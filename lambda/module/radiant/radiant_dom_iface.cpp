@@ -4,7 +4,7 @@
 // registry at registration); behavior is the binding tables below, thin
 // adapters onto the receiver-explicit engine entries in the Jube host API.
 // The strcmp dispatch chains, is-native-property predicates, method caches,
-// and expando side tables these replace are deleted from js_dom_selection.cpp.
+// and expando side tables these replace are deleted from dom_selection.cpp.
 
 #include "../../lambda.hpp"
 #include "radiant_host_api.hpp"

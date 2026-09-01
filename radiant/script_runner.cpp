@@ -2377,8 +2377,8 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         return;
     }
     js_host_hooks_set_redirect_stdout_to_stderr(dom_doc->js.redirect_stdout_to_stderr);
-    js_dom_set_ui_context(runtime->dom_ui_context);
-    js_dom_set_host_driven_loop(dom_doc->js.host_driven_loop);
+    dom_set_ui_context(runtime->dom_ui_context);
+    dom_set_host_driven_loop(dom_doc->js.host_driven_loop);
 
     if (s_js_mir_cache && !s_retain_js_state) {
         const JubeModuleDef* radiant = jube_find_static_module("radiant");
@@ -2509,14 +2509,14 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         log_error("execute_document_scripts: eval-thread owner changed during execution");
         result = ItemError;
     }
-    js_dom_set_document(dom_doc);
+    dom_set_document(dom_doc);
 
     TypeId result_type = get_type_id(result);
     if (result_type == LMD_TYPE_ERROR) {
         log_error("execute_document_scripts: JS execution failed");
     } else {
         log_info("execute_document_scripts: JS execution completed successfully");
-        if (js_dom_is_host_driven_loop()) {
+        if (dom_is_host_driven_loop()) {
             // A long-lived host (Radiant `view`) pumps the event loop AFTER it
             // commits the first layout. Draining timers here — still inside the
             // loader, before @font-face processing and the first layout pass —
@@ -2865,7 +2865,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     }
 
     // Install the compiled functions into each element's on<type> IDL slot.
-    // From this point on, normal js_dom_dispatch_event() handles `this`,
+    // From this point on, normal dom_dispatch_event() handles `this`,
     // `event`, return-false default prevention, and propagation ordering.
     Item global = js_get_global_this();
     [[maybe_unused]] int installed = 0;  // only consumed by log_info, which is a no-op in release
@@ -2879,7 +2879,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
             char attr_name[64];
             snprintf(attr_name, sizeof(attr_name), "on%s", h->event_type);
             if (get_type_id(fn_item) == LMD_TYPE_FUNC &&
-                js_dom_set_event_handler_function(h->element, attr_name, fn_item)) {
+                dom_set_event_handler_function(h->element, attr_name, fn_item)) {
                 installed++;
                 log_debug("collect_and_compile_event_handlers: installed %s on <%s>",
                           attr_name,

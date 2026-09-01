@@ -32,15 +32,15 @@
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/io/mark_builder.hpp" // MarkBuilder for event object construction
-#include "../lambda/dom/dom.h"      // js_dom_set_document for HTML event handlers
-#include "../lambda/dom/dom_events.h" // js_dom_dispatch_event + native event factories
+#include "../lambda/dom/dom.h"      // dom_set_document for HTML event handlers
+#include "../lambda/dom/dom_events.h" // dom_dispatch_event + native event factories
 #include "../lambda/js/js_runtime.h"   // js_new_object / js_set_key_default / js_array_new / js_array_push
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/dom/dom_platform.h"
 #include "../lambda/dom/dom_observers.h"
 
 // CE-3 follow-up: DataTransfer factory from js_clipboard.cpp (no public
-// header — js_clipboard installs globals through js_dom_set_document). We
+// header — js_clipboard installs globals through dom_set_document). We
 // only need the two-string builder for the paste/drop dispatch path.
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
                                                   const char* text_html);
@@ -1372,7 +1372,7 @@ void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
         DomDocument* doc = root_node && root_node->is_element()
             ? root_node->as_element()->doc : nullptr;
         MousePositionEvent* mouse = &evcon->event.mouse_position;
-        DomElement* svg_hit = doc ? (DomElement*)js_dom_document_svg_element_from_point(
+        DomElement* svg_hit = doc ? (DomElement*)dom_document_svg_element_from_point(
             doc, (float)mouse->x, (float)mouse->y) : nullptr;
         if (svg_hit && evcon->target) {
             bool target_contains_svg = false;
@@ -2233,7 +2233,7 @@ static DomNode* source_selection_scope_root(DomDocument* doc, DocState* state) {
     DomElement* owner = surface->owner;
     if (!dom_node_is_within_root(static_cast<DomNode*>(owner), doc_root) &&
         owner->id && owner->id[0]) {
-        DomElement* live_owner = js_dom_find_element_by_id(doc->root, owner->id);
+        DomElement* live_owner = dom_find_element_by_id(doc->root, owner->id);
         if (live_owner) owner = live_owner;
     }
 
@@ -3171,7 +3171,7 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
         return false;
     }
     DomDocument* doc = g_emit_handler_ctx ? g_emit_handler_ctx->doc
-                                          : (DomDocument*)js_dom_get_document();
+                                          : (DomDocument*)dom_get_document();
     if (!doc || form->doc != doc) return false;
 
     // A script-less document has no EventTarget realm or submit listeners.
@@ -3182,8 +3182,8 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
     Item event = js_create_event("submit", true, true);
     js_set_key_cstr(event, "isTrusted", (Item){.item = ITEM_TRUE});
     js_set_key_cstr(event, "submitter", submitter_node
-        ? js_dom_wrap_element((DomElement*)submitter_node) : ItemNull);
-    Item dispatched = js_dom_dispatch_event(js_dom_wrap_element(form), event);
+        ? dom_wrap_element((DomElement*)submitter_node) : ItemNull);
+    Item dispatched = dom_dispatch_event(dom_wrap_element(form), event);
     return dispatched.item != ITEM_FALSE;
 }
 
@@ -3691,7 +3691,7 @@ static bool apply_keyboard_scroll_operation(EventContext* evcon, View* origin,
     bool viewport = doc->view_tree->root == static_cast<View*>(block);
     radiant_dispatch_simple_event(evcon, static_cast<View*>(block), "scroll",
                                   false, false);
-    if (!viewport) js_dom_observers_post_layout();
+    if (!viewport) dom_observers_post_layout();
     evcon->need_repaint = true;
     return true;
 }
@@ -3841,13 +3841,13 @@ bool radiant_focus_element(DomDocument* doc, View* target) {
     if (!runtime) {
         // Lambda template documents do not own a JavaScript runtime, but their
         // contenteditable hosts still use the shared DOM focus/Selection path.
-        return js_dom_focus_editing_host_for_automation(target);
+        return dom_focus_editing_host_for_automation(target);
     }
 
     EvalContext* focus_ctx = runtime_get_eval_context(runtime);
     if (!focus_ctx || !runtime->heap || !runtime->name_pool) return false;
     Context* saved_input_ctx = input_context;
-    void* saved_doc = js_dom_get_document();
+    void* saved_doc = dom_get_document();
     // Programmatic focus runs on the document's evaluator; event handlers must
     // allocate and dispatch while that retained context owns the thread.
     if (!runtime_context_bind_retained(runtime, focus_ctx)) return false;
@@ -3856,9 +3856,9 @@ bool radiant_focus_element(DomDocument* doc, View* target) {
         input_context = saved_input_ctx;
         return false;
     }
-    js_dom_set_document(doc);
-    js_dom_focus_method_bridge(target, true);
-    js_dom_restore_active_document(saved_doc);
+    dom_set_document(doc);
+    dom_focus_method_bridge(target, true);
+    dom_restore_active_document(saved_doc);
     input_context = saved_input_ctx;
     return true;
 }
@@ -4000,7 +4000,7 @@ static bool dispatch_contenteditable_select_all_default(EventContext* evcon,
 
     DomElement* owner = surface.owner;
     if (owner->id && owner->doc && owner->doc->root) {
-        DomElement* live_owner = js_dom_find_element_by_id(owner->doc->root, owner->id);
+        DomElement* live_owner = dom_find_element_by_id(owner->doc->root, owner->id);
         if (live_owner) {
             owner = live_owner;
             surface.owner = live_owner;
@@ -4130,7 +4130,7 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
         input_type == INPUT_INTENT_DELETE_COMPOSITION_TEXT;
     if (!preserve_dispatch_target) {
         if (elem->id && elem->doc && elem->doc->root) {
-            DomElement* live_by_id = js_dom_find_element_by_id(elem->doc->root, elem->id);
+            DomElement* live_by_id = dom_find_element_by_id(elem->doc->root, elem->id);
             if (live_by_id && tc_is_text_control(live_by_id)) {
                 live_elem = live_by_id;
                 live_target = static_cast<View*>(live_by_id);
@@ -4185,7 +4185,7 @@ static void restore_form_text_focus_after_input(DocState* state,
     if (!state || focus_get(state) || !doc || !doc->root || !id || !id[0]) {
         return;
     }
-    DomElement* live_elem = js_dom_find_element_by_id(doc->root, id);
+    DomElement* live_elem = dom_find_element_by_id(doc->root, id);
     if (!live_elem || !tc_is_text_control(live_elem)) return;
     focus_set(state, static_cast<View*>(live_elem), false);
 }
@@ -5214,7 +5214,7 @@ static void dispatch_selectionchange(EventContext* evcon, DocState* state, View*
         evcon->need_repaint = true;
     }
     // The JS `selectionchange` event is queued by the dom_range selection
-    // notifier (js_dom_queue_selectionchange) and delivered to page-JS document
+    // notifier (dom_queue_selectionchange) and delivered to page-JS document
     // listeners when the event loop ticks; the headless simulator pumps it via
     // js_event_loop_pump_nowait between events.
 }
@@ -6214,7 +6214,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     dom_js_mutation_reset_records(doc);
 }
 
-void radiant_reconcile_js_dom_mutations(UiContext* uicon, DomDocument* doc) {
+void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc) {
     if (!uicon || !doc || doc->js.mutation_count == 0) return;
     EventContext evcon = {};
     evcon.ui_context = uicon;
@@ -6274,7 +6274,7 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
         return false;
     }
     input_context = nullptr;
-    js_dom_set_document(s->doc);
+    dom_set_document(s->doc);
     // A queued callback may change the DOM immediately before dispatching a
     // custom event. Its records belong to that callback turn and must survive
     // until the nested dispatch scope reconciles them.
@@ -6353,7 +6353,7 @@ struct JsDispatchScope {
         js_dispatch_batch_depth = previous_batch_depth;
         js_dispatch_batch_document = previous_batch_document;
         if (previous_batch_depth != 0 && previous_batch_document) {
-            js_dom_set_document(previous_batch_document);
+            dom_set_document(previous_batch_document);
         }
         s_active_js_dispatch_event_context = previous_active_event_context;
     }
@@ -6560,10 +6560,10 @@ void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const cha
     // Native window notifications use the canonical global EventTarget, which
     // is also the key used by window.addEventListener in the module bridge.
     Item event_item = js_create_event(type, false, false);
-    js_dom_dispatch_event(js_get_global_this(), event_item);
+    dom_dispatch_event(js_get_global_this(), event_item);
     if (strcmp(type, "resize") == 0) js_match_media_notify_resize();
     if (strcmp(type, "resize") == 0 || strcmp(type, "scroll") == 0) {
-        js_dom_observers_post_layout();
+        dom_observers_post_layout();
     }
 }
 
@@ -6578,11 +6578,11 @@ void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     bool entered_scope = radiant_js_ctx_enter(&scope, &evcon);
     // Batch DOM execution still owns the live JIT context but does not retain
     // it on the document; CSS completion must dispatch through that active frame.
-    if (!entered_scope && (!context || js_dom_get_document() != target->doc)) return;
+    if (!entered_scope && (!context || dom_get_document() != target->doc)) return;
 
     Item event_item = js_create_native_css_event(type, detail_name,
         detail_value, elapsed_time);
-    js_dom_dispatch_event(js_dom_wrap_element(target), event_item);
+    dom_dispatch_event(dom_wrap_element(target), event_item);
 
     // CSS events run inside the animation scheduler. Rebuilding immediately
     // would invalidate its current View pointers; the mutation ledger requests
@@ -6615,7 +6615,7 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     if (!dom_target || !build_event) return false;
     JsDispatchScope dispatch_scope(evcon);
     DomDocument* target_doc = event_context_target_document(evcon);
-    bool active_batch_context = context && js_dom_get_document() == target_doc;
+    bool active_batch_context = context && dom_get_document() == target_doc;
     // Synthetic input can synchronously re-enter native dispatch while the
     // page's batch context is already active. Such documents
     // do not yet retain js_mir_ctx, so requiring a fresh scope silently drops
@@ -6627,10 +6627,10 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     event_context_set_dom_event(evcon, event_root.get());
     EventTargetPath target_path = {};
     bool target_path_valid = capture_event_target_path(target_doc, target, &target_path);
-    Rooted<Item> target_root(roots, js_dom_wrap_element(dom_target));
+    Rooted<Item> target_root(roots, dom_wrap_element(dom_target));
     Item previous_raw_event = s_synthetic_dom_dispatch_raw_event;
     s_synthetic_dom_dispatch_raw_event = event_root.get();
-    js_dom_dispatch_event(target_root.get(), event_root.get());
+    dom_dispatch_event(target_root.get(), event_root.get());
     s_synthetic_dom_dispatch_raw_event = previous_raw_event;
     bool prevented = radiant_dom_event_default_prevented(event_root.get());
     evcon->default_prevented = prevented;
@@ -6813,8 +6813,8 @@ static bool radiant_dispatch_keyboard_event(EventContext* evcon, View* target,
 // `getTargetRanges()` sees the same property surface as `new StaticRange(...)`.
 static Item ce_build_static_range_item(const EditingTargetRange* r) {
     Item obj = js_new_object();
-    Item start = r->start.node ? js_dom_wrap_element(r->start.node) : ItemNull;
-    Item end   = r->end.node   ? js_dom_wrap_element(r->end.node)   : ItemNull;
+    Item start = r->start.node ? dom_wrap_element(r->start.node) : ItemNull;
+    Item end   = r->end.node   ? dom_wrap_element(r->end.node)   : ItemNull;
     Item start_key = (Item){.item = s2it(heap_create_name("startContainer"))};
     Item end_key   = (Item){.item = s2it(heap_create_name("endContainer"))};
     Item so_key    = (Item){.item = s2it(heap_create_name("startOffset"))};
@@ -6981,7 +6981,7 @@ static Item build_focus_event_item(void* userdata) {
     Item rel = ItemNull;
     if (args->related) {
         DomElement* rel_el = radiant_view_to_dom_element(args->related);
-        if (rel_el) rel = js_dom_wrap_element(rel_el);
+        if (rel_el) rel = dom_wrap_element(rel_el);
     }
     return js_create_native_focus_event(args->type, rel);
 }
@@ -7056,7 +7056,7 @@ extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
         }
         // the template has committed selectedness; mirror it into the JS DOM
         // before firing change so handlers reading target.value see it.
-        js_dom_select_set_selected_index_bridge((void*)dom_target,
+        dom_select_set_selected_index_bridge((void*)dom_target,
                                                 (Item){.item = i2it(selected_index)});
     }
     radiant_dispatch_simple_event(&evcon, target, "input", true, false);
@@ -7078,7 +7078,7 @@ static bool radiant_dispatch_clipboard_event(EventContext* evcon, View* target,
     if (!dom_target) return false;
     JsDispatchScope dispatch_scope(evcon);
     if (!dispatch_scope.active) return false;
-    Item target_item = js_dom_wrap_element(dom_target);
+    Item target_item = dom_wrap_element(dom_target);
     bool prevented = js_dispatch_clipboard_event_to_element(target_item, type);
     return prevented;
 }
@@ -7101,7 +7101,7 @@ static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
     if (!dom_target) return false;
     JsDispatchScope dispatch_scope(evcon);
     if (!dispatch_scope.active) return false;
-    Item target_item = js_dom_wrap_element(dom_target);
+    Item target_item = dom_wrap_element(dom_target);
     bool prevented = js_dispatch_drag_event_to_element(target_item, type, cx, cy);
     log_debug("JSDND: dispatched '%s' at (%.1f,%.1f) prevented=%d", type, cx, cy, prevented);
     return prevented;
@@ -7621,8 +7621,8 @@ static View* find_form_activation_button(View* target, bool reset) {
     for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
         if (!node->is_element()) continue;
         bool match = reset
-            ? js_dom_is_reset_button((void*)node)
-            : js_dom_is_submit_button((void*)node);
+            ? dom_is_reset_button((void*)node)
+            : dom_is_submit_button((void*)node);
         if (match) return static_cast<View*>(node);
     }
     return nullptr;
@@ -7632,9 +7632,9 @@ static View* find_first_form_submitter_in_tree(DomNode* node, DomElement* form) 
     for (DomNode* current = node; current; current = current->next_sibling) {
         if (!current->is_element()) continue;
         DomElement* current_elem = current->as_element();
-        if (js_dom_is_submit_button((void*)current) &&
-            js_dom_find_form_owner((void*)current) == form &&
-            !js_dom_is_disabled((void*)current)) {
+        if (dom_is_submit_button((void*)current) &&
+            dom_find_form_owner((void*)current) == form &&
+            !dom_is_disabled((void*)current)) {
             return static_cast<View*>(current);
         }
         View* nested = find_first_form_submitter_in_tree(current_elem->first_child, form);
@@ -7666,12 +7666,12 @@ static bool run_form_submit_activation(EventContext* evcon, View* target) {
     if (!target || !target->is_element()) return false;
     DomElement* elem = lam::dom_require_element(target);
     DomElement* owner = nullptr;
-    bool has_submitter = js_dom_is_submit_button((void*)elem);
+    bool has_submitter = dom_is_submit_button((void*)elem);
     if (has_submitter) {
-        if (js_dom_is_disabled((void*)elem) || !js_dom_is_connected((void*)elem)) {
+        if (dom_is_disabled((void*)elem) || !dom_is_connected((void*)elem)) {
             return false;
         }
-        owner = js_dom_find_form_owner((void*)elem);
+        owner = dom_find_form_owner((void*)elem);
     } else if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
         owner = elem;
     }
@@ -7682,9 +7682,9 @@ static bool run_form_submit_activation(EventContext* evcon, View* target) {
     if (claimed) {
         radiant_dispatch_behavior_submit_activation(evcon, target);
     } else {
-        Item submitter = has_submitter ? js_dom_wrap_element(elem)
+        Item submitter = has_submitter ? dom_wrap_element(elem)
                                        : make_js_undefined();
-        js_dom_form_request_submit_bridge(js_dom_wrap_element(owner), submitter);
+        dom_form_request_submit_bridge(dom_wrap_element(owner), submitter);
     }
     return true;
 }
@@ -7692,11 +7692,11 @@ static bool run_form_submit_activation(EventContext* evcon, View* target) {
 static bool run_form_reset_activation(EventContext* evcon, View* target) {
     if (!target || !target->is_element()) return false;
     DomElement* elem = lam::dom_require_element(target);
-    if (!js_dom_is_reset_button((void*)elem) ||
-        js_dom_is_disabled((void*)elem) || !js_dom_is_connected((void*)elem)) {
+    if (!dom_is_reset_button((void*)elem) ||
+        dom_is_disabled((void*)elem) || !dom_is_connected((void*)elem)) {
         return false;
     }
-    DomElement* owner = js_dom_find_form_owner((void*)elem);
+    DomElement* owner = dom_find_form_owner((void*)elem);
     if (!owner) return false;
 
     bool claimed = radiant_behavior_claims_event(
@@ -7704,7 +7704,7 @@ static bool run_form_reset_activation(EventContext* evcon, View* target) {
     if (claimed) {
         radiant_dispatch_behavior_reset_activation(evcon, target);
     } else {
-        radiant_dom_element_operation(js_dom_wrap_element(owner), JUBE_DOM_RESET,
+        radiant_dom_element_operation(dom_wrap_element(owner), JUBE_DOM_RESET,
                                       nullptr, 0);
     }
     return true;
@@ -7754,8 +7754,8 @@ static bool dispatch_click_default_actions(EventContext* evcon, View* target) {
 
     View* submit_target = find_form_activation_button(target, false);
     if (submit_target && !evcon->default_prevented &&
-        !js_dom_is_disabled((void*)submit_target) &&
-        js_dom_is_connected((void*)submit_target)) {
+        !dom_is_disabled((void*)submit_target) &&
+        dom_is_connected((void*)submit_target)) {
         if (run_form_submit_activation(evcon, submit_target)) {
             evcon->need_repaint = true;
             handled = true;
@@ -7764,8 +7764,8 @@ static bool dispatch_click_default_actions(EventContext* evcon, View* target) {
 
     View* reset_target = find_form_activation_button(target, true);
     if (reset_target && !evcon->default_prevented &&
-        !js_dom_is_disabled((void*)reset_target) &&
-        js_dom_is_connected((void*)reset_target)) {
+        !dom_is_disabled((void*)reset_target) &&
+        dom_is_connected((void*)reset_target)) {
         if (run_form_reset_activation(evcon, reset_target)) {
             evcon->need_repaint = true;
             handled = true;
@@ -7807,7 +7807,7 @@ extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
     // Resolve the wrapper through its generation token before reading node data.
     DomDocument* target_document = radiant_dom_item_document(target_item);
     if (!target_document) return ItemNull;
-    DomElement* target = (DomElement*)js_dom_unwrap_element(target_item);
+    DomElement* target = (DomElement*)dom_unwrap_element(target_item);
     if (!target) return ItemNull;
     DomNodeRef target_ref = dom_node_ref((DomNode*)target);
 
@@ -7817,7 +7817,7 @@ extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
     evcon.ui_context = static_cast<UiContext*>(target_document->js.host_ui_context);
     JsDispatchScope dispatch_scope(&evcon);
     bool borrows_script_context = !dispatch_scope.active && context &&
-        js_dom_get_document() == target_document;
+        dom_get_document() == target_document;
     if (!dispatch_scope.active && !borrows_script_context) return ItemNull;
     EventContext* previous_active_event_context = s_active_js_dispatch_event_context;
     if (borrows_script_context) {
@@ -7833,7 +7833,7 @@ extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
     event_context_set_dom_event(&evcon, event_root.get());
     Item previous_raw_event = s_synthetic_dom_dispatch_raw_event;
     s_synthetic_dom_dispatch_raw_event = event_root.get();
-    Item result = js_dom_dispatch_event(target_root.get(), event_root.get());
+    Item result = dom_dispatch_event(target_root.get(), event_root.get());
     s_synthetic_dom_dispatch_raw_event = previous_raw_event;
     if (!item_is_error(result)) {
         // Listener code may have replaced the target subtree. The JS dispatch
@@ -7904,7 +7904,7 @@ static void space_activation_release(EventContext* evcon, DomNodeRef ref) {
 static bool keyboard_space_activation_target(DocState* state, View* target) {
     if (!state || !target || !target->is_element()) return false;
     if (is_checkbox(target) || is_radio(target)) {
-        return !js_dom_is_disabled((void*)lam::dom_require_element(target));
+        return !dom_is_disabled((void*)lam::dom_require_element(target));
     }
     ViewElement* element = lam::view_require_element(target);
     if (element->tag() != MARKUP_NAME_BUTTON) return false;
@@ -7916,7 +7916,7 @@ static bool keyboard_space_activation_target(DocState* state, View* target) {
 static bool run_keyboard_activation(EventContext* evcon, DocState* state,
                                     View* focused, int key) {
     if (!evcon || !state || !focused || !focused->is_element() ||
-        evcon->default_prevented || !js_dom_is_connected((void*)focused)) {
+        evcon->default_prevented || !dom_is_connected((void*)focused)) {
         return false;
     }
     ViewElement* element = lam::view_require_element(focused);
@@ -7934,8 +7934,8 @@ static bool run_keyboard_activation(EventContext* evcon, DocState* state,
         return run_keyboard_click_default(evcon, focused);
     }
     if (tag == MARKUP_NAME_INPUT && key == RDT_KEY_ENTER &&
-        (js_dom_is_submit_button((void*)focused) ||
-         js_dom_is_reset_button((void*)focused))) {
+        (dom_is_submit_button((void*)focused) ||
+         dom_is_reset_button((void*)focused))) {
         DomElement* dom_element = lam::dom_require_element(focused);
         bool disabled = dom_element->form_control() &&
             form_control_is_disabled(state, static_cast<View*>(dom_element));
@@ -8692,7 +8692,7 @@ static bool navigation_apply_fragment(DomDocument* document,
     if (fragment) {
         state_set_bool(state, fragment, STATE_TARGET, true);
         radiant_sync_pseudo_state((View*)fragment, PSEUDO_STATE_TARGET, true);
-        js_dom_scroll_into_view_bridge(fragment);
+        dom_scroll_into_view_bridge(fragment);
     }
     doc_state_request_repaint(state);
     return true;
@@ -9485,8 +9485,8 @@ struct EventDocumentScope {
             runtime == doc->js.runtime;
         if (has_document_js_runtime) {
             if (!js_runtime_state_init(owner)) return;
-            js_dom_set_ui_context(uicon);
-            js_dom_set_document(doc);
+            dom_set_ui_context(uicon);
+            dom_set_document(doc);
         }
         s_event_scope_depth++;
         active = true;
@@ -10920,7 +10920,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (new_url[0] == '#' && doc->root) {
                 const char* fragment_id = new_url + 1;  // skip '#'
                 log_info("browse_nav: fragment navigation to #%s", fragment_id);
-                DomElement* target_elem = js_dom_find_element_by_id(doc->root, fragment_id);
+                DomElement* target_elem = dom_find_element_by_id(doc->root, fragment_id);
                 if (target_elem) {
                     View* target_view = find_view(doc->view_tree->root, static_cast<DomNode*>(target_elem));
                     if (target_view) {
@@ -11296,7 +11296,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             DomElement* focus_elem = lam::dom_require_element(focused);
             if (focus_elem->form_control() &&
                 focus_elem->form->control_type == FORM_CONTROL_TEXT) {
-                DomElement* owner = js_dom_find_form_owner((void*)focus_elem);
+                DomElement* owner = dom_find_form_owner((void*)focus_elem);
                 if (owner) {
                     View* submitter = find_first_form_submitter(owner);
                     View* activation = submitter ? submitter : static_cast<View*>(owner);
@@ -11693,7 +11693,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     if (event->type == RDT_EVENT_SCROLL) {
         // Element scroll does not trigger layout, but geometry observers must
         // resample after its scroll state changes just like viewport scrolling.
-        js_dom_observers_post_layout();
+        dom_observers_post_layout();
     }
     bool viewport_scrolled = sync_viewport_scroll_state(&evcon);
     if (viewport_scrolled) {

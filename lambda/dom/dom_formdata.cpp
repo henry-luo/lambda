@@ -15,7 +15,7 @@
  * during iteration are visible (live-view iteration per spec).
  *
  * Install entry point: js_formdata_install_globals()
- * Called from: js_dom.cpp: js_dom_set_document()
+ * Called from: dom.cpp: dom_set_document()
  */
 
 #include "dom.h"
@@ -40,12 +40,12 @@
 // ============================================================================
 
 
-// Helpers from js_dom.cpp used for form control inspection
-extern "C" bool js_dom_get_checkedness(void* dom_elem);
-extern "C" const char* js_dom_input_type_lower(void* dom_elem);
-extern "C" const char* js_dom_tag_name_raw(void* dom_elem);
-extern "C" bool js_dom_is_disabled(void* dom_elem);
-extern "C" DomElement* js_dom_find_form_owner(void* control_ptr);
+// Helpers from dom.cpp used for form control inspection
+extern "C" bool dom_get_checkedness(void* dom_elem);
+extern "C" const char* dom_input_type_lower(void* dom_elem);
+extern "C" const char* dom_tag_name_raw(void* dom_elem);
+extern "C" bool dom_is_disabled(void* dom_elem);
+extern "C" DomElement* dom_find_form_owner(void* control_ptr);
 
 // ============================================================================
 // Helpers
@@ -621,21 +621,21 @@ static void fd_walk_form_controls(Item entries, DomNode* node, DomElement* form)
             strcasecmp(tag, "select") == 0 ||
             strcasecmp(tag, "button") == 0;
         if (is_form_control && form &&
-            js_dom_find_form_owner((void*)elem) != form) {
+            dom_find_form_owner((void*)elem) != form) {
             node = node->next_sibling;
             continue;
         }
 
         if (strcasecmp(tag, "input") == 0) {
             const char* name = elem->get_attribute("name");
-            if (name && *name && !js_dom_is_disabled(elem)) {                const char* itype = js_dom_input_type_lower(elem);
+            if (name && *name && !dom_is_disabled(elem)) {                const char* itype = dom_input_type_lower(elem);
                 // excluded from form data: type=submit, reset, button, image
                 bool excluded = (strcmp(itype, "submit") == 0 || strcmp(itype, "reset") == 0 ||
                                  strcmp(itype, "button") == 0 || strcmp(itype, "image") == 0);
                 if (!excluded) {
                     Item name_item = fd_normalize_surrogates(name);
                     if (strcmp(itype, "checkbox") == 0 || strcmp(itype, "radio") == 0) {
-                        if (js_dom_get_checkedness(elem)) {
+                        if (dom_get_checkedness(elem)) {
                             const char* val = elem->get_attribute("value");
                             Item pair = js_array_new(0);
                             js_array_push(pair, name_item);
@@ -693,7 +693,7 @@ static void fd_walk_form_controls(Item entries, DomNode* node, DomElement* form)
             }
         } else if (strcasecmp(tag, "textarea") == 0) {
             const char* name = elem->get_attribute("name");
-            if (name && *name && !js_dom_is_disabled(elem)) {
+            if (name && *name && !dom_is_disabled(elem)) {
                 tc_ensure_init(elem);
                 const char* val = elem->form && elem->form->current_value
                     ? elem->form->current_value : "";
@@ -714,7 +714,7 @@ static void fd_walk_form_controls(Item entries, DomNode* node, DomElement* form)
                 }
             }
         } else if (strcasecmp(tag, "select") == 0) {
-            if (!js_dom_is_disabled(elem)) {
+            if (!dom_is_disabled(elem)) {
                 fd_append_select_entries(entries, elem);
             }
         } else if (strcasecmp(tag, "button") == 0) {
@@ -832,14 +832,14 @@ static Item fd_make_file_stub() {
 }
 
 static void fd_append_submitter_entry(Item entries, DomElement* elem) {
-    if (!elem || js_dom_is_disabled(elem)) return;
+    if (!elem || dom_is_disabled(elem)) return;
 
     const char* tag = elem->tag_name ? elem->tag_name : "";
     const char* name = elem->get_attribute("name");
     if (!name || !*name) return;
 
     if (strcasecmp(tag, "input") == 0) {
-        const char* itype = js_dom_input_type_lower(elem);
+        const char* itype = dom_input_type_lower(elem);
         if (strcmp(itype, "submit") != 0) return;
         const char* val = elem->get_attribute("value");
         if (!val) val = "";
@@ -881,7 +881,7 @@ static Item js_formdata_construct(Item first, Item submitter) {
 
         // DOM3 wrappers are host VMaps, so receiver identity must be decided by
         // unwrapping rather than by the obsolete map-shell representation.
-        void* node_raw = js_dom_unwrap_element(first);
+        void* node_raw = dom_unwrap_element(first);
         DomNode* node = (DomNode*)node_raw;
         if (node && node->is_element()) {
             DomElement* elem = (DomElement*)node;
@@ -903,12 +903,12 @@ static Item js_formdata_construct(Item first, Item submitter) {
 
     // F-1: populate from form controls when form element was provided
     if (get_type_id(first) != LMD_TYPE_UNDEFINED) {
-        void* node_raw = js_dom_unwrap_element(first);
+        void* node_raw = dom_unwrap_element(first);
         DomNode* node = (DomNode*)node_raw;
         if (node && node->is_element()) {
             DomElement* form_elem = (DomElement*)node;
             fd_collect_form_controls(entries, form_elem);
-            void* submitter_raw = js_dom_unwrap_element(submitter);
+            void* submitter_raw = dom_unwrap_element(submitter);
             DomNode* submitter_node = (DomNode*)submitter_raw;
             if (submitter_node && submitter_node->is_element()) {
                 fd_append_submitter_entry(entries, (DomElement*)submitter_node);
@@ -952,7 +952,7 @@ extern "C" void js_formdata_install_globals(void) {
     // C1.3: the Blob/File fallback constructors that used to live here were
     // unreachable. js_register_clipboard_globals() installs the full-spec
     // Blob/File during global bootstrap, which always runs before this
-    // installer (js_dom_set_document -> js_formdata_install_globals), so the
+    // installer (dom_set_document -> js_formdata_install_globals), so the
     // "not yet defined" guards never fired.
     Item blob_ctor_fn = prop_get(global, "Blob");
     Item file_ctor_fn = prop_get(global, "File");

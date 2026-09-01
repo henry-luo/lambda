@@ -213,7 +213,7 @@ extern Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item, 
 // after they made 8 decodeURI/decodeURIComponent tests batch-unstable.
 extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
 extern Item js_test262_concat_percent_hex(Item left_item, Item n_item);
-// Phase 8C: Image() constructor (defined in js_dom.cpp)
+// Phase 8C: Image() constructor (defined in dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
 
 // helper functions for map pipe iteration in JIT

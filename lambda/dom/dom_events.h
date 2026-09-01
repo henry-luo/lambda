@@ -1,5 +1,5 @@
 /**
- * js_dom_events.h — DOM Event System for Lambda JS Runtime
+ * dom_events.h — DOM Event System for Lambda JS Runtime
  *
  * Implements addEventListener/removeEventListener/dispatchEvent on DOM nodes
  * with 3-phase event propagation (capture → target → bubble).
@@ -26,23 +26,23 @@ extern "C" {
  * @param cb_item     Function: listener callback
  * @param opts_item   Boolean (useCapture) or options object {capture, once, passive}
  */
-void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item);
+void dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item);
 
 /**
  * removeEventListener(elem, type, callback, capture)
  */
-void js_dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item);
+void dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item);
 
 /**
  * Record assignment to an EventTarget `on<type>` IDL property. Event handler
  * attributes occupy a listener-list slot, so dispatch must merge them with
  * addEventListener registrations in assignment order.
  */
-void js_dom_event_handler_property_set(Item target, const char* property_name,
+void dom_event_handler_property_set(Item target, const char* property_name,
                                        int property_name_len, Item value);
 
 /** Record an inline handler while a native DOM wrapper is being initialized. */
-void js_dom_event_handler_property_set_for_node(void* dom_node,
+void dom_event_handler_property_set_for_node(void* dom_node,
                                                 const char* property_name,
                                                 int property_name_len,
                                                 Item value);
@@ -54,7 +54,7 @@ void js_dom_event_handler_property_set_for_node(void* dom_node,
  * @param event_item  Event object (Map with type, bubbles, cancelable, etc.)
  * @return Boolean Item (true if not preventDefault'd)
  */
-Item js_dom_dispatch_event(Item elem_item, Item event_item);
+Item dom_dispatch_event(Item elem_item, Item event_item);
 
 // ============================================================================
 // Event Object Creation
@@ -127,7 +127,7 @@ Item js_ctor_static_range_fn(Item init);
 // Each builds a spec-compliant Event object with isTrusted = true and
 // bubbles = true so it propagates through the JS dispatcher just like a
 // scripted user event. Caller passes pre-decoded modifier booleans to keep
-// js_dom_events independent of radiant/event.hpp's RDT_MOD_* layout.
+// dom_events independent of radiant/event.hpp's RDT_MOD_* layout.
 // ============================================================================
 Item js_create_native_mouse_event(const char* type,
     double client_x, double client_y,
@@ -191,7 +191,7 @@ Item js_create_native_input_event(const char* type,
  *   Item prev = js_set_window_event_for_legacy(event);
  *   handler_fn();
  *   js_restore_window_event_for_legacy(prev);
- * The bridge dispatch (`js_dom_dispatch_event`) sets `window.event`
+ * The bridge dispatch (`dom_dispatch_event`) sets `window.event`
  * itself, including inline attributes installed as IDL handlers.
  */
 Item js_set_window_event_for_legacy(Item event);
@@ -204,27 +204,27 @@ void js_restore_window_event_for_legacy(Item prev);
 /**
  * Reset event system state. Call between documents in batch mode.
  */
-void js_dom_events_reset(void);
+void dom_events_reset(void);
 
 // ============================================================================
 // Host-facing entry points (F23) — see the note in dom.h
 // ============================================================================
 
 /** Form-control role predicates consulted by the UA activation stage. */
-bool js_dom_is_submit_button(void* dom_elem);
-bool js_dom_is_reset_button(void* dom_elem);
+bool dom_is_submit_button(void* dom_elem);
+bool dom_is_reset_button(void* dom_elem);
 
 /** requestSubmit() bridge shared by the native and script activation paths. */
-Item js_dom_form_request_submit_bridge(Item form_item, Item submitter_item);
+Item dom_form_request_submit_bridge(Item form_item, Item submitter_item);
 
 #ifdef __cplusplus
 struct DomElement;
 struct JsRuntimeState;
 
 /** Resolve a control's form owner, honouring an explicit `form=` association. */
-DomElement* js_dom_find_form_owner(void* control);
+DomElement* dom_find_form_owner(void* control);
 
-void js_dom_events_destroy_context(JsRuntimeState* state);
+void dom_events_destroy_context(JsRuntimeState* state);
 #endif
 
 #ifdef __cplusplus

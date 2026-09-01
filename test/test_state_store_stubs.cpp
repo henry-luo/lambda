@@ -98,7 +98,7 @@ extern "C" void lambda_root_frame_end(LambdaRootFrame*) {}
 
 extern "C" void lambda_root_frame_overflow_error(void) {}
 
-extern "C" bool js_dom_option_is_selected(void* dom_elem) {
+extern "C" bool dom_option_selectedness(void* dom_elem) {
     DomElement* option = (DomElement*)dom_elem;
     if (!option) return false;
     // This standalone target omits LambdaJS and its expando map, so use the

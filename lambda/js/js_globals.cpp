@@ -6556,7 +6556,7 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     value = value_root.get();
     receiver = receiver_root.get();
     if (receiver.item == target.item &&
-            js_dom_dataset_set_object_property(target_root.get(), key_root.get(),
+            dom_dataset_set_object_property(target_root.get(), key_root.get(),
                                                value_root.get())) {
         // Dataset assignment otherwise takes the ordinary Map fast path and
         // only mutates the temporary object returned by the getter.
@@ -13902,7 +13902,7 @@ extern "C" Item js_get_global_this() {
         // populate standard globals
         js_set_key_cstr(js_global_this_obj, "undefined", make_js_undefined());
         // Legacy IE-style `window.event` — initially undefined, set to the
-        // in-flight event during dispatch by js_dom_dispatch_event.
+        // in-flight event during dispatch by dom_dispatch_event.
         js_set_key_cstr(js_global_this_obj, "event", make_js_undefined());
         js_set_key_cstr(js_global_this_obj, "NaN", push_d(NAN));
         js_set_key_cstr(js_global_this_obj, "Infinity", push_d(INFINITY));

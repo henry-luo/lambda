@@ -213,12 +213,12 @@ void js_runtime_state_release_heap_resources(void) {
     // later only disposes context-owned containers that are still present.
     // Listener root slots and DOM pins must leave while both their heap and
     // document owner are still valid. Dispatch remains direct state access.
-    js_dom_events_reset();
+    dom_events_reset();
     js_xhr_reset();
     js_history_reset();
     js_window_dialog_reset();
-    js_dom_collections_release_context();
-    js_dom_foreign_documents_release_context();
+    dom_collections_release_context();
+    dom_foreign_documents_release_context();
     js_fetch_reset();
     js_reset_template_registry();
     js_runtime_regex_cache_destroy_context(runtime_context->js_state);
@@ -233,13 +233,13 @@ void js_runtime_state_destroy_context(void) {
     // optional Node session while its heap-backed state is still valid.
     jube_modules_runtime_detach();
     js_runtime_owned_cache_destroy_context(runtime_context->js_state);
-    js_dom_platform_destroy_context(runtime_context->js_state);
-    js_dom_events_destroy_context(runtime_context->js_state);
-    js_dom_observers_destroy_context(runtime_context->js_state);
+    dom_platform_destroy_context(runtime_context->js_state);
+    dom_events_destroy_context(runtime_context->js_state);
+    dom_observers_destroy_context(runtime_context->js_state);
     js_xhr_destroy_context(runtime_context->js_state);
     js_history_destroy_context(runtime_context->js_state);
-    js_dom_collections_destroy_context(runtime_context->js_state);
-    js_dom_foreign_documents_destroy_context(runtime_context->js_state);
+    dom_collections_destroy_context(runtime_context->js_state);
+    dom_foreign_documents_destroy_context(runtime_context->js_state);
     js_fetch_destroy_context(runtime_context->js_state);
     js_fs_pending_destroy_context(runtime_context->js_state);
     js_tls_destroy_context(runtime_context->js_state);
@@ -988,7 +988,7 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     jube_modules_runtime_reset();
     jube_modules_runtime_detach();
     js_globals_batch_reset();
-    js_dom_batch_reset();
+    dom_batch_reset();
     memset(&js_regexp_last_match, 0, sizeof(js_regexp_last_match));
     js_regex_cache_reset();
     js_event_loop_init();

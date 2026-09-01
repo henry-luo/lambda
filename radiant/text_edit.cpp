@@ -470,12 +470,12 @@ bool te_history_step(DomElement* elem, bool redo) {
 
 // Weak hook for legacy callers that still mutate a text control without an
 // EventContext. Cancellable beforeinput is owned by event.cpp.
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_input(DomElement* elem);
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_input(DomElement* /*elem*/) {}
+extern "C" __attribute__((weak)) void dom_queue_textcontrol_input(DomElement* elem);
+extern "C" __attribute__((weak)) void dom_queue_textcontrol_input(DomElement* /*elem*/) {}
 
 void te_dispatch_input(DomElement* elem) {
     if (!elem) return;
-    js_dom_queue_textcontrol_input(elem);
+    dom_queue_textcontrol_input(elem);
 }
 
 // ---------- paste: range only ------------------------------------------

@@ -116,7 +116,7 @@ bool dom_edit_replace_range_u16(DocState* state, DomText* text,
                                                   end_u16 - start_u16,
                                                   repl, repl_bytes, repl_u16);
     if (changed) {
-        js_dom_notify_mutation_detail(DOM_JS_MUTATION_TEXT, text, text->parent,
+        dom_notify_mutation_detail(DOM_JS_MUTATION_TEXT, text, text->parent,
                                       nullptr, old_value);
         s_dom_edit_apply_epoch++;
         s_dom_edit_caret_u16 = start_u16 + repl_u16;
@@ -264,7 +264,7 @@ static bool editing_dom_replace_text(DocState* state, DomSelection* selection,
                                                   replacement, replacement_len,
                                                   replacement_u16);
     if (changed) {
-        js_dom_notify_mutation_detail(DOM_JS_MUTATION_TEXT, text, text->parent,
+        dom_notify_mutation_detail(DOM_JS_MUTATION_TEXT, text, text->parent,
                                       nullptr, old_value);
         const char* exception = nullptr;
         if (!dom_selection_collapse(selection, static_cast<DomNode*>(text),
@@ -310,7 +310,7 @@ static bool editing_dom_insert_at_boundary(DocState* state, DomSelection* select
                   exception ? exception : "unknown");
         return false;
     }
-    js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT, inserted, inserted->parent);
+    dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT, inserted, inserted->parent);
     uint32_t u16_len = tc_utf8_to_utf16_length(text_data, byte_len);
     bool collapsed = dom_selection_collapse(selection, static_cast<DomNode*>(inserted),
                                             u16_len, &exception);
@@ -419,7 +419,7 @@ bool dom_edit_wrap_range_u16(DocState* state, uint32_t start_u16,
     parent->remove_child(middle_node);
     wrapper_node->append_child(middle_node);
     dom_mutation_post_insert(state, wrapper_node, middle_node);
-    js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT, wrapper_node, parent);
+    dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT, wrapper_node, parent);
 
     // Formatting leaves the run selected, the way a browser does, so a second
     // command applies to the same span. The caret channel is deliberately left
@@ -452,7 +452,7 @@ static bool editing_dom_move_child(DocState* state, DomNode* child,
     DomNode* source = child->parent;
     dom_mutation_pre_remove(state, child);
     if (!source->remove_child(child)) return false;
-    js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_REMOVE, child, source);
+    dom_notify_mutation(DOM_JS_MUTATION_CHILD_REMOVE, child, source);
     return editing_dom_insert_child(state, destination, child, reference);
 }
 
@@ -523,7 +523,7 @@ static bool editing_dom_insert_child(DocState* state, DomElement* parent,
         : static_cast<DomNode*>(parent)->append_child(child);
     if (!inserted) return false;
     dom_mutation_post_insert(state, static_cast<DomNode*>(parent), child);
-    js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT, child,
+    dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT, child,
                            static_cast<DomNode*>(parent));
     return true;
 }
@@ -541,7 +541,7 @@ static bool editing_dom_remove_child(DocState* state, DomNode* child) {
     DomNode* parent = child->parent;
     dom_mutation_pre_remove(state, child);
     if (!parent->remove_child(child)) return false;
-    js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_REMOVE, child, parent);
+    dom_notify_mutation(DOM_JS_MUTATION_CHILD_REMOVE, child, parent);
     return true;
 }
 
@@ -648,7 +648,7 @@ static bool editing_dom_apply_pending_range(DocState* state,
     s_dom_edit_caret_node = caret.node;
     s_dom_edit_caret_u16 = caret.offset;
     s_dom_edit_apply_epoch++;
-    js_dom_notify_mutation(DOM_JS_MUTATION_TREE_REPLACE, host, host);
+    dom_notify_mutation(DOM_JS_MUTATION_TREE_REPLACE, host, host);
     return true;
 }
 
@@ -793,7 +793,7 @@ bool dom_edit_insert_paragraph(DocState* state) {
     s_dom_edit_caret_node = new_caret.node;
     s_dom_edit_caret_u16 = new_caret.offset;
     s_dom_edit_apply_epoch++;
-    js_dom_notify_mutation(DOM_JS_MUTATION_TREE_REPLACE, host, host);
+    dom_notify_mutation(DOM_JS_MUTATION_TREE_REPLACE, host, host);
     return true;
 }
 
@@ -809,7 +809,7 @@ bool dom_edit_insert_line_break(DocState* state) {
     s_dom_edit_caret_node = new_caret.node;
     s_dom_edit_caret_u16 = new_caret.offset;
     s_dom_edit_apply_epoch++;
-    js_dom_notify_mutation(DOM_JS_MUTATION_TREE_REPLACE, host, host);
+    dom_notify_mutation(DOM_JS_MUTATION_TREE_REPLACE, host, host);
     return true;
 }
 
@@ -858,7 +858,7 @@ bool dom_edit_unwrap_range_u16(DocState* state, uint32_t start_u16,
         DomNode* right_fmt_node = static_cast<DomNode*>(right_fmt);
         if (!parent->insert_before(right_fmt_node, after_fmt)) return false;
         dom_mutation_post_insert(state, parent, right_fmt_node);
-        js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT, right_fmt_node,
+        dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT, right_fmt_node,
                                parent);
     }
 
@@ -883,7 +883,7 @@ bool dom_edit_unwrap_range_u16(DocState* state, uint32_t start_u16,
     if (!left && !right) {
         dom_mutation_pre_remove(state, fmt_node);
         if (!parent->remove_child(fmt_node)) return false;
-        js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_REMOVE, fmt_node, parent);
+        dom_notify_mutation(DOM_JS_MUTATION_CHILD_REMOVE, fmt_node, parent);
     }
 
     const char* exception = nullptr;
@@ -910,7 +910,7 @@ bool dom_edit_insert_html(DocState* state, const char* html) {
     // collector may relocate; copy before handing it over, as the bridge did.
     char* stable = mem_strdup(html, MEM_CAT_TEMP);
     if (!stable) return false;
-    bool inserted = js_dom_exec_insert_html(host->doc, stable);
+    bool inserted = dom_exec_insert_html(host->doc, stable);
     mem_free(stable);
     if (inserted) s_dom_edit_apply_epoch++;
     return inserted;

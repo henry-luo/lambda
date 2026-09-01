@@ -124,7 +124,7 @@ static DomDocument* observer_node_document(DomNode* node) {
             return current->as_element()->doc;
         }
     }
-    return (DomDocument*)js_dom_get_document();
+    return (DomDocument*)dom_get_document();
 }
 
 static bool observer_pin_node(DomDocument* doc, DomNode* node, DomNodeRef* out) {
@@ -312,7 +312,7 @@ static Item js_observer_take_records(void) {
 
 static Item js_mutation_observer_observe(Item target_item, Item options) {
     JsObserverState* observer = observer_from_this();
-    DomNode* node = (DomNode*)js_dom_unwrap_element(target_item);
+    DomNode* node = (DomNode*)dom_unwrap_element(target_item);
     if (!observer || observer->kind != JS_OBSERVER_MUTATION || !node) {
         return make_js_undefined();
     }
@@ -370,7 +370,7 @@ static Item js_mutation_observer_observe(Item target_item, Item options) {
 
 static Item js_observer_unobserve(Item target_item) {
     JsObserverState* observer = observer_from_this();
-    DomNode* node = (DomNode*)js_dom_unwrap_element(target_item);
+    DomNode* node = (DomNode*)dom_unwrap_element(target_item);
     if (!observer || !node) return make_js_undefined();
     for (int i = 0; i < observer->target_count; i++) {
         if (observer->targets[i].node != node) continue;
@@ -387,7 +387,7 @@ static Item js_observer_unobserve(Item target_item) {
 
 static Item js_geometry_observer_observe(Item target_item) {
     JsObserverState* observer = observer_from_this();
-    DomNode* node = (DomNode*)js_dom_unwrap_element(target_item);
+    DomNode* node = (DomNode*)dom_unwrap_element(target_item);
     if (!observer || observer->kind == JS_OBSERVER_MUTATION || !node) {
         return make_js_undefined();
     }
@@ -487,7 +487,7 @@ extern "C" Item js_intersection_observer_new(Item callback, Item options) {
     if (!observer) return ItemNull;
     observer_install_common_methods(observer, false);
     Item root_item = observer_option(options, "root");
-    observer->root = (DomElement*)js_dom_unwrap_element(root_item);
+    observer->root = (DomElement*)dom_unwrap_element(root_item);
     if (observer->root) {
         observer_pin_node(observer->root->doc, (DomNode*)observer->root,
                           &observer->root_ref);
@@ -571,10 +571,10 @@ static void observer_queue_child_record(JsObserverState* observer,
     Item record = js_new_object();
     Item added_nodes = js_array_new(0);
     Item removed_nodes = js_array_new(0);
-    if (added) js_array_push(added_nodes, js_dom_wrap_element(added));
-    if (removed) js_array_push(removed_nodes, js_dom_wrap_element(removed));
+    if (added) js_array_push(added_nodes, dom_wrap_element(added));
+    if (removed) js_array_push(removed_nodes, dom_wrap_element(removed));
     observer_set_record_fields(record, js_make_string("childList"),
-        js_dom_wrap_element(parent), added_nodes, removed_nodes, ItemNull, ItemNull);
+        dom_wrap_element(parent), added_nodes, removed_nodes, ItemNull, ItemNull);
     observer_queue_record(observer, record);
 
     // A removed subtree remains observed through the microtask checkpoint,
@@ -589,7 +589,7 @@ static void observer_queue_child_record(JsObserverState* observer,
     }
 }
 
-extern "C" void js_dom_observers_mutation_notify(DomJsMutationKind kind,
+extern "C" void dom_observers_mutation_notify(DomJsMutationKind kind,
     void* target_ptr, void* parent_ptr, const char* attribute_name, const char* old_value)
 {
     DomNode* target = (DomNode*)target_ptr;
@@ -631,7 +631,7 @@ extern "C" void js_dom_observers_mutation_notify(DomJsMutationKind kind,
                                (character && registration->character_data_old_value);
             observer_set_record_fields(record,
                 js_make_string(child ? "childList" : attribute ? "attributes" : "characterData"),
-                js_dom_wrap_element(observed_node), added, removed,
+                dom_wrap_element(observed_node), added, removed,
                 attribute_name ? js_make_string(attribute_name) : ItemNull,
                 include_old && old_value ? js_make_string(old_value) : ItemNull);
             observer_queue_record(observer, record);
@@ -640,7 +640,7 @@ extern "C" void js_dom_observers_mutation_notify(DomJsMutationKind kind,
     }
 }
 
-extern "C" void js_dom_observers_child_replace_notify(void* parent_ptr,
+extern "C" void dom_observers_child_replace_notify(void* parent_ptr,
                                                          void* added_ptr,
                                                          void* removed_ptr) {
     DomNode* parent = (DomNode*)parent_ptr;
@@ -681,7 +681,7 @@ static Item observer_rect(Item target_item, float* x, float* y, float* width, fl
 
 JS_FORWARD_STATIC_ITEM(observer_make_rect,
     (float x, float y, float width, float height),
-    js_dom_make_rect, ((double)x, (double)y, (double)width, (double)height))
+    dom_make_rect, ((double)x, (double)y, (double)width, (double)height))
 
 static float observer_resolve_margin(JsObserverState* observer, int side,
                                      float root_width, float root_height) {
@@ -703,18 +703,18 @@ static bool observer_threshold_crossed(JsObserverState* observer,
     return false;
 }
 
-extern "C" void js_dom_observers_post_layout(void) {
+extern "C" void dom_observers_post_layout(void) {
     // Host-driven layout can finish after the loader restored its JS context;
     // sampling is deferred until the retained runtime is installed by the pump.
     if (!context) return;
-    UiContext* uicon = (UiContext*)js_dom_get_ui_context();
+    UiContext* uicon = (UiContext*)dom_get_ui_context();
     if (!uicon) return;
     for (int i = 0; i < observer_count; i++) {
         JsObserverState* observer = &observers[i];
         if (observer->kind == JS_OBSERVER_MUTATION) continue;
         for (int j = 0; j < observer->target_count; j++) {
             JsObserverTarget* target = &observer->targets[j];
-            Item target_item = js_dom_wrap_element(target->node);
+            Item target_item = dom_wrap_element(target->node);
             float x = 0.0f, y = 0.0f, width = 0.0f, height = 0.0f;
             Item rect = observer_rect(target_item, &x, &y, &width, &height);
             if (observer->kind == JS_OBSERVER_RESIZE) {
@@ -742,7 +742,7 @@ extern "C" void js_dom_observers_post_layout(void) {
             float root_width = uicon->viewport_width;
             float root_height = uicon->viewport_height;
             if (observer->root) {
-                observer_rect(js_dom_wrap_element(observer->root), &root_x, &root_y,
+                observer_rect(dom_wrap_element(observer->root), &root_x, &root_y,
                               &root_width, &root_height);
             }
             float root_top = root_y - observer_resolve_margin(observer, 0,
@@ -784,11 +784,11 @@ extern "C" void js_dom_observers_post_layout(void) {
 }
 
 static Item js_geometry_observer_initial_sample(void) {
-    js_dom_observers_post_layout();
+    dom_observers_post_layout();
     return make_js_undefined();
 }
 
-extern "C" void js_dom_observers_reset(void) {
+extern "C" void dom_observers_reset(void) {
     // Batch teardown must not instantiate the 64-observer table for scripts
     // that never used an observer; doing so made every test262 reset pay its
     // full zeroing cost.
@@ -813,7 +813,7 @@ extern "C" void js_dom_observers_reset(void) {
 #undef observer_delivery_scheduled
 #undef observer_roots_epoch
 
-extern "C" void js_dom_observers_destroy_context(JsRuntimeState* runtime_state) {
+extern "C" void dom_observers_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->dom_observer_state) return;
     JsObserverRuntimeState* state =
         (JsObserverRuntimeState*)runtime_state->dom_observer_state;

@@ -39,8 +39,8 @@
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_weak(uint64_t* slot);
 extern Item js_make_number(double d);
-extern "C" Item js_dom_form_submit_bridge(Item form_item);
-extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter);
+extern "C" Item dom_form_submit_bridge(Item form_item);
+extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter);
 #include "../../lib/arena.h"
 #include "../../lib/str.h"
 #include "../../lib/url.h"
@@ -83,15 +83,15 @@ static inline Item js_string_key(const char* s) {
     return js_name_item(s);
 }
 
-static void js_dom_refresh_live_child_collections_for_mutation(DomNode* target,
+static void dom_refresh_live_child_collections_for_mutation(DomNode* target,
                                                                DomNode* parent);
-static void js_dom_refresh_live_form_collections_for_mutation(DomNode* target,
+static void dom_refresh_live_form_collections_for_mutation(DomNode* target,
                                                               DomNode* parent,
                                                               DomDocument* doc);
-static void js_dom_refresh_select_option_collections_for_mutation(DomNode* target,
+static void dom_refresh_select_option_collections_for_mutation(DomNode* target,
                                                                   DomNode* parent,
                                                                   DomDocument* doc);
-static void js_dom_refresh_live_lookup_collections_for_mutation(DomNode* target,
+static void dom_refresh_live_lookup_collections_for_mutation(DomNode* target,
                                                                 DomNode* parent,
                                                                 DomDocument* doc);
 // Pre-order walk over `node` and its following siblings, descending into each
@@ -116,34 +116,34 @@ static void _collect_form_controls_rec(DomNode* node, Item arr);
 static void _collect_lookup_rec(DomElement* root, const char* query, Item collection,
                                 int kind);
 
-static const char* js_dom_to_attr_cstr(Item value) {
+static const char* dom_to_attr_cstr(Item value) {
     Item str_value = js_to_string(value);
     const char* s = fn_to_cstr(str_value);
     return s ? s : "";
 }
 
-static const char* js_dom_to_dom_string_cstr(Item value) {
+static const char* dom_to_dom_string_cstr(Item value) {
     Item string_value = js_to_string(value);
     return fn_to_cstr(string_value);
 }
-JS_FORWARD_RETURN(const char*, js_dom_to_attribute_cstr, (Item value), js_dom_to_attr_cstr, (value))
+JS_FORWARD_RETURN(const char*, dom_to_attribute_cstr, (Item value), dom_to_attr_cstr, (value))
 
 // Forward declarations
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
                                                   const char* text_html);
-extern "C" Item js_dom_add_event_listener_bridge(Item target_item, Item type,
+extern "C" Item dom_add_event_listener_bridge(Item target_item, Item type,
                                                  Item callback, Item opts);
-extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type,
+extern "C" Item dom_remove_event_listener_bridge(Item target_item, Item type,
                                                     Item callback, Item opts);
-extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
-extern "C" void js_dom_after_srcdoc_set(void* dom_elem);
+extern "C" Item dom_dispatch_event_bridge(Item target_item, Item event_item);
+extern "C" void dom_after_srcdoc_set(void* dom_elem);
 extern "C" Item radiant_dom_element_operation(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 
-static Item js_dom_element_prototype_operation_body(Item callee, Item this_value,
+static Item dom_element_prototype_operation_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
     (void)result_home;
     JsFunction* fn = get_type_id(callee) == LMD_TYPE_FUNC
@@ -156,23 +156,23 @@ static Item js_dom_element_prototype_operation_body(Item callee, Item this_value
 
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
-void js_dom_register_named_elements(DomElement* root);
-static bool js_dom_node_is_connected(DomNode* node);
+void dom_register_named_elements(DomElement* root);
+static bool dom_node_is_connected(DomNode* node);
 static DomElement* _nearest_select_for_node(DomNode* node);
 static void _select_refresh_cached_selected_options_for_node(DomNode* node);
 static void _select_ask_for_reset(DomElement* sel);
 static bool _get_selectedness(DomElement* opt);
-static Item js_dom_svg_get_transform_list(DomElement* elem);
-static Item js_dom_svg_get_animated_class_name(DomElement* elem);
-static Item js_dom_svg_create_transform(void);
-static Item js_dom_svg_create_transform_from_matrix(Item matrix);
-static RdtMatrix js_dom_svg_transform_from_element(DomElement* elem);
-DomElement* js_dom_find_element_by_id(DomElement* root, const char* id);
+static Item dom_svg_get_transform_list(DomElement* elem);
+static Item dom_svg_get_animated_class_name(DomElement* elem);
+static Item dom_svg_create_transform(void);
+static Item dom_svg_create_transform_from_matrix(Item matrix);
+static RdtMatrix dom_svg_transform_from_element(DomElement* elem);
+DomElement* dom_find_element_by_id(DomElement* root, const char* id);
 
-static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
+static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
                                       bool notify_mutation);
 
-static String* js_dom_fragment_text(Item item) {
+static String* dom_fragment_text(Item item) {
     String* s = it2s(item);
     // The HTML fragment parser can return zero-length string tokens around
     // element boundaries; browsers do not expose those as empty Text nodes.
@@ -183,7 +183,7 @@ static String* js_dom_fragment_text(Item item) {
 // internally (e.g. createElementNS records the namespace URI as
 // "__lambda_ns_uri") and must not leak through JS-facing attribute
 // enumeration, getAttribute lookup, or serialization.
-JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_is_internal_attr, (const char* name),
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_is_internal_attr, (const char* name),
     name && strncmp(name, "__lambda_", 9) == 0)
 // ============================================================================
 // Unique type markers for DOM-adjacent Maps
@@ -212,7 +212,7 @@ struct JsWebAnimationHost {
 // Cached JS wrappers are owned by the active EvalContext, not this translation
 // unit. The root range is registered while a context is bound, before any
 // allocation can publish one of these values.
-#define js_dom_implementation_item (js_runtime_state.dom.implementation)
+#define dom_implementation_item (js_runtime_state.dom.implementation)
 #define js_document_proxy_item (js_runtime_state.dom.document_proxy)
 #define js_document_default_view (js_runtime_state.dom.default_view)
 #define js_document_title_value (js_runtime_state.dom.title)
@@ -221,21 +221,21 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_ensure_roots, (void), (js_active_runtime_
 
 #define js_document_design_mode (js_runtime_state.dom.design_mode)
 #define js_document_active_element (js_runtime_state.dom.active_element)
-static Item js_dom_document_element_from_point(DomDocument* doc,
+static Item dom_document_element_from_point(DomDocument* doc,
                                                Item x_arg,
                                                Item y_arg);
-static void js_dom_absolute_node_position(DomNode* node,
+static void dom_absolute_node_position(DomNode* node,
                                           float* out_x,
                                           float* out_y);
-static void js_dom_viewport_node_position(DomNode* node,
+static void dom_viewport_node_position(DomNode* node,
                                           float* out_x,
                                           float* out_y);
-static DomElement* js_dom_offset_parent_element(DomElement* elem);
-static int64_t js_dom_offset_coordinate(DomElement* elem, bool x_axis);
-static Item js_dom_svg_create_matrix(void);
-static Item js_dom_svg_create_point(void);
-extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem);
-static bool js_dom_ensure_geometry_snapshot(DomDocument* doc);
+static DomElement* dom_offset_parent_element(DomElement* elem);
+static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis);
+static Item dom_svg_create_matrix(void);
+static Item dom_svg_create_point(void);
+extern "C" Item dom_get_bounding_client_rect_bridge(void* dom_elem);
+static bool dom_ensure_geometry_snapshot(DomDocument* doc);
 
 // ============================================================================
 // Thread-local DOM document context
@@ -251,12 +251,12 @@ static bool js_dom_ensure_geometry_snapshot(DomDocument* doc);
 // this false and keeps the self-contained rebuild-on-demand behaviour.
 #define _js_host_driven_loop (js_runtime_state.dom.host_driven_loop)
 
-extern "C" void js_dom_set_host_driven_loop(bool enabled) {
+extern "C" void dom_set_host_driven_loop(bool enabled) {
     if (!js_active_runtime_state) return;
     _js_host_driven_loop = enabled;
 }
-JS_FORWARD_EXPRESSION(bool, js_dom_is_host_driven_loop, (void), (_js_host_driven_loop))
-// The "main" document — the one bound by js_dom_set_document at page load.
+JS_FORWARD_EXPRESSION(bool, dom_is_host_driven_loop, (void), (_js_host_driven_loop))
+// The "main" document — the one bound by dom_set_document at page load.
 // Foreign documents created via document.implementation.create*Document are
 // distinct: they have a null defaultView and getSelection() returns null per
 // HTML spec, even when the foreign-doc dispatcher temporarily swaps them in
@@ -283,11 +283,11 @@ static Item js_create_document_fonts_object(void) {
 // Forward decls (defined further down in the foreign-doc / iframe section).
 extern "C" bool js_doc_has_browsing_context(void* doc);
 extern "C" void js_doc_mark_has_browsing_context(void* doc);
-static Url* js_dom_make_fallback_url(const char* raw_url);
+static Url* dom_make_fallback_url(const char* raw_url);
 
-static inline DocState* js_dom_current_state();
+static inline DocState* dom_current_state();
 
-static void js_dom_mark_dirty_subtree(DomNode* root) {
+static void dom_mark_dirty_subtree(DomNode* root) {
     if (!root) return;
 
     root->layout_dirty = true;
@@ -297,12 +297,12 @@ static void js_dom_mark_dirty_subtree(DomNode* root) {
         // declaration exists from which a later reflow could reconstruct them.
         if (!elem->is_table_fixup()) elem->set_styles_resolved(false);
         for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-            js_dom_mark_dirty_subtree(child);
+            dom_mark_dirty_subtree(child);
         }
     }
 }
 
-static void js_dom_mark_dirty_ancestors(DomNode* node) {
+static void dom_mark_dirty_ancestors(DomNode* node) {
     for (DomNode* cur = node; cur; cur = cur->parent) {
         cur->layout_dirty = true;
         if (cur->is_element()) {
@@ -312,13 +312,13 @@ static void js_dom_mark_dirty_ancestors(DomNode* node) {
     }
 }
 
-static inline uint32_t js_dom_mutation_bit(DomJsMutationKind kind) {
+static inline uint32_t dom_mutation_bit(DomJsMutationKind kind) {
     uint32_t slot = (uint32_t)kind;
     if (slot >= 31) slot = 0;
     return 1u << slot;
 }
 
-static inline DomJsMutationKind js_dom_style_mutation_kind(CssPropertyCode prop_id) {
+static inline DomJsMutationKind dom_style_mutation_kind(CssPropertyCode prop_id) {
     switch (prop_id) {
         case CSS_PROPERTY_BACKGROUND_COLOR:
         case CSS_PROPERTY_COLOR:
@@ -330,7 +330,7 @@ static inline DomJsMutationKind js_dom_style_mutation_kind(CssPropertyCode prop_
     }
 }
 
-static DomDocument* js_dom_node_owner_document(DomNode* node) {
+static DomDocument* dom_node_owner_document(DomNode* node) {
     for (DomNode* cur = node; cur; cur = cur->parent) {
         if (cur->is_element()) {
             DomElement* elem = cur->as_element();
@@ -340,13 +340,13 @@ static DomDocument* js_dom_node_owner_document(DomNode* node) {
     return nullptr;
 }
 
-static DomDocument* js_dom_mutation_document(DomNode* target, DomNode* parent) {
-    DomDocument* doc = js_dom_node_owner_document(target);
-    if (!doc) doc = js_dom_node_owner_document(parent);
+static DomDocument* dom_mutation_document(DomNode* target, DomNode* parent) {
+    DomDocument* doc = dom_node_owner_document(target);
+    if (!doc) doc = dom_node_owner_document(parent);
     return doc ? doc : _js_current_document;
 }
 
-static DomNode* js_dom_mutation_source_parent(DomNode* parent) {
+static DomNode* dom_mutation_source_parent(DomNode* parent) {
     // Table fixup boxes are layout-only and have no lifecycle identity; mutation
     // records must retain the nearest source-DOM ancestor instead of pinning them.
     while (parent && parent->is_element() && parent->as_element()->is_table_fixup()) {
@@ -355,7 +355,7 @@ static DomNode* js_dom_mutation_source_parent(DomNode* parent) {
     return parent;
 }
 
-static DomNode* js_dom_table_fixup_significant_sibling(DomNode* child,
+static DomNode* dom_table_fixup_significant_sibling(DomNode* child,
                                                        bool forward) {
     for (DomNode* sibling = child ? (forward ? child->next_sibling
                                              : child->prev_sibling) : nullptr;
@@ -372,7 +372,7 @@ static DomNode* js_dom_table_fixup_significant_sibling(DomNode* child,
     return nullptr;
 }
 
-static bool js_dom_table_fixup_cells_only_descendants(DomNode* node,
+static bool dom_table_fixup_cells_only_descendants(DomNode* node,
                                                        bool* has_cell) {
     if (!node || !node->is_element()) return false;
     for (DomNode* child = node->as_element()->first_child; child;
@@ -394,37 +394,37 @@ static bool js_dom_table_fixup_cells_only_descendants(DomNode* node,
             return false;
         }
         if (!child->as_element()->is_table_fixup() ||
-            !js_dom_table_fixup_cells_only_descendants(child, has_cell)) {
+            !dom_table_fixup_cells_only_descendants(child, has_cell)) {
             return false;
         }
     }
     return true;
 }
 
-static bool js_dom_table_fixup_is_cells_only_run(DomNode* node) {
+static bool dom_table_fixup_is_cells_only_run(DomNode* node) {
     if (!node || !node->is_element() || !node->as_element()->is_table_fixup()) {
         return false;
     }
     bool has_cell = false;
-    return js_dom_table_fixup_cells_only_descendants(node, &has_cell) && has_cell;
+    return dom_table_fixup_cells_only_descendants(node, &has_cell) && has_cell;
 }
 
-static bool js_dom_removal_merges_table_fixup_runs(DomElement* parent,
+static bool dom_removal_merges_table_fixup_runs(DomElement* parent,
                                                   DomNode* child) {
     if (!parent || !child ||
         resolve_display_value((void*)parent).outer != CSS_VALUE_INLINE) {
         return false;
     }
-    DomNode* previous = js_dom_table_fixup_significant_sibling(child, false);
-    DomNode* next = js_dom_table_fixup_significant_sibling(child, true);
-    bool previous_cells = js_dom_table_fixup_is_cells_only_run(previous);
-    bool next_cells = js_dom_table_fixup_is_cells_only_run(next);
+    DomNode* previous = dom_table_fixup_significant_sibling(child, false);
+    DomNode* next = dom_table_fixup_significant_sibling(child, true);
+    bool previous_cells = dom_table_fixup_is_cells_only_run(previous);
+    bool next_cells = dom_table_fixup_is_cells_only_run(next);
     return previous_cells && next_cells;
 }
 
-static DomElement* js_dom_prepare_children_for_mutation(DomElement* parent,
+static DomElement* dom_prepare_children_for_mutation(DomElement* parent,
                                                         DomNode* changed_child = nullptr) {
-    DomNode* source_parent = js_dom_mutation_source_parent(
+    DomNode* source_parent = dom_mutation_source_parent(
         static_cast<DomNode*>(parent));
     if (!source_parent || !source_parent->is_element()) return nullptr;
     DomElement* source_element = source_parent->as_element();
@@ -433,7 +433,7 @@ static DomElement* js_dom_prepare_children_for_mutation(DomElement* parent,
     if (changed_child && changed_child->is_element()) {
         DisplayValue display = resolve_display_value((void*)changed_child);
         changes_table_structure = is_table_internal_display(display.inner);
-        merges_table_fixup_runs = js_dom_removal_merges_table_fixup_runs(
+        merges_table_fixup_runs = dom_removal_merges_table_fixup_runs(
             source_element, changed_child);
     }
     if (changes_table_structure || merges_table_fixup_runs) {
@@ -445,23 +445,23 @@ static DomElement* js_dom_prepare_children_for_mutation(DomElement* parent,
     return source_element;
 }
 
-static DocState* js_dom_state_for_nodes(DomNode* target, DomNode* parent) {
-    DomDocument* doc = js_dom_mutation_document(target, parent);
+static DocState* dom_state_for_nodes(DomNode* target, DomNode* parent) {
+    DomDocument* doc = dom_mutation_document(target, parent);
     return doc ? doc->state : nullptr;
 }
 
-static inline void js_dom_record_mutation_detail(DomJsMutationKind kind,
+static inline void dom_record_mutation_detail(DomJsMutationKind kind,
                                                  DomNode* target,
                                                  DomNode* parent,
                                                  uint32_t sequence) {
-    parent = js_dom_mutation_source_parent(parent);
-    DomDocument* doc = js_dom_mutation_document(target, parent);
+    parent = dom_mutation_source_parent(parent);
+    DomDocument* doc = dom_mutation_document(target, parent);
     if (!doc) return;
 
     if (sequence == 0) {
         sequence = doc->js.mutation_sequence + 1;
     }
-    doc->js.mutation_kind_mask |= js_dom_mutation_bit(kind);
+    doc->js.mutation_kind_mask |= dom_mutation_bit(kind);
 
     if (doc->js.mutation_record_count < DOM_JS_MUTATION_RECORD_CAP) {
         DomNodeRef target_ref = dom_node_ref(target);
@@ -484,23 +484,23 @@ static inline void js_dom_record_mutation_detail(DomJsMutationKind kind,
     }
 
     if (target) {
-        js_dom_mark_dirty_subtree(target);
-        js_dom_mark_dirty_ancestors(target);
+        dom_mark_dirty_subtree(target);
+        dom_mark_dirty_ancestors(target);
     }
     if (parent) {
-        js_dom_mark_dirty_ancestors(parent);
+        dom_mark_dirty_ancestors(parent);
     }
 }
 
 // Helper: increment DOM mutation counter on current document and record the
 // mutation shape for future incremental cascade/layout decisions.
-static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_UNKNOWN,
+static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_UNKNOWN,
                                           DomNode* target = nullptr,
                                           DomNode* parent = nullptr,
                                           const char* attribute_name = nullptr,
                                           const char* old_value = nullptr) {
-    parent = js_dom_mutation_source_parent(parent);
-    DomDocument* doc = js_dom_mutation_document(target, parent);
+    parent = dom_mutation_source_parent(parent);
+    DomDocument* doc = dom_mutation_document(target, parent);
     if (!doc) return;
 
     doc->js.mutation_count++;
@@ -521,13 +521,13 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
     }
 
     if (!has_pending_structural_record) {
-        js_dom_record_mutation_detail(kind, target, parent, doc->js.mutation_sequence);
+        dom_record_mutation_detail(kind, target, parent, doc->js.mutation_sequence);
     }
-    js_dom_refresh_live_child_collections_for_mutation(target, parent);
-    js_dom_refresh_live_form_collections_for_mutation(target, parent, doc);
-    js_dom_refresh_select_option_collections_for_mutation(target, parent, doc);
-    js_dom_refresh_live_lookup_collections_for_mutation(target, parent, doc);
-    js_dom_observers_mutation_notify(kind, target, parent, attribute_name, old_value);
+    dom_refresh_live_child_collections_for_mutation(target, parent);
+    dom_refresh_live_form_collections_for_mutation(target, parent, doc);
+    dom_refresh_select_option_collections_for_mutation(target, parent, doc);
+    dom_refresh_live_lookup_collections_for_mutation(target, parent, doc);
+    dom_observers_mutation_notify(kind, target, parent, attribute_name, old_value);
 
     DocState* st = doc->state;
     if (st) {
@@ -546,16 +546,16 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
     }
 }
 
-extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent) {
+extern "C" void dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent) {
     // Module-owned DOM setters must still publish mutations through the JS DOM ledger.
-    js_dom_mutation_notify(kind, (DomNode*)target, (DomNode*)parent);
+    dom_mutation_notify(kind, (DomNode*)target, (DomNode*)parent);
 }
-JS_FORWARD_VOID( js_dom_notify_mutation_detail, (DomJsMutationKind kind, void* target,                                                 void* parent, const char* attribute_name,                                                 const char* old_value), js_dom_mutation_notify, (kind, (DomNode*)target, (DomNode*)parent, attribute_name, old_value))
+JS_FORWARD_VOID( dom_notify_mutation_detail, (DomJsMutationKind kind, void* target,                                                 void* parent, const char* attribute_name,                                                 const char* old_value), dom_mutation_notify, (kind, (DomNode*)target, (DomNode*)parent, attribute_name, old_value))
 
-JS_FORWARD_EXPRESSION(uint64_t, js_dom_mutation_epoch, (DomDocument* doc),
+JS_FORWARD_EXPRESSION(uint64_t, dom_mutation_epoch, (DomDocument* doc),
     doc ? doc->mutation_epoch : 0)
 
-static bool js_dom_mutation_node_overlaps_root(DomNode* node, DomNode* root) {
+static bool dom_mutation_node_overlaps_root(DomNode* node, DomNode* root) {
     if (!node || !root) return false;
     for (DomNode* current = node; current; current = current->parent) {
         if (current == root) return true;
@@ -566,62 +566,62 @@ static bool js_dom_mutation_node_overlaps_root(DomNode* node, DomNode* root) {
     return false;
 }
 
-extern "C" bool js_dom_mutation_since_affects_subtree(
+extern "C" bool dom_mutation_since_affects_subtree(
         DomDocument* doc, uint32_t sequence_before, void* root) {
     if (!doc || !root) return false;
     DomNode* root_node = (DomNode*)root;
     for (int index = 0; index < doc->js.mutation_record_count; index++) {
         DomJsMutationRecord* record = &doc->js.mutation_records[index];
         if (record->sequence <= sequence_before) continue;
-        if (js_dom_mutation_node_overlaps_root(record->target, root_node) ||
-            js_dom_mutation_node_overlaps_root(record->parent, root_node)) {
+        if (dom_mutation_node_overlaps_root(record->target, root_node) ||
+            dom_mutation_node_overlaps_root(record->parent, root_node)) {
             return true;
         }
     }
     return false;
 }
 
-extern "C" bool js_dom_has_committed_geometry_snapshot(void* dom_doc) {
+extern "C" bool dom_has_committed_geometry_snapshot(void* dom_doc) {
     DomDocument* doc = (DomDocument*)dom_doc;
     // this predicate is intentionally side-effect free; geometry entry points
-    // call js_dom_ensure_geometry_snapshot before inspecting the cached boxes.
+    // call dom_ensure_geometry_snapshot before inspecting the cached boxes.
     return doc && doc->view_tree && doc->view_tree->root;
 }
 
-static thread_local bool js_dom_geometry_flush_in_progress = false;
+static thread_local bool dom_geometry_flush_in_progress = false;
 
-static bool js_dom_ensure_geometry_snapshot(DomDocument* doc) {
+static bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     UiContext* uicon = _js_current_ui_context;
     if (!doc || !uicon || !uicon->headless || _js_host_driven_loop) {
-        return js_dom_has_committed_geometry_snapshot(doc);
+        return dom_has_committed_geometry_snapshot(doc);
     }
-    if (js_dom_geometry_flush_in_progress) {
-        return js_dom_has_committed_geometry_snapshot(doc);
+    if (dom_geometry_flush_in_progress) {
+        return dom_has_committed_geometry_snapshot(doc);
     }
 
     DomDocument* saved_document = uicon->document;
     uicon->document = doc;
-    js_dom_geometry_flush_in_progress = true;
+    dom_geometry_flush_in_progress = true;
 
     // CSSOM View geometry reads synchronously flush style and layout. The
     // initial load has no view tree yet, while later reads may have pending
     // DOM mutations from the same script turn.
     if (doc->view_tree && doc->view_tree->root) {
         if (doc->js.mutation_count > 0) {
-            radiant_reconcile_js_dom_mutations(uicon, doc);
+            radiant_reconcile_dom_mutations(uicon, doc);
         }
     } else if (doc->root && radiant_document_ensure_state(
-                   doc, "js_dom_geometry_flush")) {
+                   doc, "dom_geometry_flush")) {
         layout_html_doc(uicon, doc, false);
     }
 
-    js_dom_geometry_flush_in_progress = false;
+    dom_geometry_flush_in_progress = false;
     uicon->document = saved_document;
-    return js_dom_has_committed_geometry_snapshot(doc);
+    return dom_has_committed_geometry_snapshot(doc);
 }
 
-extern "C" bool js_dom_tick_headless_animation_frame(void) {
-    js_dom_commit_headless_layout();
+extern "C" bool dom_tick_headless_animation_frame(void) {
+    dom_commit_headless_layout();
     DomDocument* doc = _js_current_ui_context && _js_current_ui_context->document
         ? _js_current_ui_context->document : _js_current_document;
     DocState* state = doc && doc->state ? (DocState*)doc->state : nullptr;
@@ -633,25 +633,25 @@ extern "C" bool js_dom_tick_headless_animation_frame(void) {
     return animation_scheduler_tick(scheduler, now, &state->dirty_tracker);
 }
 
-extern "C" bool js_dom_commit_headless_layout_checkpoint(void) {
+extern "C" bool dom_commit_headless_layout_checkpoint(void) {
     UiContext* uicon = _js_current_ui_context;
     DomDocument* doc = uicon && uicon->document
         ? uicon->document : _js_current_document;
-    if (!uicon || !uicon->headless || js_dom_is_host_driven_loop() ||
+    if (!uicon || !uicon->headless || dom_is_host_driven_loop() ||
         !doc || !doc->view_tree || !doc->view_tree->root ||
         doc->js.mutation_count == 0) {
         return false;
     }
     // A one-shot DOM session has no native render loop, so task boundaries must
     // commit pending mutations; geometry getters remain snapshots.
-    radiant_reconcile_js_dom_mutations(uicon, doc);
+    radiant_reconcile_dom_mutations(uicon, doc);
     return true;
 }
 
 // keep the older entry point as a boundary wrapper: geometry readers must use
 // the same mutation reconciliation checkpoint as the event loop.
-JS_FORWARD_RETURN(bool, js_dom_commit_headless_layout, (void),
-    js_dom_commit_headless_layout_checkpoint, ())
+JS_FORWARD_RETURN(bool, dom_commit_headless_layout, (void),
+    dom_commit_headless_layout_checkpoint, ())
 
 // ----------------------------------------------------------------------------
 // Phase 3: live-range mutation envelopes — thin wrappers that bail when no
@@ -659,19 +659,19 @@ JS_FORWARD_RETURN(bool, js_dom_commit_headless_layout, (void),
 // mutation paths in this file route through these to keep boundary points
 // in sync per WHATWG DOM §5.3.
 // ----------------------------------------------------------------------------
-JS_FORWARD_STATIC_EXPRESSION(DocState*, js_dom_current_state, (void),
+JS_FORWARD_STATIC_EXPRESSION(DocState*, dom_current_state, (void),
     _js_current_document ? _js_current_document->state : nullptr)
 
-static DocState* js_dom_testdriver_state() {
+static DocState* dom_testdriver_state() {
     if (!_js_current_document) return nullptr;
     if (!_js_current_document->state) {
-        radiant_document_ensure_state(_js_current_document, "js_dom_testdriver_key");
+        radiant_document_ensure_state(_js_current_document, "dom_testdriver_key");
     }
     return _js_current_document->state;
 }
 
-extern "C" Item js_dom_set_editing_behavior(Item behavior_item) {
-    DocState* state = js_dom_testdriver_state();
+extern "C" Item dom_set_editing_behavior(Item behavior_item) {
+    DocState* state = dom_testdriver_state();
     if (!state) return make_js_undefined();
     Item behavior_str = js_to_string(behavior_item);
     const char* behavior = fn_to_cstr(behavior_str);
@@ -679,7 +679,7 @@ extern "C" Item js_dom_set_editing_behavior(Item behavior_item) {
     return make_js_undefined();
 }
 
-static uint32_t js_dom_to_u32(Item value) {
+static uint32_t dom_to_u32(Item value) {
     Item num = js_to_number(value);
     TypeId t = get_type_id(num);
     if (t == LMD_TYPE_INT) return (uint32_t)it2i(num);
@@ -689,17 +689,17 @@ static uint32_t js_dom_to_u32(Item value) {
     return 0;
 }
 
-static Item js_dom_testdriver_key(Item key_item,
+static Item dom_testdriver_key(Item key_item,
                                   Item shift_item,
                                   Item ctrl_item,
                                   Item alt_item,
                                   Item meta_item) {
     if (!_js_current_document) return (Item){.item = ITEM_FALSE};
-    if (!js_dom_testdriver_state() || !_js_current_ui_context) {
+    if (!dom_testdriver_state() || !_js_current_ui_context) {
         return (Item){.item = ITEM_FALSE};
     }
 
-    uint32_t wpt_key = js_dom_to_u32(key_item);
+    uint32_t wpt_key = dom_to_u32(key_item);
     int mods = 0;
     if (js_is_truthy(shift_item)) mods |= RDT_MOD_SHIFT;
     if (js_is_truthy(ctrl_item)) mods |= RDT_MOD_CTRL;
@@ -721,14 +721,14 @@ static Item js_dom_testdriver_key(Item key_item,
     return (Item){.item = ITEM_TRUE};
 }
 
-static bool js_dom_node_contains(DomNode* ancestor, DomNode* node) {
+static bool dom_node_contains(DomNode* ancestor, DomNode* node) {
     for (DomNode* cur = node; cur; cur = cur->parent) {
         if (cur == ancestor) return true;
     }
     return false;
 }
 
-static bool js_dom_node_is_connected(DomNode* node) {
+static bool dom_node_is_connected(DomNode* node) {
     if (!node) return false;
     DomDocument* doc = nullptr;
     if (node->is_element() && node->as_element())
@@ -752,12 +752,12 @@ static bool js_dom_node_is_connected(DomNode* node) {
 }
 
 static inline void dom_pre_remove(DomNode* child, bool record_mutation = true) {
-    DocState* st = js_dom_state_for_nodes(child, child ? child->parent : nullptr);
+    DocState* st = dom_state_for_nodes(child, child ? child->parent : nullptr);
     if (st && child) {
         dom_mutation_pre_remove(st, child);
 
         View* focused = focus_get(st);
-        if (focused && js_dom_node_contains(child, (DomNode*)focused)) {
+        if (focused && dom_node_contains(child, (DomNode*)focused)) {
             if (focused->is_element()) {
                 DomElement* focused_elem = ((DomNode*)focused)->as_element();
                 const char* tag = focused_elem ? focused_elem->tag_name : nullptr;
@@ -780,69 +780,69 @@ static inline void dom_pre_remove(DomNode* child, bool record_mutation = true) {
             focus_clear_preserve_selection(st);
         } else {
             View* caret_view = caret_get_view(st);
-            if (caret_view && js_dom_node_contains(child, (DomNode*)caret_view)) {
+            if (caret_view && dom_node_contains(child, (DomNode*)caret_view)) {
                 state_store_caret_clear(st);
             }
 
             View* anchor_view = nullptr;
             View* focus_view = nullptr;
             if (selection_get_extent_views(st, &anchor_view, &focus_view) &&
-                ((anchor_view && js_dom_node_contains(child, (DomNode*)anchor_view)) ||
-                 (focus_view && js_dom_node_contains(child, (DomNode*)focus_view)))) {
+                ((anchor_view && dom_node_contains(child, (DomNode*)anchor_view)) ||
+                 (focus_view && dom_node_contains(child, (DomNode*)focus_view)))) {
                 state_store_selection_clear(st);
             }
         }
     }
     if (child && js_document_active_element &&
-        js_dom_node_contains(child, (DomNode*)js_document_active_element)) {
+        dom_node_contains(child, (DomNode*)js_document_active_element)) {
         js_document_active_element = nullptr;
     }
     view_pool_release_detached_subtree(child);
     if (record_mutation) {
-        js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_REMOVE, child,
+        dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_REMOVE, child,
                                       child ? child->parent : nullptr, 0);
     }
 }
 
-static bool js_dom_detach_dom_node(DomNode* node) {
+static bool dom_detach_dom_node(DomNode* node) {
     if (!node || !node->parent) return true;
     dom_pre_remove(node);
     DomNode* old_parent = node->parent;
     return old_parent->remove_child(node);
 }
 
-static void js_dom_pre_remove_if_attached(DomNode* node) {
+static void dom_pre_remove_if_attached(DomNode* node) {
     if (node && node->parent) dom_pre_remove(node);
 }
 
 static inline void dom_post_insert(DomNode* parent, DomNode* node,
                                    bool record_mutation = true) {
-    DocState* st = js_dom_state_for_nodes(node, parent);
+    DocState* st = dom_state_for_nodes(node, parent);
     if (st && parent && node) dom_mutation_post_insert(st, parent, node);
     if (record_mutation) {
-        js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT, node, parent, 0);
+        dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT, node, parent, 0);
     }
 }
 
-static bool js_dom_is_generated_pseudo_node(DomNode* node) {
+static bool dom_is_generated_pseudo_node(DomNode* node) {
     if (!node || !node->is_element()) return false;
     DomElement* elem = node->as_element();
     return elem->tag_name && elem->tag_name[0] == ':' && elem->tag_name[1] == ':';
 }
 
-static bool js_dom_is_anonymous_table_wrapper(DomNode* node) {
+static bool dom_is_anonymous_table_wrapper(DomNode* node) {
     if (!node || !node->is_element()) return false;
     DomElement* elem = node->as_element();
     return elem->tag_name && strncmp(elem->tag_name, "::anon-", 7) == 0;
 }
 
-static DomNode* js_dom_visible_child(DomElement* elem, bool first) {
+static DomNode* dom_visible_child(DomElement* elem, bool first) {
     DomNode* child = elem ? (first ? elem->first_child : elem->last_child) : nullptr;
     while (child) {
-        if (!js_dom_is_generated_pseudo_node(child)) return child;
-        if (js_dom_is_anonymous_table_wrapper(child)) {
+        if (!dom_is_generated_pseudo_node(child)) return child;
+        if (dom_is_anonymous_table_wrapper(child)) {
             // layout-only wrappers are transparent in both traversal directions.
-            DomNode* nested = js_dom_visible_child(child->as_element(), first);
+            DomNode* nested = dom_visible_child(child->as_element(), first);
             if (nested) return nested;
         }
         child = first ? child->next_sibling : child->prev_sibling;
@@ -850,23 +850,23 @@ static DomNode* js_dom_visible_child(DomElement* elem, bool first) {
     return nullptr;
 }
 
-static DomNode* js_dom_visible_sibling(DomNode* node, bool forward) {
+static DomNode* dom_visible_sibling(DomNode* node, bool forward) {
     DomNode* sibling = node ? (forward ? node->next_sibling : node->prev_sibling) : nullptr;
     while (sibling) {
-        if (!js_dom_is_generated_pseudo_node(sibling)) return sibling;
-        if (js_dom_is_anonymous_table_wrapper(sibling)) {
-            DomNode* child = js_dom_visible_child(sibling->as_element(), forward);
+        if (!dom_is_generated_pseudo_node(sibling)) return sibling;
+        if (dom_is_anonymous_table_wrapper(sibling)) {
+            DomNode* child = dom_visible_child(sibling->as_element(), forward);
             if (child) return child;
         }
         sibling = forward ? sibling->next_sibling : sibling->prev_sibling;
     }
     DomNode* parent = node ? node->parent : nullptr;
-    while (js_dom_is_anonymous_table_wrapper(parent)) {
+    while (dom_is_anonymous_table_wrapper(parent)) {
         sibling = forward ? parent->next_sibling : parent->prev_sibling;
         while (sibling) {
-            if (!js_dom_is_generated_pseudo_node(sibling)) return sibling;
-            if (js_dom_is_anonymous_table_wrapper(sibling)) {
-                DomNode* child = js_dom_visible_child(sibling->as_element(), forward);
+            if (!dom_is_generated_pseudo_node(sibling)) return sibling;
+            if (dom_is_anonymous_table_wrapper(sibling)) {
+                DomNode* child = dom_visible_child(sibling->as_element(), forward);
                 if (child) return child;
             }
             sibling = forward ? sibling->next_sibling : sibling->prev_sibling;
@@ -876,16 +876,16 @@ static DomNode* js_dom_visible_sibling(DomNode* node, bool forward) {
     return nullptr;
 }
 
-JS_FORWARD_STATIC_RETURN(DomNode*, js_dom_next_script_visible_sibling,
-    (DomNode* node), js_dom_visible_sibling, (node, true))
-JS_FORWARD_STATIC_RETURN(DomNode*, js_dom_prev_script_visible_sibling,
-    (DomNode* node), js_dom_visible_sibling, (node, false))
-JS_FORWARD_STATIC_RETURN(DomNode*, js_dom_first_script_visible_child,
-    (DomElement* elem), js_dom_visible_child, (elem, true))
-JS_FORWARD_STATIC_RETURN(DomNode*, js_dom_last_script_visible_child,
-    (DomElement* elem), js_dom_visible_child, (elem, false))
+JS_FORWARD_STATIC_RETURN(DomNode*, dom_next_script_visible_sibling,
+    (DomNode* node), dom_visible_sibling, (node, true))
+JS_FORWARD_STATIC_RETURN(DomNode*, dom_prev_script_visible_sibling,
+    (DomNode* node), dom_visible_sibling, (node, false))
+JS_FORWARD_STATIC_RETURN(DomNode*, dom_first_script_visible_child,
+    (DomElement* elem), dom_visible_child, (elem, true))
+JS_FORWARD_STATIC_RETURN(DomNode*, dom_last_script_visible_child,
+    (DomElement* elem), dom_visible_child, (elem, false))
 
-static uint32_t js_dom_utf16_length_from_utf8(const char* text, size_t len) {
+static uint32_t dom_utf16_length_from_utf8(const char* text, size_t len) {
     if (!text) return 0;
     uint32_t n = 0;
     const unsigned char* p = (const unsigned char*)text;
@@ -899,7 +899,7 @@ static uint32_t js_dom_utf16_length_from_utf8(const char* text, size_t len) {
     return n;
 }
 
-static int64_t js_dom_to_integer_or_zero(Item value) {
+static int64_t dom_to_integer_or_zero(Item value) {
     Item num = js_to_number(value);
     TypeId t = get_type_id(num);
     double d = 0.0;
@@ -913,39 +913,39 @@ static int64_t js_dom_to_integer_or_zero(Item value) {
     return (int64_t)d;
 }
 
-static Item js_dom_throw_index_size_error(const char* message) {
+static Item dom_throw_index_size_error(const char* message) {
     Item name = js_name_item("IndexSizeError");
     Item msg = js_name_item(
         message ? message : "The index is not in the allowed range.");
     return js_throw_value(js_new_error_with_name(name, msg));
 }
 
-static Item js_dom_replace_text_data(DomText* text_node, uint32_t offset,
+static Item dom_replace_text_data(DomText* text_node, uint32_t offset,
                                      uint32_t count, const char* repl_chars) {
     if (!text_node) return js_status_ok();
     if (!repl_chars) repl_chars = "";
 
     uint32_t old_u16_len = dom_text_utf16_length(text_node);
     if (offset > old_u16_len) {
-        return js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
+        return dom_throw_index_size_error("The offset is larger than the CharacterData length.");
     }
     uint32_t available = old_u16_len - offset;
     if (count > available) count = available;
 
     size_t repl_len = strlen(repl_chars);
-    uint32_t repl_u16_len = js_dom_utf16_length_from_utf8(repl_chars, repl_len);
+    uint32_t repl_u16_len = dom_utf16_length_from_utf8(repl_chars, repl_len);
     const char* old_text = text_node->text ? text_node->text : "";
-    DocState* state = js_dom_state_for_nodes(
+    DocState* state = dom_state_for_nodes(
         (DomNode*)text_node, text_node->parent);
     if (!dom_text_replace_data_contents(state, text_node, offset, count,
                                         repl_chars, repl_len, repl_u16_len)) {
         return js_status_ok();
     }
-    js_dom_record_mutation_detail(DOM_JS_MUTATION_TEXT, (DomNode*)text_node,
+    dom_record_mutation_detail(DOM_JS_MUTATION_TEXT, (DomNode*)text_node,
                                   text_node->parent, 0);
-    js_dom_mutation_notify(DOM_JS_MUTATION_TEXT, (DomNode*)text_node,
+    dom_mutation_notify(DOM_JS_MUTATION_TEXT, (DomNode*)text_node,
                            text_node->parent, nullptr, old_text);
-    log_debug("js_dom_replace_text_data: offset=%u count=%u replacement_u16=%u",
+    log_debug("dom_replace_text_data: offset=%u count=%u replacement_u16=%u",
               offset, count, repl_u16_len);
     return js_status_ok();
 }
@@ -963,8 +963,8 @@ static void reset_pending_iframe_loads();
 // (radiant/event.hpp is already included at the top of this file).
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
 
-extern "C" void* js_dom_current_active_text_control(void) {
-    DocState* state = js_dom_current_state();
+extern "C" void* dom_current_active_text_control(void) {
+    DocState* state = dom_current_state();
     if (state) {
         View* focused = focus_get(state);
         if (focused && focused->is_element()) {
@@ -984,12 +984,12 @@ extern "C" void* js_dom_current_active_text_control(void) {
     return nullptr;
 }
 
-extern "C" void js_dom_batch_reset() {
+extern "C" void dom_batch_reset() {
     // Transient document teardown releases its EvalContext before generic host
     // cleanup reaches here; no context-owned DOM cache may be touched then.
     if (!js_active_runtime_state) return;
-    DocState* state = js_dom_current_state();
-    js_dom_selection_reset();
+    DocState* state = dom_current_state();
+    dom_selection_reset();
     reset_live_dom_collections();
     reset_pending_iframe_loads();
     expando_reset();
@@ -1001,33 +1001,33 @@ extern "C" void js_dom_batch_reset() {
     js_document_active_element = nullptr;
     js_document_fonts_value = (Item){.item = ITEM_NULL};
     _js_current_document = nullptr;
-    js_dom_events_reset();
+    dom_events_reset();
     js_xhr_reset();
     js_storage_reset();
     js_match_media_reset();
-    js_dom_observers_reset();
+    dom_observers_reset();
     reset_foreign_document_cache();
     tc_reset_focus_state(state);
 }
 
-extern "C" void js_dom_shutdown() {
-    // See js_dom_batch_reset: a detached host has no valid DOM cache owner.
+extern "C" void dom_shutdown() {
+    // See dom_batch_reset: a detached host has no valid DOM cache owner.
     if (!js_active_runtime_state) return;
     reset_live_dom_collections();
     reset_pending_iframe_loads();
     expando_reset();
     reset_dom_wrapper_cache();
-    js_dom_events_reset();
+    dom_events_reset();
     js_xhr_reset();
     js_storage_reset();
     js_match_media_reset();
-    js_dom_observers_reset();
+    dom_observers_reset();
     reset_foreign_document_cache();
     _js_current_document = nullptr;
     _js_main_document = nullptr;
 }
 
-extern "C" bool js_dom_evaluate_media_query(const char* query) {
+extern "C" bool dom_evaluate_media_query(const char* query) {
     if (!query || !_js_current_document || !_js_current_ui_context) return false;
     CssEngine* engine = (CssEngine*)_js_current_document->services.cached_css_engine;
     if (!engine) return false;
@@ -1100,7 +1100,7 @@ static AttachedExpandoRoot* attached_expando_find(DomNode* node) {
 
 static bool expando_node_is_attached(DomNode* node) {
     if (!node) return false;
-    DomDocument* doc = js_dom_node_owner_document(node);
+    DomDocument* doc = dom_node_owner_document(node);
     if (!doc || !doc->root) return false;
     // A descendant can retain a parent inside a detached subtree; only a
     // complete ancestry chain to the document root makes native ownership a
@@ -1115,7 +1115,7 @@ static void attached_expando_root_add(DomNode* node, Item map,
                                       bool attachment_confirmed = false) {
     if (!node || get_type_id(map) != LMD_TYPE_MAP ||
             (!attachment_confirmed && !expando_node_is_attached(node))) return;
-    DomDocument* doc = js_dom_node_owner_document(node);
+    DomDocument* doc = dom_node_owner_document(node);
     if (!doc) return;
     AttachedExpandoRoot* existing = attached_expando_find(node);
     if (existing) {
@@ -1198,7 +1198,7 @@ static Item expando_get_or_create_map(DomNode* node) {
     return m;
 }
 
-extern "C" void js_dom_expando_attachment_changed(
+extern "C" void dom_expando_attachment_changed(
         DomDocument*, DomNode* root, bool attached) {
     if (!js_active_runtime_state) return;
     if (!root) return;
@@ -1215,7 +1215,7 @@ extern "C" void js_dom_expando_attachment_changed(
     if (root->is_element()) {
         for (DomNode* child = root->as_element()->first_child;
              child; child = child->next_sibling) {
-            js_dom_expando_attachment_changed(nullptr, child, attached);
+            dom_expando_attachment_changed(nullptr, child, attached);
         }
     }
 }
@@ -1262,23 +1262,23 @@ static void expando_set_property(DomNode* node, Item key, Item value) {
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, expando_key_is_engine_internal, (const char* name, int name_len), (name && name_len >= 2 && name[0] == '_' && name[1] == '_'))
 
-extern "C" bool js_dom_expando_has_property(Item obj, Item key) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
+extern "C" bool dom_expando_has_property(Item obj, Item key) {
+    DomNode* node = (DomNode*)dom_unwrap_element(obj);
     if (!node) return false;
     Item exp_map = expando_get_map(node);
     return expando_map_has_key(exp_map, key);
 }
 
-extern "C" Item js_dom_expando_get_own_property_descriptor(Item obj, Item key) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
+extern "C" Item dom_expando_get_own_property_descriptor(Item obj, Item key) {
+    DomNode* node = (DomNode*)dom_unwrap_element(obj);
     if (!node) return make_js_undefined();
     Item exp_map = expando_get_map(node);
     if (!expando_map_has_key(exp_map, key)) return make_js_undefined();
     return js_object_get_own_property_descriptor(exp_map, key);
 }
 
-extern "C" Item js_dom_expando_delete_property(Item obj, Item key) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
+extern "C" Item dom_expando_delete_property(Item obj, Item key) {
+    DomNode* node = (DomNode*)dom_unwrap_element(obj);
     if (!node) return (Item){.item = b2it(true)};
     Item exp_map = expando_get_map(node);
     if (!expando_map_has_key(exp_map, key)) return (Item){.item = b2it(true)};
@@ -1291,8 +1291,8 @@ extern "C" Item js_dom_expando_delete_property(Item obj, Item key) {
     return (Item){.item = b2it(deleted)};
 }
 
-extern "C" Item js_dom_expando_own_property_names(Item obj) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
+extern "C" Item dom_expando_own_property_names(Item obj) {
+    DomNode* node = (DomNode*)dom_unwrap_element(obj);
     Item result = js_array_new(0);
     if (!node) return result;
     Item exp_map = expando_get_map(node);
@@ -1310,7 +1310,7 @@ extern "C" Item js_dom_expando_own_property_names(Item obj) {
     return result;
 }
 
-static bool js_dom_event_attr_name(const char* attr_name, char* prop_buf, size_t prop_buf_size) {
+static bool dom_event_attr_name(const char* attr_name, char* prop_buf, size_t prop_buf_size) {
     if (!attr_name || !prop_buf || prop_buf_size == 0) return false;
     size_t len = strlen(attr_name);
     if (len < 3 || len >= prop_buf_size) return false;
@@ -1326,20 +1326,20 @@ static bool js_dom_event_attr_name(const char* attr_name, char* prop_buf, size_t
     return true;
 }
 
-static void js_dom_compile_event_attr_to_expando(DomElement* elem,
+static void dom_compile_event_attr_to_expando(DomElement* elem,
                                                  const char* attr_name,
                                                  const char* attr_value) {
     if (!elem || !attr_name || !attr_value) return;
 
     char prop_name[64];
-    if (!js_dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return;
+    if (!dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return;
 
     Item args[2];
     args[0] = js_name_item("event");
     args[1] = js_name_item(attr_value);
     Item fn = js_new_function_from_string(args, 2);
     if (get_type_id(fn) != LMD_TYPE_FUNC) {
-        log_error("js_dom_event_attr: failed to compile %s handler", prop_name);
+        log_error("dom_event_attr: failed to compile %s handler", prop_name);
         return;
     }
 
@@ -1349,49 +1349,49 @@ static void js_dom_compile_event_attr_to_expando(DomElement* elem,
         // Inline handlers are compiled during wrapper construction; wrapping
         // the same node here recursively re-enters initialization until the
         // stack overflows, so register against its canonical native key.
-        js_dom_event_handler_property_set_for_node(elem, prop_name,
+        dom_event_handler_property_set_for_node(elem, prop_name,
                                                    (int)strlen(prop_name), fn);
     }
 }
 
-static void js_dom_initialize_event_attrs(DomElement* elem) {
+static void dom_initialize_event_attrs(DomElement* elem) {
     if (!elem) return;
     int attr_count = 0;
     const char** attr_names = elem->attribute_names(&attr_count);
     for (int i = 0; attr_names && i < attr_count; i++) {
         const char* name = attr_names[i];
-        js_dom_compile_event_attr_to_expando(elem, name, elem->get_attribute(name));
+        dom_compile_event_attr_to_expando(elem, name, elem->get_attribute(name));
     }
 }
 
-static void js_dom_clear_event_attr_expando(DomElement* elem, const char* attr_name) {
+static void dom_clear_event_attr_expando(DomElement* elem, const char* attr_name) {
     if (!elem || !attr_name) return;
 
     char prop_name[64];
-    if (!js_dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return;
+    if (!dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return;
 
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item != ITEM_NULL) {
         js_set_key_default(exp_map, js_name_item(prop_name), ItemNull);
-        js_dom_event_handler_property_set_for_node(elem, prop_name,
+        dom_event_handler_property_set_for_node(elem, prop_name,
                                                    (int)strlen(prop_name), ItemNull);
     }
 }
 
-extern "C" bool js_dom_set_event_handler_function(void* dom_elem,
+extern "C" bool dom_set_event_handler_function(void* dom_elem,
                                                   const char* attr_name,
                                                   Item fn) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !attr_name || !js_is_callable(fn)) return false;
 
     char prop_name[64];
-    if (!js_dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return false;
+    if (!dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return false;
 
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item == ITEM_NULL) return false;
 
     js_set_key_default(exp_map, js_name_item(prop_name), fn);
-    js_dom_event_handler_property_set_for_node(elem, prop_name,
+    dom_event_handler_property_set_for_node(elem, prop_name,
                                                (int)strlen(prop_name), fn);
     return true;
 }
@@ -1412,7 +1412,7 @@ static inline bool _is_tag(DomElement* elem, const char* name) {
     return elem && elem->tag_name && strcasecmp(elem->tag_name, name) == 0;
 }
 
-static bool js_dom_resolve_selector_pseudo_state(void* context,
+static bool dom_resolve_selector_pseudo_state(void* context,
                                                  DomElement* elem,
                                                  uint32_t pseudo_state) {
     DomDocument* doc = (DomDocument*)context;
@@ -1427,20 +1427,20 @@ static bool js_dom_resolve_selector_pseudo_state(void* context,
         doc ? doc->state : nullptr, elem, pseudo_state);
 }
 
-static SelectorMatcher* js_dom_create_selector_matcher(DomDocument* doc) {
+static SelectorMatcher* dom_create_selector_matcher(DomDocument* doc) {
     if (!doc || !doc->document_pool) return nullptr;
     SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
     if (matcher) {
         selector_matcher_set_pseudo_state_resolver(
-            matcher, js_dom_resolve_selector_pseudo_state, doc);
+            matcher, dom_resolve_selector_pseudo_state, doc);
     }
     return matcher;
 }
 
 // native-module selector fast paths must share the DOM resolver so live form
 // state, including option:checked, agrees with ordinary JS queries.
-JS_FORWARD_RETURN(void*, js_dom_create_selector_matcher_bridge, (void* dom_doc),
-    js_dom_create_selector_matcher, ((DomDocument*)dom_doc))
+JS_FORWARD_RETURN(void*, dom_create_selector_matcher_bridge, (void* dom_doc),
+    dom_create_selector_matcher, ((DomDocument*)dom_doc))
 
 // Returns the lowercased input `type` attribute (e.g. "checkbox", "radio",
 // "submit", "button", "text"). Falls back to "text" when missing.
@@ -1465,7 +1465,7 @@ static bool _is_checkbox_or_radio(DomElement* elem) {
 
 static DocState* _state_for_element(DomElement* elem) {
     if (elem && elem->doc && elem->doc->state) return elem->doc->state;
-    return js_dom_current_state();
+    return dom_current_state();
 }
 
 // Read the live "checkedness" state. Initialised lazily from the
@@ -1498,11 +1498,11 @@ static void _set_checkedness(DomElement* elem, bool v) {
     js_set_name_key(exp, "__checked", (Item){.item = b2it(v)});
 }
 
-// Exposed for js_dom_events.cpp pre/post-click activation.
-JS_FORWARD_RETURN(bool, js_dom_is_checkbox_or_radio, (void* dom_elem), _is_checkbox_or_radio, ((DomElement*)dom_elem))
-JS_FORWARD_RETURN(bool, js_dom_get_checkedness, (void* dom_elem), _get_checkedness, ((DomElement*)dom_elem))
-JS_FORWARD_VOID( js_dom_set_checkedness, (void* dom_elem, bool v), _set_checkedness, ((DomElement*)dom_elem, v))
-extern "C" void js_dom_after_default_checked_set(void* dom_elem, bool checked) {
+// Exposed for dom_events.cpp pre/post-click activation.
+JS_FORWARD_RETURN(bool, dom_is_checkbox_or_radio, (void* dom_elem), _is_checkbox_or_radio, ((DomElement*)dom_elem))
+JS_FORWARD_RETURN(bool, dom_get_checkedness, (void* dom_elem), _get_checkedness, ((DomElement*)dom_elem))
+JS_FORWARD_VOID( dom_set_checkedness, (void* dom_elem, bool v), _set_checkedness, ((DomElement*)dom_elem, v))
+extern "C" void dom_after_default_checked_set(void* dom_elem, bool checked) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return;
     Item exp = expando_get_map((DomNode*)elem);
@@ -1514,7 +1514,7 @@ extern "C" void js_dom_after_default_checked_set(void* dom_elem, bool checked) {
     // defaultChecked only syncs live checkedness before the user/API dirty flag.
     if (!dirty) _set_checkedness(elem, checked);
 }
-extern "C" void js_dom_set_checked_dirty(void* dom_elem, bool checked) {
+extern "C" void dom_set_checked_dirty(void* dom_elem, bool checked) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return;
     _set_checkedness(elem, checked);
@@ -1523,12 +1523,12 @@ extern "C" void js_dom_set_checked_dirty(void* dom_elem, bool checked) {
         js_set_key_cstr(exp, "__chkDirty", (Item){.item = b2it(true)});
     }
 }
-JS_FORWARD_RETURN(const char*, js_dom_input_type_lower, (void* dom_elem), _input_type_lower, ((DomElement*)dom_elem))
-extern "C" const char* js_dom_tag_name_raw(void* dom_elem) {
+JS_FORWARD_RETURN(const char*, dom_input_type_lower, (void* dom_elem), _input_type_lower, ((DomElement*)dom_elem))
+extern "C" const char* dom_tag_name_raw(void* dom_elem) {
     DomElement* e = (DomElement*)dom_elem;
     return e ? e->tag_name : nullptr;
 }
-extern "C" bool js_dom_is_disabled(void* dom_elem) {
+extern "C" bool dom_is_disabled(void* dom_elem) {
     DomElement* e = (DomElement*)dom_elem;
     return e && e->has_attribute("disabled");
 }
@@ -1537,7 +1537,7 @@ extern "C" bool js_dom_is_disabled(void* dom_elem) {
 // (HTML's "is connected" predicate). Walks the parent chain looking for
 // the document's root element. Newly-created elements that haven't been
 // inserted into the tree are not connected.
-extern "C" bool js_dom_is_connected(void* dom_elem) {
+extern "C" bool dom_is_connected(void* dom_elem) {
     DomElement* e = (DomElement*)dom_elem;
     if (!e || !e->doc) return false;
     DomElement* root = e->doc->root;
@@ -1555,7 +1555,7 @@ extern "C" bool js_dom_is_connected(void* dom_elem) {
 // Walks DOM tree, registers elements with id as global properties
 // ============================================================================
 
-static void js_dom_initialize_event_attrs(DomElement* elem);
+static void dom_initialize_event_attrs(DomElement* elem);
 static __thread bool s_dom_event_attrs_initializing = false;
 
 static void register_named_elements_recursive(DomElement* elem, Item global) {
@@ -1568,7 +1568,7 @@ static void register_named_elements_recursive(DomElement* elem, Item global) {
         // The AST tier has no deferred MIR preamble pass; compile parsed inline
         // handlers while the document realm is active so later DOM events see
         // the same EventTarget properties as the MIR tier.
-        js_dom_initialize_event_attrs(elem);
+        dom_initialize_event_attrs(elem);
     }
 
     if (elem->id && elem->id[0] != '\0') {
@@ -1582,21 +1582,21 @@ static void register_named_elements_recursive(DomElement* elem, Item global) {
         bool do_register = true;
         if (it2b(js_has_own_property(global, key))) {
             DomNode* exn = static_cast<DomNode*>(
-                js_dom_unwrap_element(js_get_key_default(global, key)));
+                dom_unwrap_element(js_get_key_default(global, key)));
             DomElement* ex = (exn && exn->is_element()) ? exn->as_element() : nullptr;
             if (!ex) {
                 do_register = false;                          // user-assigned global
             } else if (ex == elem) {
                 do_register = false;                          // already bound to this element
-            } else if (js_dom_node_is_connected((DomNode*)ex)) {
+            } else if (dom_node_is_connected((DomNode*)ex)) {
                 do_register = false;                          // a connected element already owns this id
             }
             // else: existing binding is a stale/detached wrapper → refresh it
         }
         if (do_register) {
-            Item wrapped = js_dom_wrap_element(elem);
+            Item wrapped = dom_wrap_element(elem);
             js_set_key_default(global, key, wrapped);
-            log_debug("js_dom: registered element id='%s' on global object", elem->id);
+            log_debug("dom: registered element id='%s' on global object", elem->id);
         }
     }
 
@@ -1609,7 +1609,7 @@ static void register_named_elements_recursive(DomElement* elem, Item global) {
     }
 }
 
-void js_dom_register_named_elements(DomElement* root) {
+void dom_register_named_elements(DomElement* root) {
     if (!root) return;
     Item global = js_get_global_this();
     bool initialize_event_attrs = js_ast_interpreter_requested() &&
@@ -1619,18 +1619,18 @@ void js_dom_register_named_elements(DomElement* root) {
     if (initialize_event_attrs) s_dom_event_attrs_initializing = false;
 }
 
-static void js_dom_install_window_frames_global(void);
-static void js_dom_install_window_dialog_globals(void);
-static void js_dom_install_window_computed_style_global(void);
-static void js_dom_install_dom_parser_global(void);
-static void js_dom_install_xml_serializer_global(void);
+static void dom_install_window_frames_global(void);
+static void dom_install_window_dialog_globals(void);
+static void dom_install_window_computed_style_global(void);
+static void dom_install_dom_parser_global(void);
+static void dom_install_xml_serializer_global(void);
 static DomDocument* js_document_proxy_doc_from_item(Item item);
 
 // ============================================================================
 // DOM Context Management
 // ============================================================================
 
-extern "C" void js_dom_set_document(void* dom_doc) {
+extern "C" void dom_set_document(void* dom_doc) {
     // Host teardown may notify after the document Runtime has released its
     // capsule. There is then no JS realm whose DOM bindings may be changed.
     if (!js_active_runtime_state) return;
@@ -1653,7 +1653,7 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         // this boundary or radiant_host_api remains null during bootstrap.
         const JubeModuleDef* radiant = jube_find_static_module("radiant");
         if (!radiant || !jube_activate_module(radiant)) {
-            log_error("js_dom_set_document: failed to activate radiant module");
+            log_error("dom_set_document: failed to activate radiant module");
             return;
         }
         js_doc_mark_has_browsing_context(dom_doc);
@@ -1667,46 +1667,46 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         }
         // populate global object with element IDs (browser-like named access on Window)
         if (doc->root) {
-            js_dom_register_named_elements(doc->root);
+            dom_register_named_elements(doc->root);
         }
         // install window.getSelection() global
-        js_dom_selection_install_globals();
-        js_dom_install_window_frames_global();
-        js_dom_install_window_dialog_globals();
-        js_dom_install_window_computed_style_global();
+        dom_selection_install_globals();
+        dom_install_window_frames_global();
+        dom_install_window_dialog_globals();
+        dom_install_window_computed_style_global();
         // install FormData constructor
         extern void js_formdata_install_globals(void);
         js_formdata_install_globals();
         // F-1: install collection interface globals (HTMLCollection,
         // NodeList, RadioNodeList, HTMLFormControlsCollection,
         // HTMLOptionsCollection) so existence and instanceof checks work.
-        extern void js_dom_install_collection_globals(void);
-        js_dom_install_collection_globals();
+        extern void dom_install_collection_globals(void);
+        dom_install_collection_globals();
         // F-5: install HTMLOptionElement Option() constructor.
-        extern void js_dom_install_option_constructor(void);
-        js_dom_install_option_constructor();
-        js_dom_install_dom_parser_global();
-        js_dom_install_xml_serializer_global();
+        extern void dom_install_option_constructor(void);
+        dom_install_option_constructor();
+        dom_install_dom_parser_global();
+        dom_install_xml_serializer_global();
         js_history_install_globals();
         Item global = js_get_global_this();
-        js_set_native_key(global, js_string_key("__lambda_testdriver_key"), js_dom_testdriver_key);
-        js_set_native_key(global, js_string_key("__lambda_set_editing_behavior"), js_dom_set_editing_behavior);
+        js_set_native_key(global, js_string_key("__lambda_testdriver_key"), dom_testdriver_key);
+        js_set_native_key(global, js_string_key("__lambda_set_editing_behavior"), dom_set_editing_behavior);
     }
-    log_debug("js_dom_set_document: set document=%p", dom_doc);
+    log_debug("dom_set_document: set document=%p", dom_doc);
 }
 
 // host setup may query before it has bound a document Runtime. There is no
 // ambient document to borrow in that phase; normal DOM execution binds the
 // owning EvalContext before accessing this context-local pointer.
-JS_FORWARD_EXPRESSION(void*, js_dom_get_document, (void),
+JS_FORWARD_EXPRESSION(void*, dom_get_document, (void),
     js_active_runtime_state ? (void*)_js_current_document : nullptr)
 
-extern "C" void js_dom_set_ui_context(void* ui_context) {
+extern "C" void dom_set_ui_context(void* ui_context) {
     if (!js_active_runtime_state) return;
     _js_current_ui_context = (UiContext*)ui_context;
 }
 
-JS_FORWARD_EXPRESSION(void*, js_dom_get_ui_context, (void),
+JS_FORWARD_EXPRESSION(void*, dom_get_ui_context, (void),
     js_active_runtime_state ? (void*)_js_current_ui_context : nullptr)
 
 // ============================================================================
@@ -1717,7 +1717,7 @@ JS_FORWARD_EXPRESSION(void*, js_dom_get_ui_context, (void),
 
 static Item lookup_foreign_doc_wrapper(DomDocument* doc); // fwd decl
 
-extern "C" void* js_dom_get_or_create_doc_node(void* doc_v) {
+extern "C" void* dom_get_or_create_doc_node(void* doc_v) {
     DomDocument* doc = (DomDocument*)doc_v;
     if (!doc) return nullptr;
     if (doc->js.doc_node) return doc->js.doc_node;
@@ -1777,7 +1777,7 @@ static Item doc_to_proxy_item(DomDocument* doc) {
     }
     return lookup_foreign_doc_wrapper(doc);
 }
-JS_FORWARD_ITEM(js_dom_document_proxy_for_doc_bridge, (void* doc_v), doc_to_proxy_item, ((DomDocument*)doc_v))
+JS_FORWARD_ITEM(dom_document_proxy_for_doc_bridge, (void* doc_v), doc_to_proxy_item, ((DomDocument*)doc_v))
 
 // ============================================================================
 // DOM Wrapping / Unwrapping
@@ -1786,11 +1786,11 @@ JS_FORWARD_ITEM(js_dom_document_proxy_for_doc_bridge, (void* doc_v), doc_to_prox
 extern "C" void radiant_dom_reset_wrapper_cache(void);
 JS_FORWARD_STATIC_VOID( reset_dom_wrapper_cache, (), radiant_dom_reset_wrapper_cache, ())
 
-extern "C" void js_dom_initialize_node_wrapper(void* dom_elem) {
+extern "C" void dom_initialize_node_wrapper(void* dom_elem) {
     DomNode* node = (DomNode*)dom_elem;
     if (!node || !node->is_element()) return;
     if (!s_dom_event_attrs_initializing) {
-        js_dom_initialize_event_attrs(node->as_element());
+        dom_initialize_event_attrs(node->as_element());
     }
 }
 
@@ -1799,7 +1799,7 @@ struct JsDomHtmlInterfaceEntry {
     const char* constructor_name;
 };
 
-static const JsDomHtmlInterfaceEntry s_js_dom_html_interfaces[] = {
+static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"a", "HTMLAnchorElement"},
     {"button", "HTMLButtonElement"},
     {"form", "HTMLFormElement"},
@@ -1809,19 +1809,19 @@ static const JsDomHtmlInterfaceEntry s_js_dom_html_interfaces[] = {
     {"textarea", "HTMLTextAreaElement"},
 };
 
-static const char* js_dom_html_interface_name(DomElement* elem) {
+static const char* dom_html_interface_name(DomElement* elem) {
     if (!elem || !elem->tag_name || elem->tag_name[0] == '#') return nullptr;
-    int count = (int)(sizeof(s_js_dom_html_interfaces) /
-        sizeof(s_js_dom_html_interfaces[0]));
+    int count = (int)(sizeof(s_dom_html_interfaces) /
+        sizeof(s_dom_html_interfaces[0]));
     for (int i = 0; i < count; i++) {
-        if (strcasecmp(elem->tag_name, s_js_dom_html_interfaces[i].tag_name) == 0) {
-            return s_js_dom_html_interfaces[i].constructor_name;
+        if (strcasecmp(elem->tag_name, s_dom_html_interfaces[i].tag_name) == 0) {
+            return s_dom_html_interfaces[i].constructor_name;
         }
     }
     return nullptr;
 }
 
-static bool js_dom_element_is_svg(DomElement* elem) {
+static bool dom_element_is_svg(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
     const char* namespace_uri = elem->get_attribute("__lambda_ns_uri");
     if (namespace_uri && strcmp(namespace_uri, "http://www.w3.org/2000/svg") == 0) {
@@ -1837,8 +1837,8 @@ static bool js_dom_element_is_svg(DomElement* elem) {
     return false;
 }
 
-static const char* js_dom_svg_interface_name(DomElement* elem) {
-    if (!js_dom_element_is_svg(elem)) return nullptr;
+static const char* dom_svg_interface_name(DomElement* elem) {
+    if (!dom_element_is_svg(elem)) return nullptr;
     if (strcasecmp(elem->tag_name, "svg") == 0) return "SVGSVGElement";
     if (strcasecmp(elem->tag_name, "path") == 0) return "SVGPathElement";
     if (strcasecmp(elem->tag_name, "text") == 0 ||
@@ -1856,8 +1856,8 @@ static const char* js_dom_svg_interface_name(DomElement* elem) {
     return "SVGElement";
 }
 
-extern "C" Item js_dom_get_prototype_value(Item obj) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
+extern "C" Item dom_get_prototype_value(Item obj) {
+    DomNode* node = (DomNode*)dom_unwrap_element(obj);
     const char* ctor_name = "Node";
     if (node && node->is_element()) {
         DomElement* elem = node->as_element();
@@ -1866,8 +1866,8 @@ extern "C" Item js_dom_get_prototype_value(Item obj) {
         } else {
             // HTML DOM wrappers need HTMLElement as their immediate prototype so
             // browser-library instanceof checks walk HTMLElement -> Element -> Node.
-            const char* svg_interface = js_dom_svg_interface_name(elem);
-            const char* html_interface = svg_interface ? nullptr : js_dom_html_interface_name(elem);
+            const char* svg_interface = dom_svg_interface_name(elem);
+            const char* html_interface = svg_interface ? nullptr : dom_html_interface_name(elem);
             ctor_name = svg_interface ? svg_interface : (html_interface ? html_interface :
                 ((elem && elem->tag_name && elem->tag_name[0] != '#')
                     ? "HTMLElement" : "Element"));
@@ -1887,23 +1887,23 @@ extern "C" Item radiant_dom_wrap_node(void* dom_elem);
 
 // Jube POC: keep existing JS callers stable while wrapper identity moves
 // behind the radiant module boundary.
-JS_FORWARD_ITEM(js_dom_wrap_element, (void* dom_elem), radiant_dom_wrap_node, (dom_elem))
+JS_FORWARD_ITEM(dom_wrap_element, (void* dom_elem), radiant_dom_wrap_node, (dom_elem))
 
 extern "C" void* radiant_dom_unwrap_node(Item item);
 extern "C" bool radiant_dom_is_node(Item item);
 
 // Jube POC: unwrap/type policy is exposed through the radiant module so DOM
 // nodes no longer depend on the retired DOM map wrapper shell.
-JS_FORWARD_RETURN(void*, js_dom_unwrap_element, (Item item), radiant_dom_unwrap_node, (item))
+JS_FORWARD_RETURN(void*, dom_unwrap_element, (Item item), radiant_dom_unwrap_node, (item))
 
-extern "C" void* js_dom_unwrap_element_impl(Item item) {
+extern "C" void* dom_unwrap_element_impl(Item item) {
     TypeId tid = get_type_id(item);
     if (tid == LMD_TYPE_VMAP) {
         // Only Radiant-branded VMaps unwrap as DOM nodes; style/CSSOM VMaps
         // must stop here or Radiant and DOM unwrap helpers recurse forever.
         if (radiant_dom_is_node(item)) return item.vmap->host_data;
         DomDocument* doc = js_document_proxy_doc_from_item(item);
-        return doc ? js_dom_get_or_create_doc_node(doc) : nullptr;
+        return doc ? dom_get_or_create_doc_node(doc) : nullptr;
     }
     return nullptr;
 }
@@ -1973,11 +1973,11 @@ struct JsDomCollectionRuntimeState {
 };
 
 JS_FORWARD_STATIC_EXPRESSION(JsDomCollectionRuntimeState*,
-    js_dom_collection_runtime_state_get, (),
+    dom_collection_runtime_state_get, (),
     (js_active_runtime_state ? (JsDomCollectionRuntimeState*)js_runtime_state.dom_collection_state : nullptr))
 
 template <typename State>
-static State* js_dom_runtime_state_ensure(void*& slot, const char* label) {
+static State* dom_runtime_state_ensure(void*& slot, const char* label) {
     if (!js_active_runtime_state) return nullptr;
     State* state = (State*)slot;
     if (state) return state;
@@ -1989,18 +1989,18 @@ static State* js_dom_runtime_state_ensure(void*& slot, const char* label) {
     slot = state;
     return state;
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_collection_runtime_state_ensure, (), (js_dom_runtime_state_ensure<JsDomCollectionRuntimeState>(js_runtime_state.dom_collection_state, "js-dom-collections") != nullptr))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_collection_runtime_state_ensure, (), (dom_runtime_state_ensure<JsDomCollectionRuntimeState>(js_runtime_state.dom_collection_state, "js-dom-collections") != nullptr))
 
-#define js_dom_collection_state ((JsDomCollectionRuntimeState*)js_runtime_state.dom_collection_state)
-#define s_select_options_owners (js_dom_collection_state->select_options_owners)
-#define s_select_options_owner_count (js_dom_collection_state->select_options_owner_count)
-#define s_live_child_collections (js_dom_collection_state->live_child_collections)
-#define s_live_child_collection_count (js_dom_collection_state->live_child_collection_count)
-#define s_live_form_collections (js_dom_collection_state->live_form_collections)
-#define s_live_form_collection_count (js_dom_collection_state->live_form_collection_count)
-#define s_live_lookup_collections (js_dom_collection_state->live_lookup_collections)
-#define s_live_lookup_collection_count (js_dom_collection_state->live_lookup_collection_count)
-#define s_dom_collection_refresh_depth (js_dom_collection_state->refresh_depth)
+#define dom_collection_rt_state ((JsDomCollectionRuntimeState*)js_runtime_state.dom_collection_state)
+#define s_select_options_owners (dom_collection_rt_state->select_options_owners)
+#define s_select_options_owner_count (dom_collection_rt_state->select_options_owner_count)
+#define s_live_child_collections (dom_collection_rt_state->live_child_collections)
+#define s_live_child_collection_count (dom_collection_rt_state->live_child_collection_count)
+#define s_live_form_collections (dom_collection_rt_state->live_form_collections)
+#define s_live_form_collection_count (dom_collection_rt_state->live_form_collection_count)
+#define s_live_lookup_collections (dom_collection_rt_state->live_lookup_collections)
+#define s_live_lookup_collection_count (dom_collection_rt_state->live_lookup_collection_count)
+#define s_dom_collection_refresh_depth (dom_collection_rt_state->refresh_depth)
 
 extern "C" void heap_register_gc_weak(uint64_t* slot,
     void (*on_clear)(uint64_t*, void*), void* weak_context);
@@ -2008,7 +2008,7 @@ extern "C" void heap_register_gc_weak(uint64_t* slot,
 struct DomCollectionRefreshGuard {
     bool active = false;
     DomCollectionRefreshGuard() {
-        active = js_dom_collection_runtime_state_get() != nullptr;
+        active = dom_collection_runtime_state_get() != nullptr;
         if (active) s_dom_collection_refresh_depth++;
     }
     ~DomCollectionRefreshGuard() {
@@ -2031,7 +2031,7 @@ static void live_collection_unpin(DomDocument* doc, DomNodeRef* ref) {
 }
 
 static void reset_live_dom_collections() {
-    if (!js_dom_collection_runtime_state_get()) return;
+    if (!dom_collection_runtime_state_get()) return;
     // Live collections keep native owner pointers outside the GC graph; release
     // their explicit lifecycle pins before the next document epoch can recycle.
     for (int i = 0; i < s_select_options_owner_count; i++) {
@@ -2067,7 +2067,7 @@ static void reset_live_dom_collections() {
 }
 
 template <typename Entry>
-static void js_dom_register_owner_collection(Item collection, DomElement* owner,
+static void dom_register_owner_collection(Item collection, DomElement* owner,
         int kind, Entry* entries, int* count, int capacity) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
     for (int i = 0; i < *count; i++) {
@@ -2106,11 +2106,11 @@ static void js_dom_register_owner_collection(Item collection, DomElement* owner,
 }
 #define JS_DOM_REGISTER_OWNER_COLLECTION(name, entries, count, capacity) \
 static void name(Item collection, DomElement* owner, int kind) { \
-    JsDomCollectionRuntimeState* state = js_dom_collection_runtime_state_get(); \
-    if (!state) state = js_dom_runtime_state_ensure<JsDomCollectionRuntimeState>( \
+    JsDomCollectionRuntimeState* state = dom_collection_runtime_state_get(); \
+    if (!state) state = dom_runtime_state_ensure<JsDomCollectionRuntimeState>( \
         js_runtime_state.dom_collection_state, "js-dom-collections"); \
     if (!state) return; \
-    js_dom_register_owner_collection(collection, owner, kind, state->entries, \
+    dom_register_owner_collection(collection, owner, kind, state->entries, \
         &state->count, capacity); \
 }
 JS_DOM_REGISTER_OWNER_COLLECTION(_register_select_options_owner,
@@ -2118,9 +2118,9 @@ JS_DOM_REGISTER_OWNER_COLLECTION(_register_select_options_owner,
     SELECT_OPTIONS_OWNER_CACHE_SIZE)
 
 template <typename Entry>
-static DomElement* js_dom_collection_owner(Entry* entries, int count,
+static DomElement* dom_collection_owner(Entry* entries, int count,
                                            Item collection, int* out_kind) {
-    if (!js_dom_collection_runtime_state_get()) return nullptr;
+    if (!dom_collection_runtime_state_get()) return nullptr;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
     for (int i = 0; i < count; i++) {
         if (entries[i].array == collection.array) {
@@ -2132,7 +2132,7 @@ static DomElement* js_dom_collection_owner(Entry* entries, int count,
 }
 
 static DomElement* _select_options_owner(Item collection, int* out_kind) {
-    return js_dom_collection_owner(s_select_options_owners,
+    return dom_collection_owner(s_select_options_owners,
         s_select_options_owner_count, collection, out_kind);
 }
 JS_DOM_REGISTER_OWNER_COLLECTION(_register_live_child_collection,
@@ -2141,7 +2141,7 @@ JS_DOM_REGISTER_OWNER_COLLECTION(_register_live_child_collection,
 #undef JS_DOM_REGISTER_OWNER_COLLECTION
 
 static DomElement* _live_child_collection_owner(Item collection, int* out_kind) {
-    return js_dom_collection_owner(s_live_child_collections,
+    return dom_collection_owner(s_live_child_collections,
         s_live_child_collection_count, collection, out_kind);
 }
 
@@ -2179,9 +2179,9 @@ struct JsDomLiveCollectionTraits<LiveLookupCollectionEntry> {
 };
 
 template <typename Entry>
-static void js_dom_register_live_collection(Item collection, DomDocument* doc,
+static void dom_register_live_collection(Item collection, DomDocument* doc,
         DomElement* subject, int kind, Entry* entries, int* count, int capacity) {
-    if (!js_dom_collection_runtime_state_ensure()) return;
+    if (!dom_collection_runtime_state_ensure()) return;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return;
     if (!doc && subject) doc = subject->doc;
     if (!doc && !subject) return;
@@ -2228,15 +2228,15 @@ static void _register_live_form_collection(Item collection, DomDocument* doc,
                                            DomElement* owner, int kind) {
     // The generic helper receives state-owned table pointers by value; initialize
     // the realm state before those arguments are evaluated (D5.2).
-    if (!js_dom_collection_runtime_state_ensure()) return;
-    js_dom_register_live_collection(collection, doc, owner, kind,
+    if (!dom_collection_runtime_state_ensure()) return;
+    dom_register_live_collection(collection, doc, owner, kind,
         s_live_form_collections, &s_live_form_collection_count,
         LIVE_FORM_COLLECTION_CACHE_SIZE);
 }
 
 template <typename Entry>
-static Entry* js_dom_collection_entry(Entry* entries, int count, Item collection) {
-    if (!js_dom_collection_runtime_state_get()) return nullptr;
+static Entry* dom_collection_entry(Entry* entries, int count, Item collection) {
+    if (!dom_collection_runtime_state_get()) return nullptr;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
     for (int i = 0; i < count; i++) {
         if (entries[i].array == collection.array) {
@@ -2247,7 +2247,7 @@ static Entry* js_dom_collection_entry(Entry* entries, int count, Item collection
 }
 
 static LiveFormCollectionEntry* _live_form_collection_entry(Item collection) {
-    return js_dom_collection_entry(s_live_form_collections,
+    return dom_collection_entry(s_live_form_collections,
         s_live_form_collection_count, collection);
 }
 
@@ -2261,9 +2261,9 @@ static void _register_live_lookup_collection(Item collection, DomDocument* doc,
     if (!doc && !root) return;
     // The generic helper receives state-owned table pointers by value; initialize
     // the realm state before those arguments are evaluated (D5.2).
-    if (!js_dom_collection_runtime_state_ensure()) return;
+    if (!dom_collection_runtime_state_ensure()) return;
     String* query_name = heap_create_name(query);
-    js_dom_register_live_collection(collection, doc, root, kind,
+    dom_register_live_collection(collection, doc, root, kind,
         s_live_lookup_collections, &s_live_lookup_collection_count,
         LIVE_LOOKUP_COLLECTION_CACHE_SIZE);
     LiveLookupCollectionEntry* entry = _live_lookup_collection_entry(collection);
@@ -2273,13 +2273,13 @@ static void _register_live_lookup_collection(Item collection, DomDocument* doc,
 }
 
 static LiveLookupCollectionEntry* _live_lookup_collection_entry(Item collection) {
-    return js_dom_collection_entry(s_live_lookup_collections,
+    return dom_collection_entry(s_live_lookup_collections,
         s_live_lookup_collection_count, collection);
 }
 
-extern "C" bool js_dom_collection_has_live_property_state(Item collection) {
+extern "C" bool dom_collection_has_live_property_state(Item collection) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY) return false;
-    if (!js_dom_collection_runtime_state_get()) return false;
+    if (!dom_collection_runtime_state_get()) return false;
     int collection_kind = 0;
     if (_live_child_collection_owner(collection, &collection_kind)) return true;
     if (_live_form_collection_entry(collection)) return true;
@@ -2287,19 +2287,19 @@ extern "C" bool js_dom_collection_has_live_property_state(Item collection) {
     return _select_options_owner(collection, &collection_kind) != nullptr;
 }
 
-static Item js_dom_text_replace_data_method(DomText* text_node, Item offset_arg,
+static Item dom_text_replace_data_method(DomText* text_node, Item offset_arg,
                                             Item count_arg, Item data_arg);
-static Item js_dom_text_insert_data_method(DomText* text_node, Item offset_arg,
+static Item dom_text_insert_data_method(DomText* text_node, Item offset_arg,
                                            Item data_arg);
-static Item js_dom_text_append_data_method(DomText* text_node, Item data_arg);
-static Item js_dom_text_delete_data_method(DomText* text_node, Item offset_arg,
+static Item dom_text_append_data_method(DomText* text_node, Item data_arg);
+static Item dom_text_delete_data_method(DomText* text_node, Item offset_arg,
                                            Item count_arg);
-static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_arg,
+static Item dom_text_substring_data_method(DomText* text_node, Item offset_arg,
                                               Item count_arg);
-static Item js_dom_text_split_method(DomText* text_node, Item offset_arg);
+static Item dom_text_split_method(DomText* text_node, Item offset_arg);
 static Item js_text_data_body(Item callee, Item this_value, Item* args,
                               int argc, uint64_t* result_home);
-static void js_dom_expando_flag_set(DomElement* elem, const char* name, Item value);
+static void dom_expando_flag_set(DomElement* elem, const char* name, Item value);
 static void _select_refresh_options_collection(Item collection, DomElement* sel);
 static void _select_refresh_selected_options_collection(Item collection, DomElement* sel);
 
@@ -2310,7 +2310,7 @@ static Item _collection_named_item(Item name_arg) {
     if (get_type_id(self) != LMD_TYPE_ARRAY || !self.array) return ItemNull;
     for (int64_t i = 0; i < self.array->length; i++) {
         Item item = js_elements_get_int(self, i);
-        DomElement* elem = (DomElement*)js_dom_unwrap_element(item);
+        DomElement* elem = (DomElement*)dom_unwrap_element(item);
         if (!elem) continue;
         const char* id = elem->get_attribute("id");
         if (id && strcmp(id, name) == 0) return item;
@@ -2327,7 +2327,7 @@ static Item _options_collection_add(Item element_arg, Item before_arg) {
     if (!owner || kind != SELECT_COLLECTION_OPTIONS || !_is_tag(owner, "select")) return ItemNull;
 
     Item args[2] = { element_arg, before_arg };
-    return radiant_dom_element_operation(js_dom_wrap_element(owner), JUBE_DOM_ADD, args, 2);
+    return radiant_dom_element_operation(dom_wrap_element(owner), JUBE_DOM_ADD, args, 2);
 }
 
 static void _decorate_dom_collection(Item collection, const char* ctor_name) {
@@ -2383,16 +2383,16 @@ static void _refresh_live_child_collection(Item collection, DomElement* owner, i
     // live collection refresh owns the dense backing array; routing through
     // JS length assignment can leave companion-map collection properties stale.
     collection.array->length = 0;
-    DomNode* child = js_dom_first_script_visible_child(owner);
+    DomNode* child = dom_first_script_visible_child(owner);
     while (child) {
         if (kind == LIVE_CHILD_COLLECTION_CHILD_NODES || child->is_element()) {
             if (child->is_element()) {
-                js_array_push(collection, js_dom_wrap_element(child->as_element()));
+                js_array_push(collection, dom_wrap_element(child->as_element()));
             } else {
-                js_array_push(collection, js_dom_wrap_element((DomElement*)(void*)child));
+                js_array_push(collection, dom_wrap_element((DomElement*)(void*)child));
             }
         }
-        child = js_dom_next_script_visible_sibling(child);
+        child = dom_next_script_visible_sibling(child);
     }
     if (js_array_has_props(collection.array)) {
         // decorated collections have a companion map; keep its length in sync
@@ -2462,7 +2462,7 @@ static Item _new_live_lookup_collection(DomDocument* doc, DomElement* root,
     JS_ROOTS(roots,
         query_root, query_item,
         collection_root, js_array_new(0));
-    const char* query = js_dom_to_dom_string_cstr(query_root.get());
+    const char* query = dom_to_dom_string_cstr(query_root.get());
     if (!query) return ItemNull;
     Item collection = collection_root.get();
     _register_live_lookup_collection(collection, doc, root, kind, include_root, query);
@@ -2472,7 +2472,7 @@ static Item _new_live_lookup_collection(DomDocument* doc, DomElement* root,
     return collection_root.get();
 }
 
-extern "C" Item js_dom_live_child_collection_bridge(void* elem_ptr, bool elements_only) {
+extern "C" Item dom_live_child_collection_bridge(void* elem_ptr, bool elements_only) {
     DomElement* elem = (DomElement*)elem_ptr;
     JS_ROOTS(roots, collection_root, js_array_new(0));
     Item collection = collection_root.get();
@@ -2486,7 +2486,7 @@ extern "C" Item js_dom_live_child_collection_bridge(void* elem_ptr, bool element
     return collection_root.get();
 }
 
-extern "C" Item js_dom_live_document_forms_bridge(void* doc_ptr) {
+extern "C" Item dom_live_document_forms_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     JS_ROOTS(roots, collection_root, js_array_new(0));
     Item collection = collection_root.get();
@@ -2498,7 +2498,7 @@ extern "C" Item js_dom_live_document_forms_bridge(void* doc_ptr) {
     return collection_root.get();
 }
 
-extern "C" Item js_dom_live_form_elements_bridge(void* elem_ptr) {
+extern "C" Item dom_live_form_elements_bridge(void* elem_ptr) {
     DomElement* form = (DomElement*)elem_ptr;
     JS_ROOTS(roots, collection_root, js_array_new(0));
     Item collection = collection_root.get();
@@ -2522,22 +2522,22 @@ extern "C" Item name(void* elem_ptr, Item query) { \
     return _new_live_lookup_collection(elem ? elem->doc : nullptr, elem, \
         kind, false, query, "HTMLCollection"); \
 }
-JS_DOM_DOCUMENT_LOOKUP_BRIDGE(js_dom_live_document_get_elements_by_tag_name_bridge,
+JS_DOM_DOCUMENT_LOOKUP_BRIDGE(dom_live_document_get_elements_by_tag_name_bridge,
     LIVE_LOOKUP_COLLECTION_TAG, "HTMLCollection")
-JS_DOM_DOCUMENT_LOOKUP_BRIDGE(js_dom_live_document_get_elements_by_class_name_bridge,
+JS_DOM_DOCUMENT_LOOKUP_BRIDGE(dom_live_document_get_elements_by_class_name_bridge,
     LIVE_LOOKUP_COLLECTION_CLASS, "HTMLCollection")
-JS_DOM_DOCUMENT_LOOKUP_BRIDGE(js_dom_live_document_get_elements_by_name_bridge,
+JS_DOM_DOCUMENT_LOOKUP_BRIDGE(dom_live_document_get_elements_by_name_bridge,
     LIVE_LOOKUP_COLLECTION_NAME, nullptr)
-JS_DOM_ELEMENT_LOOKUP_BRIDGE(js_dom_live_element_get_elements_by_tag_name_bridge,
+JS_DOM_ELEMENT_LOOKUP_BRIDGE(dom_live_element_get_elements_by_tag_name_bridge,
     LIVE_LOOKUP_COLLECTION_TAG)
-JS_DOM_ELEMENT_LOOKUP_BRIDGE(js_dom_live_element_get_elements_by_class_name_bridge,
+JS_DOM_ELEMENT_LOOKUP_BRIDGE(dom_live_element_get_elements_by_class_name_bridge,
     LIVE_LOOKUP_COLLECTION_CLASS)
 #undef JS_DOM_ELEMENT_LOOKUP_BRIDGE
 #undef JS_DOM_DOCUMENT_LOOKUP_BRIDGE
 
-static void js_dom_refresh_live_child_collections_for_mutation(DomNode* target,
+static void dom_refresh_live_child_collections_for_mutation(DomNode* target,
                                                                DomNode* parent) {
-    if (!js_dom_collection_runtime_state_get()) return;
+    if (!dom_collection_runtime_state_get()) return;
     for (int i = 0; i < s_live_child_collection_count; i++) {
         if (!s_live_child_collections[i].array) continue;
         DomElement* owner = s_live_child_collections[i].owner;
@@ -2550,7 +2550,7 @@ static void js_dom_refresh_live_child_collections_for_mutation(DomNode* target,
 
 #define JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION(name, entries, count, EntryType, owner_doc_expr, refresh) \
 static void name(DomNode* target, DomNode* parent, DomDocument* doc) { \
-    if (!js_dom_collection_runtime_state_get()) return; \
+    if (!dom_collection_runtime_state_get()) return; \
     (void)target; \
     (void)parent; \
     for (int i = 0; i < count; i++) { \
@@ -2564,16 +2564,16 @@ static void name(DomNode* target, DomNode* parent, DomDocument* doc) { \
 }
 
 JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION(
-    js_dom_refresh_live_form_collections_for_mutation,
+    dom_refresh_live_form_collections_for_mutation,
     s_live_form_collections, s_live_form_collection_count,
     LiveFormCollectionEntry,
     entry->doc ? entry->doc : (entry->owner ? entry->owner->doc : nullptr),
     _refresh_live_form_collection)
 
-static void js_dom_refresh_select_option_collections_for_mutation(DomNode* target,
+static void dom_refresh_select_option_collections_for_mutation(DomNode* target,
                                                                   DomNode* parent,
                                                                   DomDocument* doc) {
-    if (!js_dom_collection_runtime_state_get()) return;
+    if (!dom_collection_runtime_state_get()) return;
     (void)target;
     (void)parent;
     for (int i = 0; i < s_select_options_owner_count; i++) {
@@ -2593,7 +2593,7 @@ static void js_dom_refresh_select_option_collections_for_mutation(DomNode* targe
 }
 
 JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION(
-    js_dom_refresh_live_lookup_collections_for_mutation,
+    dom_refresh_live_lookup_collections_for_mutation,
     s_live_lookup_collections, s_live_lookup_collection_count,
     LiveLookupCollectionEntry,
     entry->doc ? entry->doc : (entry->root ? entry->root->doc : nullptr),
@@ -2640,8 +2640,8 @@ extern "C" void* js_get_foreign_doc(Item item) {
 extern "C" bool js_is_dom_implementation(Item item) {
     TypeId tid = get_type_id(item);
     if (tid != LMD_TYPE_MAP) return false;
-    return js_dom_implementation_item.item != 0 &&
-        item.item == js_dom_implementation_item.item;
+    return dom_implementation_item.item != 0 &&
+        item.item == dom_implementation_item.item;
 }
 
 extern "C" Item js_get_document_object_value() {
@@ -2701,14 +2701,14 @@ extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
             return value;
         }
         if (s && s->len == 10 && strncmp(s->chars, "designMode", 10) == 0) {
-            const char* mode = js_dom_to_attr_cstr(value);
+            const char* mode = dom_to_attr_cstr(value);
             js_document_design_mode = (mode && strcasecmp(mode, "on") == 0);
             return value;
         }
     }
 
     DomDocument* expando_doc = _js_current_document ? _js_current_document : _js_main_document;
-    void* stub_v = js_dom_get_or_create_doc_node(expando_doc);
+    void* stub_v = dom_get_or_create_doc_node(expando_doc);
     if (!stub_v) return value;
 
     Item exp_map = expando_get_or_create_map((DomNode*)stub_v);
@@ -2761,32 +2761,32 @@ struct JsDomForeignDocumentRuntimeState {
 };
 
 JS_FORWARD_STATIC_EXPRESSION(JsDomForeignDocumentRuntimeState*,
-    js_dom_foreign_document_state_get, (),
+    dom_foreign_document_state_get, (),
     (js_active_runtime_state ? (JsDomForeignDocumentRuntimeState*)js_runtime_state.dom_foreign_document_state : nullptr))
-JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_foreign_document_state_ensure, (), (js_dom_runtime_state_ensure<JsDomForeignDocumentRuntimeState>(js_runtime_state.dom_foreign_document_state, "js-dom-foreign-document") != nullptr))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_foreign_document_state_ensure, (), (dom_runtime_state_ensure<JsDomForeignDocumentRuntimeState>(js_runtime_state.dom_foreign_document_state, "js-dom-foreign-document") != nullptr))
 
-#define js_dom_foreign_document_state ((JsDomForeignDocumentRuntimeState*)js_runtime_state.dom_foreign_document_state)
-#define s_foreign_doc_cache (js_dom_foreign_document_state->foreign_doc_cache)
-#define s_foreign_doc_cache_count (js_dom_foreign_document_state->foreign_doc_cache_count)
-#define s_doc_with_window (js_dom_foreign_document_state->doc_with_window)
-#define s_doc_with_window_count (js_dom_foreign_document_state->doc_with_window_count)
-#define s_iframe_cache (js_dom_foreign_document_state->iframe_cache)
-#define s_iframe_cache_count (js_dom_foreign_document_state->iframe_cache_count)
-#define s_pending_iframe_loads (js_dom_foreign_document_state->pending_iframe_loads)
-#define s_pending_iframe_refs (js_dom_foreign_document_state->pending_iframe_refs)
-#define s_pending_iframe_docs (js_dom_foreign_document_state->pending_iframe_docs)
-#define s_pending_iframe_load_count (js_dom_foreign_document_state->pending_iframe_load_count)
-#define s_iframe_load_drain_scheduled (js_dom_foreign_document_state->iframe_load_drain_scheduled)
+#define dom_foreign_document_rt_state ((JsDomForeignDocumentRuntimeState*)js_runtime_state.dom_foreign_document_state)
+#define s_foreign_doc_cache (dom_foreign_document_rt_state->foreign_doc_cache)
+#define s_foreign_doc_cache_count (dom_foreign_document_rt_state->foreign_doc_cache_count)
+#define s_doc_with_window (dom_foreign_document_rt_state->doc_with_window)
+#define s_doc_with_window_count (dom_foreign_document_rt_state->doc_with_window_count)
+#define s_iframe_cache (dom_foreign_document_rt_state->iframe_cache)
+#define s_iframe_cache_count (dom_foreign_document_rt_state->iframe_cache_count)
+#define s_pending_iframe_loads (dom_foreign_document_rt_state->pending_iframe_loads)
+#define s_pending_iframe_refs (dom_foreign_document_rt_state->pending_iframe_refs)
+#define s_pending_iframe_docs (dom_foreign_document_rt_state->pending_iframe_docs)
+#define s_pending_iframe_load_count (dom_foreign_document_rt_state->pending_iframe_load_count)
+#define s_iframe_load_drain_scheduled (dom_foreign_document_rt_state->iframe_load_drain_scheduled)
 
 extern "C" bool js_doc_has_browsing_context(void* doc) {
-    if (!doc || !js_dom_foreign_document_state_get()) return false;
+    if (!doc || !dom_foreign_document_state_get()) return false;
     for (int i = 0; i < s_doc_with_window_count; i++) {
         if (s_doc_with_window[i] == (DomDocument*)doc) return true;
     }
     return false;
 }
 extern "C" void js_doc_mark_has_browsing_context(void* doc) {
-    if (!doc || !js_dom_foreign_document_state_ensure()) return;
+    if (!doc || !dom_foreign_document_state_ensure()) return;
     if (js_doc_has_browsing_context(doc)) return;
     if (s_doc_with_window_count < DOC_WIN_TABLE_SIZE) {
         s_doc_with_window[s_doc_with_window_count++] = (DomDocument*)doc;
@@ -2794,7 +2794,7 @@ extern "C" void js_doc_mark_has_browsing_context(void* doc) {
 }
 
 static IframeContentEntry* lookup_iframe_entry(DomElement* iframe) {
-    if (!js_dom_foreign_document_state_get()) return nullptr;
+    if (!dom_foreign_document_state_get()) return nullptr;
     for (int i = 0; i < s_iframe_cache_count; i++) {
         if (s_iframe_cache[i].iframe == iframe) return &s_iframe_cache[i];
     }
@@ -2821,7 +2821,7 @@ static void destroy_cached_doc_once(DomDocument** docs, int* doc_count, DomDocum
 }
 
 static void reset_foreign_document_cache() {
-    if (!js_dom_foreign_document_state_get()) return;
+    if (!dom_foreign_document_state_get()) return;
     DomDocument* destroyed_docs[FOREIGN_DOC_CACHE_SIZE + IFRAME_CACHE_SIZE] = {};
     int destroyed_doc_count = 0;
 
@@ -2853,11 +2853,11 @@ static void reset_foreign_document_cache() {
     }
     s_doc_with_window_count = 0;
 }
-JS_FORWARD_STATIC_VOID( js_dom_destroy_adopted_document, (void* data), free_document, ((DomDocument*)data))
+JS_FORWARD_STATIC_VOID( dom_destroy_adopted_document, (void* data), free_document, ((DomDocument*)data))
 
-static bool js_dom_transfer_document_storage(DomDocument* source,
+static bool dom_transfer_document_storage(DomDocument* source,
                                              DomDocument* destination) {
-    if (!js_dom_foreign_document_state_get()) return true;
+    if (!dom_foreign_document_state_get()) return true;
     if (!source || !destination || source == destination ||
         source == _js_main_document) {
         return true;
@@ -2881,8 +2881,8 @@ static bool js_dom_transfer_document_storage(DomDocument* source,
     if (!foreign_owner && !iframe_owner) return true;
 
     if (!dom_document_add_resource(destination, source,
-                                   js_dom_destroy_adopted_document)) {
-        log_error("js_dom_adopt: failed to retain source document storage");
+                                   dom_destroy_adopted_document)) {
+        log_error("dom_adopt: failed to retain source document storage");
         return false;
     }
     if (foreign_owner) foreign_owner->owns_doc = false;
@@ -2890,7 +2890,7 @@ static bool js_dom_transfer_document_storage(DomDocument* source,
     return true;
 }
 
-static bool js_dom_rebind_subtree_document(DomNode* node,
+static bool dom_rebind_subtree_document(DomNode* node,
                                            DomDocument* source,
                                            DomDocument* destination) {
     if (!node || !source || !destination) return false;
@@ -2905,36 +2905,36 @@ static bool js_dom_rebind_subtree_document(DomNode* node,
     DomElement* elem = node->as_element();
     elem->doc = destination;
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        if (!js_dom_rebind_subtree_document(child, source, destination)) return false;
+        if (!dom_rebind_subtree_document(child, source, destination)) return false;
     }
     if (elem->shadow_root_element()) {
-        if (!js_dom_rebind_subtree_document(
+        if (!dom_rebind_subtree_document(
                 (DomNode*)elem->shadow_root_element(), source, destination)) return false;
     }
     return true;
 }
 
-static bool js_dom_prepare_cross_document_insertion(DomNode* node,
+static bool dom_prepare_cross_document_insertion(DomNode* node,
                                                     DomElement* parent) {
     if (!node || !parent || !parent->doc) return false;
-    DomDocument* source = js_dom_node_owner_document(node);
+    DomDocument* source = dom_node_owner_document(node);
     DomDocument* destination = parent->doc;
     if (!source) return true;
     bool cross_document = source != destination;
     if (cross_document &&
-        !js_dom_transfer_document_storage(source, destination)) return false;
+        !dom_transfer_document_storage(source, destination)) return false;
     // Detach only for adoption; same-document backed paths must retain the
     // source parent so they can remove the corresponding Mark child too.
-    if (cross_document && node->parent && !js_dom_detach_dom_node(node)) {
+    if (cross_document && node->parent && !dom_detach_dom_node(node)) {
         return false;
     }
     if (cross_document &&
-        !js_dom_rebind_subtree_document(node, source, destination)) return false;
+        !dom_rebind_subtree_document(node, source, destination)) return false;
     return true;
 }
 
 static Item wrap_foreign_doc_owned(DomDocument* doc, bool owns_doc) {
-    if (!js_dom_foreign_document_state_ensure()) return ItemNull;
+    if (!dom_foreign_document_state_ensure()) return ItemNull;
     // Look up cache first.
     for (int i = 0; i < s_foreign_doc_cache_count; i++) {
         if (s_foreign_doc_cache[i].doc == doc) {
@@ -2961,7 +2961,7 @@ JS_FORWARD_STATIC_ITEM(wrap_foreign_doc, (DomDocument* doc), wrap_foreign_doc_ow
 
 // Returns the foreign-doc wrapper for `doc` if one exists, else ItemNull.
 static Item lookup_foreign_doc_wrapper(DomDocument* doc) {
-    if (!js_dom_foreign_document_state_get()) return ItemNull;
+    if (!dom_foreign_document_state_get()) return ItemNull;
     for (int i = 0; i < s_foreign_doc_cache_count; i++) {
         if (s_foreign_doc_cache[i].doc == doc) {
             return (Item){.item = s_foreign_doc_cache[i].item};
@@ -2970,7 +2970,7 @@ static Item lookup_foreign_doc_wrapper(DomDocument* doc) {
     return ItemNull;
 }
 
-static Item js_dom_owner_document_from_node(DomNode* node) {
+static Item dom_owner_document_from_node(DomNode* node) {
     DomNode* element_node = node;
     while (element_node && !element_node->is_element()) element_node = element_node->parent;
     if (element_node) {
@@ -2983,24 +2983,24 @@ static Item js_dom_owner_document_from_node(DomNode* node) {
     return js_get_document_object_value();
 }
 
-static Item js_dom_parent_element_or_null(DomNode* node) {
+static Item dom_parent_element_or_null(DomNode* node) {
     DomNode* parent = node ? node->parent : nullptr;
     if (parent && parent->is_element()) {
         DomElement* elem = parent->as_element();
         // Document and fragment nodes reuse DomElement storage but cannot be
         // exposed through the Element-only parentElement relation.
         if (elem && elem->tag_name && elem->tag_name[0] != '#') {
-            return js_dom_wrap_element(elem);
+            return dom_wrap_element(elem);
         }
     }
     return ItemNull;
 }
 
-static Item js_dom_parent_node_or_null(DomNode* node) {
+static Item dom_parent_node_or_null(DomNode* node) {
     DomNode* parent = node ? node->parent : nullptr;
-    return parent ? js_dom_wrap_element((void*)parent) : ItemNull;
+    return parent ? dom_wrap_element((void*)parent) : ItemNull;
 }
-JS_FORWARD_ITEM(js_dom_owner_document_for_node, (void* node_ptr), js_dom_owner_document_from_node, ((DomNode*)node_ptr))
+JS_FORWARD_ITEM(dom_owner_document_for_node, (void* node_ptr), dom_owner_document_from_node, ((DomNode*)node_ptr))
 
 // Build a minimal HTML document tree:
 //   <html>
@@ -3097,7 +3097,7 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
             build_dom_tree_from_element(body_elem->items[i].element,
                                         doc, body);
         } else if (t == LMD_TYPE_STRING) {
-            String* s = js_dom_fragment_text(body_elem->items[i]);
+            String* s = dom_fragment_text(body_elem->items[i]);
             if (!s) continue;
             DomText* tn = dom_text_create(s, body);
             if (tn) {
@@ -3140,9 +3140,9 @@ extern "C" Item js_create_foreign_html_doc(const char* title) {
 
 // native construction must retain the receiver carrying DOMParser's
 // prototype; returning another object would discard parseFromString.
-JS_FORWARD_STATIC_ITEM(js_dom_parser_constructor, (void), make_js_undefined, ())
+JS_FORWARD_STATIC_ITEM(dom_parser_constructor, (void), make_js_undefined, ())
 
-static Element* js_dom_parser_xml_document_element(Input* input) {
+static Element* dom_parser_xml_document_element(Input* input) {
     if (!input || get_type_id(input->root) != LMD_TYPE_ELEMENT) return nullptr;
     Element* wrapper = input->root.element;
     if (!wrapper) return nullptr;
@@ -3171,10 +3171,10 @@ static Element* js_dom_parser_xml_document_element(Input* input) {
 
 // DOMParser reports XML parse failures through a document containing a
 // parsererror element, which lets callers use normal DOM inspection.
-JS_FORWARD_STATIC_ITEM(js_dom_parser_error_document, (void),
+JS_FORWARD_STATIC_ITEM(dom_parser_error_document, (void),
     js_create_foreign_xml_doc, ("parsererror"))
 
-static Item js_dom_parser_parse_xml(const char* source) {
+static Item dom_parser_parse_xml(const char* source) {
     Input* parent_input = _js_current_document ? _js_current_document->input : nullptr;
     if (!parent_input || !parent_input->pool) return ItemNull;
 
@@ -3182,21 +3182,21 @@ static Item js_dom_parser_parse_xml(const char* source) {
     if (!xml_input) return ItemNull;
     parse_xml(xml_input, source ? source : "");
 
-    Element* xml_root = js_dom_parser_xml_document_element(xml_input);
-    if (!xml_root) return js_dom_parser_error_document();
+    Element* xml_root = dom_parser_xml_document_element(xml_input);
+    if (!xml_root) return dom_parser_error_document();
 
     DomDocument* xml_document = dom_document_create(xml_input);
     if (!xml_document) return ItemNull;
     DomElement* dom_root = build_dom_tree_from_element(xml_root, xml_document, nullptr);
     if (!dom_root) {
         free_document(xml_document);
-        return js_dom_parser_error_document();
+        return dom_parser_error_document();
     }
     xml_document->root = dom_root;
     return wrap_foreign_doc(xml_document);
 }
 
-static Item js_dom_parser_parse_from_string(Item source_item, Item type_item) {
+static Item dom_parser_parse_from_string(Item source_item, Item type_item) {
     const char* source = fn_to_cstr(source_item);
     const char* type = fn_to_cstr(type_item);
     if (!source) source = "";
@@ -3206,7 +3206,7 @@ static Item js_dom_parser_parse_from_string(Item source_item, Item type_item) {
             strcasecmp(type, "application/xml") == 0 ||
             strcasecmp(type, "image/svg+xml") == 0 ||
             strcasecmp(type, "application/xhtml+xml") == 0) {
-            return js_dom_parser_parse_xml(source);
+            return dom_parser_parse_xml(source);
         }
         return js_throw_type_error("Unsupported DOMParser MIME type");
     }
@@ -3222,7 +3222,7 @@ static Item js_dom_parser_parse_from_string(Item source_item, Item type_item) {
 }
 
 template <typename Method>
-static void js_dom_install_native_constructor_global(const char* ctor_name,
+static void dom_install_native_constructor_global(const char* ctor_name,
         JsNativeP0 ctor_target, const char* method_name, Method method_target) {
     JS_ROOTS(roots,
         global_root, js_get_global_this(),
@@ -3239,11 +3239,11 @@ static void js_dom_install_native_constructor_global(const char* ctor_name,
         ctor_root.get());
 }
 
-static void js_dom_install_dom_parser_global(void) {
+static void dom_install_dom_parser_global(void) {
     // D6.2.2v2: the prototype owns the parse capability, so construction and
     // method publication share one rooted native-constructor transaction.
-    js_dom_install_native_constructor_global("DOMParser", js_dom_parser_constructor,
-        "parseFromString", js_dom_parser_parse_from_string);
+    dom_install_native_constructor_global("DOMParser", dom_parser_constructor,
+        "parseFromString", dom_parser_parse_from_string);
 }
 
 // iframe.contentDocument / contentWindow accessors.
@@ -3252,7 +3252,7 @@ static void js_dom_install_dom_parser_global(void) {
 // resolve normally. js_document_get_property maps "document" / "defaultView"
 // back to the same wrapper so identity comparisons hold.
 extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
-    if (!iframe || !js_dom_foreign_document_state_ensure()) return ItemNull;
+    if (!iframe || !dom_foreign_document_state_ensure()) return ItemNull;
     IframeContentEntry* e = lookup_iframe_entry(iframe);
     if (!e) {
         DomDocument* embedded_doc = iframe->embed ? iframe->embedp()->doc : nullptr;
@@ -3285,7 +3285,7 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
 }
 JS_FORWARD_ITEM(js_iframe_get_content_window, (DomElement* iframe), js_iframe_get_content_document, (iframe))
 
-static void js_dom_collect_frame_windows(DomElement* elem, Item frames) {
+static void dom_collect_frame_windows(DomElement* elem, Item frames) {
     if (!elem) return;
     if (elem->tag_name && strcmp(elem->tag_name, "iframe") == 0) {
         js_array_push(frames, js_iframe_get_content_window(elem));
@@ -3293,17 +3293,17 @@ static void js_dom_collect_frame_windows(DomElement* elem, Item frames) {
     DomNode* child = elem->first_child;
     while (child) {
         if (child->is_element()) {
-            js_dom_collect_frame_windows(child->as_element(), frames);
+            dom_collect_frame_windows(child->as_element(), frames);
         }
         child = child->next_sibling;
     }
 }
 
-static void js_dom_install_window_frames_global(void) {
+static void dom_install_window_frames_global(void) {
     Item frames = js_array_new(0);
     DomDocument* doc = _js_main_document ? _js_main_document : _js_current_document;
     if (doc && doc->root) {
-        js_dom_collect_frame_windows(doc->root, frames);
+        dom_collect_frame_windows(doc->root, frames);
     }
     int64_t length = js_array_length(frames);
     Item length_item = (Item){.item = i2it(length)};
@@ -3366,7 +3366,7 @@ static Item js_window_prompt(Item message_item, Item default_item) {
 #undef s_prompt_head
 #undef s_prompt_tail
 
-static void js_dom_install_window_dialog_globals(void) {
+static void dom_install_window_dialog_globals(void) {
     Item global = js_get_global_this();
     Item fn = js_new_native_function(js_window_prompt);
     js_set_key_cstr(global, "prompt", fn);
@@ -3385,7 +3385,7 @@ static void js_dom_install_window_dialog_globals(void) {
 // ----------------------------------------------------------------------------
 static Item _iframe_load_drain(Item this_val, Item* args, int argc) {
     (void)this_val; (void)args; (void)argc;
-    if (!js_dom_foreign_document_state_get()) return ItemNull;
+    if (!dom_foreign_document_state_get()) return ItemNull;
     int n = s_pending_iframe_load_count;
     s_pending_iframe_load_count = 0;
     s_iframe_load_drain_scheduled = false;
@@ -3400,7 +3400,7 @@ static Item _iframe_load_drain(Item this_val, Item* args, int argc) {
         s_pending_iframe_refs[i] = {nullptr, 0};
         if (!ifr) continue;
         Item ev = js_create_event("load", /*bubbles=*/false, /*cancelable=*/false);
-        js_dom_dispatch_event(js_dom_wrap_element(ifr), ev);
+        dom_dispatch_event(dom_wrap_element(ifr), ev);
         dom_node_unpin(owner_doc, ref, DOM_NODE_PIN_EVENT_QUEUE);
         bool known = false;
         for (int d = 0; d < sweep_doc_count; d++) {
@@ -3416,7 +3416,7 @@ static Item _iframe_load_drain(Item this_val, Item* args, int argc) {
 }
 
 static void _schedule_iframe_load(DomElement* iframe) {
-    if (!iframe || !js_dom_foreign_document_state_ensure()) return;
+    if (!iframe || !dom_foreign_document_state_ensure()) return;
     for (int i = 0; i < s_pending_iframe_load_count; i++) {
         if (s_pending_iframe_loads[i] == iframe) return;
     }
@@ -3436,7 +3436,7 @@ static void _schedule_iframe_load(DomElement* iframe) {
 }
 
 static void reset_pending_iframe_loads() {
-    if (!js_dom_foreign_document_state_get()) return;
+    if (!dom_foreign_document_state_get()) return;
     for (int i = 0; i < s_pending_iframe_load_count; i++) {
         if (s_pending_iframe_docs[i] && s_pending_iframe_refs[i].address) {
             dom_node_unpin(s_pending_iframe_docs[i], s_pending_iframe_refs[i],
@@ -3450,7 +3450,7 @@ static void reset_pending_iframe_loads() {
     s_iframe_load_drain_scheduled = false;
 }
 
-extern "C" void js_dom_after_srcdoc_set(void* dom_elem) {
+extern "C" void dom_after_srcdoc_set(void* dom_elem) {
     // srcdoc writes mutate an iframe's nested document asynchronously.
     DomElement* iframe = (DomElement*)dom_elem;
     IframeContentEntry* entry = lookup_iframe_entry(iframe);
@@ -3460,7 +3460,7 @@ extern "C" void js_dom_after_srcdoc_set(void* dom_elem) {
     _schedule_iframe_load(iframe);
 }
 
-static DomElement* js_dom_find_iframe_by_name(DomNode* node, const char* target_name) {
+static DomElement* dom_find_iframe_by_name(DomNode* node, const char* target_name) {
     while (node) {
         if (node->is_element()) {
             DomElement* elem = node->as_element();
@@ -3470,7 +3470,7 @@ static DomElement* js_dom_find_iframe_by_name(DomNode* node, const char* target_
                     return elem;
                 }
             }
-            DomElement* found = js_dom_find_iframe_by_name(elem->first_child, target_name);
+            DomElement* found = dom_find_iframe_by_name(elem->first_child, target_name);
             if (found) return found;
         }
         node = node->next_sibling;
@@ -3478,14 +3478,14 @@ static DomElement* js_dom_find_iframe_by_name(DomNode* node, const char* target_
     return nullptr;
 }
 
-extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url) {
+extern "C" bool dom_navigate_submit_target(const char* target_name, const char* url) {
     DomDocument* doc = _js_current_document ? _js_current_document : _js_main_document;
     if (!doc || !url || !url[0]) return false;
 
     Url* resolved = doc->url ? url_parse_with_base(url, doc->url) : url_parse(url);
     if (!resolved || !url_is_valid(resolved)) {
         if (resolved) url_destroy(resolved);
-        resolved = js_dom_make_fallback_url(url);
+        resolved = dom_make_fallback_url(url);
         if (!resolved) return false;
     }
 
@@ -3500,7 +3500,7 @@ extern "C" bool js_dom_navigate_submit_target(const char* target_name, const cha
         return false;
     }
 
-    DomElement* iframe = js_dom_find_iframe_by_name((DomNode*)doc->root, target_name);
+    DomElement* iframe = dom_find_iframe_by_name((DomNode*)doc->root, target_name);
     if (!iframe) {
         url_destroy(resolved);
         return false;
@@ -3542,7 +3542,7 @@ extern "C" Item js_image_construct(Item width_arg, Item height_arg, int argc) {
         const char* h = fn_to_cstr(height_arg);
         if (h) dom_elem->set_attribute("height", h);
     }
-    return js_dom_wrap_element(dom_elem);
+    return dom_wrap_element(dom_elem);
 }
 
 // Public: create an empty foreign XML/generic document. qualified_name may be
@@ -3577,13 +3577,13 @@ extern "C" Item js_create_doctype_node(const char* name,
     if (!dt) return ItemNull;
     (void)public_id;
     (void)system_id;
-    return js_dom_wrap_element(dt);
+    return dom_wrap_element(dt);
 }
 
 // Save the current document and switch to the supplied foreign doc.
 // Returns the previous document pointer (caller must restore via
-// js_dom_restore_active_document).
-extern "C" void* js_dom_swap_active_document(void* new_doc) {
+// dom_restore_active_document).
+extern "C" void* dom_swap_active_document(void* new_doc) {
     void* prev = (void*)_js_current_document;
     if (new_doc) {
         _js_current_document = (DomDocument*)new_doc;
@@ -3591,7 +3591,7 @@ extern "C" void* js_dom_swap_active_document(void* new_doc) {
     return prev;
 }
 
-extern "C" void js_dom_restore_active_document(void* prev_doc) {
+extern "C" void dom_restore_active_document(void* prev_doc) {
     _js_current_document = (DomDocument*)prev_doc;
 }
 
@@ -3600,19 +3600,19 @@ extern "C" void js_dom_restore_active_document(void* prev_doc) {
 // ============================================================================
 
 
-static Item js_dom_impl_create_html_document_method(Item title) {
+static Item dom_impl_create_html_document_method(Item title) {
     const char* title_text = fn_to_cstr(title);
     return js_create_foreign_html_doc(title_text ? title_text : "");
 }
 
-static Item js_dom_impl_create_document_method(Item namespace_uri, Item qualified_name, Item doctype) {
+static Item dom_impl_create_document_method(Item namespace_uri, Item qualified_name, Item doctype) {
     (void)namespace_uri;
     (void)doctype;
     const char* qualified_text = fn_to_cstr(qualified_name);
     return js_create_foreign_xml_doc(qualified_text);
 }
 
-static Item js_dom_impl_create_document_type_method(Item name, Item public_id, Item system_id) {
+static Item dom_impl_create_document_type_method(Item name, Item public_id, Item system_id) {
     const char* name_text = fn_to_cstr(name);
     const char* public_text = fn_to_cstr(public_id);
     const char* system_text = fn_to_cstr(system_id);
@@ -3620,7 +3620,7 @@ static Item js_dom_impl_create_document_type_method(Item name, Item public_id, I
         public_text ? public_text : "", system_text ? system_text : "");
 }
 
-static Item js_dom_impl_has_feature_method(Item feature, Item version) {
+static Item dom_impl_has_feature_method(Item feature, Item version) {
     (void)feature;
     (void)version;
     // WHATWG requires hasFeature() to return true; the direct callable owns
@@ -3629,7 +3629,7 @@ static Item js_dom_impl_has_feature_method(Item feature, Item version) {
 }
 
 template <typename Target>
-static void js_dom_set_implementation_method(Item implementation,
+static void dom_set_implementation_method(Item implementation,
         const char* name, Target target, int adapter_arity) {
     Item key = js_name_item(name);
     js_set_key_default(implementation, key,
@@ -3639,27 +3639,27 @@ static void js_dom_set_implementation_method(Item implementation,
 
 extern "C" Item js_get_dom_implementation(void) {
     if (!dom_ensure_roots()) return ItemNull;
-    if (get_type_id(js_dom_implementation_item) == LMD_TYPE_MAP &&
-        js_is_dom_implementation(js_dom_implementation_item)) {
-        return js_dom_implementation_item;
+    if (get_type_id(dom_implementation_item) == LMD_TYPE_MAP &&
+        js_is_dom_implementation(dom_implementation_item)) {
+        return dom_implementation_item;
     }
     // Root-range cleanup clears expired realm cache slots to zero; zero must
     // rebuild this context-owned DOMImplementation instead of surfacing null.
     // A marker-only Map has no shape storage, so compiled property probes
     // dereference a null data pointer. Use a normal JS object and identify the
     // context-owned singleton by its cache identity instead.
-    js_dom_implementation_item = js_new_object();
+    dom_implementation_item = js_new_object();
     // DOMImplementation is a plain sentinel map, so property reads cannot
     // reach the native method-call dispatcher unless callable members exist.
-    js_dom_set_implementation_method(js_dom_implementation_item, "createHTMLDocument",
-        js_dom_impl_create_html_document_method, 1);
-    js_dom_set_implementation_method(js_dom_implementation_item, "createDocument",
-        js_dom_impl_create_document_method, 3);
-    js_dom_set_implementation_method(js_dom_implementation_item, "createDocumentType",
-        js_dom_impl_create_document_type_method, 3);
-    js_dom_set_implementation_method(js_dom_implementation_item, "hasFeature",
-        js_dom_impl_has_feature_method, 2);
-    return js_dom_implementation_item;
+    dom_set_implementation_method(dom_implementation_item, "createHTMLDocument",
+        dom_impl_create_html_document_method, 1);
+    dom_set_implementation_method(dom_implementation_item, "createDocument",
+        dom_impl_create_document_method, 3);
+    dom_set_implementation_method(dom_implementation_item, "createDocumentType",
+        dom_impl_create_document_type_method, 3);
+    dom_set_implementation_method(dom_implementation_item, "hasFeature",
+        dom_impl_has_feature_method, 2);
+    return dom_implementation_item;
 }
 
 // ============================================================================
@@ -3687,7 +3687,7 @@ JS_FORWARD_STATIC_RETURN(bool, js_is_inline_style, (Item item), js_is_style_wrap
 JS_FORWARD_RETURN(bool, js_is_inline_style_item, (Item item), js_is_inline_style, (item))
 
 
-static Item js_dom_get_inline_style_wrapper(DomElement* elem) {
+static Item dom_get_inline_style_wrapper(DomElement* elem) {
     if (!elem) return ItemNull;
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item != ITEM_NULL) {
@@ -3751,7 +3751,7 @@ static Item js_classlist_operation_body(Item callee, Item this_value,
     return js_classlist_operation(this_value, operation, args, argc);
 }
 
-static Item js_dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
+static Item dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
     if (!elem) return ItemNull;
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     Item cache_key = js_name_item("__classListWrapper");
@@ -3805,7 +3805,7 @@ struct JsComputedStyleHost {
 };
 
 extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
+    DomNode* node = (DomNode*)dom_unwrap_element(elem_item);
     if (!node || !node->is_element()) {
         log_debug("js_get_computed_style: not a DOM element");
         return ItemNull;
@@ -3844,7 +3844,7 @@ extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
 }
 JS_FORWARD_STATIC_ITEM(js_window_get_computed_style, (Item elem_item, Item pseudo_item), js_get_computed_style, (elem_item, pseudo_item))
 
-static void js_dom_install_window_computed_style_global(void) {
+static void dom_install_window_computed_style_global(void) {
     Item global = js_get_global_this();
     Item key = js_string_key("getComputedStyle");
     Item existing = js_get_key_default(global, key);
@@ -4415,7 +4415,7 @@ static CssDeclaration* js_match_custom_property(DomElement* elem, const char* pr
 
     // search stylesheets (lower specificity than inline)
     if (doc->stylesheets && doc->stylesheet_count > 0) {
-        SelectorMatcher* matcher = js_dom_create_selector_matcher(doc);
+        SelectorMatcher* matcher = dom_create_selector_matcher(doc);
         if (matcher) {
             for (int s = 0; s < doc->stylesheet_count; s++) {
                 CssStylesheet* sheet = doc->stylesheets[s];
@@ -4476,14 +4476,14 @@ static CssDeclaration* js_match_custom_property(DomElement* elem, const char* pr
 // Helper: find element by ID (tree walk)
 // ============================================================================
 
-DomElement* js_dom_find_element_by_id(DomElement* root, const char* id) {
+DomElement* dom_find_element_by_id(DomElement* root, const char* id) {
     if (!root || !id) return nullptr;
     if (root->id && strcmp(root->id, id) == 0) return root;
 
     DomNode* child = root->first_child;
     while (child) {
         if (child->is_element()) {
-            DomElement* found = js_dom_find_element_by_id(child->as_element(), id);
+            DomElement* found = dom_find_element_by_id(child->as_element(), id);
             if (found) return found;
         }
         child = child->next_sibling;
@@ -4491,7 +4491,7 @@ DomElement* js_dom_find_element_by_id(DomElement* root, const char* id) {
     return nullptr;
 }
 
-extern "C" void* js_dom_popover_target_for_button(void* button_ptr) {
+extern "C" void* dom_popover_target_for_button(void* button_ptr) {
     DomElement* button = (DomElement*)button_ptr;
     if (!button || !button->doc || !button->tag_name ||
         strcasecmp(button->tag_name, "button") != 0) {
@@ -4499,11 +4499,11 @@ extern "C" void* js_dom_popover_target_for_button(void* button_ptr) {
     }
     const char* target_id = button->get_attribute("popovertarget");
     if (!target_id || !*target_id || !button->doc->root) return nullptr;
-    DomElement* target = js_dom_find_element_by_id(button->doc->root, target_id);
+    DomElement* target = dom_find_element_by_id(button->doc->root, target_id);
     return target && target->has_attribute("popover") ? target : nullptr;
 }
 
-extern "C" int js_dom_popover_target_action(void* button_ptr) {
+extern "C" int dom_popover_target_action(void* button_ptr) {
     DomElement* button = (DomElement*)button_ptr;
     const char* action = button ? button->get_attribute("popovertargetaction") : nullptr;
     if (!action || strcasecmp(action, "toggle") == 0) return 0;
@@ -4512,7 +4512,7 @@ extern "C" int js_dom_popover_target_action(void* button_ptr) {
     return 0;
 }
 
-extern "C" bool js_dom_activate_popover(void* popover_ptr, int action) {
+extern "C" bool dom_activate_popover(void* popover_ptr, int action) {
     DomElement* popover = (DomElement*)popover_ptr;
     if (!popover || !popover->has_attribute("popover")) return false;
 
@@ -4520,11 +4520,11 @@ extern "C" bool js_dom_activate_popover(void* popover_ptr, int action) {
     bool should_open = action == 1 ? true : action == 2 ? false : !was_open;
     if (was_open == should_open) return false;
     popover->set_popover_open(should_open);
-    js_dom_notify_mutation(DOM_JS_MUTATION_STYLE, popover, popover->parent);
+    dom_notify_mutation(DOM_JS_MUTATION_STYLE, popover, popover->parent);
     return true;
 }
 
-static const char* js_dom_normalize_contenteditable(const char* value) {
+static const char* dom_normalize_contenteditable(const char* value) {
     if (!value || *value == '\0' || strcasecmp(value, "true") == 0) return "true";
     if (strcasecmp(value, "false") == 0) return "false";
     if (strcasecmp(value, "plaintext-only") == 0) return "plaintext-only";
@@ -4532,7 +4532,7 @@ static const char* js_dom_normalize_contenteditable(const char* value) {
     return nullptr;
 }
 
-static const char* js_dom_autocapitalize_state(const char* value, bool missing_is_empty) {
+static const char* dom_autocapitalize_state(const char* value, bool missing_is_empty) {
     if (!value) return missing_is_empty ? "" : "sentences";
     if (*value == '\0') return "";
     if (strcasecmp(value, "off") == 0 || strcasecmp(value, "none") == 0) return "none";
@@ -4541,15 +4541,15 @@ static const char* js_dom_autocapitalize_state(const char* value, bool missing_i
     if (strcasecmp(value, "words") == 0) return "words";
     return "sentences";
 }
-JS_FORWARD_STATIC_RETURN(bool, js_dom_autocapitalize_inherits_from_form, (DomElement* elem), _is_tag, (elem, "button") || _is_tag(elem, "fieldset") || _is_tag(elem, "input") || _is_tag(elem, "output") || _is_tag(elem, "select") || _is_tag(elem, "textarea"))
+JS_FORWARD_STATIC_RETURN(bool, dom_autocapitalize_inherits_from_form, (DomElement* elem), _is_tag, (elem, "button") || _is_tag(elem, "fieldset") || _is_tag(elem, "input") || _is_tag(elem, "output") || _is_tag(elem, "select") || _is_tag(elem, "textarea"))
 
-static DomElement* js_dom_form_owner(DomElement* elem) {
+static DomElement* dom_form_owner(DomElement* elem) {
     if (!elem) return nullptr;
     const char* form_id = elem->get_attribute("form");
     if (form_id && *form_id) {
         DomDocument* doc = elem->doc ? elem->doc : _js_current_document;
         DomElement* root = doc ? doc->root : nullptr;
-        return js_dom_find_element_by_id(root, form_id);
+        return dom_find_element_by_id(root, form_id);
     }
     DomNode* p = elem->parent;
     while (p) {
@@ -4562,22 +4562,22 @@ static DomElement* js_dom_form_owner(DomElement* elem) {
     return nullptr;
 }
 
-static const char* js_dom_get_autocapitalize(DomElement* elem) {
+static const char* dom_get_autocapitalize(DomElement* elem) {
     if (!elem) return "";
     const char* own = elem->get_attribute("autocapitalize");
-    if (own) return js_dom_autocapitalize_state(own, true);
-    if (js_dom_autocapitalize_inherits_from_form(elem)) {
-        DomElement* form = js_dom_form_owner(elem);
+    if (own) return dom_autocapitalize_state(own, true);
+    if (dom_autocapitalize_inherits_from_form(elem)) {
+        DomElement* form = dom_form_owner(elem);
         if (form) {
             const char* form_value = form->get_attribute("autocapitalize");
-            if (form_value && *form_value) return js_dom_autocapitalize_state(form_value, false);
+            if (form_value && *form_value) return dom_autocapitalize_state(form_value, false);
         }
     }
     return "";
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_autocorrect_attr_state, (const char* value), (!(value && strcasecmp(value, "off") == 0)))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_autocorrect_attr_state, (const char* value), (!(value && strcasecmp(value, "off") == 0)))
 
-static bool js_dom_autocorrect_disabled_by_input_type(DomElement* elem) {
+static bool dom_autocorrect_disabled_by_input_type(DomElement* elem) {
     if (!_is_tag(elem, "input")) return false;
     const char* type = elem->get_attribute("type");
     if (!type) return false;
@@ -4586,24 +4586,24 @@ static bool js_dom_autocorrect_disabled_by_input_type(DomElement* elem) {
         strcasecmp(type, "url") == 0;
 }
 
-static bool js_dom_get_autocorrect(DomElement* elem) {
+static bool dom_get_autocorrect(DomElement* elem) {
     if (!elem) return true;
-    if (js_dom_autocorrect_disabled_by_input_type(elem)) return false;
+    if (dom_autocorrect_disabled_by_input_type(elem)) return false;
     const char* own = elem->get_attribute("autocorrect");
     if (own || elem->has_attribute("autocorrect"))
-        return js_dom_autocorrect_attr_state(own ? own : "");
-    if (js_dom_autocapitalize_inherits_from_form(elem)) {
-        DomElement* form = js_dom_form_owner(elem);
+        return dom_autocorrect_attr_state(own ? own : "");
+    if (dom_autocapitalize_inherits_from_form(elem)) {
+        DomElement* form = dom_form_owner(elem);
         if (form) {
             const char* form_value = form->get_attribute("autocorrect");
             if (form_value || form->has_attribute("autocorrect"))
-                return js_dom_autocorrect_attr_state(form_value ? form_value : "");
+                return dom_autocorrect_attr_state(form_value ? form_value : "");
         }
     }
     return true;
 }
 
-static bool js_dom_spellcheck_state_from_value(const char* value, bool* out) {
+static bool dom_spellcheck_state_from_value(const char* value, bool* out) {
     if (!value || *value == '\0' || strcasecmp(value, "true") == 0) {
         *out = true;
         return true;
@@ -4615,33 +4615,33 @@ static bool js_dom_spellcheck_state_from_value(const char* value, bool* out) {
     return false;
 }
 
-static bool js_dom_get_spellcheck(DomElement* elem) {
+static bool dom_get_spellcheck(DomElement* elem) {
     DomNode* p = (DomNode*)elem;
     while (p) {
         if (p->is_element()) {
             DomElement* e = p->as_element();
             const char* value = e->get_attribute("spellcheck");
             bool state = true;
-            if (value && js_dom_spellcheck_state_from_value(value, &state)) return state;
+            if (value && dom_spellcheck_state_from_value(value, &state)) return state;
         }
         p = p->parent;
     }
     return true;
 }
 
-static const char* js_dom_writing_suggestions_attr_state(const char* value) {
+static const char* dom_writing_suggestions_attr_state(const char* value) {
     if (!value || *value == '\0' || strcasecmp(value, "true") == 0) return "true";
     if (strcasecmp(value, "false") == 0) return "false";
     return "true";
 }
 
-static const char* js_dom_get_writing_suggestions(DomElement* elem) {
+static const char* dom_get_writing_suggestions(DomElement* elem) {
     DomNode* p = (DomNode*)elem;
     while (p) {
         if (p->is_element()) {
             DomElement* e = p->as_element();
             if (e->has_attribute("writingsuggestions")) {
-                return js_dom_writing_suggestions_attr_state(
+                return dom_writing_suggestions_attr_state(
                     e->get_attribute("writingsuggestions"));
             }
         }
@@ -4650,7 +4650,7 @@ static const char* js_dom_get_writing_suggestions(DomElement* elem) {
     return "true";
 }
 
-static bool js_dom_data_attr_to_dataset_key(const char* attr, char* out, size_t out_cap) {
+static bool dom_data_attr_to_dataset_key(const char* attr, char* out, size_t out_cap) {
     if (!attr || !out || out_cap == 0 || strncmp(attr, "data-", 5) != 0) return false;
     const char* p = attr + 5;
     if (!*p) return false;
@@ -4671,8 +4671,8 @@ static bool js_dom_data_attr_to_dataset_key(const char* attr, char* out, size_t 
     return len > 0;
 }
 
-extern "C" Item js_dom_dataset_property(Item elem_item) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+extern "C" Item dom_dataset_property(Item elem_item) {
+    DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
     JS_ROOTS(roots,
         elem_root, elem_item,
@@ -4689,7 +4689,7 @@ extern "C" Item js_dom_dataset_property(Item elem_item) {
     const char** names = elem->attribute_names(&attr_count);
     for (int i = 0; i < attr_count; i++) {
         char key_buf[128];
-        if (!js_dom_data_attr_to_dataset_key(names[i], key_buf, sizeof(key_buf))) continue;
+        if (!dom_data_attr_to_dataset_key(names[i], key_buf, sizeof(key_buf))) continue;
         const char* value = elem->get_attribute(names[i]);
         key_root.set(js_name_item(key_buf));
         value_root.set(js_name_item(value ? value : ""));
@@ -4698,7 +4698,7 @@ extern "C" Item js_dom_dataset_property(Item elem_item) {
     return dataset_root.get();
 }
 
-static bool js_dom_has_valid_int_attr(DomElement* elem, const char* attr, long* out) {
+static bool dom_has_valid_int_attr(DomElement* elem, const char* attr, long* out) {
     if (!elem || !attr) return false;
     const char* value = elem->get_attribute(attr);
     if (!value) return false;
@@ -4713,7 +4713,7 @@ static bool js_dom_has_valid_int_attr(DomElement* elem, const char* attr, long* 
     return true;
 }
 
-static bool js_dom_is_first_summary_child(DomElement* elem) {
+static bool dom_is_first_summary_child(DomElement* elem) {
     if (!_is_tag(elem, "summary") || !elem->parent || !elem->parent->is_element()) return false;
     DomElement* parent = elem->parent->as_element();
     if (!_is_tag(parent, "details")) return false;
@@ -4725,20 +4725,20 @@ static bool js_dom_is_first_summary_child(DomElement* elem) {
     return false;
 }
 
-static bool js_dom_is_disabled_for_focus(DomElement* elem) {
+static bool dom_is_disabled_for_focus(DomElement* elem) {
     if (!elem) return true;
-    return form_control_is_disabled(elem->doc ? elem->doc->state : js_dom_current_state(),
+    return form_control_is_disabled(elem->doc ? elem->doc->state : dom_current_state(),
                                     static_cast<View*>(elem));
 }
 
-static bool js_dom_is_editing_host(DomElement* elem) {
+static bool dom_is_editing_host(DomElement* elem) {
     if (!elem || !elem->has_attribute("contenteditable")) return false;
-    const char* state = js_dom_normalize_contenteditable(
+    const char* state = dom_normalize_contenteditable(
         elem->get_attribute("contenteditable"));
     return state && (strcmp(state, "true") == 0 || strcmp(state, "plaintext-only") == 0);
 }
 
-static int js_dom_default_tab_index(DomElement* elem) {
+static int dom_default_tab_index(DomElement* elem) {
     if (!elem || !elem->tag_name) return -1;
     if (_is_tag(elem, "input") || _is_tag(elem, "button") ||
         _is_tag(elem, "select") || _is_tag(elem, "textarea") ||
@@ -4746,17 +4746,17 @@ static int js_dom_default_tab_index(DomElement* elem) {
         return 0;
     }
     if (_is_tag(elem, "a")) return 0;
-    if (js_dom_is_first_summary_child(elem)) return 0;
+    if (dom_is_first_summary_child(elem)) return 0;
     return -1;
 }
 
-static bool js_dom_is_script_focusable(DomElement* elem) {
-    if (!elem || !js_dom_node_is_connected((DomNode*)elem)) return false;
+static bool dom_is_script_focusable(DomElement* elem) {
+    if (!elem || !dom_node_is_connected((DomNode*)elem)) return false;
     if (elem->has_attribute("hidden")) return false;
-    if (js_dom_is_disabled_for_focus(elem)) return false;
+    if (dom_is_disabled_for_focus(elem)) return false;
 
     long tabindex = 0;
-    if (js_dom_has_valid_int_attr(elem, "tabindex", &tabindex)) return true;
+    if (dom_has_valid_int_attr(elem, "tabindex", &tabindex)) return true;
     if (_is_tag(elem, "input")) {
         const char* type = elem->get_attribute("type");
         return !type || strcasecmp(type, "hidden") != 0;
@@ -4767,42 +4767,42 @@ static bool js_dom_is_script_focusable(DomElement* elem) {
         return true;
     }
     if (_is_tag(elem, "a")) return elem->has_attribute("href");
-    if (js_dom_is_first_summary_child(elem)) return true;
-    if (js_dom_is_editing_host(elem)) return true;
+    if (dom_is_first_summary_child(elem)) return true;
+    if (dom_is_editing_host(elem)) return true;
     return false;
 }
 
-static void js_dom_dispatch_focus_events(DomElement* elem) {
+static void dom_dispatch_focus_events(DomElement* elem) {
     if (!elem) return;
-    Item elem_item = js_dom_wrap_element(elem);
+    Item elem_item = dom_wrap_element(elem);
     Item focus_event = js_create_native_focus_event("focus", ItemNull);
-    js_dom_dispatch_event(elem_item, focus_event);
+    dom_dispatch_event(elem_item, focus_event);
     Item focusin_event = js_create_native_focus_event("focusin", ItemNull);
-    js_dom_dispatch_event(elem_item, focusin_event);
+    dom_dispatch_event(elem_item, focusin_event);
 }
 
-static void js_dom_clear_focus_if_disabled_now(DomElement* changed_elem) {
+static void dom_clear_focus_if_disabled_now(DomElement* changed_elem) {
     if (!changed_elem) return;
-    DocState* state = changed_elem->doc ? changed_elem->doc->state : js_dom_current_state();
+    DocState* state = changed_elem->doc ? changed_elem->doc->state : dom_current_state();
     if (state) {
         View* focused = focus_get(state);
         if (focused && focused->is_element() &&
-            js_dom_node_contains((DomNode*)changed_elem, (DomNode*)focused)) {
+            dom_node_contains((DomNode*)changed_elem, (DomNode*)focused)) {
             DomElement* focused_elem = ((DomNode*)focused)->as_element();
-            if (js_dom_is_disabled_for_focus(focused_elem)) {
+            if (dom_is_disabled_for_focus(focused_elem)) {
                 focus_clear(state);
             }
         }
     }
     if (js_document_active_element &&
-        js_dom_node_contains((DomNode*)changed_elem, (DomNode*)js_document_active_element) &&
-        js_dom_is_disabled_for_focus(js_document_active_element)) {
+        dom_node_contains((DomNode*)changed_elem, (DomNode*)js_document_active_element) &&
+        dom_is_disabled_for_focus(js_document_active_element)) {
         js_document_active_element = nullptr;
     }
 }
-JS_FORWARD_VOID( js_dom_after_disabled_attribute_set, (void* elem_ptr), js_dom_clear_focus_if_disabled_now, ((DomElement*)elem_ptr))
+JS_FORWARD_VOID( dom_after_disabled_attribute_set, (void* elem_ptr), dom_clear_focus_if_disabled_now, ((DomElement*)elem_ptr))
 
-static bool js_dom_style_preserves_leading_ws(DomElement* elem, bool inherited) {
+static bool dom_style_preserves_leading_ws(DomElement* elem, bool inherited) {
     const char* style = elem ? elem->get_attribute("style") : nullptr;
     if (!style) return inherited;
     const char* ws = strstr(style, "white-space");
@@ -4810,7 +4810,7 @@ static bool js_dom_style_preserves_leading_ws(DomElement* elem, bool inherited) 
     return strstr(ws, "pre") != nullptr || strstr(ws, "break-spaces") != nullptr;
 }
 
-static bool js_dom_text_initial_offset(DomText* text, bool preserve_ws, uint32_t* out_offset) {
+static bool dom_text_initial_offset(DomText* text, bool preserve_ws, uint32_t* out_offset) {
     if (!text || !text->text || text->length == 0) return false;
     if (preserve_ws) {
         *out_offset = 0;
@@ -4828,27 +4828,27 @@ static bool js_dom_text_initial_offset(DomText* text, bool preserve_ws, uint32_t
         first_visible++;
     }
     if (first_visible == len) return false;
-    *out_offset = js_dom_utf16_length_from_utf8(chars, first_visible);
+    *out_offset = dom_utf16_length_from_utf8(chars, first_visible);
     return true;
 }
 
-static bool js_dom_find_initial_editing_boundary(DomElement* elem,
+static bool dom_find_initial_editing_boundary(DomElement* elem,
                                                  bool preserve_ws,
                                                  DomBoundary* out_boundary) {
     if (!elem || !out_boundary) return false;
-    bool child_preserve_ws = js_dom_style_preserves_leading_ws(elem, preserve_ws);
+    bool child_preserve_ws = dom_style_preserves_leading_ws(elem, preserve_ws);
     uint32_t index = 0;
     bool have_empty_prefix = false;
     uint32_t empty_prefix_index = 0;
     for (DomNode* child = elem->first_child; child; child = child->next_sibling, index++) {
-        if (js_dom_is_generated_pseudo_node(child)) {
+        if (dom_is_generated_pseudo_node(child)) {
             // Generated ::before/::after trees are layout artifacts; a DOM
             // editing host must place its selection in authored content.
             continue;
         }
         if (child->is_text()) {
             uint32_t offset = 0;
-            if (js_dom_text_initial_offset(child->as_text(), child_preserve_ws, &offset)) {
+            if (dom_text_initial_offset(child->as_text(), child_preserve_ws, &offset)) {
                 out_boundary->node = child;
                 out_boundary->offset = offset;
                 return true;
@@ -4863,7 +4863,7 @@ static bool js_dom_find_initial_editing_boundary(DomElement* elem,
 
         DomElement* child_elem = child->as_element();
         if (child_elem->has_attribute("contenteditable")) {
-            const char* ce = js_dom_normalize_contenteditable(
+            const char* ce = dom_normalize_contenteditable(
                 child_elem->get_attribute("contenteditable"));
             if (ce && strcmp(ce, "false") == 0) {
                 out_boundary->node = (DomNode*)elem;
@@ -4877,7 +4877,7 @@ static bool js_dom_find_initial_editing_boundary(DomElement* elem,
             out_boundary->offset = index;
             return true;
         }
-        if (js_dom_find_initial_editing_boundary(child_elem, child_preserve_ws, out_boundary)) {
+        if (dom_find_initial_editing_boundary(child_elem, child_preserve_ws, out_boundary)) {
             return true;
         }
         if (!have_empty_prefix) {
@@ -4888,7 +4888,7 @@ static bool js_dom_find_initial_editing_boundary(DomElement* elem,
     return false;
 }
 
-static bool js_dom_selection_is_inside_element(DomSelection* selection,
+static bool dom_selection_is_inside_element(DomSelection* selection,
                                                DomElement* elem) {
     if (!selection || !elem || selection->range_count == 0 ||
         !selection->ranges[0]) {
@@ -4897,11 +4897,11 @@ static bool js_dom_selection_is_inside_element(DomSelection* selection,
     DomRange* range = selection->ranges[0];
     DomNode* root = (DomNode*)elem;
     return range->start.node && range->end.node &&
-        js_dom_node_contains(root, range->start.node) &&
-        js_dom_node_contains(root, range->end.node);
+        dom_node_contains(root, range->start.node) &&
+        dom_node_contains(root, range->end.node);
 }
 
-static void js_dom_focus_set_selection_for_element(DocState* state, DomElement* elem) {
+static void dom_focus_set_selection_for_element(DocState* state, DomElement* elem) {
     if (!state || !elem) return;
     const char* exc = nullptr;
     if (tc_is_text_control_elem(elem) && elem->parent) {
@@ -4917,28 +4917,28 @@ static void js_dom_focus_set_selection_for_element(DocState* state, DomElement* 
         return;
     }
 
-    if (js_dom_is_editing_host(elem)) {
+    if (dom_is_editing_host(elem)) {
         DomSelection* existing = state->dom_selection;
-        bool selection_inside = js_dom_selection_is_inside_element(existing, elem);
+        bool selection_inside = dom_selection_is_inside_element(existing, elem);
         if (selection_inside) {
             return;
         }
         DomBoundary boundary = { (DomNode*)elem, 0 };
-        js_dom_find_initial_editing_boundary(elem, false, &boundary);
+        dom_find_initial_editing_boundary(elem, false, &boundary);
         if (!state_store_set_selection(state, &boundary, &boundary, &exc)) {
-            log_debug("js_dom_focus_selection_editing_host_failed: %s",
+            log_debug("dom_focus_selection_editing_host_failed: %s",
                       exc ? exc : "unknown");
         }
     }
 }
 
-extern "C" void js_dom_focus_if_editing_host_for_selection(void* dom_node) {
+extern "C" void dom_focus_if_editing_host_for_selection(void* dom_node) {
     DomNode* node = (DomNode*)dom_node;
     DomElement* elem = nullptr;
     while (node) {
         if (node->is_element()) {
             DomElement* candidate = node->as_element();
-            if (js_dom_is_editing_host(candidate)) {
+            if (dom_is_editing_host(candidate)) {
                 elem = candidate;
                 break;
             }
@@ -4946,20 +4946,20 @@ extern "C" void js_dom_focus_if_editing_host_for_selection(void* dom_node) {
         node = node->parent;
     }
     if (!elem) return;
-    if (!js_dom_is_script_focusable(elem)) return;
-    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+    if (!dom_is_script_focusable(elem)) return;
+    DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     View* old_focus = state ? focus_get(state) : nullptr;
     js_document_active_element = elem;
     focus_set_programmatic(state, (View*)elem);
-    if (old_focus != (View*)elem) js_dom_dispatch_focus_events(elem);
+    if (old_focus != (View*)elem) dom_dispatch_focus_events(elem);
 }
 
-static Item js_dom_throw_syntax_error(const char* message) {
+static Item dom_throw_syntax_error(const char* message) {
     Item name = js_name_item("SyntaxError");
     Item msg = js_name_item(message ? message : "SyntaxError");
     return js_throw_value(js_new_error_with_name(name, msg));
 }
-JS_FORWARD_ITEM(js_dom_throw_contenteditable_syntax_error, (void), js_dom_throw_syntax_error, ("Invalid contentEditable value"))
+JS_FORWARD_ITEM(dom_throw_contenteditable_syntax_error, (void), dom_throw_syntax_error, ("Invalid contentEditable value"))
 
 static void _collect_lookup_rec(DomElement* root, const char* query, Item collection,
                                 int kind) {
@@ -4979,7 +4979,7 @@ static void _collect_lookup_rec(DomElement* root, const char* query, Item collec
         const char* attr = root->get_attribute("name");
         matches = attr && strcmp(attr, query) == 0;
     }
-    if (matches) js_array_push(collection, js_dom_wrap_element(root));
+    if (matches) js_array_push(collection, dom_wrap_element(root));
     DomNode* child = root->first_child;
     while (child) {
         if (child->is_element()) {
@@ -5002,7 +5002,7 @@ static CssSelectorGroup* parse_css_selector_group(const char* sel_text, Pool* po
     return css_parse_selector_group_text(sel_text, sel_len, pool);
 }
 
-static DomElement* js_dom_selector_group_find_first(SelectorMatcher* matcher,
+static DomElement* dom_selector_group_find_first(SelectorMatcher* matcher,
                                                     CssSelectorGroup* group,
                                                     DomElement* element,
                                                     bool include_element) {
@@ -5015,7 +5015,7 @@ static DomElement* js_dom_selector_group_find_first(SelectorMatcher* matcher,
     DomNode* child_node = element->first_child;
     while (child_node) {
         if (child_node->is_element()) {
-            DomElement* found = js_dom_selector_group_find_first(
+            DomElement* found = dom_selector_group_find_first(
                 matcher, group, child_node->as_element(), true);
             if (found) return found;
         }
@@ -5024,7 +5024,7 @@ static DomElement* js_dom_selector_group_find_first(SelectorMatcher* matcher,
     return nullptr;
 }
 
-static bool js_dom_selector_group_result_contains(ArrayList* results, DomElement* element) {
+static bool dom_selector_group_result_contains(ArrayList* results, DomElement* element) {
     if (!results || !element) return false;
     for (int i = 0; i < results->length; i++) {
         if ((DomElement*)results->data[i] == element) return true;
@@ -5032,7 +5032,7 @@ static bool js_dom_selector_group_result_contains(ArrayList* results, DomElement
     return false;
 }
 
-static void js_dom_selector_group_collect_all(SelectorMatcher* matcher,
+static void dom_selector_group_collect_all(SelectorMatcher* matcher,
                                               CssSelectorGroup* group,
                                               DomElement* element,
                                               ArrayList* results,
@@ -5040,14 +5040,14 @@ static void js_dom_selector_group_collect_all(SelectorMatcher* matcher,
     if (!matcher || !group || !element || !results) return;
 
     if (include_element && selector_matcher_matches_group(matcher, group, element, nullptr) &&
-            !js_dom_selector_group_result_contains(results, element)) {
+            !dom_selector_group_result_contains(results, element)) {
         arraylist_append(results, element);
     }
 
     DomNode* child_node = element->first_child;
     while (child_node) {
         if (child_node->is_element()) {
-            js_dom_selector_group_collect_all(
+            dom_selector_group_collect_all(
                 matcher, group, child_node->as_element(), results, true);
         }
         child_node = child_node->next_sibling;
@@ -5060,7 +5060,7 @@ static void js_dom_selector_group_collect_all(SelectorMatcher* matcher,
 
 static void collect_text_content(DomNode* node, StrBuf* sb) {
     if (!node) return;
-    if (js_dom_is_generated_pseudo_node(node)) return;
+    if (dom_is_generated_pseudo_node(node)) return;
 
     if (node->is_text()) {
         DomText* text = node->as_text();
@@ -5072,24 +5072,24 @@ static void collect_text_content(DomNode* node, StrBuf* sb) {
 
     if (node->is_element()) {
         DomElement* elem = node->as_element();
-        DomNode* child = js_dom_first_script_visible_child(elem);
+        DomNode* child = dom_first_script_visible_child(elem);
         while (child) {
             collect_text_content(child, sb);
-            child = js_dom_next_script_visible_sibling(child);
+            child = dom_next_script_visible_sibling(child);
         }
     }
 }
 
-static Item js_dom_text_content_item(DomElement* elem) {
+static Item dom_text_content_item(DomElement* elem) {
     StrBuf* sb = strbuf_new_cap(32);
     collect_text_content((DomNode*)elem, sb);
     String* text = heap_create_name(sb->str ? sb->str : "");
     strbuf_free(sb);
     return (Item){.item = s2it(text)};
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_ascii_space, (char ch), (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f'))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_ascii_space, (char ch), (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f'))
 
-static bool js_dom_style_decl_name_matches(const char* seg, const char* end,
+static bool dom_style_decl_name_matches(const char* seg, const char* end,
                                            const char* prop_name,
                                            const char** colon_out = nullptr) {
     if (colon_out) *colon_out = nullptr;
@@ -5104,8 +5104,8 @@ static bool js_dom_style_decl_name_matches(const char* seg, const char* end,
     if (!colon) return false;
     const char* name_start = seg;
     const char* name_end = colon;
-    while (name_start < name_end && js_dom_ascii_space(*name_start)) name_start++;
-    while (name_end > name_start && js_dom_ascii_space(name_end[-1])) name_end--;
+    while (name_start < name_end && dom_ascii_space(*name_start)) name_start++;
+    while (name_end > name_start && dom_ascii_space(name_end[-1])) name_end--;
     size_t name_len = (size_t)(name_end - name_start);
     bool matches = strlen(prop_name) == name_len &&
         strncasecmp(name_start, prop_name, name_len) == 0;
@@ -5113,7 +5113,7 @@ static bool js_dom_style_decl_name_matches(const char* seg, const char* end,
     return matches;
 }
 
-static bool js_dom_style_decl_value(const char* style_text,
+static bool dom_style_decl_value(const char* style_text,
                                     const char* prop_name,
                                     char* out,
                                     size_t out_size) {
@@ -5126,15 +5126,15 @@ static bool js_dom_style_decl_value(const char* style_text,
         if (!end) end = seg + strlen(seg);
 
         const char* colon = nullptr;
-        if (js_dom_style_decl_name_matches(seg, end, prop_name, &colon)) {
+        if (dom_style_decl_name_matches(seg, end, prop_name, &colon)) {
                 const char* value_start = colon + 1;
                 const char* value_end = end;
                 while (value_start < value_end &&
-                       js_dom_ascii_space(*value_start)) {
+                       dom_ascii_space(*value_start)) {
                     value_start++;
                 }
                 while (value_end > value_start &&
-                       js_dom_ascii_space(value_end[-1])) {
+                       dom_ascii_space(value_end[-1])) {
                     value_end--;
                 }
 
@@ -5150,7 +5150,7 @@ static bool js_dom_style_decl_value(const char* style_text,
     return false;
 }
 
-static bool js_dom_update_inline_style_attribute(DomElement* elem,
+static bool dom_update_inline_style_attribute(DomElement* elem,
                                                  const char* prop_name,
                                                  const char* value,
                                                  const char* priority) {
@@ -5169,9 +5169,9 @@ static bool js_dom_update_inline_style_attribute(DomElement* elem,
     while (*seg) {
         const char* end = strchr(seg, ';');
         if (!end) end = seg + strlen(seg);
-        if (!js_dom_style_decl_name_matches(seg, end, prop_name)) {
-            while (seg < end && js_dom_ascii_space(*seg)) seg++;
-            while (end > seg && js_dom_ascii_space(end[-1])) end--;
+        if (!dom_style_decl_name_matches(seg, end, prop_name)) {
+            while (seg < end && dom_ascii_space(*seg)) seg++;
+            while (end > seg && dom_ascii_space(end[-1])) end--;
             if (end > seg) {
                 if (updated->length > 0) strbuf_append_char(updated, ' ');
                 strbuf_append_str_n(updated, seg, (int)(end - seg));
@@ -5201,48 +5201,48 @@ static bool js_dom_update_inline_style_attribute(DomElement* elem,
     return applied;
 }
 
-static float js_dom_parse_positive_css_dimension(const char* value) {
+static float dom_parse_positive_css_dimension(const char* value) {
     if (!value) return 0.0f;
-    while (js_dom_ascii_space(*value)) value++;
+    while (dom_ascii_space(*value)) value++;
     if (!*value) return 0.0f;
     char* end = nullptr;
     double parsed = strtod(value, &end);
     if (end == value || parsed <= 0.0) return 0.0f;
-    while (end && js_dom_ascii_space(*end)) end++;
+    while (end && dom_ascii_space(*end)) end++;
     if (end && *end && strncasecmp(end, "px", 2) != 0) return 0.0f;
     return (float)parsed;
 }
 
-static float js_dom_inline_css_dimension(DomElement* elem,
+static float dom_inline_css_dimension(DomElement* elem,
                                          const char* prop_name) {
     if (!elem || !prop_name) return 0.0f;
     const char* style = elem->get_attribute("style");
     char value[64];
-    if (!js_dom_style_decl_value(style, prop_name, value, sizeof(value))) {
+    if (!dom_style_decl_value(style, prop_name, value, sizeof(value))) {
         return 0.0f;
     }
-    return js_dom_parse_positive_css_dimension(value);
+    return dom_parse_positive_css_dimension(value);
 }
 
-static float js_dom_computed_css_dimension(DomElement* elem, bool width_axis) {
+static float dom_computed_css_dimension(DomElement* elem, bool width_axis) {
     if (!elem) return 0.0f;
     char value[64];
     CssPropertyCode property = width_axis ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
     if (!css_prop_serialize_computed(elem, property, 0, value, sizeof(value))) {
         return 0.0f;
     }
-    return js_dom_parse_positive_css_dimension(value);
+    return dom_parse_positive_css_dimension(value);
 }
 
-static int64_t js_dom_headless_dimension(DomElement* elem, bool width_axis) {
+static int64_t dom_headless_dimension(DomElement* elem, bool width_axis) {
     if (!elem) return 0;
     float layout_value = width_axis ? elem->width : elem->height;
     if (layout_value > 0.0f) return (int64_t)(layout_value + 0.5f);
 
-    float css_value = js_dom_inline_css_dimension(
+    float css_value = dom_inline_css_dimension(
         elem, width_axis ? "width" : "height");
     if (css_value <= 0.0f) {
-        css_value = js_dom_computed_css_dimension(elem, width_axis);
+        css_value = dom_computed_css_dimension(elem, width_axis);
     }
     if (css_value > 0.0f) return (int64_t)(css_value + 0.5f);
 
@@ -5254,15 +5254,15 @@ static int64_t js_dom_headless_dimension(DomElement* elem, bool width_axis) {
     return 1;
 }
 
-static int64_t js_dom_geometry_dimension(DomElement* elem, bool width_axis) {
+static int64_t dom_geometry_dimension(DomElement* elem, bool width_axis) {
     if (!elem) return 0;
-    js_dom_ensure_geometry_snapshot(elem->doc);
+    dom_ensure_geometry_snapshot(elem->doc);
     float layout_value = width_axis ? elem->width : elem->height;
     if (layout_value > 0.0f) return (int64_t)(layout_value + 0.5f);
     // Load-time scripts execute before the first host-loop commit. A resolved
     // CSS length is a declaration lookup, not a reflow, and lets those scripts
     // initialize against their declared container size without flushing layout.
-    return js_dom_headless_dimension(elem, width_axis);
+    return dom_headless_dimension(elem, width_axis);
 }
 
 // ============================================================================
@@ -5301,7 +5301,7 @@ static void collect_html_text_value(const char* value, size_t length,
 
 static void collect_inner_html(DomNode* node, StrBuf* sb) {
     if (!node) return;
-    if (js_dom_is_generated_pseudo_node(node)) return;
+    if (dom_is_generated_pseudo_node(node)) return;
 
     if (node->is_text()) {
         DomText* text = node->as_text();
@@ -5334,7 +5334,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
                 const char* name = attr_names[i];
                 const char* value = elem->get_attribute(name);
                 if (!name) continue;
-                if (js_dom_is_internal_attr(name)) continue;
+                if (dom_is_internal_attr(name)) continue;
                 strbuf_append_char(sb, ' ');
                 strbuf_append_str(sb, name);
                 strbuf_append_str(sb, "=\"");
@@ -5347,10 +5347,10 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
         strbuf_append_char(sb, '>');
 
         // children
-        DomNode* child = js_dom_first_script_visible_child(elem);
+        DomNode* child = dom_first_script_visible_child(elem);
         while (child) {
             collect_inner_html(child, sb);
-            child = js_dom_next_script_visible_sibling(child);
+            child = dom_next_script_visible_sibling(child);
         }
 
         // closing tag (skip void elements)
@@ -5388,7 +5388,7 @@ static void collect_xml_text_value(const char* value, size_t length, StrBuf* sb)
 }
 
 static void collect_xml_node(DomNode* node, StrBuf* sb) {
-    if (!node || !sb || js_dom_is_generated_pseudo_node(node)) return;
+    if (!node || !sb || dom_is_generated_pseudo_node(node)) return;
     if (node->is_text()) {
         DomText* text = node->as_text();
         if (text && text->text && text->length > 0) {
@@ -5410,8 +5410,8 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
     DomElement* elem = node->as_element();
     const char* tag = elem && elem->tag_name ? elem->tag_name : "";
     if (strcmp(tag, "#document-fragment") == 0) {
-        for (DomNode* child = js_dom_first_script_visible_child(elem); child;
-             child = js_dom_next_script_visible_sibling(child)) {
+        for (DomNode* child = dom_first_script_visible_child(elem); child;
+             child = dom_next_script_visible_sibling(child)) {
             collect_xml_node(child, sb);
         }
         return;
@@ -5424,7 +5424,7 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
     bool has_xlink_attr = false;
     for (int i = 0; attr_names && i < attr_count; i++) {
         const char* name = attr_names[i];
-        if (!name || js_dom_is_internal_attr(name)) continue;
+        if (!name || dom_is_internal_attr(name)) continue;
         char xlink_name[128];
         snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", name);
         if (elem->get_attribute(xlink_name)) {
@@ -5439,7 +5439,7 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
     }
     for (int i = 0; attr_names && i < attr_count; i++) {
         const char* name = attr_names[i];
-        if (!name || js_dom_is_internal_attr(name)) continue;
+        if (!name || dom_is_internal_attr(name)) continue;
         char xlink_name[128];
         snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", name);
         bool is_xlink_attr = elem->get_attribute(xlink_name) != nullptr;
@@ -5452,7 +5452,7 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
         strbuf_append_char(sb, '"');
     }
 
-    DomNode* child = js_dom_first_script_visible_child(elem);
+    DomNode* child = dom_first_script_visible_child(elem);
     if (!child) {
         strbuf_append_str(sb, "/>");
         return;
@@ -5460,16 +5460,16 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
     strbuf_append_char(sb, '>');
     while (child) {
         collect_xml_node(child, sb);
-        child = js_dom_next_script_visible_sibling(child);
+        child = dom_next_script_visible_sibling(child);
     }
     strbuf_append_str(sb, "</");
     strbuf_append_str(sb, tag);
     strbuf_append_char(sb, '>');
 }
-JS_FORWARD_STATIC_ITEM(js_dom_xml_serializer_constructor, (void), make_js_undefined, ())
+JS_FORWARD_STATIC_ITEM(dom_xml_serializer_constructor, (void), make_js_undefined, ())
 
-static Item js_dom_xml_serializer_serialize_to_string(Item node_item) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(node_item);
+static Item dom_xml_serializer_serialize_to_string(Item node_item) {
+    DomNode* node = (DomNode*)dom_unwrap_element(node_item);
     if (!node) {
         DomDocument* doc = js_document_proxy_doc_from_item(node_item);
         node = doc ? (DomNode*)doc->root : nullptr;
@@ -5485,57 +5485,57 @@ static Item js_dom_xml_serializer_serialize_to_string(Item node_item) {
     strbuf_free(sb);
     return (Item){.item = s2it(result)};
 }
-JS_FORWARD_STATIC_VOID( js_dom_install_xml_serializer_global, (void), js_dom_install_native_constructor_global, ("XMLSerializer", js_dom_xml_serializer_constructor, "serializeToString", js_dom_xml_serializer_serialize_to_string))
+JS_FORWARD_STATIC_VOID( dom_install_xml_serializer_global, (void), dom_install_native_constructor_global, ("XMLSerializer", dom_xml_serializer_constructor, "serializeToString", dom_xml_serializer_serialize_to_string))
 
-static void js_dom_collapse_selection_before_child_replace(DomElement* elem,
+static void dom_collapse_selection_before_child_replace(DomElement* elem,
                                                            const char* context) {
     if (!elem) return;
-    DocState* state = js_dom_state_for_nodes((DomNode*)elem, nullptr);
+    DocState* state = dom_state_for_nodes((DomNode*)elem, nullptr);
     if (!state || !state->dom_selection ||
         state->dom_selection->range_count == 0) {
         return;
     }
     DomRange* selected_range = state->dom_selection->ranges[0];
     if (!selected_range ||
-        (!js_dom_node_contains((DomNode*)elem, selected_range->start.node) &&
-         !js_dom_node_contains((DomNode*)elem, selected_range->end.node))) {
+        (!dom_node_contains((DomNode*)elem, selected_range->start.node) &&
+         !dom_node_contains((DomNode*)elem, selected_range->end.node))) {
         return;
     }
 
     DomBoundary boundary = { (DomNode*)elem, 0 };
     const char* exc = nullptr;
     if (!state_store_set_selection(state, &boundary, &boundary, &exc)) {
-        log_debug("js_dom_collapse_selection_before_child_replace: %s rejected: %s",
+        log_debug("dom_collapse_selection_before_child_replace: %s rejected: %s",
                   context ? context : "replace children", exc ? exc : "?");
         state_store_selection_clear(state);
         state_store_caret_clear(state);
         return;
     }
-    js_dom_queue_selectionchange(state->dom_selection);
+    dom_queue_selectionchange(state->dom_selection);
 }
 
-static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child);
+static bool dom_remove_backed_child(DomElement* parent, DomNode* child);
 
-static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
+static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
                                       bool notify_mutation) {
     if (!elem || !html_str) return false;
-    elem = js_dom_prepare_children_for_mutation(elem);
+    elem = dom_prepare_children_for_mutation(elem);
     if (!elem) return false;
     DomDocument* doc = elem->doc;
 
-    js_dom_collapse_selection_before_child_replace(elem, "innerHTML");
+    dom_collapse_selection_before_child_replace(elem, "innerHTML");
 
     while (elem->first_child) {
         DomNode* child = elem->first_child;
         dom_pre_remove(child, notify_mutation);
         // Observers pin their removedNodes while the wrapper is still live.
         // MarkEditor may retire it as part of the backing deletion below.
-        js_dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE,
+        dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE,
                                          child, elem, nullptr, nullptr);
         // Remove each child through both representations. Detaching the DOM
         // list before editing Mark leaves lifecycle pins registered for nodes
         // that MarkEditor subsequently retires.
-        if (!js_dom_remove_backed_child(elem, child)) return false;
+        if (!dom_remove_backed_child(elem, child)) return false;
         // MarkEditor relinks the surviving wrappers while removing a backing
         // child. Re-read first_child rather than retaining next_sibling, which
         // may have been retired by that relink.
@@ -5560,18 +5560,18 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
                 if (child_dom && elem->append_child(child_dom)) {
                     dom_post_insert((DomNode*)elem, (DomNode*)child_dom,
                                     notify_mutation);
-                    js_dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                    dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
                                                      child_dom, elem,
                                                      nullptr, nullptr);
                 }
             } else if (type == LMD_TYPE_STRING) {
-                String* s = js_dom_fragment_text(body_elem->items[i]);
+                String* s = dom_fragment_text(body_elem->items[i]);
                 if (!s) continue;
                 DomText* text_dom = elem->append_text(s->chars);
                 if (text_dom) {
                     dom_post_insert((DomNode*)elem, (DomNode*)text_dom,
                                     notify_mutation);
-                    js_dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                    dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
                                                      text_dom, elem,
                                                      nullptr, nullptr);
                 }
@@ -5579,21 +5579,21 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
         }
     }
 
-    js_dom_register_named_elements(elem);
+    dom_register_named_elements(elem);
     _select_refresh_cached_selected_options_for_node((DomNode*)elem);
     if (notify_mutation) {
         // innerHTML replaces children under the same parent; preserving the
         // remove/insert records avoids broad TREE_REPLACE fallback for local edits.
-        js_dom_mutation_notify();
+        dom_mutation_notify();
     }
-    log_debug("js_dom_replace_inner_html: replaced <%s>",
+    log_debug("dom_replace_inner_html: replaced <%s>",
               elem->tag_name ? elem->tag_name : "?");
     return true;
 }
 
-static bool js_dom_replace_text_content(DomElement* elem, const char* text) {
+static bool dom_replace_text_content(DomElement* elem, const char* text) {
     // Replace through the Mark-aware path so DOM links and backing children stay aligned.
-    if (!elem || !text || !js_dom_replace_inner_html(elem, "", false)) return false;
+    if (!elem || !text || !dom_replace_inner_html(elem, "", false)) return false;
     if (text[0] != '\0') {
         DomText* text_node = elem->append_text(text);
         if (!text_node) return false;
@@ -5602,11 +5602,11 @@ static bool js_dom_replace_text_content(DomElement* elem, const char* text) {
     // Stylesheet text changes CSS globally; ordinary text is subtree-local.
     DomJsMutationKind kind = elem->tag_name && strcasecmp(elem->tag_name, "style") == 0
         ? DOM_JS_MUTATION_STYLE : DOM_JS_MUTATION_TEXT;
-    js_dom_mutation_notify(kind, (DomNode*)elem, (DomNode*)elem);
+    dom_mutation_notify(kind, (DomNode*)elem, (DomNode*)elem);
     return true;
 }
 
-static DomElement* js_dom_parse_html_fragment(DomDocument* doc,
+static DomElement* dom_parse_html_fragment(DomDocument* doc,
                                               const char* html_str) {
     if (!doc || !doc->input || !html_str) return nullptr;
 
@@ -5626,7 +5626,7 @@ static DomElement* js_dom_parse_html_fragment(DomDocument* doc,
                 body_elem->items[i].element, doc, nullptr);
             if (child) ((DomNode*)fragment)->append_child((DomNode*)child);
         } else if (type == LMD_TYPE_STRING) {
-            String* text = js_dom_fragment_text(body_elem->items[i]);
+            String* text = dom_fragment_text(body_elem->items[i]);
             if (!text) continue;
             DomText* child = dom_text_create_detached(text, doc);
             if (child) ((DomNode*)fragment)->append_child((DomNode*)child);
@@ -5637,9 +5637,9 @@ static DomElement* js_dom_parse_html_fragment(DomDocument* doc,
 
 // F14.1: the DOM package owns the command decision; this remains only as the
 // parse-and-splice mechanism behind radiant.dom_insert_html.
-extern "C" bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) {
+extern "C" bool dom_exec_insert_html(DomDocument* doc, const char* html_str) {
     if (!doc || !html_str) return false;
-    DocState* state = doc->state ? doc->state : js_dom_current_state();
+    DocState* state = doc->state ? doc->state : dom_current_state();
     DomSelection* selection = state ? state->dom_selection : nullptr;
     if (!selection || selection->range_count == 0 || !selection->ranges[0]) {
         return false;
@@ -5647,7 +5647,7 @@ extern "C" bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) 
     DomRange* range = selection->ranges[0];
     if (!range->start.node || !range->end.node) return false;
 
-    DomElement* fragment = js_dom_parse_html_fragment(doc, html_str);
+    DomElement* fragment = dom_parse_html_fragment(doc, html_str);
     if (!fragment) return false;
 
     ArrayList* inserted = arraylist_new(8);
@@ -5673,12 +5673,12 @@ extern "C" bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) 
     }
 
     if (replaced_selection && replace_root) {
-        js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
+        dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
                                replace_root, replace_root);
     }
     for (int i = 0; i < inserted->length; i++) {
         DomNode* child = (DomNode*)inserted->data[i];
-        js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child, child->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child, child->parent);
     }
 
     if (inserted->length > 0) {
@@ -5688,7 +5688,7 @@ extern "C" bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) 
             arraylist_free(inserted);
             return false;
         }
-        js_dom_queue_selectionchange(selection);
+        dom_queue_selectionchange(selection);
     }
     arraylist_free(inserted);
     return true;
@@ -5702,7 +5702,7 @@ extern "C" bool radiant_dom_exec_command(void* document, const char* command,
 // `insertHTML` — which meant Cmd+B and `execCommand('bold')` could not share an
 // implementation because only one of them had one. The package owns the command
 // set for both entry points; this only converts the arguments.
-extern "C" Item js_dom_document_exec_command_bridge(Item command_item,
+extern "C" Item dom_document_exec_command_bridge(Item command_item,
                                                       Item value_item) {
     JS_ROOTS(roots,
         command_root, command_item,
@@ -5719,7 +5719,7 @@ extern "C" Item js_dom_document_exec_command_bridge(Item command_item,
     char* stable_value = mem_strdup(value ? value : "", MEM_CAT_JS_RUNTIME);
     bool handled = false;
     if (stable_command && stable_value) {
-        handled = radiant_dom_exec_command(js_dom_get_document(), stable_command,
+        handled = radiant_dom_exec_command(dom_get_document(), stable_command,
                                            stable_value);
     }
     mem_free(stable_command);
@@ -5746,7 +5746,7 @@ static String* uppercase_tag_name(const char* tag_name) {
     return result;
 }
 
-static int64_t js_dom_text_measure(DomNode* node) {
+static int64_t dom_text_measure(DomNode* node) {
     if (!node) return 0;
     if (node->is_text()) {
         return (int64_t)dom_text_utf16_length(node->as_text());
@@ -5755,12 +5755,12 @@ static int64_t js_dom_text_measure(DomNode* node) {
     int64_t total = 0;
     for (DomNode* child = node->as_element()->first_child; child;
          child = child->next_sibling) {
-        total += js_dom_text_measure(child);
+        total += dom_text_measure(child);
     }
     return total;
 }
 
-static bool js_dom_text_offset_before_node(DomNode* node, DomNode* target,
+static bool dom_text_offset_before_node(DomNode* node, DomNode* target,
                                            int64_t* offset) {
     if (!node || !target || !offset) return false;
     if (node == target) return true;
@@ -5771,13 +5771,13 @@ static bool js_dom_text_offset_before_node(DomNode* node, DomNode* target,
     if (!node->is_element()) return false;
     for (DomNode* child = node->as_element()->first_child; child;
          child = child->next_sibling) {
-        if (js_dom_text_offset_before_node(child, target, offset))
+        if (dom_text_offset_before_node(child, target, offset))
             return true;
     }
     return false;
 }
 
-static DomElement* js_dom_inline_offset_scope(DomElement* elem) {
+static DomElement* dom_inline_offset_scope(DomElement* elem) {
     DomElement* fallback = elem && elem->parent && elem->parent->is_element()
         ? elem->parent->as_element() : nullptr;
     for (DomNode* current = elem ? elem->parent : nullptr; current;
@@ -5795,16 +5795,16 @@ static DomElement* js_dom_inline_offset_scope(DomElement* elem) {
     return fallback;
 }
 
-static int64_t js_dom_synthetic_inline_offset_left(DomElement* elem) {
+static int64_t dom_synthetic_inline_offset_left(DomElement* elem) {
     if (!elem) return 0;
-    DomElement* scope = js_dom_inline_offset_scope(elem);
+    DomElement* scope = dom_inline_offset_scope(elem);
     if (!scope) return 0;
     int64_t offset = 0;
-    if (!js_dom_text_offset_before_node((DomNode*)scope, (DomNode*)elem,
+    if (!dom_text_offset_before_node((DomNode*)scope, (DomNode*)elem,
                                         &offset)) {
         return 0;
     }
-    int64_t width = js_dom_text_measure((DomNode*)elem);
+    int64_t width = dom_text_measure((DomNode*)elem);
     return offset > 0 || width > 0 ? offset : 0;
 }
 
@@ -5812,13 +5812,13 @@ static int64_t js_dom_synthetic_inline_offset_left(DomElement* elem) {
 // Document Method Dispatcher
 // ============================================================================
 
-static Item js_dom_create_document_fragment(DomDocument* doc) {
+static Item dom_create_document_fragment(DomDocument* doc) {
     if (!doc || !doc->input) return ItemNull;
 
     // A fragment owns no Mark tree: its children are moved into the destination
     // element, which is the sole owner of their persistent backing entries.
     DomElement* fragment = dom_element_create(doc, "#document-fragment", nullptr);
-    return fragment ? js_dom_wrap_element(fragment) : ItemNull;
+    return fragment ? dom_wrap_element(fragment) : ItemNull;
 }
 
 static const char* JS_TREE_WALKER_ROOT = "__lambda_tree_walker_root";
@@ -5831,22 +5831,22 @@ enum JsDomTreeWalkerStep {
     JS_TREE_WALKER_STEP_NEXT_SIBLING,
 };
 
-static uint32_t js_dom_tree_walker_node_mask(DomNode* node) {
+static uint32_t dom_tree_walker_node_mask(DomNode* node) {
     if (!node) return 0;
     uint32_t node_type = node->is_text() ? 3u : (uint32_t)node->node_type;
     if (node_type == 0 || node_type > 32) return 0;
     return 1u << (node_type - 1u);
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_tree_walker_accepts, (DomNode* node, uint32_t what_to_show), ((js_dom_tree_walker_node_mask(node) & what_to_show) != 0))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_tree_walker_accepts, (DomNode* node, uint32_t what_to_show), ((dom_tree_walker_node_mask(node) & what_to_show) != 0))
 
-static DomNode* js_dom_tree_walker_first_child_raw(DomNode* node) {
+static DomNode* dom_tree_walker_first_child_raw(DomNode* node) {
     if (!node || !node->is_element()) return nullptr;
-    return js_dom_first_script_visible_child(node->as_element());
+    return dom_first_script_visible_child(node->as_element());
 }
 
-static DomNode* js_dom_tree_walker_next_raw(DomNode* root, DomNode* current) {
+static DomNode* dom_tree_walker_next_raw(DomNode* root, DomNode* current) {
     if (!root || !current) return nullptr;
-    DomNode* child = js_dom_tree_walker_first_child_raw(current);
+    DomNode* child = dom_tree_walker_first_child_raw(current);
     if (child) return child;
     for (DomNode* node = current; node && node != root; node = node->parent) {
         if (node->next_sibling) return node->next_sibling;
@@ -5854,33 +5854,33 @@ static DomNode* js_dom_tree_walker_next_raw(DomNode* root, DomNode* current) {
     return nullptr;
 }
 
-static DomNode* js_dom_tree_walker_next_matching(DomNode* root,
+static DomNode* dom_tree_walker_next_matching(DomNode* root,
                                                   DomNode* current,
                                                   uint32_t what_to_show) {
-    for (DomNode* node = js_dom_tree_walker_next_raw(root, current);
+    for (DomNode* node = dom_tree_walker_next_raw(root, current);
          node;
-         node = js_dom_tree_walker_next_raw(root, node)) {
-        if (js_dom_tree_walker_accepts(node, what_to_show)) return node;
+         node = dom_tree_walker_next_raw(root, node)) {
+        if (dom_tree_walker_accepts(node, what_to_show)) return node;
     }
     return nullptr;
 }
 
-static Item js_dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) {
+static Item dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) {
     JS_ROOTS(roots, walker_root, walker_item, node_root, ItemNull, result_root, ItemNull);
     Item root_item = js_get_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_ROOT));
     Item current_item = js_get_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT));
-    DomNode* root = (DomNode*)js_dom_unwrap_element(root_item);
-    DomNode* current = (DomNode*)js_dom_unwrap_element(current_item);
+    DomNode* root = (DomNode*)dom_unwrap_element(root_item);
+    DomNode* current = (DomNode*)dom_unwrap_element(current_item);
     if (!root || !current) return ItemNull;
 
-    uint32_t what_to_show = js_dom_to_u32(
+    uint32_t what_to_show = dom_to_u32(
         js_get_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_WHAT_TO_SHOW)));
     DomNode* next = nullptr;
     if (step == JS_TREE_WALKER_STEP_FIRST_CHILD) {
-        for (DomNode* node = js_dom_tree_walker_first_child_raw(current);
+        for (DomNode* node = dom_tree_walker_first_child_raw(current);
              node;
-             node = js_dom_tree_walker_next_raw(root, node)) {
-            if (js_dom_tree_walker_accepts(node, what_to_show)) {
+             node = dom_tree_walker_next_raw(root, node)) {
+            if (dom_tree_walker_accepts(node, what_to_show)) {
                 next = node;
                 break;
             }
@@ -5889,20 +5889,20 @@ static Item js_dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep ste
         for (DomNode* node = current->next_sibling;
              node;
              node = node->next_sibling) {
-            if (js_dom_tree_walker_accepts(node, what_to_show)) {
+            if (dom_tree_walker_accepts(node, what_to_show)) {
                 next = node;
                 break;
             }
         }
     } else {
-        next = js_dom_tree_walker_next_matching(root, current, what_to_show);
+        next = dom_tree_walker_next_matching(root, current, what_to_show);
     }
     if (!next) return ItemNull;
 
     // Sanitizer walks detached editor documents; keep the wrapper rooted while
     // publishing it as currentNode so a compacting collection cannot leave the
     // walker pointing at the pre-move wrapper during the next traversal step.
-    node_root.set(js_dom_wrap_element(next));
+    node_root.set(dom_wrap_element(next));
     if (node_root.get().item == ItemNull.item) return ItemNull;
     js_set_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT),
                     node_root.get());
@@ -5912,47 +5912,47 @@ static Item js_dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep ste
 
 #define JS_DOM_TREE_WALKER_METHOD(name, step) \
 static Item name(Item walker_item) { \
-    return js_dom_tree_walker_advance(walker_item, step); \
+    return dom_tree_walker_advance(walker_item, step); \
 }
-JS_DOM_TREE_WALKER_METHOD(js_dom_tree_walker_next_node_method,
+JS_DOM_TREE_WALKER_METHOD(dom_tree_walker_next_node_method,
     JS_TREE_WALKER_STEP_NEXT_NODE)
-JS_DOM_TREE_WALKER_METHOD(js_dom_tree_walker_first_child_method,
+JS_DOM_TREE_WALKER_METHOD(dom_tree_walker_first_child_method,
     JS_TREE_WALKER_STEP_FIRST_CHILD)
-JS_DOM_TREE_WALKER_METHOD(js_dom_tree_walker_next_sibling_method,
+JS_DOM_TREE_WALKER_METHOD(dom_tree_walker_next_sibling_method,
     JS_TREE_WALKER_STEP_NEXT_SIBLING)
 #undef JS_DOM_TREE_WALKER_METHOD
 
-extern "C" Item js_dom_create_tree_walker_bridge(Item root_item, Item what_to_show_item) {
-    if (!js_dom_unwrap_element(root_item)) return ItemNull;
+extern "C" Item dom_create_tree_walker_bridge(Item root_item, Item what_to_show_item) {
+    if (!dom_unwrap_element(root_item)) return ItemNull;
     RootFrame roots(4);
     Rooted<Item> root_root(roots, root_item);
     Rooted<Item> walker_root(roots, js_new_object());
     Rooted<Item> method_root(roots, ItemNull);
     if (walker_root.get().item == ItemNull.item) return ItemNull;
-    uint32_t what_to_show = js_dom_to_u32(what_to_show_item);
+    uint32_t what_to_show = dom_to_u32(what_to_show_item);
     js_set_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_ROOT), root_root.get());
     js_set_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT), root_root.get());
     js_set_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_WHAT_TO_SHOW),
                     (Item){.item = i2it((int64_t)what_to_show)});
     Item bound_args[1] = {walker_root.get()};
     method_root.set(js_bind_function(
-        js_new_native_function(js_dom_tree_walker_next_node_method),
+        js_new_native_function(dom_tree_walker_next_node_method),
         make_js_undefined(), bound_args, 1));
     js_set_key_cstr(walker_root.get(), "nextNode", method_root.get());
     bound_args[0] = walker_root.get();
     method_root.set(js_bind_function(
-        js_new_native_function(js_dom_tree_walker_first_child_method),
+        js_new_native_function(dom_tree_walker_first_child_method),
         make_js_undefined(), bound_args, 1));
     js_set_key_cstr(walker_root.get(), "firstChild", method_root.get());
     bound_args[0] = walker_root.get();
     method_root.set(js_bind_function(
-        js_new_native_function(js_dom_tree_walker_next_sibling_method),
+        js_new_native_function(dom_tree_walker_next_sibling_method),
         make_js_undefined(), bound_args, 1));
     js_set_key_cstr(walker_root.get(), "nextSibling", method_root.get());
     return walker_root.get();
 }
 
-extern "C" Item js_dom_document_create_event_bridge(Item interface_name) {
+extern "C" Item dom_document_create_event_bridge(Item interface_name) {
     const char* interface_text = fn_to_cstr(interface_name);
     if (!interface_text) interface_text = "";
     if (strcmp(interface_text, "CustomEvent") == 0) {
@@ -5964,7 +5964,7 @@ extern "C" Item js_dom_document_create_event_bridge(Item interface_name) {
     return js_create_event_init("", false, false, false);
 }
 
-static bool js_dom_append_document_text(DomDocument* doc, const char* text) {
+static bool dom_append_document_text(DomDocument* doc, const char* text) {
     DomElement* body = document_body_element(doc);
     if (!body) return false;
 
@@ -6007,7 +6007,7 @@ static bool js_dom_append_document_text(DomDocument* doc, const char* text) {
 // Document Property Access
 // ============================================================================
 
-extern "C" Item js_dom_document_fonts_bridge(void) {
+extern "C" Item dom_document_fonts_bridge(void) {
     if (!dom_ensure_roots()) return ItemNull;
     if (get_type_id(js_document_fonts_value) != LMD_TYPE_MAP) {
         // Root-range cleanup clears expired realm cache slots to zero; rebuild
@@ -6016,9 +6016,9 @@ extern "C" Item js_dom_document_fonts_bridge(void) {
     }
     return js_document_fonts_value;
 }
-JS_FORWARD_ITEM(js_dom_document_stylesheets_bridge, (void), js_cssom_get_document_stylesheets, ())
+JS_FORWARD_ITEM(dom_document_stylesheets_bridge, (void), js_cssom_get_document_stylesheets, ())
 
-extern "C" Item js_dom_document_default_view_bridge(void* doc_ptr) {
+extern "C" Item dom_document_default_view_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     if (!js_doc_has_browsing_context(doc)) {
         return ItemNull;
@@ -6032,29 +6032,29 @@ extern "C" Item js_dom_document_default_view_bridge(void* doc_ptr) {
     }
     return ItemNull;
 }
-JS_FORWARD_ITEM(js_dom_document_implementation_bridge, (void), js_get_dom_implementation, ())
-JS_FORWARD_EXPRESSION(Item, js_dom_document_design_mode_bridge, (void), (js_name_item(js_document_design_mode ? "on" : "off")))
+JS_FORWARD_ITEM(dom_document_implementation_bridge, (void), js_get_dom_implementation, ())
+JS_FORWARD_EXPRESSION(Item, dom_document_design_mode_bridge, (void), (js_name_item(js_document_design_mode ? "on" : "off")))
 
-extern "C" Item js_dom_document_active_element_bridge(void* doc_ptr) {
+extern "C" Item dom_document_active_element_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     DomElement* root = doc ? doc->root : nullptr;
-    DocState* state = js_dom_current_state();
+    DocState* state = dom_current_state();
     View* focused = focus_get(state);
     if (focused && focused->is_element()) {
-        return js_dom_wrap_element(((DomNode*)focused)->as_element());
+        return dom_wrap_element(((DomNode*)focused)->as_element());
     }
     DomElement* active_element = tc_get_active_element(state);
     if (active_element && active_element->doc == doc) {
-        return js_dom_wrap_element(active_element);
+        return dom_wrap_element(active_element);
     }
     if (js_document_active_element &&
         js_document_active_element->doc == doc &&
-        js_dom_node_is_connected((DomNode*)js_document_active_element)) {
-        return js_dom_wrap_element(js_document_active_element);
+        dom_node_is_connected((DomNode*)js_document_active_element)) {
+        return dom_wrap_element(js_document_active_element);
     }
     DomElement* body = document_body_element(doc);
-    if (body) return js_dom_wrap_element(body);
-    return root ? js_dom_wrap_element(root) : ItemNull;
+    if (body) return dom_wrap_element(body);
+    return root ? dom_wrap_element(root) : ItemNull;
 }
 
 // The nine URL components that document, location and history all expose.
@@ -6091,7 +6091,7 @@ static bool js_url_component_item(const Url* url, const char* prop, Item* out) {
     return false;
 }
 
-static bool js_dom_form_named_getter_reserved_name(const char* prop);
+static bool dom_form_named_getter_reserved_name(const char* prop);
 // ----------------------------------------------------------------------
 // DOM property identity
 //
@@ -6101,7 +6101,7 @@ static bool js_dom_form_named_getter_reserved_name(const char* prop);
 // switches over the id.
 //
 // Rows are in ASCII order of the property name, which strcmp-based bsearch
-// relies on; js_dom_prop_id_selftest() checks that in debug builds.
+// relies on; dom_prop_id_selftest() checks that in debug builds.
 // ----------------------------------------------------------------------
 #define JS_DOM_PROPS(X) \
     X(RANGE,                     "Range") \
@@ -6272,16 +6272,16 @@ static const JsDomPropRow k_dom_props[] = {
 #undef JS_DOM_PROP_ROW
 };
 
-static int js_dom_prop_row_compare(const void* key, const void* row) {
+static int dom_prop_row_compare(const void* key, const void* row) {
     return strcmp((const char*)key, ((const JsDomPropRow*)row)->name);
 }
 
 // JS_DOM_PROP_NONE for any name the dispatchers do not special-case.
-static JsDomPropId js_dom_prop_id(const char* prop) {
+static JsDomPropId dom_prop_id(const char* prop) {
     if (!prop) return JS_DOM_PROP_NONE;
     const JsDomPropRow* row = (const JsDomPropRow*)bsearch(prop, k_dom_props,
         sizeof(k_dom_props) / sizeof(k_dom_props[0]), sizeof(k_dom_props[0]),
-        js_dom_prop_row_compare);
+        dom_prop_row_compare);
     return row ? row->id : JS_DOM_PROP_NONE;
 }
 
@@ -6293,7 +6293,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
 
     const char* prop = fn_to_cstr(prop_name);
-    JsDomPropId prop_id = js_dom_prop_id(prop);
+    JsDomPropId prop_id = dom_prop_id(prop);
     if (!prop) return ItemNull;
 
     DomDocument* doc = _js_current_document;
@@ -6301,7 +6301,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
     // documentElement — the root <html> element
     if (prop_id == JS_DOM_PROP_DOCUMENT_ELEMENT) {
-        return root ? js_dom_wrap_element(root) : ItemNull;
+        return root ? dom_wrap_element(root) : ItemNull;
     }
 
     // body — the <body> element
@@ -6311,7 +6311,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
             if (child->is_element()) {
                 DomElement* elem = child->as_element();
                 if (elem->tag_name && strcasecmp(elem->tag_name, "body") == 0) {
-                    return js_dom_wrap_element(elem);
+                    return dom_wrap_element(elem);
                 }
             }
             child = child->next_sibling;
@@ -6326,7 +6326,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
             if (child->is_element()) {
                 DomElement* elem = child->as_element();
                 if (elem->tag_name && strcasecmp(elem->tag_name, "head") == 0) {
-                    return js_dom_wrap_element(elem);
+                    return dom_wrap_element(elem);
                 }
             }
             child = child->next_sibling;
@@ -6392,7 +6392,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
 
     if (prop_id == JS_DOM_PROP_FONTS) {
-        return js_dom_document_fonts_bridge();
+        return dom_document_fonts_bridge();
     }
 
     // compatMode
@@ -6403,7 +6403,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // F-1: document.forms — array of all <form> elements in the document.
     if (prop_id == JS_DOM_PROP_FORMS) {
         DomDocument* doc = _js_current_document;
-        return js_dom_live_document_forms_bridge((void*)doc);
+        return dom_live_document_forms_bridge((void*)doc);
     }
 
     // characterSet / charset
@@ -6427,7 +6427,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     if (prop_id == JS_DOM_PROP_CHILD_NODES) {
         DomDocument* doc = _js_current_document;
         if (!doc) return ItemNull;
-        void* stub_v = js_dom_get_or_create_doc_node(doc);
+        void* stub_v = dom_get_or_create_doc_node(doc);
         if (!stub_v) return ItemNull;
         DomElement* stub = (DomElement*)stub_v;
         Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
@@ -6437,7 +6437,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
         arr->capacity = 0;
         DomNode* child = stub->first_child;
         while (child) {
-            array_push(arr, js_dom_wrap_element((void*)child));
+            array_push(arr, dom_wrap_element((void*)child));
             child = child->next_sibling;
         }
         return (Item){.array = arr};
@@ -6450,7 +6450,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
     // styleSheets — collection of parsed CSSStyleSheet objects
     if (prop_id == JS_DOM_PROP_STYLE_SHEETS) {
-        return js_dom_document_stylesheets_bridge();
+        return dom_document_stylesheets_bridge();
     }
 
     // ownerDocument — the document itself has no owner (returns null)
@@ -6463,7 +6463,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // Foreign documents (created via document.implementation.create*Document)
     // never have a browsing context, so defaultView must be null per HTML spec.
     if (prop_id == JS_DOM_PROP_DEFAULT_VIEW) {
-        return js_dom_document_default_view_bridge((void*)_js_current_document);
+        return dom_document_default_view_bridge((void*)_js_current_document);
     }
 
     // For iframe content docs, expose Window-like properties on the same
@@ -6485,29 +6485,29 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
     // implementation — DOMImplementation (createHTMLDocument, createDocument, ...)
     if (prop_id == JS_DOM_PROP_IMPLEMENTATION) {
-        return js_dom_document_implementation_bridge();
+        return dom_document_implementation_bridge();
     }
 
     // doctype — DocumentType node (or null if document has none).
     // We synthesize a DOCTYPE node as the first child of the document stub
-    // (see js_dom_get_or_create_doc_node). Expose it here so JS code that
+    // (see dom_get_or_create_doc_node). Expose it here so JS code that
     // does `document.doctype` (and Range/Selection APIs that take it as a
     // node argument) work.
     if (prop_id == JS_DOM_PROP_DOCTYPE) {
         DomDocument* doc = _js_current_document;
         if (!doc) return ItemNull;
-        void* stub = js_dom_get_or_create_doc_node(doc);
+        void* stub = dom_get_or_create_doc_node(doc);
         if (!stub) return ItemNull;
         DomElement* e = (DomElement*)stub;
         DomNode* fc = e->first_child;
         if (!fc) return ItemNull;
         // synthesized doctype is the leading DomComment child
-        if (fc->is_comment()) return js_dom_wrap_element(fc);
+        if (fc->is_comment()) return dom_wrap_element(fc);
         return ItemNull;
     }
 
     DomDocument* expando_doc = _js_current_document ? _js_current_document : _js_main_document;
-    void* stub_v = js_dom_get_or_create_doc_node(expando_doc);
+    void* stub_v = dom_get_or_create_doc_node(expando_doc);
     if (stub_v) {
         Item exp_map = expando_get_map((DomNode*)stub_v);
         if (exp_map.item != ITEM_NULL) {
@@ -6521,16 +6521,16 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // exposes the IDL state; editing-host default actions still land in the
     // command engine phases.
     if (prop_id == JS_DOM_PROP_DESIGN_MODE) {
-        return js_dom_document_design_mode_bridge();
+        return dom_document_design_mode_bridge();
     }
 
     // activeElement — currently focused element, or <body> as default per spec.
     if (prop_id == JS_DOM_PROP_ACTIVE_ELEMENT) {
-        return js_dom_document_active_element_bridge((void*)doc);
+        return dom_document_active_element_bridge((void*)doc);
     }
 
     expando_doc = _js_current_document ? _js_current_document : _js_main_document;
-    stub_v = js_dom_get_or_create_doc_node(expando_doc);
+    stub_v = dom_get_or_create_doc_node(expando_doc);
     if (stub_v) {
         Item exp_map = expando_get_map((DomNode*)stub_v);
         if (exp_map.item != ITEM_NULL) {
@@ -6578,9 +6578,9 @@ extern "C" Item js_document_get_property(Item prop_name) {
 // selection is empty (or to override the empty result with the focused
 // text control's selected substring per WPT stringifier_editable_element).
 // Returns nullptr if no text control should contribute.
-extern "C" String* js_dom_active_text_control_selected_text(void) {
+extern "C" String* dom_active_text_control_selected_text(void) {
     uint32_t blen = 0;
-    const char* sel = tc_active_selected_text(js_dom_current_state(), &blen);
+    const char* sel = tc_active_selected_text(dom_current_state(), &blen);
     if (!sel || !blen) return nullptr;
     return heap_strcpy((char*)sel, (int64_t)blen);
 }
@@ -6593,18 +6593,18 @@ static uint8_t text_control_direction_from_item(Item value) {
     return 0;
 }
 
-extern "C" Item js_dom_text_control_set_selection_range_bridge(void* dom_elem,
+extern "C" Item dom_text_control_set_selection_range_bridge(void* dom_elem,
                                                                Item start_arg,
                                                                Item end_arg,
                                                                Item dir_arg);
-extern "C" Item js_dom_text_control_select_bridge(void* dom_elem);
-extern "C" Item js_dom_text_control_set_range_text_bridge(void* dom_elem,
+extern "C" Item dom_text_control_select_bridge(void* dom_elem);
+extern "C" Item dom_text_control_set_range_text_bridge(void* dom_elem,
                                                           Item replacement_arg,
                                                           Item start_arg,
                                                           Item end_arg,
                                                           Item mode_arg);
 
-static bool js_dom_form_named_getter_reserved_name(const char* prop) {
+static bool dom_form_named_getter_reserved_name(const char* prop) {
     if (!prop) return true;
     return strcmp(prop, "elements") == 0 ||
         strcmp(prop, "length") == 0 ||
@@ -6626,17 +6626,17 @@ static bool js_dom_form_named_getter_reserved_name(const char* prop) {
 
 static Item js_text_control_set_selection_range(Item start_arg, Item end_arg, Item dir_arg) {
     Item self = js_get_this();
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(self);
-    return js_dom_text_control_set_selection_range_bridge((void*)elem, start_arg, end_arg, dir_arg);
+    DomElement* elem = (DomElement*)dom_unwrap_element(self);
+    return dom_text_control_set_selection_range_bridge((void*)elem, start_arg, end_arg, dir_arg);
 }
 
-extern "C" Item js_dom_text_control_set_selection_range_bridge(void* dom_elem,
+extern "C" Item dom_text_control_set_selection_range_bridge(void* dom_elem,
                                                                Item start_arg,
                                                                Item end_arg,
                                                                Item dir_arg) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !tc_is_text_control_elem(elem)) return make_js_undefined();
-    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+    DocState* state = elem->doc ? elem->doc->state : dom_current_state();
 
     int64_t s = it2i(start_arg);
     int64_t e = it2i(end_arg);
@@ -6649,18 +6649,18 @@ extern "C" Item js_dom_text_control_set_selection_range_bridge(void* dom_elem,
 
 static Item js_text_control_select(void) {
     Item self = js_get_this();
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(self);
-    return js_dom_text_control_select_bridge((void*)elem);
+    DomElement* elem = (DomElement*)dom_unwrap_element(self);
+    return dom_text_control_select_bridge((void*)elem);
 }
 
-extern "C" Item js_dom_text_control_select_bridge(void* dom_elem) {
+extern "C" Item dom_text_control_select_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !tc_is_text_control_elem(elem)) return make_js_undefined();
 
     tc_ensure_init(elem);
     FormControlProp* f = elem->form;
-    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
-    if (js_dom_is_script_focusable(elem)) {
+    DocState* state = elem->doc ? elem->doc->state : dom_current_state();
+    if (dom_is_script_focusable(elem)) {
         focus_set_programmatic(state, (View*)elem);
     }
     form_control_set_selection(state, (View*)elem, 0, f->current_value_u16_len, 0);
@@ -6674,7 +6674,7 @@ static bool js_text_control_set_raw_value(DomElement* elem, const char* new_val,
     FormControlProp* f = tc_get_or_create_form(elem);
     if (!f) return false;
 
-    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+    DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (!state && elem->doc) {
         state = radiant_document_ensure_state(elem->doc, "js_text_control_set_raw_value");
     }
@@ -6730,15 +6730,15 @@ static Item js_text_control_set_range_text_for_elem(DomElement* elem,
     uint32_t start = old_selection_start;
     uint32_t end = old_selection_end;
     if (!is_js_undefined(start_arg)) {
-        int64_t start_i = js_dom_to_integer_or_zero(start_arg);
+        int64_t start_i = dom_to_integer_or_zero(start_arg);
         start = start_i < 0 ? 0 : (uint32_t)start_i;
     }
     if (!is_js_undefined(end_arg)) {
-        int64_t end_i = js_dom_to_integer_or_zero(end_arg);
+        int64_t end_i = dom_to_integer_or_zero(end_arg);
         end = end_i < 0 ? 0 : (uint32_t)end_i;
     }
     if (start > end) {
-        return js_dom_throw_index_size_error("The start offset is larger than the end offset.");
+        return dom_throw_index_size_error("The start offset is larger than the end offset.");
     }
     if (start > old_value_u16_len) start = old_value_u16_len;
     if (end > old_value_u16_len) end = old_value_u16_len;
@@ -6797,8 +6797,8 @@ static Item js_text_control_set_range_text_for_elem(DomElement* elem,
         return make_js_undefined();
     }
     mem_free(new_value);
-    js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
-    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+    dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
+    DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     form_control_set_selection(state, (View*)elem,
         final_start, final_end, final_direction);
     return make_js_undefined();
@@ -6807,13 +6807,13 @@ static Item js_text_control_set_range_text_for_elem(DomElement* elem,
 static Item js_text_control_set_range_text(Item replacement_arg, Item start_arg,
                                            Item end_arg, Item mode_arg) {
     Item self = js_get_this();
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(self);
-    return js_dom_text_control_set_range_text_bridge((void*)elem, replacement_arg,
+    DomElement* elem = (DomElement*)dom_unwrap_element(self);
+    return dom_text_control_set_range_text_bridge((void*)elem, replacement_arg,
         start_arg, end_arg, mode_arg);
 }
-JS_FORWARD_ITEM(js_dom_text_control_set_range_text_bridge, (void* dom_elem,                                                           Item replacement_arg,                                                           Item start_arg,                                                           Item end_arg,                                                           Item mode_arg), js_text_control_set_range_text_for_elem, ((DomElement*)dom_elem, replacement_arg, start_arg, end_arg, mode_arg))
+JS_FORWARD_ITEM(dom_text_control_set_range_text_bridge, (void* dom_elem,                                                           Item replacement_arg,                                                           Item start_arg,                                                           Item end_arg,                                                           Item mode_arg), js_text_control_set_range_text_for_elem, ((DomElement*)dom_elem, replacement_arg, start_arg, end_arg, mode_arg))
 
-static void js_dom_queue_scroll_into_view(DomElement* elem, bool center) {
+static void dom_queue_scroll_into_view(DomElement* elem, bool center) {
     DomDocument* doc = elem ? (elem->doc ? elem->doc : _js_current_document) : nullptr;
     if (!doc) return;
     if (doc->pending_scroll_into_view_target) {
@@ -6836,12 +6836,12 @@ static void js_dom_queue_scroll_into_view(DomElement* elem, bool center) {
     if (doc->state) doc_state_request_reflow(doc->state);
 }
 
-static Item js_dom_focus_method(DomElement* elem, bool focus,
+static Item dom_focus_method(DomElement* elem, bool focus,
                                 bool prevent_scroll) {
     if (!elem) return make_js_undefined();
-    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+    DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (focus) {
-        if (js_dom_is_script_focusable(elem)) {
+        if (dom_is_script_focusable(elem)) {
             View* old_focus = state ? focus_get(state) : nullptr;
             js_document_active_element = elem;
             focus_set_programmatic(state, (View*)elem);
@@ -6849,10 +6849,10 @@ static Item js_dom_focus_method(DomElement* elem, bool focus,
             // live selection; reinitialising it here moves scripted caret
             // placement back to the host start before the next key event.
             if (old_focus != (View*)elem) {
-                js_dom_focus_set_selection_for_element(state, elem);
+                dom_focus_set_selection_for_element(state, elem);
             }
-            if (old_focus != (View*)elem) js_dom_dispatch_focus_events(elem);
-            if (!prevent_scroll) js_dom_queue_scroll_into_view(elem, true);
+            if (old_focus != (View*)elem) dom_dispatch_focus_events(elem);
+            if (!prevent_scroll) dom_queue_scroll_into_view(elem, true);
         }
     } else {
         if (js_document_active_element == elem) js_document_active_element = nullptr;
@@ -6861,17 +6861,17 @@ static Item js_dom_focus_method(DomElement* elem, bool focus,
     return make_js_undefined();
 }
 
-extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus) {
-    return js_dom_focus_method((DomElement*)dom_elem, focus, false);
+extern "C" Item dom_focus_method_bridge(void* dom_elem, bool focus) {
+    return dom_focus_method((DomElement*)dom_elem, focus, false);
 }
 
-extern "C" bool js_dom_focus_editing_host_for_automation(void* dom_elem) {
+extern "C" bool dom_focus_editing_host_for_automation(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
-    if (!elem || !js_dom_is_editing_host(elem) ||
-        !js_dom_is_script_focusable(elem)) {
+    if (!elem || !dom_is_editing_host(elem) ||
+        !dom_is_script_focusable(elem)) {
         return false;
     }
-    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+    DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (!state) return false;
     // Template documents have no JS runtime, so returning a JS Item through
     // focus() would dereference an unbound interpreter context. The common
@@ -6884,13 +6884,13 @@ extern "C" bool js_dom_focus_editing_host_for_automation(void* dom_elem) {
     // automation focus follows the same idempotent focus contract as JS:
     // preserve an explicitly placed selection when the host already owns focus.
     if (old_focus != (View*)elem) {
-        js_dom_focus_set_selection_for_element(state, elem);
+        dom_focus_set_selection_for_element(state, elem);
     }
     return true;
 }
 
-extern "C" Item js_dom_click_method_bridge(Item elem_item) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+extern "C" Item dom_click_method_bridge(Item elem_item) {
+    DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return make_js_undefined();
     if (elem->tag_name) {
         const char* tag = elem->tag_name;
@@ -6906,7 +6906,7 @@ extern "C" Item js_dom_click_method_bridge(Item elem_item) {
     }
     // click() synthesizes a JS MouseEvent and dispatches through the existing event system.
     Item ev = js_create_click_mouse_event();
-    return js_dom_dispatch_event(elem_item, ev);
+    return dom_dispatch_event(elem_item, ev);
 }
 
 #define JS_DOM_EVENT_LISTENER_BRIDGE(name, operation) \
@@ -6914,53 +6914,53 @@ extern "C" Item name(Item target_item, Item type, Item callback, Item opts) { \
     operation(target_item, type, callback, opts); \
     return make_js_undefined(); \
 }
-JS_DOM_EVENT_LISTENER_BRIDGE(js_dom_add_event_listener_bridge,
-    js_dom_add_event_listener)
-JS_DOM_EVENT_LISTENER_BRIDGE(js_dom_remove_event_listener_bridge,
-    js_dom_remove_event_listener)
+JS_DOM_EVENT_LISTENER_BRIDGE(dom_add_event_listener_bridge,
+    dom_add_event_listener)
+JS_DOM_EVENT_LISTENER_BRIDGE(dom_remove_event_listener_bridge,
+    dom_remove_event_listener)
 #undef JS_DOM_EVENT_LISTENER_BRIDGE
 
 // dispatch keeps the wrapped target identity shared with listener lookup.
-JS_FORWARD_ITEM(js_dom_dispatch_event_bridge, (Item target_item, Item event_item),
-    js_dom_dispatch_event, (target_item, event_item))
+JS_FORWARD_ITEM(dom_dispatch_event_bridge, (Item target_item, Item event_item),
+    dom_dispatch_event, (target_item, event_item))
 
-static Item js_dom_text_replace_data_method(DomText* text_node, Item offset_arg,
+static Item dom_text_replace_data_method(DomText* text_node, Item offset_arg,
                                             Item count_arg, Item data_arg) {
     if (!text_node) return make_js_undefined();
-    int64_t offset = js_dom_to_integer_or_zero(offset_arg);
-    int64_t count = js_dom_to_integer_or_zero(count_arg);
+    int64_t offset = dom_to_integer_or_zero(offset_arg);
+    int64_t count = dom_to_integer_or_zero(count_arg);
     if (offset < 0 || count < 0) {
-        return js_dom_throw_index_size_error("The offset or count is negative.");
+        return dom_throw_index_size_error("The offset or count is negative.");
     }
 
     Item data_text_item = js_to_string(data_arg);
     const char* data_text = fn_to_cstr(data_text_item);
     if (!data_text) data_text = "";
-    JS_RETURN_IF_ERROR(js_dom_replace_text_data(text_node, (uint32_t)offset,
+    JS_RETURN_IF_ERROR(dom_replace_text_data(text_node, (uint32_t)offset,
         (uint32_t)count, data_text));
     return make_js_undefined();
 }
-JS_FORWARD_STATIC_ITEM(js_dom_text_insert_data_method, (DomText* text_node, Item offset_arg,                                            Item data_arg), js_dom_text_replace_data_method, (text_node, offset_arg, (Item){.item = i2it(0)}, data_arg))
+JS_FORWARD_STATIC_ITEM(dom_text_insert_data_method, (DomText* text_node, Item offset_arg,                                            Item data_arg), dom_text_replace_data_method, (text_node, offset_arg, (Item){.item = i2it(0)}, data_arg))
 
-static Item js_dom_text_append_data_method(DomText* text_node, Item data_arg) {
+static Item dom_text_append_data_method(DomText* text_node, Item data_arg) {
     if (!text_node) return make_js_undefined();
-    return js_dom_text_replace_data_method(text_node,
+    return dom_text_replace_data_method(text_node,
         (Item){.item = i2it((int64_t)dom_text_utf16_length(text_node))},
         (Item){.item = i2it(0)}, data_arg);
 }
-JS_FORWARD_STATIC_ITEM(js_dom_text_delete_data_method, (DomText* text_node, Item offset_arg,                                            Item count_arg), js_dom_text_replace_data_method, (text_node, offset_arg, count_arg, js_name_item("")))
+JS_FORWARD_STATIC_ITEM(dom_text_delete_data_method, (DomText* text_node, Item offset_arg,                                            Item count_arg), dom_text_replace_data_method, (text_node, offset_arg, count_arg, js_name_item("")))
 
-static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_arg,
+static Item dom_text_substring_data_method(DomText* text_node, Item offset_arg,
                                               Item count_arg) {
     if (!text_node) return js_name_item("");
-    int64_t offset = js_dom_to_integer_or_zero(offset_arg);
-    int64_t count = js_dom_to_integer_or_zero(count_arg);
+    int64_t offset = dom_to_integer_or_zero(offset_arg);
+    int64_t count = dom_to_integer_or_zero(count_arg);
     if (offset < 0 || count < 0) {
-        return js_dom_throw_index_size_error("The offset or count is negative.");
+        return dom_throw_index_size_error("The offset or count is negative.");
     }
     uint32_t old_u16_len = dom_text_utf16_length(text_node);
     if ((uint64_t)offset > old_u16_len) {
-        return js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
+        return dom_throw_index_size_error("The offset is larger than the CharacterData length.");
     }
     uint32_t available = old_u16_len - (uint32_t)offset;
     uint32_t take = (uint64_t)count > available ? available : (uint32_t)count;
@@ -6972,45 +6972,45 @@ static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_ar
     return (Item){.item = s2it(s)};
 }
 
-static Item js_dom_text_split_method(DomText* text_node, Item offset_arg) {
+static Item dom_text_split_method(DomText* text_node, Item offset_arg) {
     if (!text_node) return make_js_undefined();
-    int64_t offset = js_dom_to_integer_or_zero(offset_arg);
+    int64_t offset = dom_to_integer_or_zero(offset_arg);
     if (offset < 0) {
-        return js_dom_throw_index_size_error("The offset is negative.");
+        return dom_throw_index_size_error("The offset is negative.");
     }
     uint32_t length = dom_text_utf16_length(text_node);
     if ((uint64_t)offset > length) {
-        return js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
+        return dom_throw_index_size_error("The offset is larger than the CharacterData length.");
     }
 
     DomNode* parent = text_node->parent;
-    DocState* state = js_dom_state_for_nodes((DomNode*)text_node, parent);
+    DocState* state = dom_state_for_nodes((DomNode*)text_node, parent);
     DomText* right = dom_text_split_at(state, text_node, (uint32_t)offset);
     if (!right) {
-        return js_dom_throw_index_size_error("The text node cannot be split.");
+        return dom_throw_index_size_error("The text node cannot be split.");
     }
 
     // dom_text_split_at updates live ranges and the sibling chain; publish the
     // corresponding JS mutation after the new sibling is fully linked.
-    js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT,
+    dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT,
                                   (DomNode*)right, parent, 0);
-    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+    dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
                            (DomNode*)right, parent);
-    return js_dom_wrap_element((void*)right);
+    return dom_wrap_element((void*)right);
 }
 
-extern "C" Item js_dom_set_text_data_property(void* text_ptr, Item value) {
+extern "C" Item dom_set_text_data_property(void* text_ptr, Item value) {
     DomText* text_node = (DomText*)text_ptr;
     if (!text_node) return value;
     // The specialized MIR member path must preserve CharacterData's DOMString
     // conversion just like the generic host-property path.
-    const char* new_text = js_dom_to_dom_string_cstr(value);
+    const char* new_text = dom_to_dom_string_cstr(value);
     if (new_text) {
         uint32_t old_u16_len = dom_text_utf16_length(text_node);
         // text data writes must continue through the JS helper because it
         // updates live ranges and publishes the text mutation kind.
-        JS_ASSIGN_OR_RETURN(set_result, js_dom_replace_text_data(text_node, 0, old_u16_len, new_text));
-        log_debug("js_dom_set_text_data_property: set text node data='%.30s'", new_text);
+        JS_ASSIGN_OR_RETURN(set_result, dom_replace_text_data(text_node, 0, old_u16_len, new_text));
+        log_debug("dom_set_text_data_property: set text node data='%.30s'", new_text);
     }
     return value;
 }
@@ -7027,11 +7027,11 @@ extern "C" Item js_dom_set_text_data_property(void* text_ptr, Item value) {
     extern "C" Item name(void* text_ptr, Item a, Item b, Item c) { \
         return method((DomText*)text_ptr, a, b, c); \
     }
-JS_DOM_TEXT_BRIDGE_3(js_dom_text_replace_data_bridge, js_dom_text_replace_data_method)
-JS_DOM_TEXT_BRIDGE_2(js_dom_text_insert_data_bridge, js_dom_text_insert_data_method)
-JS_DOM_TEXT_BRIDGE_1(js_dom_text_append_data_bridge, js_dom_text_append_data_method)
-JS_DOM_TEXT_BRIDGE_2(js_dom_text_delete_data_bridge, js_dom_text_delete_data_method)
-JS_DOM_TEXT_BRIDGE_2(js_dom_text_substring_data_bridge, js_dom_text_substring_data_method)
+JS_DOM_TEXT_BRIDGE_3(dom_text_replace_data_bridge, dom_text_replace_data_method)
+JS_DOM_TEXT_BRIDGE_2(dom_text_insert_data_bridge, dom_text_insert_data_method)
+JS_DOM_TEXT_BRIDGE_1(dom_text_append_data_bridge, dom_text_append_data_method)
+JS_DOM_TEXT_BRIDGE_2(dom_text_delete_data_bridge, dom_text_delete_data_method)
+JS_DOM_TEXT_BRIDGE_2(dom_text_substring_data_bridge, dom_text_substring_data_method)
 #undef JS_DOM_TEXT_BRIDGE_3
 #undef JS_DOM_TEXT_BRIDGE_2
 #undef JS_DOM_TEXT_BRIDGE_1
@@ -7049,24 +7049,24 @@ static Item js_text_data_body(Item callee, Item this_value, Item* args,
                               int argc, uint64_t* result_home) {
     (void)this_value; (void)result_home;
     JsFunction* fn = (JsFunction*)callee.function;
-    DomNode* node = (DomNode*)js_dom_unwrap_element(js_get_this());
+    DomNode* node = (DomNode*)dom_unwrap_element(js_get_this());
     if (!node || !node->is_text() || !fn) return make_js_undefined();
     Item arg0 = argc > 0 ? args[0] : make_js_undefined();
     Item arg1 = argc > 1 ? args[1] : make_js_undefined();
     Item arg2 = argc > 2 ? args[2] : make_js_undefined();
     switch ((JsTextDataOperation)fn->native_target.bits) {
     case JS_TEXT_DATA_REPLACE:
-        return js_dom_text_replace_data_method(node->as_text(), arg0, arg1, arg2);
+        return dom_text_replace_data_method(node->as_text(), arg0, arg1, arg2);
     case JS_TEXT_DATA_INSERT:
-        return js_dom_text_insert_data_method(node->as_text(), arg0, arg1);
+        return dom_text_insert_data_method(node->as_text(), arg0, arg1);
     case JS_TEXT_DATA_APPEND:
-        return js_dom_text_append_data_method(node->as_text(), arg0);
+        return dom_text_append_data_method(node->as_text(), arg0);
     case JS_TEXT_DATA_DELETE:
-        return js_dom_text_delete_data_method(node->as_text(), arg0, arg1);
+        return dom_text_delete_data_method(node->as_text(), arg0, arg1);
     case JS_TEXT_DATA_SUBSTRING:
-        return js_dom_text_substring_data_method(node->as_text(), arg0, arg1);
+        return dom_text_substring_data_method(node->as_text(), arg0, arg1);
     case JS_TEXT_DATA_SPLIT:
-        return js_dom_text_split_method(node->as_text(), arg0);
+        return dom_text_split_method(node->as_text(), arg0);
     default:
         return ItemError;
     }
@@ -7092,12 +7092,12 @@ static bool _elem_is_barred(DomElement* elem) {
     // Constraint validation, selector matching, and focusability share the
     // StateStore disabled-fieldset rule so a dynamically inserted control
     // cannot disagree about whether the first-legend exemption applies.
-    if (form_control_is_disabled(elem->doc ? elem->doc->state : js_dom_current_state(),
+    if (form_control_is_disabled(elem->doc ? elem->doc->state : dom_current_state(),
                                  static_cast<View*>(elem))) return true;
     // barred if readonly
     if (elem->has_attribute("readonly")) return true;
     if (strcasecmp(tag, "input") == 0) {
-        const char* type = js_dom_input_type_lower(elem);
+        const char* type = dom_input_type_lower(elem);
         // Per HTML spec, input types hidden, reset, button are barred
         // from constraint validation.
         if (strcmp(type, "hidden") == 0 || strcmp(type, "reset") == 0 ||
@@ -7173,7 +7173,7 @@ static void _collect_options_impl(DomNode* node, Item arr, bool allow_optgroup) 
             DomElement* ce = (DomElement*)node;
             if (ce->tag_name) {
                 if (strcasecmp(ce->tag_name, "option") == 0) {
-                    js_array_push(arr, js_dom_wrap_element(ce));
+                    js_array_push(arr, dom_wrap_element(ce));
                 } else if (strcasecmp(ce->tag_name, "select") == 0 ||
                            strcasecmp(ce->tag_name, "hr") == 0) {
                     // skip nested select/hr subtrees
@@ -7213,12 +7213,12 @@ static bool _get_selectedness(DomElement* opt) {
     }
     return dom_option_is_selected(opt);
 }
-JS_FORWARD_RETURN(bool, js_dom_option_is_selected, (void* dom_elem), _get_selectedness, ((DomElement*)dom_elem))
+JS_FORWARD_RETURN(bool, dom_option_selectedness, (void* dom_elem), _get_selectedness, ((DomElement*)dom_elem))
 
 // Returns true if the select's selectedness has been explicitly modified
 // (via selectedIndex/value/option.selected setter), so default-reset
 // behavior should NOT be applied.
-static bool js_dom_expando_flag_is(DomElement* elem, const char* name) {
+static bool dom_expando_flag_is(DomElement* elem, const char* name) {
     if (!elem) return false;
     Item exp = expando_get_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return false;
@@ -7226,44 +7226,44 @@ static bool js_dom_expando_flag_is(DomElement* elem, const char* name) {
     return value.item != ITEM_NULL && !is_js_undefined(value) && js_is_truthy(value);
 }
 
-static void js_dom_expando_flag_set(DomElement* elem, const char* name, Item value) {
+static void dom_expando_flag_set(DomElement* elem, const char* name, Item value) {
     if (!elem) return;
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return;
     js_set_key_default(exp, js_name_item(name), value);
 }
-JS_FORWARD_STATIC_RETURN(bool, _select_is_dirty, (DomElement* sel), js_dom_expando_flag_is, (sel, "__selDirty"))
+JS_FORWARD_STATIC_RETURN(bool, _select_is_dirty, (DomElement* sel), dom_expando_flag_is, (sel, "__selDirty"))
 
 // Text-control dirty value flag (input/textarea), tracked via expando so we
 // can distinguish "API has been called to set value" from "value reflects
 // defaultValue". Cleared by form reset.
-JS_FORWARD_STATIC_RETURN(bool, _value_is_dirty, (DomElement* elem), js_dom_expando_flag_is, (elem, "__valueDirty"))
+JS_FORWARD_STATIC_RETURN(bool, _value_is_dirty, (DomElement* elem), dom_expando_flag_is, (elem, "__valueDirty"))
 
-static bool js_dom_output_is_value_mode(DomElement* elem) {
-    return js_dom_expando_flag_is(elem, "__outputValueMode");
+static bool dom_output_is_value_mode(DomElement* elem) {
+    return dom_expando_flag_is(elem, "__outputValueMode");
 }
 
-static Item js_dom_output_default_value(DomElement* elem) {
-    if (js_dom_output_is_value_mode(elem)) {
+static Item dom_output_default_value(DomElement* elem) {
+    if (dom_output_is_value_mode(elem)) {
         Item exp = expando_get_map((DomNode*)elem);
         if (exp.item != ITEM_NULL) {
             Item stored = js_get_name_key(exp, "__outputDefaultValue");
             if (get_type_id(stored) == LMD_TYPE_STRING) return stored;
         }
     }
-    return js_dom_text_content_item(elem);
+    return dom_text_content_item(elem);
 }
 
-static bool js_dom_output_set_text(DomElement* elem, Item value) {
-    const char* raw = js_dom_to_dom_string_cstr(value);
+static bool dom_output_set_text(DomElement* elem, Item value) {
+    const char* raw = dom_to_dom_string_cstr(value);
     char* text = mem_strdup(raw ? raw : "", MEM_CAT_JS_RUNTIME);
     if (!text) return false;
-    bool replaced = js_dom_replace_text_content(elem, text);
+    bool replaced = dom_replace_text_content(elem, text);
     mem_free(text);
     return replaced;
 }
 
-extern "C" Item js_dom_text_control_set_value_bridge(void* dom_elem, Item value) {
+extern "C" Item dom_text_control_set_value_bridge(void* dom_elem, Item value) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !tc_is_text_control_elem(elem)) return value;
     const char* s = fn_to_cstr(value);
@@ -7289,8 +7289,8 @@ extern "C" Item js_dom_text_control_set_value_bridge(void* dom_elem, Item value)
                     stripped[out] = '\0';
                     tc_set_value(elem, stripped, out);
                     mem_free(stripped);
-                    js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
-                    js_dom_mutation_notify(DOM_JS_MUTATION_CONTROL_VALUE,
+                    dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
+                    dom_mutation_notify(DOM_JS_MUTATION_CONTROL_VALUE,
                         (DomNode*)elem, elem->parent);
                     return value;
                 }
@@ -7299,13 +7299,13 @@ extern "C" Item js_dom_text_control_set_value_bridge(void* dom_elem, Item value)
     }
     // text-control value writes dirty live state without changing the default attribute.
     tc_set_value(elem, s, strlen(s));
-    js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
-    js_dom_mutation_notify(DOM_JS_MUTATION_CONTROL_VALUE,
+    dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
+    dom_mutation_notify(DOM_JS_MUTATION_CONTROL_VALUE,
         (DomNode*)elem, elem->parent);
     return value;
 }
 
-static Item js_dom_text_control_set_selection_edge(void* dom_elem, Item value,
+static Item dom_text_control_set_selection_edge(void* dom_elem, Item value,
                                                    bool start_edge) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !tc_is_text_control_elem(elem)) return value;
@@ -7316,7 +7316,7 @@ static Item js_dom_text_control_set_selection_edge(void* dom_elem, Item value,
     uint32_t start = 0;
     uint32_t end = 0;
     uint8_t direction = 0;
-    DocState* state = js_dom_current_state();
+    DocState* state = dom_current_state();
     form_control_get_selection(state, (View*)elem,
         start_edge ? NULL : &start, start_edge ? &end : NULL, &direction);
     if (start_edge) {
@@ -7329,10 +7329,10 @@ static Item js_dom_text_control_set_selection_edge(void* dom_elem, Item value,
     form_control_set_selection(state, (View*)elem, start, end, direction);
     return value;
 }
-JS_FORWARD_ITEM(js_dom_text_control_set_selection_start_bridge, (void* dom_elem, Item value), js_dom_text_control_set_selection_edge, (dom_elem, value, true))
-JS_FORWARD_ITEM(js_dom_text_control_set_selection_end_bridge, (void* dom_elem, Item value), js_dom_text_control_set_selection_edge, (dom_elem, value, false))
+JS_FORWARD_ITEM(dom_text_control_set_selection_start_bridge, (void* dom_elem, Item value), dom_text_control_set_selection_edge, (dom_elem, value, true))
+JS_FORWARD_ITEM(dom_text_control_set_selection_end_bridge, (void* dom_elem, Item value), dom_text_control_set_selection_edge, (dom_elem, value, false))
 
-static void js_dom_detach_all_children(DomElement* elem) {
+static void dom_detach_all_children(DomElement* elem) {
     if (!elem) return;
     DomNode* child = elem->first_child;
     while (child) {
@@ -7347,27 +7347,27 @@ static void js_dom_detach_all_children(DomElement* elem) {
     elem->last_child = nullptr;
 }
 
-extern "C" Item js_dom_text_control_set_selection_direction_bridge(void* dom_elem, Item value) {
+extern "C" Item dom_text_control_set_selection_direction_bridge(void* dom_elem, Item value) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !tc_is_text_control_elem(elem)) return value;
     tc_ensure_init(elem);
     uint8_t d = text_control_direction_from_item(value);
     uint32_t start = 0;
     uint32_t end = 0;
-    DocState* state = js_dom_current_state();
+    DocState* state = dom_current_state();
     form_control_get_selection(state, (View*)elem, &start, &end, NULL);
     form_control_set_selection(state, (View*)elem, start, end, d);
     return value;
 }
 
-extern "C" Item js_dom_text_control_set_default_value_bridge(void* dom_elem, Item value) {
+extern "C" Item dom_text_control_set_default_value_bridge(void* dom_elem, Item value) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !tc_is_text_control_elem(elem)) return value;
     const char* s = fn_to_cstr(value);
     if (!s) s = "";
     if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
         bool dom_children_changed = elem->first_child != nullptr || *s;
-        js_dom_detach_all_children(elem);
+        dom_detach_all_children(elem);
         if (*s) {
             DomText* tn = DomText::create_copy(s, strlen(s), elem);
             if (tn) {
@@ -7382,7 +7382,7 @@ extern "C" Item js_dom_text_control_set_default_value_bridge(void* dom_elem, Ite
             tc_set_value(elem, s, strlen(s));
         }
         if (dom_children_changed) {
-            js_dom_mutation_notify();
+            dom_mutation_notify();
         }
         return value;
     }
@@ -7417,14 +7417,14 @@ static void _select_set_selected_index(DomElement* sel, int idx) {
     _collect_options(sel->first_child, arr);
     int64_t n = js_array_length(arr);
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
         if (!opt) continue;
         _set_selectedness(opt, (int)i == idx); // INT_CAST_OK: option index
     }
     _select_sync_native_selected_index(
         sel, idx >= 0 && idx < n ? idx : -1,
         (int)n); // INT_CAST_OK: option count
-    js_dom_expando_flag_set(sel, "__selDirty", (Item){.item = b2it(true)});
+    dom_expando_flag_set(sel, "__selDirty", (Item){.item = b2it(true)});
 }
 
 static void _select_select_only_option(DomElement* sel, DomElement* selected_opt) {
@@ -7434,7 +7434,7 @@ static void _select_select_only_option(DomElement* sel, DomElement* selected_opt
     int64_t n = js_array_length(arr);
     int selected_index = -1;
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
         if (opt) {
             bool selected = opt == selected_opt;
             _set_selectedness(opt, selected);
@@ -7453,7 +7453,7 @@ static void _select_normalize_for_selected_options(DomElement* sel, Item options
     int last_selected = -1;
     int first_non_disabled = -1;
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(options, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(options, i));
         if (!opt) continue;
         if (_get_selectedness(opt)) {
             selected_count++;
@@ -7471,7 +7471,7 @@ static void _select_normalize_for_selected_options(DomElement* sel, Item options
     else if (selected_count == 0 && size <= 1 && !_select_is_dirty(sel)) chosen = first_non_disabled;
     if (chosen < 0) return;
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(options, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(options, i));
         if (!opt) continue;
         _set_selectedness(opt, (int)i == chosen); // INT_CAST_OK: option index
     }
@@ -7487,7 +7487,7 @@ static void _select_refresh_selected_options_collection(Item collection, DomElem
     int64_t n = js_array_length(arr);
     for (int64_t i = 0; i < n; i++) {
         Item it = js_elements_get_int(arr, i);
-        DomElement* opt = (DomElement*)js_dom_unwrap_element(it);
+        DomElement* opt = (DomElement*)dom_unwrap_element(it);
         if (opt && _get_selectedness(opt)) js_array_push(collection, it);
     }
 }
@@ -7498,7 +7498,7 @@ static int _select_effective_selected_index(DomElement* sel, Item options) {
     int sel_idx = -1;
     int first_non_disabled = -1;
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(options, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(options, i));
         if (!opt) continue;
         if (sel_idx < 0 && _get_selectedness(opt)) sel_idx = (int)i; // INT_CAST_OK: option index
         if (first_non_disabled < 0 && !opt->has_attribute("disabled")) {
@@ -7558,7 +7558,7 @@ JS_FORWARD_STATIC_VOID( _select_refresh_cached_selected_options_for_node, (DomNo
 
 extern "C" void js_array_exotic_before_property_get(Item object, Item key) {
     if (get_type_id(object) != LMD_TYPE_ARRAY) return;
-    if (!js_dom_collection_runtime_state_get()) return;
+    if (!dom_collection_runtime_state_get()) return;
     if (s_dom_collection_refresh_depth > 0) return;
     int child_kind = 0;
     DomElement* child_owner = _live_child_collection_owner(object, &child_kind);
@@ -7593,7 +7593,7 @@ extern "C" void js_array_exotic_before_property_get(Item object, Item key) {
         Item matched = ItemNull;
         for (int64_t i = 0; i < object.array->length; i++) {
             Item candidate = js_elements_get_int(object, i);
-            DomElement* elem = (DomElement*)js_dom_unwrap_element(candidate);
+            DomElement* elem = (DomElement*)dom_unwrap_element(candidate);
             if (!elem) continue;
             const char* name = elem->get_attribute("name");
             const char* id = elem->get_attribute("id");
@@ -7613,7 +7613,7 @@ extern "C" void js_array_exotic_before_property_get(Item object, Item key) {
             Map* props = js_array_props(object.array);
             bool found = false;
             Item existing = js_map_shape_lookup_ext(props, sk->chars, (int)sk->len, &found);
-            if (found && js_dom_unwrap_element(existing)) {
+            if (found && dom_unwrap_element(existing)) {
                 // dynamic named properties can become stale after DOM renames;
                 // tombstone only old DOM-backed slots and leave user expandos alone.
                 js_delete_property(object, prop_key);
@@ -7666,7 +7666,7 @@ extern "C" void js_array_exotic_before_property_set(Item object, Item key, Item 
 // reflection route. Name-gated to the inputs of revalidate/reflect, so an
 // unrelated attribute never schedules work; the package's own `aria-*` writes
 // do not reach this hook at all.
-static void js_dom_reinit_behavior_if_constraint_attr(DomElement* elem,
+static void dom_reinit_behavior_if_constraint_attr(DomElement* elem,
                                                       const char* attr_name) {
     if (!elem || !attr_name || !elem->form_control() || !elem->doc) return;
     static const char* kConstraintAttrs[] = {
@@ -7682,13 +7682,13 @@ static void js_dom_reinit_behavior_if_constraint_attr(DomElement* elem,
     }
 }
 
-extern "C" void js_dom_after_set_attribute(void* elem_ptr,
+extern "C" void dom_after_set_attribute(void* elem_ptr,
                                            const char* attr_name,
                                            const char* attr_value) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !attr_name || !attr_value) return;
-    js_dom_compile_event_attr_to_expando(elem, attr_name, attr_value);
-    js_dom_reinit_behavior_if_constraint_attr(elem, attr_name);
+    dom_compile_event_attr_to_expando(elem, attr_name, attr_value);
+    dom_reinit_behavior_if_constraint_attr(elem, attr_name);
     if (_is_tag(elem, "option") && strcasecmp(attr_name, "selected") == 0) {
         DomElement* sel = _nearest_select_for_node((DomNode*)elem);
         if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
@@ -7696,19 +7696,19 @@ extern "C" void js_dom_after_set_attribute(void* elem_ptr,
     _select_refresh_cached_selected_options_for_node((DomNode*)elem);
 }
 
-extern "C" void js_dom_after_remove_attribute(void* elem_ptr,
+extern "C" void dom_after_remove_attribute(void* elem_ptr,
                                               const char* attr_name) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !attr_name) return;
-    js_dom_clear_event_attr_expando(elem, attr_name);
-    js_dom_reinit_behavior_if_constraint_attr(elem, attr_name);
+    dom_clear_event_attr_expando(elem, attr_name);
+    dom_reinit_behavior_if_constraint_attr(elem, attr_name);
     if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
         _select_ask_for_reset(elem);
     }
     _select_refresh_cached_selected_options_for_node((DomNode*)elem);
 }
 
-extern "C" void js_dom_after_toggle_attribute_remove(void* elem_ptr,
+extern "C" void dom_after_toggle_attribute_remove(void* elem_ptr,
                                                      const char* attr_name) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !attr_name) return;
@@ -7748,7 +7748,7 @@ static char* _select_value(DomElement* elem) {
     int64_t count = js_array_length(options);
     DomElement* first_non_disabled = nullptr;
     for (int64_t i = 0; i < count; i++) {
-        DomElement* option = (DomElement*)js_dom_unwrap_element(
+        DomElement* option = (DomElement*)dom_unwrap_element(
             js_elements_get_int(options, i));
         if (!option) continue;
         if (_get_selectedness(option)) return _option_value(option);
@@ -7800,7 +7800,7 @@ static int _option_index_in_select(DomElement* opt) {
     int64_t n = js_array_length(arr);
     for (int64_t i = 0; i < n; i++) {
         Item it = js_elements_get_int(arr, i);
-        DomElement* ce = (DomElement*)js_dom_unwrap_element(it);
+        DomElement* ce = (DomElement*)dom_unwrap_element(it);
         if (ce == opt) return (int)i; // INT_CAST_OK: option index
     }
     return -1;
@@ -7821,7 +7821,7 @@ static void _select_ask_for_reset(DomElement* sel) {
     int last_selected = -1;
     int first_non_disabled = -1;
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
         if (!opt) continue;
         if (_get_selectedness(opt)) last_selected = (int)i; // INT_CAST_OK: option index
         if (first_non_disabled < 0 && !opt->has_attribute("disabled")) {
@@ -7841,7 +7841,7 @@ static void _select_ask_for_reset(DomElement* sel) {
     // only the last remains.
     bool require_one = size <= 1;
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
         if (!opt) continue;
         if (require_one) {
             _set_selectedness(opt, (int)i == chosen); // INT_CAST_OK: option index
@@ -7859,7 +7859,7 @@ static void _select_ask_for_reset(DomElement* sel) {
                                        (int)n); // INT_CAST_OK: option count
 }
 
-extern "C" void js_dom_after_default_selected_set(void* dom_elem, bool selected) {
+extern "C" void dom_after_default_selected_set(void* dom_elem, bool selected) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return;
     Item exp = expando_get_map((DomNode*)elem);
@@ -7874,16 +7874,16 @@ extern "C" void js_dom_after_default_selected_set(void* dom_elem, bool selected)
     DomElement* sel = _option_owner_select(elem);
     if (sel) _select_ask_for_reset(sel);
 }
-JS_FORWARD_VOID( js_dom_after_select_multiple_removed, (void* dom_elem), _select_ask_for_reset, ((DomElement*)dom_elem))
+JS_FORWARD_VOID( dom_after_select_multiple_removed, (void* dom_elem), _select_ask_for_reset, ((DomElement*)dom_elem))
 
-static int js_dom_select_apply_value(DomElement* elem, const char* value,
+static int dom_select_apply_value(DomElement* elem, const char* value,
         bool sync_native_index) {
     Item arr = js_array_new(0);
     _collect_options(elem->first_child, arr);
     int64_t n = js_array_length(arr);
     int found = -1;
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
         if (!opt) continue;
         char* option_value = _option_value(opt);
         bool match = option_value && strcmp(option_value, value) == 0;
@@ -7891,7 +7891,7 @@ static int js_dom_select_apply_value(DomElement* elem, const char* value,
         if (match) { found = (int)i; break; } // INT_CAST_OK: option index
     }
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
         if (!opt) continue;
         _set_selectedness(opt, found >= 0 && (int)i == found); // INT_CAST_OK: option index
     }
@@ -7902,16 +7902,16 @@ static int js_dom_select_apply_value(DomElement* elem, const char* value,
     return found;
 }
 
-extern "C" void js_dom_select_set_value_bridge(void* dom_elem, const char* value) {
+extern "C" void dom_select_set_value_bridge(void* dom_elem, const char* value) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return;
     const char* sv = value ? value : "";
-    js_dom_select_apply_value(elem, sv, true);
-    js_dom_expando_flag_set(elem, "__selDirty", (Item){.item = b2it(true)});
+    dom_select_apply_value(elem, sv, true);
+    dom_expando_flag_set(elem, "__selDirty", (Item){.item = b2it(true)});
 }
-JS_FORWARD_VOID( js_dom_select_set_selected_index_bridge, (void* dom_elem, Item value), _select_set_selected_index, ((DomElement*)dom_elem, _select_index_from_item(value)))
+JS_FORWARD_VOID( dom_select_set_selected_index_bridge, (void* dom_elem, Item value), _select_set_selected_index, ((DomElement*)dom_elem, _select_index_from_item(value)))
 
-extern "C" void js_dom_select_set_length_bridge(void* dom_elem, Item value) {
+extern "C" void dom_select_set_length_bridge(void* dom_elem, Item value) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return;
     int new_len = 0;
@@ -7949,7 +7949,7 @@ extern "C" void js_dom_select_set_length_bridge(void* dom_elem, Item value) {
         }
     } else if (new_len < cur) {
         for (int64_t i = cur - 1; i >= new_len; i--) {
-            DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
+            DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
             if (!opt) continue;
             DomNode* on = (DomNode*)opt;
             DomNode* parent = on->parent;
@@ -7965,10 +7965,10 @@ extern "C" void js_dom_select_set_length_bridge(void* dom_elem, Item value) {
         }
     }
     // select.length mutates the option subtree, so keep the JS mutation ledger authoritative.
-    js_dom_mutation_notify();
+    dom_mutation_notify();
 }
 
-static void js_dom_apply_option_selected(DomElement* elem, bool selected) {
+static void dom_apply_option_selected(DomElement* elem, bool selected) {
     _set_selectedness(elem, selected);
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item != ITEM_NULL) {
@@ -7985,13 +7985,13 @@ static void js_dom_apply_option_selected(DomElement* elem, bool selected) {
     _select_refresh_cached_selected_options(sel);
 }
 
-extern "C" void js_dom_set_option_selected_dirty(void* dom_elem, bool selected) {
+extern "C" void dom_set_option_selected_dirty(void* dom_elem, bool selected) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return;
-    js_dom_apply_option_selected(elem, selected);
+    dom_apply_option_selected(elem, selected);
 }
 
-extern "C" void js_dom_set_option_text_bridge(void* dom_elem, const char* value) {
+extern "C" void dom_set_option_text_bridge(void* dom_elem, const char* value) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return;
     const char* sv = value ? value : "";
@@ -8012,7 +8012,7 @@ extern "C" void js_dom_set_option_text_bridge(void* dom_elem, const char* value)
         elem->last_child = tn;
     }
     // option.text replaces children, so publish a structural mutation instead of an attribute record.
-    js_dom_mutation_notify();
+    dom_mutation_notify();
 }
 
 // For a <select required> element, returns true iff no <option> is
@@ -8036,7 +8036,7 @@ static bool _select_value_missing(DomElement* sel) {
     // value. Options inside an optgroup don't qualify.
     DomElement* placeholder = nullptr;
     if (!is_listbox && n > 0) {
-        DomElement* first_opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, 0));
+        DomElement* first_opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, 0));
         if (first_opt && first_opt->parent == (DomNode*)sel) {
             char* v = _option_value(first_opt);
             bool empty_value = !v || !*v;
@@ -8047,7 +8047,7 @@ static bool _select_value_missing(DomElement* sel) {
     bool any_non_placeholder_selected = false;
     bool any_selected = false;
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
         if (!opt) continue;
         if (_get_selectedness(opt)) {
             any_selected = true;
@@ -8058,7 +8058,7 @@ static bool _select_value_missing(DomElement* sel) {
     // first non-disabled option counts as selected.
     if (!any_selected && !is_listbox && !_select_is_dirty(sel)) {
         for (int64_t i = 0; i < n; i++) {
-            DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
+            DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
             if (!opt || opt->has_attribute("disabled")) continue;
             any_selected = true;
             if (opt != placeholder) any_non_placeholder_selected = true;
@@ -8113,7 +8113,7 @@ static void _reset_form_control(DomElement* elem) {
             const char* dv = elem->get_attribute("value");
             if (!dv) dv = "";
             tc_set_value(elem, dv, strlen(dv));
-            js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = ITEM_NULL});
+            dom_expando_flag_set(elem, "__valueDirty", (Item){.item = ITEM_NULL});
         }
         return;
     }
@@ -8125,7 +8125,7 @@ static void _reset_form_control(DomElement* elem) {
             collect_text_content((DomNode*)elem, sb);
             const char* s = sb->str ? sb->str : "";
             tc_set_value(elem, s, sb->length);
-            js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = ITEM_NULL});
+            dom_expando_flag_set(elem, "__valueDirty", (Item){.item = ITEM_NULL});
             strbuf_free(sb);
         }
         return;
@@ -8137,7 +8137,7 @@ static void _reset_form_control(DomElement* elem) {
         _collect_options(elem->first_child, arr);
         int64_t n = js_array_length(arr);
         for (int64_t i = 0; i < n; i++) {
-            DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
+            DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
             if (!opt) continue;
             // Default selectedness = presence of "selected" content attribute
             _set_selectedness(opt, opt->has_attribute("selected"));
@@ -8158,15 +8158,15 @@ static void _reset_form_control(DomElement* elem) {
         return;
     }
     if (strcasecmp(tag, "output") == 0) {
-        Item default_value = js_dom_output_default_value(elem);
+        Item default_value = dom_output_default_value(elem);
         const char* raw = fn_to_cstr(default_value);
         char* text = mem_strdup(raw ? raw : "", MEM_CAT_JS_RUNTIME);
         if (!text) return;
         // Reset restores the saved default and returns the output to default mode.
-        js_dom_replace_text_content(elem, text);
+        dom_replace_text_content(elem, text);
         mem_free(text);
-        js_dom_expando_flag_set(elem, "__outputValueMode", ItemNull);
-        js_dom_expando_flag_set(elem, "__outputDefaultValue", ItemNull);
+        dom_expando_flag_set(elem, "__outputValueMode", ItemNull);
+        dom_expando_flag_set(elem, "__outputDefaultValue", ItemNull);
         return;
     }
 }
@@ -8215,7 +8215,7 @@ static bool _form_reset_visit(DomElement* elem, void* ctx) {
         DomElement* owner = NULL;
         if (form_attr && *form_attr) {
             owner = state->doc_root
-                ? js_dom_find_element_by_id(state->doc_root, form_attr) : NULL;
+                ? dom_find_element_by_id(state->doc_root, form_attr) : NULL;
         } else if (!state->associated_only) {
             owner = _nearest_enclosing_form(elem, state->form_elem);
         }
@@ -8261,11 +8261,11 @@ typedef struct RadioGroupScanCtx {
 static bool _radio_group_visit(DomElement* elem, void* ctx) {
     RadioGroupScanCtx* state = (RadioGroupScanCtx*)ctx;
     if (!elem->tag_name || strcasecmp(elem->tag_name, "input") != 0) return true;
-    if (strcmp(js_dom_input_type_lower(elem), "radio") != 0) return true;
+    if (strcmp(dom_input_type_lower(elem), "radio") != 0) return true;
     const char* name = elem->get_attribute("name");
     if (!name || strcmp(name, state->name) != 0) return true;
     if (_nearest_enclosing_form(elem, NULL) == state->form_scope) {
-        if (js_dom_get_checkedness(elem)) *state->any_checked = true;
+        if (dom_get_checkedness(elem)) *state->any_checked = true;
         if (elem->has_attribute("required")) *state->any_required = true;
     }
     return true;
@@ -8309,7 +8309,7 @@ static Item _build_validity_state(DomElement* elem) {
         // from disagreeing with the value exposed through the IDL.
         if (!val_empty && strcasecmp(tag, "input") == 0) {
             char sanitized[128];
-            radiant_input_value_sanitize(js_dom_input_type_lower(elem), val,
+            radiant_input_value_sanitize(dom_input_type_lower(elem), val,
                                           sanitized, sizeof(sanitized));
             val_empty = sanitized[0] == '\0';
         }
@@ -8320,18 +8320,18 @@ static Item _build_validity_state(DomElement* elem) {
         // this particular element does not carry the required attribute.
         bool radio_handled = false;
         if (strcasecmp(tag, "input") == 0) {
-            const char* itype0 = js_dom_input_type_lower(elem);
+            const char* itype0 = dom_input_type_lower(elem);
             if (strcmp(itype0, "radio") == 0) {
                 radio_handled = true;
                 const char* rname = elem->get_attribute("name");
-                bool elem_connected = js_dom_is_connected(elem);
+                bool elem_connected = dom_is_connected(elem);
                 bool own_required = elem->has_attribute("required");
                 if (!rname || !*rname) {
                     // Empty/missing name → no group. WPT expects
                     // valueMissing=false even if required.
                     value_missing = false;
                 } else if (!elem_connected) {
-                    value_missing = own_required && !js_dom_get_checkedness(elem);
+                    value_missing = own_required && !dom_get_checkedness(elem);
                 } else {
                     // Find the ancestor <form>, if any.
                     DomElement* form_scope = nullptr;
@@ -8358,9 +8358,9 @@ static Item _build_validity_state(DomElement* elem) {
 
         if (!radio_handled && elem->has_attribute("required")) {
             if (strcasecmp(tag, "input") == 0) {
-                const char* itype = js_dom_input_type_lower(elem);
+                const char* itype = dom_input_type_lower(elem);
                 if (strcmp(itype, "checkbox") == 0) {
-                    value_missing = !js_dom_get_checkedness(elem);
+                    value_missing = !dom_get_checkedness(elem);
                 } else if (strcmp(itype, "file") == 0) {
                     Item files = radiant_input_files(elem);
                     value_missing = get_type_id(files) != LMD_TYPE_ARRAY ||
@@ -8379,7 +8379,7 @@ static Item _build_validity_state(DomElement* elem) {
 
         // typeMismatch: email / url with non-empty invalid value
         if (!val_empty && strcasecmp(tag, "input") == 0) {
-            const char* itype = js_dom_input_type_lower(elem);
+            const char* itype = dom_input_type_lower(elem);
             if (strcmp(itype, "email") == 0) {
                 // simple email check: must contain @
                 type_mismatch = (strchr(val, '@') == nullptr);
@@ -8418,7 +8418,7 @@ static Item _build_validity_state(DomElement* elem) {
         // Numeric value states share their scalar conversion and step base with
         // valueAsNumber/stepUp, including ISO week and calendar-month rules.
         if (!val_empty && strcasecmp(tag, "input") == 0) {
-            const char* itype = js_dom_input_type_lower(elem);
+            const char* itype = dom_input_type_lower(elem);
             RadiantInputValidity typed = {};
             radiant_input_value_validate(itype, val,
                 elem->get_attribute("min"),
@@ -8444,7 +8444,7 @@ static Item _build_validity_state(DomElement* elem) {
         bool is_input = elem && tag && strcasecmp(tag, "input") == 0;
         bool gate_value_missing = false;
         if (is_input) {
-            const char* itype = js_dom_input_type_lower(elem);
+            const char* itype = dom_input_type_lower(elem);
             // gate for text-like types only
             if (strcmp(itype, "checkbox") != 0 && strcmp(itype, "radio") != 0 &&
                 strcmp(itype, "file") != 0) {
@@ -8477,9 +8477,9 @@ static Item _build_validity_state(DomElement* elem) {
 #undef JS_DOM_VALIDITY_FIELDS
     return vs;
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_validity_item_is_valid, (Item flag), (((flag.item & 0xFF) != 0 && flag.item != ITEM_NULL)))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_validity_item_is_valid, (Item flag), (((flag.item & 0xFF) != 0 && flag.item != ITEM_NULL)))
 
-static bool js_dom_is_constraint_control(DomElement* elem) {
+static bool dom_is_constraint_control(DomElement* elem) {
     if (!elem || !elem->tag_name || _elem_is_barred(elem)) return false;
     return strcasecmp(elem->tag_name, "input") == 0 ||
            strcasecmp(elem->tag_name, "select") == 0 ||
@@ -8487,80 +8487,80 @@ static bool js_dom_is_constraint_control(DomElement* elem) {
            strcasecmp(elem->tag_name, "button") == 0;
 }
 
-static void js_dom_dispatch_invalid_event(Item target_item, bool include_bubbles) {
+static void dom_dispatch_invalid_event(Item target_item, bool include_bubbles) {
     Item ev_obj = js_new_object();
     js_set_key_cstr(ev_obj, "type", js_name_item("invalid"));
     if (include_bubbles) {
         js_set_key_cstr(ev_obj, "bubbles", (Item){.item = ITEM_FALSE});
     }
     js_set_key_cstr(ev_obj, "cancelable", (Item){.item = ITEM_TRUE});
-    js_dom_dispatch_event(target_item, ev_obj);
+    dom_dispatch_event(target_item, ev_obj);
 }
 
-static void js_dom_check_form_control_descendants(DomNode* node, bool* all_valid) {
+static void dom_check_form_control_descendants(DomNode* node, bool* all_valid) {
     while (node) {
         if (node->is_element()) {
             DomElement* elem = node->as_element();
-            if (js_dom_is_constraint_control(elem)) {
+            if (dom_is_constraint_control(elem)) {
                 Item vs = _build_validity_state(elem);
                 Item vf = js_get_key_cstr(vs, "valid");
-                if (!js_dom_validity_item_is_valid(vf)) {
+                if (!dom_validity_item_is_valid(vf)) {
                     if (all_valid) *all_valid = false;
-                    js_dom_dispatch_invalid_event(js_dom_wrap_element(elem), false);
+                    dom_dispatch_invalid_event(dom_wrap_element(elem), false);
                 }
             }
-            js_dom_check_form_control_descendants(elem->first_child, all_valid);
+            dom_check_form_control_descendants(elem->first_child, all_valid);
         }
         node = node->next_sibling;
     }
 }
 
-extern "C" Item js_dom_form_reset_bridge(Item form_item) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(form_item);
+extern "C" Item dom_form_reset_bridge(Item form_item) {
+    DomElement* elem = (DomElement*)dom_unwrap_element(form_item);
     if (!elem || !elem->tag_name || strcasecmp(elem->tag_name, "form") != 0) {
         return make_js_undefined();
     }
     Item ev = js_create_event("reset", /*bubbles=*/true, /*cancelable=*/true);
     js_set_key_cstr(ev, "isTrusted", (Item){.item = ITEM_TRUE});
-    Item dispatched = js_dom_dispatch_event(form_item, ev);
+    Item dispatched = dom_dispatch_event(form_item, ev);
     if (dispatched.item == ITEM_FALSE) return make_js_undefined();
     _run_form_reset(elem);
     return make_js_undefined();
 }
 
-static Item js_dom_check_or_report_validity(Item elem_item, bool report) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+static Item dom_check_or_report_validity(Item elem_item, bool report) {
+    DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem || !elem->tag_name) return (Item){.item = ITEM_TRUE};
 
     if (strcasecmp(elem->tag_name, "form") == 0) {
         bool all_valid = true;
-        js_dom_check_form_control_descendants(elem->first_child, &all_valid);
+        dom_check_form_control_descendants(elem->first_child, &all_valid);
         return (Item){.item = b2it(all_valid)};
     }
 
     if (_elem_is_barred(elem)) return (Item){.item = ITEM_TRUE};
     Item vs = _build_validity_state(elem);
     Item valid_flag = js_get_key_cstr(vs, "valid");
-    bool is_valid = js_dom_validity_item_is_valid(valid_flag);
+    bool is_valid = dom_validity_item_is_valid(valid_flag);
     if (!is_valid) {
-        js_dom_dispatch_invalid_event(elem_item, !report);
+        dom_dispatch_invalid_event(elem_item, !report);
     }
     return (Item){.item = b2it(is_valid)};
 }
-JS_FORWARD_ITEM(js_dom_check_validity_bridge, (Item elem_item), js_dom_check_or_report_validity, (elem_item, false))
-JS_FORWARD_ITEM(js_dom_report_validity_bridge, (Item elem_item), js_dom_check_or_report_validity, (elem_item, true))
+JS_FORWARD_ITEM(dom_check_validity_bridge, (Item elem_item), dom_check_or_report_validity, (elem_item, false))
+JS_FORWARD_ITEM(dom_report_validity_bridge, (Item elem_item), dom_check_or_report_validity, (elem_item, true))
 
-static DomElement* js_dom_first_invalid_control(DomNode* node) {
+static DomElement* dom_first_invalid_control(DomNode* node) {
     for (DomNode* current = node; current; current = current->next_sibling) {
         if (!current->is_element()) continue;
         DomElement* elem = current->as_element();
-        if (js_dom_is_constraint_control(elem)) {
+        if (dom_is_constraint_control(elem)) {
             Item state = _build_validity_state(elem);
-            if (!js_dom_validity_item_is_valid(js_get_key_cstr(state, "valid"))) {
+            if (!dom_validity_item_is_valid(js_get_key_cstr(state, "valid"))) {
                 return elem;
             }
         }
-        DomElement* nested = js_dom_first_invalid_control(elem->first_child);
+        DomElement* nested = dom_first_invalid_control(elem->first_child);
         if (nested) return nested;
     }
     return nullptr;
@@ -8570,14 +8570,14 @@ static DomElement* js_dom_first_invalid_control(DomNode* node) {
 // events have fired. The validity computation remains shared with the public
 // checkValidity/reportValidity bridges; this helper only supplies the focus
 // side effect required by the form submission policy.
-extern "C" bool js_dom_focus_first_invalid_form_control(void* form_ptr) {
+extern "C" bool dom_focus_first_invalid_form_control(void* form_ptr) {
     DomElement* form = (DomElement*)form_ptr;
     if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
         return false;
     }
-    DomElement* invalid = js_dom_first_invalid_control(form->first_child);
+    DomElement* invalid = dom_first_invalid_control(form->first_child);
     if (!invalid) return false;
-    js_dom_focus_method_bridge((void*)invalid, true);
+    dom_focus_method_bridge((void*)invalid, true);
     return true;
 }
 
@@ -8617,7 +8617,7 @@ JS_DOM_TAGS(JS_DOM_TAG_BIT_CONST)
 #undef JS_DOM_TAG_BIT_CONST
 static const uint32_t DOM_TAG_ANY = 0xFFFFFFFFu;
 
-static uint32_t js_dom_tag_bit(const DomElement* elem) {
+static uint32_t dom_tag_bit(const DomElement* elem) {
     if (!elem || !elem->tag_name) return 0;
 #define JS_DOM_TAG_BIT_MATCH(name, text) \
     if (strcasecmp(elem->tag_name, text) == 0) return DOM_TAG_##name;
@@ -8691,11 +8691,11 @@ static const JsDomReflectSpec k_dom_reflected_attrs[] = {
 };
 
 // First row whose IDL name and element type both match, or NULL.
-static const JsDomReflectSpec* js_dom_reflect_spec(const DomElement* elem,
+static const JsDomReflectSpec* dom_reflect_spec(const DomElement* elem,
                                                    const char* prop,
                                                    JsDomReflectKind kind) {
     if (!elem || !prop) return NULL;
-    uint32_t tag = js_dom_tag_bit(elem);
+    uint32_t tag = dom_tag_bit(elem);
     if (!tag) return NULL;
     for (size_t i = 0; i < sizeof(k_dom_reflected_attrs) / sizeof(k_dom_reflected_attrs[0]); i++) {
         const JsDomReflectSpec* spec = &k_dom_reflected_attrs[i];
@@ -8721,7 +8721,7 @@ static const char* _idl_to_attr_name(const char* prop) {
 // Per HTML spec, IDL boolean reflection setters do ToBoolean coercion:
 // truthy → set attribute (empty value), falsy → remove attribute.
 static bool _is_bool_reflected(DomElement* elem, const char* prop) {
-    return js_dom_reflect_spec(elem, prop, JS_DOM_REFLECT_BOOL) != NULL;
+    return dom_reflect_spec(elem, prop, JS_DOM_REFLECT_BOOL) != NULL;
 }
 
 // True if `prop` reflects a non-negative-integer-with-default attribute.
@@ -8730,7 +8730,7 @@ static bool _is_bool_reflected(DomElement* elem, const char* prop) {
 static bool _is_int_reflected(DomElement* elem, const char* prop,
                               const char** attr_name, int* default_val) {
     if (!attr_name || !default_val) return false;
-    const JsDomReflectSpec* spec = js_dom_reflect_spec(elem, prop, JS_DOM_REFLECT_INT);
+    const JsDomReflectSpec* spec = dom_reflect_spec(elem, prop, JS_DOM_REFLECT_INT);
     if (!spec) return false;
     *attr_name = spec->attr;
     *default_val = spec->default_value;
@@ -8746,7 +8746,7 @@ static bool _is_int_reflected(DomElement* elem, const char* prop,
 static bool _is_string_reflected(DomElement* elem, const char* prop,
                                  const char** attr_name) {
     if (!attr_name) return false;
-    const JsDomReflectSpec* spec = js_dom_reflect_spec(elem, prop, JS_DOM_REFLECT_STR);
+    const JsDomReflectSpec* spec = dom_reflect_spec(elem, prop, JS_DOM_REFLECT_STR);
     if (!spec) return false;
     *attr_name = spec->attr;
     return true;
@@ -8759,7 +8759,7 @@ static bool _is_string_reflected(DomElement* elem, const char* prop,
 // The table gates the write on the same element/property pairs the getter
 // accepts.
 static bool _is_mapped_attr_reflected(DomElement* elem, const char* prop) {
-    return js_dom_reflect_spec(elem, prop, JS_DOM_REFLECT_MAP) != NULL;
+    return dom_reflect_spec(elem, prop, JS_DOM_REFLECT_MAP) != NULL;
 }
 
 // Returns the lowercased input `formmethod` value or "get" default.
@@ -8809,7 +8809,7 @@ static void _collect_form_related_rec(DomNode* node, Item arr, bool controls) {
                 ? _is_listed_form_control(elem)
                 : (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0);
             if (selected) {
-                js_array_push(arr, js_dom_wrap_element(elem));
+                js_array_push(arr, dom_wrap_element(elem));
             }
             _collect_form_related_rec(elem->first_child, arr, controls);
         }
@@ -8831,9 +8831,9 @@ static const char* _form_control_name_or_id(DomElement* e) {
 extern "C" int radiant_dom_m4b_href_get(Item receiver, Item* out);
 extern "C" int radiant_dom_anchor_hash_get(Item receiver, Item* out);
 
-static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child);
+static bool dom_remove_backed_child(DomElement* parent, DomNode* child);
 
-static Item js_dom_template_content(DomElement* template_elem) {
+static Item dom_template_content(DomElement* template_elem) {
     if (!template_elem || !template_elem->doc) return ItemNull;
 
     Item content_key = js_string_key("__lambda_template_content");
@@ -8851,7 +8851,7 @@ static Item js_dom_template_content(DomElement* template_elem) {
     DomNode* child = template_elem->first_child;
     while (child) {
         DomNode* next = child->next_sibling;
-        if (!js_dom_remove_backed_child(template_elem, child) &&
+        if (!dom_remove_backed_child(template_elem, child) &&
             child->parent == (DomNode*)template_elem) {
             ((DomNode*)template_elem)->remove_child(child);
         }
@@ -8859,26 +8859,26 @@ static Item js_dom_template_content(DomElement* template_elem) {
         child = next;
     }
 
-    Item fragment_item = js_dom_wrap_element(fragment);
+    Item fragment_item = dom_wrap_element(fragment);
     expando_set_property((DomNode*)template_elem, content_key, fragment_item);
     return fragment_item;
 }
 
-static Item js_dom_collect_child_nodes(DomElement* elem, bool elements_only) {
+static Item dom_collect_child_nodes(DomElement* elem, bool elements_only) {
     Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
     arr->type_id = LMD_TYPE_ARRAY;
     arr->items = nullptr;
     arr->length = 0;
     arr->capacity = 0;
-    DomNode* child = js_dom_first_script_visible_child(elem);
+    DomNode* child = dom_first_script_visible_child(elem);
     while (child) {
         if (child->is_element()) {
-            array_push(arr, js_dom_wrap_element(child->as_element()));
+            array_push(arr, dom_wrap_element(child->as_element()));
         } else if (!elements_only) {
             // text and comment nodes share the DOM wrapper path.
-            array_push(arr, js_dom_wrap_element((DomElement*)(void*)child));
+            array_push(arr, dom_wrap_element((DomElement*)(void*)child));
         }
-        child = js_dom_next_script_visible_sibling(child);
+        child = dom_next_script_visible_sibling(child);
     }
     return (Item){.array = arr};
 }
@@ -8895,13 +8895,13 @@ static bool _form_named_getter_visit(DomElement* elem, void* ctx) {
     if (_is_listed_form_control(elem)) {
         const char* key = _form_control_name_or_id(elem);
         if (key && strcmp(key, state->name) == 0) {
-            js_array_push(state->matches, js_dom_wrap_element(elem));
+            js_array_push(state->matches, dom_wrap_element(elem));
         }
     }
     return true;
 }
 
-static bool js_dom_get_textlike_property(DomNode* node, Item elem_item,
+static bool dom_get_textlike_property(DomNode* node, Item elem_item,
         Item prop_name, const char* prop, const char* content,
         int64_t length, int64_t node_type, const char* node_name,
         bool is_text, Item* result) {
@@ -8923,25 +8923,25 @@ static bool js_dom_get_textlike_property(DomNode* node, Item elem_item,
         return true;
     }
     if (strcmp(prop, "parentNode") == 0) {
-        *result = js_dom_parent_node_or_null(node);
+        *result = dom_parent_node_or_null(node);
         return true;
     }
     if (strcmp(prop, "parentElement") == 0) {
-        *result = js_dom_parent_element_or_null(node);
+        *result = dom_parent_element_or_null(node);
         return true;
     }
     if (strcmp(prop, "isConnected") == 0) {
-        *result = (Item){.item = b2it(js_dom_node_is_connected(node))};
+        *result = (Item){.item = b2it(dom_node_is_connected(node))};
         return true;
     }
     if (strcmp(prop, "nextSibling") == 0) {
-        DomNode* sibling = js_dom_next_script_visible_sibling(node);
-        *result = sibling ? js_dom_wrap_element((void*)sibling) : ItemNull;
+        DomNode* sibling = dom_next_script_visible_sibling(node);
+        *result = sibling ? dom_wrap_element((void*)sibling) : ItemNull;
         return true;
     }
     if (strcmp(prop, "previousSibling") == 0) {
-        DomNode* sibling = js_dom_prev_script_visible_sibling(node);
-        *result = sibling ? js_dom_wrap_element((void*)sibling) : ItemNull;
+        DomNode* sibling = dom_prev_script_visible_sibling(node);
+        *result = sibling ? dom_wrap_element((void*)sibling) : ItemNull;
         return true;
     }
     if (strcmp(prop, "childNodes") == 0) {
@@ -8955,7 +8955,7 @@ static bool js_dom_get_textlike_property(DomNode* node, Item elem_item,
         return true;
     }
     if (strcmp(prop, "ownerDocument") == 0) {
-        *result = js_dom_owner_document_from_node(node->parent);
+        *result = dom_owner_document_from_node(node->parent);
         return true;
     }
     if (is_text) {
@@ -8985,14 +8985,14 @@ static bool js_dom_get_textlike_property(DomNode* node, Item elem_item,
     return expando_get_property(node, prop_name, result);
 }
 
-extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
+extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // Range / Selection wrappers also live under the DOM resource carrier and route here.
 
-    DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
+    DomNode* node = (DomNode*)dom_unwrap_element(elem_item);
     const char* prop = fn_to_cstr(prop_name);
-    JsDomPropId prop_id = js_dom_prop_id(prop);
+    JsDomPropId prop_id = dom_prop_id(prop);
     if (!node) {
-        log_debug("js_dom_get_property: not a DOM node");
+        log_debug("dom_get_property: not a DOM node");
         return ItemNull;
     }
 
@@ -9035,27 +9035,27 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (node->is_text()) {
         DomText* text_node = node->as_text();
         Item result = ItemNull;
-        if (js_dom_get_textlike_property(node, elem_item, prop_name, prop,
+        if (dom_get_textlike_property(node, elem_item, prop_name, prop,
                 text_node->text, dom_text_utf16_length(text_node), 3,
                 "#text", true, &result)) return result;
-        log_debug("js_dom_get_property: unknown text node property '%s'", prop);
+        log_debug("dom_get_property: unknown text node property '%s'", prop);
         return make_js_undefined();
     }
 
     if (node->is_comment()) {
         DomComment* comment_node = node->as_comment();
         Item result = ItemNull;
-        if (js_dom_get_textlike_property(node, elem_item, prop_name, prop,
+        if (dom_get_textlike_property(node, elem_item, prop_name, prop,
                 comment_node->content, comment_node->length,
                 comment_node->node_type, "#comment", false, &result)) return result;
-        log_debug("js_dom_get_property: unknown comment node property '%s'", prop);
+        log_debug("dom_get_property: unknown comment node property '%s'", prop);
         return make_js_undefined();
     }
 
     // Element properties below — safe to cast
     DomElement* elem = node->as_element();
     if (!elem) {
-        log_debug("js_dom_get_property: node is not an element for property '%s'", prop);
+        log_debug("dom_get_property: node is not an element for property '%s'", prop);
         return ItemNull;
     }
 
@@ -9085,7 +9085,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // DocumentFragment, so cloning does not clone the hidden template wrapper.
     if (prop_id == JS_DOM_PROP_CONTENT &&
         elem->tag_name && strcasecmp(elem->tag_name, "template") == 0) {
-        return js_dom_template_content(elem);
+        return dom_template_content(elem);
     }
 
     // namespaceURI. Prefer the URI recorded by createElementNS (kept as a
@@ -9096,21 +9096,21 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         if (ns && ns[0] != '\0') {
             return js_name_item(ns);
         }
-        if (js_dom_element_is_svg(elem)) {
+        if (dom_element_is_svg(elem)) {
             return js_name_item("http://www.w3.org/2000/svg");
         }
         return js_name_item("http://www.w3.org/1999/xhtml");
     }
 
     if (prop_id == JS_DOM_PROP_OWNER_SVGELEMENT) {
-        if (!js_dom_element_is_svg(elem) || strcasecmp(elem->tag_name, "svg") == 0) {
+        if (!dom_element_is_svg(elem) || strcasecmp(elem->tag_name, "svg") == 0) {
             return ItemNull;
         }
         for (DomNode* current = elem->parent; current; current = current->parent) {
             if (!current->is_element()) continue;
             DomElement* ancestor = current->as_element();
             if (ancestor && ancestor->tag_name && strcasecmp(ancestor->tag_name, "svg") == 0) {
-                return js_dom_wrap_element(ancestor);
+                return dom_wrap_element(ancestor);
             }
         }
         return ItemNull;
@@ -9146,15 +9146,15 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return js_name_item(slot_name ? slot_name : "");
     }
 
-    if (js_dom_element_is_svg(elem) && prop_id == JS_DOM_PROP_TRANSFORM) {
-        return js_dom_svg_get_transform_list(elem);
+    if (dom_element_is_svg(elem) && prop_id == JS_DOM_PROP_TRANSFORM) {
+        return dom_svg_get_transform_list(elem);
     }
 
     // SVGAnimatedString is distinct from HTML's string-valued className.
     // Keep baseVal live so SVG libraries changing it update the actual class
     // attribute used by selector matching and rendering.
-    if (js_dom_element_is_svg(elem) && prop_id == JS_DOM_PROP_CLASS_NAME) {
-        return js_dom_svg_get_animated_class_name(elem);
+    if (dom_element_is_svg(elem) && prop_id == JS_DOM_PROP_CLASS_NAME) {
+        return dom_svg_get_animated_class_name(elem);
     }
 
     // className (space-joined class list)
@@ -9165,12 +9165,12 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (prop_id == JS_DOM_PROP_CLASS_LIST) {
         // Nested member chains use the generic property path, so classList
         // must expose the same live owner-bound operations as the MIR fast path.
-        return js_dom_get_classlist_wrapper(elem, elem_item);
+        return dom_get_classlist_wrapper(elem, elem_item);
     }
 
     // style — live CSSStyleDeclaration-like wrapper for inline style.
     if (prop_id == JS_DOM_PROP_STYLE) {
-        return js_dom_get_inline_style_wrapper(elem);
+        return dom_get_inline_style_wrapper(elem);
     }
 
     // textContent / innerText (recursive text extraction)
@@ -9185,10 +9185,10 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // innerHTML (recursive HTML serialization of children)
     if (prop_id == JS_DOM_PROP_INNER_HTML) {
         StrBuf* sb = strbuf_new_cap(256);
-        DomNode* child = js_dom_first_script_visible_child(elem);
+        DomNode* child = dom_first_script_visible_child(elem);
         while (child) {
             collect_inner_html(child, sb);
-            child = js_dom_next_script_visible_sibling(child);
+            child = dom_next_script_visible_sibling(child);
         }
         String* result = heap_create_name(sb->str ? sb->str : "");
         strbuf_free(sb);
@@ -9214,32 +9214,32 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // childElementCount
     if (prop_id == JS_DOM_PROP_CHILD_ELEMENT_COUNT) {
         int count = 0;
-        DomNode* child = js_dom_first_script_visible_child(elem);
+        DomNode* child = dom_first_script_visible_child(elem);
         while (child) {
             if (child->is_element()) count++;
-            child = js_dom_next_script_visible_sibling(child);
+            child = dom_next_script_visible_sibling(child);
         }
         return (Item){.item = i2it((int64_t)count)};
     }
 
     // children (array of child DOM elements only)
     if (prop_id == JS_DOM_PROP_CHILDREN) {
-        return js_dom_collect_child_nodes(elem, true);
+        return dom_collect_child_nodes(elem, true);
     }
 
     // parentElement
     if (prop_id == JS_DOM_PROP_PARENT_ELEMENT) {
-        return js_dom_parent_element_or_null((DomNode*)elem);
+        return dom_parent_element_or_null((DomNode*)elem);
     }
 
     // parentNode (includes text nodes — returns any parent)
     if (prop_id == JS_DOM_PROP_PARENT_NODE) {
-        return js_dom_parent_node_or_null((DomNode*)elem);
+        return dom_parent_node_or_null((DomNode*)elem);
     }
 
     // isConnected — true iff the shadow-inclusive root is the Document.
     if (prop_id == JS_DOM_PROP_IS_CONNECTED) {
-        return (Item){.item = b2it(js_dom_node_is_connected((DomNode*)elem) ? 1 : 0)};
+        return (Item){.item = b2it(dom_node_is_connected((DomNode*)elem) ? 1 : 0)};
     }
 
     // attributes → a NamedNodeMap-like array of {name, value} entries with
@@ -9259,7 +9259,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         const char** attr_names = elem->attribute_names(&attr_count);
         for (int i = 0; attr_names && i < attr_count; i++) {
             const char* name = attr_names[i];
-            if (js_dom_is_internal_attr(name)) continue;
+            if (dom_is_internal_attr(name)) continue;
             const char* value = elem->get_attribute(name);
             Item pair = js_new_object();
             Item name_item = js_name_item(name);
@@ -9289,80 +9289,80 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // firstChild (any node type, not just elements)
     if (prop_id == JS_DOM_PROP_FIRST_CHILD) {
-        DomNode* child = js_dom_first_script_visible_child(elem);
+        DomNode* child = dom_first_script_visible_child(elem);
         if (!child) return ItemNull;
-        if (child->is_element()) return js_dom_wrap_element(child->as_element());
+        if (child->is_element()) return dom_wrap_element(child->as_element());
         // wrap text node
-        return js_dom_wrap_element((DomElement*)(void*)child);
+        return dom_wrap_element((DomElement*)(void*)child);
     }
 
     // lastChild (any node type)
     if (prop_id == JS_DOM_PROP_LAST_CHILD) {
-        DomNode* child = js_dom_last_script_visible_child(elem);
+        DomNode* child = dom_last_script_visible_child(elem);
         if (!child) return ItemNull;
-        if (child->is_element()) return js_dom_wrap_element(child->as_element());
-        return js_dom_wrap_element((DomElement*)(void*)child);
+        if (child->is_element()) return dom_wrap_element(child->as_element());
+        return dom_wrap_element((DomElement*)(void*)child);
     }
 
     // nextSibling (any node type)
     if (prop_id == JS_DOM_PROP_NEXT_SIBLING) {
-        DomNode* sib = js_dom_next_script_visible_sibling((DomNode*)elem);
+        DomNode* sib = dom_next_script_visible_sibling((DomNode*)elem);
         if (!sib) return ItemNull;
-        if (sib->is_element()) return js_dom_wrap_element(sib->as_element());
-        return js_dom_wrap_element((DomElement*)(void*)sib);
+        if (sib->is_element()) return dom_wrap_element(sib->as_element());
+        return dom_wrap_element((DomElement*)(void*)sib);
     }
 
     // previousSibling (any node type)
     if (prop_id == JS_DOM_PROP_PREVIOUS_SIBLING) {
-        DomNode* sib = js_dom_prev_script_visible_sibling((DomNode*)elem);
+        DomNode* sib = dom_prev_script_visible_sibling((DomNode*)elem);
         if (!sib) return ItemNull;
-        if (sib->is_element()) return js_dom_wrap_element(sib->as_element());
-        return js_dom_wrap_element((DomElement*)(void*)sib);
+        if (sib->is_element()) return dom_wrap_element(sib->as_element());
+        return dom_wrap_element((DomElement*)(void*)sib);
     }
 
     // firstElementChild
     if (prop_id == JS_DOM_PROP_FIRST_ELEMENT_CHILD) {
-        DomNode* child = js_dom_first_script_visible_child(elem);
+        DomNode* child = dom_first_script_visible_child(elem);
         while (child) {
-            if (child->is_element()) return js_dom_wrap_element(child->as_element());
-            child = js_dom_next_script_visible_sibling(child);
+            if (child->is_element()) return dom_wrap_element(child->as_element());
+            child = dom_next_script_visible_sibling(child);
         }
         return ItemNull;
     }
 
     // lastElementChild
     if (prop_id == JS_DOM_PROP_LAST_ELEMENT_CHILD) {
-        DomNode* child = js_dom_last_script_visible_child(elem);
+        DomNode* child = dom_last_script_visible_child(elem);
         while (child) {
-            if (child->is_element()) return js_dom_wrap_element(child->as_element());
-            child = js_dom_prev_script_visible_sibling(child);
+            if (child->is_element()) return dom_wrap_element(child->as_element());
+            child = dom_prev_script_visible_sibling(child);
         }
         return ItemNull;
     }
 
     // nextElementSibling
     if (prop_id == JS_DOM_PROP_NEXT_ELEMENT_SIBLING) {
-        DomNode* sib = js_dom_next_script_visible_sibling((DomNode*)elem);
+        DomNode* sib = dom_next_script_visible_sibling((DomNode*)elem);
         while (sib) {
-            if (sib->is_element()) return js_dom_wrap_element(sib->as_element());
-            sib = js_dom_next_script_visible_sibling(sib);
+            if (sib->is_element()) return dom_wrap_element(sib->as_element());
+            sib = dom_next_script_visible_sibling(sib);
         }
         return ItemNull;
     }
 
     // previousElementSibling
     if (prop_id == JS_DOM_PROP_PREVIOUS_ELEMENT_SIBLING) {
-        DomNode* sib = js_dom_prev_script_visible_sibling((DomNode*)elem);
+        DomNode* sib = dom_prev_script_visible_sibling((DomNode*)elem);
         while (sib) {
-            if (sib->is_element()) return js_dom_wrap_element(sib->as_element());
-            sib = js_dom_prev_script_visible_sibling(sib);
+            if (sib->is_element()) return dom_wrap_element(sib->as_element());
+            sib = dom_prev_script_visible_sibling(sib);
         }
         return ItemNull;
     }
 
     // childNodes (all children including text nodes)
     if (prop_id == JS_DOM_PROP_CHILD_NODES) {
-        return js_dom_collect_child_nodes(elem, false);
+        return dom_collect_child_nodes(elem, false);
     }
 
     // children (array of child DOM elements only)
@@ -9372,12 +9372,12 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         arr->items = nullptr;
         arr->length = 0;
         arr->capacity = 0;
-        DomNode* child = js_dom_first_script_visible_child(elem);
+        DomNode* child = dom_first_script_visible_child(elem);
         while (child) {
             if (child->is_element()) {
-                array_push(arr, js_dom_wrap_element(child->as_element()));
+                array_push(arr, dom_wrap_element(child->as_element()));
             }
-            child = js_dom_next_script_visible_sibling(child);
+            child = dom_next_script_visible_sibling(child);
         }
         return (Item){.array = arr};
     }
@@ -9385,10 +9385,10 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // length (for NodeList / HTMLCollection-like results)
     if (prop_id == JS_DOM_PROP_LENGTH) {
         int count = 0;
-        DomNode* child = js_dom_first_script_visible_child(elem);
+        DomNode* child = dom_first_script_visible_child(elem);
         while (child) {
             if (child->is_element()) count++;
-            child = js_dom_next_script_visible_sibling(child);
+            child = dom_next_script_visible_sibling(child);
         }
         return (Item){.item = i2it((int64_t)count)};
     }
@@ -9402,15 +9402,15 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // offsetWidth / offsetHeight — border box dimensions
     if (prop_id == JS_DOM_PROP_OFFSET_WIDTH) {
-        return (Item){.item = i2it(js_dom_geometry_dimension(elem, true))};
+        return (Item){.item = i2it(dom_geometry_dimension(elem, true))};
     }
     if (prop_id == JS_DOM_PROP_OFFSET_HEIGHT) {
-        return (Item){.item = i2it(js_dom_geometry_dimension(elem, false))};
+        return (Item){.item = i2it(dom_geometry_dimension(elem, false))};
     }
 
     // clientWidth / clientHeight — border box minus borders
     if (prop_id == JS_DOM_PROP_CLIENT_WIDTH) {
-        js_dom_ensure_geometry_snapshot(elem->doc);
+        dom_ensure_geometry_snapshot(elem->doc);
         float bw = 0;
         if (elem->bound && elem->boundary()->border) {
             bw = elem->boundary()->border->width.left + elem->boundary()->border->width.right;
@@ -9418,7 +9418,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = i2it((int64_t)(elem->width - bw))};
     }
     if (prop_id == JS_DOM_PROP_CLIENT_HEIGHT) {
-        js_dom_ensure_geometry_snapshot(elem->doc);
+        dom_ensure_geometry_snapshot(elem->doc);
         float bh = 0;
         if (elem->bound && elem->boundary()->border) {
             bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
@@ -9428,21 +9428,21 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // offsetTop / offsetLeft — position relative to offsetParent
     if (prop_id == JS_DOM_PROP_OFFSET_TOP) {
-        js_dom_ensure_geometry_snapshot(elem->doc);
+        dom_ensure_geometry_snapshot(elem->doc);
         if (_is_tag(elem, "body") || _is_tag(elem, "html"))
             return (Item){.item = i2it(0)};
-        if (elem->doc && js_dom_has_committed_geometry_snapshot(elem->doc))
-            return (Item){.item = i2it(js_dom_offset_coordinate(elem, false))};
+        if (elem->doc && dom_has_committed_geometry_snapshot(elem->doc))
+            return (Item){.item = i2it(dom_offset_coordinate(elem, false))};
         return (Item){.item = i2it((int64_t)elem->y)};
     }
     if (prop_id == JS_DOM_PROP_OFFSET_LEFT) {
-        js_dom_ensure_geometry_snapshot(elem->doc);
+        dom_ensure_geometry_snapshot(elem->doc);
         if (_is_tag(elem, "body") || _is_tag(elem, "html"))
             return (Item){.item = i2it(0)};
-        if (elem->doc && js_dom_has_committed_geometry_snapshot(elem->doc))
-            return (Item){.item = i2it(js_dom_offset_coordinate(elem, true))};
+        if (elem->doc && dom_has_committed_geometry_snapshot(elem->doc))
+            return (Item){.item = i2it(dom_offset_coordinate(elem, true))};
         if (elem->x == 0.0f) {
-            int64_t synthetic_left = js_dom_synthetic_inline_offset_left(elem);
+            int64_t synthetic_left = dom_synthetic_inline_offset_left(elem);
             if (synthetic_left > 0) {
                 return (Item){.item = i2it(synthetic_left)};
             }
@@ -9452,20 +9452,20 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // offsetParent — nearest positioned ancestor (or body)
     if (prop_id == JS_DOM_PROP_OFFSET_PARENT) {
-        js_dom_ensure_geometry_snapshot(elem->doc);
-        DomElement* parent = js_dom_offset_parent_element(elem);
-        return parent ? js_dom_wrap_element(parent) : ItemNull;
+        dom_ensure_geometry_snapshot(elem->doc);
+        DomElement* parent = dom_offset_parent_element(elem);
+        return parent ? dom_wrap_element(parent) : ItemNull;
     }
 
     // scrollWidth / scrollHeight — total scrollable content size
     if (prop_id == JS_DOM_PROP_SCROLL_WIDTH) {
-        js_dom_ensure_geometry_snapshot(elem->doc);
+        dom_ensure_geometry_snapshot(elem->doc);
         float cw = elem->content_width;
         float bw = elem->width;
         return (Item){.item = i2it((int64_t)(cw > bw ? cw : bw))};
     }
     if (prop_id == JS_DOM_PROP_SCROLL_HEIGHT) {
-        js_dom_ensure_geometry_snapshot(elem->doc);
+        dom_ensure_geometry_snapshot(elem->doc);
         float ch = elem->content_height;
         float bh = elem->height;
         return (Item){.item = i2it((int64_t)(ch > bh ? ch : bh))};
@@ -9559,7 +9559,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             int64_t n = js_array_length(arr);
             int first_non_disabled = -1;
             for (int64_t i = 0; i < n; i++) {
-                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
+                DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
                 if (!opt) continue;
                 if (_get_selectedness(opt)) return (Item){.item = i2it(i)};
                 if (first_non_disabled < 0 && !opt->has_attribute("disabled"))
@@ -9627,14 +9627,14 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             int64_t n = js_array_length(arr);
             int first_nd = -1;
             for (int64_t i = 0; i < n; i++) {
-                DomElement* o = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, i));
+                DomElement* o = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
                 if (!o) continue;
                 if (_get_selectedness(o)) return (Item){.item = b2it(false)};
                 if (first_nd < 0 && !o->has_attribute("disabled"))
                     first_nd = (int)i; // INT_CAST_OK: option index
             }
             if (first_nd < 0) return (Item){.item = b2it(false)};
-            DomElement* first = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, first_nd));
+            DomElement* first = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, first_nd));
             return (Item){.item = b2it(first == elem)};
         }
         if (prop_id == JS_DOM_PROP_INDEX) {
@@ -9648,7 +9648,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
                     if (p->is_element()) {
                         DomElement* pe = (DomElement*)p;
                         if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0)
-                            return js_dom_wrap_element(pe);
+                            return dom_wrap_element(pe);
                     }
                 }
             }
@@ -9703,14 +9703,14 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         if (prop_id == JS_DOM_PROP_SELECTION_START) {
             tc_ensure_init(elem);
             uint32_t start = 0;
-            DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+            DocState* state = elem->doc ? elem->doc->state : dom_current_state();
             form_control_get_selection(state, (View*)elem, &start, NULL, NULL);
             return (Item){.item = i2it((int64_t)start)};
         }
         if (prop_id == JS_DOM_PROP_SELECTION_END) {
             tc_ensure_init(elem);
             uint32_t end = 0;
-            DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+            DocState* state = elem->doc ? elem->doc->state : dom_current_state();
             form_control_get_selection(state, (View*)elem, NULL, &end, NULL);
             return (Item){.item = i2it((int64_t)end)};
         }
@@ -9718,7 +9718,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             tc_ensure_init(elem);
             const char* d = "none";
             uint8_t direction = 0;
-            DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+            DocState* state = elem->doc ? elem->doc->state : dom_current_state();
             form_control_get_selection(state, (View*)elem, NULL, NULL, &direction);
             if (direction == 1) d = "forward";
             else if (direction == 2) d = "backward";
@@ -9742,7 +9742,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // F-1: HTMLFormElement.elements — snapshot array of listed form controls
     if (_is_tag(elem, "form") && prop_id == JS_DOM_PROP_ELEMENTS) {
-        return js_dom_live_form_elements_bridge((void*)elem);
+        return dom_live_form_elements_bridge((void*)elem);
     }
     // F-1: HTMLFormElement.length → number of listed controls
     if (_is_tag(elem, "form") && prop_id == JS_DOM_PROP_LENGTH) {
@@ -9917,19 +9917,19 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // HTMLOutputElement.defaultValue tracks text in default mode and the saved
     // reset value after a value setter switches the control to value mode.
     if (prop_id == JS_DOM_PROP_DEFAULT_VALUE && _is_tag(elem, "output")) {
-        return js_dom_output_default_value(elem);
+        return dom_output_default_value(elem);
     }
     // HTMLOutputElement.value is always the current descendant text content.
     if (prop_id == JS_DOM_PROP_VALUE && _is_tag(elem, "output")) {
-        return js_dom_text_content_item(elem);
+        return dom_text_content_item(elem);
     }
     // tabIndex — reflects `tabindex` as integer, otherwise returns the HTML
     // default for elements that are naturally focusable.
     if (prop_id == JS_DOM_PROP_TAB_INDEX) {
         long parsed = 0;
-        if (js_dom_has_valid_int_attr(elem, "tabindex", &parsed))
+        if (dom_has_valid_int_attr(elem, "tabindex", &parsed))
             return (Item){.item = i2it(parsed)};
-        return (Item){.item = i2it(js_dom_default_tab_index(elem))};
+        return (Item){.item = i2it(dom_default_tab_index(elem))};
     }
     // CE-4 (Radiant_Design_Content_Editable.md §7): inputMode/enterKeyHint
     // are enumerated reflected attributes. The IDL getter canonicalises the
@@ -9979,7 +9979,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         if (!elem->has_attribute("contenteditable")) {
             return js_name_item("inherit");
         }
-        const char* out = js_dom_normalize_contenteditable(
+        const char* out = dom_normalize_contenteditable(
             elem->get_attribute("contenteditable"));
         return js_name_item(out ? out : "inherit");
     }
@@ -10008,19 +10008,19 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = ITEM_FALSE};
     }
     if (prop_id == JS_DOM_PROP_AUTOCAPITALIZE) {
-        return js_name_item(js_dom_get_autocapitalize(elem));
+        return js_name_item(dom_get_autocapitalize(elem));
     }
     if (prop_id == JS_DOM_PROP_AUTOCORRECT) {
-        return (Item){.item = b2it(js_dom_get_autocorrect(elem))};
+        return (Item){.item = b2it(dom_get_autocorrect(elem))};
     }
     if (prop_id == JS_DOM_PROP_SPELLCHECK) {
-        return (Item){.item = b2it(js_dom_get_spellcheck(elem))};
+        return (Item){.item = b2it(dom_get_spellcheck(elem))};
     }
     if (prop_id == JS_DOM_PROP_WRITING_SUGGESTIONS) {
-        return js_name_item(js_dom_get_writing_suggestions(elem));
+        return js_name_item(dom_get_writing_suggestions(elem));
     }
     if (prop_id == JS_DOM_PROP_DATASET) {
-        return js_dom_dataset_property(elem_item);
+        return dom_dataset_property(elem_item);
     }
     // autofocus boolean reflection (HTML global attribute).
     if (prop_id == JS_DOM_PROP_AUTOFOCUS) {
@@ -10104,7 +10104,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (_is_tag(elem, "form") && prop && *prop) {
         // Skip standard IDL props (already handled above) and known DOM methods
         // to avoid shadowing them.
-        if (!js_dom_form_named_getter_reserved_name(prop)) {
+        if (!dom_form_named_getter_reserved_name(prop)) {
             Item matches = js_array_new(0);
             FormNamedGetterCtx named_ctx = { prop, matches };
             dom_walk_elements(elem->first_child, _form_named_getter_visit, &named_ctx);
@@ -10125,7 +10125,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // live in the expando table. Prefer the compiled handler over the raw
     // attribute text so EventTarget dispatch can invoke it.
     char event_prop_name[64];
-    if (js_dom_event_attr_name(prop, event_prop_name, sizeof(event_prop_name))) {
+    if (dom_event_attr_name(prop, event_prop_name, sizeof(event_prop_name))) {
         Item exp_map = expando_get_map((DomNode*)elem);
         if (exp_map.item != ITEM_NULL) {
             Item val = js_get_name_key(exp_map, event_prop_name);
@@ -10159,7 +10159,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     Item proto_value = js_prototype_lookup_ex(elem_item, prop_name, &proto_found);
     if (proto_found) return proto_value;
 
-    log_debug("js_dom_get_property: unknown property '%s' on <%s>",
+    log_debug("dom_get_property: unknown property '%s' on <%s>",
               prop, elem->tag_name ? elem->tag_name : "?");
     return make_js_undefined();
 }
@@ -10204,15 +10204,15 @@ static bool js_inline_style_cssom_property_exposed(const char* css_prop) {
     return true;
 }
 
-extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item value) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
+extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value) {
+    DomNode* node = (DomNode*)dom_unwrap_element(elem_item);
     if (!node) {
-        log_debug("js_dom_set_property: not a DOM node");
+        log_debug("dom_set_property: not a DOM node");
         return ItemNull;
     }
 
     const char* prop = fn_to_cstr(prop_name);
-    JsDomPropId prop_id = js_dom_prop_id(prop);
+    JsDomPropId prop_id = dom_prop_id(prop);
     if (!prop) return ItemNull;
 
     // text node CharacterData aliases
@@ -10223,11 +10223,11 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         DomText* text_node = node->as_text();
         // CharacterData setters accept DOMString, so numeric/boolean values
         // must be converted instead of being mistaken for an absent string.
-        const char* new_text = js_dom_to_dom_string_cstr(value);
+        const char* new_text = dom_to_dom_string_cstr(value);
         if (new_text) {
             uint32_t old_u16_len = dom_text_utf16_length(text_node);
-            JS_ASSIGN_OR_RETURN(set_result, js_dom_replace_text_data(text_node, 0, old_u16_len, new_text));
-            log_debug("js_dom_set_property: set text node data='%.30s'", new_text);
+            JS_ASSIGN_OR_RETURN(set_result, dom_replace_text_data(text_node, 0, old_u16_len, new_text));
+            log_debug("dom_set_property: set text node data='%.30s'", new_text);
         }
         return value;
     }
@@ -10251,8 +10251,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         const char* style_text = fn_to_cstr(value);
         elem->set_attribute("style", style_text ? style_text : "");
         elem->set_styles_resolved(false);
-        js_dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
-        log_debug("js_dom_set_property: set style='%.50s' on <%s>",
+        dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
+        log_debug("dom_set_property: set style='%.50s' on <%s>",
                   style_text ? style_text : "", elem->tag_name ? elem->tag_name : "?");
         return value;
     }
@@ -10295,7 +10295,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             } else {
                 elem->doc->pending_viewport_scroll_x = scroll_value;
             }
-            log_debug("js_dom_set_property: pending viewport %s=%.1f on <%s>",
+            log_debug("dom_set_property: pending viewport %s=%.1f on <%s>",
                       prop, scroll_value, elem->tag_name);
             return value;
         }
@@ -10341,7 +10341,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
                     elem->scroll()->pane, scroll_value, current_y, false);
                 elem->set_has_pending_element_scroll_x(false);
             }
-            log_debug("js_dom_set_property: set %s=%.1f on <%s>",
+            log_debug("dom_set_property: set %s=%.1f on <%s>",
                       prop, scroll_value, elem->tag_name ? elem->tag_name : "?");
             return value;
         }
@@ -10355,7 +10355,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             elem->set_pending_scroll_x(scroll_value);
             elem->set_has_pending_element_scroll_x(true);
         }
-        log_debug("js_dom_set_property: pending element %s=%.1f on <%s>",
+        log_debug("dom_set_property: pending element %s=%.1f on <%s>",
                   prop, scroll_value, elem->tag_name ? elem->tag_name : "?");
         return value;
     }
@@ -10365,8 +10365,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         elem->set_attribute("srcdoc", srcdoc ? srcdoc : "");
         // srcdoc can be assigned after the browsing context was lazily cached;
         // rehydrate that existing blank document before dispatching its load.
-        js_dom_after_srcdoc_set((void*)elem);
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_after_srcdoc_set((void*)elem);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
 
@@ -10377,8 +10377,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             // set_attribute owns the pooled class cache; writing class_names
             // directly bypasses its persistent-field lifetime bookkeeping.
             elem->set_attribute("class", class_str);
-            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
-            log_debug("js_dom_set_property: set className='%s' on <%s>",
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            log_debug("dom_set_property: set className='%s' on <%s>",
                       class_str, elem->tag_name ? elem->tag_name : "?");
         }
         return value;
@@ -10399,34 +10399,34 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         if (!s) s = "";
         if (*s == '\0') {
             elem->remove_attribute("contenteditable");
-            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
-        const char* normalized = js_dom_normalize_contenteditable(s);
+        const char* normalized = dom_normalize_contenteditable(s);
         if (!normalized) {
-            log_debug("js_dom_contentEditable_setter_syntax_error: invalid value '%s'", s);
-            return js_dom_throw_syntax_error("Invalid contentEditable value");
+            log_debug("dom_contentEditable_setter_syntax_error: invalid value '%s'", s);
+            return dom_throw_syntax_error("Invalid contentEditable value");
         }
         if (strcmp(normalized, "inherit") == 0) {
             elem->remove_attribute("contenteditable");
-            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
         elem->set_attribute("contenteditable", normalized);
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
 
     if (prop_id == JS_DOM_PROP_AUTOCAPITALIZE) {
-        const char* s = js_dom_to_attr_cstr(value);
+        const char* s = dom_to_attr_cstr(value);
         elem->set_attribute("autocapitalize", s);
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
 
     if (prop_id == JS_DOM_PROP_AUTOCORRECT) {
         elem->set_attribute("autocorrect", js_is_truthy(value) ? "on" : "off");
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
 
@@ -10438,7 +10438,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             s = raw ? raw : "";
         }
         elem->set_attribute("spellcheck", s);
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
 
@@ -10446,10 +10446,10 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         const char* s = js_is_truthy(value) ? "true" : "false";
         TypeId vt = get_type_id(value);
         if (vt == LMD_TYPE_STRING || vt == LMD_TYPE_SYMBOL) {
-            s = js_dom_to_attr_cstr(value);
+            s = dom_to_attr_cstr(value);
         }
         elem->set_attribute("writingsuggestions", s);
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
 
@@ -10463,18 +10463,18 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             id_copy[len] = '\0';
             elem->id = id_copy;
             elem->set_attribute("id", id_str);
-            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
-            log_debug("js_dom_set_property: set id='%s' on <%s>",
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            log_debug("dom_set_property: set id='%s' on <%s>",
                       id_str, elem->tag_name ? elem->tag_name : "?");
         }
         return value;
     }
 
     if (prop_id == JS_DOM_PROP_SLOT) {
-        const char* slot_name = js_dom_to_attr_cstr(value);
+        const char* slot_name = dom_to_attr_cstr(value);
         const char* old_value = elem->get_attribute("slot");
         elem->set_attribute("slot", slot_name ? slot_name : "");
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                                elem->parent, "slot", old_value);
         return value;
     }
@@ -10482,9 +10482,9 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // innerText: replace children while preserving line breaks as <br> nodes.
     if (prop_id == JS_DOM_PROP_INNER_TEXT) {
         // HTMLElement.innerText is a DOMString setter, so convert primitive values too.
-        const char* text_str = js_dom_to_dom_string_cstr(value);
+        const char* text_str = dom_to_dom_string_cstr(value);
         if (text_str) {
-            js_dom_detach_all_children(elem);
+            dom_detach_all_children(elem);
 
             const char* segment = text_str;
             const char* p = text_str;
@@ -10518,11 +10518,11 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
                 }
                 p++;
             }
-            log_debug("js_dom_set_property: set innerText on <%s>",
+            log_debug("dom_set_property: set innerText on <%s>",
                       elem->tag_name ? elem->tag_name : "?");
             // innerText is parent-local child replacement, so keep the detailed
             // remove/insert records for incremental reconcile.
-            js_dom_mutation_notify();
+            dom_mutation_notify();
         }
         return value;
     }
@@ -10532,10 +10532,10 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         // Node.textContent performs DOMString conversion; reactive libraries
         // routinely assign numbers directly from their data model.
         const char* text_str = value.item == ITEM_NULL
-            ? "" : js_dom_to_dom_string_cstr(value);
+            ? "" : dom_to_dom_string_cstr(value);
         if (text_str) {
-            if (!js_dom_replace_text_content(elem, text_str)) return ItemNull;
-            log_debug("js_dom_set_property: set textContent on <%s>",
+            if (!dom_replace_text_content(elem, text_str)) return ItemNull;
+            log_debug("dom_set_property: set textContent on <%s>",
                       elem->tag_name ? elem->tag_name : "?");
         }
         return value;
@@ -10545,7 +10545,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     if (prop_id == JS_DOM_PROP_INNER_HTML) {
         const char* html_str = fn_to_cstr(value);
         if (!html_str) return ItemNull;
-        js_dom_replace_inner_html(elem, html_str, true);
+        dom_replace_inner_html(elem, html_str, true);
         return value;
     }
 
@@ -10584,10 +10584,10 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
 
     if (_is_tag(elem, "output")) {
         if (prop_id == JS_DOM_PROP_DEFAULT_VALUE) {
-            if (!js_dom_output_is_value_mode(elem)) {
-                return js_dom_output_set_text(elem, value) ? value : ItemNull;
+            if (!dom_output_is_value_mode(elem)) {
+                return dom_output_set_text(elem, value) ? value : ItemNull;
             }
-            const char* raw = js_dom_to_dom_string_cstr(value);
+            const char* raw = dom_to_dom_string_cstr(value);
             RootFrame roots(2);
             Rooted<Item> value_root(roots, js_name_item(raw ? raw : ""));
             Rooted<Item> exp_root(roots, expando_get_or_create_map((DomNode*)elem));
@@ -10596,16 +10596,16 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             return value;
         }
         if (prop_id == JS_DOM_PROP_VALUE) {
-            if (!js_dom_output_is_value_mode(elem)) {
+            if (!dom_output_is_value_mode(elem)) {
                 RootFrame roots(2);
                 Rooted<Item> exp_root(roots, expando_get_or_create_map((DomNode*)elem));
-                Rooted<Item> default_root(roots, js_dom_text_content_item(elem));
+                Rooted<Item> default_root(roots, dom_text_content_item(elem));
                 if (exp_root.get().item == ITEM_NULL) return ItemNull;
                 js_set_key_cstr(exp_root.get(), "__outputDefaultValue", default_root.get());
                 js_set_key_cstr(exp_root.get(), "__outputValueMode",
                     (Item){.item = b2it(true)});
             }
-            return js_dom_output_set_text(elem, value) ? value : ItemNull;
+            return dom_output_set_text(elem, value) ? value : ItemNull;
         }
     }
 
@@ -10616,8 +10616,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         if (prop_id == JS_DOM_PROP_VALUE) {
             const char* sv = fn_to_cstr(value);
             if (!sv) sv = "";
-            js_dom_select_apply_value(elem, sv, false);
-            js_dom_expando_flag_set(elem, "__selDirty", (Item){.item = b2it(true)});
+            dom_select_apply_value(elem, sv, false);
+            dom_expando_flag_set(elem, "__selDirty", (Item){.item = b2it(true)});
             return value;
         }
         if (prop_id == JS_DOM_PROP_SELECTED_INDEX) {
@@ -10625,14 +10625,14 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             return value;
         }
         if (prop_id == JS_DOM_PROP_LENGTH) {
-            js_dom_select_set_length_bridge((void*)elem, value);
+            dom_select_set_length_bridge((void*)elem, value);
             return value;
         }
     }
     if (_is_tag(elem, "option")) {
         if (prop_id == JS_DOM_PROP_SELECTED) {
             bool selected = js_is_truthy(value);
-            js_dom_apply_option_selected(elem, selected);
+            dom_apply_option_selected(elem, selected);
             return value;
         }
         // option.defaultSelected setter — reflects `selected` attribute.
@@ -10662,7 +10662,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         }
         if (prop_id == JS_DOM_PROP_TEXT) {
             const char* sv = fn_to_cstr(value);
-            js_dom_set_option_text_bridge((void*)elem, sv ? sv : "");
+            dom_set_option_text_bridge((void*)elem, sv ? sv : "");
             return value;
         }
         if (prop_id == JS_DOM_PROP_DEFAULT_SELECTED) {
@@ -10678,7 +10678,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         if (elem->form) {
             elem->form->value = elem->get_attribute("value");
         }
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
 
@@ -10688,19 +10688,19 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // ------------------------------------------------------------------
     if (tc_is_text_control_elem(elem)) {
         if (prop_id == JS_DOM_PROP_VALUE) {
-            return js_dom_text_control_set_value_bridge((void*)elem, value);
+            return dom_text_control_set_value_bridge((void*)elem, value);
         }
         if (prop_id == JS_DOM_PROP_SELECTION_START) {
-            return js_dom_text_control_set_selection_start_bridge((void*)elem, value);
+            return dom_text_control_set_selection_start_bridge((void*)elem, value);
         }
         if (prop_id == JS_DOM_PROP_SELECTION_END) {
-            return js_dom_text_control_set_selection_end_bridge((void*)elem, value);
+            return dom_text_control_set_selection_end_bridge((void*)elem, value);
         }
         if (prop_id == JS_DOM_PROP_SELECTION_DIRECTION) {
-            return js_dom_text_control_set_selection_direction_bridge((void*)elem, value);
+            return dom_text_control_set_selection_direction_bridge((void*)elem, value);
         }
         if (prop_id == JS_DOM_PROP_DEFAULT_VALUE) {
-            return js_dom_text_control_set_default_value_bridge((void*)elem, value);
+            return dom_text_control_set_default_value_bridge((void*)elem, value);
         }
     }
 
@@ -10733,7 +10733,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             char text[32];
             snprintf(text, sizeof(text), "%ld", tab_index);
             elem->set_attribute("tabindex", text);
-            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
 
@@ -10751,7 +10751,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             if (truthy) {
                 elem->set_attribute(attr, "");
                 if (strcmp(attr, "disabled") == 0) {
-                    js_dom_clear_focus_if_disabled_now(elem);
+                    dom_clear_focus_if_disabled_now(elem);
                 }
             } else {
                 elem->remove_attribute(attr);
@@ -10759,7 +10759,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
                     _select_ask_for_reset(elem);
                 }
             }
-            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
 
@@ -10787,7 +10787,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             char buf[32];
             snprintf(buf, sizeof(buf), "%ld", n);
             elem->set_attribute(int_attr, buf);
-            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
 
@@ -10801,15 +10801,15 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             } else {
                 elem->remove_attribute(mapped_attr);
             }
-            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
 
         const char* string_attr = nullptr;
         if (_is_string_reflected(elem, prop, &string_attr)) {
-            const char* s = js_dom_to_attr_cstr(value);
+            const char* s = dom_to_attr_cstr(value);
             elem->set_attribute(string_attr, s);
-            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
 
@@ -10826,7 +10826,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             } else {
                 elem->set_attribute("type", "text");
             }
-            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
     }
@@ -10840,14 +10840,14 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             // DOM host setters store on* values in the expando side table;
             // register the same write in the listener list so assignment
             // order relative to addEventListener() remains observable.
-            js_dom_event_handler_property_set_for_node(
+            dom_event_handler_property_set_for_node(
                 elem, prop, (int)strlen(prop), value);
         }
     }
     return value;
 }
 
-extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item value) {
+extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item value) {
     if (js_is_rule_style_decl(elem_item)) {
         // CSSOM style declarations are VMaps, not DOM elements; handle them
         // before DOM unwrapping so nested rule.style.x lowering stays native.
@@ -10861,7 +10861,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
         return ItemNull;
     }
 
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) {
         // not a DOM element — fall back to normal property set on obj.style
         Item style_obj = js_get_name_key(elem_item, "style");
@@ -10876,14 +10876,14 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     const char* js_prop = fn_to_cstr(prop_name);
     // CSSStyleDeclaration assignment performs Web IDL DOMString coercion;
     // reading raw Item storage made numeric animation values look empty.
-    const char* val_str = js_dom_to_dom_string_cstr(value);
+    const char* val_str = dom_to_dom_string_cstr(value);
     if (!js_prop || !val_str) return ItemNull;
 
     // convert camelCase JS property to CSS property
     char css_prop[128];
     js_camel_to_css_prop(js_prop, css_prop, sizeof(css_prop));
     if (!js_inline_style_cssom_property_exposed(css_prop)) {
-        log_debug("js_dom_set_style_property: ignored unsupported CSSOM property %s on <%s>",
+        log_debug("dom_set_style_property: ignored unsupported CSSOM property %s on <%s>",
                   css_prop, elem->tag_name ? elem->tag_name : "?");
         return value;
     }
@@ -10891,8 +10891,8 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     // handle cssText special case: replace entire inline style
     if (strcmp(css_prop, "cssText") == 0) {
         elem->set_attribute("style", val_str);
-        js_dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
-        log_debug("js_dom_set_style_property: set cssText='%.50s' on <%s>",
+        dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
+        log_debug("dom_set_style_property: set cssText='%.50s' on <%s>",
                   val_str, elem->tag_name ? elem->tag_name : "?");
         return value;
     }
@@ -10901,12 +10901,12 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     if (!val_str[0]) {
         CssPropertyCode prop_id = css_property_code_from_name(css_prop);
         if (prop_id != CSS_PROPERTY_UNKNOWN && elem->specified_style) {
-            js_dom_update_inline_style_attribute(elem, css_prop, "", nullptr);
+            dom_update_inline_style_attribute(elem, css_prop, "", nullptr);
             elem->set_styles_resolved(false);
-            js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
+            dom_mutation_notify(dom_style_mutation_kind(prop_id),
                                    (DomNode*)elem, elem->parent);
         }
-        log_debug("js_dom_set_style_property: removed %s (CSS: %s) on <%s>",
+        log_debug("dom_set_style_property: removed %s (CSS: %s) on <%s>",
                   js_prop, css_prop, elem->tag_name ? elem->tag_name : "?");
         return value;
     }
@@ -10919,7 +10919,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
         } else {
             UnicodeChar uc = css_parse_unicode_char(val_str + i, strlen(val_str + i));
             if (uc.byte_length == 0 || !css_is_name_char_unicode(uc.codepoint)) {
-                log_debug("js_dom_set_style_property: rejecting value with invalid codepoint U+%04X at byte offset %zu (byte=0x%02X)", uc.codepoint, i, b);
+                log_debug("dom_set_style_property: rejecting value with invalid codepoint U+%04X at byte offset %zu (byte=0x%02X)", uc.codepoint, i, b);
                 return value;  // silently reject per CSSOM spec
             }
             i += uc.byte_length;
@@ -10927,13 +10927,13 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     }
 
     // apply as inline style (highest cascade priority)
-    js_dom_update_inline_style_attribute(elem, css_prop, val_str, nullptr);
+    dom_update_inline_style_attribute(elem, css_prop, val_str, nullptr);
     elem->set_styles_resolved(false);  // mark for re-cascading
     CssPropertyCode prop_id = css_property_code_from_name(css_prop);
-    js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
+    dom_mutation_notify(dom_style_mutation_kind(prop_id),
                            (DomNode*)elem, elem->parent);
 
-    log_debug("js_dom_set_style_property: set %s='%s' (CSS: %s) on <%s>",
+    log_debug("dom_set_style_property: set %s='%s' (CSS: %s) on <%s>",
               js_prop, val_str, css_prop, elem->tag_name ? elem->tag_name : "?");
     return value;
 }
@@ -10942,7 +10942,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
 // Style Property Read (elem.style.X)
 // ============================================================================
 
-extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
+extern "C" Item dom_get_style_property(Item elem_item, Item prop_name) {
     if (js_is_rule_style_decl(elem_item)) {
         // CSSOM style declarations are VMaps, not DOM elements; handle them
         // before DOM unwrapping so nested rule.style.x lowering stays native.
@@ -10956,7 +10956,7 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
         return js_name_item("");
     }
 
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) {
         // not a DOM element — fall back to normal property access on obj.style
         Item style_obj = js_get_name_key(elem_item, "style");
@@ -10987,7 +10987,7 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
     // look up the CSS property ID
     CssPropertyCode prop_id = css_property_code_from_name(css_prop);
     if (prop_id == CSS_PROPERTY_UNKNOWN) {
-        log_debug("js_dom_get_style_property: unknown CSS property '%s'", css_prop);
+        log_debug("dom_get_style_property: unknown CSS property '%s'", css_prop);
         return js_name_item("");
     }
 
@@ -11042,12 +11042,12 @@ extern "C" Item js_style_css_has(Item style_item, Item prop_name) {
 // Element Method Dispatcher
 // ============================================================================
 
-static void js_dom_set_number_property(Item object, const char* name,
+static void dom_set_number_property(Item object, const char* name,
                                        float value) {
     js_set_name_key(object, name, push_d((double)value));
 }
 
-Item js_dom_make_rect(double x, double y, double width, double height) {
+Item dom_make_rect(double x, double y, double width, double height) {
     Item rect = js_new_object();
     js_set_name_key(rect, "x", push_d(x));
     js_set_name_key(rect, "y", push_d(y));
@@ -11060,11 +11060,11 @@ Item js_dom_make_rect(double x, double y, double width, double height) {
     return rect;
 }
 
-JS_FORWARD_STATIC_ITEM(js_dom_make_rect_object,
+JS_FORWARD_STATIC_ITEM(dom_make_rect_object,
     (float x, float y, float width, float height),
-    js_dom_make_rect, ((double)x, (double)y, (double)width, (double)height))
+    dom_make_rect, ((double)x, (double)y, (double)width, (double)height))
 
-static float js_dom_svg_number(Item value, float fallback) {
+static float dom_svg_number(Item value, float fallback) {
     Item numeric = js_to_number(value);
     TypeId type = get_type_id(numeric);
     if (type == LMD_TYPE_FLOAT) return (float)it2d(numeric);
@@ -11072,20 +11072,20 @@ static float js_dom_svg_number(Item value, float fallback) {
     return fallback;
 }
 
-static RdtMatrix js_dom_svg_matrix_from_item(Item item) {
+static RdtMatrix dom_svg_matrix_from_item(Item item) {
     RdtMatrix matrix = rdt_matrix_identity();
-    matrix.e11 = js_dom_svg_number(js_get_key_cstr(item, "a"), 1.0f);
-    matrix.e21 = js_dom_svg_number(js_get_key_cstr(item, "b"), 0.0f);
-    matrix.e12 = js_dom_svg_number(js_get_key_cstr(item, "c"), 0.0f);
-    matrix.e22 = js_dom_svg_number(js_get_key_cstr(item, "d"), 1.0f);
-    matrix.e13 = js_dom_svg_number(js_get_key_cstr(item, "e"), 0.0f);
-    matrix.e23 = js_dom_svg_number(js_get_key_cstr(item, "f"), 0.0f);
+    matrix.e11 = dom_svg_number(js_get_key_cstr(item, "a"), 1.0f);
+    matrix.e21 = dom_svg_number(js_get_key_cstr(item, "b"), 0.0f);
+    matrix.e12 = dom_svg_number(js_get_key_cstr(item, "c"), 0.0f);
+    matrix.e22 = dom_svg_number(js_get_key_cstr(item, "d"), 1.0f);
+    matrix.e13 = dom_svg_number(js_get_key_cstr(item, "e"), 0.0f);
+    matrix.e23 = dom_svg_number(js_get_key_cstr(item, "f"), 0.0f);
     return matrix;
 }
 
-static Item js_dom_svg_make_matrix_with_interface(RdtMatrix matrix,
+static Item dom_svg_make_matrix_with_interface(RdtMatrix matrix,
                                                    const char* interface_name);
-JS_FORWARD_STATIC_ITEM(js_dom_svg_make_matrix, (RdtMatrix matrix), js_dom_svg_make_matrix_with_interface, (matrix, "SVGMatrix"))
+JS_FORWARD_STATIC_ITEM(dom_svg_make_matrix, (RdtMatrix matrix), dom_svg_make_matrix_with_interface, (matrix, "SVGMatrix"))
 
 enum JsSvgMatrixOperation {
     JS_SVG_MATRIX_MULTIPLY,
@@ -11097,7 +11097,7 @@ enum JsSvgMatrixOperation {
     JS_SVG_MATRIX_FLIP_Y,
 };
 
-static Item js_dom_svg_matrix_operation(Item callee, Item this_value, Item* args,
+static Item dom_svg_matrix_operation(Item callee, Item this_value, Item* args,
                                         int argc, uint64_t* result_home) {
     (void)this_value;
     (void)result_home;
@@ -11106,11 +11106,11 @@ static Item js_dom_svg_matrix_operation(Item callee, Item this_value, Item* args
         ? (JsSvgMatrixOperation)fn->native_target.bits : JS_SVG_MATRIX_INVERSE;
     Item arg0 = argc > 0 ? args[0] : make_js_undefined();
     Item arg1 = argc > 1 ? args[1] : make_js_undefined();
-    RdtMatrix matrix = js_dom_svg_matrix_from_item(js_get_this());
+    RdtMatrix matrix = dom_svg_matrix_from_item(js_get_this());
     switch (operation) {
     case JS_SVG_MATRIX_MULTIPLY: {
-        RdtMatrix right = js_dom_svg_matrix_from_item(arg0);
-        return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &right));
+        RdtMatrix right = dom_svg_matrix_from_item(arg0);
+        return dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &right));
     }
     case JS_SVG_MATRIX_INVERSE: {
         float determinant = matrix.e11 * matrix.e22 - matrix.e21 * matrix.e12;
@@ -11124,59 +11124,59 @@ static Item js_dom_svg_matrix_operation(Item callee, Item this_value, Item* args
             (matrix.e21 * matrix.e13 - matrix.e11 * matrix.e23) * reciprocal,
             0, 0, 1
         };
-        return js_dom_svg_make_matrix(inverse);
+        return dom_svg_make_matrix(inverse);
     }
     case JS_SVG_MATRIX_TRANSLATE: {
-        RdtMatrix translation = rdt_matrix_translate(js_dom_svg_number(arg0, 0.0f),
-                                                      js_dom_svg_number(arg1, 0.0f));
-        return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &translation));
+        RdtMatrix translation = rdt_matrix_translate(dom_svg_number(arg0, 0.0f),
+                                                      dom_svg_number(arg1, 0.0f));
+        return dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &translation));
     }
     case JS_SVG_MATRIX_SCALE: {
-        float value = js_dom_svg_number(arg0, 1.0f);
+        float value = dom_svg_number(arg0, 1.0f);
         RdtMatrix scale = {value, 0, 0, 0, value, 0, 0, 0, 1};
-        return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &scale));
+        return dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &scale));
     }
     case JS_SVG_MATRIX_ROTATE: {
-        float radians = js_dom_svg_number(arg0, 0.0f) * 0.01745329251994329577f;
+        float radians = dom_svg_number(arg0, 0.0f) * 0.01745329251994329577f;
         float cosine = cosf(radians);
         float sine = sinf(radians);
         RdtMatrix rotation = {cosine, -sine, 0, sine, cosine, 0, 0, 0, 1};
-        return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &rotation));
+        return dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &rotation));
     }
     case JS_SVG_MATRIX_FLIP_X: {
         RdtMatrix flip = {-1, 0, 0, 0, 1, 0, 0, 0, 1};
-        return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &flip));
+        return dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &flip));
     }
     case JS_SVG_MATRIX_FLIP_Y: {
         RdtMatrix flip = {1, 0, 0, 0, -1, 0, 0, 0, 1};
-        return js_dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &flip));
+        return dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &flip));
     }
     }
     return ItemNull;
 }
 
-static Item js_dom_svg_make_matrix_with_interface(RdtMatrix matrix,
+static Item dom_svg_make_matrix_with_interface(RdtMatrix matrix,
                                                    const char* interface_name) {
     Item result = js_new_object();
-    js_dom_set_number_property(result, "a", matrix.e11);
-    js_dom_set_number_property(result, "b", matrix.e21);
-    js_dom_set_number_property(result, "c", matrix.e12);
-    js_dom_set_number_property(result, "d", matrix.e22);
-    js_dom_set_number_property(result, "e", matrix.e13);
-    js_dom_set_number_property(result, "f", matrix.e23);
-    js_set_key_cstr(result, "multiply", js_new_native_payload_function(js_dom_svg_matrix_operation,
+    dom_set_number_property(result, "a", matrix.e11);
+    dom_set_number_property(result, "b", matrix.e21);
+    dom_set_number_property(result, "c", matrix.e12);
+    dom_set_number_property(result, "d", matrix.e22);
+    dom_set_number_property(result, "e", matrix.e13);
+    dom_set_number_property(result, "f", matrix.e23);
+    js_set_key_cstr(result, "multiply", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_MULTIPLY, 1));
-    js_set_key_cstr(result, "inverse", js_new_native_payload_function(js_dom_svg_matrix_operation,
+    js_set_key_cstr(result, "inverse", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_INVERSE, 0));
-    js_set_key_cstr(result, "translate", js_new_native_payload_function(js_dom_svg_matrix_operation,
+    js_set_key_cstr(result, "translate", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_TRANSLATE, 2));
-    js_set_key_cstr(result, "scale", js_new_native_payload_function(js_dom_svg_matrix_operation,
+    js_set_key_cstr(result, "scale", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_SCALE, 1));
-    js_set_key_cstr(result, "rotate", js_new_native_payload_function(js_dom_svg_matrix_operation,
+    js_set_key_cstr(result, "rotate", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_ROTATE, 1));
-    js_set_key_cstr(result, "flipX", js_new_native_payload_function(js_dom_svg_matrix_operation,
+    js_set_key_cstr(result, "flipX", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_FLIP_X, 0));
-    js_set_key_cstr(result, "flipY", js_new_native_payload_function(js_dom_svg_matrix_operation,
+    js_set_key_cstr(result, "flipY", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_FLIP_Y, 0));
     Item global = js_get_global_this();
     Item ctor = js_get_key_default(global, js_string_key(interface_name));
@@ -11184,14 +11184,14 @@ static Item js_dom_svg_make_matrix_with_interface(RdtMatrix matrix,
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(result, proto);
     return result;
 }
-JS_FORWARD_STATIC_ITEM(js_dom_svg_create_matrix, (void), js_dom_svg_make_matrix, (rdt_matrix_identity()))
+JS_FORWARD_STATIC_ITEM(dom_svg_create_matrix, (void), dom_svg_make_matrix, (rdt_matrix_identity()))
 
-static DomElement* js_dom_svg_owner_from_value(Item value) {
+static DomElement* dom_svg_owner_from_value(Item value) {
     Item owner = js_get_key_cstr(value, "__lambda_svg_owner");
-    return (DomElement*)js_dom_unwrap_element(owner);
+    return (DomElement*)dom_unwrap_element(owner);
 }
 
-static void js_dom_svg_set_transform_attribute(DomElement* elem, RdtMatrix matrix) {
+static void dom_svg_set_transform_attribute(DomElement* elem, RdtMatrix matrix) {
     if (!elem) return;
     char text[192];
     snprintf(text, sizeof(text), "matrix(%g %g %g %g %g %g)",
@@ -11200,31 +11200,31 @@ static void js_dom_svg_set_transform_attribute(DomElement* elem, RdtMatrix matri
     // SVGTransformList mutations must update the backing attribute; otherwise
     // later CTM reads and renderer traversal observe a stale transform.
     elem->set_attribute("transform", text);
-    js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
 }
 
-static Item js_dom_svg_transform_set_matrix(Item matrix_item) {
+static Item dom_svg_transform_set_matrix(Item matrix_item) {
     Item transform = js_get_this();
-    js_set_key_cstr(transform, "matrix", js_dom_svg_make_matrix(js_dom_svg_matrix_from_item(matrix_item)));
+    js_set_key_cstr(transform, "matrix", dom_svg_make_matrix(dom_svg_matrix_from_item(matrix_item)));
     return ItemNull;
 }
 
-static Item js_dom_svg_transform_set_translate(Item x, Item y) {
-    RdtMatrix matrix = rdt_matrix_translate(js_dom_svg_number(x, 0.0f),
-                                             js_dom_svg_number(y, 0.0f));
-    return js_dom_svg_transform_set_matrix(js_dom_svg_make_matrix(matrix));
+static Item dom_svg_transform_set_translate(Item x, Item y) {
+    RdtMatrix matrix = rdt_matrix_translate(dom_svg_number(x, 0.0f),
+                                             dom_svg_number(y, 0.0f));
+    return dom_svg_transform_set_matrix(dom_svg_make_matrix(matrix));
 }
 
-static Item js_dom_svg_transform_set_scale(Item scale) {
-    float value = js_dom_svg_number(scale, 1.0f);
+static Item dom_svg_transform_set_scale(Item scale) {
+    float value = dom_svg_number(scale, 1.0f);
     RdtMatrix matrix = {value, 0, 0, 0, value, 0, 0, 0, 1};
-    return js_dom_svg_transform_set_matrix(js_dom_svg_make_matrix(matrix));
+    return dom_svg_transform_set_matrix(dom_svg_make_matrix(matrix));
 }
 
-static Item js_dom_svg_transform_set_rotate(Item angle, Item cx, Item cy) {
-    float radians = js_dom_svg_number(angle, 0.0f) * 0.01745329251994329577f;
-    float center_x = js_dom_svg_number(cx, 0.0f);
-    float center_y = js_dom_svg_number(cy, 0.0f);
+static Item dom_svg_transform_set_rotate(Item angle, Item cx, Item cy) {
+    float radians = dom_svg_number(angle, 0.0f) * 0.01745329251994329577f;
+    float center_x = dom_svg_number(cx, 0.0f);
+    float center_y = dom_svg_number(cy, 0.0f);
     float cosine = cosf(radians);
     float sine = sinf(radians);
     RdtMatrix rotation = {cosine, -sine, 0, sine, cosine, 0, 0, 0, 1};
@@ -11232,161 +11232,161 @@ static Item js_dom_svg_transform_set_rotate(Item angle, Item cx, Item cy) {
     RdtMatrix after = rdt_matrix_translate(center_x, center_y);
     RdtMatrix rotated = rdt_matrix_multiply(&rotation, &before);
     RdtMatrix matrix = rdt_matrix_multiply(&after, &rotated);
-    return js_dom_svg_transform_set_matrix(js_dom_svg_make_matrix(matrix));
+    return dom_svg_transform_set_matrix(dom_svg_make_matrix(matrix));
 }
 
-static Item js_dom_svg_make_transform(Item matrix) {
+static Item dom_svg_make_transform(Item matrix) {
     Item transform = js_new_object();
-    js_set_key_cstr(transform, "matrix", js_dom_svg_make_matrix(js_dom_svg_matrix_from_item(matrix)));
+    js_set_key_cstr(transform, "matrix", dom_svg_make_matrix(dom_svg_matrix_from_item(matrix)));
     js_set_key_cstr(transform, "type", (Item){.item = i2it(1)});
-    js_set_native_key(transform, js_string_key("setMatrix"), js_dom_svg_transform_set_matrix);
-    js_set_native_key(transform, js_string_key("setTranslate"), js_dom_svg_transform_set_translate);
-    js_set_native_key(transform, js_string_key("setScale"), js_dom_svg_transform_set_scale);
-    js_set_native_key(transform, js_string_key("setRotate"), js_dom_svg_transform_set_rotate);
+    js_set_native_key(transform, js_string_key("setMatrix"), dom_svg_transform_set_matrix);
+    js_set_native_key(transform, js_string_key("setTranslate"), dom_svg_transform_set_translate);
+    js_set_native_key(transform, js_string_key("setScale"), dom_svg_transform_set_scale);
+    js_set_native_key(transform, js_string_key("setRotate"), dom_svg_transform_set_rotate);
     Item global = js_get_global_this();
     Item ctor = js_get_key_cstr(global, "SVGTransform");
     Item proto = js_get_key_cstr(ctor, "prototype");
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(transform, proto);
     return transform;
 }
-JS_FORWARD_STATIC_ITEM(js_dom_svg_create_transform, (void), js_dom_svg_make_transform, (js_dom_svg_make_matrix(rdt_matrix_identity())))
-JS_FORWARD_STATIC_ITEM(js_dom_svg_create_transform_from_matrix, (Item matrix), js_dom_svg_make_transform, (matrix))
+JS_FORWARD_STATIC_ITEM(dom_svg_create_transform, (void), dom_svg_make_transform, (dom_svg_make_matrix(rdt_matrix_identity())))
+JS_FORWARD_STATIC_ITEM(dom_svg_create_transform_from_matrix, (Item matrix), dom_svg_make_transform, (matrix))
 
-static Item js_dom_svg_transform_list_count_get(void) {
-    DomElement* elem = js_dom_svg_owner_from_value(js_get_this());
+static Item dom_svg_transform_list_count_get(void) {
+    DomElement* elem = dom_svg_owner_from_value(js_get_this());
     const char* value = elem ? elem->get_attribute("transform") : nullptr;
     return (Item){.item = i2it(value && value[0] ? 1 : 0)};
 }
 
-static Item js_dom_svg_transform_list_clear(void) {
-    DomElement* elem = js_dom_svg_owner_from_value(js_get_this());
+static Item dom_svg_transform_list_clear(void) {
+    DomElement* elem = dom_svg_owner_from_value(js_get_this());
     if (elem) {
         elem->set_attribute("transform", "");
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
     }
     return ItemNull;
 }
 
-static Item js_dom_svg_transform_list_append(Item transform) {
-    DomElement* elem = js_dom_svg_owner_from_value(js_get_this());
+static Item dom_svg_transform_list_append(Item transform) {
+    DomElement* elem = dom_svg_owner_from_value(js_get_this());
     Item matrix = js_get_key_cstr(transform, "matrix");
     if (elem && matrix.item != ITEM_NULL && !is_js_undefined(matrix)) {
-        js_dom_svg_set_transform_attribute(elem, js_dom_svg_matrix_from_item(matrix));
+        dom_svg_set_transform_attribute(elem, dom_svg_matrix_from_item(matrix));
     }
     return transform;
 }
 
-static Item js_dom_svg_transform_list_consolidate(void) {
-    DomElement* elem = js_dom_svg_owner_from_value(js_get_this());
+static Item dom_svg_transform_list_consolidate(void) {
+    DomElement* elem = dom_svg_owner_from_value(js_get_this());
     if (!elem || !elem->get_attribute("transform")) return ItemNull;
-    return js_dom_svg_make_transform(
-        js_dom_svg_make_matrix(js_dom_svg_transform_from_element(elem)));
+    return dom_svg_make_transform(
+        dom_svg_make_matrix(dom_svg_transform_from_element(elem)));
 }
 
-static Item js_dom_svg_transform_list_get_item(Item index) {
-    if (js_dom_svg_number(index, -1.0f) != 0.0f) return ItemNull;
-    return js_dom_svg_transform_list_consolidate();
+static Item dom_svg_transform_list_get_item(Item index) {
+    if (dom_svg_number(index, -1.0f) != 0.0f) return ItemNull;
+    return dom_svg_transform_list_consolidate();
 }
 
-static Item js_dom_svg_transform_list_initialize(Item transform) {
-    js_dom_svg_transform_list_clear();
-    return js_dom_svg_transform_list_append(transform);
+static Item dom_svg_transform_list_initialize(Item transform) {
+    dom_svg_transform_list_clear();
+    return dom_svg_transform_list_append(transform);
 }
 
-static Item js_dom_svg_get_transform_list(DomElement* elem) {
+static Item dom_svg_get_transform_list(DomElement* elem) {
     Item list = js_new_object();
-    js_set_key_cstr(list, "__lambda_svg_owner", js_dom_wrap_element(elem));
+    js_set_key_cstr(list, "__lambda_svg_owner", dom_wrap_element(elem));
     js_install_native_accessor(list, js_string_key("numberOfItems"),
-        js_new_native_function(js_dom_svg_transform_list_count_get), ItemNull,
+        js_new_native_function(dom_svg_transform_list_count_get), ItemNull,
         JSPD_NON_ENUMERABLE);
-    js_set_native_key(list, js_string_key("clear"), js_dom_svg_transform_list_clear);
-    js_set_native_key(list, js_string_key("appendItem"), js_dom_svg_transform_list_append);
-    js_set_native_key(list, js_string_key("initialize"), js_dom_svg_transform_list_initialize);
-    js_set_native_key(list, js_string_key("consolidate"), js_dom_svg_transform_list_consolidate);
-    js_set_native_key(list, js_string_key("getItem"), js_dom_svg_transform_list_get_item);
+    js_set_native_key(list, js_string_key("clear"), dom_svg_transform_list_clear);
+    js_set_native_key(list, js_string_key("appendItem"), dom_svg_transform_list_append);
+    js_set_native_key(list, js_string_key("initialize"), dom_svg_transform_list_initialize);
+    js_set_native_key(list, js_string_key("consolidate"), dom_svg_transform_list_consolidate);
+    js_set_native_key(list, js_string_key("getItem"), dom_svg_transform_list_get_item);
     Item animated = js_new_object();
     js_set_key_cstr(animated, "baseVal", list);
     js_set_key_cstr(animated, "animVal", list);
     return animated;
 }
 
-static Item js_dom_svg_class_name_get_base_val(void) {
-    DomElement* elem = js_dom_svg_owner_from_value(js_get_this());
+static Item dom_svg_class_name_get_base_val(void) {
+    DomElement* elem = dom_svg_owner_from_value(js_get_this());
     const char* class_name = elem ? elem->get_attribute("class") : nullptr;
     return js_name_item(class_name ? class_name : "");
 }
 
-static Item js_dom_svg_class_name_set_base_val(Item value) {
-    DomElement* elem = js_dom_svg_owner_from_value(js_get_this());
+static Item dom_svg_class_name_set_base_val(Item value) {
+    DomElement* elem = dom_svg_owner_from_value(js_get_this());
     if (elem) {
-        elem->set_attribute("class", js_dom_to_attr_cstr(value));
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        elem->set_attribute("class", dom_to_attr_cstr(value));
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
     }
     return value;
 }
 
-static Item js_dom_svg_get_animated_class_name(DomElement* elem) {
+static Item dom_svg_get_animated_class_name(DomElement* elem) {
     Item animated = js_new_object();
-    js_set_key_cstr(animated, "__lambda_svg_owner", js_dom_wrap_element(elem));
+    js_set_key_cstr(animated, "__lambda_svg_owner", dom_wrap_element(elem));
     js_install_native_accessor(animated, js_string_key("baseVal"),
-        js_new_native_function(js_dom_svg_class_name_get_base_val),
-        js_new_native_function(js_dom_svg_class_name_set_base_val),
+        js_new_native_function(dom_svg_class_name_get_base_val),
+        js_new_native_function(dom_svg_class_name_set_base_val),
         JSPD_NON_ENUMERABLE);
     js_install_native_accessor(animated, js_string_key("animVal"),
-        js_new_native_function(js_dom_svg_class_name_get_base_val), ItemNull,
+        js_new_native_function(dom_svg_class_name_get_base_val), ItemNull,
         JSPD_NON_ENUMERABLE);
     return animated;
 }
 
-static Item js_dom_svg_make_point(float x, float y, const char* interface_name);
+static Item dom_svg_make_point(float x, float y, const char* interface_name);
 
-static Item js_dom_svg_point_matrix_transform(Item matrix_item) {
+static Item dom_svg_point_matrix_transform(Item matrix_item) {
     Item point_item = js_get_this();
-    float x = js_dom_svg_number(js_get_key_cstr(point_item, "x"), 0.0f);
-    float y = js_dom_svg_number(js_get_key_cstr(point_item, "y"), 0.0f);
-    RdtMatrix matrix = js_dom_svg_matrix_from_item(matrix_item);
+    float x = dom_svg_number(js_get_key_cstr(point_item, "x"), 0.0f);
+    float y = dom_svg_number(js_get_key_cstr(point_item, "y"), 0.0f);
+    RdtMatrix matrix = dom_svg_matrix_from_item(matrix_item);
     float transformed_x = 0.0f;
     float transformed_y = 0.0f;
     rdt_matrix_transform_point(&matrix, x, y, &transformed_x, &transformed_y);
-    return js_dom_svg_make_point(transformed_x, transformed_y, "DOMPoint");
+    return dom_svg_make_point(transformed_x, transformed_y, "DOMPoint");
 }
 
-static Item js_dom_svg_make_point(float x, float y, const char* interface_name) {
+static Item dom_svg_make_point(float x, float y, const char* interface_name) {
     Item result = js_new_object();
-    js_dom_set_number_property(result, "x", x);
-    js_dom_set_number_property(result, "y", y);
-    js_dom_set_number_property(result, "z", 0.0f);
-    js_dom_set_number_property(result, "w", 1.0f);
-    js_set_native_key(result, js_string_key("matrixTransform"), js_dom_svg_point_matrix_transform);
+    dom_set_number_property(result, "x", x);
+    dom_set_number_property(result, "y", y);
+    dom_set_number_property(result, "z", 0.0f);
+    dom_set_number_property(result, "w", 1.0f);
+    js_set_native_key(result, js_string_key("matrixTransform"), dom_svg_point_matrix_transform);
     Item global = js_get_global_this();
     Item ctor = js_get_key_default(global, js_string_key(interface_name));
     Item proto = js_get_key_cstr(ctor, "prototype");
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(result, proto);
     return result;
 }
-JS_FORWARD_STATIC_ITEM(js_dom_svg_create_point, (void), js_dom_svg_make_point, (0.0f, 0.0f, "SVGPoint"))
+JS_FORWARD_STATIC_ITEM(dom_svg_create_point, (void), dom_svg_make_point, (0.0f, 0.0f, "SVGPoint"))
 
-static Item js_dom_point_constructor(Item x, Item y, Item z, Item w) {
-    Item result = js_dom_svg_make_point(js_dom_svg_number(x, 0.0f),
-                                        js_dom_svg_number(y, 0.0f), "DOMPoint");
-    js_dom_set_number_property(result, "z", js_dom_svg_number(z, 0.0f));
-    js_dom_set_number_property(result, "w", js_dom_svg_number(w, 1.0f));
+static Item dom_point_constructor(Item x, Item y, Item z, Item w) {
+    Item result = dom_svg_make_point(dom_svg_number(x, 0.0f),
+                                        dom_svg_number(y, 0.0f), "DOMPoint");
+    dom_set_number_property(result, "z", dom_svg_number(z, 0.0f));
+    dom_set_number_property(result, "w", dom_svg_number(w, 1.0f));
     return result;
 }
 
-static Item js_dom_matrix_constructor(Item init) {
+static Item dom_matrix_constructor(Item init) {
     RdtMatrix matrix = rdt_matrix_identity();
     if (get_type_id(init) == LMD_TYPE_ARRAY && js_array_length(init) >= 6) {
-        matrix.e11 = js_dom_svg_number(js_elements_get_int(init, 0), 1.0f);
-        matrix.e21 = js_dom_svg_number(js_elements_get_int(init, 1), 0.0f);
-        matrix.e12 = js_dom_svg_number(js_elements_get_int(init, 2), 0.0f);
-        matrix.e22 = js_dom_svg_number(js_elements_get_int(init, 3), 1.0f);
-        matrix.e13 = js_dom_svg_number(js_elements_get_int(init, 4), 0.0f);
-        matrix.e23 = js_dom_svg_number(js_elements_get_int(init, 5), 0.0f);
+        matrix.e11 = dom_svg_number(js_elements_get_int(init, 0), 1.0f);
+        matrix.e21 = dom_svg_number(js_elements_get_int(init, 1), 0.0f);
+        matrix.e12 = dom_svg_number(js_elements_get_int(init, 2), 0.0f);
+        matrix.e22 = dom_svg_number(js_elements_get_int(init, 3), 1.0f);
+        matrix.e13 = dom_svg_number(js_elements_get_int(init, 4), 0.0f);
+        matrix.e23 = dom_svg_number(js_elements_get_int(init, 5), 0.0f);
     } else if (get_type_id(init) == LMD_TYPE_MAP) {
-        matrix = js_dom_svg_matrix_from_item(init);
+        matrix = dom_svg_matrix_from_item(init);
     }
-    return js_dom_svg_make_matrix_with_interface(matrix, "DOMMatrix");
+    return dom_svg_make_matrix_with_interface(matrix, "DOMMatrix");
 }
 
 typedef struct JsDomSvgBounds {
@@ -11397,7 +11397,7 @@ typedef struct JsDomSvgBounds {
     bool valid;
 } JsDomSvgBounds;
 
-static void js_dom_svg_bounds_include_point(JsDomSvgBounds* bounds, float x, float y) {
+static void dom_svg_bounds_include_point(JsDomSvgBounds* bounds, float x, float y) {
     if (!bounds) return;
     if (!bounds->valid) {
         bounds->left = bounds->right = x;
@@ -11411,21 +11411,21 @@ static void js_dom_svg_bounds_include_point(JsDomSvgBounds* bounds, float x, flo
     bounds->bottom = LMB_MAX(bounds->bottom, y);
 }
 
-static void js_dom_svg_bounds_include_rect(JsDomSvgBounds* bounds, float x, float y,
+static void dom_svg_bounds_include_rect(JsDomSvgBounds* bounds, float x, float y,
                                             float width, float height) {
     if (!bounds) return;
-    js_dom_svg_bounds_include_point(bounds, x, y);
-    js_dom_svg_bounds_include_point(bounds, x + width, y + height);
+    dom_svg_bounds_include_point(bounds, x, y);
+    dom_svg_bounds_include_point(bounds, x + width, y + height);
 }
 
-static void js_dom_svg_bounds_include_bounds(JsDomSvgBounds* bounds,
+static void dom_svg_bounds_include_bounds(JsDomSvgBounds* bounds,
                                               const JsDomSvgBounds* child) {
     if (!bounds || !child || !child->valid) return;
-    js_dom_svg_bounds_include_point(bounds, child->left, child->top);
-    js_dom_svg_bounds_include_point(bounds, child->right, child->bottom);
+    dom_svg_bounds_include_point(bounds, child->left, child->top);
+    dom_svg_bounds_include_point(bounds, child->right, child->bottom);
 }
 
-static void js_dom_svg_bounds_apply_transform(JsDomSvgBounds* bounds,
+static void dom_svg_bounds_apply_transform(JsDomSvgBounds* bounds,
                                                const RdtMatrix* transform) {
     if (!bounds || !bounds->valid || !transform) return;
     float left = 0.0f;
@@ -11441,7 +11441,7 @@ static void js_dom_svg_bounds_apply_transform(JsDomSvgBounds* bounds,
     bounds->bottom = bottom;
 }
 
-static float js_dom_svg_attribute_number(DomElement* elem, const char* name,
+static float dom_svg_attribute_number(DomElement* elem, const char* name,
                                          float fallback) {
     if (!elem || !name) return fallback;
     const char* value = elem->get_attribute(name);
@@ -11451,12 +11451,12 @@ static float js_dom_svg_attribute_number(DomElement* elem, const char* name,
     return end != value ? parsed : fallback;
 }
 
-static const char* js_dom_svg_skip_number_separators(const char* cursor) {
+static const char* dom_svg_skip_number_separators(const char* cursor) {
     while (cursor && (*cursor == ',' || str_char_is_ascii_space(*cursor))) cursor++;
     return cursor;
 }
 
-static RdtMatrix js_dom_svg_transform_from_element(DomElement* elem) {
+static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
     RdtMatrix transform = rdt_matrix_identity();
     if (!elem) return transform;
     const char* transform_attr = elem->get_attribute("transform");
@@ -11473,30 +11473,30 @@ static RdtMatrix js_dom_svg_transform_from_element(DomElement* elem) {
     }
     if (elem->tag_name && strcasecmp(elem->tag_name, "svg") == 0 && elem->parent) {
         RdtMatrix viewport_offset = rdt_matrix_translate(
-            js_dom_svg_attribute_number(elem, "x", 0.0f),
-            js_dom_svg_attribute_number(elem, "y", 0.0f));
+            dom_svg_attribute_number(elem, "x", 0.0f),
+            dom_svg_attribute_number(elem, "y", 0.0f));
         transform = rdt_matrix_multiply(&viewport_offset, &transform);
     }
     return transform;
 }
 
-static void js_dom_svg_bounds_from_points(const char* points, JsDomSvgBounds* bounds) {
+static void dom_svg_bounds_from_points(const char* points, JsDomSvgBounds* bounds) {
     const char* cursor = points;
     while (cursor && *cursor) {
-        cursor = js_dom_svg_skip_number_separators(cursor);
+        cursor = dom_svg_skip_number_separators(cursor);
         if (!*cursor) break;
         char* end = nullptr;
         float x = strtof(cursor, &end);
         if (end == cursor) break;
-        cursor = js_dom_svg_skip_number_separators(end);
+        cursor = dom_svg_skip_number_separators(end);
         float y = strtof(cursor, &end);
         if (end == cursor) break;
-        js_dom_svg_bounds_include_point(bounds, x, y);
+        dom_svg_bounds_include_point(bounds, x, y);
         cursor = end;
     }
 }
 
-static int js_dom_svg_font_weight(DomElement* elem) {
+static int dom_svg_font_weight(DomElement* elem) {
     const char* attr = elem ? elem->get_attribute("font-weight") : nullptr;
     if (!attr || !*attr || strcmp(attr, "normal") == 0) return 400;
     if (strcmp(attr, "bold") == 0 || strcmp(attr, "bolder") == 0) return 700;
@@ -11505,46 +11505,46 @@ static int js_dom_svg_font_weight(DomElement* elem) {
     return weight > 0 ? weight : 400;
 }
 
-static FontSlant js_dom_svg_font_slant(DomElement* elem) {
+static FontSlant dom_svg_font_slant(DomElement* elem) {
     const char* attr = elem ? elem->get_attribute("font-style") : nullptr;
     if (attr && strcmp(attr, "italic") == 0) return FONT_SLANT_ITALIC;
     if (attr && strcmp(attr, "oblique") == 0) return FONT_SLANT_OBLIQUE;
     return FONT_SLANT_NORMAL;
 }
 
-static JsDomSvgBounds js_dom_svg_bounds_for_element(DomElement* elem) {
+static JsDomSvgBounds dom_svg_bounds_for_element(DomElement* elem) {
     JsDomSvgBounds bounds = {};
     if (!elem || !elem->tag_name) return bounds;
     const char* tag = elem->tag_name;
     if (strcasecmp(tag, "rect") == 0 || strcasecmp(tag, "image") == 0 ||
         strcasecmp(tag, "foreignObject") == 0) {
-        js_dom_svg_bounds_include_rect(&bounds,
-            js_dom_svg_attribute_number(elem, "x", 0.0f),
-            js_dom_svg_attribute_number(elem, "y", 0.0f),
-            js_dom_svg_attribute_number(elem, "width", 0.0f),
-            js_dom_svg_attribute_number(elem, "height", 0.0f));
+        dom_svg_bounds_include_rect(&bounds,
+            dom_svg_attribute_number(elem, "x", 0.0f),
+            dom_svg_attribute_number(elem, "y", 0.0f),
+            dom_svg_attribute_number(elem, "width", 0.0f),
+            dom_svg_attribute_number(elem, "height", 0.0f));
     } else if (strcasecmp(tag, "circle") == 0) {
-        float radius = js_dom_svg_attribute_number(elem, "r", 0.0f);
-        js_dom_svg_bounds_include_rect(&bounds,
-            js_dom_svg_attribute_number(elem, "cx", 0.0f) - radius,
-            js_dom_svg_attribute_number(elem, "cy", 0.0f) - radius,
+        float radius = dom_svg_attribute_number(elem, "r", 0.0f);
+        dom_svg_bounds_include_rect(&bounds,
+            dom_svg_attribute_number(elem, "cx", 0.0f) - radius,
+            dom_svg_attribute_number(elem, "cy", 0.0f) - radius,
             radius * 2.0f, radius * 2.0f);
     } else if (strcasecmp(tag, "ellipse") == 0) {
-        float rx = js_dom_svg_attribute_number(elem, "rx", 0.0f);
-        float ry = js_dom_svg_attribute_number(elem, "ry", 0.0f);
-        js_dom_svg_bounds_include_rect(&bounds,
-            js_dom_svg_attribute_number(elem, "cx", 0.0f) - rx,
-            js_dom_svg_attribute_number(elem, "cy", 0.0f) - ry,
+        float rx = dom_svg_attribute_number(elem, "rx", 0.0f);
+        float ry = dom_svg_attribute_number(elem, "ry", 0.0f);
+        dom_svg_bounds_include_rect(&bounds,
+            dom_svg_attribute_number(elem, "cx", 0.0f) - rx,
+            dom_svg_attribute_number(elem, "cy", 0.0f) - ry,
             rx * 2.0f, ry * 2.0f);
     } else if (strcasecmp(tag, "line") == 0) {
-        js_dom_svg_bounds_include_point(&bounds,
-            js_dom_svg_attribute_number(elem, "x1", 0.0f),
-            js_dom_svg_attribute_number(elem, "y1", 0.0f));
-        js_dom_svg_bounds_include_point(&bounds,
-            js_dom_svg_attribute_number(elem, "x2", 0.0f),
-            js_dom_svg_attribute_number(elem, "y2", 0.0f));
+        dom_svg_bounds_include_point(&bounds,
+            dom_svg_attribute_number(elem, "x1", 0.0f),
+            dom_svg_attribute_number(elem, "y1", 0.0f));
+        dom_svg_bounds_include_point(&bounds,
+            dom_svg_attribute_number(elem, "x2", 0.0f),
+            dom_svg_attribute_number(elem, "y2", 0.0f));
     } else if (strcasecmp(tag, "polyline") == 0 || strcasecmp(tag, "polygon") == 0) {
-        js_dom_svg_bounds_from_points(elem->get_attribute("points"), &bounds);
+        dom_svg_bounds_from_points(elem->get_attribute("points"), &bounds);
     } else if (strcasecmp(tag, "path") == 0) {
         // `getBBox()` is consumed immediately by SVG callers; preserve the
         // renderer's path parser so malformed geometry cannot turn into a
@@ -11556,7 +11556,7 @@ static JsDomSvgBounds js_dom_svg_bounds_for_element(DomElement* elem) {
             float right = 0.0f;
             float bottom = 0.0f;
             if (rdt_path_get_bounds(path, &left, &top, &right, &bottom)) {
-                js_dom_svg_bounds_include_rect(&bounds, left, top,
+                dom_svg_bounds_include_rect(&bounds, left, top,
                                                 right - left, bottom - top);
             }
             rdt_path_free(path);
@@ -11564,7 +11564,7 @@ static JsDomSvgBounds js_dom_svg_bounds_for_element(DomElement* elem) {
     } else if (strcasecmp(tag, "text") == 0 || strcasecmp(tag, "tspan") == 0) {
         StrBuf* text = strbuf_new_cap(32);
         collect_text_content((DomNode*)elem, text);
-        float font_size = js_dom_svg_attribute_number(elem, "font-size",
+        float font_size = dom_svg_attribute_number(elem, "font-size",
             elem->font && elem->font->font_size > 0.0f ? elem->font->font_size : 16.0f);
         const char* family = elem->get_attribute("font-family");
         if (!family && elem->font) family = elem->font->family;
@@ -11573,13 +11573,13 @@ static JsDomSvgBounds js_dom_svg_bounds_for_element(DomElement* elem) {
         SvgTextMetrics metrics = {};
         svg_measure_text_metrics(text && text->str ? text->str : "", font_size,
             ui_context ? ui_context->font_ctx : nullptr, family,
-            js_dom_svg_font_weight(elem), js_dom_svg_font_slant(elem), &metrics);
-        float x = js_dom_svg_attribute_number(elem, "x", 0.0f);
+            dom_svg_font_weight(elem), dom_svg_font_slant(elem), &metrics);
+        float x = dom_svg_attribute_number(elem, "x", 0.0f);
         const char* anchor = elem->get_attribute("text-anchor");
         if (anchor && strcmp(anchor, "middle") == 0) x -= metrics.width * 0.5f;
         else if (anchor && strcmp(anchor, "end") == 0) x -= metrics.width;
-        float y = js_dom_svg_attribute_number(elem, "y", 0.0f);
-        js_dom_svg_bounds_include_rect(&bounds, x, y - metrics.ascent,
+        float y = dom_svg_attribute_number(elem, "y", 0.0f);
+        dom_svg_bounds_include_rect(&bounds, x, y - metrics.ascent,
                                         metrics.width, metrics.ascent + metrics.descent);
         if (text) strbuf_free(text);
     } else if (strcasecmp(tag, "g") == 0 || strcasecmp(tag, "svg") == 0 ||
@@ -11587,30 +11587,30 @@ static JsDomSvgBounds js_dom_svg_bounds_for_element(DomElement* elem) {
         for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
             if (!child->is_element()) continue;
             DomElement* child_elem = child->as_element();
-            JsDomSvgBounds child_bounds = js_dom_svg_bounds_for_element(child_elem);
-            RdtMatrix child_transform = js_dom_svg_transform_from_element(child_elem);
-            js_dom_svg_bounds_apply_transform(&child_bounds, &child_transform);
-            js_dom_svg_bounds_include_bounds(&bounds, &child_bounds);
+            JsDomSvgBounds child_bounds = dom_svg_bounds_for_element(child_elem);
+            RdtMatrix child_transform = dom_svg_transform_from_element(child_elem);
+            dom_svg_bounds_apply_transform(&child_bounds, &child_transform);
+            dom_svg_bounds_include_bounds(&bounds, &child_bounds);
         }
     }
     return bounds;
 }
 
-static Item js_dom_svg_get_bbox_for_element(DomElement* elem) {
-    JsDomSvgBounds bounds = js_dom_svg_bounds_for_element(elem);
-    if (!bounds.valid) return js_dom_make_rect_object(0.0f, 0.0f, 0.0f, 0.0f);
-    return js_dom_make_rect_object(bounds.left, bounds.top,
+static Item dom_svg_get_bbox_for_element(DomElement* elem) {
+    JsDomSvgBounds bounds = dom_svg_bounds_for_element(elem);
+    if (!bounds.valid) return dom_make_rect_object(0.0f, 0.0f, 0.0f, 0.0f);
+    return dom_make_rect_object(bounds.left, bounds.top,
                                    bounds.right - bounds.left,
                                    bounds.bottom - bounds.top);
 }
 
-static bool js_dom_svg_parse_viewbox(const char* value, float* min_x, float* min_y,
+static bool dom_svg_parse_viewbox(const char* value, float* min_x, float* min_y,
                                      float* width, float* height) {
     if (!value || !min_x || !min_y || !width || !height) return false;
     float values[4] = {};
     const char* cursor = value;
     for (int i = 0; i < 4; i++) {
-        cursor = js_dom_svg_skip_number_separators(cursor);
+        cursor = dom_svg_skip_number_separators(cursor);
         char* end = nullptr;
         values[i] = strtof(cursor, &end);
         if (end == cursor) return false;
@@ -11624,7 +11624,7 @@ static bool js_dom_svg_parse_viewbox(const char* value, float* min_x, float* min
     return true;
 }
 
-static RdtMatrix js_dom_svg_viewbox_transform(DomElement* elem) {
+static RdtMatrix dom_svg_viewbox_transform(DomElement* elem) {
     RdtMatrix transform = rdt_matrix_identity();
     if (!elem) return transform;
     float min_x = 0.0f;
@@ -11633,11 +11633,11 @@ static RdtMatrix js_dom_svg_viewbox_transform(DomElement* elem) {
     float viewbox_height = 0.0f;
     const char* viewbox = elem->get_attribute("viewBox");
     if (!viewbox) viewbox = elem->get_attribute("viewbox");
-    if (!js_dom_svg_parse_viewbox(viewbox, &min_x, &min_y, &viewbox_width, &viewbox_height)) {
+    if (!dom_svg_parse_viewbox(viewbox, &min_x, &min_y, &viewbox_width, &viewbox_height)) {
         return transform;
     }
-    float viewport_width = js_dom_svg_attribute_number(elem, "width", 0.0f);
-    float viewport_height = js_dom_svg_attribute_number(elem, "height", 0.0f);
+    float viewport_width = dom_svg_attribute_number(elem, "width", 0.0f);
+    float viewport_height = dom_svg_attribute_number(elem, "height", 0.0f);
     if (viewport_width <= 0.0f || viewport_height <= 0.0f) {
         // hit-testing already has committed CSS geometry; flushing through the
         // generic DOM path can rebuild this element before the second axis.
@@ -11646,10 +11646,10 @@ static RdtMatrix js_dom_svg_viewbox_transform(DomElement* elem) {
     }
     if (viewport_width <= 0.0f || viewport_height <= 0.0f) {
         if (viewport_width <= 0.0f) {
-            viewport_width = (float)js_dom_geometry_dimension(elem, true);
+            viewport_width = (float)dom_geometry_dimension(elem, true);
         }
         if (viewport_height <= 0.0f) {
-            viewport_height = (float)js_dom_geometry_dimension(elem, false);
+            viewport_height = (float)dom_geometry_dimension(elem, false);
         }
     }
     if (viewport_width <= 0.0f || viewport_height <= 0.0f) return transform;
@@ -11672,7 +11672,7 @@ static RdtMatrix js_dom_svg_viewbox_transform(DomElement* elem) {
     return transform;
 }
 
-static RdtMatrix js_dom_svg_ctm(DomElement* elem, bool screen_space) {
+static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
     RdtMatrix matrix = rdt_matrix_identity();
     if (!elem) return matrix;
     DomElement* chain[64];
@@ -11693,25 +11693,25 @@ static RdtMatrix js_dom_svg_ctm(DomElement* elem, bool screen_space) {
         if (!current || !current->tag_name) continue;
         if (strcasecmp(current->tag_name, "svg") == 0) {
             in_svg = true;
-            RdtMatrix viewbox_transform = js_dom_svg_viewbox_transform(current);
+            RdtMatrix viewbox_transform = dom_svg_viewbox_transform(current);
             matrix = rdt_matrix_multiply(&matrix, &viewbox_transform);
         }
         if (in_svg) {
-            RdtMatrix local_transform = js_dom_svg_transform_from_element(current);
+            RdtMatrix local_transform = dom_svg_transform_from_element(current);
             matrix = rdt_matrix_multiply(&matrix, &local_transform);
         }
     }
     if (screen_space && outermost_svg) {
         float x = 0.0f;
         float y = 0.0f;
-        js_dom_viewport_node_position((DomNode*)outermost_svg, &x, &y);
+        dom_viewport_node_position((DomNode*)outermost_svg, &x, &y);
         RdtMatrix layout_transform = rdt_matrix_translate(x, y);
         matrix = rdt_matrix_multiply(&layout_transform, &matrix);
     }
     return matrix;
 }
 
-static bool js_dom_svg_matrix_unproject_point(const RdtMatrix* matrix,
+static bool dom_svg_matrix_unproject_point(const RdtMatrix* matrix,
                                               float x, float y,
                                               float* local_x,
                                               float* local_y) {
@@ -11767,7 +11767,7 @@ typedef struct JsDomSvgPathHitContext {
     float subpath_start_y;
 } JsDomSvgPathHitContext;
 
-static float js_dom_svg_point_segment_distance_sq(float point_x, float point_y,
+static float dom_svg_point_segment_distance_sq(float point_x, float point_y,
                                                   float start_x, float start_y,
                                                   float end_x, float end_y) {
     float dx = end_x - start_x;
@@ -11789,7 +11789,7 @@ static float js_dom_svg_point_segment_distance_sq(float point_x, float point_y,
     return px * px + py * py;
 }
 
-static bool js_dom_svg_point_in_triangle(float point_x, float point_y,
+static bool dom_svg_point_in_triangle(float point_x, float point_y,
                                          float ax, float ay, float bx, float by,
                                          float cx, float cy) {
     float ab = (point_x - ax) * (by - ay) - (point_y - ay) * (bx - ax);
@@ -11799,7 +11799,7 @@ static bool js_dom_svg_point_in_triangle(float point_x, float point_y,
         (ab <= 0.0f && bc <= 0.0f && ca <= 0.0f);
 }
 
-static bool js_dom_svg_stroke_segment_contains(const JsDomSvgPathHitContext* context,
+static bool dom_svg_stroke_segment_contains(const JsDomSvgPathHitContext* context,
                                                 float start_x, float start_y,
                                                 float end_x, float end_y,
                                                 bool start_cap, bool end_cap) {
@@ -11840,7 +11840,7 @@ static bool js_dom_svg_stroke_segment_contains(const JsDomSvgPathHitContext* con
     return false;
 }
 
-static bool js_dom_svg_dash_is_on_at(const JsDomSvgPathHitContext* context,
+static bool dom_svg_dash_is_on_at(const JsDomSvgPathHitContext* context,
                                      float distance, float* out_remaining) {
     if (!context || context->stroke_dash_count <= 0 || context->stroke_dash_total <= 0.0f) {
         if (out_remaining) *out_remaining = 1.0e30f;
@@ -11861,7 +11861,7 @@ static bool js_dom_svg_dash_is_on_at(const JsDomSvgPathHitContext* context,
     return false;
 }
 
-static void js_dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
+static void dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
                                          float prev_start_x, float prev_start_y,
                                          float vertex_x, float vertex_y,
                                          float next_end_x, float next_end_y) {
@@ -11906,7 +11906,7 @@ static void js_dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
         return;
     }
     if (context->stroke_join == RDT_JOIN_BEVEL) {
-        context->stroke_hit = js_dom_svg_point_in_triangle(context->point_x, context->point_y,
+        context->stroke_hit = dom_svg_point_in_triangle(context->point_x, context->point_y,
             vertex_x, vertex_y, outer_prev_x, outer_prev_y, outer_next_x, outer_next_y);
         return;
     }
@@ -11919,20 +11919,20 @@ static void js_dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
     float miter_y = outer_prev_y + prev_y * prev_distance;
     float miter_length = hypotf(miter_x - vertex_x, miter_y - vertex_y);
     if (miter_length > context->stroke_miter_limit * context->stroke_radius) {
-        context->stroke_hit = js_dom_svg_point_in_triangle(context->point_x, context->point_y,
+        context->stroke_hit = dom_svg_point_in_triangle(context->point_x, context->point_y,
             vertex_x, vertex_y, outer_prev_x, outer_prev_y, outer_next_x, outer_next_y);
         return;
     }
-    context->stroke_hit = js_dom_svg_point_in_triangle(context->point_x, context->point_y,
+    context->stroke_hit = dom_svg_point_in_triangle(context->point_x, context->point_y,
         outer_prev_x, outer_prev_y, outer_next_x, outer_next_y, miter_x, miter_y);
 }
 
-static void js_dom_svg_path_hit_add_stroke_segment(JsDomSvgPathHitContext* context,
+static void dom_svg_path_hit_add_stroke_segment(JsDomSvgPathHitContext* context,
                                                     float start_x, float start_y,
                                                     float end_x, float end_y) {
     if (!context || !context->stroke_enabled) return;
     if (context->stroke_dash_count == 0 && context->has_last_stroke_segment) {
-        js_dom_svg_path_hit_add_join(context, context->last_stroke_start_x,
+        dom_svg_path_hit_add_join(context, context->last_stroke_start_x,
             context->last_stroke_start_y, start_x, start_y, end_x, end_y);
     }
     float dx = end_x - start_x;
@@ -11947,7 +11947,7 @@ static void js_dom_svg_path_hit_add_stroke_segment(JsDomSvgPathHitContext* conte
         context->has_first_stroke_segment = true;
     }
     if (context->stroke_dash_count <= 0) {
-        if (js_dom_svg_stroke_segment_contains(context, start_x, start_y,
+        if (dom_svg_stroke_segment_contains(context, start_x, start_y,
                 end_x, end_y, false, false)) {
             context->stroke_hit = true;
         }
@@ -11956,7 +11956,7 @@ static void js_dom_svg_path_hit_add_stroke_segment(JsDomSvgPathHitContext* conte
         while (segment_offset < length) {
             float remaining = 0.0f;
             float path_offset = context->subpath_stroke_length + segment_offset;
-            bool dash_on = js_dom_svg_dash_is_on_at(context, path_offset, &remaining);
+            bool dash_on = dom_svg_dash_is_on_at(context, path_offset, &remaining);
             if (remaining <= 0.000001f) remaining = length - segment_offset;
             float fragment_length = LMB_MIN(remaining, length - segment_offset);
             if (dash_on) {
@@ -11967,10 +11967,10 @@ static void js_dom_svg_path_hit_add_stroke_segment(JsDomSvgPathHitContext* conte
                 float fragment_end_x = start_x + dx * end_fraction;
                 float fragment_end_y = start_y + dy * end_fraction;
                 bool start_cap = path_offset <= 0.000001f ||
-                    !js_dom_svg_dash_is_on_at(context, path_offset - 0.0001f, nullptr);
-                bool end_cap = !js_dom_svg_dash_is_on_at(context,
+                    !dom_svg_dash_is_on_at(context, path_offset - 0.0001f, nullptr);
+                bool end_cap = !dom_svg_dash_is_on_at(context,
                     path_offset + fragment_length + 0.0001f, nullptr);
-                if (js_dom_svg_stroke_segment_contains(context, fragment_start_x, fragment_start_y,
+                if (dom_svg_stroke_segment_contains(context, fragment_start_x, fragment_start_y,
                         fragment_end_x, fragment_end_y, start_cap, end_cap)) {
                     context->stroke_hit = true;
                 }
@@ -11986,7 +11986,7 @@ static void js_dom_svg_path_hit_add_stroke_segment(JsDomSvgPathHitContext* conte
     context->has_last_stroke_segment = true;
 }
 
-static void js_dom_svg_path_hit_add_fill_edge(JsDomSvgPathHitContext* context,
+static void dom_svg_path_hit_add_fill_edge(JsDomSvgPathHitContext* context,
                                               float start_x, float start_y,
                                               float end_x, float end_y) {
     if (!context || fabsf(end_y - start_y) <= 0.000001f) return;
@@ -12008,19 +12008,19 @@ static void js_dom_svg_path_hit_add_fill_edge(JsDomSvgPathHitContext* context,
     }
 }
 
-static void js_dom_svg_path_hit_add_segment(JsDomSvgPathHitContext* context,
+static void dom_svg_path_hit_add_segment(JsDomSvgPathHitContext* context,
                                             float start_x, float start_y,
                                             float end_x, float end_y,
                                             bool include_stroke) {
     if (!context) return;
     context->subpath_area_twice += start_x * end_y - end_x * start_y;
     if (include_stroke) {
-        js_dom_svg_path_hit_add_stroke_segment(context, start_x, start_y, end_x, end_y);
+        dom_svg_path_hit_add_stroke_segment(context, start_x, start_y, end_x, end_y);
     }
-    js_dom_svg_path_hit_add_fill_edge(context, start_x, start_y, end_x, end_y);
+    dom_svg_path_hit_add_fill_edge(context, start_x, start_y, end_x, end_y);
 }
 
-static void js_dom_svg_path_hit_commit_subpath_fill_edge(JsDomSvgPathHitContext* context) {
+static void dom_svg_path_hit_commit_subpath_fill_edge(JsDomSvgPathHitContext* context) {
     if (!context) return;
     if (fabsf(context->subpath_area_twice) > 0.000001f &&
         context->subpath_fill_on_edge) {
@@ -12028,22 +12028,22 @@ static void js_dom_svg_path_hit_commit_subpath_fill_edge(JsDomSvgPathHitContext*
     }
 }
 
-static void js_dom_svg_path_hit_finish_subpath(JsDomSvgPathHitContext* context) {
+static void dom_svg_path_hit_finish_subpath(JsDomSvgPathHitContext* context) {
     if (!context || !context->has_current || !context->subpath_has_draw) return;
     if (!context->subpath_closed) {
         // SVG fill implicitly closes an open subpath, while its stroke does not.
-        js_dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
+        dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
                                         context->subpath_start_x, context->subpath_start_y,
                                         false);
         // A zero-area contour, such as <line>, has no fill boundary to pick.
-        js_dom_svg_path_hit_commit_subpath_fill_edge(context);
+        dom_svg_path_hit_commit_subpath_fill_edge(context);
     }
     if (!context->subpath_closed && context->has_first_stroke_segment &&
         context->stroke_dash_count == 0) {
-        if (js_dom_svg_stroke_segment_contains(context, context->first_stroke_start_x,
+        if (dom_svg_stroke_segment_contains(context, context->first_stroke_start_x,
                 context->first_stroke_start_y, context->first_stroke_end_x,
                 context->first_stroke_end_y, true, false) ||
-            js_dom_svg_stroke_segment_contains(context, context->last_stroke_start_x,
+            dom_svg_stroke_segment_contains(context, context->last_stroke_start_x,
                 context->last_stroke_start_y, context->last_stroke_end_x,
                 context->last_stroke_end_y, false, true)) {
             context->stroke_hit = true;
@@ -12051,7 +12051,7 @@ static void js_dom_svg_path_hit_finish_subpath(JsDomSvgPathHitContext* context) 
     }
 }
 
-static void js_dom_svg_path_hit_flatten_cubic(JsDomSvgPathHitContext* context,
+static void dom_svg_path_hit_flatten_cubic(JsDomSvgPathHitContext* context,
                                               float start_x, float start_y,
                                               float control1_x, float control1_y,
                                               float control2_x, float control2_y,
@@ -12059,13 +12059,13 @@ static void js_dom_svg_path_hit_flatten_cubic(JsDomSvgPathHitContext* context,
                                               int depth) {
     if (!context) return;
     float flatness_sq = context->curve_flatness * context->curve_flatness;
-    float control1_distance_sq = js_dom_svg_point_segment_distance_sq(
+    float control1_distance_sq = dom_svg_point_segment_distance_sq(
         control1_x, control1_y, start_x, start_y, end_x, end_y);
-    float control2_distance_sq = js_dom_svg_point_segment_distance_sq(
+    float control2_distance_sq = dom_svg_point_segment_distance_sq(
         control2_x, control2_y, start_x, start_y, end_x, end_y);
     if (depth >= JS_DOM_SVG_PATH_HIT_MAX_CUBIC_DEPTH ||
         (control1_distance_sq <= flatness_sq && control2_distance_sq <= flatness_sq)) {
-        js_dom_svg_path_hit_add_segment(context, start_x, start_y, end_x, end_y, true);
+        dom_svg_path_hit_add_segment(context, start_x, start_y, end_x, end_y, true);
         return;
     }
     float start_control1_x = (start_x + control1_x) * 0.5f;
@@ -12080,15 +12080,15 @@ static void js_dom_svg_path_hit_flatten_cubic(JsDomSvgPathHitContext* context,
     float middle_control2_y = (controls_y + control2_end_y) * 0.5f;
     float middle_x = (middle_control1_x + middle_control2_x) * 0.5f;
     float middle_y = (middle_control1_y + middle_control2_y) * 0.5f;
-    js_dom_svg_path_hit_flatten_cubic(context, start_x, start_y,
+    dom_svg_path_hit_flatten_cubic(context, start_x, start_y,
         start_control1_x, start_control1_y, middle_control1_x, middle_control1_y,
         middle_x, middle_y, depth + 1);
-    js_dom_svg_path_hit_flatten_cubic(context, middle_x, middle_y,
+    dom_svg_path_hit_flatten_cubic(context, middle_x, middle_y,
         middle_control2_x, middle_control2_y, control2_end_x, control2_end_y,
         end_x, end_y, depth + 1);
 }
 
-static void js_dom_svg_path_add_ellipse(RdtPath* path, float cx, float cy,
+static void dom_svg_path_add_ellipse(RdtPath* path, float cx, float cy,
                                         float rx, float ry) {
     if (!path || rx <= 0.0f || ry <= 0.0f) return;
     const float kappa = 0.5522847498307936f;
@@ -12104,7 +12104,7 @@ static void js_dom_svg_path_add_ellipse(RdtPath* path, float cx, float cy,
     rdt_path_close(path);
 }
 
-static void js_dom_svg_path_add_rect(RdtPath* path, float x, float y,
+static void dom_svg_path_add_rect(RdtPath* path, float x, float y,
                                      float width, float height,
                                      float rx, float ry) {
     if (!path || width <= 0.0f || height <= 0.0f) return;
@@ -12137,18 +12137,18 @@ static void js_dom_svg_path_add_rect(RdtPath* path, float x, float y,
     rdt_path_close(path);
 }
 
-static bool js_dom_svg_path_add_points(RdtPath* path, const char* points,
+static bool dom_svg_path_add_points(RdtPath* path, const char* points,
                                        bool close_path) {
     if (!path || !points) return false;
     bool has_point = false;
     const char* cursor = points;
     while (cursor && *cursor) {
-        cursor = js_dom_svg_skip_number_separators(cursor);
+        cursor = dom_svg_skip_number_separators(cursor);
         if (!*cursor) break;
         char* end = nullptr;
         float x = strtof(cursor, &end);
         if (end == cursor) break;
-        cursor = js_dom_svg_skip_number_separators(end);
+        cursor = dom_svg_skip_number_separators(end);
         float y = strtof(cursor, &end);
         if (end == cursor) break;
         if (has_point) rdt_path_line_to(path, x, y);
@@ -12160,7 +12160,7 @@ static bool js_dom_svg_path_add_points(RdtPath* path, const char* points,
     return has_point;
 }
 
-static bool js_dom_svg_is_basic_shape(DomElement* elem) {
+static bool dom_svg_is_basic_shape(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
     const char* tag = elem->tag_name;
     return strcasecmp(tag, "rect") == 0 || strcasecmp(tag, "circle") == 0 ||
@@ -12169,8 +12169,8 @@ static bool js_dom_svg_is_basic_shape(DomElement* elem) {
         strcasecmp(tag, "path") == 0;
 }
 
-static RdtPath* js_dom_svg_basic_shape_path(DomElement* elem) {
-    if (!js_dom_svg_is_basic_shape(elem)) return nullptr;
+static RdtPath* dom_svg_basic_shape_path(DomElement* elem) {
+    if (!dom_svg_is_basic_shape(elem)) return nullptr;
     const char* tag = elem->tag_name;
     if (strcasecmp(tag, "path") == 0) {
         const char* d = elem->get_attribute("d");
@@ -12180,44 +12180,44 @@ static RdtPath* js_dom_svg_basic_shape_path(DomElement* elem) {
     if (!path) return nullptr;
     bool valid = false;
     if (strcasecmp(tag, "rect") == 0) {
-        float width = js_dom_svg_attribute_number(elem, "width", 0.0f);
-        float height = js_dom_svg_attribute_number(elem, "height", 0.0f);
+        float width = dom_svg_attribute_number(elem, "width", 0.0f);
+        float height = dom_svg_attribute_number(elem, "height", 0.0f);
         const char* rx_attr = elem->get_attribute("rx");
         const char* ry_attr = elem->get_attribute("ry");
-        float rx = rx_attr ? js_dom_svg_attribute_number(elem, "rx", 0.0f)
-            : (ry_attr ? js_dom_svg_attribute_number(elem, "ry", 0.0f) : 0.0f);
-        float ry = ry_attr ? js_dom_svg_attribute_number(elem, "ry", 0.0f) : rx;
+        float rx = rx_attr ? dom_svg_attribute_number(elem, "rx", 0.0f)
+            : (ry_attr ? dom_svg_attribute_number(elem, "ry", 0.0f) : 0.0f);
+        float ry = ry_attr ? dom_svg_attribute_number(elem, "ry", 0.0f) : rx;
         if (width > 0.0f && height > 0.0f) {
-            js_dom_svg_path_add_rect(path,
-                js_dom_svg_attribute_number(elem, "x", 0.0f),
-                js_dom_svg_attribute_number(elem, "y", 0.0f), width, height, rx, ry);
+            dom_svg_path_add_rect(path,
+                dom_svg_attribute_number(elem, "x", 0.0f),
+                dom_svg_attribute_number(elem, "y", 0.0f), width, height, rx, ry);
             valid = true;
         }
     } else if (strcasecmp(tag, "circle") == 0) {
-        float radius = js_dom_svg_attribute_number(elem, "r", 0.0f);
+        float radius = dom_svg_attribute_number(elem, "r", 0.0f);
         if (radius > 0.0f) {
-            js_dom_svg_path_add_ellipse(path,
-                js_dom_svg_attribute_number(elem, "cx", 0.0f),
-                js_dom_svg_attribute_number(elem, "cy", 0.0f), radius, radius);
+            dom_svg_path_add_ellipse(path,
+                dom_svg_attribute_number(elem, "cx", 0.0f),
+                dom_svg_attribute_number(elem, "cy", 0.0f), radius, radius);
             valid = true;
         }
     } else if (strcasecmp(tag, "ellipse") == 0) {
-        float rx = js_dom_svg_attribute_number(elem, "rx", 0.0f);
-        float ry = js_dom_svg_attribute_number(elem, "ry", 0.0f);
+        float rx = dom_svg_attribute_number(elem, "rx", 0.0f);
+        float ry = dom_svg_attribute_number(elem, "ry", 0.0f);
         if (rx > 0.0f && ry > 0.0f) {
-            js_dom_svg_path_add_ellipse(path,
-                js_dom_svg_attribute_number(elem, "cx", 0.0f),
-                js_dom_svg_attribute_number(elem, "cy", 0.0f), rx, ry);
+            dom_svg_path_add_ellipse(path,
+                dom_svg_attribute_number(elem, "cx", 0.0f),
+                dom_svg_attribute_number(elem, "cy", 0.0f), rx, ry);
             valid = true;
         }
     } else if (strcasecmp(tag, "line") == 0) {
-        rdt_path_move_to(path, js_dom_svg_attribute_number(elem, "x1", 0.0f),
-                         js_dom_svg_attribute_number(elem, "y1", 0.0f));
-        rdt_path_line_to(path, js_dom_svg_attribute_number(elem, "x2", 0.0f),
-                         js_dom_svg_attribute_number(elem, "y2", 0.0f));
+        rdt_path_move_to(path, dom_svg_attribute_number(elem, "x1", 0.0f),
+                         dom_svg_attribute_number(elem, "y1", 0.0f));
+        rdt_path_line_to(path, dom_svg_attribute_number(elem, "x2", 0.0f),
+                         dom_svg_attribute_number(elem, "y2", 0.0f));
         valid = true;
     } else {
-        valid = js_dom_svg_path_add_points(path, elem->get_attribute("points"),
+        valid = dom_svg_path_add_points(path, elem->get_attribute("points"),
             strcasecmp(tag, "polygon") == 0);
     }
     if (!valid) {
@@ -12227,14 +12227,14 @@ static RdtPath* js_dom_svg_basic_shape_path(DomElement* elem) {
     return path;
 }
 
-static bool js_dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
+static bool dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
                                       const float* args, int arg_count) {
     JsDomSvgPathHitContext* context = (JsDomSvgPathHitContext*)userdata;
     if (!context) return false;
     switch (command) {
     case RDT_PATH_MOVE:
         if (arg_count < 2) return false;
-        js_dom_svg_path_hit_finish_subpath(context);
+        dom_svg_path_hit_finish_subpath(context);
         context->current_x = args[0];
         context->current_y = args[1];
         context->subpath_start_x = args[0];
@@ -12250,7 +12250,7 @@ static bool js_dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
         return true;
     case RDT_PATH_LINE:
         if (arg_count < 2 || !context->has_current) return false;
-        js_dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
+        dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
                                         args[0], args[1], true);
         context->current_x = args[0];
         context->current_y = args[1];
@@ -12259,7 +12259,7 @@ static bool js_dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
         return true;
     case RDT_PATH_QUAD:
         if (arg_count < 4 || !context->has_current) return false;
-        js_dom_svg_path_hit_flatten_cubic(context, context->current_x, context->current_y,
+        dom_svg_path_hit_flatten_cubic(context, context->current_x, context->current_y,
             context->current_x + (args[0] - context->current_x) * (2.0f / 3.0f),
             context->current_y + (args[1] - context->current_y) * (2.0f / 3.0f),
             args[2] + (args[0] - args[2]) * (2.0f / 3.0f),
@@ -12272,7 +12272,7 @@ static bool js_dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
         return true;
     case RDT_PATH_CUBIC:
         if (arg_count < 6 || !context->has_current) return false;
-        js_dom_svg_path_hit_flatten_cubic(context, context->current_x, context->current_y,
+        dom_svg_path_hit_flatten_cubic(context, context->current_x, context->current_y,
             args[0], args[1], args[2], args[3], args[4], args[5], 0);
         context->current_x = args[4];
         context->current_y = args[5];
@@ -12281,12 +12281,12 @@ static bool js_dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
         return true;
     case RDT_PATH_CLOSE:
         if (!context->has_current || !context->subpath_has_draw) return true;
-        js_dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
+        dom_svg_path_hit_add_segment(context, context->current_x, context->current_y,
                                         context->subpath_start_x, context->subpath_start_y,
                                         true);
         if (context->stroke_dash_count == 0 && context->has_first_stroke_segment &&
             context->has_last_stroke_segment) {
-            js_dom_svg_path_hit_add_join(context, context->last_stroke_start_x,
+            dom_svg_path_hit_add_join(context, context->last_stroke_start_x,
                 context->last_stroke_start_y, context->subpath_start_x,
                 context->subpath_start_y, context->first_stroke_end_x,
                 context->first_stroke_end_y);
@@ -12294,7 +12294,7 @@ static bool js_dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
         context->current_x = context->subpath_start_x;
         context->current_y = context->subpath_start_y;
         context->subpath_closed = true;
-        js_dom_svg_path_hit_commit_subpath_fill_edge(context);
+        dom_svg_path_hit_commit_subpath_fill_edge(context);
         return true;
     case RDT_PATH_RECT:
     case RDT_PATH_CIRCLE:
@@ -12305,7 +12305,7 @@ static bool js_dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
     return false;
 }
 
-static const char* js_dom_svg_cascaded_property_value(DomElement* elem,
+static const char* dom_svg_cascaded_property_value(DomElement* elem,
                                                        const char* name,
                                                        char* buffer,
                                                        size_t buffer_size) {
@@ -12326,7 +12326,7 @@ static const char* js_dom_svg_cascaded_property_value(DomElement* elem,
     return buffer;
 }
 
-static const char* js_dom_svg_presentation_value(DomElement* elem, const char* name,
+static const char* dom_svg_presentation_value(DomElement* elem, const char* name,
                                                   bool inherits, char* buffer,
                                                   size_t buffer_size) {
     if (!elem || !name || !buffer || buffer_size == 0) return nullptr;
@@ -12336,7 +12336,7 @@ static const char* js_dom_svg_presentation_value(DomElement* elem, const char* n
         const char* inline_value = svg_get_inline_style_property(
             current->get_attribute("style"), name, buffer, buffer_size);
         if (inline_value) return inline_value;
-        const char* cascaded_value = js_dom_svg_cascaded_property_value(current, name,
+        const char* cascaded_value = dom_svg_cascaded_property_value(current, name,
             buffer, buffer_size);
         if (cascaded_value) return cascaded_value;
         const char* attribute = current->get_attribute(name);
@@ -12346,10 +12346,10 @@ static const char* js_dom_svg_presentation_value(DomElement* elem, const char* n
     return nullptr;
 }
 
-static float js_dom_svg_presentation_number(DomElement* elem, const char* name,
+static float dom_svg_presentation_number(DomElement* elem, const char* name,
                                             float fallback, bool inherits) {
     char value_buffer[64] = {};
-    const char* value = js_dom_svg_presentation_value(elem, name, inherits,
+    const char* value = dom_svg_presentation_value(elem, name, inherits,
         value_buffer, sizeof(value_buffer));
     if (!value) return fallback;
     char* end = nullptr;
@@ -12357,11 +12357,11 @@ static float js_dom_svg_presentation_number(DomElement* elem, const char* name,
     return end != value ? parsed : fallback;
 }
 
-static bool js_dom_svg_paint_is_present(DomElement* elem, const char* paint_name,
+static bool dom_svg_paint_is_present(DomElement* elem, const char* paint_name,
                                         bool paint_is_present_by_default) {
     if (!elem || !paint_name) return false;
     char paint_buffer[256] = {};
-    const char* paint = js_dom_svg_presentation_value(elem, paint_name, true,
+    const char* paint = dom_svg_presentation_value(elem, paint_name, true,
         paint_buffer, sizeof(paint_buffer));
     if (paint && (!*paint || strcasecmp(paint, "none") == 0)) return false;
     return paint || paint_is_present_by_default;
@@ -12373,10 +12373,10 @@ typedef struct JsDomSvgShapeHit {
     bool bounding_box;
 } JsDomSvgShapeHit;
 
-static void js_dom_svg_configure_stroke_hit(DomElement* elem, float min_scale,
+static void dom_svg_configure_stroke_hit(DomElement* elem, float min_scale,
                                             JsDomSvgPathHitContext* context) {
     if (!context) return;
-    float stroke_width = js_dom_svg_presentation_number(elem, "stroke-width", 1.0f, true);
+    float stroke_width = dom_svg_presentation_number(elem, "stroke-width", 1.0f, true);
     context->stroke_enabled = stroke_width > 0.0f;
     if (!context->stroke_enabled) return;
     context->stroke_radius = stroke_width * 0.5f + JS_DOM_SVG_STROKE_HIT_AIM_SLOP_PX / min_scale;
@@ -12386,25 +12386,25 @@ static void js_dom_svg_configure_stroke_hit(DomElement* elem, float min_scale,
     char cap_buffer[64] = {};
     char join_buffer[64] = {};
     char dash_buffer[256] = {};
-    const char* cap = js_dom_svg_presentation_value(elem, "stroke-linecap", true,
+    const char* cap = dom_svg_presentation_value(elem, "stroke-linecap", true,
         cap_buffer, sizeof(cap_buffer));
-    const char* join = js_dom_svg_presentation_value(elem, "stroke-linejoin", true,
+    const char* join = dom_svg_presentation_value(elem, "stroke-linejoin", true,
         join_buffer, sizeof(join_buffer));
     if (cap && strcasecmp(cap, "round") == 0) context->stroke_cap = RDT_CAP_ROUND;
     else if (cap && strcasecmp(cap, "square") == 0) context->stroke_cap = RDT_CAP_SQUARE;
     if (join && strcasecmp(join, "round") == 0) context->stroke_join = RDT_JOIN_ROUND;
     else if (join && strcasecmp(join, "bevel") == 0) context->stroke_join = RDT_JOIN_BEVEL;
-    context->stroke_miter_limit = js_dom_svg_presentation_number(elem,
+    context->stroke_miter_limit = dom_svg_presentation_number(elem,
         "stroke-miterlimit", 4.0f, true);
     if (context->stroke_miter_limit < 1.0f) context->stroke_miter_limit = 1.0f;
-    context->stroke_dash_offset = js_dom_svg_presentation_number(elem,
+    context->stroke_dash_offset = dom_svg_presentation_number(elem,
         "stroke-dashoffset", 0.0f, true);
-    const char* dasharray = js_dom_svg_presentation_value(elem, "stroke-dasharray", true,
+    const char* dasharray = dom_svg_presentation_value(elem, "stroke-dasharray", true,
         dash_buffer, sizeof(dash_buffer));
     if (!dasharray || !*dasharray || strcasecmp(dasharray, "none") == 0) return;
     const char* cursor = dasharray;
     while (*cursor && context->stroke_dash_count < 16) {
-        cursor = js_dom_svg_skip_number_separators(cursor);
+        cursor = dom_svg_skip_number_separators(cursor);
         if (!*cursor) break;
         char* end = nullptr;
         float dash = strtof(cursor, &end);
@@ -12426,7 +12426,7 @@ static void js_dom_svg_configure_stroke_hit(DomElement* elem, float min_scale,
     if (context->stroke_dash_total <= 0.0f) context->stroke_dash_count = 0;
 }
 
-static JsDomSvgShapeHit js_dom_svg_basic_shape_hit_local_point(DomElement* elem,
+static JsDomSvgShapeHit dom_svg_basic_shape_hit_local_point(DomElement* elem,
                                                                float local_x,
                                                                float local_y,
                                                                float min_scale) {
@@ -12434,15 +12434,15 @@ static JsDomSvgShapeHit js_dom_svg_basic_shape_hit_local_point(DomElement* elem,
     if (!elem) return result;
     // Every basic SVG primitive is lowered to the same contour visitor.  Its
     // bounding box contains non-painted gaps, so it cannot decide a hit.
-    RdtPath* path = js_dom_svg_basic_shape_path(elem);
+    RdtPath* path = dom_svg_basic_shape_path(elem);
     if (!path) return result;
     JsDomSvgPathHitContext context = {};
     context.point_x = local_x;
     context.point_y = local_y;
     context.curve_flatness = 0.5f / min_scale;
-    js_dom_svg_configure_stroke_hit(elem, min_scale, &context);
-    bool visited = rdt_path_visit(path, js_dom_svg_path_hit_visit, &context);
-    if (visited) js_dom_svg_path_hit_finish_subpath(&context);
+    dom_svg_configure_stroke_hit(elem, min_scale, &context);
+    bool visited = rdt_path_visit(path, dom_svg_path_hit_visit, &context);
+    if (visited) dom_svg_path_hit_finish_subpath(&context);
     float left = 0.0f;
     float top = 0.0f;
     float right = 0.0f;
@@ -12453,7 +12453,7 @@ static JsDomSvgShapeHit js_dom_svg_basic_shape_hit_local_point(DomElement* elem,
     if (!visited) return result;
     {
         char fill_rule_buffer[64] = {};
-        const char* fill_rule = js_dom_svg_presentation_value(elem, "fill-rule", true,
+        const char* fill_rule = dom_svg_presentation_value(elem, "fill-rule", true,
             fill_rule_buffer, sizeof(fill_rule_buffer));
         bool even_odd = fill_rule && strcasecmp(fill_rule, "evenodd") == 0;
         if (context.fill_on_edge || (even_odd
@@ -12466,15 +12466,15 @@ static JsDomSvgShapeHit js_dom_svg_basic_shape_hit_local_point(DomElement* elem,
     return result;
 }
 
-static JsDomSvgShapeHit js_dom_svg_basic_shape_hit_viewport_point(DomElement* elem,
+static JsDomSvgShapeHit dom_svg_basic_shape_hit_viewport_point(DomElement* elem,
                                                                   float viewport_x,
                                                                   float viewport_y) {
     JsDomSvgShapeHit result = {};
     if (!elem) return result;
-    RdtMatrix screen_ctm = js_dom_svg_ctm(elem, true);
+    RdtMatrix screen_ctm = dom_svg_ctm(elem, true);
     float local_x = 0.0f;
     float local_y = 0.0f;
-    if (!js_dom_svg_matrix_unproject_point(&screen_ctm, viewport_x, viewport_y,
+    if (!dom_svg_matrix_unproject_point(&screen_ctm, viewport_x, viewport_y,
                                             &local_x, &local_y)) {
         return result;
     }
@@ -12482,28 +12482,28 @@ static JsDomSvgShapeHit js_dom_svg_basic_shape_hit_viewport_point(DomElement* el
     float scale_y = hypotf(screen_ctm.e12, screen_ctm.e22);
     float min_scale = LMB_MIN(scale_x, scale_y);
     if (min_scale < 0.0001f) min_scale = 0.0001f;
-    return js_dom_svg_basic_shape_hit_local_point(elem, local_x, local_y, min_scale);
+    return dom_svg_basic_shape_hit_local_point(elem, local_x, local_y, min_scale);
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_svg_tag_is, (DomElement* elem, const char* tag), (elem && elem->tag_name && tag && strcasecmp(elem->tag_name, tag) == 0))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_svg_tag_is, (DomElement* elem, const char* tag), (elem && elem->tag_name && tag && strcasecmp(elem->tag_name, tag) == 0))
 
-static bool js_dom_svg_viewport_local_bounds(DomElement* elem, float* left, float* top,
+static bool dom_svg_viewport_local_bounds(DomElement* elem, float* left, float* top,
                                              float* right, float* bottom) {
-    if (!js_dom_svg_tag_is(elem, "svg") || !left || !top || !right || !bottom) return false;
+    if (!dom_svg_tag_is(elem, "svg") || !left || !top || !right || !bottom) return false;
     float min_x = 0.0f;
     float min_y = 0.0f;
     float width = 0.0f;
     float height = 0.0f;
     const char* viewbox = elem->get_attribute("viewBox");
     if (!viewbox) viewbox = elem->get_attribute("viewbox");
-    if (js_dom_svg_parse_viewbox(viewbox, &min_x, &min_y, &width, &height)) {
+    if (dom_svg_parse_viewbox(viewbox, &min_x, &min_y, &width, &height)) {
         *left = min_x;
         *top = min_y;
         *right = min_x + width;
         *bottom = min_y + height;
         return true;
     }
-    width = js_dom_svg_attribute_number(elem, "width", elem->width);
-    height = js_dom_svg_attribute_number(elem, "height", elem->height);
+    width = dom_svg_attribute_number(elem, "width", elem->width);
+    height = dom_svg_attribute_number(elem, "height", elem->height);
     if (width <= 0.0f || height <= 0.0f) return false;
     *left = 0.0f;
     *top = 0.0f;
@@ -12512,15 +12512,15 @@ static bool js_dom_svg_viewport_local_bounds(DomElement* elem, float* left, floa
     return true;
 }
 
-static JsDomSvgShapeHit js_dom_svg_bounds_hit_viewport_point(DomElement* elem,
+static JsDomSvgShapeHit dom_svg_bounds_hit_viewport_point(DomElement* elem,
                                                               float viewport_x,
                                                               float viewport_y) {
     JsDomSvgShapeHit result = {};
     if (!elem) return result;
-    RdtMatrix screen_ctm = js_dom_svg_ctm(elem, true);
+    RdtMatrix screen_ctm = dom_svg_ctm(elem, true);
     float local_x = 0.0f;
     float local_y = 0.0f;
-    if (!js_dom_svg_matrix_unproject_point(&screen_ctm, viewport_x, viewport_y,
+    if (!dom_svg_matrix_unproject_point(&screen_ctm, viewport_x, viewport_y,
                                             &local_x, &local_y)) {
         return result;
     }
@@ -12528,12 +12528,12 @@ static JsDomSvgShapeHit js_dom_svg_bounds_hit_viewport_point(DomElement* elem,
     float top = 0.0f;
     float right = 0.0f;
     float bottom = 0.0f;
-    if (js_dom_svg_tag_is(elem, "svg")) {
-        if (!js_dom_svg_viewport_local_bounds(elem, &left, &top, &right, &bottom)) {
+    if (dom_svg_tag_is(elem, "svg")) {
+        if (!dom_svg_viewport_local_bounds(elem, &left, &top, &right, &bottom)) {
             return result;
         }
     } else {
-        JsDomSvgBounds bounds = js_dom_svg_bounds_for_element(elem);
+        JsDomSvgBounds bounds = dom_svg_bounds_for_element(elem);
         if (!bounds.valid) return result;
         left = bounds.left;
         top = bounds.top;
@@ -12548,24 +12548,24 @@ static JsDomSvgShapeHit js_dom_svg_bounds_hit_viewport_point(DomElement* elem,
     return result;
 }
 
-static DomElement* js_dom_svg_use_reference(DomElement* elem) {
-    if (!elem || !elem->doc || !js_dom_svg_tag_is(elem, "use")) return nullptr;
+static DomElement* dom_svg_use_reference(DomElement* elem) {
+    if (!elem || !elem->doc || !dom_svg_tag_is(elem, "use")) return nullptr;
     const char* href = elem->get_attribute("href");
     if (!href) href = elem->get_attribute("xlink:href");
     if (!href || href[0] != '#' || !href[1]) return nullptr;
-    return js_dom_find_element_by_id(elem->doc->root, href + 1);
+    return dom_find_element_by_id(elem->doc->root, href + 1);
 }
 
-static JsDomSvgShapeHit js_dom_svg_reference_hit_viewport_point(DomElement* reference,
+static JsDomSvgShapeHit dom_svg_reference_hit_viewport_point(DomElement* reference,
                                                                  const RdtMatrix* reference_ctm,
                                                                  float viewport_x,
                                                                  float viewport_y) {
     JsDomSvgShapeHit result = {};
     if (!reference || !reference_ctm) return result;
-    if (js_dom_svg_is_basic_shape(reference)) {
+    if (dom_svg_is_basic_shape(reference)) {
         float local_x = 0.0f;
         float local_y = 0.0f;
-        if (!js_dom_svg_matrix_unproject_point(reference_ctm, viewport_x, viewport_y,
+        if (!dom_svg_matrix_unproject_point(reference_ctm, viewport_x, viewport_y,
                                                 &local_x, &local_y)) {
             return result;
         }
@@ -12573,18 +12573,18 @@ static JsDomSvgShapeHit js_dom_svg_reference_hit_viewport_point(DomElement* refe
         float scale_y = hypotf(reference_ctm->e12, reference_ctm->e22);
         float min_scale = LMB_MIN(scale_x, scale_y);
         if (min_scale < 0.0001f) min_scale = 0.0001f;
-        return js_dom_svg_basic_shape_hit_local_point(reference, local_x, local_y, min_scale);
+        return dom_svg_basic_shape_hit_local_point(reference, local_x, local_y, min_scale);
     }
-    if (!js_dom_svg_tag_is(reference, "g") && !js_dom_svg_tag_is(reference, "a") &&
-        !js_dom_svg_tag_is(reference, "symbol")) {
+    if (!dom_svg_tag_is(reference, "g") && !dom_svg_tag_is(reference, "a") &&
+        !dom_svg_tag_is(reference, "symbol")) {
         return result;
     }
     for (DomNode* child = reference->last_child; child; child = child->prev_sibling) {
         if (!child->is_element()) continue;
         DomElement* child_elem = child->as_element();
-        RdtMatrix child_transform = js_dom_svg_transform_from_element(child_elem);
+        RdtMatrix child_transform = dom_svg_transform_from_element(child_elem);
         RdtMatrix child_ctm = rdt_matrix_multiply(reference_ctm, &child_transform);
-        JsDomSvgShapeHit child_hit = js_dom_svg_reference_hit_viewport_point(child_elem,
+        JsDomSvgShapeHit child_hit = dom_svg_reference_hit_viewport_point(child_elem,
             &child_ctm, viewport_x, viewport_y);
         result.fill = result.fill || child_hit.fill;
         result.stroke = result.stroke || child_hit.stroke;
@@ -12593,25 +12593,25 @@ static JsDomSvgShapeHit js_dom_svg_reference_hit_viewport_point(DomElement* refe
     return result;
 }
 
-static JsDomSvgShapeHit js_dom_svg_use_hit_viewport_point(DomElement* elem,
+static JsDomSvgShapeHit dom_svg_use_hit_viewport_point(DomElement* elem,
                                                            float viewport_x,
                                                            float viewport_y) {
     JsDomSvgShapeHit result = {};
-    DomElement* reference = js_dom_svg_use_reference(elem);
+    DomElement* reference = dom_svg_use_reference(elem);
     if (!reference) return result;
-    RdtMatrix instance_ctm = js_dom_svg_ctm(elem, true);
+    RdtMatrix instance_ctm = dom_svg_ctm(elem, true);
     RdtMatrix offset = rdt_matrix_translate(
-        js_dom_svg_attribute_number(elem, "x", 0.0f),
-        js_dom_svg_attribute_number(elem, "y", 0.0f));
+        dom_svg_attribute_number(elem, "x", 0.0f),
+        dom_svg_attribute_number(elem, "y", 0.0f));
     instance_ctm = rdt_matrix_multiply(&instance_ctm, &offset);
-    RdtMatrix reference_transform = js_dom_svg_transform_from_element(reference);
+    RdtMatrix reference_transform = dom_svg_transform_from_element(reference);
     RdtMatrix reference_ctm = rdt_matrix_multiply(&instance_ctm, &reference_transform);
-    result = js_dom_svg_reference_hit_viewport_point(reference, &reference_ctm,
+    result = dom_svg_reference_hit_viewport_point(reference, &reference_ctm,
         viewport_x, viewport_y);
-    JsDomSvgBounds bounds = js_dom_svg_bounds_for_element(reference);
+    JsDomSvgBounds bounds = dom_svg_bounds_for_element(reference);
     float local_x = 0.0f;
     float local_y = 0.0f;
-    if (bounds.valid && js_dom_svg_matrix_unproject_point(&reference_ctm, viewport_x,
+    if (bounds.valid && dom_svg_matrix_unproject_point(&reference_ctm, viewport_x,
             viewport_y, &local_x, &local_y)) {
         result.bounding_box = local_x >= bounds.left && local_x <= bounds.right &&
             local_y >= bounds.top && local_y <= bounds.bottom;
@@ -12632,9 +12632,9 @@ typedef enum JsDomSvgPointerEventsMode {
     JS_DOM_SVG_POINTER_EVENTS_NONE,
 } JsDomSvgPointerEventsMode;
 
-static JsDomSvgPointerEventsMode js_dom_svg_pointer_events_mode(DomElement* elem) {
+static JsDomSvgPointerEventsMode dom_svg_pointer_events_mode(DomElement* elem) {
     char pointer_events_buffer[64] = {};
-    const char* value = js_dom_svg_presentation_value(elem, "pointer-events", true,
+    const char* value = dom_svg_presentation_value(elem, "pointer-events", true,
         pointer_events_buffer, sizeof(pointer_events_buffer));
     if (!value || !*value || strcasecmp(value, "auto") == 0 ||
         strcasecmp(value, "visiblePainted") == 0) {
@@ -12652,15 +12652,15 @@ static JsDomSvgPointerEventsMode js_dom_svg_pointer_events_mode(DomElement* elem
     return JS_DOM_SVG_POINTER_EVENTS_VISIBLE_PAINTED;
 }
 
-static bool js_dom_svg_element_is_visible_for_pointer_events(DomElement* elem) {
+static bool dom_svg_element_is_visible_for_pointer_events(DomElement* elem) {
     char visibility_buffer[64] = {};
-    const char* visibility = js_dom_svg_presentation_value(elem, "visibility", true,
+    const char* visibility = dom_svg_presentation_value(elem, "visibility", true,
         visibility_buffer, sizeof(visibility_buffer));
     return !visibility || (strcasecmp(visibility, "hidden") != 0 &&
         strcasecmp(visibility, "collapse") != 0);
 }
 
-static bool js_dom_svg_pointer_events_selects_geometry(JsDomSvgPointerEventsMode mode,
+static bool dom_svg_pointer_events_selects_geometry(JsDomSvgPointerEventsMode mode,
                                                         bool visible,
                                                         bool fill_painted,
                                                         bool stroke_painted,
@@ -12691,7 +12691,7 @@ static bool js_dom_svg_pointer_events_selects_geometry(JsDomSvgPointerEventsMode
     return false;
 }
 
-static bool js_dom_svg_element_skips_hit_test(DomElement* elem) {
+static bool dom_svg_element_skips_hit_test(DomElement* elem) {
     if (!elem || !elem->tag_name) return true;
     const char* tag = elem->tag_name;
     if (strcasecmp(tag, "defs") == 0 || strcasecmp(tag, "clipPath") == 0 ||
@@ -12702,32 +12702,32 @@ static bool js_dom_svg_element_skips_hit_test(DomElement* elem) {
         return true;
     }
     char display_buffer[64] = {};
-    const char* display = js_dom_svg_presentation_value(elem, "display", false,
+    const char* display = dom_svg_presentation_value(elem, "display", false,
         display_buffer, sizeof(display_buffer));
     // visibility and pointer-events are inherited, but descendants may
     // override either one. Only display:none removes the entire subtree.
     return display && strcasecmp(display, "none") == 0;
 }
 
-static bool js_dom_svg_point_is_within_viewports(DomElement* elem, float x, float y) {
+static bool dom_svg_point_is_within_viewports(DomElement* elem, float x, float y) {
     for (DomNode* node = (DomNode*)elem; node && node->is_element(); node = node->parent) {
         DomElement* current = node->as_element();
-        if (!js_dom_svg_tag_is(current, "svg")) continue;
+        if (!dom_svg_tag_is(current, "svg")) continue;
         char overflow_buffer[64] = {};
-        const char* overflow = js_dom_svg_presentation_value(current, "overflow", false,
+        const char* overflow = dom_svg_presentation_value(current, "overflow", false,
             overflow_buffer, sizeof(overflow_buffer));
         if (overflow && strcasecmp(overflow, "visible") == 0) continue;
         float local_x = 0.0f;
         float local_y = 0.0f;
-        RdtMatrix ctm = js_dom_svg_ctm(current, true);
-        if (!js_dom_svg_matrix_unproject_point(&ctm, x, y, &local_x, &local_y)) {
+        RdtMatrix ctm = dom_svg_ctm(current, true);
+        if (!dom_svg_matrix_unproject_point(&ctm, x, y, &local_x, &local_y)) {
             return false;
         }
         float left = 0.0f;
         float top = 0.0f;
         float right = 0.0f;
         float bottom = 0.0f;
-        if (!js_dom_svg_viewport_local_bounds(current, &left, &top, &right, &bottom) ||
+        if (!dom_svg_viewport_local_bounds(current, &left, &top, &right, &bottom) ||
             local_x < left || local_x > right || local_y < top || local_y > bottom) {
             return false;
         }
@@ -12735,58 +12735,58 @@ static bool js_dom_svg_point_is_within_viewports(DomElement* elem, float x, floa
     return true;
 }
 
-static bool js_dom_svg_element_contains_viewport_point(DomElement* elem,
+static bool dom_svg_element_contains_viewport_point(DomElement* elem,
                                                        float x, float y) {
-    if (!elem || js_dom_svg_element_skips_hit_test(elem) ||
-        !js_dom_svg_point_is_within_viewports(elem, x, y)) return false;
-    JsDomSvgPointerEventsMode pointer_events = js_dom_svg_pointer_events_mode(elem);
+    if (!elem || dom_svg_element_skips_hit_test(elem) ||
+        !dom_svg_point_is_within_viewports(elem, x, y)) return false;
+    JsDomSvgPointerEventsMode pointer_events = dom_svg_pointer_events_mode(elem);
     if (pointer_events == JS_DOM_SVG_POINTER_EVENTS_NONE) return false;
     JsDomSvgShapeHit hit = {};
     bool fill_painted = false;
     bool stroke_painted = false;
-    if (js_dom_svg_is_basic_shape(elem)) {
-        hit = js_dom_svg_basic_shape_hit_viewport_point(elem, x, y);
-        fill_painted = js_dom_svg_paint_is_present(elem, "fill", true);
-        stroke_painted = js_dom_svg_paint_is_present(elem, "stroke", false);
-    } else if (js_dom_svg_tag_is(elem, "use")) {
-        DomElement* reference = js_dom_svg_use_reference(elem);
-        hit = js_dom_svg_use_hit_viewport_point(elem, x, y);
-        fill_painted = js_dom_svg_paint_is_present(reference ? reference : elem, "fill", true);
-        stroke_painted = js_dom_svg_paint_is_present(reference ? reference : elem, "stroke", false);
-    } else if (js_dom_svg_tag_is(elem, "g") || js_dom_svg_tag_is(elem, "a") ||
-               js_dom_svg_tag_is(elem, "switch")) {
+    if (dom_svg_is_basic_shape(elem)) {
+        hit = dom_svg_basic_shape_hit_viewport_point(elem, x, y);
+        fill_painted = dom_svg_paint_is_present(elem, "fill", true);
+        stroke_painted = dom_svg_paint_is_present(elem, "stroke", false);
+    } else if (dom_svg_tag_is(elem, "use")) {
+        DomElement* reference = dom_svg_use_reference(elem);
+        hit = dom_svg_use_hit_viewport_point(elem, x, y);
+        fill_painted = dom_svg_paint_is_present(reference ? reference : elem, "fill", true);
+        stroke_painted = dom_svg_paint_is_present(reference ? reference : elem, "stroke", false);
+    } else if (dom_svg_tag_is(elem, "g") || dom_svg_tag_is(elem, "a") ||
+               dom_svg_tag_is(elem, "switch")) {
         // Container bounds are only a union for getBBox(); blank union gaps
         // belong to no painted child and must not become a drag target.
         return false;
     } else {
-        hit = js_dom_svg_bounds_hit_viewport_point(elem, x, y);
-        if (js_dom_svg_tag_is(elem, "image") ||
-            js_dom_svg_tag_is(elem, "foreignObject") || js_dom_svg_tag_is(elem, "svg")) {
+        hit = dom_svg_bounds_hit_viewport_point(elem, x, y);
+        if (dom_svg_tag_is(elem, "image") ||
+            dom_svg_tag_is(elem, "foreignObject") || dom_svg_tag_is(elem, "svg")) {
             fill_painted = true;
         } else {
-            fill_painted = js_dom_svg_paint_is_present(elem, "fill", true);
-            stroke_painted = js_dom_svg_paint_is_present(elem, "stroke", false);
+            fill_painted = dom_svg_paint_is_present(elem, "fill", true);
+            stroke_painted = dom_svg_paint_is_present(elem, "stroke", false);
         }
     }
-    return js_dom_svg_pointer_events_selects_geometry(pointer_events,
-        js_dom_svg_element_is_visible_for_pointer_events(elem), fill_painted,
+    return dom_svg_pointer_events_selects_geometry(pointer_events,
+        dom_svg_element_is_visible_for_pointer_events(elem), fill_painted,
         stroke_painted, &hit);
 }
 
-static DomElement* js_dom_svg_element_from_point_walk(DomElement* elem,
+static DomElement* dom_svg_element_from_point_walk(DomElement* elem,
                                                        float x, float y) {
-    if (!elem || js_dom_svg_element_skips_hit_test(elem) ||
-        !js_dom_svg_point_is_within_viewports(elem, x, y)) return nullptr;
+    if (!elem || dom_svg_element_skips_hit_test(elem) ||
+        !dom_svg_point_is_within_viewports(elem, x, y)) return nullptr;
     for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
         if (!child->is_element()) continue;
         DomElement* child_elem = child->as_element();
-        DomElement* hit = js_dom_svg_element_from_point_walk(child_elem, x, y);
+        DomElement* hit = dom_svg_element_from_point_walk(child_elem, x, y);
         if (hit) return hit;
     }
-    return js_dom_svg_element_contains_viewport_point(elem, x, y) ? elem : nullptr;
+    return dom_svg_element_contains_viewport_point(elem, x, y) ? elem : nullptr;
 }
 
-static DomElement* js_dom_svg_element_from_document_point_walk(DomNode* node,
+static DomElement* dom_svg_element_from_document_point_walk(DomNode* node,
                                                                 float x, float y) {
     if (!node || !node->is_element()) return nullptr;
     DomElement* elem = node->as_element();
@@ -12794,25 +12794,25 @@ static DomElement* js_dom_svg_element_from_document_point_walk(DomNode* node,
         if (!child->is_element()) continue;
         DomElement* child_elem = child->as_element();
         if (child_elem->tag_name && strcasecmp(child_elem->tag_name, "svg") == 0) {
-            DomElement* hit = js_dom_svg_element_from_point_walk(child_elem, x, y);
+            DomElement* hit = dom_svg_element_from_point_walk(child_elem, x, y);
             if (hit) return hit;
         }
-        DomElement* hit = js_dom_svg_element_from_document_point_walk(child, x, y);
+        DomElement* hit = dom_svg_element_from_document_point_walk(child, x, y);
         if (hit) return hit;
     }
     return nullptr;
 }
 
-extern "C" void* js_dom_document_svg_element_from_point(void* doc_ptr,
+extern "C" void* dom_document_svg_element_from_point(void* doc_ptr,
                                                           float x, float y) {
     DomDocument* doc = (DomDocument*)doc_ptr;
-    if (!doc || !doc->root || !js_dom_has_committed_geometry_snapshot(doc)) {
+    if (!doc || !doc->root || !dom_has_committed_geometry_snapshot(doc)) {
         return nullptr;
     }
-    return js_dom_svg_element_from_document_point_walk((DomNode*)doc->root, x, y);
+    return dom_svg_element_from_document_point_walk((DomNode*)doc->root, x, y);
 }
 
-static void js_dom_absolute_node_position(DomNode* node,
+static void dom_absolute_node_position(DomNode* node,
                                           float* out_x,
                                           float* out_y) {
     float x = 0.0f;
@@ -12825,7 +12825,7 @@ static void js_dom_absolute_node_position(DomNode* node,
     if (out_y) *out_y = y;
 }
 
-static DomElement* js_dom_offset_parent_element(DomElement* elem) {
+static DomElement* dom_offset_parent_element(DomElement* elem) {
     if (!elem) return nullptr;
     DomNode* p = elem->parent;
     while (p) {
@@ -12847,20 +12847,20 @@ static DomElement* js_dom_offset_parent_element(DomElement* elem) {
     return nullptr;
 }
 
-static int64_t js_dom_offset_coordinate(DomElement* elem, bool x_axis) {
+static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
     if (!elem) return 0;
     float abs_x = 0.0f;
     float abs_y = 0.0f;
-    js_dom_absolute_node_position((DomNode*)elem, &abs_x, &abs_y);
+    dom_absolute_node_position((DomNode*)elem, &abs_x, &abs_y);
     float value = x_axis ? abs_x : abs_y;
 
-    DomElement* offset_parent = js_dom_offset_parent_element(elem);
+    DomElement* offset_parent = dom_offset_parent_element(elem);
     if (offset_parent) {
         if (!offset_parent->tag_name ||
             strcasecmp(offset_parent->tag_name, "body") != 0) {
             float parent_x = 0.0f;
             float parent_y = 0.0f;
-            js_dom_absolute_node_position((DomNode*)offset_parent, &parent_x,
+            dom_absolute_node_position((DomNode*)offset_parent, &parent_x,
                                           &parent_y);
             value -= x_axis ? parent_x : parent_y;
         }
@@ -12868,7 +12868,7 @@ static int64_t js_dom_offset_coordinate(DomElement* elem, bool x_axis) {
     return (int64_t)value;
 }
 
-static void js_dom_scroll_offset_for_node(DomNode* node,
+static void dom_scroll_offset_for_node(DomNode* node,
                                           float* out_x,
                                           float* out_y) {
     if (out_x) *out_x = 0.0f;
@@ -12883,7 +12883,7 @@ static void js_dom_scroll_offset_for_node(DomNode* node,
     if (out_y) *out_y = elem->scroll()->pane->v_scroll_position;
 }
 
-static void js_dom_viewport_node_position(DomNode* node,
+static void dom_viewport_node_position(DomNode* node,
                                           float* out_x,
                                           float* out_y) {
     float x = 0.0f;
@@ -12895,7 +12895,7 @@ static void js_dom_viewport_node_position(DomNode* node,
         if (cur != origin) {
             float scroll_x = 0.0f;
             float scroll_y = 0.0f;
-            js_dom_scroll_offset_for_node(cur, &scroll_x, &scroll_y);
+            dom_scroll_offset_for_node(cur, &scroll_x, &scroll_y);
             x -= scroll_x;
             y -= scroll_y;
         }
@@ -12903,16 +12903,16 @@ static void js_dom_viewport_node_position(DomNode* node,
     if (out_x) *out_x = x;
     if (out_y) *out_y = y;
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_point_in_box, (float px, float py,                                 float x, float y,                                 float w, float h), (w > 0.0f && h > 0.0f && x <= px && px < x + w && y <= py && py < y + h))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_point_in_box, (float px, float py,                                 float x, float y,                                 float w, float h), (w > 0.0f && h > 0.0f && x <= px && px < x + w && y <= py && py < y + h))
 
-static bool js_dom_text_contains_point(DomText* text,
+static bool dom_text_contains_point(DomText* text,
                                        float abs_x,
                                        float abs_y,
                                        float px,
                                        float py) {
     if (!text) return false;
     for (TextRect* rect = text->rect; rect; rect = rect->next) {
-        if (js_dom_point_in_box(px, py, abs_x + rect->x, abs_y + rect->y,
+        if (dom_point_in_box(px, py, abs_x + rect->x, abs_y + rect->y,
                 rect->width, rect->height)) {
             return true;
         }
@@ -12920,7 +12920,7 @@ static bool js_dom_text_contains_point(DomText* text,
     return false;
 }
 
-static bool js_dom_element_from_point_skips_subtree(DomElement* elem) {
+static bool dom_element_from_point_skips_subtree(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
     return _is_tag(elem, "head") ||
         _is_tag(elem, "style") ||
@@ -12933,30 +12933,30 @@ static bool js_dom_element_from_point_skips_subtree(DomElement* elem) {
         _is_tag(elem, "template");
 }
 
-static float js_dom_shadow_node_synthetic_width(DomNode* node) {
+static float dom_shadow_node_synthetic_width(DomNode* node) {
     if (!node) return 0.0f;
     if (node->is_text()) {
         DomText* text = node->as_text();
         return text && text->length > 0 ? (float)text->length : 0.0f;
     }
     if (!node->is_element()) return 0.0f;
-    int64_t width = js_dom_headless_dimension(node->as_element(), true);
+    int64_t width = dom_headless_dimension(node->as_element(), true);
     return width > 0 ? (float)width : 1.0f;
 }
 
-static float js_dom_shadow_node_synthetic_height(DomNode* node) {
+static float dom_shadow_node_synthetic_height(DomNode* node) {
     if (!node) return 0.0f;
     if (node->is_text()) {
         DomText* text = node->as_text();
         return text && text->length > 0 ? 1.0f : 0.0f;
     }
     if (!node->is_element()) return 0.0f;
-    int64_t height = js_dom_headless_dimension(node->as_element(), false);
+    int64_t height = dom_headless_dimension(node->as_element(), false);
     return height > 0 ? (float)height : 1.0f;
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_is_document_fragment_element, (DomElement* elem), (elem && elem->tag_name && strcmp(elem->tag_name, "#document-fragment") == 0))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_is_document_fragment_element, (DomElement* elem), (elem && elem->tag_name && strcmp(elem->tag_name, "#document-fragment") == 0))
 
-static DomElement* js_dom_shadow_element_from_point_walk(DomNode* node,
+static DomElement* dom_shadow_element_from_point_walk(DomNode* node,
                                                          float abs_x,
                                                          float abs_y,
                                                          float px,
@@ -12966,9 +12966,9 @@ static DomElement* js_dom_shadow_element_from_point_walk(DomNode* node,
     float node_y = abs_y + node->y;
 
     if (node->is_text()) {
-        if (js_dom_point_in_box(px, py, node_x, node_y,
-                js_dom_shadow_node_synthetic_width(node),
-                js_dom_shadow_node_synthetic_height(node)) &&
+        if (dom_point_in_box(px, py, node_x, node_y,
+                dom_shadow_node_synthetic_width(node),
+                dom_shadow_node_synthetic_height(node)) &&
             node->parent && node->parent->is_element()) {
             return node->parent->as_element();
         }
@@ -12977,25 +12977,25 @@ static DomElement* js_dom_shadow_element_from_point_walk(DomNode* node,
     if (!node->is_element()) return nullptr;
 
     DomElement* elem = node->as_element();
-    if (js_dom_element_from_point_skips_subtree(elem)) return nullptr;
+    if (dom_element_from_point_skips_subtree(elem)) return nullptr;
 
     DomElement* best = nullptr;
     float child_x = node_x;
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        DomElement* hit = js_dom_shadow_element_from_point_walk(child, child_x,
+        DomElement* hit = dom_shadow_element_from_point_walk(child, child_x,
             node_y, px, py);
         if (hit) best = hit;
-        child_x += js_dom_shadow_node_synthetic_width(child);
+        child_x += dom_shadow_node_synthetic_width(child);
     }
     if (best) return best;
-    if (js_dom_is_document_fragment_element(elem)) return nullptr;
+    if (dom_is_document_fragment_element(elem)) return nullptr;
 
-    return js_dom_point_in_box(px, py, node_x, node_y,
-        js_dom_shadow_node_synthetic_width(node),
-        js_dom_shadow_node_synthetic_height(node)) ? elem : nullptr;
+    return dom_point_in_box(px, py, node_x, node_y,
+        dom_shadow_node_synthetic_width(node),
+        dom_shadow_node_synthetic_height(node)) ? elem : nullptr;
 }
 
-static DomElement* js_dom_element_from_point_walk(DomNode* node,
+static DomElement* dom_element_from_point_walk(DomNode* node,
                                                   float abs_x,
                                                   float abs_y,
                                                   float px,
@@ -13005,21 +13005,21 @@ static DomElement* js_dom_element_from_point_walk(DomNode* node,
     float node_y = abs_y + node->y;
 
     if (node->is_text()) {
-        return js_dom_text_contains_point(node->as_text(), abs_x, abs_y,
+        return dom_text_contains_point(node->as_text(), abs_x, abs_y,
             px, py) && node->parent && node->parent->is_element()
             ? node->parent->as_element() : nullptr;
     }
     if (!node->is_element()) return nullptr;
 
     DomElement* elem = node->as_element();
-    if (js_dom_element_from_point_skips_subtree(elem)) return nullptr;
+    if (dom_element_from_point_skips_subtree(elem)) return nullptr;
     if (elem->tag_name && strcasecmp(elem->tag_name, "svg") == 0) {
         // SVG's geometry walker is authoritative: falling through to the DOM
         // layout box would resurrect elements rejected by pointer-events.
-        return js_dom_svg_element_from_point_walk(elem, px, py);
+        return dom_svg_element_from_point_walk(elem, px, py);
     }
     if (elem->shadow_root_element()) {
-        DomElement* shadow_hit = js_dom_shadow_element_from_point_walk(
+        DomElement* shadow_hit = dom_shadow_element_from_point_walk(
             (DomNode*)elem->shadow_root_element(), node_x, node_y, px, py);
         if (shadow_hit) return shadow_hit;
     }
@@ -13028,40 +13028,40 @@ static DomElement* js_dom_element_from_point_walk(DomNode* node,
     float child_base_y = node_y;
     float scroll_x = 0.0f;
     float scroll_y = 0.0f;
-    js_dom_scroll_offset_for_node(node, &scroll_x, &scroll_y);
+    dom_scroll_offset_for_node(node, &scroll_x, &scroll_y);
     child_base_x -= scroll_x;
     child_base_y -= scroll_y;
 
     for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
-        DomElement* hit = js_dom_element_from_point_walk(child, child_base_x,
+        DomElement* hit = dom_element_from_point_walk(child, child_base_x,
             child_base_y, px, py);
         if (hit) return hit;
     }
 
     float hit_width = node->width;
     float hit_height = node->height;
-    if (js_dom_is_editing_host(elem)) {
+    if (dom_is_editing_host(elem)) {
         if (hit_width <= 0.0f) {
-            hit_width = (float)js_dom_headless_dimension(elem, true);
+            hit_width = (float)dom_headless_dimension(elem, true);
         }
         if (hit_height <= 0.0f) {
-            hit_height = (float)js_dom_headless_dimension(elem, false);
+            hit_height = (float)dom_headless_dimension(elem, false);
         }
     }
 
-    return js_dom_point_in_box(px, py, node_x, node_y, hit_width,
+    return dom_point_in_box(px, py, node_x, node_y, hit_width,
         hit_height) ? elem : nullptr;
 }
 
-static DomElement* js_dom_shadow_element_from_document_point_walk(DomNode* node,
+static DomElement* dom_shadow_element_from_document_point_walk(DomNode* node,
                                                                   float px,
                                                                   float py) {
     if (!node || !node->is_element()) return nullptr;
     DomElement* elem = node->as_element();
-    if (js_dom_element_from_point_skips_subtree(elem)) return nullptr;
+    if (dom_element_from_point_skips_subtree(elem)) return nullptr;
 
     for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
-        DomElement* hit = js_dom_shadow_element_from_document_point_walk(child,
+        DomElement* hit = dom_shadow_element_from_document_point_walk(child,
             px, py);
         if (hit) return hit;
     }
@@ -13069,57 +13069,57 @@ static DomElement* js_dom_shadow_element_from_document_point_walk(DomNode* node,
 
     float host_x = 0.0f;
     float host_y = 0.0f;
-    js_dom_viewport_node_position((DomNode*)elem, &host_x, &host_y);
-    DomElement* hit = js_dom_shadow_element_from_point_walk((DomNode*)elem->shadow_root_element(),
+    dom_viewport_node_position((DomNode*)elem, &host_x, &host_y);
+    DomElement* hit = dom_shadow_element_from_point_walk((DomNode*)elem->shadow_root_element(),
         host_x, host_y, px, py);
     if (hit) return hit;
     if (host_x != 0.0f || host_y != 0.0f) {
         // Shadow descendants in headless editing tests expose synthetic
         // offsetLeft/offsetTop before Radiant has real shadow layout boxes.
-        return js_dom_shadow_element_from_point_walk(
+        return dom_shadow_element_from_point_walk(
             (DomNode*)elem->shadow_root_element(), 0.0f, 0.0f, px, py);
     }
     return nullptr;
 }
 
-static Item js_dom_document_element_from_point(DomDocument* doc,
+static Item dom_document_element_from_point(DomDocument* doc,
                                                Item x_arg,
                                                Item y_arg);
 
-JS_FORWARD_STATIC_EXPRESSION(float, js_dom_item_to_float, (Item value),
-    js_dom_svg_number(value, 0.0f))
-JS_FORWARD_STATIC_ITEM(js_dom_float_item, (float value), js_make_number, ((double)value))
+JS_FORWARD_STATIC_EXPRESSION(float, dom_item_to_float, (Item value),
+    dom_svg_number(value, 0.0f))
+JS_FORWARD_STATIC_ITEM(dom_float_item, (float value), js_make_number, ((double)value))
 
-static Item js_dom_make_plain_boundary_object(DomBoundary boundary) {
+static Item dom_make_plain_boundary_object(DomBoundary boundary) {
     if (!boundary.node) return ItemNull;
     Item out = js_new_object();
-    js_set_key_cstr(out, "node", js_dom_wrap_element(boundary.node));
+    js_set_key_cstr(out, "node", dom_wrap_element(boundary.node));
     js_set_key_cstr(out, "offset", (Item){.item = i2it((int64_t)boundary.offset)});
     return out;
 }
 
-static Item js_dom_make_boundary_object(DomBoundary boundary) {
-    Item out = js_dom_make_plain_boundary_object(boundary);
+static Item dom_make_boundary_object(DomBoundary boundary) {
+    Item out = dom_make_plain_boundary_object(boundary);
     if (get_type_id(out) != LMD_TYPE_MAP) return out;
 
     DomBoundary all_start;
     DomBoundary all_end;
     if (dom_selection_user_select_all_range_for_node(boundary.node,
             &all_start, &all_end)) {
-        js_set_key_cstr(out, "selectAllStart", js_dom_make_plain_boundary_object(all_start));
-        js_set_key_cstr(out, "selectAllEnd", js_dom_make_plain_boundary_object(all_end));
+        js_set_key_cstr(out, "selectAllStart", dom_make_plain_boundary_object(all_start));
+        js_set_key_cstr(out, "selectAllEnd", dom_make_plain_boundary_object(all_end));
     }
     DomBoundary triple_start;
     DomBoundary triple_end;
     if (dom_selection_triple_click_range_for_node(boundary.node,
             &triple_start, &triple_end)) {
-        js_set_key_cstr(out, "tripleClickStart", js_dom_make_plain_boundary_object(triple_start));
-        js_set_key_cstr(out, "tripleClickEnd", js_dom_make_plain_boundary_object(triple_end));
+        js_set_key_cstr(out, "tripleClickStart", dom_make_plain_boundary_object(triple_start));
+        js_set_key_cstr(out, "tripleClickEnd", dom_make_plain_boundary_object(triple_end));
     }
     return out;
 }
 
-static bool js_dom_boundary_inside_text_control(DomBoundary boundary) {
+static bool dom_boundary_inside_text_control(DomBoundary boundary) {
     for (DomNode* node = boundary.node; node; node = node->parent) {
         if (node->is_element() && tc_is_text_control_elem(node->as_element())) {
             return true;
@@ -13128,18 +13128,18 @@ static bool js_dom_boundary_inside_text_control(DomBoundary boundary) {
     return false;
 }
 
-static Item js_dom_boundary_from_point(DomElement* elem,
+static Item dom_boundary_from_point(DomElement* elem,
                                        Item x_arg,
                                        Item y_arg,
                                        Item behavior_arg) {
     if (!elem || !elem->doc || !_js_current_ui_context ||
-        !js_dom_has_committed_geometry_snapshot(elem->doc) ||
+        !dom_has_committed_geometry_snapshot(elem->doc) ||
         !elem->doc->view_tree || !elem->doc->view_tree->root) {
         return ItemNull;
     }
 
-    float x = js_dom_item_to_float(x_arg);
-    float y = js_dom_item_to_float(y_arg);
+    float x = dom_item_to_float(x_arg);
+    float y = dom_item_to_float(y_arg);
     EditingSurface surface;
     if (editing_surface_from_target(static_cast<View*>(elem), &surface) &&
         editing_surface_is_rich(&surface)) {
@@ -13155,55 +13155,55 @@ static Item js_dom_boundary_from_point(DomElement* elem,
                 EDITING_CLAMP_SKIP_TEXT_CONTROLS, &hit, behavior) &&
             hit.kind == EDITING_BOUNDARY_DOM &&
             hit.dom.node) {
-            return js_dom_make_boundary_object(hit.dom);
+            return dom_make_boundary_object(hit.dom);
         }
     }
 
     DomBoundary boundary = dom_hit_test_to_boundary(
         elem->doc->view_tree->root, x, y);
-    if (!boundary.node || js_dom_boundary_inside_text_control(boundary)) {
+    if (!boundary.node || dom_boundary_inside_text_control(boundary)) {
         return ItemNull;
     }
-    return js_dom_make_boundary_object(boundary);
+    return dom_make_boundary_object(boundary);
 }
 
-extern "C" void* js_dom_document_element_from_point_native(void* doc_ptr,
+extern "C" void* dom_document_element_from_point_native(void* doc_ptr,
                                                             float x, float y) {
     DomDocument* doc = (DomDocument*)doc_ptr;
-    if (!doc || !js_dom_has_committed_geometry_snapshot(doc) ||
+    if (!doc || !dom_has_committed_geometry_snapshot(doc) ||
         !doc->view_tree || !doc->view_tree->root) {
         return nullptr;
     }
 
-    DomElement* shadow_hit = js_dom_shadow_element_from_document_point_walk(
+    DomElement* shadow_hit = dom_shadow_element_from_document_point_walk(
         static_cast<DomNode*>(doc->root), x, y);
     if (shadow_hit) return shadow_hit;
 
-    return js_dom_element_from_point_walk(
+    return dom_element_from_point_walk(
         static_cast<DomNode*>(doc->view_tree->root),
         0.0f, 0.0f, x, y);
 }
 
-static Item js_dom_document_element_from_point(DomDocument* doc,
+static Item dom_document_element_from_point(DomDocument* doc,
                                                Item x_arg,
                                                Item y_arg) {
     if (!doc || !_js_current_ui_context) return ItemNull;
-    float x = js_dom_item_to_float(x_arg);
-    float y = js_dom_item_to_float(y_arg);
-    DomElement* hit = (DomElement*)js_dom_document_element_from_point_native(doc, x, y);
-    return hit ? js_dom_wrap_element(hit) : ItemNull;
+    float x = dom_item_to_float(x_arg);
+    float y = dom_item_to_float(y_arg);
+    DomElement* hit = (DomElement*)dom_document_element_from_point_native(doc, x, y);
+    return hit ? dom_wrap_element(hit) : ItemNull;
 }
-JS_FORWARD_ITEM(js_dom_document_element_from_point_bridge, (void* doc_ptr,                                                           Item x_arg,                                                           Item y_arg), js_dom_document_element_from_point, ((DomDocument*)doc_ptr, x_arg, y_arg))
+JS_FORWARD_ITEM(dom_document_element_from_point_bridge, (void* doc_ptr,                                                           Item x_arg,                                                           Item y_arg), dom_document_element_from_point, ((DomDocument*)doc_ptr, x_arg, y_arg))
 
-static Item js_dom_text_control_caret_bounds(DomElement* elem) {
+static Item dom_text_control_caret_bounds(DomElement* elem) {
     if (!elem || !tc_is_text_control_elem(elem) || !_js_current_ui_context) {
         return ItemNull;
     }
 
-    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+    DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (!state && elem->doc) {
         state = radiant_document_ensure_state(elem->doc,
-            "js_dom_text_control_caret_bounds");
+            "dom_text_control_caret_bounds");
     }
 
     tc_ensure_init(elem);
@@ -13228,22 +13228,22 @@ static Item js_dom_text_control_caret_bounds(DomElement* elem) {
             elem, focus_utf8, &rect) || !rect.valid) {
         return ItemNull;
     }
-    return js_dom_make_rect_object(rect.x, rect.y, rect.width, rect.height);
+    return dom_make_rect_object(rect.x, rect.y, rect.width, rect.height);
 }
 
-static Item js_dom_text_control_boundary_from_point(DomElement* elem,
+static Item dom_text_control_boundary_from_point(DomElement* elem,
                                                     Item x_arg,
                                                     Item y_arg) {
     if (!elem || !tc_is_text_control_elem(elem) || !_js_current_ui_context ||
-        !elem->doc || !js_dom_has_committed_geometry_snapshot(elem->doc)) {
+        !elem->doc || !dom_has_committed_geometry_snapshot(elem->doc)) {
         return ItemNull;
     }
 
     EditingBoundary hit;
     editing_boundary_clear(&hit);
     if (!editing_geometry_text_control_boundary_from_point(
-            _js_current_ui_context, elem, js_dom_item_to_float(x_arg),
-            js_dom_item_to_float(y_arg), &hit) ||
+            _js_current_ui_context, elem, dom_item_to_float(x_arg),
+            dom_item_to_float(y_arg), &hit) ||
         hit.kind != EDITING_BOUNDARY_TEXT_CONTROL) {
         return ItemNull;
     }
@@ -13258,47 +13258,47 @@ static Item js_dom_text_control_boundary_from_point(DomElement* elem,
         value_len, hit.offset);
 
     Item out = js_new_object();
-    js_set_key_cstr(out, "node", js_dom_wrap_element(elem));
+    js_set_key_cstr(out, "node", dom_wrap_element(elem));
     js_set_key_cstr(out, "offset", (Item){.item = i2it((int64_t)offset_u16)});
     js_set_key_cstr(out, "byteOffset", (Item){.item = i2it((int64_t)hit.offset)});
     return out;
 }
-JS_FORWARD_ITEM(js_dom_text_control_caret_bounds_bridge, (void* elem), js_dom_text_control_caret_bounds, ((DomElement*)elem))
-JS_FORWARD_ITEM(js_dom_text_control_boundary_from_point_bridge, (void* elem,                                                                Item x_arg,                                                                Item y_arg), js_dom_text_control_boundary_from_point, ((DomElement*)elem, x_arg, y_arg))
-JS_FORWARD_ITEM(js_dom_boundary_from_point_bridge, (void* elem,                                                   Item x_arg,                                                   Item y_arg,                                                   Item behavior_arg), js_dom_boundary_from_point, ((DomElement*)elem, x_arg, y_arg, behavior_arg))
+JS_FORWARD_ITEM(dom_text_control_caret_bounds_bridge, (void* elem), dom_text_control_caret_bounds, ((DomElement*)elem))
+JS_FORWARD_ITEM(dom_text_control_boundary_from_point_bridge, (void* elem,                                                                Item x_arg,                                                                Item y_arg), dom_text_control_boundary_from_point, ((DomElement*)elem, x_arg, y_arg))
+JS_FORWARD_ITEM(dom_boundary_from_point_bridge, (void* elem,                                                   Item x_arg,                                                   Item y_arg,                                                   Item behavior_arg), dom_boundary_from_point, ((DomElement*)elem, x_arg, y_arg, behavior_arg))
 
-extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem) {
+extern "C" Item dom_get_bounding_client_rect_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return ItemNull;
-    if (elem->doc) js_dom_ensure_geometry_snapshot(elem->doc);
+    if (elem->doc) dom_ensure_geometry_snapshot(elem->doc);
     if (layout_noscript_content_suppressed(elem)) {
-        return js_dom_make_rect_object(0.0, 0.0, 0.0, 0.0);
+        return dom_make_rect_object(0.0, 0.0, 0.0, 0.0);
     }
     float abs_x = 0.0f;
     float abs_y = 0.0f;
-    js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
+    dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
     float width = elem->width;
     float height = elem->height;
-    return js_dom_make_rect_object(abs_x, abs_y,
-        width > 0.0f ? width : (float)js_dom_geometry_dimension(elem, true),
-        height > 0.0f ? height : (float)js_dom_geometry_dimension(elem, false));
+    return dom_make_rect_object(abs_x, abs_y,
+        width > 0.0f ? width : (float)dom_geometry_dimension(elem, true),
+        height > 0.0f ? height : (float)dom_geometry_dimension(elem, false));
 }
 
-extern "C" Item js_dom_get_client_rects_bridge(void* dom_elem) {
+extern "C" Item dom_get_client_rects_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return js_array_new(0);
-    if (elem->doc) js_dom_ensure_geometry_snapshot(elem->doc);
+    if (elem->doc) dom_ensure_geometry_snapshot(elem->doc);
     if (layout_noscript_content_suppressed(elem)) {
         return js_array_new(0);
     }
 
     float abs_x = 0.0f;
     float abs_y = 0.0f;
-    js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
+    dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
     float w = elem->width;
     float h = elem->height;
-    if (w <= 0.0f) w = (float)js_dom_geometry_dimension(elem, true);
-    if (h <= 0.0f) h = (float)js_dom_geometry_dimension(elem, false);
+    if (w <= 0.0f) w = (float)dom_geometry_dimension(elem, true);
+    if (h <= 0.0f) h = (float)dom_geometry_dimension(elem, false);
 
     Item rect = js_new_object();
     Item k;
@@ -13324,16 +13324,16 @@ extern "C" Item js_dom_get_client_rects_bridge(void* dom_elem) {
     return arr;
 }
 
-extern "C" Item js_dom_scroll_into_view_bridge(void* dom_elem) {
+extern "C" Item dom_scroll_into_view_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return make_js_undefined();
-    js_dom_queue_scroll_into_view(elem, false);
-    log_debug("js_dom_scrollIntoView: queued target <%s>",
+    dom_queue_scroll_into_view(elem, false);
+    log_debug("dom_scrollIntoView: queued target <%s>",
               elem->tag_name ? elem->tag_name : "?");
     return make_js_undefined();
 }
 
-extern "C" Item js_dom_scroll_operation_bridge(Item elem_item,
+extern "C" Item dom_scroll_operation_bridge(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc) {
     float x = 0.0f;
@@ -13341,26 +13341,26 @@ extern "C" Item js_dom_scroll_operation_bridge(Item elem_item,
     if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
         Item left = js_get_key_cstr(args[0], "left");
         Item top = js_get_key_cstr(args[0], "top");
-        x = js_dom_item_to_float(left);
-        y = js_dom_item_to_float(top);
+        x = dom_item_to_float(left);
+        y = dom_item_to_float(top);
     } else {
-        if (argc >= 1) x = js_dom_item_to_float(args[0]);
-        if (argc >= 2) y = js_dom_item_to_float(args[1]);
+        if (argc >= 1) x = dom_item_to_float(args[0]);
+        if (argc >= 2) y = dom_item_to_float(args[1]);
     }
     if (x != x) x = 0.0f;
     if (y != y) y = 0.0f;
     if (operation == JUBE_DOM_SCROLL_BY) {
-        x += js_dom_item_to_float(js_dom_get_property_impl(elem_item, js_string_key("scrollLeft")));
-        y += js_dom_item_to_float(js_dom_get_property_impl(elem_item, js_string_key("scrollTop")));
+        x += dom_item_to_float(dom_get_property_impl(elem_item, js_string_key("scrollLeft")));
+        y += dom_item_to_float(dom_get_property_impl(elem_item, js_string_key("scrollTop")));
     }
     // scroll(), scrollTo(), and scrollBy() share the element scroll setters
     // so pending viewport/element scroll state stays in one place.
-    js_dom_set_property_impl(elem_item, js_string_key("scrollLeft"), js_dom_float_item(x));
-    js_dom_set_property_impl(elem_item, js_string_key("scrollTop"), js_dom_float_item(y));
+    dom_set_property_impl(elem_item, js_string_key("scrollLeft"), dom_float_item(x));
+    dom_set_property_impl(elem_item, js_string_key("scrollTop"), dom_float_item(y));
     return make_js_undefined();
 }
 
-static int64_t js_dom_backed_child_index(DomElement* parent, DomElement* child) {
+static int64_t dom_backed_child_index(DomElement* parent, DomElement* child) {
     if (!parent || !child || !parent->doc || !parent->doc->input) return -1;
     Element* parent_backing = dom_element_to_element(parent);
     Element* child_backing = dom_element_to_element(child);
@@ -13373,10 +13373,10 @@ static int64_t js_dom_backed_child_index(DomElement* parent, DomElement* child) 
     return -1;
 }
 
-static int64_t js_dom_backed_node_index(DomElement* parent, DomNode* child) {
+static int64_t dom_backed_node_index(DomElement* parent, DomNode* child) {
     if (!parent || !child) return -1;
     if (child->is_element()) {
-        return js_dom_backed_child_index(parent, child->as_element());
+        return dom_backed_child_index(parent, child->as_element());
     }
     if (!child->is_text()) return -1;
 
@@ -13393,9 +13393,9 @@ static int64_t js_dom_backed_node_index(DomElement* parent, DomNode* child) {
     return -1;
 }
 
-static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child);
+static bool dom_remove_backed_child(DomElement* parent, DomNode* child);
 
-static bool js_dom_remove_backed_element_item(DomElement* parent,
+static bool dom_remove_backed_element_item(DomElement* parent,
                                                DomElement* child,
                                                int64_t child_index) {
     if (!parent || !child || child_index < 0 || !parent->doc ||
@@ -13409,29 +13409,29 @@ static bool js_dom_remove_backed_element_item(DomElement* parent,
     Item result = editor.elmt_delete_child({.element = parent_backing},
                                             (int)child_index);
     if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
-        log_error("js_dom_remove_backed_element_item: inline delete changed backing identity");
+        log_error("dom_remove_backed_element_item: inline delete changed backing identity");
         return false;
     }
     return true;
 }
 
-static bool js_dom_append_backed_element(DomElement* parent, DomNode* child) {
+static bool dom_append_backed_element(DomElement* parent, DomNode* child) {
     if (!parent || !child || !child->is_element()) return false;
-    parent = js_dom_prepare_children_for_mutation(parent);
+    parent = dom_prepare_children_for_mutation(parent);
     if (!parent) return false;
     if (child->parent == (DomNode*)parent && parent->last_child == child) return true;
     if (child->parent) dom_pre_remove(child);
     DomElement* child_elem = child->as_element();
-    int64_t backed_index = js_dom_backed_child_index(parent, child_elem);
+    int64_t backed_index = dom_backed_child_index(parent, child_elem);
     if (backed_index >= 0) {
         if (child->parent == parent) {
             // Move an existing sibling through both trees so the backing order
             // stays aligned with the DOM appendChild() ordering rule.
-            if (!js_dom_remove_backed_child(parent, child)) return false;
+            if (!dom_remove_backed_child(parent, child)) return false;
         } else if (child->parent) {
             if (!child->parent->is_element() ||
                 !((DomNode*)child->parent)->remove_child(child)) return false;
-        } else if (!js_dom_remove_backed_element_item(parent, child_elem,
+        } else if (!dom_remove_backed_element_item(parent, child_elem,
                                                        backed_index)) {
             return false;
         }
@@ -13447,7 +13447,7 @@ static bool js_dom_append_backed_element(DomElement* parent, DomNode* child) {
         // linked child straight to MarkEditor duplicates its backing entry and
         // leaves the DOM sibling chain inconsistent after library capability
         // probes reappend a temporary fieldset.
-        if (!js_dom_remove_backed_child(previous_parent, child)) return false;
+        if (!dom_remove_backed_child(previous_parent, child)) return false;
     }
     if (!parent->append_child(child_elem)) return false;
     if (child->parent != parent) {
@@ -13459,23 +13459,23 @@ static bool js_dom_append_backed_element(DomElement* parent, DomNode* child) {
     return true;
 }
 
-static int64_t js_dom_backed_insertion_index(DomElement* parent,
+static int64_t dom_backed_insertion_index(DomElement* parent,
                                               DomNode* ref_child) {
     if (!parent) return -1;
     int64_t insert_index = dom_element_to_element(parent)->length;
     for (DomNode* candidate = ref_child; candidate;
          candidate = candidate->next_sibling) {
-        insert_index = js_dom_backed_node_index(parent, candidate);
+        insert_index = dom_backed_node_index(parent, candidate);
         if (insert_index >= 0) break;
     }
     if (insert_index < 0) insert_index = dom_element_to_element(parent)->length;
     return insert_index;
 }
 
-static bool js_dom_insert_backed_element(DomElement* parent, DomNode* child,
+static bool dom_insert_backed_element(DomElement* parent, DomNode* child,
                                          DomNode* ref_child) {
     if (!parent || !child || !child->is_element()) return false;
-    parent = js_dom_prepare_children_for_mutation(parent);
+    parent = dom_prepare_children_for_mutation(parent);
     if (!parent) return false;
     if (ref_child && ref_child->parent != (DomNode*)parent) return false;
     DomElement* child_elem = child->as_element();
@@ -13491,18 +13491,18 @@ static bool js_dom_insert_backed_element(DomElement* parent, DomNode* child,
 
     if (child->parent) {
         if (!child->parent->is_element() ||
-            !js_dom_remove_backed_child(child->parent->as_element(), child)) {
+            !dom_remove_backed_child(child->parent->as_element(), child)) {
             return false;
         }
     } else {
-        int64_t backed_index = js_dom_backed_child_index(parent, child_elem);
+        int64_t backed_index = dom_backed_child_index(parent, child_elem);
         if (backed_index >= 0 &&
-            !js_dom_remove_backed_element_item(parent, child_elem, backed_index)) {
+            !dom_remove_backed_element_item(parent, child_elem, backed_index)) {
             return false;
         }
     }
 
-    int64_t insert_index = js_dom_backed_insertion_index(parent, ref_child);
+    int64_t insert_index = dom_backed_insertion_index(parent, ref_child);
     if (insert_index < 0) return false;
 
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
@@ -13511,7 +13511,7 @@ static bool js_dom_insert_backed_element(DomElement* parent, DomNode* child,
                                             (int)insert_index,
                                             {.element = dom_element_to_element(child_elem)});
     if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
-        log_error("js_dom_insert_backed_element: inline insert changed backing identity");
+        log_error("dom_insert_backed_element: inline insert changed backing identity");
         return false;
     }
     if (child->parent != (DomNode*)parent) {
@@ -13523,7 +13523,7 @@ static bool js_dom_insert_backed_element(DomElement* parent, DomNode* child,
     return true;
 }
 
-static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
+static bool dom_insert_backed_text(DomElement* parent, DomText* text,
                                       DomNode* ref_child) {
     if (!parent || !text || !text->native_string || !parent->doc ||
         !parent->doc->input) return false;
@@ -13543,7 +13543,7 @@ static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
         return ((DomNode*)parent)->insert_before((DomNode*)text, ref_child);
     }
 
-    parent = js_dom_prepare_children_for_mutation(parent);
+    parent = dom_prepare_children_for_mutation(parent);
     if (!parent) return false;
     String* native_string = text->native_string;
 
@@ -13568,7 +13568,7 @@ static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
         insert_index = -1;
         for (DomNode* candidate = ref_child; candidate;
              candidate = candidate->next_sibling) {
-            int64_t candidate_index = js_dom_backed_node_index(parent, candidate);
+            int64_t candidate_index = dom_backed_node_index(parent, candidate);
             if (candidate_index >= 0) {
                 insert_index = candidate_index;
                 break;
@@ -13581,7 +13581,7 @@ static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
             for (DomNode* candidate = parent->first_child;
                  candidate && candidate != ref_child;
                  candidate = candidate->next_sibling) {
-                if (js_dom_backed_node_index(parent, candidate) >= 0) {
+                if (dom_backed_node_index(parent, candidate) >= 0) {
                     insert_index++;
                 }
             }
@@ -13595,7 +13595,7 @@ static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
         (int)insert_index,
         {.item = s2it(native_string)});
     if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
-        log_error("js_dom_insert_backed_text: inline insert changed backing identity");
+        log_error("dom_insert_backed_text: inline insert changed backing identity");
         return false;
     }
     if (text->parent != (DomNode*)parent) {
@@ -13615,37 +13615,37 @@ static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
     return true;
 }
 
-static bool js_dom_append_fragment_children(DomElement* parent,
+static bool dom_append_fragment_children(DomElement* parent,
                                              DomElement* fragment) {
     if (!parent || !fragment) return false;
     DomNode* child = fragment->first_child;
     while (child) {
         DomNode* next = child->next_sibling;
-        if (!js_dom_prepare_cross_document_insertion(child, parent)) {
+        if (!dom_prepare_cross_document_insertion(child, parent)) {
             return false;
         }
         if (child->is_element()) {
             // DOM Standard: appending a DocumentFragment splices its children;
             // keep the backing Element order aligned with the live DOM chain.
-            if (!js_dom_append_backed_element(parent, child)) return false;
+            if (!dom_append_backed_element(parent, child)) return false;
         } else if (child->is_text()) {
-            js_dom_pre_remove_if_attached(child);
-            if (!js_dom_insert_backed_text(parent, child->as_text(), nullptr)) {
+            dom_pre_remove_if_attached(child);
+            if (!dom_insert_backed_text(parent, child->as_text(), nullptr)) {
                 return false;
             }
-        } else if (!js_dom_detach_dom_node(child) ||
+        } else if (!dom_detach_dom_node(child) ||
                    !((DomNode*)parent)->append_child(child)) {
             return false;
         }
         dom_post_insert((DomNode*)parent, child);
         child = next;
     }
-    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+    dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
                            (DomNode*)parent, (DomNode*)parent);
     return true;
 }
 
-static bool js_dom_insert_before_child(DomElement* parent, DomNode* child,
+static bool dom_insert_before_child(DomElement* parent, DomNode* child,
                                        DomNode* ref_child) {
     if (!parent || !child) return false;
     if (child == ref_child ||
@@ -13657,19 +13657,19 @@ static bool js_dom_insert_before_child(DomElement* parent, DomNode* child,
     // otherwise HTMLCollection keeps reporting the source order after insertBefore().
     if (child->parent) dom_pre_remove(child);
     bool inserted = child->is_element()
-        ? js_dom_insert_backed_element(parent, child, ref_child)
+        ? dom_insert_backed_element(parent, child, ref_child)
         : child->is_text()
-            ? js_dom_insert_backed_text(parent, child->as_text(), ref_child)
+            ? dom_insert_backed_text(parent, child->as_text(), ref_child)
             : ((child->parent ? child->parent->remove_child(child) : true) &&
                ((DomNode*)parent)->insert_before(child, ref_child));
     if (!inserted) return false;
 
     dom_post_insert((DomNode*)parent, child);
-    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child, (DomNode*)parent);
+    dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child, (DomNode*)parent);
     return true;
 }
 
-static bool js_dom_insert_text_before_child(DomElement* parent, Item text_item,
+static bool dom_insert_text_before_child(DomElement* parent, Item text_item,
                                             DomNode* ref_child) {
     if (!parent || get_type_id(text_item) != LMD_TYPE_STRING) return false;
     String* source = it2s(text_item);
@@ -13680,13 +13680,13 @@ static bool js_dom_insert_text_before_child(DomElement* parent, Item text_item,
             parent->doc, source->chars, source->len);
         if (!text || !((DomNode*)parent)->insert_before(text, ref_child)) return false;
         dom_post_insert((DomNode*)parent, text);
-        js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, text,
+        dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, text,
                                (DomNode*)parent);
         return true;
     }
     if (!parent->doc || !parent->doc->input) return false;
 
-    int64_t insert_index = js_dom_backed_insertion_index(parent, ref_child);
+    int64_t insert_index = dom_backed_insertion_index(parent, ref_child);
     if (insert_index < 0) return false;
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Element* parent_backing = dom_element_to_element(parent);
@@ -13695,7 +13695,7 @@ static bool js_dom_insert_text_before_child(DomElement* parent, Item text_item,
     if (get_type_id(result) != LMD_TYPE_ELEMENT ||
         result.element != parent_backing ||
         insert_index >= parent_backing->length) {
-        log_error("js_dom_insert_text_before_child: inline insert changed backing identity");
+        log_error("dom_insert_text_before_child: inline insert changed backing identity");
         return false;
     }
 
@@ -13719,12 +13719,12 @@ static bool js_dom_insert_text_before_child(DomElement* parent, Item text_item,
     }
     if (!inserted_text) return false;
     dom_post_insert((DomNode*)parent, inserted_text);
-    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, inserted_text,
+    dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, inserted_text,
                            (DomNode*)parent);
     return true;
 }
 
-static bool js_dom_text_is_backed_child(DomElement* parent, DomText* text) {
+static bool dom_text_is_backed_child(DomElement* parent, DomText* text) {
     if (!parent || !text || !text->native_string) return false;
     Element* backing = dom_element_to_element(parent);
     if (!backing) return false;
@@ -13738,14 +13738,14 @@ static bool js_dom_text_is_backed_child(DomElement* parent, DomText* text) {
     return false;
 }
 
-static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child) {
+static bool dom_remove_backed_child(DomElement* parent, DomNode* child) {
     if (!parent || !child) return false;
-    parent = js_dom_prepare_children_for_mutation(parent, child);
+    parent = dom_prepare_children_for_mutation(parent, child);
     if (!parent || child->parent != parent) return false;
     if (!child->is_element()) {
         if (child->is_text()) {
             DomText* text = (DomText*)child;
-            if (js_dom_text_is_backed_child(parent, text)) {
+            if (dom_text_is_backed_child(parent, text)) {
                 return dom_text_remove(text);
             }
             // Some DOM replacements have already removed the Mark string but
@@ -13763,14 +13763,14 @@ static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child) {
     }
     if (!parent->doc || !parent->doc->input) return false;
 
-    int64_t child_index = js_dom_backed_child_index(parent, child_elem);
+    int64_t child_index = dom_backed_child_index(parent, child_elem);
     if (child_index < 0) {
         // Positional DOM APIs can insert a DOM-only element between backed
         // siblings. Its removal must not delete an unrelated Mark child.
         return ((DomNode*)parent)->remove_child(child);
     }
 
-    if (!js_dom_remove_backed_element_item(parent, child_elem, child_index)) {
+    if (!dom_remove_backed_element_item(parent, child_elem, child_index)) {
         return false;
     }
 
@@ -13781,7 +13781,7 @@ static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child) {
     return ((DomNode*)parent)->remove_child(child);
 }
 
-static bool js_dom_replace_document_element(DomElement* old_root,
+static bool dom_replace_document_element(DomElement* old_root,
                                             DomElement* replacement) {
     if (!old_root || !replacement || old_root == replacement ||
         !old_root->doc || old_root->doc->root != old_root ||
@@ -13794,8 +13794,8 @@ static bool js_dom_replace_document_element(DomElement* old_root,
 
     // Use the document proxy as the logical parent for adoption and DOM links;
     // the parser's #document Mark element remains the persistent backing root.
-    DomElement* document_node = (DomElement*)js_dom_get_or_create_doc_node(doc);
-    if (!document_node || !js_dom_prepare_cross_document_insertion(
+    DomElement* document_node = (DomElement*)dom_get_or_create_doc_node(doc);
+    if (!document_node || !dom_prepare_cross_document_insertion(
             (DomNode*)replacement, document_node)) {
         return false;
     }
@@ -13834,7 +13834,7 @@ static bool js_dom_replace_document_element(DomElement* old_root,
             {.element = replacement_backing});
         if (get_type_id(result) != LMD_TYPE_ELEMENT ||
             result.element != input_root) {
-            log_error("js_dom_replace_document_element: backing root changed identity");
+            log_error("dom_replace_document_element: backing root changed identity");
             return false;
         }
     } else {
@@ -13875,35 +13875,35 @@ static bool js_dom_replace_document_element(DomElement* old_root,
     doc->root = replacement;
     doc->html_root = replacement_backing;
     dom_node_schedule_detached(doc, (DomNode*)old_root);
-    js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
+    dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
                            (DomNode*)replacement, old_parent);
     return true;
 }
 
-extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
+extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
     DomElement* elem = (DomElement*)parent_ptr;
     if (!elem) return ItemNull;
-    DomNode* child_node = (DomNode*)js_dom_unwrap_element(child_arg);
+    DomNode* child_node = (DomNode*)dom_unwrap_element(child_arg);
     if (!child_node) {
-        log_error("js_dom_append_child_bridge: argument is not a DOM node");
+        log_error("dom_append_child_bridge: argument is not a DOM node");
         return ItemNull;
     }
     if (child_node->is_element()) {
         DomElement* child_elem = child_node->as_element();
         if (child_elem->tag_name && strcmp(child_elem->tag_name, "#document-fragment") == 0) {
-            if (!js_dom_append_fragment_children(elem, child_elem)) return ItemNull;
+            if (!dom_append_fragment_children(elem, child_elem)) return ItemNull;
             return child_arg;
         }
     }
-    if (!js_dom_prepare_cross_document_insertion(child_node, elem)) return ItemNull;
+    if (!dom_prepare_cross_document_insertion(child_node, elem)) return ItemNull;
     if (child_node->is_element()) {
         // DOM-created elements have independent Mark backings, so append through
         // DomElement to preserve the renderer's tree as well as DOM links.
-        if (!js_dom_append_backed_element(elem, child_node)) return ItemNull;
+        if (!dom_append_backed_element(elem, child_node)) return ItemNull;
     } else if (child_node->is_text()) {
-        js_dom_pre_remove_if_attached(child_node);
-        if (!js_dom_insert_backed_text(elem, child_node->as_text(), nullptr)) return ItemNull;
-    } else if (!js_dom_detach_dom_node(child_node) ||
+        dom_pre_remove_if_attached(child_node);
+        if (!dom_insert_backed_text(elem, child_node->as_text(), nullptr)) return ItemNull;
+    } else if (!dom_detach_dom_node(child_node) ||
                !((DomNode*)elem)->append_child(child_node)) {
         return ItemNull;
     }
@@ -13913,7 +13913,7 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         _select_ask_for_reset(elem);
     }
     _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child_node, (DomNode*)elem);
+    dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child_node, (DomNode*)elem);
     if (child_node->is_element()) {
         DomElement* ce = child_node->as_element();
         if (ce->tag_name && strcmp(ce->tag_name, "iframe") == 0) {
@@ -13923,30 +13923,30 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
     return child_arg;
 }
 
-extern "C" Item js_dom_remove_child_bridge(void* parent_ptr, Item child_arg) {
+extern "C" Item dom_remove_child_bridge(void* parent_ptr, Item child_arg) {
     DomElement* elem = (DomElement*)parent_ptr;
     if (!elem) return ItemNull;
-    DomNode* child_node = (DomNode*)js_dom_unwrap_element(child_arg);
+    DomNode* child_node = (DomNode*)dom_unwrap_element(child_arg);
     if (!child_node) {
-        log_error("js_dom_remove_child_bridge: argument is not a DOM node");
+        log_error("dom_remove_child_bridge: argument is not a DOM node");
         return ItemNull;
     }
     dom_pre_remove(child_node);
-    if (!js_dom_remove_backed_child(elem, child_node)) return ItemNull;
+    if (!dom_remove_backed_child(elem, child_node)) return ItemNull;
     if (child_node->is_element() && child_node->as_element()->tag() == MARKUP_NAME_OPTION &&
         elem->tag() == MARKUP_NAME_SELECT) {
         _select_ask_for_reset(elem);
     }
-    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE, child_node, (DomNode*)elem);
+    dom_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE, child_node, (DomNode*)elem);
     return child_arg;
 }
 
-extern "C" Item js_dom_insert_before_bridge(void* parent_ptr, Item new_child_arg,
+extern "C" Item dom_insert_before_bridge(void* parent_ptr, Item new_child_arg,
                                             Item ref_child_arg) {
     DomElement* elem = (DomElement*)parent_ptr;
     if (!elem) return ItemNull;
-    DomNode* new_child = (DomNode*)js_dom_unwrap_element(new_child_arg);
-    DomNode* ref_child = (DomNode*)js_dom_unwrap_element(ref_child_arg);
+    DomNode* new_child = (DomNode*)dom_unwrap_element(new_child_arg);
+    DomNode* ref_child = (DomNode*)dom_unwrap_element(ref_child_arg);
     if (!new_child) return ItemNull;
     DomNode* parent_node = (DomNode*)elem;
     if (new_child == ref_child) {
@@ -13955,7 +13955,7 @@ extern "C" Item js_dom_insert_before_bridge(void* parent_ptr, Item new_child_arg
         return new_child_arg;
     }
     if (ref_child && ref_child->parent != parent_node) {
-        log_error("js_dom_insert_before_bridge: reference node is not a child of target parent");
+        log_error("dom_insert_before_bridge: reference node is not a child of target parent");
         return ItemNull;
     }
     if (new_child->is_element()) {
@@ -13965,7 +13965,7 @@ extern "C" Item js_dom_insert_before_bridge(void* parent_ptr, Item new_child_arg
             DomNode* frag_child = new_elem->first_child;
             while (frag_child) {
                 DomNode* next = frag_child->next_sibling;
-                if (!js_dom_prepare_cross_document_insertion(frag_child, elem)) {
+                if (!dom_prepare_cross_document_insertion(frag_child, elem)) {
                     return ItemNull;
                 }
                 if (parent_node->insert_before(frag_child, ref_child)) {
@@ -13974,18 +13974,18 @@ extern "C" Item js_dom_insert_before_bridge(void* parent_ptr, Item new_child_arg
                 }
                 frag_child = next;
             }
-            if (mutated) js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, (DomNode*)elem, (DomNode*)elem);
+            if (mutated) dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, (DomNode*)elem, (DomNode*)elem);
             return new_child_arg;
         }
     }
-    if (!js_dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
-    if (!js_dom_insert_before_child(elem, new_child, ref_child)) {
+    if (!dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
+    if (!dom_insert_before_child(elem, new_child, ref_child)) {
         return ItemNull;
     }
     return new_child_arg;
 }
 
-extern "C" Item js_dom_remove_bridge(void* node_ptr) {
+extern "C" Item dom_remove_bridge(void* node_ptr) {
     DomNode* node = (DomNode*)node_ptr;
     if (!node) return ItemNull;
     if (node->parent) {
@@ -14000,27 +14000,27 @@ extern "C" Item js_dom_remove_bridge(void* node_ptr) {
             // Node.remove() must share removeChild()'s dual-tree path. Leaving
             // the Mark entry behind after an SVG library tears down its Paper
             // makes a later textContent clear operate on a retired wrapper.
-            if (!js_dom_remove_backed_child(old_parent->as_element(), node)) {
+            if (!dom_remove_backed_child(old_parent->as_element(), node)) {
                 return ItemNull;
             }
         } else if (!old_parent->remove_child(node)) {
             return ItemNull;
         }
         if (owner_select) _select_ask_for_reset(owner_select);
-        js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE, node, old_parent);
+        dom_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE, node, old_parent);
     }
     return ItemNull;
 }
 
-extern "C" Item js_dom_adopt_node_bridge(Item node_arg) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(node_arg);
+extern "C" Item dom_adopt_node_bridge(Item node_arg) {
+    DomNode* node = (DomNode*)dom_unwrap_element(node_arg);
     if (!node) return ItemNull;
     // adoptNode detaches through remove() bookkeeping so live ranges/focus see the original parent.
-    js_dom_remove_bridge((void*)node);
+    dom_remove_bridge((void*)node);
     return node_arg;
 }
 
-extern "C" Item js_dom_location_navigate_bridge(void* doc_ptr, Item next_url_item,
+extern "C" Item dom_location_navigate_bridge(void* doc_ptr, Item next_url_item,
                                                  bool replace) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     const char* next_url = fn_to_cstr(next_url_item);
@@ -14035,10 +14035,10 @@ extern "C" Item js_dom_location_navigate_bridge(void* doc_ptr, Item next_url_ite
     return make_js_undefined();
 }
 
-extern "C" Item js_dom_document_open_bridge(void* doc_ptr) {
+extern "C" Item dom_document_open_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     if (!doc) return js_get_document_object_value();
-    DocState* state = doc->state ? doc->state : js_dom_current_state();
+    DocState* state = doc->state ? doc->state : dom_current_state();
     if (state) {
         const char* exc = nullptr;
         if (!state_store_set_selection(state, NULL, NULL, &exc)) {
@@ -14049,20 +14049,20 @@ extern "C" Item js_dom_document_open_bridge(void* doc_ptr) {
     DomElement* body = document_body_element(doc);
     if (body) {
         clear_element_children_for_navigation(body);
-        js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
+        dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
                                (DomNode*)body,
                                (DomNode*)body->parent);
     }
     return js_get_document_object_value();
 }
 
-extern "C" Item js_dom_document_write_bridge(void* doc_ptr, Item text_arg) {
+extern "C" Item dom_document_write_bridge(void* doc_ptr, Item text_arg) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     if (!doc || !doc->root) return ItemNull;
     const char* text = fn_to_cstr(text_arg);
     if (!text) return ItemNull;
 
-    if (!js_dom_append_document_text(doc, text)) {
+    if (!dom_append_document_text(doc, text)) {
         log_debug("js_document_write_bridge: no body element found");
         return ItemNull;
     }
@@ -14070,7 +14070,7 @@ extern "C" Item js_dom_document_write_bridge(void* doc_ptr, Item text_arg) {
     return ItemNull;
 }
 
-extern "C" Item js_dom_normalize_bridge(void* elem_ptr) {
+extern "C" Item dom_normalize_bridge(void* elem_ptr) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem) return ItemNull;
     DomNode* child = elem->first_child;
@@ -14097,14 +14097,14 @@ extern "C" Item js_dom_normalize_bridge(void* elem_ptr) {
                 // relinks both stale text entries into the DOM child list.
                 if (!dom_text_replace_backed_string(text, s) &&
                     !dom_text_adopt_document_string(text, elem->doc, s)) break;
-                DocState* st = js_dom_current_state();
+                DocState* st = dom_current_state();
                 if (st) {
                     dom_mutation_text_replace_data(st, text, head_u16, 0, tail_u16);
                     dom_mutation_text_merge(st, text, next_text, head_u16);
                 }
                 DomNode* remove_node = child->next_sibling;
                 dom_pre_remove(remove_node);
-                if (!js_dom_remove_backed_child(elem, remove_node)) break;
+                if (!dom_remove_backed_child(elem, remove_node)) break;
             }
         }
         child = child->next_sibling;
@@ -14112,7 +14112,7 @@ extern "C" Item js_dom_normalize_bridge(void* elem_ptr) {
     return ItemNull;
 }
 
-static void js_dom_clone_content_attributes(DomElement* source, DomElement* clone) {
+static void dom_clone_content_attributes(DomElement* source, DomElement* clone) {
     if (!source || !clone || source->is_synthetic()) return;
 
     int attr_count = 0;
@@ -14129,7 +14129,7 @@ static void js_dom_clone_content_attributes(DomElement* source, DomElement* clon
     }
 }
 
-extern "C" Item js_dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has_deep) {
+extern "C" Item dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has_deep) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem) return ItemNull;
     bool deep = has_deep ? js_is_truthy(deep_arg) : false;
@@ -14139,7 +14139,7 @@ extern "C" Item js_dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has
     Item _clean_elem = _clone_builder.element(elem->tag_name).final();
     DomElement* clone = dom_element_create(elem->doc, elem->tag_name, _clean_elem.element);
     if (!clone) return ItemNull;
-    js_dom_clone_content_attributes(elem, clone);
+    dom_clone_content_attributes(elem, clone);
     // DOM cloning must not copy source-bound wrapper caches; their host_data would
     // make clone.classList/style writes mutate the original element.
     clone->tag_id = elem->tag_id;
@@ -14147,8 +14147,8 @@ extern "C" Item js_dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has
         DomNode* child = elem->first_child;
         while (child) {
             if (child->is_element()) {
-                Item child_clone = js_dom_clone_node_bridge(child->as_element(), deep_arg, has_deep);
-                DomNode* cloned_child = (DomNode*)js_dom_unwrap_element(child_clone);
+                Item child_clone = dom_clone_node_bridge(child->as_element(), deep_arg, has_deep);
+                DomNode* cloned_child = (DomNode*)dom_unwrap_element(child_clone);
                 if (cloned_child) {
                     ((DomNode*)clone)->append_child(cloned_child);
                 }
@@ -14163,15 +14163,15 @@ extern "C" Item js_dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has
             child = child->next_sibling;
         }
     }
-    return js_dom_wrap_element(clone);
+    return dom_wrap_element(clone);
 }
 
-extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
+extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
                                             Item old_child_arg) {
     DomElement* elem = (DomElement*)parent_ptr;
     if (!elem) return ItemNull;
-    DomNode* new_child = (DomNode*)js_dom_unwrap_element(new_child_arg);
-    DomNode* old_child = (DomNode*)js_dom_unwrap_element(old_child_arg);
+    DomNode* new_child = (DomNode*)dom_unwrap_element(new_child_arg);
+    DomNode* old_child = (DomNode*)dom_unwrap_element(old_child_arg);
     if (!new_child || !old_child) return ItemNull;
     if (old_child->parent != (DomNode*)elem) return ItemNull;
     if (new_child == old_child) {
@@ -14179,7 +14179,7 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
         dom_pre_remove(old_child);
         return old_child_arg;
     }
-    if (!js_dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
+    if (!dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
 
     // Replacing a backed CharacterData node with a backed Element must update
     // the Lambda child list too; the generic DOM-only fallback leaves the
@@ -14187,12 +14187,12 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
     if (new_child->is_element() && old_child->is_text() && elem->doc &&
         elem->doc->input) {
         DomElement* new_elem = new_child->as_element();
-        int64_t old_index = js_dom_backed_node_index(elem, old_child);
+        int64_t old_index = dom_backed_node_index(elem, old_child);
         if (new_elem && !new_elem->is_synthetic() && old_index >= 0) {
             if (new_child->parent && new_child->parent != (DomNode*)elem) {
                 dom_pre_remove(new_child);
                 if (!new_child->parent->is_element() ||
-                    !js_dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
+                    !dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
                     return ItemNull;
                 }
             }
@@ -14204,12 +14204,12 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
                 {.element = dom_element_to_element(new_elem)});
             if (get_type_id(result) != LMD_TYPE_ELEMENT ||
                 result.element != dom_element_to_element(elem)) {
-                log_error("js_dom_replace_child: text-element replace changed backing identity");
+                log_error("dom_replace_child: text-element replace changed backing identity");
                 return ItemNull;
             }
             dom_post_insert((DomNode*)elem, new_child);
-            js_dom_observers_child_replace_notify((DomNode*)elem, new_child, old_child);
-            js_dom_mutation_notify();
+            dom_observers_child_replace_notify((DomNode*)elem, new_child, old_child);
+            dom_mutation_notify();
             return old_child_arg;
         }
     }
@@ -14223,12 +14223,12 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
         DomText* new_text = new_child->as_text();
         DomElement* old_elem = old_child->as_element();
         String* replacement_string = new_text ? new_text->native_string : nullptr;
-        int64_t old_index = js_dom_backed_child_index(elem, old_elem);
+        int64_t old_index = dom_backed_child_index(elem, old_elem);
         if (new_text && replacement_string && old_elem && old_index >= 0) {
             if (new_child->parent && new_child->parent != (DomNode*)elem) {
                 dom_pre_remove(new_child);
                 if (!new_child->parent->is_element() ||
-                    !js_dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
+                    !dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
                     return ItemNull;
                 }
             } else if (new_child->parent == (DomNode*)elem) {
@@ -14236,8 +14236,8 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
                 // it at the old node's position; recompute the old index after
                 // that removal because the backing array may have shifted.
                 dom_pre_remove(new_child);
-                if (!js_dom_remove_backed_child(elem, new_child)) return ItemNull;
-                old_index = js_dom_backed_child_index(elem, old_elem);
+                if (!dom_remove_backed_child(elem, new_child)) return ItemNull;
+                old_index = dom_backed_child_index(elem, old_elem);
                 if (old_index < 0) return ItemNull;
             }
             if (!new_text->native_string) new_text->native_string = replacement_string;
@@ -14249,12 +14249,12 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
                 {.item = s2it(replacement_string)});
             if (get_type_id(result) != LMD_TYPE_ELEMENT ||
                 result.element != dom_element_to_element(elem)) {
-                log_error("js_dom_replace_child: element-text replace changed backing identity");
+                log_error("dom_replace_child: element-text replace changed backing identity");
                 return ItemNull;
             }
             dom_post_insert((DomNode*)elem, new_child);
-            js_dom_observers_child_replace_notify((DomNode*)elem, new_child, old_child);
-            js_dom_mutation_notify();
+            dom_observers_child_replace_notify((DomNode*)elem, new_child, old_child);
+            dom_mutation_notify();
             return old_child_arg;
         }
     }
@@ -14263,12 +14263,12 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
         elem->doc->input) {
         DomElement* new_elem = new_child->as_element();
         DomElement* old_elem = old_child->as_element();
-        int64_t old_index = js_dom_backed_child_index(elem, old_elem);
+        int64_t old_index = dom_backed_child_index(elem, old_elem);
         if (new_elem && old_elem && old_index >= 0) {
             if (new_child->parent && new_child->parent != (DomNode*)elem) {
                 dom_pre_remove(new_child);
                 if (!new_child->parent->is_element() ||
-                    !js_dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
+                    !dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
                     return ItemNull;
                 }
             }
@@ -14281,12 +14281,12 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
                 result.element != dom_element_to_element(elem)) {
                 // The DOM link is committed first so the UI relink keeps the
                 // removed wrapper out of a later Mark-backed reconstruction.
-                log_error("js_dom_replace_child: inline replace changed backing identity");
+                log_error("dom_replace_child: inline replace changed backing identity");
                 return ItemNull;
             }
             dom_post_insert((DomNode*)elem, new_child);
-            js_dom_observers_child_replace_notify((DomNode*)elem, new_child, old_child);
-            js_dom_mutation_notify();
+            dom_observers_child_replace_notify((DomNode*)elem, new_child, old_child);
+            dom_mutation_notify();
             return old_child_arg;
         }
     }
@@ -14296,10 +14296,10 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
     ((DomNode*)elem)->remove_child(old_child);
     // A replacement is one childList record containing both nodes; split
     // records leave observers unable to update a replaced editor root.
-    js_dom_observers_child_replace_notify((DomNode*)elem, new_child, old_child);
+    dom_observers_child_replace_notify((DomNode*)elem, new_child, old_child);
     // dom_post_insert/dom_pre_remove already supplied precise incremental
     // ledger entries; this flush must not downgrade them to a broad replace.
-    js_dom_mutation_notify();
+    dom_mutation_notify();
     return old_child_arg;
 }
 
@@ -14315,16 +14315,16 @@ typedef struct JsDomRelativeArgument {
     uint64_t* text_root;
 } JsDomRelativeArgument;
 
-static Item js_dom_child_node_insert_relative(DomNode* node, Item* args, int argc,
+static Item dom_child_node_insert_relative(DomNode* node, Item* args, int argc,
                                                JsDomChildNodePlacement placement) {
     if (!node) return (Item){.item = ITEM_JS_UNDEFINED};
     if (placement == JS_DOM_CHILD_NODE_REPLACE && node->is_element() &&
         node->as_element()->doc &&
         node->as_element()->doc->root == node->as_element()) {
         if (argc != 1) return (Item){.item = ITEM_JS_UNDEFINED};
-        DomNode* replacement = (DomNode*)js_dom_unwrap_element(args[0]);
+        DomNode* replacement = (DomNode*)dom_unwrap_element(args[0]);
         if (!replacement || !replacement->is_element() ||
-            !js_dom_replace_document_element(node->as_element(),
+            !dom_replace_document_element(node->as_element(),
                                               replacement->as_element())) {
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
@@ -14350,7 +14350,7 @@ static Item js_dom_child_node_insert_relative(DomNode* node, Item* args, int arg
     // particular, a later throwing ToString must not leave earlier arguments
     // inserted into the document.
     for (int i = 0; i < argc; i++) {
-        DomNode* insertion = (DomNode*)js_dom_unwrap_element(args[i]);
+        DomNode* insertion = (DomNode*)dom_unwrap_element(args[i]);
         if (!insertion) {
             Item text_item = js_to_string(args[i]);
             if (item_is_error(text_item)) {
@@ -14386,7 +14386,7 @@ static Item js_dom_child_node_insert_relative(DomNode* node, Item* args, int arg
         // Remove through the backing-aware path so replaceWith() cannot leave
         // a stale Mark child that a later UI relink resurrects.
         dom_pre_remove(node);
-        if (!js_dom_remove_backed_child(parent, node)) {
+        if (!dom_remove_backed_child(parent, node)) {
             mem_free(insertion_args);
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
@@ -14398,19 +14398,19 @@ static Item js_dom_child_node_insert_relative(DomNode* node, Item* args, int arg
             Item text = insertion_args[i].text_root
                 ? (Item){.item = *insertion_args[i].text_root}
                 : insertion_args[i].text;
-            if (!js_dom_insert_text_before_child(parent, text, viable_next)) {
+            if (!dom_insert_text_before_child(parent, text, viable_next)) {
                 mem_free(insertion_args);
                 return (Item){.item = ITEM_JS_UNDEFINED};
             }
             continue;
         }
-        DomDocument* source = js_dom_node_owner_document(insertion);
+        DomDocument* source = dom_node_owner_document(insertion);
         if (source && source != parent->doc &&
-            !js_dom_prepare_cross_document_insertion(insertion, parent)) {
+            !dom_prepare_cross_document_insertion(insertion, parent)) {
             mem_free(insertion_args);
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
-        if (!js_dom_insert_before_child(parent, insertion, viable_next)) {
+        if (!dom_insert_before_child(parent, insertion, viable_next)) {
             mem_free(insertion_args);
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
@@ -14418,22 +14418,22 @@ static Item js_dom_child_node_insert_relative(DomNode* node, Item* args, int arg
 
     mem_free(insertion_args);
     _select_refresh_cached_selected_options_for_node(parent_node);
-    js_dom_mutation_notify();
+    dom_mutation_notify();
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-extern "C" Item js_dom_replace_with_bridge(void* node_ptr, Item* args, int argc) {
+extern "C" Item dom_replace_with_bridge(void* node_ptr, Item* args, int argc) {
     DomNode* node = (DomNode*)node_ptr;
-    return js_dom_child_node_insert_relative(
+    return dom_child_node_insert_relative(
         node, args, argc, JS_DOM_CHILD_NODE_REPLACE);
 }
 
-extern "C" Item js_dom_insert_adjacent_element_bridge(void* elem_ptr, Item position_arg,
+extern "C" Item dom_insert_adjacent_element_bridge(void* elem_ptr, Item position_arg,
                                                       Item new_node_arg) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem) return ItemNull;
     const char* position = fn_to_cstr(position_arg);
-    DomNode* new_node = (DomNode*)js_dom_unwrap_element(new_node_arg);
+    DomNode* new_node = (DomNode*)dom_unwrap_element(new_node_arg);
     if (!position || !new_node) return ItemNull;
     if (new_node->parent) {
         dom_pre_remove(new_node);
@@ -14459,12 +14459,12 @@ extern "C" Item js_dom_insert_adjacent_element_bridge(void* elem_ptr, Item posit
     }
     if (new_parent) {
         dom_post_insert(new_parent, new_node);
-        js_dom_mutation_notify();
+        dom_mutation_notify();
     }
     return new_node_arg;
 }
 
-extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem_ptr, Item position_arg,
+extern "C" Item dom_insert_adjacent_html_bridge(void* elem_ptr, Item position_arg,
                                                    Item html_arg) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem) return ItemNull;
@@ -14472,7 +14472,7 @@ extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem_ptr, Item position
     const char* html_str = fn_to_cstr(html_arg);
     if (!position || !html_str || !elem->doc) return ItemNull;
     DomDocument* doc = elem->doc;
-    DomElement* fragment = js_dom_parse_html_fragment(doc, html_str);
+    DomElement* fragment = dom_parse_html_fragment(doc, html_str);
     if (!fragment) return ItemNull;
 
     DomElement* target_parent = nullptr;
@@ -14492,7 +14492,7 @@ extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem_ptr, Item position
         target_parent = elem->parent->as_element();
         ref_node = elem->next_sibling;
     } else {
-        log_error("js_dom_insert_adjacent_html_bridge: invalid position '%s'", position);
+        log_error("dom_insert_adjacent_html_bridge: invalid position '%s'", position);
         return ItemNull;
     }
 
@@ -14507,17 +14507,17 @@ extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem_ptr, Item position
     return ItemNull;
 }
 
-extern "C" Item js_dom_append_variadic_bridge(void* elem_ptr, Item* args, int argc) {
+extern "C" Item dom_append_variadic_bridge(void* elem_ptr, Item* args, int argc) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem) return (Item){.item = ITEM_JS_UNDEFINED};
     for (int i = 0; i < argc; i++) {
-        DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[i]);
+        DomNode* child_node = (DomNode*)dom_unwrap_element(args[i]);
         if (child_node) {
             if (child_node->is_element()) {
                 DomElement* child_elem = child_node->as_element();
                 if (child_elem->tag_name &&
                     strcmp(child_elem->tag_name, "#document-fragment") == 0) {
-                    if (!js_dom_append_fragment_children(elem, child_elem)) {
+                    if (!dom_append_fragment_children(elem, child_elem)) {
                         return (Item){.item = ITEM_JS_UNDEFINED};
                     }
                     continue;
@@ -14525,18 +14525,18 @@ extern "C" Item js_dom_append_variadic_bridge(void* elem_ptr, Item* args, int ar
             }
             // ParentNode.append is the path used by DOMParser consumers such
             // as HTMX; it must adopt foreign nodes before relinking them.
-            if (!js_dom_prepare_cross_document_insertion(child_node, elem)) {
+            if (!dom_prepare_cross_document_insertion(child_node, elem)) {
                 return (Item){.item = ITEM_JS_UNDEFINED};
             }
             bool inserted = false;
             if (child_node->is_element()) {
-                inserted = js_dom_append_backed_element(elem, child_node);
+                inserted = dom_append_backed_element(elem, child_node);
             } else if (child_node->is_text()) {
-                js_dom_pre_remove_if_attached(child_node);
-                inserted = js_dom_insert_backed_text(
+                dom_pre_remove_if_attached(child_node);
+                inserted = dom_insert_backed_text(
                     elem, child_node->as_text(), nullptr);
             } else {
-                inserted = js_dom_detach_dom_node(child_node) &&
+                inserted = dom_detach_dom_node(child_node) &&
                     ((DomNode*)elem)->append_child(child_node);
             }
             if (!inserted) return (Item){.item = ITEM_JS_UNDEFINED};
@@ -14549,29 +14549,29 @@ extern "C" Item js_dom_append_variadic_bridge(void* elem_ptr, Item* args, int ar
             }
         }
     }
-    js_dom_mutation_notify();
+    dom_mutation_notify();
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-extern "C" Item js_dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc) {
+extern "C" Item dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem) return (Item){.item = ITEM_JS_UNDEFINED};
     DomNode* ref = elem->first_child;
     for (int i = 0; i < argc; i++) {
-        DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[i]);
+        DomNode* child_node = (DomNode*)dom_unwrap_element(args[i]);
         if (child_node) {
-            if (!js_dom_prepare_cross_document_insertion(child_node, elem)) {
+            if (!dom_prepare_cross_document_insertion(child_node, elem)) {
                 return (Item){.item = ITEM_JS_UNDEFINED};
             }
             bool inserted = false;
             if (child_node->is_element()) {
-                inserted = js_dom_insert_before_child(elem, child_node, ref);
+                inserted = dom_insert_before_child(elem, child_node, ref);
             } else if (child_node->is_text()) {
-                js_dom_pre_remove_if_attached(child_node);
-                inserted = js_dom_insert_backed_text(
+                dom_pre_remove_if_attached(child_node);
+                inserted = dom_insert_backed_text(
                     elem, child_node->as_text(), ref);
             } else {
-                inserted = js_dom_detach_dom_node(child_node) &&
+                inserted = dom_detach_dom_node(child_node) &&
                     ((DomNode*)elem)->insert_before(child_node, ref);
             }
             if (!inserted) return (Item){.item = ITEM_JS_UNDEFINED};
@@ -14594,13 +14594,13 @@ extern "C" Item js_dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int a
         }
     }
     _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-    js_dom_mutation_notify();
+    dom_mutation_notify();
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-extern "C" Item js_dom_element_operation_impl(Item elem_item,
+extern "C" Item dom_element_operation_impl(Item elem_item,
         JubeDomElementOperation operation, Item* args, int argc) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
+    DomNode* node = (DomNode*)dom_unwrap_element(elem_item);
     if (!node) {
         log_error("js-dom-operation: receiver is not a DOM node");
         return ItemNull;
@@ -14626,7 +14626,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         Item arr = js_array_new(0);
         _collect_options(elem->first_child, arr);
         if (idx >= js_array_length(arr)) return ItemNull;
-        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, idx));
+        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, idx));
         if (!opt || !opt->parent) return ItemNull;
         DomElement* parent = (DomElement*)opt->parent;
         DomNode* on = (DomNode*)opt;
@@ -14636,7 +14636,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         if (on->next_sibling) on->next_sibling->prev_sibling = on->prev_sibling;
         else parent->last_child = on->prev_sibling;
         on->parent = nullptr; on->next_sibling = nullptr; on->prev_sibling = nullptr;
-        js_dom_mutation_notify();
+        dom_mutation_notify();
         return ItemNull;
     }
 
@@ -14651,7 +14651,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
             dom_pre_remove(node);
             node->parent->remove_child(node);
             if (owner_select) _select_ask_for_reset(owner_select);
-            js_dom_mutation_notify();
+            dom_mutation_notify();
         }
         return ItemNull;
     }
@@ -14659,21 +14659,21 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     // v12: contains(other) → boolean (works on any node type)
     if (operation == JUBE_DOM_CONTAINS) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
-        return js_dom_contains(elem_item, args[0]);
+        return dom_contains(elem_item, args[0]);
     }
 
     // Structural equality is a Node operation, so it must remain available to
     // text and comment wrappers before the Element-only method handling below.
     if (operation == JUBE_DOM_IS_EQUAL_NODE) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
-        return js_dom_is_equal_node(elem_item, args[0]);
+        return dom_is_equal_node(elem_item, args[0]);
     }
 
     // Node identity is a published capability, not a name-selected host call;
     // keep wrapper identity tied to the underlying node (D6.2.2v2).
     if (operation == JUBE_DOM_IS_SAME_NODE) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
-        return js_dom_is_same_node(elem_item, args[0]);
+        return dom_is_same_node(elem_item, args[0]);
     }
 
     // CharacterData.replaceData(offset, count, data) — text nodes only.
@@ -14681,46 +14681,46 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
         Item count_arg = argc >= 2 ? args[1] : make_js_undefined();
         Item data_arg = argc >= 3 ? args[2] : make_js_undefined();
-        return js_dom_text_replace_data_method(node->as_text(), offset_arg, count_arg, data_arg);
+        return dom_text_replace_data_method(node->as_text(), offset_arg, count_arg, data_arg);
     }
     if (node->is_text() && operation == JUBE_DOM_INSERT_DATA) {
         Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
         Item data_arg = argc >= 2 ? args[1] : make_js_undefined();
-        return js_dom_text_insert_data_method(node->as_text(), offset_arg, data_arg);
+        return dom_text_insert_data_method(node->as_text(), offset_arg, data_arg);
     }
     if (node->is_text() && operation == JUBE_DOM_APPEND_DATA) {
         Item data_arg = argc >= 1 ? args[0] : make_js_undefined();
-        return js_dom_text_append_data_method(node->as_text(), data_arg);
+        return dom_text_append_data_method(node->as_text(), data_arg);
     }
     if (node->is_text() && operation == JUBE_DOM_DELETE_DATA) {
         Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
         Item count_arg = argc >= 2 ? args[1] : make_js_undefined();
-        return js_dom_text_delete_data_method(node->as_text(), offset_arg, count_arg);
+        return dom_text_delete_data_method(node->as_text(), offset_arg, count_arg);
     }
     if (node->is_text() && operation == JUBE_DOM_SUBSTRING_DATA) {
         Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
         Item count_arg = argc >= 2 ? args[1] : make_js_undefined();
-        return js_dom_text_substring_data_method(node->as_text(), offset_arg, count_arg);
+        return dom_text_substring_data_method(node->as_text(), offset_arg, count_arg);
     }
     if (node->is_text() && operation == JUBE_DOM_SPLIT_TEXT) {
         Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
-        return js_dom_text_split_method(node->as_text(), offset_arg);
+        return dom_text_split_method(node->as_text(), offset_arg);
     }
 
     // EventTarget is a Node capability, so text/comment nodes must reach the
     // same typed call targets before Element-only operations begin (D6.2.2v2).
     if (operation == JUBE_DOM_ADD_EVENT_LISTENER) {
         return argc >= 2
-            ? js_dom_add_event_listener_bridge(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull)
+            ? dom_add_event_listener_bridge(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull)
             : make_js_undefined();
     }
     if (operation == JUBE_DOM_REMOVE_EVENT_LISTENER) {
         return argc >= 2
-            ? js_dom_remove_event_listener_bridge(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull)
+            ? dom_remove_event_listener_bridge(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull)
             : make_js_undefined();
     }
     if (operation == JUBE_DOM_DISPATCH_EVENT) {
-        if (argc >= 1) return js_dom_dispatch_event_bridge(elem_item, args[0]);
+        if (argc >= 1) return dom_dispatch_event_bridge(elem_item, args[0]);
         return (Item){.item = ITEM_FALSE};
     }
 
@@ -14751,7 +14751,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         DomElement* frag = dom_element_create(elem->doc, "#document-fragment", frag_elem);
         frag->set_shadow_host_element(elem);
         elem->set_shadow_root_element(frag);
-        Item root = js_dom_wrap_element(frag);
+        Item root = dom_wrap_element(frag);
 
         js_set_key_cstr(root, "host", elem_item);
         js_set_key_cstr(root, "mode", js_name_item(mode));
@@ -14771,7 +14771,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         if (argc < 1) return ItemNull;
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return ItemNull;
-        if (js_dom_is_internal_attr(attr_name)) return ItemNull;
+        if (dom_is_internal_attr(attr_name)) return ItemNull;
         const char* val = elem->get_attribute(attr_name);
         if (val) return js_name_item(val);
         if (elem->has_attribute(attr_name))
@@ -14783,19 +14783,19 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     if (operation == JUBE_DOM_SET_ATTRIBUTE) {
         if (argc < 2) return ItemNull;
         const char* attr_name = fn_to_cstr(args[0]);
-        const char* attr_val = js_dom_to_attr_cstr(args[1]);
+        const char* attr_val = dom_to_attr_cstr(args[1]);
         if (!attr_name || !attr_val) return ItemNull;
-        if (js_dom_is_internal_attr(attr_name)) return ItemNull;
+        if (dom_is_internal_attr(attr_name)) return ItemNull;
         const char* old_value = elem->get_attribute(attr_name);
         elem->set_attribute(attr_name, attr_val);
-        js_dom_compile_event_attr_to_expando(elem, attr_name, attr_val);
-        js_dom_reinit_behavior_if_constraint_attr(elem, attr_name);
+        dom_compile_event_attr_to_expando(elem, attr_name, attr_val);
+        dom_reinit_behavior_if_constraint_attr(elem, attr_name);
         if (_is_tag(elem, "option") && strcasecmp(attr_name, "selected") == 0) {
             DomElement* sel = _nearest_select_for_node((DomNode*)elem);
             if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
         }
         _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                                elem->parent, attr_name, old_value);
         return ItemNull;
     }
@@ -14808,7 +14808,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         if (argc < 3) return ItemNull;
         const char* namespace_uri = fn_to_cstr(args[0]);
         const char* qualified_name = fn_to_cstr(args[1]);
-        const char* value = js_dom_to_attr_cstr(args[2]);
+        const char* value = dom_to_attr_cstr(args[2]);
         if (!qualified_name || !value) return ItemNull;
         const char* local_name = strrchr(qualified_name, ':');
         local_name = local_name ? local_name + 1 : qualified_name;
@@ -14822,7 +14822,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         }
         const char* old_value = elem->get_attribute(stored_name);
         elem->set_attribute(stored_name, value);
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                                elem->parent, stored_name, old_value);
         return ItemNull;
     }
@@ -14855,7 +14855,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         }
         const char* old_value = elem->get_attribute(stored_name);
         elem->remove_attribute(stored_name);
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                                elem->parent, stored_name, old_value);
         return ItemNull;
     }
@@ -14865,7 +14865,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return (Item){.item = ITEM_FALSE};
-        if (js_dom_is_internal_attr(attr_name)) return (Item){.item = ITEM_FALSE};
+        if (dom_is_internal_attr(attr_name)) return (Item){.item = ITEM_FALSE};
         bool has = elem->has_attribute(attr_name);
         return (Item){.item = b2it(has ? 1 : 0)};
     }
@@ -14881,7 +14881,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         int attr_count = 0;
         const char** attr_names = elem->attribute_names(&attr_count);
         for (int i = 0; attr_names && i < attr_count; i++) {
-            if (js_dom_is_internal_attr(attr_names[i])) continue;
+            if (dom_is_internal_attr(attr_names[i])) continue;
             js_array_push(arr_item, js_name_item(attr_names[i]));
         }
         return arr_item;
@@ -14894,13 +14894,13 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         if (!attr_name) return ItemNull;
         const char* old_value = elem->get_attribute(attr_name);
         elem->remove_attribute(attr_name);
-        js_dom_clear_event_attr_expando(elem, attr_name);
-        js_dom_reinit_behavior_if_constraint_attr(elem, attr_name);
+        dom_clear_event_attr_expando(elem, attr_name);
+        dom_reinit_behavior_if_constraint_attr(elem, attr_name);
         if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
             _select_ask_for_reset(elem);
         }
         _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                                elem->parent, attr_name, old_value);
         return ItemNull;
     }
@@ -14908,38 +14908,38 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     // getElementsByTagName(tagName) — descendants of this element
     if (operation == JUBE_DOM_GET_ELEMENTS_BY_TAG_NAME) {
         if (argc < 1) return ItemNull;
-        return js_dom_live_element_get_elements_by_tag_name_bridge((void*)elem, args[0]);
+        return dom_live_element_get_elements_by_tag_name_bridge((void*)elem, args[0]);
     }
 
     // getElementsByClassName(className) — descendants of this element
     if (operation == JUBE_DOM_GET_ELEMENTS_BY_CLASS_NAME) {
         if (argc < 1) return ItemNull;
-        return js_dom_live_element_get_elements_by_class_name_bridge((void*)elem, args[0]);
+        return dom_live_element_get_elements_by_class_name_bridge((void*)elem, args[0]);
     }
 
     // querySelector(selector) — from this element
     if (operation == JUBE_DOM_QUERY_SELECTOR) {
         if (argc < 1) return ItemNull;
-        const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
+        const char* sel_text = dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return ItemNull;
 
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-        if (!selector_group) return js_dom_throw_syntax_error("Invalid selector");
+        if (!selector_group) return dom_throw_syntax_error("Invalid selector");
 
-        SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
+        SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
         // CSS Selectors defines :scope relative to the Element query receiver.
         // Without this binding, jQuery's scoped relative selectors match no descendants.
         selector_matcher_set_scope_element(matcher, elem);
-        DomElement* found = js_dom_selector_group_find_first(
+        DomElement* found = dom_selector_group_find_first(
             matcher, selector_group, elem, false);
-        return found ? js_dom_wrap_element(found) : ItemNull;
+        return found ? dom_wrap_element(found) : ItemNull;
     }
 
     // querySelectorAll(selector) — from this element
     if (operation == JUBE_DOM_QUERY_SELECTOR_ALL) {
         if (argc < 1) return ItemNull;
-        const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
+        const char* sel_text = dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return ItemNull;
 
         Pool* pool = elem->doc->document_pool;
@@ -14951,17 +14951,17 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         arr->length = 0;
         arr->capacity = 0;
 
-        if (!selector_group) return js_dom_throw_syntax_error("Invalid selector");
+        if (!selector_group) return dom_throw_syntax_error("Invalid selector");
 
-        SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
+        SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
         // Keep :scope anchored to this Element for relative selector queries.
         selector_matcher_set_scope_element(matcher, elem);
         ArrayList* results = arraylist_new(16);
         if (!results) return (Item){.array = arr};
-        js_dom_selector_group_collect_all(
+        dom_selector_group_collect_all(
             matcher, selector_group, elem, results, false);
         for (int i = 0; i < results->length; i++) {
-            array_push(arr, js_dom_wrap_element((DomElement*)results->data[i]));
+            array_push(arr, dom_wrap_element((DomElement*)results->data[i]));
         }
         arraylist_free(results);
         return (Item){.array = arr};
@@ -14970,14 +14970,14 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     // matches(selector) → boolean
     if (operation == JUBE_DOM_MATCHES) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
-        const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
+        const char* sel_text = dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return (Item){.item = ITEM_FALSE};
 
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-        if (!selector_group) return js_dom_throw_syntax_error("Invalid selector");
+        if (!selector_group) return dom_throw_syntax_error("Invalid selector");
 
-        SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
+        SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
         MatchResult result;
         bool matched = selector_matcher_matches_group(matcher, selector_group, elem, &result);
         return (Item){.item = b2it(matched ? 1 : 0)};
@@ -14986,19 +14986,19 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     // closest(selector) → element or null
     if (operation == JUBE_DOM_CLOSEST) {
         if (argc < 1) return ItemNull;
-        const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
+        const char* sel_text = dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return ItemNull;
 
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-        if (!selector_group) return js_dom_throw_syntax_error("Invalid selector");
+        if (!selector_group) return dom_throw_syntax_error("Invalid selector");
 
-        SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
+        SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
         MatchResult mresult;
         DomElement* current = elem;
         while (current) {
             if (selector_matcher_matches_group(matcher, selector_group, current, &mresult)) {
-                return js_dom_wrap_element(current);
+                return dom_wrap_element(current);
             }
             DomNode* parent = current->parent;
             current = (parent && parent->is_element()) ? parent->as_element() : nullptr;
@@ -15007,37 +15007,37 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     }
 
     if (operation == JUBE_DOM_APPEND_CHILD) {
-        return js_dom_append_child_bridge((void*)elem, argc > 0 ? args[0] : ItemNull);
+        return dom_append_child_bridge((void*)elem, argc > 0 ? args[0] : ItemNull);
     }
 
     if (operation == JUBE_DOM_REMOVE_CHILD) {
-        return js_dom_remove_child_bridge((void*)elem, argc > 0 ? args[0] : ItemNull);
+        return dom_remove_child_bridge((void*)elem, argc > 0 ? args[0] : ItemNull);
     }
 
     if (operation == JUBE_DOM_INSERT_BEFORE) {
-        return js_dom_insert_before_bridge((void*)elem,
+        return dom_insert_before_bridge((void*)elem,
             argc > 0 ? args[0] : ItemNull, argc > 1 ? args[1] : ItemNull);
     }
 
     // hasChildNodes() → boolean
     if (operation == JUBE_DOM_HAS_CHILD_NODES) {
-        bool has = (js_dom_first_script_visible_child(elem) != nullptr);
+        bool has = (dom_first_script_visible_child(elem) != nullptr);
         return (Item){.item = b2it(has ? 1 : 0)};
     }
 
     if (operation == JUBE_DOM_NORMALIZE) {
-        return js_dom_normalize_bridge((void*)elem);
+        return dom_normalize_bridge((void*)elem);
     }
 
     if (operation == JUBE_DOM_CLONE_NODE) {
-        return js_dom_clone_node_bridge((void*)elem,
+        return dom_clone_node_bridge((void*)elem,
             argc > 0 ? args[0] : ItemNull, argc > 0);
     }
 
     // v12b: replaceChild(newChild, oldChild)
     if (operation == JUBE_DOM_REPLACE_CHILD) {
         if (argc < 2) return ItemNull;
-        return js_dom_replace_child_bridge(elem, args[0], args[1]);
+        return dom_replace_child_bridge(elem, args[0], args[1]);
     }
 
     // replaceWith(...nodes) — replace this node in its parent's children with
@@ -15046,16 +15046,16 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     // distinct from a no-op for live ranges anchored inside `node` even when
     // the only argument is `node` itself.
     if (operation == JUBE_DOM_REPLACE_WITH) {
-        return js_dom_replace_with_bridge((void*)node, args, argc);
+        return dom_replace_with_bridge((void*)node, args, argc);
     }
 
     if (operation == JUBE_DOM_AFTER) {
-        return js_dom_child_node_insert_relative(
+        return dom_child_node_insert_relative(
             node, args, argc, JS_DOM_CHILD_NODE_AFTER);
     }
 
     if (operation == JUBE_DOM_BEFORE) {
-        return js_dom_child_node_insert_relative(
+        return dom_child_node_insert_relative(
             node, args, argc, JS_DOM_CHILD_NODE_BEFORE);
     }
 
@@ -15085,7 +15085,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         if (should_have != has) {
             // MutationObserver filters depend on toggleAttribute preserving the
             // changed name; a null name turns self-filtered updates into feedback loops.
-            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                                    elem->parent, attr_name, old_value);
         }
         return (Item){.item = b2it(should_have ? 1 : 0)};
@@ -15094,60 +15094,60 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     // v12b: insertAdjacentElement(position, newElement)
     if (operation == JUBE_DOM_INSERT_ADJACENT_ELEMENT) {
         if (argc < 2) return ItemNull;
-        return js_dom_insert_adjacent_element_bridge((void*)elem, args[0], args[1]);
+        return dom_insert_adjacent_element_bridge((void*)elem, args[0], args[1]);
     }
 
     // v12b: insertAdjacentHTML(position, text)
     if (operation == JUBE_DOM_INSERT_ADJACENT_HTML) {
         if (argc < 2) return ItemNull;
-        return js_dom_insert_adjacent_html_bridge((void*)elem, args[0], args[1]);
+        return dom_insert_adjacent_html_bridge((void*)elem, args[0], args[1]);
     }
 
     // SVG member records land here with an explicit operation; keeping their
     // native-object construction in this one target prevents property reads
     // and calls from diverging (D6.2.2v2).
-    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_CREATE_SVG_MATRIX) {
-        return js_dom_svg_create_matrix();
+    if (dom_element_is_svg(elem) && operation == JUBE_DOM_CREATE_SVG_MATRIX) {
+        return dom_svg_create_matrix();
     }
-    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_CREATE_SVG_POINT) {
-        return js_dom_svg_create_point();
+    if (dom_element_is_svg(elem) && operation == JUBE_DOM_CREATE_SVG_POINT) {
+        return dom_svg_create_point();
     }
-    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_CREATE_SVG_TRANSFORM) {
-        return js_dom_svg_create_transform();
+    if (dom_element_is_svg(elem) && operation == JUBE_DOM_CREATE_SVG_TRANSFORM) {
+        return dom_svg_create_transform();
     }
-    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_CREATE_SVG_TRANSFORM_FROM_MATRIX) {
-        return argc >= 1 ? js_dom_svg_create_transform_from_matrix(args[0]) : ItemNull;
+    if (dom_element_is_svg(elem) && operation == JUBE_DOM_CREATE_SVG_TRANSFORM_FROM_MATRIX) {
+        return argc >= 1 ? dom_svg_create_transform_from_matrix(args[0]) : ItemNull;
     }
-    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_GET_BBOX) {
-        return js_dom_svg_get_bbox_for_element(elem);
+    if (dom_element_is_svg(elem) && operation == JUBE_DOM_GET_BBOX) {
+        return dom_svg_get_bbox_for_element(elem);
     }
-    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_GET_CTM) {
-        return js_dom_svg_make_matrix(js_dom_svg_ctm(elem, false));
+    if (dom_element_is_svg(elem) && operation == JUBE_DOM_GET_CTM) {
+        return dom_svg_make_matrix(dom_svg_ctm(elem, false));
     }
-    if (js_dom_element_is_svg(elem) && operation == JUBE_DOM_GET_SCREEN_CTM) {
-        return js_dom_svg_make_matrix(js_dom_svg_ctm(elem, true));
+    if (dom_element_is_svg(elem) && operation == JUBE_DOM_GET_SCREEN_CTM) {
+        return dom_svg_make_matrix(dom_svg_ctm(elem, true));
     }
 
     // getBoundingClientRect() — returns {top, left, right, bottom, width, height}
     // Walks parent chain to compute absolute position.
     if (operation == JUBE_DOM_GET_BOUNDING_CLIENT_RECT) {
-        return js_dom_get_bounding_client_rect_bridge((void*)elem);
+        return dom_get_bounding_client_rect_bridge((void*)elem);
     }
 
     if (operation == JUBE_DOM_SCROLL_INTO_VIEW) {
-        return js_dom_scroll_into_view_bridge((void*)elem);
+        return dom_scroll_into_view_bridge((void*)elem);
     }
 
     if (operation == JUBE_DOM_SCROLL ||
         operation == JUBE_DOM_SCROLL_TO ||
         operation == JUBE_DOM_SCROLL_BY) {
-        return js_dom_scroll_operation_bridge(elem_item, operation, args, argc);
+        return dom_scroll_operation_bridge(elem_item, operation, args, argc);
     }
 
     // compareDocumentPosition(otherNode) — returns bitmask per W3C DOM spec
     if (operation == JUBE_DOM_COMPARE_DOCUMENT_POSITION) {
         if (argc < 1) return (Item){.item = i2it(0)};
-        DomNode* other = (DomNode*)js_dom_unwrap_element(args[0]);
+        DomNode* other = (DomNode*)dom_unwrap_element(args[0]);
         if (!other) return (Item){.item = i2it(1)}; // disconnected
         if (node == other) return (Item){.item = i2it(0)};
         // check if node is ancestor of other (node contains other → 16+4)
@@ -15183,34 +15183,34 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
 
     // append(...nodes) — ParentNode.append(), accepts multiple args and strings
     if (operation == JUBE_DOM_APPEND) {
-        return js_dom_append_variadic_bridge((void*)elem, args, argc);
+        return dom_append_variadic_bridge((void*)elem, args, argc);
     }
 
     // prepend(...nodes) — ParentNode.prepend()
     if (operation == JUBE_DOM_PREPEND) {
-        return js_dom_prepend_variadic_bridge((void*)elem, args, argc);
+        return dom_prepend_variadic_bridge((void*)elem, args, argc);
     }
 
     // getClientRects() — returns array containing single DOMRect (same as getBoundingClientRect)
     if (operation == JUBE_DOM_GET_CLIENT_RECTS) {
-        return js_dom_get_client_rects_bridge((void*)elem);
+        return dom_get_client_rects_bridge((void*)elem);
     }
 
     if (operation == JUBE_DOM_TEXT_CONTROL_CARET_BOUNDS &&
         tc_is_text_control_elem(elem)) {
-        return js_dom_text_control_caret_bounds(elem);
+        return dom_text_control_caret_bounds(elem);
     }
     if (operation == JUBE_DOM_TEXT_CONTROL_BOUNDARY_FROM_POINT &&
         tc_is_text_control_elem(elem)) {
         Item x_arg = argc >= 1 ? args[0] : (Item){.item = i2it(0)};
         Item y_arg = argc >= 2 ? args[1] : (Item){.item = i2it(0)};
-        return js_dom_text_control_boundary_from_point(elem, x_arg, y_arg);
+        return dom_text_control_boundary_from_point(elem, x_arg, y_arg);
     }
     if (operation == JUBE_DOM_BOUNDARY_FROM_POINT) {
         Item x_arg = argc >= 1 ? args[0] : (Item){.item = i2it(0)};
         Item y_arg = argc >= 2 ? args[1] : (Item){.item = i2it(0)};
         Item behavior_arg = argc >= 3 ? args[2] : make_js_undefined();
-        return js_dom_boundary_from_point(elem, x_arg, y_arg, behavior_arg);
+        return dom_boundary_from_point(elem, x_arg, y_arg, behavior_arg);
     }
 
     // focus() / blur()
@@ -15220,7 +15220,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
             get_type_id(args[0]) == LMD_TYPE_MAP) {
             prevent_scroll = js_is_truthy(js_get_key_cstr(args[0], "preventScroll"));
         }
-        return js_dom_focus_method(elem, operation == JUBE_DOM_FOCUS,
+        return dom_focus_method(elem, operation == JUBE_DOM_FOCUS,
                                    prevent_scroll);
     }
 
@@ -15228,18 +15228,18 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     // (bubbles, cancelable, composed). Per the HTML spec §6.4.4, calling
     // click() on a disabled form control is a no-op (no event fires).
     if (operation == JUBE_DOM_CLICK) {
-        return js_dom_click_method_bridge(elem_item);
+        return dom_click_method_bridge(elem_item);
     }
 
     if (operation == JUBE_DOM_SHOW_POPOVER) {
         // programmatic opening must use the same state transition as a popover button
-        if (elem) js_dom_activate_popover((void*)elem, 1);
+        if (elem) dom_activate_popover((void*)elem, 1);
         return make_js_undefined();
     }
 
     if (operation == JUBE_DOM_HIDE_POPOVER) {
         // programmatic closing must publish the same live-state transition as a popover button
-        if (elem) js_dom_activate_popover((void*)elem, 2);
+        if (elem) dom_activate_popover((void*)elem, 2);
         return make_js_undefined();
     }
 
@@ -15248,7 +15248,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
             // showModal makes the dialog open and establishes modal top-layer state
             elem->set_dialog_modal(true);
             elem->set_attribute("open", "");
-            js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE,
+            dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE,
                                    (DomNode*)elem, elem->parent);
         }
         return make_js_undefined();
@@ -15263,15 +15263,15 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         if (argc < 1) return ItemNull;
         const char* id = fn_to_cstr(args[0]);
         if (!id) return ItemNull;
-        DomElement* found = js_dom_find_element_by_id(elem, id);
-        return found ? js_dom_wrap_element(found) : ItemNull;
+        DomElement* found = dom_find_element_by_id(elem, id);
+        return found ? dom_wrap_element(found) : ItemNull;
     }
 
     // setSelectionRange(start, end [, direction]) — text controls only.
     if (operation == JUBE_DOM_SET_SELECTION_RANGE && tc_is_text_control_elem(elem)) {
         // preserve the legacy DOM fallback no-op when required offsets are absent.
         if (argc < 2) return make_js_undefined();
-        return js_dom_text_control_set_selection_range_bridge((void*)elem,
+        return dom_text_control_set_selection_range_bridge((void*)elem,
             argc >= 1 ? args[0] : make_js_undefined(),
             argc >= 2 ? args[1] : make_js_undefined(),
             argc >= 3 ? args[2] : make_js_undefined());
@@ -15279,7 +15279,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
 
     // setRangeText(replacement [, start, end, selectionMode]) — text controls only.
     if (operation == JUBE_DOM_SET_RANGE_TEXT && tc_is_text_control_elem(elem)) {
-        return js_dom_text_control_set_range_text_bridge((void*)elem,
+        return dom_text_control_set_range_text_bridge((void*)elem,
             argc >= 1 ? args[0] : make_js_undefined(),
             argc >= 2 ? args[1] : make_js_undefined(),
             argc >= 3 ? args[2] : make_js_undefined(),
@@ -15288,7 +15288,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
 
     // select() — text controls only. Selects the entire value and focuses.
     if (operation == JUBE_DOM_SELECT && tc_is_text_control_elem(elem)) {
-        return js_dom_text_control_select_bridge((void*)elem);
+        return dom_text_control_select_bridge((void*)elem);
     }
 
     // ----------------------------------------------------------------
@@ -15310,27 +15310,27 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     // algorithm on all listed form controls.
     // ----------------------------------------------------------------
     if (operation == JUBE_DOM_RESET && elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
-        return js_dom_form_reset_bridge(elem_item);
+        return dom_form_reset_bridge(elem_item);
     }
 
     if (operation == JUBE_DOM_SUBMIT && elem->tag_name &&
         strcasecmp(elem->tag_name, "form") == 0) {
-        return js_dom_form_submit_bridge(elem_item);
+        return dom_form_submit_bridge(elem_item);
     }
     if (operation == JUBE_DOM_REQUEST_SUBMIT && elem->tag_name &&
         strcasecmp(elem->tag_name, "form") == 0) {
-        return js_dom_form_request_submit_bridge(elem_item,
+        return dom_form_request_submit_bridge(elem_item,
             argc >= 1 ? args[0] : make_js_undefined());
     }
 
     // checkValidity(): fire invalid event if not valid, return bool
     if (operation == JUBE_DOM_CHECK_VALIDITY) {
-        return js_dom_check_validity_bridge(elem_item);
+        return dom_check_validity_bridge(elem_item);
     }
 
     // reportValidity(): same as checkValidity() in headless (no UI feedback)
     if (operation == JUBE_DOM_REPORT_VALIDITY) {
-        return js_dom_report_validity_bridge(elem_item);
+        return dom_report_validity_bridge(elem_item);
     }
 
     // HTMLSelectElement.namedItem(name) — search options by id/name.
@@ -15343,7 +15343,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         int64_t n = js_array_length(arr);
         for (int64_t i = 0; i < n; i++) {
             Item item = js_elements_get_int(arr, i);
-            DomElement* opt = (DomElement*)js_dom_unwrap_element(item);
+            DomElement* opt = (DomElement*)dom_unwrap_element(item);
             if (!opt) continue;
             const char* id = opt->get_attribute("id");
             if (id && strcmp(id, name) == 0) return item;
@@ -15356,7 +15356,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
     // HTMLSelectElement.add(element, before) — insert option/optgroup
     if (operation == JUBE_DOM_ADD && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
         if (argc < 1) return ItemNull;
-        DomElement* new_opt = (DomElement*)js_dom_unwrap_element(args[0]);
+        DomElement* new_opt = (DomElement*)dom_unwrap_element(args[0]);
         if (!new_opt || !new_opt->tag_name) return ItemNull;
         // Per spec, must be HTMLOptionElement or HTMLOptGroupElement, otherwise TypeError.
         if (strcasecmp(new_opt->tag_name, "option") != 0 &&
@@ -15385,12 +15385,12 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
                     Item arr = js_array_new(0);
                     _collect_options(elem->first_child, arr);
                     if (idx < js_array_length(arr)) {
-                        before_elem = (DomElement*)js_dom_unwrap_element(js_elements_get_int(arr, idx));
+                        before_elem = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, idx));
                         append_at_end = false;
                     }
                 }
             } else {
-                DomElement* be = (DomElement*)js_dom_unwrap_element(args[1]);
+                DomElement* be = (DomElement*)dom_unwrap_element(args[1]);
                 if (be) {
                     bool belongs_to_select = false;
                     for (DomNode* p = (DomNode*)be; p; p = p->parent) {
@@ -15414,13 +15414,13 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         // No-op if before == new_opt (per spec).
         if (before_elem == new_opt) return ItemNull;
         if (append_at_end || !before_elem) {
-            js_dom_append_child_bridge((void*)elem, args[0]);
+            dom_append_child_bridge((void*)elem, args[0]);
         } else {
             // The resolved option's parent can be an optgroup, not the select itself.
             DomNode* insertion_parent = before_elem->parent;
             if (!insertion_parent || !insertion_parent->is_element()) return ItemNull;
-            js_dom_insert_before_bridge((void*)insertion_parent->as_element(),
-                args[0], js_dom_wrap_element(before_elem));
+            dom_insert_before_bridge((void*)insertion_parent->as_element(),
+                args[0], dom_wrap_element(before_elem));
         }
         return ItemNull;
     }
@@ -15434,7 +15434,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
 
 static Item js_classlist_operation(Item elem_item, JsClassListOperation operation,
                                    Item* args, int argc) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) {
         log_error("js-classlist-operation: not a DOM element");
         return ItemNull;
@@ -15446,7 +15446,7 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
             const char* cls = fn_to_cstr(args[i]);
             if (cls) elem->add_class(cls);
         }
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return ItemNull;
     }
 
@@ -15456,7 +15456,7 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
             const char* cls = fn_to_cstr(args[i]);
             if (cls) elem->remove_class(cls);
         }
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return ItemNull;
     }
 
@@ -15471,17 +15471,17 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
             bool force = js_is_truthy(args[1]);
             if (force) {
                 elem->add_class(cls);
-                js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+                dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
                 return (Item){.item = ITEM_TRUE};
             } else {
                 elem->remove_class(cls);
-                js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+                dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
                 return (Item){.item = ITEM_FALSE};
             }
         }
         // no force: toggle
         bool result = elem->toggle_class(cls);
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return (Item){.item = b2it(result ? 1 : 0)};
     }
 
@@ -15511,7 +15511,7 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
         if (!elem->has_class(old_cls)) return (Item){.item = ITEM_FALSE};
         elem->remove_class(old_cls);
         elem->add_class(new_cls);
-        js_dom_mutation_notify();
+        dom_mutation_notify();
         return (Item){.item = ITEM_TRUE};
     }
 
@@ -15533,7 +15533,7 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
 }
 
 extern "C" Item js_classlist_get_property(Item elem_item, Item prop_name) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
 
     const char* prop = fn_to_cstr(prop_name);
@@ -15583,7 +15583,7 @@ static void camel_to_data_attr(const char* camel, char* buf, size_t buf_size) {
 }
 
 extern "C" Item js_dataset_get_property(Item elem_item, Item prop_name) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
 
     const char* prop = fn_to_cstr(prop_name);
@@ -15600,7 +15600,7 @@ extern "C" Item js_dataset_get_property(Item elem_item, Item prop_name) {
 }
 
 extern "C" Item js_dataset_set_property(Item elem_item, Item prop_name, Item value) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
 
     const char* prop = fn_to_cstr(prop_name);
@@ -15614,12 +15614,12 @@ extern "C" Item js_dataset_set_property(Item elem_item, Item prop_name, Item val
     elem->set_attribute(attr_name, val_str);
     // Dataset writes must expose their data-* name so MutationObserver
     // consumers can suppress their own bookkeeping mutations.
-    js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                            elem->parent, attr_name, old_value);
     return value;
 }
 
-extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
+extern "C" bool dom_dataset_set_object_property(Item dataset, Item key,
                                                        Item value) {
     JS_ROOTS(roots, dataset_root, dataset, key_root, key, value_root, value, owner_root, ItemNull);
     if (get_type_id(key_root.get()) != LMD_TYPE_STRING) return false;
@@ -15632,7 +15632,7 @@ extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
     // Property lookup may collect while an async handler owns the only
     // references to this dataset view; keep the receiver and operands precise.
     owner_root.set(js_get_key_cstr(dataset_root.get(), "__lambda_dataset_element"));
-    if (!js_dom_unwrap_element(owner_root.get())) return false;
+    if (!dom_unwrap_element(owner_root.get())) return false;
     js_dataset_set_property(owner_root.get(), key_root.get(), value_root.get());
     return true;
 }
@@ -15665,7 +15665,7 @@ extern "C" Item js_location_get_property(Item prop_name) {
     return js_name_item("");
 }
 
-static Url* js_dom_make_fallback_url(const char* raw_url) {
+static Url* dom_make_fallback_url(const char* raw_url) {
     if (!raw_url) return nullptr;
 
     Url* url = url_create();
@@ -15702,9 +15702,9 @@ static Url* js_dom_make_fallback_url(const char* raw_url) {
 // Node.contains() (v12)
 // ============================================================================
 
-extern "C" Item js_dom_contains(Item elem_item, Item other_item) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
-    DomNode* other = (DomNode*)js_dom_unwrap_element(other_item);
+extern "C" Item dom_contains(Item elem_item, Item other_item) {
+    DomNode* node = (DomNode*)dom_unwrap_element(elem_item);
+    DomNode* other = (DomNode*)dom_unwrap_element(other_item);
     if (!node || !other) return (Item){.item = ITEM_FALSE};
 
     // a node contains itself per spec
@@ -15723,15 +15723,15 @@ extern "C" Item js_dom_contains(Item elem_item, Item other_item) {
 // Node.isEqualNode()
 // ============================================================================
 
-static bool js_dom_equal_cstr(const char* left, const char* right) {
+static bool dom_equal_cstr(const char* left, const char* right) {
     if (left == right) return true;
     if (!left || !right) return false;
     return strcmp(left, right) == 0;
 }
 
-static bool js_dom_equal_children(DomElement* left, DomElement* right);
+static bool dom_equal_children(DomElement* left, DomElement* right);
 
-static bool js_dom_nodes_are_equal(DomNode* left, DomNode* right) {
+static bool dom_nodes_are_equal(DomNode* left, DomNode* right) {
     if (left == right) return true;
     if (!left || !right || left->node_type != right->node_type) return false;
 
@@ -15747,7 +15747,7 @@ static bool js_dom_nodes_are_equal(DomNode* left, DomNode* right) {
     if (left->is_comment()) {
         DomComment* left_comment = left->as_comment();
         DomComment* right_comment = right->as_comment();
-        return js_dom_equal_cstr(left_comment->tag_name, right_comment->tag_name) &&
+        return dom_equal_cstr(left_comment->tag_name, right_comment->tag_name) &&
             left_comment->length == right_comment->length &&
             (left_comment->length == 0 ||
              (left_comment->content && right_comment->content &&
@@ -15759,7 +15759,7 @@ static bool js_dom_nodes_are_equal(DomNode* left, DomNode* right) {
 
     DomElement* left_elem = left->as_element();
     DomElement* right_elem = right->as_element();
-    if (!js_dom_equal_cstr(left_elem->tag_name, right_elem->tag_name)) return false;
+    if (!dom_equal_cstr(left_elem->tag_name, right_elem->tag_name)) return false;
 
     int left_attr_count = 0;
     const char** left_attr_names = left_elem->attribute_names(&left_attr_count);
@@ -15767,45 +15767,45 @@ static bool js_dom_nodes_are_equal(DomNode* left, DomNode* right) {
     int right_attr_count = 0;
     const char** right_attr_names = right_elem->attribute_names(&right_attr_count);
     for (int i = 0; right_attr_names && i < right_attr_count; i++) {
-        if (!js_dom_is_internal_attr(right_attr_names[i])) right_visible_attr_count++;
+        if (!dom_is_internal_attr(right_attr_names[i])) right_visible_attr_count++;
     }
 
     int left_visible_attr_count = 0;
     for (int i = 0; left_attr_names && i < left_attr_count; i++) {
         const char* name = left_attr_names[i];
-        if (js_dom_is_internal_attr(name)) continue;
+        if (dom_is_internal_attr(name)) continue;
         left_visible_attr_count++;
         if (!right_elem->has_attribute(name)) return false;
-        if (!js_dom_equal_cstr(left_elem->get_attribute(name),
+        if (!dom_equal_cstr(left_elem->get_attribute(name),
                                right_elem->get_attribute(name))) return false;
     }
     if (left_visible_attr_count != right_visible_attr_count) return false;
 
-    return js_dom_equal_children(left_elem, right_elem);
+    return dom_equal_children(left_elem, right_elem);
 }
 
-static bool js_dom_equal_children(DomElement* left, DomElement* right) {
+static bool dom_equal_children(DomElement* left, DomElement* right) {
     DomNode* left_child = left->first_child;
     DomNode* right_child = right->first_child;
     while (left_child && right_child) {
-        if (!js_dom_nodes_are_equal(left_child, right_child)) return false;
+        if (!dom_nodes_are_equal(left_child, right_child)) return false;
         left_child = left_child->next_sibling;
         right_child = right_child->next_sibling;
     }
     return !left_child && !right_child;
 }
 
-extern "C" Item js_dom_is_equal_node(Item node_item, Item other_item) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(node_item);
-    DomNode* other = (DomNode*)js_dom_unwrap_element(other_item);
+extern "C" Item dom_is_equal_node(Item node_item, Item other_item) {
+    DomNode* node = (DomNode*)dom_unwrap_element(node_item);
+    DomNode* other = (DomNode*)dom_unwrap_element(other_item);
     // Node equality is structural: separately created but matching trees must
     // compare equal so editor ownership checks do not depend on wrapper identity.
-    return (Item){.item = b2it(js_dom_nodes_are_equal(node, other))};
+    return (Item){.item = b2it(dom_nodes_are_equal(node, other))};
 }
 
-extern "C" Item js_dom_is_same_node(Item node_item, Item other_item) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(node_item);
-    DomNode* other = (DomNode*)js_dom_unwrap_element(other_item);
+extern "C" Item dom_is_same_node(Item node_item, Item other_item) {
+    DomNode* node = (DomNode*)dom_unwrap_element(node_item);
+    DomNode* other = (DomNode*)dom_unwrap_element(other_item);
     return (Item){.item = b2it(node && node == other)};
 }
 
@@ -15813,7 +15813,7 @@ extern "C" Item js_dom_is_same_node(Item node_item, Item other_item) {
 // style.setProperty() / style.removeProperty() (v12b)
 // ============================================================================
 
-static Item js_dom_style_set_property_for_elem(DomElement* elem, Item prop_arg,
+static Item dom_style_set_property_for_elem(DomElement* elem, Item prop_arg,
                                                Item value_arg, Item priority_arg,
                                                bool has_priority) {
     if (!elem) return ItemNull;
@@ -15821,7 +15821,7 @@ static Item js_dom_style_set_property_for_elem(DomElement* elem, Item prop_arg,
     const char* val_str = fn_to_cstr(value_arg);
     if (!css_prop || !val_str) return ItemNull;
     if (!js_inline_style_cssom_property_exposed(css_prop)) {
-        log_debug("js_dom_style_method: ignored unsupported CSSOM property '%s' on <%s>",
+        log_debug("dom_style_method: ignored unsupported CSSOM property '%s' on <%s>",
                   css_prop, elem->tag_name ? elem->tag_name : "?");
         return ItemNull;
     }
@@ -15833,26 +15833,26 @@ static Item js_dom_style_set_property_for_elem(DomElement* elem, Item prop_arg,
             priority = "important";
         }
     }
-    int applied = js_dom_update_inline_style_attribute(
+    int applied = dom_update_inline_style_attribute(
         elem, css_prop, val_str, priority) ? 1 : 0;
     elem->set_styles_resolved(false);
     if (applied) {
         CssPropertyCode prop_id = css_property_code_from_name(css_prop);
-        js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
+        dom_mutation_notify(dom_style_mutation_kind(prop_id),
                                (DomNode*)elem, elem->parent);
     }
-    log_debug("js_dom_style_method: setProperty '%s: %s' on <%s>",
+    log_debug("dom_style_method: setProperty '%s: %s' on <%s>",
               css_prop, val_str, elem->tag_name ? elem->tag_name : "?");
     return ItemNull;
 }
 
 // inline style parsing and mutation invalidation remain centralized here.
-JS_FORWARD_ITEM(js_dom_style_set_property_bridge,
+JS_FORWARD_ITEM(dom_style_set_property_bridge,
     (void* dom_elem, Item prop_arg, Item value_arg, Item priority_arg, bool has_priority),
-    js_dom_style_set_property_for_elem,
+    dom_style_set_property_for_elem,
     ((DomElement*)dom_elem, prop_arg, value_arg, priority_arg, has_priority))
 
-static Item js_dom_style_remove_property_for_elem(DomElement* elem, Item prop_arg) {
+static Item dom_style_remove_property_for_elem(DomElement* elem, Item prop_arg) {
     if (!elem) return js_name_item("");
     const char* css_prop = fn_to_cstr(prop_arg);
     if (!css_prop) return js_name_item("");
@@ -15864,23 +15864,23 @@ static Item js_dom_style_remove_property_for_elem(DomElement* elem, Item prop_ar
         CssDeclaration* decl = dom_element_get_specified_value(elem, prop_id);
         if (decl && decl->specificity.inline_style) {
             // serialize old value via the getter
-            Item owner_item = js_dom_wrap_element(elem);
+            Item owner_item = dom_wrap_element(elem);
             Item prop_item = js_name_item(css_prop);
-            old_val = js_dom_get_style_property(owner_item, prop_item);
+            old_val = dom_get_style_property(owner_item, prop_item);
         }
-        js_dom_update_inline_style_attribute(elem, css_prop, "", nullptr);
-        js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
+        dom_update_inline_style_attribute(elem, css_prop, "", nullptr);
+        dom_mutation_notify(dom_style_mutation_kind(prop_id),
                                (DomNode*)elem, elem->parent);
     }
     elem->set_styles_resolved(false);
-    log_debug("js_dom_style_method: removeProperty '%s' on <%s>",
+    log_debug("dom_style_method: removeProperty '%s' on <%s>",
               css_prop, elem->tag_name ? elem->tag_name : "?");
     return old_val;
 }
 
 // old-value serialization and mutation invalidation remain centralized here.
-JS_FORWARD_ITEM(js_dom_style_remove_property_bridge, (void* dom_elem, Item prop_arg),
-    js_dom_style_remove_property_for_elem, ((DomElement*)dom_elem, prop_arg))
+JS_FORWARD_ITEM(dom_style_remove_property_bridge, (void* dom_elem, Item prop_arg),
+    dom_style_remove_property_for_elem, ((DomElement*)dom_elem, prop_arg))
 
 
 // ============================================================================
@@ -15935,11 +15935,11 @@ static void _install_iface(Item global, const char* name) {
 static Item _document_fragment_ctor(void) {
     // Both construction paths must create the same detached native node so
     // fragment insertion retains the move-children invariant.
-    return js_dom_create_document_fragment(_js_current_document);
+    return dom_create_document_fragment(_js_current_document);
 }
 
 template <typename Target>
-static void js_dom_install_value_constructor(Item global, const char* name,
+static void dom_install_value_constructor(Item global, const char* name,
         Target target, bool set_string_tag) {
     JS_ROOTS(roots,
         global_root, global,
@@ -15953,7 +15953,7 @@ static void js_dom_install_value_constructor(Item global, const char* name,
         proto_root.get());
     js_set_key_default(global_root.get(), name_key, ctor_root.get());
 }
-JS_FORWARD_STATIC_VOID( _install_document_fragment_iface, (Item global), js_dom_install_value_constructor, (global, "DocumentFragment", _document_fragment_ctor, true))
+JS_FORWARD_STATIC_VOID( _install_document_fragment_iface, (Item global), dom_install_value_constructor, (global, "DocumentFragment", _document_fragment_ctor, true))
 
 static Item _iface_proto(Item global, const char* name) {
     Item ctor = js_get_key_default(global, js_name_item(name));
@@ -16020,7 +16020,7 @@ static void _xpath_collect_descendants(DomNode* node, Item expression, Item matc
         if (!current->is_element()) continue;
         DomElement* elem = current->as_element();
         if (_xpath_element_matches(expression, elem)) {
-            js_array_push(matches, js_dom_wrap_element(elem));
+            js_array_push(matches, dom_wrap_element(elem));
         }
         if (elem->first_child) {
             _xpath_collect_descendants(elem->first_child, expression, matches);
@@ -16045,7 +16045,7 @@ static Item _xpath_expression_evaluate(Item context_node, Item /*result_type*/,
                                        Item /*existing_result*/) {
     Item self = js_get_this();
     Item expression = js_get_key_cstr(self, "__lambda_xpath_source");
-    DomElement* root = (DomElement*)js_dom_unwrap_element(context_node);
+    DomElement* root = (DomElement*)dom_unwrap_element(context_node);
     Item matches = js_array_new(0);
     if (root && root->first_child) {
         // XPath `.//*` selects descendants, not the context node itself; htmx
@@ -16084,7 +16084,7 @@ static Item _xpath_evaluator_ctor(void) {
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(evaluator, proto);
     return evaluator;
 }
-JS_FORWARD_STATIC_VOID( _install_xpath_evaluator, (Item global), js_dom_install_value_constructor, (global, "XPathEvaluator", _xpath_evaluator_ctor, false))
+JS_FORWARD_STATIC_VOID( _install_xpath_evaluator, (Item global), dom_install_value_constructor, (global, "XPathEvaluator", _xpath_evaluator_ctor, false))
 
 static void _install_node_iface(Item global) {
     RootFrame roots(3);
@@ -16128,7 +16128,7 @@ static JsWebAnimationHost* js_web_animation_host(Item value) {
 }
 
 JS_FORWARD_STATIC_EXPRESSION(float, js_web_animation_number, (Item value, float fallback),
-    js_dom_svg_number(value, fallback))
+    dom_svg_number(value, fallback))
 
 static CssAnimComposite js_web_animation_composite(Item value) {
     const char* text = fn_to_cstr(value);
@@ -16242,8 +16242,8 @@ static Item js_web_animation_current_time_set(Item value) {
     return value;
 }
 
-static Item js_dom_element_animate(Item keyframes_item, Item options_item) {
-    DomElement* element = (DomElement*)js_dom_unwrap_element(js_get_this());
+static Item dom_element_animate(Item keyframes_item, Item options_item) {
+    DomElement* element = (DomElement*)dom_unwrap_element(js_get_this());
     if (!element || !element->doc) return ItemNull;
 
     CssKeyframes* keyframes = js_web_animation_parse_keyframes(
@@ -16310,7 +16310,7 @@ static Item js_dom_element_animate(Item keyframes_item, Item options_item) {
     return animation_root.get();
 }
 
-extern "C" void js_dom_install_collection_globals(void) {
+extern "C" void dom_install_collection_globals(void) {
     Item global = js_get_global_this();
     _install_iface(global, "Window");
     _link_iface_proto(global, "Window", "EventTarget");
@@ -16342,15 +16342,15 @@ extern "C" void js_dom_install_collection_globals(void) {
     for (size_t i = 0; i < sizeof(svg_ifaces) / sizeof(svg_ifaces[0]); i++) {
         _install_iface(global, svg_ifaces[i]);
     }
-    js_dom_install_value_constructor(global, "DOMMatrix", js_dom_matrix_constructor, true);
-    js_dom_install_value_constructor(global, "DOMPoint", js_dom_point_constructor, true);
-    int html_interface_count = (int)(sizeof(s_js_dom_html_interfaces) /
-        sizeof(s_js_dom_html_interfaces[0]));
+    dom_install_value_constructor(global, "DOMMatrix", dom_matrix_constructor, true);
+    dom_install_value_constructor(global, "DOMPoint", dom_point_constructor, true);
+    int html_interface_count = (int)(sizeof(s_dom_html_interfaces) /
+        sizeof(s_dom_html_interfaces[0]));
     for (int i = 0; i < html_interface_count; i++) {
         // Specialized HTML wrappers must inherit HTMLElement so WebIDL brand
         // checks do not collapse every form control to the generic interface.
-        _install_iface(global, s_js_dom_html_interfaces[i].constructor_name);
-        _link_iface_proto(global, s_js_dom_html_interfaces[i].constructor_name,
+        _install_iface(global, s_dom_html_interfaces[i].constructor_name);
+        _link_iface_proto(global, s_dom_html_interfaces[i].constructor_name,
                           "HTMLElement");
     }
     _install_document_fragment_iface(global);
@@ -16364,17 +16364,17 @@ extern "C" void js_dom_install_collection_globals(void) {
         RootFrame method_roots(2);
         Rooted<Item> element_proto_root(method_roots, element_proto);
         Rooted<Item> method_root(method_roots,
-            js_new_native_payload_function(js_dom_element_prototype_operation_body,
+            js_new_native_payload_function(dom_element_prototype_operation_body,
                 (uint64_t)JUBE_DOM_QUERY_SELECTOR, 1));
         // Bootstrap needs these WebIDL prototype aliases before any instance
         // exists. Each carries its direct operation payload; populating every
         // Jube prototype here would mutate the sealed NameId module table.
         js_set_key_cstr(element_proto_root.get(), "querySelector", method_root.get());
         method_root.set(js_new_native_payload_function(
-            js_dom_element_prototype_operation_body,
+            dom_element_prototype_operation_body,
             (uint64_t)JUBE_DOM_QUERY_SELECTOR_ALL, 1));
         js_set_key_cstr(element_proto_root.get(), "querySelectorAll", method_root.get());
-        js_set_native_key(element_proto_root.get(), js_string_key("animate"), js_dom_element_animate);
+        js_set_native_key(element_proto_root.get(), js_string_key("animate"), dom_element_animate);
     }
     static const char* collection_ifaces[] = {
         "Range", "Selection", "HTMLCollection", "HTMLFormControlsCollection",
@@ -16387,7 +16387,7 @@ extern "C" void js_dom_install_collection_globals(void) {
     _install_nodelist_for_each(global);
     _install_iface(global, "RadioNodeList");
     _install_xpath_evaluator(global);
-    log_debug("js_dom_install_collection_globals: installed collection interfaces");
+    log_debug("dom_install_collection_globals: installed collection interfaces");
 }
 
 // ----------------------------------------------------------------------------
@@ -16427,10 +16427,10 @@ static Item _option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item s
     if (sel_arg.item != ITEM_NULL && !is_js_undefined(sel_arg)) {
         _set_selectedness(opt, js_is_truthy(sel_arg));
     }
-    return js_dom_wrap_element(opt);
+    return dom_wrap_element(opt);
 }
 
-extern "C" void js_dom_install_option_constructor(void) {
+extern "C" void dom_install_option_constructor(void) {
     Item global = js_get_global_this();
     Item ctor = js_new_native_constructor(_option_ctor);
     js_set_function_name(ctor, js_name_item("Option"));
@@ -16438,11 +16438,11 @@ extern "C" void js_dom_install_option_constructor(void) {
     js_set_key_cstr(proto, "constructor", ctor);
     js_set_key_cstr(ctor, "prototype", proto);
     js_set_key_cstr(global, "Option", ctor);
-    log_debug("js_dom_install_option_constructor: installed Option");
+    log_debug("dom_install_option_constructor: installed Option");
 }
-JS_FORWARD_VOID( js_dom_collections_release_context, (void), reset_live_dom_collections, ())
+JS_FORWARD_VOID( dom_collections_release_context, (void), reset_live_dom_collections, ())
 
-#undef js_dom_collection_state
+#undef dom_collection_rt_state
 #undef s_select_options_owners
 #undef s_select_options_owner_count
 #undef s_live_child_collections
@@ -16453,7 +16453,7 @@ JS_FORWARD_VOID( js_dom_collections_release_context, (void), reset_live_dom_coll
 #undef s_live_lookup_collection_count
 #undef s_dom_collection_refresh_depth
 
-static void js_dom_destroy_context_state(void** slot, bool has_entries,
+static void dom_destroy_context_state(void** slot, bool has_entries,
                                          const char* label) {
     if (!slot || !*slot) return;
     // All weak homes and native pins are removed before heap destruction.
@@ -16462,22 +16462,22 @@ static void js_dom_destroy_context_state(void** slot, bool has_entries,
     *slot = nullptr;
 }
 
-extern "C" void js_dom_collections_destroy_context(JsRuntimeState* runtime_state) {
+extern "C" void dom_collections_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->dom_collection_state) return;
     JsDomCollectionRuntimeState* state =
         (JsDomCollectionRuntimeState*)runtime_state->dom_collection_state;
-    js_dom_destroy_context_state(&runtime_state->dom_collection_state,
+    dom_destroy_context_state(&runtime_state->dom_collection_state,
         state->select_options_owner_count || state->live_child_collection_count ||
         state->live_form_collection_count || state->live_lookup_collection_count,
         "js-dom-collections");
 }
 
-extern "C" void js_dom_foreign_documents_release_context(void) {
+extern "C" void dom_foreign_documents_release_context(void) {
     reset_pending_iframe_loads();
     reset_foreign_document_cache();
 }
 
-#undef js_dom_foreign_document_state
+#undef dom_foreign_document_rt_state
 #undef s_foreign_doc_cache
 #undef s_foreign_doc_cache_count
 #undef s_doc_with_window
@@ -16490,11 +16490,11 @@ extern "C" void js_dom_foreign_documents_release_context(void) {
 #undef s_pending_iframe_load_count
 #undef s_iframe_load_drain_scheduled
 
-extern "C" void js_dom_foreign_documents_destroy_context(JsRuntimeState* runtime_state) {
+extern "C" void dom_foreign_documents_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->dom_foreign_document_state) return;
     JsDomForeignDocumentRuntimeState* state =
         (JsDomForeignDocumentRuntimeState*)runtime_state->dom_foreign_document_state;
-    js_dom_destroy_context_state(&runtime_state->dom_foreign_document_state,
+    dom_destroy_context_state(&runtime_state->dom_foreign_document_state,
         state->foreign_doc_cache_count || state->doc_with_window_count ||
         state->iframe_cache_count || state->pending_iframe_load_count,
         "js-dom-foreign-document");

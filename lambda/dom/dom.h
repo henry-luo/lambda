@@ -27,46 +27,46 @@ extern "C" {
  * Must be called before executing JS code that accesses the DOM.
  * @param dom_doc  DomDocument* (void* for C linkage compatibility)
  */
-void js_dom_set_document(void* dom_doc);
+void dom_set_document(void* dom_doc);
 
 /**
  * Get the current DomDocument.
  * @return DomDocument* cast to void*, or NULL if no document is set
  */
-void* js_dom_get_document(void);
+void* dom_get_document(void);
 
 /**
  * Set the current Radiant UiContext for JS DOM layout/geometry queries.
  * The pointer is borrowed from the active JS document session.
  */
-void js_dom_set_ui_context(void* ui_context);
+void dom_set_ui_context(void* ui_context);
 
 /**
  * Get the current Radiant UiContext.
  */
-void* js_dom_get_ui_context(void);
+void* dom_get_ui_context(void);
 
 // Records whether the active document Runtime is owned by a host frame loop.
 // This setting is context-local and must be applied after binding that Runtime.
-void js_dom_set_host_driven_loop(bool enabled);
-bool js_dom_is_host_driven_loop(void);
+void dom_set_host_driven_loop(bool enabled);
+bool dom_is_host_driven_loop(void);
 
 /**
  * Return whether an Array is a DOM-owned live collection whose property reads
  * can refresh named or indexed values from the current document tree.
  */
-bool js_dom_collection_has_live_property_state(Item collection);
+bool dom_collection_has_live_property_state(Item collection);
 
 // DOMRect-shaped object: x/y/top/left/right/bottom/width/height as doubles,
-// on interned keys. js_dom.cpp, js_dom_observers.cpp and js_dom_selection.cpp
+// on interned keys. dom.cpp, dom_observers.cpp and dom_selection.cpp
 // each built this themselves.
-Item js_dom_make_rect(double x, double y, double width, double height);
+Item dom_make_rect(double x, double y, double width, double height);
 
 /**
  * Return whether the document has a committed geometry snapshot.
  * This predicate never performs style resolution or layout.
  */
-bool js_dom_has_committed_geometry_snapshot(void* dom_doc);
+bool dom_has_committed_geometry_snapshot(void* dom_doc);
 
 /**
  * Return the topmost painted SVG element at viewport coordinates, or NULL.
@@ -74,35 +74,35 @@ bool js_dom_has_committed_geometry_snapshot(void* dom_doc);
  * SVG descendants retain their geometric event target even though they do not
  * each own a CSS layout box.
  */
-void* js_dom_document_svg_element_from_point(void* dom_doc, float x, float y);
+void* dom_document_svg_element_from_point(void* dom_doc, float x, float y);
 
 /**
  * Return the exact native target used by document.elementFromPoint() without
  * allocating a JavaScript wrapper. Automation assertions use this bridge so
  * their result cannot diverge from the public DOM API.
  */
-void* js_dom_document_element_from_point_native(void* dom_doc, float x, float y);
+void* dom_document_element_from_point_native(void* dom_doc, float x, float y);
 
 // Commits a pending transient-document reflow at the script/event-loop
 // checkpoint. Long-lived Radiant sessions keep ownership of their frame loop.
-bool js_dom_commit_headless_layout(void);
+bool dom_commit_headless_layout(void);
 
 /** Advance the active document's CSS animation scheduler by one headless frame. */
-bool js_dom_tick_headless_animation_frame(void);
+bool dom_tick_headless_animation_frame(void);
 
 /** Commit pending DOM mutations at a one-shot headless rendering checkpoint. */
-bool js_dom_commit_headless_layout_checkpoint(void);
+bool dom_commit_headless_layout_checkpoint(void);
 
 // Lazy DomElement* with tag "#document" used so JS Range/Selection APIs can
 // accept `document` (or a foreign-doc wrapper) as a node container.
-void* js_dom_get_or_create_doc_node(void* dom_doc);
+void* dom_get_or_create_doc_node(void* dom_doc);
 
 /**
  * Focus a contenteditable host through the shared DOM Selection state without
  * constructing a JavaScript return value. Used by native automation for
  * Lambda template documents, which do not own a JS runtime.
  */
-bool js_dom_focus_editing_host_for_automation(void* dom_elem);
+bool dom_focus_editing_host_for_automation(void* dom_elem);
 
 // =============================================================================
 // Named Element Access on Window
@@ -115,14 +115,14 @@ bool js_dom_focus_editing_host_for_automation(void* dom_elem);
  */
 #ifdef __cplusplus
 struct DomElement;
-void js_dom_register_named_elements(DomElement* root);
-DomElement* js_dom_find_element_by_id(DomElement* root, const char* id);
+void dom_register_named_elements(DomElement* root);
+DomElement* dom_find_element_by_id(DomElement* root, const char* id);
 #endif
 
 /** Resolve and activate a popover target from a button activation. */
-void* js_dom_popover_target_for_button(void* button);
-int js_dom_popover_target_action(void* button);
-bool js_dom_activate_popover(void* popover, int action);
+void* dom_popover_target_for_button(void* button);
+int dom_popover_target_action(void* button);
+bool dom_activate_popover(void* popover, int action);
 
 // =============================================================================
 // DOM Wrapping / Unwrapping
@@ -133,29 +133,29 @@ bool js_dom_activate_popover(void* popover, int action);
  * @param dom_elem  DomElement* (void* for C linkage)
  * @return Item wrapping the element, or ITEM_NULL if dom_elem is NULL
  */
-Item js_dom_wrap_element(void* dom_elem);
+Item dom_wrap_element(void* dom_elem);
 
 /**
  * Unwrap a Lambda Item to get the DomElement*.
- * @param item  Item previously returned by js_dom_wrap_element
+ * @param item  Item previously returned by dom_wrap_element
  * @return DomElement* or NULL if item is not a DOM node
  */
-void* js_dom_unwrap_element(Item item);
+void* dom_unwrap_element(Item item);
 
 /**
  * Return an <option>'s live selectedness, including IDL writes to .selected.
  * This is distinct from the immutable selected content attribute.
  */
-bool js_dom_option_is_selected(void* dom_elem);
+bool dom_option_selectedness(void* dom_elem);
 
 /**
  * Create a selector matcher configured for a DOM document's live UI state.
  * The opaque return value is a SelectorMatcher* for Radiant's native bridge.
  */
-void* js_dom_create_selector_matcher_bridge(void* dom_doc);
+void* dom_create_selector_matcher_bridge(void* dom_doc);
 
 /** Return the identity-preserving Document proxy that owns a DOM node. */
-Item js_dom_owner_document_for_node(void* node);
+Item dom_owner_document_for_node(void* node);
 
 /**
  * Check if an Item is a wrapped DOM node.
@@ -211,8 +211,8 @@ Item js_create_foreign_xml_doc(const char* qualified_name);
 Item js_create_doctype_node(const char* name, const char* public_id, const char* system_id);
 
 /** Save the current active document and switch to `new_doc`. Returns the prior doc. */
-void* js_dom_swap_active_document(void* new_doc);
-void  js_dom_restore_active_document(void* prev_doc);
+void* dom_swap_active_document(void* new_doc);
+void  dom_restore_active_document(void* prev_doc);
 
 // =============================================================================
 // Document Method Dispatcher
@@ -235,7 +235,7 @@ Item js_document_get_property(Item prop_name);
  * handler slot, e.g. "onclick". This is used for initial HTML attributes
  * after they are compiled by the document script runner.
  */
-bool js_dom_set_event_handler_function(void* dom_elem, const char* attr_name, Item fn);
+bool dom_set_event_handler_function(void* dom_elem, const char* attr_name, Item fn);
 
 /**
  * Set a CSS inline style property on a DOM element.
@@ -246,8 +246,8 @@ bool js_dom_set_event_handler_function(void* dom_elem, const char* attr_name, It
  * @param value      String Item with CSS value
  * @return The value that was set, or ITEM_NULL on failure
  */
-Item js_dom_set_style_property(Item elem, Item prop_name, Item value);
-Item js_dom_get_style_property(Item elem, Item prop_name);
+Item dom_set_style_property(Item elem, Item prop_name, Item value);
+Item dom_get_style_property(Item elem, Item prop_name);
 
 // =============================================================================
 // Computed Style (window.getComputedStyle)
@@ -334,14 +334,14 @@ Item js_location_get_property(Item prop_name);
  * @param other  Wrapped DOM element (potential descendant)
  * @return Boolean Item
  */
-Item js_dom_contains(Item elem, Item other);
+Item dom_contains(Item elem, Item other);
 
 /**
  * Compare two wrapped DOM nodes using the DOM structural-equality algorithm.
  * @return Boolean Item
  */
-Item js_dom_is_equal_node(Item node, Item other);
-Item js_dom_is_same_node(Item node, Item other);
+Item dom_is_equal_node(Item node, Item other);
+Item dom_is_same_node(Item node, Item other);
 
 // =============================================================================
 // style.setProperty() / style.removeProperty() (v12b)
@@ -367,37 +367,37 @@ Item js_dom_is_same_node(Item node, Item other);
 // =============================================================================
 
 /** Session/runtime teardown. */
-void js_dom_shutdown(void);
-void js_dom_batch_reset(void);
-void js_dom_collections_release_context(void);
-void js_dom_foreign_documents_release_context(void);
+void dom_shutdown(void);
+void dom_batch_reset(void);
+void dom_collections_release_context(void);
+void dom_foreign_documents_release_context(void);
 
 /** Element-state queries used by the native event and form paths. */
-bool js_dom_is_disabled(void* dom_elem);
-bool js_dom_is_connected(void* dom_elem);
+bool dom_is_disabled(void* dom_elem);
+bool dom_is_connected(void* dom_elem);
 
 /** Activation bridges invoked after the UA tier claims an event. */
-Item js_dom_focus_method_bridge(void* dom_elem, bool focus);
-Item js_dom_scroll_into_view_bridge(void* dom_elem);
-void js_dom_select_set_selected_index_bridge(void* dom_elem, Item value);
+Item dom_focus_method_bridge(void* dom_elem, bool focus);
+Item dom_scroll_into_view_bridge(void* dom_elem);
+void dom_select_set_selected_index_bridge(void* dom_elem, Item value);
 
 /** dataset expando write, routed from the JS property-set path. */
-bool js_dom_dataset_set_object_property(Item dataset, Item key, Item value);
+bool dom_dataset_set_object_property(Item dataset, Item key, Item value);
 
 #ifdef __cplusplus
 struct DomDocument;
 struct JsRuntimeState;
 
 /** Per-runtime-state teardown for the DOM-owned caches. */
-void js_dom_collections_destroy_context(JsRuntimeState* state);
-void js_dom_foreign_documents_destroy_context(JsRuntimeState* state);
+void dom_collections_destroy_context(JsRuntimeState* state);
+void dom_foreign_documents_destroy_context(JsRuntimeState* state);
 
 /** contenteditable HTML insertion, driven by the editing waist. */
-bool js_dom_exec_insert_html(DomDocument* doc, const char* html);
+bool dom_exec_insert_html(DomDocument* doc, const char* html);
 
 /** Mutation-sequence reads for incremental reconciliation. */
-uint64_t js_dom_mutation_epoch(DomDocument* doc);
-bool js_dom_mutation_since_affects_subtree(
+uint64_t dom_mutation_epoch(DomDocument* doc);
+bool dom_mutation_since_affects_subtree(
         DomDocument* doc, uint32_t sequence_before, void* root);
 #endif
 

@@ -800,7 +800,7 @@ void js_intrinsic_state_teardown(void);
 void js_batch_reset_to(int checkpoint_var_count);
 extern int js_batch_execution_mode;
 void js_symbol_registry_batch_reset(void);
-void js_dom_batch_reset(void);
+void dom_batch_reset(void);
 void js_globals_batch_reset(void);
 void js_reset_constructor_prototypes(void);
 Item js_constructor_create_object(Item callee, Item new_target);

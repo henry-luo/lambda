@@ -5133,7 +5133,7 @@ static bool layout_single_file(
     if (!script_runner_js_batch_cleanup_unsafe()) {
         js_event_loop_shutdown();
         js_batch_reset();
-        js_dom_batch_reset();
+        dom_batch_reset();
         js_globals_batch_reset();
 
         script_runner_cleanup_heap();

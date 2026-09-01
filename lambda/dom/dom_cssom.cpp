@@ -36,15 +36,15 @@ extern "C" const void* radiant_dom_rule_style_decl_host_type(void);
 
 // Forward declaration
 static Pool* get_document_pool();
-extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
+extern "C" void dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
 
 static void js_cssom_notify_stylesheet_mutation(CssStylesheet* stylesheet = nullptr) {
     // stylesheet edits do not touch a DOM node, but they still require post-script cascade.
     DomDocument* doc = stylesheet && stylesheet->owner_style_element
-        ? stylesheet->owner_style_element->doc : (DomDocument*)js_dom_get_document();
+        ? stylesheet->owner_style_element->doc : (DomDocument*)dom_get_document();
     style_epoch_mark_global_change(doc);
     DomElement* owner = stylesheet ? stylesheet->owner_style_element : nullptr;
-    js_dom_notify_mutation(DOM_JS_MUTATION_STYLE, owner, owner ? owner->parent : nullptr);
+    dom_notify_mutation(DOM_JS_MUTATION_STYLE, owner, owner ? owner->parent : nullptr);
 }
 
 // =============================================================================
@@ -248,7 +248,7 @@ static Pool* unwrap_rule_decl_pool(Item item) {
 // =============================================================================
 
 static Pool* get_document_pool() {
-    DomDocument* doc = (DomDocument*)js_dom_get_document();
+    DomDocument* doc = (DomDocument*)dom_get_document();
     return doc ? doc->document_pool : nullptr;
 }
 
@@ -887,7 +887,7 @@ extern "C" Item js_cssom_decl_css_has(Item decl_item, Item prop_name) {
 // =============================================================================
 
 extern "C" Item js_cssom_get_document_stylesheets(void) {
-    DomDocument* doc = (DomDocument*)js_dom_get_document();
+    DomDocument* doc = (DomDocument*)dom_get_document();
     if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) {
         // return empty array
         Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
@@ -950,7 +950,7 @@ static CssStylesheet* js_cssom_create_inline_stylesheet(DomElement* elem) {
 }
 
 extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
 
     // must be a <style> element

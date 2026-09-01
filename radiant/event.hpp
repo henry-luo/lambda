@@ -44,7 +44,7 @@ bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source);
 bool radiant_urls_match_without_fragment(const Url* first, const Url* second);
 
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);
-void radiant_reconcile_js_dom_mutations(UiContext* uicon, DomDocument* doc);
+void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value,
     double elapsed_time);
@@ -1504,7 +1504,7 @@ int dom_range_byte_offset_for_x(struct UiContext* uicon, struct ViewText* text,
 // ===== text controls =====
 
 // Phase 6E text-control helpers shared between:
-//   - lambda/js/js_dom.cpp    (programmatic API: value, selectionStart/End, ...)
+//   - lambda/dom/dom.cpp    (programmatic API: value, selectionStart/End, ...)
 //   - radiant/event.cpp       (mouse/keyboard editing)
 //   - radiant/render_form.cpp (caret + selection highlight inside <input>/<textarea>)
 //
@@ -2457,7 +2457,7 @@ typedef struct DocState {
     bool                 selectionchange_pending;  // task queued and not yet fired
     // Phase 8E: per-text-control selectionchange coalescing. Linked list head
     // through the element's DOM task link. Drained by a single
-    // setTimeout(0) callback queued via `js_dom_queue_textcontrol_selectionchange`.
+    // setTimeout(0) callback queued via `dom_queue_textcontrol_selectionchange`.
     DomElement*          tc_selectionchange_head;
     bool                 tc_selectionchange_drain_scheduled;
     DomElement*          active_text_control;

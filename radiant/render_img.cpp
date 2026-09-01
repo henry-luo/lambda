@@ -516,7 +516,7 @@ static void render_batch_cleanup_doc(UiContext* ui_context, DomDocument* doc) {
     }
 
     js_batch_reset();
-    js_dom_batch_reset();
+    dom_batch_reset();
     js_globals_batch_reset();
     script_runner_cleanup_heap();
 

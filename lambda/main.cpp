@@ -171,7 +171,7 @@ static bool js_document_session_start(JsDocumentSession* session, DomDocument* d
     }
     session->initialized = true;
     session->uicon.document = dom_doc;
-    js_dom_set_ui_context(&session->uicon);
+    dom_set_ui_context(&session->uicon);
     session->uicon.window_width = JS_DOCUMENT_VIEWPORT_WIDTH;
     session->uicon.window_height = JS_DOCUMENT_VIEWPORT_HEIGHT;
     session->uicon.viewport_width = JS_DOCUMENT_VIEWPORT_WIDTH;
@@ -193,7 +193,7 @@ static bool js_document_session_start(JsDocumentSession* session, DomDocument* d
 static void js_document_session_finish(JsDocumentSession* session) {
     if (!session || !session->initialized) return;
 
-    js_dom_set_ui_context(nullptr);
+    dom_set_ui_context(nullptr);
     session->uicon.document = nullptr;
     ui_context_cleanup(&session->uicon);
     js_document_session_init(session);
@@ -2652,7 +2652,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 // post-script pump. Commit and drain while its UiContext is
                 // still bound so observer, timer, and transition callbacks
                 // see the same context-owned DOM realm as the script.
-                js_dom_commit_headless_layout();
+                dom_commit_headless_layout();
                 js_event_loop_drain();
                 js_animation_frame_drain(64);
             }

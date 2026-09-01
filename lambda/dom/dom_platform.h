@@ -17,7 +17,7 @@ void js_match_media_reset(void);
 // Host-facing entry point (F23) — see the note in dom.h.
 #ifdef __cplusplus
 struct JsRuntimeState;
-void js_dom_platform_destroy_context(JsRuntimeState* state);
+void dom_platform_destroy_context(JsRuntimeState* state);
 #endif
 
 #ifdef __cplusplus

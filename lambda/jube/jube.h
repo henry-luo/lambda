@@ -916,7 +916,7 @@ struct JubeHostDomAPI {
     Item (*rule_decl_css_has)(Item decl, Item prop);
 
     // -- Radiant browser-global state. Kept behind the host boundary so the
-    // module owns DOM-facing window semantics without reaching into js_dom.cpp.
+    // module owns DOM-facing window semantics without reaching into dom.cpp.
     void* (*get_ui_context)(void);
     bool (*has_committed_geometry_snapshot)(void* doc);
 

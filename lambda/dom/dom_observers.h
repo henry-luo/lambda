@@ -11,14 +11,14 @@ Item js_mutation_observer_new(Item callback);
 Item js_resize_observer_new(Item callback);
 Item js_intersection_observer_new(Item callback, Item options);
 
-void js_dom_observers_mutation_notify(DomJsMutationKind kind,
+void dom_observers_mutation_notify(DomJsMutationKind kind,
                                       void* target, void* parent,
                                       const char* attribute_name,
                                       const char* old_value);
-void js_dom_observers_child_replace_notify(void* parent, void* added,
+void dom_observers_child_replace_notify(void* parent, void* added,
                                            void* removed);
-void js_dom_observers_post_layout(void);
-void js_dom_observers_reset(void);
+void dom_observers_post_layout(void);
+void dom_observers_reset(void);
 
 // ============================================================================
 // Host-facing entry points (F23) — see the note in dom.h
@@ -29,15 +29,15 @@ void js_dom_observers_reset(void);
 // C and must not pull in the C++ DomJsMutationKind definition.
 // ============================================================================
 
-void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
-void js_dom_notify_mutation_detail(DomJsMutationKind kind,
+void dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
+void dom_notify_mutation_detail(DomJsMutationKind kind,
                                    void* target, void* parent,
                                    const char* attribute_name,
                                    const char* old_value);
 
 #ifdef __cplusplus
 struct JsRuntimeState;
-void js_dom_observers_destroy_context(JsRuntimeState* state);
+void dom_observers_destroy_context(JsRuntimeState* state);
 #endif
 
 #ifdef __cplusplus

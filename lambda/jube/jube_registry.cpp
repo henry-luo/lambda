@@ -927,135 +927,135 @@ static Item jube_host_script_bigint_from_decimal(const char* text, size_t length
 static int jube_script_class_id(Item value) {
     return (int)js_class_id(value);
 }
-extern "C" void* js_dom_get_document(void);
-extern "C" void* js_dom_get_ui_context(void);
-extern "C" bool js_dom_has_committed_geometry_snapshot(void* doc);
+extern "C" void* dom_get_document(void);
+extern "C" void* dom_get_ui_context(void);
+extern "C" bool dom_has_committed_geometry_snapshot(void* doc);
 extern "C" Item js_get_document_object_value(void);
-extern "C" void* js_dom_get_or_create_doc_node(void* doc);
-extern "C" Item js_dom_document_proxy_for_doc_bridge(void* doc);
-extern "C" void* js_dom_unwrap_element_impl(Item item);
-extern "C" void js_dom_initialize_node_wrapper(void* dom_elem);
+extern "C" void* dom_get_or_create_doc_node(void* doc);
+extern "C" Item dom_document_proxy_for_doc_bridge(void* doc);
+extern "C" void* dom_unwrap_element_impl(Item item);
+extern "C" void dom_initialize_node_wrapper(void* dom_elem);
 extern "C" bool js_is_css_namespace(Item item);
 extern "C" bool js_is_inline_style_item(Item item);
 extern "C" bool js_is_computed_style_item(Item item);
 extern "C" bool js_is_stylesheet(Item item);
 extern "C" bool js_is_css_rule(Item item);
 extern "C" bool js_is_rule_style_decl(Item item);
-extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name);
-extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item value);
-extern "C" Item js_dom_element_operation_impl(Item elem_item,
+extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name);
+extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value);
+extern "C" Item dom_element_operation_impl(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
-extern "C" Item js_dom_create_tree_walker_bridge(Item root, Item what_to_show);
-extern "C" Item js_dom_document_create_event_bridge(Item interface_name);
-extern "C" Item js_dom_document_exec_command_bridge(Item command, Item value);
+extern "C" Item dom_create_tree_walker_bridge(Item root, Item what_to_show);
+extern "C" Item dom_document_create_event_bridge(Item interface_name);
+extern "C" Item dom_document_exec_command_bridge(Item command, Item value);
 extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name);
-extern "C" Item js_dom_get_prototype_value(Item obj);
+extern "C" Item dom_get_prototype_value(Item obj);
 extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
 extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value);
 extern "C" void* js_get_foreign_doc(Item item);
-extern "C" void* js_dom_swap_active_document(void* new_doc);
-extern "C" void js_dom_restore_active_document(void* prev_doc);
+extern "C" void* dom_swap_active_document(void* new_doc);
+extern "C" void dom_restore_active_document(void* prev_doc);
 extern "C" Item js_document_proxy_get_property(Item prop_name);
 extern "C" Item js_document_proxy_set_property(Item prop_name, Item value);
-extern "C" bool js_dom_item_is_range(Item item);
-extern "C" bool js_dom_item_is_selection(Item item);
-extern "C" Item js_dom_range_get_prototype_value(void);
-extern "C" Item js_dom_selection_get_prototype_value(void);
-extern "C" bool js_dom_expando_has_property(Item obj, Item key);
-extern "C" Item js_dom_expando_get_own_property_descriptor(Item obj, Item key);
-extern "C" Item js_dom_expando_delete_property(Item obj, Item key);
-extern "C" Item js_dom_expando_own_property_names(Item obj);
-extern "C" Item js_dom_owner_document_for_node(void* node);
-extern "C" const char* js_dom_to_attribute_cstr(Item value);
-extern "C" void js_dom_after_set_attribute(void* elem, const char* attr_name, const char* attr_value);
-extern "C" void js_dom_after_remove_attribute(void* elem, const char* attr_name);
-extern "C" void js_dom_after_toggle_attribute_remove(void* elem, const char* attr_name);
-extern "C" void js_dom_after_disabled_attribute_set(void* elem);
-extern "C" void js_dom_after_default_checked_set(void* elem, bool checked);
-extern "C" void js_dom_after_default_selected_set(void* elem, bool selected);
-extern "C" void js_dom_after_select_multiple_removed(void* elem);
-extern "C" void js_dom_set_checked_dirty(void* elem, bool checked);
-extern "C" void js_dom_select_set_value_bridge(void* elem, const char* value);
-extern "C" void js_dom_select_set_selected_index_bridge(void* elem, Item value);
-extern "C" void js_dom_select_set_length_bridge(void* elem, Item value);
-extern "C" void js_dom_set_option_selected_dirty(void* elem, bool selected);
-extern "C" void js_dom_set_option_text_bridge(void* elem, const char* value);
-extern "C" void js_dom_after_srcdoc_set(void* elem);
-extern "C" Item js_dom_throw_contenteditable_syntax_error(void);
-extern "C" Item js_dom_set_text_data_property(void* text, Item value);
-extern "C" Item js_dom_text_control_set_value_bridge(void* elem, Item value);
-extern "C" Item js_dom_text_control_set_selection_start_bridge(void* elem, Item value);
-extern "C" Item js_dom_text_control_set_selection_end_bridge(void* elem, Item value);
-extern "C" Item js_dom_text_control_set_selection_direction_bridge(void* elem, Item value);
-extern "C" Item js_dom_text_control_set_default_value_bridge(void* elem, Item value);
-extern "C" Item js_dom_text_control_set_selection_range_bridge(void* elem, Item start, Item end, Item dir);
-extern "C" Item js_dom_text_control_set_range_text_bridge(void* elem, Item replacement, Item start,
+extern "C" bool dom_item_is_range(Item item);
+extern "C" bool dom_item_is_selection(Item item);
+extern "C" Item dom_range_get_prototype_value(void);
+extern "C" Item dom_selection_get_prototype_value(void);
+extern "C" bool dom_expando_has_property(Item obj, Item key);
+extern "C" Item dom_expando_get_own_property_descriptor(Item obj, Item key);
+extern "C" Item dom_expando_delete_property(Item obj, Item key);
+extern "C" Item dom_expando_own_property_names(Item obj);
+extern "C" Item dom_owner_document_for_node(void* node);
+extern "C" const char* dom_to_attribute_cstr(Item value);
+extern "C" void dom_after_set_attribute(void* elem, const char* attr_name, const char* attr_value);
+extern "C" void dom_after_remove_attribute(void* elem, const char* attr_name);
+extern "C" void dom_after_toggle_attribute_remove(void* elem, const char* attr_name);
+extern "C" void dom_after_disabled_attribute_set(void* elem);
+extern "C" void dom_after_default_checked_set(void* elem, bool checked);
+extern "C" void dom_after_default_selected_set(void* elem, bool selected);
+extern "C" void dom_after_select_multiple_removed(void* elem);
+extern "C" void dom_set_checked_dirty(void* elem, bool checked);
+extern "C" void dom_select_set_value_bridge(void* elem, const char* value);
+extern "C" void dom_select_set_selected_index_bridge(void* elem, Item value);
+extern "C" void dom_select_set_length_bridge(void* elem, Item value);
+extern "C" void dom_set_option_selected_dirty(void* elem, bool selected);
+extern "C" void dom_set_option_text_bridge(void* elem, const char* value);
+extern "C" void dom_after_srcdoc_set(void* elem);
+extern "C" Item dom_throw_contenteditable_syntax_error(void);
+extern "C" Item dom_set_text_data_property(void* text, Item value);
+extern "C" Item dom_text_control_set_value_bridge(void* elem, Item value);
+extern "C" Item dom_text_control_set_selection_start_bridge(void* elem, Item value);
+extern "C" Item dom_text_control_set_selection_end_bridge(void* elem, Item value);
+extern "C" Item dom_text_control_set_selection_direction_bridge(void* elem, Item value);
+extern "C" Item dom_text_control_set_default_value_bridge(void* elem, Item value);
+extern "C" Item dom_text_control_set_selection_range_bridge(void* elem, Item start, Item end, Item dir);
+extern "C" Item dom_text_control_set_range_text_bridge(void* elem, Item replacement, Item start,
                                                           Item end, Item mode);
-extern "C" Item js_dom_text_control_select_bridge(void* elem);
-extern "C" Item js_dom_form_reset_bridge(Item form_item);
-extern "C" Item js_dom_check_validity_bridge(Item elem_item);
-extern "C" Item js_dom_report_validity_bridge(Item elem_item);
-extern "C" Item js_dom_form_submit_bridge(Item form_item);
-extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter);
-extern "C" Item js_dom_focus_method_bridge(void* elem, bool focus);
-extern "C" Item js_dom_click_method_bridge(Item elem_item);
-extern "C" Item js_dom_add_event_listener_bridge(Item target_item, Item type, Item callback, Item opts);
-extern "C" Item js_dom_remove_event_listener_bridge(Item target_item, Item type, Item callback, Item opts);
-extern "C" Item js_dom_dispatch_event_bridge(Item target_item, Item event_item);
-extern "C" Item js_dom_get_bounding_client_rect_bridge(void* elem);
-extern "C" Item js_dom_get_client_rects_bridge(void* elem);
-extern "C" Item js_dom_scroll_into_view_bridge(void* elem);
-extern "C" Item js_dom_scroll_operation_bridge(Item elem_item,
+extern "C" Item dom_text_control_select_bridge(void* elem);
+extern "C" Item dom_form_reset_bridge(Item form_item);
+extern "C" Item dom_check_validity_bridge(Item elem_item);
+extern "C" Item dom_report_validity_bridge(Item elem_item);
+extern "C" Item dom_form_submit_bridge(Item form_item);
+extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter);
+extern "C" Item dom_focus_method_bridge(void* elem, bool focus);
+extern "C" Item dom_click_method_bridge(Item elem_item);
+extern "C" Item dom_add_event_listener_bridge(Item target_item, Item type, Item callback, Item opts);
+extern "C" Item dom_remove_event_listener_bridge(Item target_item, Item type, Item callback, Item opts);
+extern "C" Item dom_dispatch_event_bridge(Item target_item, Item event_item);
+extern "C" Item dom_get_bounding_client_rect_bridge(void* elem);
+extern "C" Item dom_get_client_rects_bridge(void* elem);
+extern "C" Item dom_scroll_into_view_bridge(void* elem);
+extern "C" Item dom_scroll_operation_bridge(Item elem_item,
                                                  JubeDomElementOperation operation,
                                                  Item* args, int argc);
-extern "C" Item js_dom_text_control_caret_bounds_bridge(void* elem);
-extern "C" Item js_dom_text_control_boundary_from_point_bridge(void* elem, Item x, Item y);
-extern "C" Item js_dom_boundary_from_point_bridge(void* elem, Item x, Item y, Item behavior);
-extern "C" Item js_dom_style_set_property_bridge(void* elem, Item prop, Item value,
+extern "C" Item dom_text_control_caret_bounds_bridge(void* elem);
+extern "C" Item dom_text_control_boundary_from_point_bridge(void* elem, Item x, Item y);
+extern "C" Item dom_boundary_from_point_bridge(void* elem, Item x, Item y, Item behavior);
+extern "C" Item dom_style_set_property_bridge(void* elem, Item prop, Item value,
                                                  Item priority, bool has_priority);
-extern "C" Item js_dom_style_remove_property_bridge(void* elem, Item prop);
-extern "C" Item js_dom_text_replace_data_bridge(void* text, Item offset, Item count, Item data);
-extern "C" Item js_dom_text_insert_data_bridge(void* text, Item offset, Item data);
-extern "C" Item js_dom_text_append_data_bridge(void* text, Item data);
-extern "C" Item js_dom_text_delete_data_bridge(void* text, Item offset, Item count);
-extern "C" Item js_dom_text_substring_data_bridge(void* text, Item offset, Item count);
-extern "C" Item js_dom_append_child_bridge(void* parent, Item child);
-extern "C" Item js_dom_remove_child_bridge(void* parent, Item child);
-extern "C" Item js_dom_insert_before_bridge(void* parent, Item new_child, Item ref_child);
-extern "C" Item js_dom_remove_bridge(void* node);
-extern "C" Item js_dom_adopt_node_bridge(Item node);
-extern "C" Item js_dom_location_navigate_bridge(void* doc, Item next_url,
+extern "C" Item dom_style_remove_property_bridge(void* elem, Item prop);
+extern "C" Item dom_text_replace_data_bridge(void* text, Item offset, Item count, Item data);
+extern "C" Item dom_text_insert_data_bridge(void* text, Item offset, Item data);
+extern "C" Item dom_text_append_data_bridge(void* text, Item data);
+extern "C" Item dom_text_delete_data_bridge(void* text, Item offset, Item count);
+extern "C" Item dom_text_substring_data_bridge(void* text, Item offset, Item count);
+extern "C" Item dom_append_child_bridge(void* parent, Item child);
+extern "C" Item dom_remove_child_bridge(void* parent, Item child);
+extern "C" Item dom_insert_before_bridge(void* parent, Item new_child, Item ref_child);
+extern "C" Item dom_remove_bridge(void* node);
+extern "C" Item dom_adopt_node_bridge(Item node);
+extern "C" Item dom_location_navigate_bridge(void* doc, Item next_url,
                                                   bool replace);
-extern "C" Item js_dom_document_open_bridge(void* doc);
-extern "C" Item js_dom_document_write_bridge(void* doc, Item text);
-extern "C" Item js_dom_document_element_from_point_bridge(void* doc, Item x, Item y);
-extern "C" Item js_dom_create_range(void);
-extern "C" Item js_dom_get_selection(void);
-extern "C" Item js_dom_get_selection_function_for_document(void* doc);
+extern "C" Item dom_document_open_bridge(void* doc);
+extern "C" Item dom_document_write_bridge(void* doc, Item text);
+extern "C" Item dom_document_element_from_point_bridge(void* doc, Item x, Item y);
+extern "C" Item dom_create_range(void);
+extern "C" Item dom_get_selection(void);
+extern "C" Item dom_get_selection_function_for_document(void* doc);
 extern "C" bool js_doc_has_browsing_context(void* doc);
-extern "C" Item js_dom_document_fonts_bridge(void);
-extern "C" Item js_dom_document_stylesheets_bridge(void);
-extern "C" Item js_dom_document_default_view_bridge(void* doc);
-extern "C" Item js_dom_document_implementation_bridge(void);
-extern "C" Item js_dom_document_design_mode_bridge(void);
-extern "C" Item js_dom_document_active_element_bridge(void* doc);
-extern "C" Item js_dom_normalize_bridge(void* elem);
-extern "C" Item js_dom_live_child_collection_bridge(void* elem, bool elements_only);
-extern "C" Item js_dom_live_document_forms_bridge(void* doc);
-extern "C" Item js_dom_live_form_elements_bridge(void* elem);
-extern "C" Item js_dom_live_document_get_elements_by_tag_name_bridge(void* doc, Item query);
-extern "C" Item js_dom_live_document_get_elements_by_class_name_bridge(void* doc, Item query);
-extern "C" Item js_dom_live_document_get_elements_by_name_bridge(void* doc, Item query);
-extern "C" Item js_dom_live_element_get_elements_by_tag_name_bridge(void* elem, Item query);
-extern "C" Item js_dom_live_element_get_elements_by_class_name_bridge(void* elem, Item query);
-extern "C" Item js_dom_clone_node_bridge(void* elem, Item deep, bool has_deep);
-extern "C" Item js_dom_replace_child_bridge(void* parent, Item new_child, Item old_child);
-extern "C" Item js_dom_replace_with_bridge(void* node, Item* args, int argc);
-extern "C" Item js_dom_insert_adjacent_element_bridge(void* elem, Item position, Item new_node);
-extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem, Item position, Item html);
-extern "C" Item js_dom_append_variadic_bridge(void* elem, Item* args, int argc);
-extern "C" Item js_dom_prepend_variadic_bridge(void* elem, Item* args, int argc);
+extern "C" Item dom_document_fonts_bridge(void);
+extern "C" Item dom_document_stylesheets_bridge(void);
+extern "C" Item dom_document_default_view_bridge(void* doc);
+extern "C" Item dom_document_implementation_bridge(void);
+extern "C" Item dom_document_design_mode_bridge(void);
+extern "C" Item dom_document_active_element_bridge(void* doc);
+extern "C" Item dom_normalize_bridge(void* elem);
+extern "C" Item dom_live_child_collection_bridge(void* elem, bool elements_only);
+extern "C" Item dom_live_document_forms_bridge(void* doc);
+extern "C" Item dom_live_form_elements_bridge(void* elem);
+extern "C" Item dom_live_document_get_elements_by_tag_name_bridge(void* doc, Item query);
+extern "C" Item dom_live_document_get_elements_by_class_name_bridge(void* doc, Item query);
+extern "C" Item dom_live_document_get_elements_by_name_bridge(void* doc, Item query);
+extern "C" Item dom_live_element_get_elements_by_tag_name_bridge(void* elem, Item query);
+extern "C" Item dom_live_element_get_elements_by_class_name_bridge(void* elem, Item query);
+extern "C" Item dom_clone_node_bridge(void* elem, Item deep, bool has_deep);
+extern "C" Item dom_replace_child_bridge(void* parent, Item new_child, Item old_child);
+extern "C" Item dom_replace_with_bridge(void* node, Item* args, int argc);
+extern "C" Item dom_insert_adjacent_element_bridge(void* elem, Item position, Item new_node);
+extern "C" Item dom_insert_adjacent_html_bridge(void* elem, Item position, Item html);
+extern "C" Item dom_append_variadic_bridge(void* elem, Item* args, int argc);
+extern "C" Item dom_prepend_variadic_bridge(void* elem, Item* args, int argc);
 // DOM3 Phase 2: receiver-explicit CSSOM behavior entries
 extern "C" Item js_cssom_stylesheet_get_css_rules(Item sheet);
 extern "C" Item js_cssom_stylesheet_get_length(Item sheet);
@@ -1076,8 +1076,8 @@ extern "C" Item js_cssom_rule_get_parent_rule(Item rule);
 extern "C" Item js_cssom_rule_decl_remove_property(Item decl, Item prop);
 extern "C" Item js_cssom_decl_css_has(Item decl, Item prop);
 // DOM3 Phase 3: style-host behavior entries
-extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name);
-extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item value);
+extern "C" Item dom_get_style_property(Item elem_item, Item prop_name);
+extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item value);
 extern "C" Item js_style_css_has(Item style_item, Item prop_name);
 // DOM3 Phase 1: receiver-explicit Range/Selection behavior entries
 extern "C" Item js_range_get_start_container(Item self);
@@ -1134,8 +1134,8 @@ extern "C" Item js_selection_delete_from_document(Item self);
 extern "C" Item js_selection_to_string(Item self);
 extern "C" Item js_selection_modify(Item self, Item alter, Item direction, Item granularity);
 extern "C" Item js_selection_force_direction(Item self, Item direction);
-extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
-extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind, void* target,
+extern "C" void dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
+extern "C" void dom_notify_mutation_detail(DomJsMutationKind kind, void* target,
                                                 void* parent, const char* attribute_name,
                                                 const char* old_value);
 extern "C" Item js_setTimeout_promise(Item delay, Item value, Item options);
@@ -1154,13 +1154,13 @@ extern "C" Item js_util_promisify_custom_symbol(void);
 extern "C" Item js_util_custom_promisify_args_symbol(void);
 
 static void jube_host_dom_notify_mutation(int kind, void* target, void* parent) {
-    js_dom_notify_mutation((DomJsMutationKind)kind, target, parent);
+    dom_notify_mutation((DomJsMutationKind)kind, target, parent);
 }
 
 static void jube_host_dom_notify_mutation_detail(int kind, void* target, void* parent,
                                                   const char* attribute_name,
                                                   const char* old_value) {
-    js_dom_notify_mutation_detail((DomJsMutationKind)kind, target, parent,
+    dom_notify_mutation_detail((DomJsMutationKind)kind, target, parent,
                                   attribute_name, old_value);
 }
 
@@ -1505,25 +1505,25 @@ static const JubeHostScriptAPI jube_host_script_api = {
 };
 
 static const JubeHostDomAPI jube_host_dom_api = {
-    js_dom_get_document,
+    dom_get_document,
     js_get_document_object_value,
-    js_dom_get_or_create_doc_node,
-    js_dom_document_proxy_for_doc_bridge,
-    js_dom_unwrap_element_impl,
-    js_dom_initialize_node_wrapper,
+    dom_get_or_create_doc_node,
+    dom_document_proxy_for_doc_bridge,
+    dom_unwrap_element_impl,
+    dom_initialize_node_wrapper,
     js_is_css_namespace,
     js_is_inline_style_item,
     js_is_computed_style_item,
     js_is_stylesheet,
     js_is_css_rule,
     js_is_rule_style_decl,
-    js_dom_get_property_impl,
-    js_dom_set_property_impl,
-    js_dom_element_operation_impl,
+    dom_get_property_impl,
+    dom_set_property_impl,
+    dom_element_operation_impl,
     js_computed_style_get_property,
-    NULL,  // js_dom_style_resource_has_property retired: style hosts are record-driven (DOM3)
-    NULL,  // js_dom_style_method retired: style hosts are record-driven (DOM3)
-    js_dom_get_prototype_value,
+    NULL,  // dom_style_resource_has_property retired: style hosts are record-driven (DOM3)
+    NULL,  // dom_style_method retired: style hosts are record-driven (DOM3)
+    dom_get_prototype_value,
     NULL,  // js_cssom_resource_has_property retired: CSSOM types are record-driven (DOM3)
     NULL,  // js_cssom_stylesheet_get_property retired: CSSOM types are record-driven (DOM3)
     NULL,  // js_cssom_rule_get_property retired: CSSOM types are record-driven (DOM3)
@@ -1531,121 +1531,121 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_cssom_rule_decl_get_property,
     js_cssom_rule_decl_set_property,
     js_get_foreign_doc,
-    js_dom_swap_active_document,
-    js_dom_restore_active_document,
+    dom_swap_active_document,
+    dom_restore_active_document,
     js_document_proxy_get_property,
     js_document_proxy_set_property,
     NULL,  // receiver/name document invocation retired by Tune4 (D6.2.2v2)
-    js_dom_item_is_range,
-    js_dom_item_is_selection,
-    NULL,  // js_dom_range_get_property retired: range/selection are record-driven (DOM3)
-    NULL,  // js_dom_range_set_property retired: range/selection are record-driven (DOM3)
-    NULL,  // js_dom_selection_get_property retired: range/selection are record-driven (DOM3)
-    NULL,  // js_dom_selection_set_property retired: range/selection are record-driven (DOM3)
-    js_dom_range_get_prototype_value,
-    js_dom_selection_get_prototype_value,
-    NULL,  // js_dom_range_native_property retired: range/selection are record-driven (DOM3)
-    NULL,  // js_dom_selection_native_property retired: range/selection are record-driven (DOM3)
-    js_dom_expando_has_property,
-    NULL,  // js_dom_range_expando_has_property retired: range/selection are record-driven (DOM3)
-    NULL,  // js_dom_selection_expando_has_property retired: range/selection are record-driven (DOM3)
-    js_dom_expando_get_own_property_descriptor,
-    NULL,  // js_dom_range_expando_get_own_property_descriptor retired: range/selection are record-driven (DOM3)
-    NULL,  // js_dom_selection_expando_get_own_property_descriptor retired: range/selection are record-driven (DOM3)
-    js_dom_expando_delete_property,
-    NULL,  // js_dom_range_expando_delete_property retired: range/selection are record-driven (DOM3)
-    NULL,  // js_dom_selection_expando_delete_property retired: range/selection are record-driven (DOM3)
-    js_dom_expando_own_property_names,
-    NULL,  // js_dom_range_expando_own_property_names retired: range/selection are record-driven (DOM3)
-    NULL,  // js_dom_selection_expando_own_property_names retired: range/selection are record-driven (DOM3)
+    dom_item_is_range,
+    dom_item_is_selection,
+    NULL,  // dom_range_get_property retired: range/selection are record-driven (DOM3)
+    NULL,  // dom_range_set_property retired: range/selection are record-driven (DOM3)
+    NULL,  // dom_selection_get_property retired: range/selection are record-driven (DOM3)
+    NULL,  // dom_selection_set_property retired: range/selection are record-driven (DOM3)
+    dom_range_get_prototype_value,
+    dom_selection_get_prototype_value,
+    NULL,  // dom_range_native_property retired: range/selection are record-driven (DOM3)
+    NULL,  // dom_selection_native_property retired: range/selection are record-driven (DOM3)
+    dom_expando_has_property,
+    NULL,  // dom_range_expando_has_property retired: range/selection are record-driven (DOM3)
+    NULL,  // dom_selection_expando_has_property retired: range/selection are record-driven (DOM3)
+    dom_expando_get_own_property_descriptor,
+    NULL,  // dom_range_expando_get_own_property_descriptor retired: range/selection are record-driven (DOM3)
+    NULL,  // dom_selection_expando_get_own_property_descriptor retired: range/selection are record-driven (DOM3)
+    dom_expando_delete_property,
+    NULL,  // dom_range_expando_delete_property retired: range/selection are record-driven (DOM3)
+    NULL,  // dom_selection_expando_delete_property retired: range/selection are record-driven (DOM3)
+    dom_expando_own_property_names,
+    NULL,  // dom_range_expando_own_property_names retired: range/selection are record-driven (DOM3)
+    NULL,  // dom_selection_expando_own_property_names retired: range/selection are record-driven (DOM3)
     NULL,  // CSS namespace invocation is intrinsic-target-owned (D6.2.2v2)
     NULL,  // js_cssom_stylesheet_method retired: CSSOM types are record-driven (DOM3)
     NULL,  // js_cssom_rule_decl_method retired: CSSOM types are record-driven (DOM3)
-    js_dom_owner_document_for_node,
-    js_dom_to_attribute_cstr,
-    js_dom_after_set_attribute,
-    js_dom_after_remove_attribute,
-    js_dom_after_toggle_attribute_remove,
-    js_dom_after_disabled_attribute_set,
-    js_dom_after_default_checked_set,
-    js_dom_after_default_selected_set,
-    js_dom_after_select_multiple_removed,
-    js_dom_set_checked_dirty,
-    js_dom_select_set_value_bridge,
-    js_dom_select_set_selected_index_bridge,
-    js_dom_select_set_length_bridge,
-    js_dom_set_option_selected_dirty,
-    js_dom_set_option_text_bridge,
-    js_dom_after_srcdoc_set,
-    js_dom_throw_contenteditable_syntax_error,
-    js_dom_set_text_data_property,
-    js_dom_text_control_set_value_bridge,
-    js_dom_text_control_set_selection_start_bridge,
-    js_dom_text_control_set_selection_end_bridge,
-    js_dom_text_control_set_selection_direction_bridge,
-    js_dom_text_control_set_default_value_bridge,
-    js_dom_text_control_set_selection_range_bridge,
-    js_dom_text_control_set_range_text_bridge,
-    js_dom_text_control_select_bridge,
-    js_dom_form_reset_bridge,
-    js_dom_check_validity_bridge,
-    js_dom_report_validity_bridge,
-    js_dom_form_submit_bridge,
-    js_dom_form_request_submit_bridge,
-    js_dom_focus_method_bridge,
-    js_dom_click_method_bridge,
-    js_dom_add_event_listener_bridge,
-    js_dom_remove_event_listener_bridge,
-    js_dom_dispatch_event_bridge,
-    js_dom_get_bounding_client_rect_bridge,
-    js_dom_get_client_rects_bridge,
-    js_dom_scroll_into_view_bridge,
-    js_dom_scroll_operation_bridge,
-    js_dom_text_control_caret_bounds_bridge,
-    js_dom_text_control_boundary_from_point_bridge,
-    js_dom_boundary_from_point_bridge,
-    js_dom_style_set_property_bridge,
-    js_dom_style_remove_property_bridge,
-    js_dom_text_replace_data_bridge,
-    js_dom_text_insert_data_bridge,
-    js_dom_text_append_data_bridge,
-    js_dom_text_delete_data_bridge,
-    js_dom_text_substring_data_bridge,
-    js_dom_append_child_bridge,
-    js_dom_remove_child_bridge,
-    js_dom_insert_before_bridge,
-    js_dom_remove_bridge,
-    js_dom_adopt_node_bridge,
-    js_dom_location_navigate_bridge,
-    js_dom_document_open_bridge,
-    js_dom_document_write_bridge,
-    js_dom_document_element_from_point_bridge,
-    js_dom_create_range,
-    js_dom_get_selection,
-    js_dom_get_selection_function_for_document,
+    dom_owner_document_for_node,
+    dom_to_attribute_cstr,
+    dom_after_set_attribute,
+    dom_after_remove_attribute,
+    dom_after_toggle_attribute_remove,
+    dom_after_disabled_attribute_set,
+    dom_after_default_checked_set,
+    dom_after_default_selected_set,
+    dom_after_select_multiple_removed,
+    dom_set_checked_dirty,
+    dom_select_set_value_bridge,
+    dom_select_set_selected_index_bridge,
+    dom_select_set_length_bridge,
+    dom_set_option_selected_dirty,
+    dom_set_option_text_bridge,
+    dom_after_srcdoc_set,
+    dom_throw_contenteditable_syntax_error,
+    dom_set_text_data_property,
+    dom_text_control_set_value_bridge,
+    dom_text_control_set_selection_start_bridge,
+    dom_text_control_set_selection_end_bridge,
+    dom_text_control_set_selection_direction_bridge,
+    dom_text_control_set_default_value_bridge,
+    dom_text_control_set_selection_range_bridge,
+    dom_text_control_set_range_text_bridge,
+    dom_text_control_select_bridge,
+    dom_form_reset_bridge,
+    dom_check_validity_bridge,
+    dom_report_validity_bridge,
+    dom_form_submit_bridge,
+    dom_form_request_submit_bridge,
+    dom_focus_method_bridge,
+    dom_click_method_bridge,
+    dom_add_event_listener_bridge,
+    dom_remove_event_listener_bridge,
+    dom_dispatch_event_bridge,
+    dom_get_bounding_client_rect_bridge,
+    dom_get_client_rects_bridge,
+    dom_scroll_into_view_bridge,
+    dom_scroll_operation_bridge,
+    dom_text_control_caret_bounds_bridge,
+    dom_text_control_boundary_from_point_bridge,
+    dom_boundary_from_point_bridge,
+    dom_style_set_property_bridge,
+    dom_style_remove_property_bridge,
+    dom_text_replace_data_bridge,
+    dom_text_insert_data_bridge,
+    dom_text_append_data_bridge,
+    dom_text_delete_data_bridge,
+    dom_text_substring_data_bridge,
+    dom_append_child_bridge,
+    dom_remove_child_bridge,
+    dom_insert_before_bridge,
+    dom_remove_bridge,
+    dom_adopt_node_bridge,
+    dom_location_navigate_bridge,
+    dom_document_open_bridge,
+    dom_document_write_bridge,
+    dom_document_element_from_point_bridge,
+    dom_create_range,
+    dom_get_selection,
+    dom_get_selection_function_for_document,
     js_doc_has_browsing_context,
-    js_dom_document_fonts_bridge,
-    js_dom_document_stylesheets_bridge,
-    js_dom_document_default_view_bridge,
-    js_dom_document_implementation_bridge,
-    js_dom_document_design_mode_bridge,
-    js_dom_document_active_element_bridge,
-    js_dom_normalize_bridge,
-    js_dom_live_child_collection_bridge,
-    js_dom_live_document_forms_bridge,
-    js_dom_live_form_elements_bridge,
-    js_dom_live_document_get_elements_by_tag_name_bridge,
-    js_dom_live_document_get_elements_by_class_name_bridge,
-    js_dom_live_document_get_elements_by_name_bridge,
-    js_dom_live_element_get_elements_by_tag_name_bridge,
-    js_dom_live_element_get_elements_by_class_name_bridge,
-    js_dom_clone_node_bridge,
-    js_dom_replace_child_bridge,
-    js_dom_replace_with_bridge,
-    js_dom_insert_adjacent_element_bridge,
-    js_dom_insert_adjacent_html_bridge,
-    js_dom_append_variadic_bridge,
-    js_dom_prepend_variadic_bridge,
+    dom_document_fonts_bridge,
+    dom_document_stylesheets_bridge,
+    dom_document_default_view_bridge,
+    dom_document_implementation_bridge,
+    dom_document_design_mode_bridge,
+    dom_document_active_element_bridge,
+    dom_normalize_bridge,
+    dom_live_child_collection_bridge,
+    dom_live_document_forms_bridge,
+    dom_live_form_elements_bridge,
+    dom_live_document_get_elements_by_tag_name_bridge,
+    dom_live_document_get_elements_by_class_name_bridge,
+    dom_live_document_get_elements_by_name_bridge,
+    dom_live_element_get_elements_by_tag_name_bridge,
+    dom_live_element_get_elements_by_class_name_bridge,
+    dom_clone_node_bridge,
+    dom_replace_child_bridge,
+    dom_replace_with_bridge,
+    dom_insert_adjacent_element_bridge,
+    dom_insert_adjacent_html_bridge,
+    dom_append_variadic_bridge,
+    dom_prepend_variadic_bridge,
     jube_host_dom_notify_mutation,
     jube_host_dom_notify_mutation_detail,
     js_range_get_start_container,
@@ -1702,8 +1702,8 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_selection_to_string,
     js_selection_modify,
     js_selection_force_direction,
-    js_dom_get_style_property,
-    js_dom_set_style_property,
+    dom_get_style_property,
+    dom_set_style_property,
     js_style_css_has,
     js_cssom_stylesheet_get_css_rules,
     js_cssom_stylesheet_get_length,
@@ -1723,11 +1723,11 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_cssom_rule_get_parent_rule,
     js_cssom_rule_decl_remove_property,
     js_cssom_decl_css_has,
-    js_dom_get_ui_context,
-    js_dom_has_committed_geometry_snapshot,
-    js_dom_create_tree_walker_bridge,
-    js_dom_document_create_event_bridge,
-    js_dom_document_exec_command_bridge,
+    dom_get_ui_context,
+    dom_has_committed_geometry_snapshot,
+    dom_create_tree_walker_bridge,
+    dom_document_create_event_bridge,
+    dom_document_exec_command_bridge,
 };
 
 // H7A source records are intentionally plain C data.  A language can retain

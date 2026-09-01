@@ -1007,7 +1007,7 @@ extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const c
     }
     Item ev = js_create_event(type, /*bubbles=*/1, /*cancelable=*/1);
     js_set_key_cstr(ev, "clipboardData", dt);
-    js_dom_dispatch_event(target_item, ev);
+    dom_dispatch_event(target_item, ev);
     bool prevented = radiant_dom_event_default_prevented(ev);
     if (!is_paste) {
         const char* plain = dt_read_record(dt, "text/plain");
@@ -1060,7 +1060,7 @@ extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
     }
     Item ev = js_create_native_drag_event(type, client_x, client_y,
         g_drag_data_transfer, false, false, false, false);
-    js_dom_dispatch_event(target_item, ev);
+    dom_dispatch_event(target_item, ev);
     return radiant_dom_event_default_prevented(ev);
 }
 

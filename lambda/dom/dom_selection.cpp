@@ -1,5 +1,5 @@
 /**
- * js_dom_selection.cpp — JS bindings for DOM Range / Selection
+ * dom_selection.cpp — JS bindings for DOM Range / Selection
  *
  * Wraps radiant/dom_range.{hpp,cpp} primitives as JS host objects and
  * routes document.createRange(), document.getSelection(), and the global
@@ -42,11 +42,11 @@
 #include <cstdio>
 
 extern __thread EvalContext* context;
-extern "C" void* js_dom_current_active_text_control(void);
+extern "C" void* dom_current_active_text_control(void);
 extern "C" bool js_doc_has_browsing_context(void* doc);
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 
-static Item js_dom_flush_selectionchange(Item this_val, Item* args, int argc);
+static Item dom_flush_selectionchange(Item this_val, Item* args, int argc);
 
 // ============================================================================
 // Helpers
@@ -64,7 +64,7 @@ static bool js_doc_runtime_enter_if_needed(DomDocument* doc) {
     if (!doc) return false;
     if (!doc->js.runtime) {
         if (!context) return false;
-        js_dom_set_document(doc);
+        dom_set_document(doc);
         return true;
     }
     Runtime* runtime = doc->js.runtime;
@@ -72,7 +72,7 @@ static bool js_doc_runtime_enter_if_needed(DomDocument* doc) {
     if (!runtime_ctx || !runtime->heap || !runtime->name_pool) return false;
     if (!runtime_context_bind_retained(runtime, runtime_ctx)) return false;
     if (runtime_ctx->js_state && !js_runtime_state_init(runtime_ctx)) return false;
-    js_dom_set_document(doc);
+    dom_set_document(doc);
     return true;
 }
 
@@ -121,11 +121,11 @@ JS_FORWARD_STATIC_ITEM(throw_from_dom_exc, (const char* exc, const char* fallbac
 // ============================================================================
 
 static DocState* get_or_create_state() {
-    DomDocument* doc = (DomDocument*)js_dom_get_document();
+    DomDocument* doc = (DomDocument*)dom_get_document();
     if (!doc) return nullptr;
     if (doc->state) return doc->state;
     if (!doc->document_pool) return nullptr;
-    return radiant_document_ensure_state(doc, "js_dom_selection");
+    return radiant_document_ensure_state(doc, "dom_selection");
 }
 
 // ============================================================================
@@ -145,12 +145,12 @@ static Item build_range_object(DomRange* r);
 static Item build_selection_object(DomSelection* s);
 static inline void range_sync_props(Item, DomRange*);
 static inline void selection_sync_props(Item, DomSelection*);
-extern "C" Item js_dom_range_to_string_value(Item obj);
-extern "C" Item js_dom_selection_to_string_value(Item obj);
+extern "C" Item dom_range_to_string_value(Item obj);
+extern "C" Item dom_selection_to_string_value(Item obj);
 
 // Identity / unwrap ----------------------------------------------------------
 
-extern "C" bool js_dom_item_is_range(Item item) {
+extern "C" bool dom_item_is_range(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_VMAP) {
         return item.vmap &&
@@ -160,7 +160,7 @@ extern "C" bool js_dom_item_is_range(Item item) {
     return false;
 }
 
-extern "C" bool js_dom_item_is_selection(Item item) {
+extern "C" bool dom_item_is_selection(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_VMAP) {
         return item.vmap &&
@@ -170,16 +170,16 @@ extern "C" bool js_dom_item_is_selection(Item item) {
     return false;
 }
 
-static inline void* js_dom_host_data(Item obj, bool (*is_type)(Item)) {
+static inline void* dom_host_data(Item obj, bool (*is_type)(Item)) {
     if (!is_type(obj)) return nullptr;
     if (get_type_id(obj) == LMD_TYPE_VMAP) return obj.vmap->host_data;
     return obj.map->data;
 }
 static inline DomRange* range_from(Item obj) {
-    return (DomRange*)js_dom_host_data(obj, js_dom_item_is_range);
+    return (DomRange*)dom_host_data(obj, dom_item_is_range);
 }
 static inline DomSelection* selection_from(Item obj) {
-    return (DomSelection*)js_dom_host_data(obj, js_dom_item_is_selection);
+    return (DomSelection*)dom_host_data(obj, dom_item_is_selection);
 }
 
 static bool selection_state_set(DomSelection* s,
@@ -204,8 +204,8 @@ static Item get_dom_constructor_prototype(const char* ctor_name) {
 
 #define JS_DOM_PROTOTYPE_VALUE(name, class_name) \
     extern "C" Item name(void) { return get_dom_constructor_prototype(class_name); }
-JS_DOM_PROTOTYPE_VALUE(js_dom_range_get_prototype_value, "Range")
-JS_DOM_PROTOTYPE_VALUE(js_dom_selection_get_prototype_value, "Selection")
+JS_DOM_PROTOTYPE_VALUE(dom_range_get_prototype_value, "Range")
+JS_DOM_PROTOTYPE_VALUE(dom_selection_get_prototype_value, "Selection")
 #undef JS_DOM_PROTOTYPE_VALUE
 
 // Reuse cached JS wrapper if the native object already has one; else build.
@@ -227,17 +227,17 @@ static Item js_object_for_selection(DomSelection* s) {
 static DomNode* node_arg(Item v) {
     TypeId type = get_type_id(v);
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) return nullptr;
-    void* p = js_dom_unwrap_element(v);
+    void* p = dom_unwrap_element(v);
     if (!p) {
         Item doc_obj = js_get_document_object_value();
         if (v.item == doc_obj.item) {
-            p = js_dom_unwrap_element(doc_obj);
+            p = dom_unwrap_element(doc_obj);
         }
     }
     if (!p) {
         Item node_type = js_get_reference(v, make_key("nodeType"));
         if (item_to_int(node_type) == 9) {
-            p = js_dom_unwrap_element(js_get_document_object_value());
+            p = dom_unwrap_element(js_get_document_object_value());
         }
     }
     return (DomNode*)p;
@@ -259,7 +259,7 @@ static DomElement* active_text_control_for_selection(DomSelection* s) {
         DomElement* elem = focused->as_element();
         if (elem && tc_is_text_control(elem)) return elem;
     }
-    DomElement* current = (DomElement*)js_dom_current_active_text_control();
+    DomElement* current = (DomElement*)dom_current_active_text_control();
     if (current && tc_is_text_control(current)) {
         DocState* current_state = current->doc ? (DocState*)current->doc->state : nullptr;
         if (!current_state || current_state == state) return current;
@@ -313,7 +313,7 @@ static bool node_in_selection_doc(DomNode* n, DomSelection* s) {
         DomDocument* nd = node_owning_doc(n);
         if (nd && nd->state == s->state) sel_doc = nd;
     }
-    if (!sel_doc) sel_doc = (DomDocument*)js_dom_get_document();
+    if (!sel_doc) sel_doc = (DomDocument*)dom_get_document();
     if (!sel_doc) return false;
     DomNode* doc_stub = (DomNode*)sel_doc->js.doc_node;
     DomNode* root = (DomNode*)sel_doc->root;
@@ -458,7 +458,7 @@ JS_FORWARD_ITEM(js_range_detach, (Item self_v), make_undef, ())
 
 #define JS_DOM_SELF_ALIAS(name, target) \
     extern "C" Item name(Item self_v) { return target(self_v); }
-JS_DOM_SELF_ALIAS(js_range_to_string, js_dom_range_to_string_value)
+JS_DOM_SELF_ALIAS(js_range_to_string, dom_range_to_string_value)
 
 struct RangeClientRectCollector {
     Item array;
@@ -474,7 +474,7 @@ static void js_range_collect_rect(float x, float y, float w, float h,
     RangeClientRectCollector* collector =
         (RangeClientRectCollector*)userdata;
     if (!collector) return;
-    js_array_push(collector->array, js_dom_make_rect(x, y, w, h));
+    js_array_push(collector->array, dom_make_rect(x, y, w, h));
     if (collector->count == 0) {
         collector->left = x;
         collector->top = y;
@@ -496,7 +496,7 @@ static RangeClientRectCollector js_range_collect_client_rects(DomRange* r) {
     if (!r) return collector;
     DomDocument* doc = node_owning_doc(r->start.node);
     if (!doc) doc = node_owning_doc(r->end.node);
-    if (doc && !js_dom_has_committed_geometry_snapshot(doc)) return collector;
+    if (doc && !dom_has_committed_geometry_snapshot(doc)) return collector;
     if (!dom_range_resolve_layout(r)) return collector;
     dom_range_for_each_rect(r, nullptr, js_range_collect_rect, &collector);
     return collector;
@@ -511,12 +511,12 @@ extern "C" Item js_range_get_client_rects(Item self_v) {
 extern "C" Item js_range_get_bounding_client_rect(Item self_v) {
     RangeClientRectCollector collector =
         js_range_collect_client_rects(range_from(self_v));
-    if (collector.count == 0) return js_dom_make_rect(0, 0, 0, 0);
-    return js_dom_make_rect(collector.left, collector.top,
+    if (collector.count == 0) return dom_make_rect(0, 0, 0, 0);
+    return dom_make_rect(collector.left, collector.top,
         collector.right - collector.left, collector.bottom - collector.top);
 }
 
-extern "C" Item js_dom_range_to_string_value(Item obj) {
+extern "C" Item dom_range_to_string_value(Item obj) {
     DomRange* r = range_from(obj);
     if (!r) return make_str("");
     char* s = dom_range_to_string(r);
@@ -546,7 +546,7 @@ static Item js_range_fragment_operation(Item self_v,
     DomElement* frag = operation(r, &exc);
     if (exc && !frag) return throw_from_dom_exc(exc, message);
     if (undefined_on_invalid && !frag) return make_undef();
-    return frag ? js_dom_wrap_element(frag) : ItemNull;
+    return frag ? dom_wrap_element(frag) : ItemNull;
 }
 JS_FORWARD_ITEM(js_range_extract_contents, (Item self_v), js_range_fragment_operation, (self_v, dom_range_extract_contents, "extractContents failed", false))
 JS_FORWARD_ITEM(js_range_clone_contents, (Item self_v), js_range_fragment_operation, (self_v, dom_range_clone_contents, "cloneContents failed", false))
@@ -557,7 +557,7 @@ JS_FORWARD_ITEM(js_range_surround_contents, (Item self_v, Item node_v), js_range
 // Range constructor / property dispatch
 // ============================================================================
 
-// No-op now — properties are read on demand via js_dom_range_get_property.
+// No-op now — properties are read on demand via dom_range_get_property.
 // The call sites in mutation methods are kept as documentation cues.
 static inline void range_sync_props(Item /*obj*/, DomRange* /*r*/) {}
 
@@ -574,7 +574,7 @@ static Item build_range_object(DomRange* r) {
         return obj;
     }
     r->host_wrapper = obj.vmap;
-    dom_range_retain(r);  // released in js_dom_selection_reset
+    dom_range_retain(r);  // released in dom_selection_reset
     return obj;
 }
 
@@ -588,10 +588,10 @@ static Item js_range_wrap_boundary_node(DomNode* node) {
         if (element->doc && element->doc->root == element) {
             // The native document root is an element-shaped storage node, but
             // Range boundaries at that root must preserve Document proxy identity.
-            return js_dom_owner_document_for_node(node);
+            return dom_owner_document_for_node(node);
         }
     }
-    return js_dom_wrap_element(node);
+    return dom_wrap_element(node);
 }
 
 #define JS_RANGE_GETTER(name, expression) \
@@ -712,8 +712,8 @@ extern "C" Item js_selection_collapse(Item self_v, Item node_v, Item offset_v) {
     if (!selection_state_set(s, &caret, &caret, &exc)) {
         return throw_from_dom_exc(exc, "Selection.collapse failed");
     }
-    extern void js_dom_focus_if_editing_host_for_selection(void* dom_node);
-    js_dom_focus_if_editing_host_for_selection((void*)n);
+    extern void dom_focus_if_editing_host_for_selection(void* dom_node);
+    dom_focus_if_editing_host_for_selection((void*)n);
     selection_sync_props(self_v, s);
     return make_undef();
 }
@@ -870,8 +870,8 @@ extern "C" Item js_selection_set_base_and_extent(Item self_v, Item anchor_node_v
     if (!selection_state_set(s, &anchor, &focus, &exc)) {
         return throw_from_dom_exc(exc, "setBaseAndExtent failed");
     }
-    extern void js_dom_focus_if_editing_host_for_selection(void* dom_node);
-    js_dom_focus_if_editing_host_for_selection((void*)fn);
+    extern void dom_focus_if_editing_host_for_selection(void* dom_node);
+    dom_focus_if_editing_host_for_selection((void*)fn);
     selection_sync_props(self_v, s);
     return make_undef();
 }
@@ -931,17 +931,17 @@ extern "C" Item js_selection_delete_from_document(Item self_v) {
 
 #define JS_DOM_SELF_ALIAS(name, target) \
     extern "C" Item name(Item self_v) { return target(self_v); }
-JS_DOM_SELF_ALIAS(js_selection_to_string, js_dom_selection_to_string_value)
+JS_DOM_SELF_ALIAS(js_selection_to_string, dom_selection_to_string_value)
 #undef JS_DOM_SELF_ALIAS
 
-extern "C" Item js_dom_selection_to_string_value(Item obj) {
+extern "C" Item dom_selection_to_string_value(Item obj) {
     DomSelection* s = selection_from(obj);
     // Per WPT stringifier_editable_element.tentative.html: when a focused
     // text control has a non-empty selection, getSelection().toString()
     // returns the visible selected substring of the control — even when
     // the document selection itself is empty.
-    extern String* js_dom_active_text_control_selected_text(void);
-    String* tc_str = js_dom_active_text_control_selected_text();
+    extern String* dom_active_text_control_selected_text(void);
+    String* tc_str = dom_active_text_control_selected_text();
     if (tc_str) {
         return (Item){.item = s2it(tc_str)};
     }
@@ -1012,7 +1012,7 @@ static Item build_selection_object(DomSelection* s) {
         return s ? (expression) : ItemNull; \
     }
 static Item js_selection_node_value(DomNode* node) {
-    return node ? js_dom_wrap_element(node) : ItemNull;
+    return node ? dom_wrap_element(node) : ItemNull;
 }
 JS_SELECTION_GETTER(js_selection_get_anchor_node,
     js_selection_node_value(dom_selection_anchor_node(s)))
@@ -1046,7 +1046,7 @@ extern "C" Item js_selection_get_direction(Item self_v) {
 // Public entry points
 // ============================================================================
 
-extern "C" Item js_dom_create_range(void) {
+extern "C" Item dom_create_range(void) {
     DocState* state = get_or_create_state();
     if (!state) {
         log_error("createRange: no document state");
@@ -1058,7 +1058,7 @@ extern "C" Item js_dom_create_range(void) {
     return build_range_object(r);
 }
 
-extern "C" Item js_dom_create_live_range_from_boundaries(Item start_container,
+extern "C" Item dom_create_live_range_from_boundaries(Item start_container,
                                                          int64_t start_offset,
                                                          Item end_container,
                                                          int64_t end_offset,
@@ -1069,8 +1069,8 @@ extern "C" Item js_dom_create_live_range_from_boundaries(Item start_container,
         return ItemNull;
     }
 
-    DomNode* start_node = (DomNode*)js_dom_unwrap_element(start_container);
-    DomNode* end_node = (DomNode*)js_dom_unwrap_element(end_container);
+    DomNode* start_node = (DomNode*)dom_unwrap_element(start_container);
+    DomNode* end_node = (DomNode*)dom_unwrap_element(end_container);
     if (!start_node || !end_node) {
         if (out_exception) *out_exception = "InvalidNodeTypeError";
         return ItemNull;
@@ -1101,7 +1101,7 @@ extern "C" Item js_dom_create_live_range_from_boundaries(Item start_container,
     return build_range_object(r);
 }
 
-extern "C" Item js_dom_get_selection(void) {
+extern "C" Item dom_get_selection(void) {
     DocState* state = get_or_create_state();
     if (!state) {
         log_error("getSelection: no document state");
@@ -1112,12 +1112,12 @@ extern "C" Item js_dom_get_selection(void) {
     }
     return js_object_for_selection(state->dom_selection);
 }
-JS_FORWARD_ITEM(js_dom_wrap_range, (void* dom_range), js_object_for_range, ((DomRange*)dom_range))
-JS_FORWARD_RETURN(bool, js_dom_is_range_object, (Item item), js_dom_item_is_range, (item))
-JS_FORWARD_RETURN(bool, js_dom_is_selection_object, (Item item), js_dom_item_is_selection, (item))
+JS_FORWARD_ITEM(dom_wrap_range, (void* dom_range), js_object_for_range, ((DomRange*)dom_range))
+JS_FORWARD_RETURN(bool, dom_is_range_object, (Item item), dom_item_is_range, (item))
+JS_FORWARD_RETURN(bool, dom_is_selection_object, (Item item), dom_item_is_selection, (item))
 
-JS_FORWARD_RETURN(void*, js_dom_unwrap_range, (Item item), range_from, (item))
-JS_FORWARD_RETURN(void*, js_dom_unwrap_selection, (Item item), selection_from, (item))
+JS_FORWARD_RETURN(void*, dom_unwrap_range, (Item item), range_from, (item))
+JS_FORWARD_RETURN(void*, dom_unwrap_selection, (Item item), selection_from, (item))
 
 // ============================================================================
 // Global installation
@@ -1128,32 +1128,32 @@ extern "C" Item js_global_get_selection(void) {
     Item self = js_get_this();
     void* foreign = js_get_foreign_doc(self);
     if (foreign && js_doc_has_browsing_context(foreign)) {
-        void* prev = js_dom_swap_active_document(foreign);
-        Item selection = js_dom_get_selection();
-        js_dom_restore_active_document(prev);
+        void* prev = dom_swap_active_document(foreign);
+        Item selection = dom_get_selection();
+        dom_restore_active_document(prev);
         return selection;
     }
-    return js_dom_get_selection();
+    return dom_get_selection();
 }
 
 static Item js_bound_document_get_selection(Item env_item) {
     JS_ENV_UNPACK(env, env_item);
     DomDocument* doc = env ? (DomDocument*)(uintptr_t)env[0].item : nullptr;
     if (!doc || !js_doc_has_browsing_context(doc)) return ItemNull;
-    void* prev = js_dom_swap_active_document(doc);
-    Item selection = js_dom_get_selection();
-    js_dom_restore_active_document(prev);
+    void* prev = dom_swap_active_document(doc);
+    Item selection = dom_get_selection();
+    dom_restore_active_document(prev);
     return selection;
 }
 
-extern "C" Item js_dom_get_selection_function_for_document(void* doc) {
+extern "C" Item dom_get_selection_function_for_document(void* doc) {
     Item* env = js_alloc_env(1);
     if (!env) return js_new_native_function(js_global_get_selection);
     env[0] = (Item){.item = (uint64_t)(uintptr_t)doc};
     return js_new_native_closure(js_bound_document_get_selection, 0, env, 1);
 }
 
-extern "C" void js_dom_selection_install_globals(void) {
+extern "C" void dom_selection_install_globals(void) {
     Item global = js_get_global_this();
     Item fn = js_new_native_function(js_global_get_selection);
     js_set_key_cstr(global, "getSelection", fn);
@@ -1181,7 +1181,7 @@ extern "C" void js_dom_selection_install_globals(void) {
         js_set_key_cstr(existing, "document", doc_proxy);
 
     Item flush_fn = js_new_native_this_span_function(
-        js_dom_flush_selectionchange);
+        dom_flush_selectionchange);
     js_set_key_cstr(global, "__lambdaFlushSelectionChange", flush_fn);
     if (get_type_id(existing) == LMD_TYPE_MAP)
         js_set_key_cstr(existing, "__lambdaFlushSelectionChange", flush_fn);
@@ -1192,7 +1192,7 @@ extern "C" void js_dom_selection_install_globals(void) {
     // / getSelection); identity comes from their function names plus DOM host
     // fast paths in js_instanceof_classname.
     Item sel_ctor   = js_new_native_function(js_global_get_selection);
-    Item range_ctor = js_new_native_constructor(js_dom_create_range);
+    Item range_ctor = js_new_native_constructor(dom_create_range);
     js_set_function_name(sel_ctor, make_key("Selection"));
     js_set_function_name(range_ctor, make_key("Range"));
     js_set_key_cstr(global, "Selection", sel_ctor);
@@ -1225,7 +1225,7 @@ extern "C" void js_dom_selection_install_globals(void) {
     js_document_proxy_set_property(make_key("defaultView"), global);
     (void)doc;
 
-    log_debug("js_dom_selection: installed global getSelection / Selection / Range");
+    log_debug("dom_selection: installed global getSelection / Selection / Range");
 }
 
 // ----------------------------------------------------------------------------
@@ -1238,7 +1238,7 @@ extern "C" void js_dom_selection_install_globals(void) {
 // mutations into a single async dispatch, fire on the document.
 static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
     (void)this_val; (void)args; (void)argc;
-    DomDocument* doc = (DomDocument*)js_dom_get_document();
+    DomDocument* doc = (DomDocument*)dom_get_document();
     if (!doc || !doc->state) return ItemNull;
     DocState* state = doc->state;
     if (!state->selectionchange_pending) return ItemNull;
@@ -1250,12 +1250,12 @@ static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
     // The document wrapper allocates after Event construction; retain the
     // queued selectionchange Event until dispatch takes its own exact roots.
     Rooted<Item> document_root(roots, js_get_document_object_value());
-    js_dom_dispatch_event(document_root.get(), event_root.get());
+    dom_dispatch_event(document_root.get(), event_root.get());
     return ItemNull;
 }
-JS_FORWARD_STATIC_ITEM(js_dom_flush_selectionchange, (Item this_val, Item* args, int argc), _wpt_selectionchange_fire, (this_val, args, argc))
+JS_FORWARD_STATIC_ITEM(dom_flush_selectionchange, (Item this_val, Item* args, int argc), _wpt_selectionchange_fire, (this_val, args, argc))
 
-extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
+extern "C" void dom_queue_selectionchange(DomSelection* sel) {
     if (!sel || !sel->state) return;
     // Native-only documents retain selection state but have no JS event-loop
     // capsule.  Do not dereference context-local JS roots to synthesize an
@@ -1264,7 +1264,7 @@ extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
     if (!js_input || !js_input->pool) return;
     DocState* state = sel->state;
     // Coalesce before touching the document runtime. In tight DOM-only loops
-    // (e.g. WPT collapse), repeated js_dom_set_document() dominates runtime.
+    // (e.g. WPT collapse), repeated dom_set_document() dominates runtime.
     if (state->selectionchange_pending) return;
 
     DomBoundary anchor = dom_selection_anchor_boundary(sel);
@@ -1272,7 +1272,7 @@ extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
     DomDocument* doc = nullptr;
     if (anchor.node) doc = node_owning_doc(anchor.node);
     if (!doc && focus.node) doc = node_owning_doc(focus.node);
-    if (!doc) doc = (DomDocument*)js_dom_get_document();
+    if (!doc) doc = (DomDocument*)dom_get_document();
     if (!js_doc_runtime_enter_if_needed(doc)) return;
     state->selectionchange_pending = true;
     Item cb = js_new_native_this_span_function(_wpt_selectionchange_fire);
@@ -1288,7 +1288,7 @@ extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
 // whole pending list in a single setTimeout(0) callback.
 static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
     (void)this_val; (void)args; (void)argc;
-    DomDocument* doc = (DomDocument*)js_dom_get_document();
+    DomDocument* doc = (DomDocument*)dom_get_document();
     if (!js_doc_runtime_enter_if_needed(doc)) return ItemNull;
     DocState* state = get_or_create_state();
     if (!state) {
@@ -1309,7 +1309,7 @@ static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
         // reads one committed selection rather than re-entering that writer.
         Item select_ev = js_create_event("select", /*bubbles=*/true,
                                          /*cancelable=*/false);
-        js_dom_dispatch_event(js_dom_wrap_element(head), select_ev);
+        dom_dispatch_event(dom_wrap_element(head), select_ev);
         // Per HTML, selectionchange on text controls fires on the element
         // AND is observable at document. Spec says bubbles=false but two
         // separate dispatches; we use bubbles=true to deliver both with a
@@ -1317,7 +1317,7 @@ static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
         // equivalent for all WPT tests we exercise.
         Item ev = js_create_event("selectionchange", /*bubbles=*/true,
                                   /*cancelable=*/false);
-        js_dom_dispatch_event(js_dom_wrap_element(head), ev);
+        dom_dispatch_event(dom_wrap_element(head), ev);
         dom_node_unpin(head->doc, dom_node_ref((DomNode*)head),
                        DOM_NODE_PIN_EVENT_QUEUE);
         head = next;
@@ -1328,7 +1328,7 @@ static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
     return ItemNull;
 }
 
-extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
+extern "C" void dom_queue_textcontrol_selectionchange(DomElement* elem) {
     if (!elem) return;
     if (!elem->form) return;
     if (!js_active_runtime_state) return;
@@ -1364,7 +1364,7 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
     js_setTimeout(cb, (Item){.item = i2it(0)});
 }
 
-extern "C" void js_dom_selection_reset(void) {
+extern "C" void dom_selection_reset(void) {
     // DOM3: cached jube prototypes/method Items seed off this runtime's global
     // constructors; drop them so the next runtime re-seeds against fresh globals.
     jube_interface_runtime_reset();
@@ -1372,7 +1372,7 @@ extern "C" void js_dom_selection_reset(void) {
     // Native lifetime is owned by the per-document DocState. Walk the
     // current document's live ranges, drop our JS-side retain, and clear
     // host_wrapper back-pointers so a fresh document starts clean.
-    DomDocument* doc = (DomDocument*)js_dom_get_document();
+    DomDocument* doc = (DomDocument*)dom_get_document();
     if (!doc || !doc->state) return;
     DocState* state = doc->state;
     DomElement* pending = state->tc_selectionchange_head;

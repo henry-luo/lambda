@@ -2093,7 +2093,7 @@ void runtime_cleanup(Runtime* runtime) {
         lambda_uv_cleanup();
         event_loop_cleaned = true;
 
-        js_dom_shutdown();
+        dom_shutdown();
         if (runtime->dom_doc) {
             free_document((DomDocument*)runtime->dom_doc);
             runtime->dom_doc = NULL;
@@ -2146,7 +2146,7 @@ void runtime_cleanup(Runtime* runtime) {
         cleanup_context->type_list = NULL;
         cleanup_context->scheduler = NULL;
     } else {
-        js_dom_shutdown();
+        dom_shutdown();
         if (runtime->dom_doc) {
             free_document((DomDocument*)runtime->dom_doc);
             runtime->dom_doc = NULL;

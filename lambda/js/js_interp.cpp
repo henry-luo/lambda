@@ -5701,7 +5701,7 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     bool reusing_context = false;
     if (!js_prepare_eval_context(runtime, true, &eval, &reusing_context)) return ItemError;
     (void)eval;
-    if (runtime->dom_ui_context) js_dom_set_ui_context(runtime->dom_ui_context);
+    if (runtime->dom_ui_context) dom_set_ui_context(runtime->dom_ui_context);
     // DOM wrapper construction interns runtime property names, so it must run
     // after the common JS name pool becomes dynamic, as it does on the MIR path.
     if (!js_activate_runtime_name_pool()) return ItemError;
@@ -5732,7 +5732,7 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     }
     // DOM globals publish through the active module slab. MIR binds the
     // document only after that slab and its property-name image are ready.
-    if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
+    if (runtime->dom_doc) dom_set_document(runtime->dom_doc);
     Item namespace_obj = ItemNull;
     if (script->is_es_module) {
         namespace_obj = js_module_get(js_make_string(script->reference));
@@ -5991,7 +5991,7 @@ Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
     bool reusing_context = false;
     if (!js_prepare_eval_context(runtime, true, &eval, &reusing_context)) return ItemError;
     (void)eval;
-    if (runtime->dom_ui_context) js_dom_set_ui_context(runtime->dom_ui_context);
+    if (runtime->dom_ui_context) dom_set_ui_context(runtime->dom_ui_context);
     // Static import linkage may compile a Lambda dependency. Seal the JS
     // parser root first so both languages append runtime names through the
     // canonical dynamic child rather than mutating the frozen static table.
@@ -6028,7 +6028,7 @@ Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
         module->loading = false;
         return instantiated;
     }
-    if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
+    if (runtime->dom_doc) dom_set_document(runtime->dom_doc);
     Item imports = js_interp_load_static_imports(runtime, script);
     if (item_is_error(imports)) {
         module->evaluation_error = imports;

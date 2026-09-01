@@ -54,7 +54,7 @@ static bool js_history_runtime_state_ensure() {
 #define js_history_drain_scheduled (js_history_state->drain_scheduled)
 
 static DomDocument* js_history_document(void) {
-    return (DomDocument*)js_dom_get_document();
+    return (DomDocument*)dom_get_document();
 }
 JS_FORWARD_STATIC_ITEM(js_history_string, (const char* value), make_string_item, (value ? value : ""))
 
@@ -94,13 +94,13 @@ static Item js_history_drain_events(void) {
     if (task->dispatch_popstate) {
         Item event = js_create_event("popstate", false, false);
         js_set_key_cstr(event, "state", task->state);
-        js_dom_dispatch_event(window, event);
+        dom_dispatch_event(window, event);
     }
     if (task->dispatch_hashchange) {
         Item event = js_create_event("hashchange", false, false);
         js_set_key_cstr(event, "oldURL", js_history_string(task->old_url));
         js_set_key_cstr(event, "newURL", js_history_string(task->new_url));
-        js_dom_dispatch_event(window, event);
+        dom_dispatch_event(window, event);
     }
     js_history_task_destroy(task);
 
