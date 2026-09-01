@@ -1290,8 +1290,9 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
     if (!script_buf) return;
     strbuf_append_str(script_buf,
         "var window = globalThis;\n"
-        "var jQuery = undefined;\n"
-        "var $ = undefined;\n"
+        // Third-party libraries export these names through window. Do not
+        // predeclare module slots here: later classic scripts must resolve the
+        // live global properties instead of a stale preamble-local undefined.
         // PointerEvent is installed natively; advertise the matching touch
         // capability so libraries select their pointer branch in headless UI.
         "var navigator = {\n"

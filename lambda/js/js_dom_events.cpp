@@ -392,6 +392,12 @@ struct EventTypeCountEntry {
     const char* type;
     int count;
 };
+
+static void event_type_count_entry_free(void* item) {
+    EventTypeCountEntry* entry = (EventTypeCountEntry*)item;
+    if (entry && entry->type) mem_free((void*)entry->type);
+}
+
 HASHMAP_DEFINE_STRKEY(event_type_count, EventTypeCountEntry, type)
 
 // DOM listener registration is semantic realm state. The state capsule is
@@ -601,7 +607,9 @@ static NodeListeners* find_listeners(void* key) {
 // removed or once listener never keeps a later dispatch on the slow path.
 static void note_listener_type(const char* type, int delta) {
     if (!type || !type[0] || delta == 0) return;
-    if (!_type_counts && delta > 0) _type_counts = event_type_count_new(16);
+    if (!_type_counts && delta > 0) {
+        _type_counts = event_type_count_new_with_free(16, event_type_count_entry_free);
+    }
     if (!_type_counts) return;
     EventTypeCountEntry lookup = {type, 0};
     const EventTypeCountEntry* found =
@@ -609,12 +617,22 @@ static void note_listener_type(const char* type, int delta) {
     int old_count = found ? found->count : 0;
     int new_count = old_count + delta;
     if (new_count <= 0) {
-        if (found) hashmap_delete(_type_counts, &lookup);
+        if (found) {
+            const EventTypeCountEntry* removed =
+                (const EventTypeCountEntry*)hashmap_delete(_type_counts, &lookup);
+            if (removed && removed->type) mem_free((void*)removed->type);
+        }
         return;
     }
-    EventTypeCountEntry updated = {found ? found->type : type, new_count};
+
+    // Listener compaction frees listener.type. The dispatch index must own its
+    // key so removing one listener cannot hide peers of the same event type.
+    const char* owned_type = found ? found->type : mem_strdup(type, MEM_CAT_JS_RUNTIME);
+    if (!owned_type) return;
+    EventTypeCountEntry updated = {owned_type, new_count};
     hashmap_set(_type_counts, &updated);
     if (hashmap_oom(_type_counts)) {
+        if (!found) mem_free((void*)owned_type);
         hashmap_free(_type_counts);
         _type_counts = nullptr;
         log_error("js-dom-events: listener type index allocation failed");

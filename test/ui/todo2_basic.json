@@ -20,7 +20,7 @@
 
     {"type": "log", "message": "--- Toggle first todo item ---"},
     {"type": "click", "target": {"selector": ".checkbox"}},
-    {"type": "assert_attribute", "target": {"selector": ".todo-item"}, "attribute": "class", "not_contains": "done"},
+    {"type": "assert_attribute", "target": {"selector": ".todo-item"}, "attribute": "class", "contains": "done"},
 
     {"type": "log", "message": "--- Click + to add item ---"},
     {"type": "click", "target": {"selector": ".add-icon", "index": 1}, "comment": "Use todo-list add-icon (index 0 is the file-panel add-icon which would create a new file)"},

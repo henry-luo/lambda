@@ -5603,7 +5603,7 @@ static Item interp_eval_view_activation(Context* host, Script* module,
     if (setup_ok) {
         for (AstStateEntry* state = view->state; state && setup_ok;
                 state = state->next_state) {
-            NameEntry* entry = interp_view_scope_entry(view->vars, state->name);
+            NameEntry* entry = state->entry;
             if (!entry) {
                 log_error("interp: view state '%s' has no binding entry",
                     state->name ? state->name->chars : "<unnamed>");
