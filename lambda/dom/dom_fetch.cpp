@@ -5,9 +5,9 @@
  * for non-blocking HTTP requests from JavaScript.
  * Returns a Promise<Response> matching the web fetch() API.
  */
-#include "js_runtime.h"
-#include "js_runtime_state.hpp"
-#include "js_event_loop.h"
+#include "../js/js_runtime.h"
+#include "../js/js_runtime_state.hpp"
+#include "../js/js_event_loop.h"
 #include "../jube/jube_node_permission.h"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"

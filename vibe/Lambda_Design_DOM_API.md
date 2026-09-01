@@ -1,6 +1,6 @@
 # Lambda DOM API — one native DOM layer under two realms
 
-> **Status**: **PROPOSAL** (2026-09-01, revised same day). Scope direction set by user 2026-09-01 (§1.3); **ES34 direction set by user 2026-09-01**: the `JubeHostDomAPI` seam is **retained** — it is the dynamic DOM ABI (AST-interpreter dispatch; dynamically-loaded Jube modules such as Python call DOM through it without static linking). **Phase-2 target set by user 2026-09-01** (§7): unify `radiant_module`'s DOM surface and `JubeHostDomAPI` into **one new DOM API** — dedup the API functions *and* the implementations behind them; not this pass. Rulings **ES32–ES38 proposed, not yet ratified**; migration stages **F22–F27 not started**. §2 is descriptive, verified against the tree at 2026-09-01 (post-`b9aaeca81`, F21 landed).
+> **Status**: **RATIFIED — implementation in progress** (2026-09-01). Rulings **ES32–ES38 ratified in full (2026-09-01, user)**; migration stages **F22–F27 in progress** (§5 carries per-stage checkpoints). Scope direction set by user 2026-09-01 (§1.3); **ES34**: the `JubeHostDomAPI` seam is **retained** — it is the dynamic DOM ABI (AST-interpreter dispatch; dynamically-loaded Jube modules such as Python call DOM through it without static linking). **Phase-2 target** (§7): unify `radiant_module`'s DOM surface and `JubeHostDomAPI` into **one new DOM API** — dedup the API functions *and* the implementations behind them; not this pass. §2 is descriptive, verified against the tree at 2026-09-01 (post-`b9aaeca81`, F21 landed).
 > **Role**: the design home for the **native DOM layer's code architecture** — where the DOM/web-platform host algorithms live (`lambda/dom/`), the realm-neutral core vs JS-adapter split, how the Jube `radiant` module and the JS runtime link to that core, and the Lambda-facing `import dom` API. Complements the behavior/dispatch docs, which own *what* the DOM layer does; this doc owns *where it lives and who may call it, how*.
 > **Scope**: file/module layout, symbol namespaces, the host-table linkage question, the core/adapter boundary, and the Lambda `dom` module surface. **Out of scope**: event dispatch semantics (`Lambda_Design_DOM_Dispatch.md`), default-action placement (`Lambda_Design_DOM_Default.md`), state storage and waist semantics (`Lambda_Design_DOM_State.md`), the L3 Obscura-parity package (`Lambda_Design_DOM_Pkg.md` Phase 1+), and the DOM data structures themselves (deferred, §6).
 > **Companion docs**: `vibe/Lambda_Design_Native_Module.md` §8 (POC 1 `radiant-dom` — this proposal executes its carve-out half; the host DOM API redesign is Phase 2, §7), `vibe/Lambda_Design_DOM_Pkg.md` (the four-layer stack L1–L4 and Phase-0 gate this delivers), `vibe/Lambda_Jube_DOM3.md`/`DOM4.md` (declared interfaces, ordinal dispatch), `vibe/radiant/Radiant_Design_Dom_View_Struct.md` (OQ5 — the struct move this doc defers), `doc/dev/js/JS_13_Web_DOM.md`.
@@ -113,9 +113,9 @@ Lambda already holds `dom_node` VMaps (`~` in handlers), already calls member se
 
 ---
 
-## 4. Design & rulings (proposed)
+## 4. Design & rulings (ratified 2026-09-01)
 
-### ES32 (proposed) — `lambda/dom/` is the realm-neutral DOM home
+### ES32 (ratified 2026-09-01) — `lambda/dom/` is the realm-neutral DOM home
 
 All 20 web-platform files move to `lambda/dom/`, renamed by dropping the `js_` prefix:
 
@@ -139,7 +139,7 @@ lambda/dom/
 
 The stems `dom_node`/`dom_element`/`dom_lifecycle` are **reserved** — they belong to the data structures in `lambda/input/css/`, which stay put (user direction; `Radiant_Design_Dom_View_Struct.md` OQ5 reserves this same directory for their eventual move — coherent end state, deferred, ESO77). Build: the files stay in the `lambda-rt` target (new glob + include dirs); no new link target this pass (ESO72).
 
-### ES33 (proposed) — the core/adapter split rule
+### ES33 (ratified 2026-09-01) — the core/adapter split rule
 
 `lambda/dom/` code **may** use the shared runtime's value helpers (map/array/string Item construction and keyed access — the ES12 one-runtime value API) and runtime-state context. It **must not** contain:
 
@@ -173,14 +173,14 @@ What this pass changes *behind* the seam:
 
 What is explicitly **deferred to DOM API Phase 2** (§7): the table's redesign. It exposes too many meticulous per-function slots; Phase 2 reshapes it into a narrow, reviewable host DOM API. Redesigning it now, in the middle of a 28k-line relocation, would couple two risky changes and pre-empt what the `import dom` surface (ES36) will teach about the right shape.
 
-### ES35 (proposed) — one symbol namespace: `dom_*`
+### ES35 (ratified 2026-09-01) — one symbol namespace: `dom_*`
 
 All moved symbols rename `js_dom_*` → `dom_*`; the un-prefixed browser accessors in the moved headers (`js_get_computed_style`, `js_classlist_*`, `js_dataset_*`, `js_document_proxy_*`, `js_storage_*`, `js_match_media*`, `js_cssom_*`, `js_xhr_*`, …) join the `dom_*` family. `js_` remains reserved for the adapter layer (functions whose *contract* is JS shape). Two disciplines ride along:
 
 - **Weak pairs rename atomically** — declaration, empty default, strong definition, and test stub in one change, or radiant-only binaries silently lose their hooks.
 - **String-table sweep** — name-registered tables (JIT import tables, Jube descriptors) resolve by string; a missed rename is a runtime lookup failure, not a link error. The rename stage greps string literals for every renamed symbol before it is called done.
 
-### ES36 (proposed) — the Lambda `import dom` module
+### ES36 (ratified 2026-09-01) — the Lambda `import dom` module
 
 A new Jube **static module `"dom"`** (`lambda/dom/dom_module.cpp`, registered beside `radiant` in `jube_register_builtin_modules()`) exposes the DOM API to Lambda scripts. Bare `import dom` resolves through the Jube registry; no collision with the behavior package, which is only ever imported by full path (`lambda.package.dom.dom`).
 
@@ -201,11 +201,11 @@ A new Jube **static module `"dom"`** (`lambda/dom/dom_module.cpp`, registered be
 
 **Catalog note (vs §7)**: this function list is designed as the **first tranche of the Phase-2 operation catalog** — names, signatures, and clusters chosen so the unification re-homes the registrations without changing the script-visible surface. F26 must not invent operations the catalog would reject (the budget rule applies from day one).
 
-### ES37 (proposed) — peripherals move-and-rename only, for now
+### ES37 (ratified 2026-09-01) — peripherals move-and-rename only, for now
 
 `dom_canvas`/`dom_xhr`/`dom_fetch`/`dom_formdata`/`dom_clipboard`/`dom_history` relocate and rename but keep their JS residue: their surfaces (Promises, JS class objects, ctor publication) are inherently L4-shaped until the async/Promise seam is designed (ESO74). Applying ES33 to them now would either fake a split or stall the carve-out. They are *in* `lambda/dom/` because that is where the web platform lives; they are *exempt* from the purity grep until ESO74 resolves.
 
-### ES38 (proposed) — one implementation per DOM operation
+### ES38 (ratified 2026-09-01) — one implementation per DOM operation
 
 Extends CLAUDE.md rule 13 to this area as a standing invariant: for any DOM operation, the `dom.*` module function, the `radiant.*` waist function, and the JS declared-interface ordinal must bottom out in **the same core function** in `lambda/dom/`. One core implementation — not necessarily one call path: `dom.*` reaches it directly (same target, ES36 linkage note), while `radiant.*` reaches it **through the ES34 seam** (existing table slots/ordinals, as `set_attr`/`closest` already do at `radiant_module.cpp:1205,1211,1514`). The radiant module's overlapping tree functions (`attr`, `set_attr`, `first_element_child`, `next_element_sibling`, `closest`, `parent`, `document_root`, …) keep their behavior-waist role and their `.ls` callers unchanged. A private near-duplicate of core logic found during migration is a defect to fold, not a variant to preserve — folded on the core side, behind the seam. This ruling is the implementation-level half of the §7 unification, enforced from F22 onward so Phase 2 inherits a deduplicated core rather than having to create one.
 

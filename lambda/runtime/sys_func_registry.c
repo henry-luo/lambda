@@ -194,10 +194,10 @@ extern bool target_equal(Target* a, Target* b);
 #ifdef LAMBDA_RUBY
 #include "../module/rb/rb_runtime.h"
 #endif
-#include "../js/js_dom.h"
+#include "../dom/dom.h"
 #include "../js/js_typed_array.h"
 #include "../js/js_event_loop.h"
-#include "../js/js_xhr.h"
+#include "../dom/dom_xhr.h"
 extern Item js_buffer_construct(Item arg, Item encoding);
 // Tune8 §2.5: js_array_indexOf_int fast path retired (0 telemetry emissions);
 // arr.indexOf(int) flows through the generic array method dispatcher now.

@@ -20,7 +20,7 @@ extern "C" {
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/js/js_dom_observers.h"
+#include "../lambda/dom/dom_observers.h"
 
 using namespace std::chrono;
 

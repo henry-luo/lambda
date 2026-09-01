@@ -7,7 +7,7 @@
 
 #include "js_transpiler.hpp"
 #include "../ts/ts_ast.hpp"
-#include "js_dom.h"
+#include "../dom/dom.h"
 #include "js_runtime.h"
 #include "js_typed_array.h"
 #include "js_event_loop.h"

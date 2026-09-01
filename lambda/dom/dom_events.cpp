@@ -8,12 +8,12 @@
  * DomNode pointer. Avoids modifying the DomNode struct.
  */
 
-#include "js_dom_events.h"
-#include "js_dom.h"
-#include "js_dom_selection.h"
-#include "js_runtime.h"
-#include "js_runtime_state.hpp"
-#include "js_class.h"
+#include "dom_events.h"
+#include "dom.h"
+#include "dom_selection.h"
+#include "../js/js_runtime.h"
+#include "../js/js_runtime_state.hpp"
+#include "../js/js_class.h"
 #include "../lambda.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"

@@ -23,11 +23,11 @@
  * naturally skip the polyfills when the natives are present.
  */
 
-#include "js_runtime.h"
-#include "js_runtime_state.hpp"
-#include "js_typed_array.h"
-#include "js_class.h"
-#include "js_dom_events.h"
+#include "../js/js_runtime.h"
+#include "../js/js_runtime_state.hpp"
+#include "../js/js_typed_array.h"
+#include "../js/js_class.h"
+#include "dom_events.h"
 #include "../lambda-data.hpp"
 #include "../module/radiant/radiant_dom_bridge.hpp"
 #include "../runtime/transpiler.hpp"

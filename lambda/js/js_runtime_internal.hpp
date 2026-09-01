@@ -3,9 +3,9 @@
 // js_runtime_internal.hpp - shared declarations for the split JS runtime.
 
 #include "js_runtime.h"
-#include "js_dom.h"
-#include "js_dom_events.h"
-#include "js_cssom.h"
+#include "../dom/dom.h"
+#include "../dom/dom_events.h"
+#include "../dom/dom_cssom.h"
 #include "js_typed_array.h"
 #include "js_event_loop.h"
 #include "js_error_codes.h"

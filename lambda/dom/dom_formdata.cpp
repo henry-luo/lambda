@@ -18,9 +18,9 @@
  * Called from: js_dom.cpp: js_dom_set_document()
  */
 
-#include "js_dom.h"
-#include "js_runtime.h"
-#include "js_class.h"
+#include "dom.h"
+#include "../js/js_runtime.h"
+#include "../js/js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../input/css/dom_element.hpp"

@@ -32,12 +32,12 @@
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/io/mark_builder.hpp" // MarkBuilder for event object construction
-#include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
-#include "../lambda/js/js_dom_events.h" // js_dom_dispatch_event + native event factories
+#include "../lambda/dom/dom.h"      // js_dom_set_document for HTML event handlers
+#include "../lambda/dom/dom_events.h" // js_dom_dispatch_event + native event factories
 #include "../lambda/js/js_runtime.h"   // js_new_object / js_set_key_default / js_array_new / js_array_push
 #include "../lambda/js/js_runtime_state.hpp"
-#include "../lambda/js/js_dom_platform.h"
-#include "../lambda/js/js_dom_observers.h"
+#include "../lambda/dom/dom_platform.h"
+#include "../lambda/dom/dom_observers.h"
 
 // CE-3 follow-up: DataTransfer factory from js_clipboard.cpp (no public
 // header — js_clipboard installs globals through js_dom_set_document). We

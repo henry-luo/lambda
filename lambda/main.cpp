@@ -52,7 +52,7 @@
 #include "input/css/css_engine.hpp"  // CssEngine for CSS extraction
 #include "js/js_event_loop.h"        // v14: event loop drain
 #include "js/js_runtime.h"           // JS result and exception-lane helpers
-#include "js/js_dom.h"               // JS DOM document/session bridge
+#include "dom/dom.h"               // JS DOM document/session bridge
 #include "js/js_transpiler.hpp"      // JsPreambleState for js-test-batch
 #include "js/js_interp.hpp"          // retained AST harness execution
 #include "js/js_exec_profile.h"      // profile flush on the batch _exit path

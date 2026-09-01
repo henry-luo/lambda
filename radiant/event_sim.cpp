@@ -19,7 +19,7 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/runtime-state.h"
-#include "../lambda/js/js_dom.h"
+#include "../lambda/dom/dom.h"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"

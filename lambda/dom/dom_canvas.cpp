@@ -9,9 +9,9 @@
  *   ctx.measureText(text) → { width }
  */
 
-#include "js_runtime.h"
-#include "js_runtime_state.hpp"
-#include "js_class.h"
+#include "../js/js_runtime.h"
+#include "../js/js_runtime_state.hpp"
+#include "../js/js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../runtime/heap_api.h"

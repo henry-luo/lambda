@@ -12,7 +12,7 @@
 #include "../../input/css/selector_matcher.hpp"
 #include "../../core/well_known_markup_names.h"
 #include "../../js/js_class.h"
-#include "../../js/js_dom.h"
+#include "../../dom/dom.h"
 #include "../../js/js_runtime.h"
 #include "../../../radiant/view.hpp"
 #include "../../../radiant/render.hpp"

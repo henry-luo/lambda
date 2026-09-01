@@ -9,7 +9,7 @@
  * - Drain: uv_run(UV_RUN_DEFAULT) — runs until no active handles
  */
 #include "js_event_loop.h"
-#include "js_dom.h"
+#include "../dom/dom.h"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "js_class.h"

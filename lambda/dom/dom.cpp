@@ -8,21 +8,21 @@
  * VMaps owned by the module bridge.
  */
 
-#include "js_dom.h"
-#include "js_dom_events.h"
-#include "js_dom_selection.h"
-#include "js_history.h"
-#include "js_xhr.h"
-#include "js_cssom.h"
-#include "js_runtime.h"
-#include "js_props.h"
-#include "js_property_attrs.h"
-#include "js_runtime_state.hpp"
-#include "js_function.hpp"
-#include "js_interp.hpp"
-#include "js_event_loop.h"
-#include "js_dom_platform.h"
-#include "js_dom_observers.h"
+#include "dom.h"
+#include "dom_events.h"
+#include "dom_selection.h"
+#include "dom_history.h"
+#include "dom_xhr.h"
+#include "dom_cssom.h"
+#include "../js/js_runtime.h"
+#include "../js/js_props.h"
+#include "../js/js_property_attrs.h"
+#include "../js/js_runtime_state.hpp"
+#include "../js/js_function.hpp"
+#include "../js/js_interp.hpp"
+#include "../js/js_event_loop.h"
+#include "dom_platform.h"
+#include "dom_observers.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../jube/jube_registry.h"
@@ -959,8 +959,8 @@ static void reset_dom_wrapper_cache(); // forward declaration
 static void reset_foreign_document_cache(); // forward declaration
 static void reset_live_dom_collections(); // forward declaration
 static void reset_pending_iframe_loads();
-// Phase 6E: text-control helpers are shared with Radiant event/render paths.
-#include "../../radiant/event.hpp"
+// Phase 6E: text-control helpers are shared with Radiant event/render paths
+// (radiant/event.hpp is already included at the top of this file).
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
 
 extern "C" void* js_dom_current_active_text_control(void) {

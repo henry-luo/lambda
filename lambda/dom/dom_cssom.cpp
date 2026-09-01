@@ -5,11 +5,11 @@
  * Uses branded native VMaps for stylesheet/rule/declaration host objects.
  */
 
-#include "js_cssom.h"
-#include "js_dom.h"
-#include "js_runtime.h"
-#include "js_class.h"
-#include "js_object_meta.h"
+#include "dom_cssom.h"
+#include "dom.h"
+#include "../js/js_runtime.h"
+#include "../js/js_class.h"
+#include "../js/js_object_meta.h"
 #include "../runtime/lambda-root-frame.hpp"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"

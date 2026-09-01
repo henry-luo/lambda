@@ -3,7 +3,7 @@
 #include "js_interp_env.h"
 #include "js_runtime_state.hpp"
 #include "js_builtin_catalog.hpp"
-#include "js_dom.h"
+#include "../dom/dom.h"
 #include "js_event_loop.h"
 #include "js_property_attrs.h"
 #include "js_props.h"

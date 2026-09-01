@@ -14,13 +14,13 @@
  * we lazily create the document StateStore on first use.
  */
 
-#include "js_dom_selection.h"
-#include "js_dom.h"
-#include "js_dom_events.h"
-#include "js_event_loop.h"
-#include "js_props.h"
-#include "js_runtime.h"
-#include "js_runtime_state.hpp"
+#include "dom_selection.h"
+#include "dom.h"
+#include "dom_events.h"
+#include "../js/js_event_loop.h"
+#include "../js/js_props.h"
+#include "../js/js_runtime.h"
+#include "../js/js_runtime_state.hpp"
 #include "../lambda.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
@@ -37,7 +37,6 @@
 
 #include "../../radiant/event.hpp"
 #include "../../radiant/view.hpp"
-#include "../../radiant/event.hpp"
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
