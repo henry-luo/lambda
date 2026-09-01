@@ -2904,20 +2904,20 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     }
     if (!s_enabled) { doc->dom_package_loaded = true; return false; }
 
-    // A document with a live JS DOM realm is deferred (ESO27). ES10/ES12 want
-    // the package sharing that realm's one runtime, and doing so no longer
-    // crashes — EO5v2's boundary switching fixed that — but it still fails, for
-    // a reason now identified: module state ids are handed out from a *Runtime*
-    // counter (lambda_module_state_reserve) while the state slabs they index
-    // live on the *EvalContext*, and a compiled module carries the id it was
-    // assigned at transpile time. Loading the package into a runtime whose JS
-    // modules have already sealed those slots trips "sealed layout changed for
-    // module 0" and the package registers no templates at all.
+    // ES12/D8: the package shares a document's one script runtime, whether
+    // it was initialized by a Lambda document or an author script. Module
+    // state is now allocated for the active document context, avoiding the
+    // earlier sealed-layout failure when the page has compiled modules.
     //
-    // That is a core-runtime ownership bug (D8), not a Radiant one, so the
-    // deferral stands until it is fixed. Consequence, now that no native
-    // validator backs it up: a JS page gets no :valid/:invalid.
-    // The document's one script runtime, whichever realm established it (ES12).
+    // The package must not defer a live JS realm. Deferral previously skipped
+    // behavior registration, leaving JS-authored forms without package policy.
+    // Both authoring modes now receive the same behavior templates through the
+    // document-owned runtime.
+    //
+    // The scope below selects that runtime instead of creating a competing
+    // evaluator. Its fallback applies only before the loader stores the
+    // document-owned script runtime.
+    // It remains valid for either document-loader ordering.
     //
     // EO4: dispatch never creates. The evaluator, if this document is to have
     // one, was created and bound at document setup by

@@ -1,8 +1,8 @@
 # Radiant — Events & Input Dispatch
 
-> **Last verified against tree:** 2026-07-15 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-09-01
 
-> **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the interaction *input* half of Radiant: the single funnel `handle_event()` that takes platform input, hit-tests it against the layout view tree, builds a root→target view stack, and fires DOM-style events out to three consumers at once — native default actions, the Lambda/JS handler bridge, and the editing controllers. It covers the `RdtEvent` union and `EventContext` record, the hit-test recursion, mouse/keyboard/IME/scroll/context-menu input, the deterministic `event_sim` replay harness that drives the *same* funnel, and the event-state JSONL log. Timing and animation (the render loop, frame clock, `@keyframes`) are a separate concern documented in [RAD_16 — Animation & Frame Scheduling](RAD_16_Animation_Frame_Scheduling.md).
+> **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the interaction *input* half of Radiant: platform input, IME, automation, and synthetic DOM dispatch construct one native event record and enter the same author-then-UA pipeline. It covers the `RdtEvent` union and `EventContext` record, hit testing, mouse/keyboard/IME/scroll/context-menu input, the deterministic `event_sim` replay harness, and the event-state JSONL log. Timing and animation (the render loop, frame clock, `@keyframes`) are a separate concern documented in [RAD_16 — Animation & Frame Scheduling](RAD_16_Animation_Frame_Scheduling.md).
 >
 > **Primary sources:** `radiant/event.hpp` (event, input-context, logging, context-menu, and scrolling declarations), `radiant/event.cpp` (`handle_event`, targeting, and dispatch), `radiant/event_sim.{cpp,hpp}` (JSON-driven replay/test harness), `radiant/event_state_log.cpp` (JSONL log + `JsonWriter`), `radiant/context_menu.cpp`, `radiant/scroller.cpp`, `radiant/ime_mac.mm`, and `radiant/ime_win.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
@@ -11,9 +11,19 @@
 
 ## 1. Responsibility and the single-funnel principle
 
-Radiant routes *every* input — real GLFW callbacks, native IME composition, and synthesized test events — through one function: `handle_event(UiContext*, DomDocument*, RdtEvent*)` (`event.cpp:6664`). The GLFW callbacks in `window.cpp` (cursor/button/scroll/key/char) build an `RdtEvent` and call it directly (`window.cpp:485/505/519/597/620`); the platform IME shims funnel through the C bridge `radiant_dispatch_editing_composition_event` (`event.cpp:3647`) which itself calls `handle_event` (`event.cpp:3680`); and the automation harness synthesizes events into the *same* call ([§8](#8-event_sim--deterministic-replay--ui-test-harness)). There is exactly one production input path.
+Radiant routes real GLFW callbacks, native IME composition, automation, and
+synthetic DOM events to one logical dispatch pipeline. `handle_event` translates
+platform input after hit testing; editing/IME and `event_sim` use the matching
+event builders; `dispatchEvent()`/`el.click()` enter through the synthetic
+bridge. Every path creates the ES24 native record, runs the ES22 author tier,
+settles cancellation, then reaches the ES29 UA tier only when not prevented.
+The handlers mutate state, and S12.1.3 regeneration/reconciliation runs in the
+settle stage rather than from a second dispatcher.
 
-The design rationale is fidelity: because the test harness exercises the identical `handle_event`, a JSON-scripted regression test hits every real dispatch, hit-test, and default-action site. The cost is that `handle_event` is a single ~2900-line switch over `EventType` and `event.cpp` is the largest interaction file in the tree (~9,554 lines / 440KB). This monolith is the recurring theme of [§10](#10-known-issues--future-improvements).
+This keeps automation representative without requiring its historical
+first-claim bridge: its event builders feed the same record-backed entry as
+trusted input. `handle_event` remains a large per-`EventType` translation
+switch; that size is a separate maintainability concern in [§10](#10-known-issues--future-improvements).
 
 `handle_event` short-circuits early for documents that cannot receive DOM events: it returns if there is no `doc`, no content at all, or — for PDF documents which have a `view_tree` but no `html_root` — after logging "PDF document - skipping DOM event handling" (`event.cpp:6674-6683`). Otherwise it calls `event_context_init` (`event.cpp:5040`), opens an event-state-log cascade via `state_begin_event_cascade` (`event.cpp:6688`), emits the raw input record (`event.cpp:6689`), and switches on the event type.
 
@@ -36,7 +46,7 @@ The design rationale is fidelity: because the test harness exercises the identic
 - **Input + resolved target**: the `RdtEvent event` copy, the hit `target` `View*`, the `target_text_rect` and `target_text_offset` (with a `_valid` flag) for text-leaf hits, and the `offset_x`/`offset_y` of the pointer within the target.
 - **Style context** carried down the hit-test recursion: `BlockBlot block` (the accumulated coordinate origin) and the current `FontBox font`.
 - **Effects output** applied by the caller after dispatch: `new_cursor` (a `CssEnum`), `new_url`/`new_target` (link navigation), and `need_repaint`.
-- **`default_prevented`** (`event.hpp`) — the JS `preventDefault()` signal. The bridge sets it when a scripted listener calls `event.preventDefault()`, and native default-action sites (link nav, checkbox toggle, radio select, video play/pause) check it before running their default. This is the unification seam between the JS handler world and Radiant's native behaviors.
+- **`dom_event` / `default_prevented`** (`event.hpp`) — the current ES24 native record and its cancellation result. JS `preventDefault()` and the Lambda `'prevent-default'` verdict write the same record state; the UA tier reads it only after the author cascade has settled (ES22/ES29).
 - **Editing / clipboard plumbing**: `paste_text`, a `caret_pos_override` (so the cut default action can report the selection start before it collapses the live selection), and an `editing_target_ranges` snapshot so `InputEvent.getTargetRanges()` uses pre-mutation ranges.
 - **Iframe bridging**: `iframe_container` and `target_document`, set when the hit target lands inside an embedded iframe document so events can propagate back across the boundary ([§3](#3-hit-testing-the-view-tree)).
 
@@ -60,13 +70,21 @@ The recursion restores the parent's coordinate/font context on the way out, but 
 
 ---
 
-## 4. Dispatch — view stack, no capture phase
+## 4. Dispatch — one record, author tier, UA tier
 
-Once a target is resolved, `build_view_stack(EventContext*, View*)` (`event.cpp:1229`) walks `view->parent` from the target up to the root, **prepending** each node, producing a root→target `ArrayList`. `fire_events(EventContext*, ArrayList*)` (`event.cpp:1307`) then iterates that list **top-down** (root first), dispatching each entry by `view_type` to `fire_block_event`/`fire_inline_event`/`fire_text_event` (`event.cpp:1283`/`1249`/`1238`).
+The shared event builders in `event.cpp` construct one native DOM record and
+call `js_dom_dispatch_event`. Its one propagation walk owns the target →
+ancestor → document → window path. JS capture listeners run on the capture
+pass; at target/bubble each node's JS listeners run before its producing Lambda
+template handler. The record carries phase, current target, cancellation, and
+stop state across both realms (ES23/ES24).
 
-There is **no separate capture phase** and no bubbling re-walk: dispatch is a single stack-down pass. `fire_inline_event` is where anchor-tag default navigation lives — on `RDT_EVENT_MOUSE_DOWN` at an `<a>` it reads `href`/`target` into `new_url`/`new_target`, *unless* `default_prevented` is set (`event.cpp:1258-1279`). `fire_block_event` runs scroll-pane behaviors (wheel scroll, thumb mouse-down/up/drag) for blocks that own a scroller (`event.cpp:1287-1304`). Cursor resolution also happens here — text views default the cursor to `CSS_VALUE_TEXT`, inline views honor `in_line->cursor`.
-
-The scriptable-listener path is separate from `fire_events` and runs earlier in each `handle_event` branch: `dispatch_lambda_handler` (`event.cpp:1951`). It walks the target's DOM ancestry, and for each element with a `native_element` performs a `render_map_reverse_lookup` to find which Lambda template produced it, then invokes the matching `TemplateHandlerEntry` by event name (`event.cpp:1980-1990`). Event objects are built by `build_lambda_event_map` (`event.cpp:1479`) as a Lambda map `{type, target_class, target_tag, x, y}` plus `input_type`/`data`/`key`/`char` for the relevant kinds. This bridge, its `EvalContext` restoration dance around the JIT, and the full JS `addEventListener` integration are documented in [RAD_21 — JS Scripting Integration](RAD_21_JS_Scripting_Integration.md); here the only load-bearing seam is that the bridge sets `default_prevented` on `EventContext`.
+After author dispatch, `radiant_dispatch_built_event` performs the ES29
+cancellation check and invokes the behavior registry at most once. The behavior
+template or native fallback then owns the default action; handler mutations are
+settled through the S12.1.3 regeneration path. Hit-test-only work such as
+cursor selection and scrollbar geometry stays native and is not a second event
+propagation path.
 
 ---
 
@@ -80,7 +98,12 @@ The scriptable-listener path is separate from `fire_events` and runs earlier in 
 
 ## 6. Keyboard, IME, and text input
 
-`RDT_EVENT_KEY_DOWN` (`event.cpp:8217`) handles editing shortcuts and caret navigation. Clipboard combos (Cmd/Ctrl+C/X/V), select-all, formatting (B/I/U), and undo/redo (Z/Y) are matched against `RDT_KEY_*` plus `RDT_MOD_*`, and navigation keys drive caret movement. Modern editing routes through the editing-controller / transaction path (comment at `event.cpp:9411`); a legacy contenteditable key-path remains with unfinished `TODO: delete selected text` / `TODO: insert character at caret` stubs (`event.cpp:9303/9311/9316/9488/9492`) that the controller path supersedes. `RDT_EVENT_KEY_UP` (`event.cpp:9341`) is lightweight. `RDT_EVENT_TEXT_INPUT` (`event.cpp:9381`) delivers a committed Unicode codepoint (from GLFW's char callback) into the focused editing surface.
+`RDT_EVENT_KEY_DOWN` constructs a shared keyboard record before the package's
+keyboard policy chooses caret, editing, scroll, or activation behavior. The
+native layer keeps platform key translation, focus/selection geometry, and
+paint; package handlers own policy under S12.1.3. `RDT_EVENT_KEY_UP` is
+lightweight, while `RDT_EVENT_TEXT_INPUT` delivers a committed Unicode
+codepoint into the focused editing surface.
 
 The three `RDT_EVENT_COMPOSITION_*` events (`event.cpp:9367`) carry native IME preedit/commit text. IME is platform-native and does **not** flow through GLFW keys — it enters at the shared C bridge `radiant_dispatch_editing_composition_event` (`event.cpp:3647`), which resolves the editing surface from focus/caret and re-enters `handle_event` with a `CompositionEvent`. On macOS, `ime_mac.mm` swaps GLFW's content-view class at runtime (`object_setClass`) with a subclass overriding the four `NSTextInputClient` methods (`setMarkedText:`/`insertText:`), forwarding to `ime_dispatch_editing` (`ime_mac.mm:78`) and falling back to `super` for non-editing elements; it deliberately avoids `view.hpp` to dodge AppKit's `Rect` clash (`ime_mac.mm:11-14`, `RADIANT_CAST_OK` at `ime_mac.mm:69`). On Windows, `ime_win.cpp` intercepts `WM_IME_STARTCOMPOSITION`/`WM_IME_COMPOSITION`/`WM_IME_ENDCOMPOSITION` (`ime_win.cpp:125`) and positions the candidate window via `ImmSetCandidateWindow` (`ime_win.cpp:89`) from `radiant_editing_focused_caret_rect`. The concrete editing semantics of a composition (marked-text ranges, commit) belong to [RAD_18 — Editing, Selection & DOM Ranges](RAD_18_Editing_Selection_Ranges.md).
 
@@ -98,11 +121,11 @@ The native context menu (`event.hpp`) is a fixed 5-item popup — Cut/Copy/Paste
 
 <img alt="event_sim harness structure: scenario JSON to process_sim_event to handle_event and assertions" src="diagram/rad15_event_sim_harness.svg" width="720">
 
-`event_sim.cpp` is **not** production input. It is a JSON-driven test-automation and deterministic-replay harness, and it is enormous (~5,902 lines / 258KB) for one reason: it is a single giant `process_sim_event` (`event_sim.cpp:3608`) dispatch plus dozens of `assert_*` implementations. Its value is that it drives the *same* `handle_event` real windows use, so a scripted scenario is a high-fidelity regression test.
+`event_sim.cpp` is **not** production input. It is a JSON-driven test-automation and deterministic-replay harness whose entry helpers now feed the same record-backed dispatch builders as trusted input. Its value is that a scripted scenario exercises the same author/UA boundary, cancellation record, and settle stage as a real event.
 
 **Loading.** `event_sim_load` (`event_sim.cpp:1962`) parses a scenario JSON (the full schema is documented in the `event_sim.hpp` header comment, `event_sim.hpp:8-70`) into an `EventSimContext` holding an `ArrayList` of `SimEvent` (`event_sim.hpp:165`); `event_sim_load_replay_log` (`event_sim.cpp:2213`) instead loads an event/state JSONL replay so a recorded session can be re-run exactly (`SIM_EVENT_REPLAY_INPUT` replays the raw `input.raw` record verbatim).
 
-**Ticking.** On each render tick, `event_sim_update` pulls the next `SimEvent` and calls `process_sim_event` (`event_sim.cpp:3608`), which resolves targets by CSS selector / visible text / index via `find_element_by_selector` (`event_sim.cpp:314`/`418`) and then either synthesizes an `RdtEvent` into `handle_event` (`sim_mouse_move` `event_sim.cpp:2913`, `sim_mouse_button` `2924`, `sim_key` `2942`, `sim_scroll` `2954`) or runs an assertion.
+**Ticking.** On each render tick, `event_sim_update` resolves a target by CSS selector, visible text, or index, then runs the corresponding native input or shared event-builder entry before evaluating assertions. Simulator-only selection and inspection actions remain test tooling; they do not bypass author or UA dispatch for user-visible events.
 
 **Action vocabulary** (`SimEventType`, `event_sim.hpp:83`): primitives (`mouse_move/down/up/drag`, `key_press/down/up/combo`, `scroll`), high-level actions (`click`, `dblclick`, `type`, `focus`, `check`, `select_option`, `resize`, `drag_and_drop`, `editing_text_drag_drop`, `paste_text`, `ime_compose`, `set_editing_selection/value`), navigation (`navigate`, `navigate_back`, `switch_frame`), and utilities (`log`, `render`, `dump_caret`, `advance_time`, webview eval/wait).
 
@@ -125,10 +148,8 @@ The writer is a fixed-buffer, alloc-free `JsonWriter` (`event.hpp`) that builds 
 1. **Duplicated layer-mode webview hit-test block.** The `WEBVIEW_MODE_LAYER` inject block appears twice back-to-back in `target_block_view` — `event.cpp:1029-1051` and again `event.cpp:1053-1075`, byte-for-byte identical. The second is dead (the first `goto RETURN`s on a hit) and is almost certainly a copy-paste bug; the duplicate should be deleted. *(Note: the scan digest cited these as `~1056-1077`/`~1079-1100`; the current lines are `~1029-1075`.)*
 2. **z-index is not honored in positioned hit-testing.** Absolute/fixed children are walked in DOM/list order (`event.cpp:1109-1119`, `// todo: should target based on z-index order` at `event.cpp:1113`), so overlapping positioned elements can hit-test to the wrong target. Hit-testing should walk the paint order that [RAD_12 — Paint IR & Display List](RAD_12_Paint_IR_Display_List.md) establishes.
 3. **Legacy contenteditable key path has unfinished stubs.** `event.cpp:9303/9311/9316/9488/9492` carry `TODO: delete selected text` / `TODO: insert character at caret` in a legacy key handler superseded by the editing-controller/transaction path (comment at `event.cpp:9411`). The dead path should be removed so the transaction path is the only key→edit route.
-4. **No capture phase, and dispatch is not a full DOM event model.** `fire_events` (`event.cpp:1307`) is a single root→target down-walk with no capture and no bubble re-walk; `preventDefault` is modeled as one `EventContext` flag rather than per-listener propagation control. Scripts expecting standard capture/bubble semantics ([RAD_21](RAD_21_JS_Scripting_Integration.md)) are not fully served.
-5. **`handle_event` monolith.** `event.cpp` is ~9,554 lines / 440KB and `handle_event` is a ~2,900-line switch; `event_sim.cpp` is ~5,902 lines. High cognitive load. Splitting per-`EventType` handlers into separate translation units would help without changing the single-funnel contract.
-6. **`native_element`-based JS lookup is transitional.** `dispatch_lambda_handler` (`event.cpp:1951`) relies on `DomElement::native_element` and `render_map_reverse_lookup`; `native_element` is itself flagged transitional in [RAD_01](RAD_01_View_and_DOM_Model.md). If it is removed, the bridge's reverse-lookup must move to `dom_element_to_element()`.
-7. **`event_sim_print_results` uses `fprintf(stderr,...)`.** Scoped to the test harness, but a deviation from the project no-`fprintf` guidance.
+4. **`handle_event` monolith.** `event.cpp` is ~9,554 lines / 440KB and `handle_event` is a ~2,900-line switch; `event_sim.cpp` is ~5,902 lines. High cognitive load. Splitting per-`EventType` handlers into separate translation units would help without changing the single-funnel contract.
+5. **`event_sim_print_results` uses `fprintf(stderr,...)`.** Scoped to the test harness, but a deviation from the project no-`fprintf` guidance.
 
 ---
 
@@ -138,7 +159,7 @@ The writer is a fixed-buffer, alloc-free `JsonWriter` (`event.hpp`) that builds 
 |---|---|
 | `radiant/event.hpp` | `EventType` enum, `RdtEvent` union + payload structs, `RDT_KEY_*`/`RDT_MOD_*`, `MouseState`. |
 | `radiant/event.hpp` | `EventContext` — the per-event working record (target, effects, `default_prevented`, editing/iframe plumbing). |
-| `radiant/event.cpp` | `handle_event` funnel, `target_block_view`/`target_html_doc` hit-test, `build_view_stack`, `fire_events`, `dispatch_lambda_handler`, per-EventType handling, IME bridge, event-log emitters. |
+| `radiant/event.cpp` | `handle_event` translation funnel, hit testing, shared event builders, author/UA dispatch boundary, per-EventType handling, IME bridge, and event-log emitters. |
 | `radiant/event.hpp` / `scroller.cpp` | Scrollbar hit-test/drag/wheel; scroll position written to the StateStore, not the view. |
 | `radiant/event.hpp` / `context_menu.cpp` | Fixed 5-item text-control context menu and its `ContextMenuEditHooks` callback table. |
 | `radiant/ime_mac.mm` | macOS `NSTextInputClient` shim → shared composition bridge. |

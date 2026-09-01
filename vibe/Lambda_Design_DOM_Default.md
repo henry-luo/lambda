@@ -55,26 +55,26 @@ ES25/ES26).
 
 ### 2.1 The pipeline
 
-Dispatch order for a discrete event on a target element (ES5, conforming to DOM_Pkg decision 2):
+Dispatch order for a discrete event on a target element (ES5, ES22–ES29):
 
 ```
-[N] hit test → target path → trusted event construction
-[N] 3-phase dispatch: JS listeners (capture / target / bubble)
-[N] app-template handler dispatch (reverse render-map path — author level)
-      │  either layer may cancel: defaultPrevented / 'prevent-default'
+[N] hit test → one native event record → target path
+[N] AUTHOR TIER — one propagation cascade:
+      JS capture → JS target/bubble → Lambda template at that node
+      │  either participant may cancel: preventDefault / 'prevent-default'
       ▼
-[N] defaultPrevented? → done
-[L] BEHAVIOR DISPATCH — at most one Lambda call per discrete event:
+[N] record.default_prevented? → settle only
+[L] UA TIER — at most one behavior Lambda call per discrete event:
       walk target→root; first element whose behavior entry declares this
       event type wins (most specific template for that element)
 [M] handler effects via waist primitives only
-[N] cascade settle → restyle / reflow / repaint scheduling
+[N] S12.1.3 settle → restyle / reflow / repaint scheduling
 ```
 
 Three properties hold it together:
 
 - **One-call ceiling and hot-path guard.** A native per-event-type bitmask keeps `mousemove` / `pointermove` / `scroll` / `wheel` out of behavior dispatch unless a loaded template declares such a handler.
-- **Handler verdicts are return values** (ES15): `'pass'` declines — the walk continues and the native fallback for that class stays in charge; `'prevent-default'` claims and suppresses the remaining default actions; any other return means claimed.
+- **Handler verdicts are tier-specific return values** (ES15/ES29): at the author tier only `preventDefault()` / `'prevent-default'` suppresses the UA tier; participation and `'pass'` do not. At the UA tier, `'pass'` declines so the native fallback for that class stays in charge; `'prevent-default'` suppresses the remaining default actions; any other return claims.
 - **Fallback until claimed** (ES5/ES7): each native default-action block is guarded by `radiant_behavior_claims_event`, so behavior is untouched until the package registers, and `RADIANT_DOM_PKG=0` disables the package wholesale. Note the retirement direction: once a class is proven state-equivalent, the *native* half is deleted (F1b/F2b/F3), and after that `'pass'` means **nothing happens** — see §5.6.
 
 ### 2.2 Two realms, one canonical state

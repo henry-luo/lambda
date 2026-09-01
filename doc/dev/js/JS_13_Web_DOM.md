@@ -1,6 +1,6 @@
 # LambdaJS — Web Platform: DOM, CSSOM, Events & Fetch
 
-> **Last verified against tree:** 2026-08-14 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-09-01
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the Web-platform host objects: the DOM bridge to Radiant's `DomNode`/`DomElement` tree, element/document API dispatch, CSS selector queries and layout-metric reads, the 3-phase event system, the CSSOM, OffscreenCanvas text measurement, XHR/fetch/FormData/clipboard, and Selection/Range.
 >
@@ -79,15 +79,24 @@ The mutation kind is classified so a future incremental engine can scope work: c
 
 **Listener storage is external** — the `DomNode` struct is never modified. A file-static flat array `NodeListenerEntry _entries[]` maps a `void* key` → `NodeListeners {EventListener* items; count; capacity}` (`:230`–`244`). `get_event_target_key` (`:251`) derives the key: the `DomNode*` for elements, `&_document_sentinel` for the document proxy, `&_window_sentinel` for the global, or the object pointer itself for a plain EventTarget. Each `EventListener` (`:218`) carries the type string, callback, `capture`/`once`/`passive` flags, an `AbortSignal`, and a `removed` tombstone. `get_or_create_listeners`/`find_listeners` (`:277`,`:305`) **linearly scan** `_entries` (geometric grow, `:286`) — O(n) in distinct targets.
 
-**3-phase dispatch.** `js_dom_dispatch_event` (`:1673`):
-1. **Validate** — a null/non-Event argument throws TypeError (`:1674`); a re-entrant dispatch (the `__dispatch_flag` per-event slot) throws InvalidStateError (`:1769`).
-2. **Pre-activation** — for a `click` whose class is `MouseEvent`/`PointerEvent`/`WheelEvent`, toggle checkbox/radio checkedness and identify submit/reset activation before listeners run (HTML §6.4.4, `:1710`).
-3. **Path** — `build_path` collects `target → ancestors → document → window` into `path[0..n-1]` (`:1800`); `window.event` is set to the in-flight event for the duration (`:1815`).
-4. **Phases** — **CAPTURING** fires capture-only listeners from `path[n-1]` down to `path[1]` (`:1822`); **AT_TARGET** fires `path[0]` capture-then-bubble, both reported with `eventPhase == 2` (`:1830`); **BUBBLING**, only if `event.bubbles`, fires non-capture listeners up from `path[1]` (`:1837`).
-5. **Per-node firing** — `fire_listeners` (`:1554`) runs the matching `on<type>` IDL handler first, then snapshots the matching, non-tombstoned, correct-phase listeners into an `alloca` array so concurrent add/remove during dispatch cannot perturb iteration (`:1611`); a non-true return from a cancelable handler sets the canceled flag (`:1596`).
-6. **Teardown** — `eventPhase` → 0, `currentTarget` → null, stop flags reset; the canceled flag *persists* across dispatches (`:1846`).
+**One-record, two-tier dispatch.** `js_dom_dispatch_event` first validates the
+event and its `__dispatch_flag`, then routes a native DOM record through
+`radiant_dispatch_synthetic_dom_event` when necessary. The shared engine owns
+the target → ancestor → document → window path. Its author tier fires capture
+listeners, target listeners, and bubble listeners; after each node's JS
+target/bubble listeners it invokes that node's Lambda template participant.
+The UA tier runs only after the author cascade has settled and only when the
+record is not default-prevented (ES22–ES29).
 
-**Propagation control.** `stopPropagation`/`stopImmediatePropagation`/`cancelBubble` are checked through both thread-local mirrors (`_stop_propagation`, `_stop_immediate`, `:610`) and per-event flag slots (`__stop_prop`/`__stop_imm`); the `_STOP_PROP` macro (`:1817`) gates each phase boundary, and `_STOP_IMM` (`:1583`) gates between listeners on a single node. Subclass constructors (`js_ctor_mouse_event_fn`, etc., `js_dom_events.h:97`) and native-input factories (`js_create_native_mouse_event`, etc., `:113`) build spec-shaped events (`isTrusted`, `bubbles`) that flow through the same dispatcher.
+`fire_listeners` snapshots matching listeners before invocation, preserving
+`once`, removal, and `AbortSignal` behavior under mutation. The one native
+record carries `eventPhase`, `currentTarget`, `default_prevented`, and the
+stop state for both realms through the D3.4.7/D7.4.1–D7.4.4 host bridge.
+`stopPropagation`/`stopImmediatePropagation` read only `__stop_prop` and
+`__stop_imm` on that record; the former thread-local mirrors are retired.
+Teardown clears the dispatch/stop state while preserving cancellation according
+to the DOM event contract. F19 removed the former JS-only activation pass, so
+checkbox/radio/popover policy is the shared UA-tier claim protocol instead.
 
 ---
 
@@ -131,7 +140,6 @@ Measurement uses **Lambda's unified font engine** (`lib/font/`): a singleton `Fo
 4. **Text segmentation remains narrow; Bidi is absent.** `Intl.Segmenter` is a construct-only callable with a realm-local prototype and a basic segment operation, sufficient for current editor libraries, but it is not a complete ICU-grade implementation. There is no bidirectional-text algorithm; FormData/clipboard direction remains hard-coded and canvas fallback width is a per-character heuristic.
 5. **`js_dom.cpp` size & per-access logging.** The file is ~9,500 lines with ~50 `log_debug` call sites on hot get/method paths (e.g. every `js_dom_get_property` on a non-node logs, `:5340`); the `strcmp` ladder in `js_dom_get_property` re-tests every property name linearly per access. Both add avoidable per-access overhead in tight DOM loops — see [JS_15 — Performance](JS_15_Performance.md).
 6. **O(n) listener and wrapper storage.** Event listeners live in a flat `_entries` array scanned linearly by target key (`js_dom_events.cpp:277`), and the DOM wrapper identity cache is a linked list of chunks scanned linearly per wrap (`js_dom.cpp:820`). Documents with many distinct event targets or many wrapped nodes degrade quadratically. *Improvement:* hash both keyed structures.
-7. **Transitional dual propagation state.** Stop-propagation tracks both thread-local booleans and per-event flag slots (`js_dom_events.cpp:610`,`:1794`), labeled "legacy thread-locals — transitional"; a single source of truth (the event slots) is the intended end state.
 
 ---
 
