@@ -688,9 +688,10 @@ int jube_member_get(Item receiver, Item key, Item* out) {
         *out = jube_undefined_item();
         return 1;
     }
-    // prototype-chain fallthrough: patched prototype members and inherited
-    // Object.prototype methods must stay reachable on declared types
-    Item proto = jube_type_prototype_for(trec);
+    // Use the receiver-aware hook: DOM event subclasses carry their exact
+    // realm prototype on the wrapper, while the type-wide fallback loses it.
+    Item proto = ItemNull;
+    jube_member_prototype(receiver, &proto);
     if (get_type_id(proto) == LMD_TYPE_MAP) {
         *out = jube_internal_host_api()->value->property_get(proto, key);
         return 1;

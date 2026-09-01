@@ -635,16 +635,13 @@ function _wpt_patch_text_field(el) {
 
 function _wpt_install_text_field_shims() { /* no-op, see _wpt_patch_text_field */ }
 
-// EditorTestUtils — minimal subset used by selection WPT tests. Now backed by
-// the native text-control selection model. Wrapped in `var` rather than a
-// function declaration so that tests which include the real
-// /editing/include/editor-test-utils.js (which declares
-// `class EditorTestUtils`) can shadow this binding without the JS runtime
-// throwing on duplicate declaration.
-var EditorTestUtils = function(el) {
+// EditorTestUtils — minimal subset used by selection WPT tests. Install the
+// fallback through the global object so WPT's later lexical class declaration
+// can replace it without a duplicate global binding.
+var _wpt_EditorTestUtils = function(el) {
     this.el = el;
 };
-EditorTestUtils.prototype._move_word = function(dir) {
+_wpt_EditorTestUtils.prototype._move_word = function(dir) {
     if (!this.el) return;
     var v = this.el.value;
     if (typeof v !== "string") v = "";
@@ -658,15 +655,18 @@ EditorTestUtils.prototype._move_word = function(dir) {
         this.el.selectionEnd = pos;
     }
 };
-EditorTestUtils.prototype.sendMoveWordLeftKey = function() {
+_wpt_EditorTestUtils.prototype.sendMoveWordLeftKey = function() {
     this._move_word(-1);
     return Promise.resolve();
 };
-EditorTestUtils.prototype.sendMoveWordRightKey = function() {
+_wpt_EditorTestUtils.prototype.sendMoveWordRightKey = function() {
     this._move_word(1);
     return Promise.resolve();
 };
-EditorTestUtils.prototype.sendKey = function() { return Promise.resolve(); };
+_wpt_EditorTestUtils.prototype.sendKey = function() { return Promise.resolve(); };
+if (typeof globalThis !== "undefined" && globalThis) {
+    globalThis.EditorTestUtils = _wpt_EditorTestUtils;
+}
 
 // ---------------------------------------------------------------------------
 // WPT testdriver shim — `test_driver.click(elem)` simulates a real user
