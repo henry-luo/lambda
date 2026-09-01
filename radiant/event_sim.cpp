@@ -84,6 +84,7 @@ extern __thread Context* input_context;
 void parse_json(Input* input, const char* json_string);
 
 static bool g_replay_assert_state = false;
+static const char* g_event_result_path = NULL;
 
 static bool sim_focus_element_with_js_runtime(DomDocument* doc, View* target) {
     if (!doc || !target) {
@@ -152,6 +153,10 @@ void event_sim_set_replay_assert_state(bool assert_state) {
     g_replay_assert_state = assert_state;
 }
 
+void event_sim_set_result_path(const char* result_path) {
+    g_event_result_path = result_path;
+}
+
 static EventSimContext* event_sim_create_context() {
     g_pending_input_turns = 0;
     EventSimContext* ctx = (EventSimContext*)mem_calloc(1, sizeof(EventSimContext), MEM_CAT_LAYOUT);
@@ -171,6 +176,7 @@ static EventSimContext* event_sim_create_context() {
     ctx->pass_count = 0;
     ctx->fail_count = 0;
     ctx->test_name = NULL;
+    ctx->result_path = g_event_result_path ? mem_strdup(g_event_result_path, MEM_CAT_LAYOUT) : NULL;
     ctx->device_scale = 1.0f;
     ctx->default_timeout = 2000;
     ctx->replay_assert_state = g_replay_assert_state;
@@ -2434,6 +2440,7 @@ void event_sim_free(EventSimContext* ctx) {
     if (ctx->replay_expected_focus_stable_id) mem_free(ctx->replay_expected_focus_stable_id);
     if (ctx->replay_expected_caret_stable_id) mem_free(ctx->replay_expected_caret_stable_id);
     if (ctx->result_file) fclose(ctx->result_file);
+    if (ctx->result_path) mem_free(ctx->result_path);
     if (ctx->event_arena) mem_arena_destroy(ctx->event_arena);
     mem_free(ctx);
 }
@@ -6165,6 +6172,22 @@ void event_sim_print_results(EventSimContext* ctx) {
         fprintf(stderr, " Result: %s\n", ctx->fail_count == 0 ? "PASS" : "FAIL");
     }
     fprintf(stderr, "========================================\n");
+
+    // The human summary remains useful for local runs, but the unified UI
+    // runner consumes this stable protocol instead of scraping presentation
+    // text. Keep the schema intentionally small so new assertions are additive.
+    if (ctx->result_path && ctx->result_path[0]) {
+        FILE* result = fopen(ctx->result_path, "wb");
+        if (result) {
+            fprintf(result,
+                    "{\"version\":1,\"events\":%d,\"assertions\":{\"passed\":%d,\"failed\":%d},\"result\":\"%s\"}\n",
+                    ctx->current_index, ctx->pass_count, ctx->fail_count,
+                    ctx->fail_count == 0 ? "PASS" : "FAIL");
+            fclose(result);
+        } else {
+            log_error("event_sim: failed to write machine result '%s'", ctx->result_path);
+        }
+    }
 
     // Log file as well
     log_info("event_sim: results - %d events, %d assertions passed, %d failed",

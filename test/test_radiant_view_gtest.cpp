@@ -24,13 +24,11 @@ struct RadiantViewCase {
     const char* test_name;
     const char* label;
     const char* path;
-    const char* event_path;
 };
 
 struct RadiantViewCaseResult {
     bool executed;
     bool missing_path;
-    bool missing_event_path;
     bool has_layout_prof;
     bool has_render_prof;
     bool has_peak_footprint;
@@ -40,27 +38,21 @@ struct RadiantViewCaseResult {
 };
 
 static const RadiantViewCase g_radiant_view_cases[] = {
-    {"RadiantViewTest.LoadsPngAsHeadlessView", "png", "test/layout/data/res/sample1.png", nullptr},
-    {"RadiantViewTest.LoadsJpegAsHeadlessView", "jpg", "test/layout/data/res/sample1.jpg", nullptr},
-    {"RadiantViewTest.LoadsGifAsHeadlessView", "gif", "test/layout/data/res/hn_s.gif", nullptr},
-    {"RadiantViewTest.LoadsSvgAsHeadlessView", "svg", "test/layout/data/res/hn_y18.svg", nullptr},
-    {"RadiantViewTest.LoadsHtmlAsHeadlessView", "html", "test/layout/data/page/sample1.html", nullptr},
-    {"RadiantViewTest.LoadsXmlAsHeadlessView", "xml", "test/input/test.xml", nullptr},
-    {"RadiantViewTest.LoadsMarkdownAsHeadlessView", "markdown", "test/input/comprehensive_test.md", nullptr},
-    {"RadiantViewTest.LoadsMarkdownMathAsHeadlessView", "markdown_math", "test/input/simple_math_test.md", nullptr},
-    {"RadiantViewTest.LoadsWikiAsHeadlessView", "wiki", "test/input/test.wiki", nullptr},
-    {"RadiantViewTest.LoadsLatexShowcaseAsHeadlessView", "latex_showcase", "test/input/latex-showcase.tex", nullptr},
-    {"RadiantViewTest.LoadsMathIntensiveLatexAsHeadlessView", "latex_math_intensive", "test/input/math_intensive_test.tex", nullptr},
-    {"RadiantViewTest.LoadsYamlAsHeadlessView", "yaml", "test/input/more_test.yaml", nullptr},
-    {"RadiantViewTest.LoadsLambdaReportAsHeadlessView", "lambda_report", "test/lambda/complex_iot_report_html.ls", nullptr},
-    {"RadiantViewTest.LoadsLambdaChartDashboardAsHeadlessView", "lambda_chart_dashboard", "test/lambda/chart/chart_dashboard.ls", nullptr},
-    {"RadiantViewTest.LoadsPdfAsHeadlessView", "pdf", "test/input/raw_commands_test.pdf", nullptr},
-    {"RadiantViewTest.LoadsPdfIntoIframeAfterLinkClickWithNoLog", "pdf_iframe", "test/html/index.html", "test/view/radiant_view_pdf_iframe.json"},
-    {"RadiantViewTest.LoadsMarkdownIntoIframeAfterLinkClickWithNoLog", "markdown_iframe", "test/html/index.html", "test/ui/radiant_view_markdown_iframe.json"},
-    {"RadiantViewTest.LoadsPngIntoIframeAfterLinkClickWithNoLog", "png_iframe", "test/html/index.html", "test/view/radiant_view_png_iframe.json"},
-    {"RadiantViewTest.KeepsIframeSizedAfterPdfThenSvgTargetNavigation", "iframe_pdf_svg_sequence", "test/html/index.html", "test/view/radiant_view_iframe_pdf_svg_sequence.json"},
-    {"RadiantViewTest.RecascadesLambdaReportInIframeDuringScrollHover", "lambda_report_iframe_scroll_hover", "test/html/index.html", "test/view/radiant_view_lambda_report_iframe_hover.json"},
-    {"RadiantViewTest.ResetsGlyphCacheAcrossIframeDocumentNavigation", "iframe_font_navigation", "test/html/index.html", "test/view/radiant_view_iframe_font_navigation.json"},
+    {"RadiantViewTest.LoadsPngAsHeadlessView", "png", "test/layout/data/res/sample1.png"},
+    {"RadiantViewTest.LoadsJpegAsHeadlessView", "jpg", "test/layout/data/res/sample1.jpg"},
+    {"RadiantViewTest.LoadsGifAsHeadlessView", "gif", "test/layout/data/res/hn_s.gif"},
+    {"RadiantViewTest.LoadsSvgAsHeadlessView", "svg", "test/layout/data/res/hn_y18.svg"},
+    {"RadiantViewTest.LoadsHtmlAsHeadlessView", "html", "test/layout/data/page/sample1.html"},
+    {"RadiantViewTest.LoadsXmlAsHeadlessView", "xml", "test/input/test.xml"},
+    {"RadiantViewTest.LoadsMarkdownAsHeadlessView", "markdown", "test/input/comprehensive_test.md"},
+    {"RadiantViewTest.LoadsMarkdownMathAsHeadlessView", "markdown_math", "test/input/simple_math_test.md"},
+    {"RadiantViewTest.LoadsWikiAsHeadlessView", "wiki", "test/input/test.wiki"},
+    {"RadiantViewTest.LoadsLatexShowcaseAsHeadlessView", "latex_showcase", "test/input/latex-showcase.tex"},
+    {"RadiantViewTest.LoadsMathIntensiveLatexAsHeadlessView", "latex_math_intensive", "test/input/math_intensive_test.tex"},
+    {"RadiantViewTest.LoadsYamlAsHeadlessView", "yaml", "test/input/more_test.yaml"},
+    {"RadiantViewTest.LoadsLambdaReportAsHeadlessView", "lambda_report", "test/lambda/complex_iot_report_html.ls"},
+    {"RadiantViewTest.LoadsLambdaChartDashboardAsHeadlessView", "lambda_chart_dashboard", "test/lambda/chart/chart_dashboard.ls"},
+    {"RadiantViewTest.LoadsPdfAsHeadlessView", "pdf", "test/input/raw_commands_test.pdf"},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -128,14 +120,6 @@ static void test_radiant_view_run_case(size_t index) {
         result->executed = true;
         return;
     }
-    if (view_case->event_path && !test_radiant_view_file_readable(view_case->event_path)) {
-        result->missing_event_path = true;
-        snprintf(result->message, sizeof(result->message),
-                 "event file is not readable: %s", view_case->event_path);
-        result->executed = true;
-        return;
-    }
-
     test_radiant_view_ensure_temp_dir();
 
     char log_path[256];
@@ -153,10 +137,6 @@ static void test_radiant_view_run_case(size_t index) {
     args[arg_count++] = "./lambda.exe";
     args[arg_count++] = "view";
     args[arg_count++] = view_case->path;
-    if (view_case->event_path) {
-        args[arg_count++] = "--event-file";
-        args[arg_count++] = view_case->event_path;
-    }
     args[arg_count++] = "--headless";
     args[arg_count++] = "--no-log";
     args[arg_count] = nullptr;
@@ -205,7 +185,6 @@ static void test_radiant_view_expect_case(size_t index) {
     const RadiantViewCaseResult* result = &g_radiant_view_results[index];
 
     EXPECT_FALSE(result->missing_path) << result->message;
-    EXPECT_FALSE(result->missing_event_path) << result->message;
     EXPECT_EQ(0, result->exit_code) << view_case->path << ": " << result->message;
     EXPECT_FALSE(result->has_layout_prof) << view_case->path;
     EXPECT_FALSE(result->has_render_prof) << view_case->path;
@@ -271,30 +250,6 @@ TEST(RadiantViewTest, LoadsLambdaChartDashboardAsHeadlessView) {
 
 TEST(RadiantViewTest, LoadsPdfAsHeadlessView) {
     test_radiant_view_expect_case(14);
-}
-
-TEST(RadiantViewTest, LoadsPdfIntoIframeAfterLinkClickWithNoLog) {
-    test_radiant_view_expect_case(15);
-}
-
-TEST(RadiantViewTest, LoadsMarkdownIntoIframeAfterLinkClickWithNoLog) {
-    test_radiant_view_expect_case(16);
-}
-
-TEST(RadiantViewTest, LoadsPngIntoIframeAfterLinkClickWithNoLog) {
-    test_radiant_view_expect_case(17);
-}
-
-TEST(RadiantViewTest, KeepsIframeSizedAfterPdfThenSvgTargetNavigation) {
-    test_radiant_view_expect_case(18);
-}
-
-TEST(RadiantViewTest, RecascadesLambdaReportInIframeDuringScrollHover) {
-    test_radiant_view_expect_case(19);
-}
-
-TEST(RadiantViewTest, ResetsGlyphCacheAcrossIframeDocumentNavigation) {
-    test_radiant_view_expect_case(20);
 }
 
 TEST(RadiantViewTest, PromotesCachedPngDecodeFromThumbnailToFullSize) {

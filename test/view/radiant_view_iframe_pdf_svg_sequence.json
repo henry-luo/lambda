@@ -1,5 +1,7 @@
 {
   "name": "Radiant view iframe remains sized after PDF then SVG target navigation",
+  "html": "test/html/index.html",
+  "assertions": [{"output_contains": "Assertions:"}, {"output_not_contains": "[LAYOUT_PROF]"}, {"output_not_contains": "[RENDER_PROF]"}, {"output_not_contains": "[PEAK_FOOTPRINT]"}],
   "viewport": { "width": 1200, "height": 600 },
   "events": [
     { "type": "assert_rect", "target": { "selector": "iframe[name=\"main_frame\"]" }, "width": 1186, "height": 602, "tolerance": 4 },

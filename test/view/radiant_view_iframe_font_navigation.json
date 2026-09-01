@@ -1,5 +1,7 @@
 {
   "name": "Radiant view resets glyph cache across iframe navigation",
+  "html": "test/html/index.html",
+  "assertions": [{"output_contains": "Assertions:"}, {"output_not_contains": "[LAYOUT_PROF]"}, {"output_not_contains": "[RENDER_PROF]"}, {"output_not_contains": "[PEAK_FOOTPRINT]"}],
   "viewport": { "width": 1200, "height": 720 },
   "events": [
     { "type": "click", "target": { "selector": "a[href=\"../lambda/complex_iot_report_html.ls\"]" } },

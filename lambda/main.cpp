@@ -724,6 +724,7 @@ extern int view_lambda_script_source_in_window_with_events(const char* script_na
                                                            bool enable_state_dump = false);
 extern char* event_sim_replay_document_path(const char* jsonl_file);
 extern void event_sim_set_replay_assert_state(bool assert_state);
+extern void event_sim_set_result_path(const char* result_path);
 
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
@@ -3602,6 +3603,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .csv       Comma-separated values (source view)\n");
             printf("\nOptions:\n");
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
+            printf("  --event-result <file.json> Write a machine-readable event result\n");
             printf("  --view-key <key>           Structurizr view key (default: first declared view)\n");
             printf("\nExamples:\n");
             printf("  %s view                          # View default HTML (test/html/index.html)\n", argv[0]);
@@ -3627,6 +3629,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // Parse arguments for view command
         const char* filename = NULL;
         const char* event_file = NULL;
+        const char* event_result = NULL;
         bool headless = false;
         bool event_log = false;
         bool state_dump = false;
@@ -3637,6 +3640,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--event-file") == 0 && i + 1 < argc) {
                 event_file = argv[++i];
+            } else if (strcmp(argv[i], "--event-result") == 0 && i + 1 < argc) {
+                event_result = argv[++i];
             } else if (strcmp(argv[i], "--headless") == 0) {
                 headless = true;
             } else if (strcmp(argv[i], "--event-log") == 0) {
@@ -3660,6 +3665,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 filename = argv[i];
             }
         }
+
+        event_sim_set_result_path(event_result);
 
         // Default to test/html/index.html if no file specified (like radiant.exe)
         if (filename == NULL) {
