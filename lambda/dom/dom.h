@@ -384,6 +384,24 @@ void dom_select_set_selected_index_bridge(void* dom_elem, Item value);
 /** dataset expando write, routed from the JS property-set path. */
 bool dom_dataset_set_object_property(Item dataset, Item key, Item value);
 
+// -----------------------------------------------------------------------------
+// Scheduling seam (F25/ES33)
+//
+// The DOM core defers work — observer delivery, selectionchange coalescing, the
+// iframe load drain — but it does not own the loop that runs it, and naming the
+// JS event loop directly would make the core JS-specific for what is really a
+// "run this after the current turn settles" request. These two entries are
+// implemented by the adapter in lambda/js/, which is where knowledge of the
+// loop belongs; the callback Item itself is ordinary runtime value construction
+// and stays with the caller.
+// -----------------------------------------------------------------------------
+
+/** Run `callback` once the current script's writes settle (microtask turn). */
+void dom_schedule_microtask(Item callback);
+
+/** Run `callback` on the next task turn (zero-delay timer). */
+void dom_schedule_task(Item callback);
+
 #ifdef __cplusplus
 struct DomDocument;
 struct JsRuntimeState;

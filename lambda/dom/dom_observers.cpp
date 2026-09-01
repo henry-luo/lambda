@@ -408,7 +408,7 @@ static Item js_geometry_observer_observe(Item target_item) {
     // Geometry observation requires an initial sample even when observe() did
     // not dirty layout, but sampling waits until the current script's writes
     // settle so ResizeObserver reports the latest box once per checkpoint.
-    js_microtask_enqueue(js_new_native_function(js_geometry_observer_initial_sample));
+    dom_schedule_microtask(js_new_native_function(js_geometry_observer_initial_sample));
     return make_js_undefined();
 }
 
@@ -445,7 +445,7 @@ static Item js_observer_deliver(void) {
 static void observer_schedule_delivery(void) {
     if (observer_delivery_scheduled) return;
     observer_delivery_scheduled = true;
-    js_microtask_enqueue(js_new_native_function(js_observer_deliver));
+    dom_schedule_microtask(js_new_native_function(js_observer_deliver));
 }
 
 static void observer_queue_record(JsObserverState* observer, Item record) {

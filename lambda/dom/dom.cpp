@@ -20,7 +20,6 @@
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_function.hpp"
 #include "../js/js_interp.hpp"
-#include "../js/js_event_loop.h"
 #include "dom_platform.h"
 #include "dom_observers.h"
 #include "../lambda-data.hpp"
@@ -3431,7 +3430,7 @@ static void _schedule_iframe_load(DomElement* iframe) {
     if (!s_iframe_load_drain_scheduled) {
         s_iframe_load_drain_scheduled = true;
         Item cb = js_new_native_this_span_function(_iframe_load_drain);
-        js_setTimeout(cb, (Item){.item = i2it(0)});
+        dom_schedule_task(cb);
     }
 }
 

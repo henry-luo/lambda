@@ -5,7 +5,7 @@
 > **Scope**: file/module layout, symbol namespaces, the host-table linkage question, the core/adapter boundary, and the Lambda `dom` module surface. **Out of scope**: event dispatch semantics (`Lambda_Design_DOM_Dispatch.md`), default-action placement (`Lambda_Design_DOM_Default.md`), state storage and waist semantics (`Lambda_Design_DOM_State.md`), the L3 Obscura-parity package (`Lambda_Design_DOM_Pkg.md` Phase 1+), and the DOM data structures themselves (deferred, §6).
 > **Companion docs**: `vibe/Lambda_Design_Native_Module.md` §8 (POC 1 `radiant-dom` — this proposal executes its carve-out half; the host DOM API redesign is Phase 2, §7), `vibe/Lambda_Design_DOM_Pkg.md` (the four-layer stack L1–L4 and Phase-0 gate this delivers), `vibe/Lambda_Jube_DOM3.md`/`DOM4.md` (declared interfaces, ordinal dispatch), `vibe/radiant/Radiant_Design_Dom_View_Struct.md` (OQ5 — the struct move this doc defers), `doc/dev/js/JS_13_Web_DOM.md`.
 > **Formal anchors**: D8 (module/runtime ownership), D3.4.7/D7.4.1–D7.4.4 (host-object metadata and the single VMap/Jube bridge), D6.2.2v2 (observable property Get + `[[Call]]`), D4.5.1v3 (the Radiant memory seam), S9.2.2 (read views are snapshots), S9.1.4 (state lives in view state), S12.1.3 (mutation only in handlers), S5.1.4 (no reference identity in Lambda).
-> **Ledger series**: extends the DOM area's `ES#`/`ESO#`/`F#` per `doc/Doc_Convention.md` §4 — no new series. Decisions **ES32–ES38**; open issues **ESO72–ESO78**; migration stages **F22–F27**. (Prior: ES31/ESO71 in `Lambda_Design_DOM_Default.md`, F21 in `Lambda_Design_DOM_Dispatch.md`.)
+> **Ledger series**: extends the DOM area's `ES#`/`ESO#`/`F#` per `doc/Doc_Convention.md` §4 — no new series. Decisions **ES32–ES38**; open issues **ESO72–ESO79**; migration stages **F22–F27**. (Prior: ES31/ESO71 in `Lambda_Design_DOM_Default.md`, F21 in `Lambda_Design_DOM_Dispatch.md`.)
 
 ---
 
@@ -213,18 +213,45 @@ Extends CLAUDE.md rule 13 to this area as a standing invariant: for any DOM oper
 
 ## 5. Migration stages
 
-Each stage is independently landable, behavior-neutral, and gated on: `make build`, `make test-radiant-baseline` + `make test-lambda-baseline` (both 100%), the JS Event/DOM gtests, the dom UI fixtures (`dom_synthetic_activation` 6/6, `dom_pkg_prevent_default` 4/4, `dom_pkg_radio` 7/7, `js_dispatch_radio_group`), and `make lint`. One stage per commit, never combined.
+Each stage is independently landable, behavior-neutral, and gated on `make build`, `make test-lambda-baseline`, `make test-radiant-baseline`, and `make lint`. One stage per commit, never combined.
+
+**Gate definition (corrected 2026-09-01).** An earlier draft of this table said "both baselines 100%". They are not 100% at HEAD, and a stage must not be blocked on pre-existing failures it did not cause. The gate is **no new failure against the recorded pre-F22 baseline**:
+
+| Baseline at `e4c4c9614` (pre-F22) | Result |
+|---|---|
+| `make test-lambda-baseline` | 4069 tests, **4067 passed, 2 failed** — `MirGcStressTest…regression_tune4_closure_scalar_ownership` and `JavaScriptRegression.DocumentExitCodeAfterContextRestoreDoesNotInternWithNullContext`, both confirmed failing standalone (not parallel-load flakes) |
+| `make test-radiant-baseline` | 8381 tests, **8002 passed, 20 failed**, 359 partial, 6 skipped — 15 layout (2 baseline + 13 wpt-css-text) and 5 WPT DOM2 `input_events` |
+| `make lint` | exits 1 at HEAD: `structural:gc-effects` and `structural:no-new-per-file-header` fail; `structural:static-module-architecture` passes. Verified in a clean worktree at HEAD, so a stage is measured against this, not against zero |
+
+**Stale-artifact hazard (learned in F24).** Premake leaves object files for deleted source paths in `build/obj/`, and `ar` never drops stale members, so `liblambda-rt-cpp.a` still contained `js_dom.o` after F22. It stayed invisible while old and new objects exported identical symbols, and surfaced only when F24 renamed one — as an undefined `radiant_reconcile_js_dom_mutations` attributed to the *old* object. After any move or rename in this tree, purge the orphaned objects and any archive still listing them before trusting a gate result.
 
 | Stage | Contents | Exit criterion |
 |---|---|---|
 | **F22 — relocate** | `git mv` the 20 files to `lambda/dom/` per ES32 (content untouched except `#include` paths); update the ~18 includers; build config: add `lambda/dom/*.cpp` glob to `lambda-rt` + `lambda/dom` to both include lists; drop the two duplicated mid-file includes found in census | tree builds; all gates green; `git log --follow` preserves file history |
 | **F23 — host-side extern hygiene** | Replace ad-hoc `extern "C"` declarations in **host-side** code with includes of the new `lambda/dom/` headers (CLAUDE.md rule 13): `radiant/event.cpp:48–61,6937`, `window.cpp:44–47`, `editing_dom_waist.cpp`, `cmd_layout.cpp:79`, `lambda/runtime/runner.cpp:43`, `lambda/js/js_runtime_state.cpp:16–18,75–78`, the moved peripherals' internal externs; move `radiant/event.hpp:48` externs into the dom header. **Untouched per ES34**: the `JubeHostDomAPI` table + bridge remaps (proper seam usage), the module-side bypasses (`radiant_module.cpp:51–60`, frozen for ESO78), the weak pairs | no ad-hoc `js_dom_*`/`dom_*` externs outside the Jube table wiring, the frozen module bypasses, and the weak pairs; gates green |
 | **F24 — rename** | ES35: `js_dom_*` → `dom_*` + un-prefixed accessors, **including** the `JubeHostDomAPI` prototype/initializer references in `jube_registry.cpp` and the bridge remap defines (table layout untouched, ES34); weak pairs atomic; string-literal sweep of name-registered tables | `grep -rn "js_dom" lambda/ radiant/ test/ --include=*.{c,cpp,h,hpp}` → empty; gates green |
-| **F25 — adapter split** | ES33: extract Event-class stamps/ctors/init-dicts → `js_event_adapter.cpp`; prototype/global/meta glue → `js_dom_adapter.cpp`; scheduling seam (5 sites); throw-convention audit on Lambda-reachable paths (ESO76); fix the duplicated `js_ctor_static_range_fn` declaration | purity grep clean over the six core families: no `JS_CLASS_`, `js_object_meta`, `js_get_global_this`, `js_install_native_method`, `js_setTimeout` under `lambda/dom/{dom,dom_events,dom_observers,dom_platform,dom_selection,dom_cssom}.*`; gates green |
+| **F25 — adapter split (PARTIAL — see §5.1)** | ES33: scheduling seam landed (`dom_schedule_microtask`/`dom_schedule_task` in `dom.h`, implemented in the new `lambda/js/js_dom_adapter.cpp`; all 5 core call sites repointed; `js_event_loop.h` no longer included by the core); duplicated `js_ctor_static_range_fn` declaration removed. **Deferred to ESO79**: the class-stamp, prototype, realm-global and object-builder categories | scheduling: no `js_setTimeout`/`js_microtask_enqueue` under the six core families ✅. Full purity grep: **not met** — see §5.1 |
 | **F26 — `import dom`** | ES36 module (its fn list doubling as the first tranche of the §7 catalog) + ES38 dedupe of the radiant tree functions; tests `test/lambda/dom_api.ls` + `dom_api_read.ls` (+ `.txt` goldens, rule 8): parse/load → query → mutate → re-query → serialize round-trip; snapshot-stability check (mutation during iteration does not perturb a taken snapshot) | POC-1 exit test passes from a pure Lambda script; `make test-lambda-baseline` 100% with the new tests in the glob |
 | **F27 — docs & closure** | Path/name refresh + verified-against stamps: `JS_13`, `JS_00/10/14/15`, `RAD_15`, DOM_Dispatch Appendix A, DOM_Default §3 anchor note; `Lambda_Design_Native_Module.md` §8 POC-1 status (carve-out landed; host DOM API redesign deferred to Phase 2/ESO78); DOM_Pkg Phase-0 status; CLAUDE.md Key Entry Points row for `lambda/dom/` mirrored in AGENTS.md | grep for `lambda/js/js_dom` in `doc/`+`vibe/` returns only historical/superseded contexts |
 
 Sequencing rationale: F22 before F23 so the hygiene diff is against stable paths; F23 before F24 so the rename sweeps headers, not scattered ad-hoc declarations; F25 after F24 so extracted adapter functions are named against the final namespace; F26 last because ES38's dedupe wants the split core as its target. The `JubeHostDomAPI` is renamed-through in F24 and otherwise untouched until Phase 2 (§7).
+
+### 5.1 Why F25 stopped where it did (2026-09-01)
+
+ES33 assumed the JS-shape code could be *lifted out* of the core. For one category it could, and that part landed: scheduling was a genuine seam — the core asks for "run this after the current turn settles", the adapter knows that is the JS event loop, and the dependency edge from `lambda/dom/` to `js_event_loop.h` is now gone.
+
+The other four categories are not a move, and attempting them mechanically would have broken the most heavily tested path in the tree. The measured residue over the six core families:
+
+| Category | Sites | Why it is not a move |
+|---|---|---|
+| `JS_CLASS_*` stamps + `js_class_id` | 11 (9 `dom_events`, 2 `dom_cssom`) | the class id is a **parameter of the shared event builder** `js_create_event_init_with_class`, which the *native* factories (`js_create_native_mouse_event`, …) call too. Splitting it means separating the native event record from its JS wrapper — the ES24/F17 record design — not relocating a function |
+| `js_set_prototype` | 7 (6 `dom`, 1 `dom_cssom`) | attached to values on the way out of DOMMatrix/DOMPoint/XPath/window construction. Extracting means changing what those paths return and who attaches the prototype |
+| `js_get_global_this` | 24 (14 `dom`, 7 `dom_events`, 2 `dom_selection`, 1 `dom_cssom`) | realm access woven through named-element registration and `window.event`; needs a per-realm accessor the core can hold, not a lift |
+| `js_install_native_method` / `js_object_define_property` | 6 (`dom_platform`) | `storage_object()` **caches the built JS object inside the storage state**. The state and its presentation share one owner; separating them is a small design decision about which side holds the cache |
+
+The common shape: the core currently both computes DOM state **and** constructs the JS object that presents it. ES33's line is right, but drawing it needs a design pass per category — chiefly the event record/wrapper separation, which is already ES24's subject. Tracked as **ESO79**; the enforcement grep and the `js_event_adapter.cpp` file arrive with it.
+
+This is recorded rather than quietly dropped because "the adapter is split" would otherwise read as true when four fifths of it is not.
 
 ## 6. Open issues
 
@@ -236,6 +263,7 @@ Sequencing rationale: F22 before F23 so the hygiene diff is against stable paths
 | ESO75 | **The shared value helpers wear a `js_` prefix** (`js_name_item`, `js_set_key_cstr`, `js_new_object`, …, ~600 call sites in the core). Under ES12 they are the one runtime's value API. Decide: neutral aliases (`rt_*`?), wholesale rename, or accept the prefix as historical. Deliberately *not* bundled into F24 — it touches the whole JS runtime, not just the DOM layer. |
 | ESO76 | **Throw-convention audit tail**: ~33 `js_throw_*` sites in the core. F25 converts Lambda-reachable ones to error Items and moves JS-protocol ones to the adapter, but the general rule for *shared* validation paths (one core check, two realm-specific error presentations) deserves a stated pattern once `import dom` has real users. |
 | ESO77 | **Struct co-location** (user-deferred): moving `dom_node`/`dom_element`/`dom_lifecycle` from `lambda/input/css/` into `lambda/dom/` — reconcile with `Radiant_Design_Dom_View_Struct.md` OQ5 when taken up; the stems are already reserved (ES32). |
+| ESO79 | **The rest of the ES33 adapter split** (§5.1). Four categories remain in the core because each fuses DOM state with its JS presentation: event class stamps (blocked on the ES24 record/wrapper separation — do this one first, it unblocks the others by example), prototype attachment on constructed values, realm-global access, and the Storage/matchMedia object builders that cache their JS object inside the state. Needs a design pass per category, then the enforcement grep and `js_event_adapter.cpp`. |
 | ESO78 | **The new DOM API — Phase 2 unification** (user direction 2026-09-01: table retained now; then `radiant_module`'s DOM surface + `JubeHostDomAPI` unify into one DOM API, deduped at the API level *and* the implementation level). One operation catalog derives the table slots (the dynamic ABI for the AST interpreter and non-statically-linked Jube modules such as Python), the script registrations, and the ordinal wiring; the frozen module-side bypasses (`radiant_module.cpp:51–60` and kin) fold in. Design in §7. |
 
 Cross-referenced, not duplicated here: live collections (DOM_Pkg Q4), the L3 Obscura-parity package phases (DOM_Pkg §7 — unblocked by this carve-out), package state model (DOM_Pkg Q1).

@@ -17,7 +17,6 @@
 #include "dom_selection.h"
 #include "dom.h"
 #include "dom_events.h"
-#include "../js/js_event_loop.h"
 #include "../js/js_props.h"
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
@@ -1276,7 +1275,7 @@ extern "C" void dom_queue_selectionchange(DomSelection* sel) {
     if (!js_doc_runtime_enter_if_needed(doc)) return;
     state->selectionchange_pending = true;
     Item cb = js_new_native_this_span_function(_wpt_selectionchange_fire);
-    js_setTimeout(cb, (Item){.item = i2it(0)});
+    dom_schedule_task(cb);
 }
 
 // ----------------------------------------------------------------------------
@@ -1361,7 +1360,7 @@ extern "C" void dom_queue_textcontrol_selectionchange(DomElement* elem) {
     }
     state->tc_selectionchange_drain_scheduled = true;
     Item cb = js_new_native_this_span_function(_tc_selectionchange_drain);
-    js_setTimeout(cb, (Item){.item = i2it(0)});
+    dom_schedule_task(cb);
 }
 
 extern "C" void dom_selection_reset(void) {

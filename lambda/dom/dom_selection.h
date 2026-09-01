@@ -22,7 +22,9 @@ Item dom_get_selection(void);
 // does not update under DOM mutation — used by InputEvent.getTargetRanges().
 // The constructor copies the dictionary fields, computes `collapsed`, and
 // exposes them as non-writable snapshot properties.
-Item js_ctor_static_range_fn(Item init);
+//
+// Declared in dom_events.h, where it is defined, rather than a second time
+// here: two headers declaring one symbol is how the two copies drift apart.
 
 // Wrap an existing native DomRange* into a JS Range object (used by
 // selection.getRangeAt). Returns ItemNull on failure. Takes a strong
