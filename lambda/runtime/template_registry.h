@@ -5,6 +5,7 @@
 
 #include "../lambda.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -69,6 +70,9 @@ typedef struct TemplateEntry {
 
     // Event handlers
     TemplateHandlerEntry* handlers;  // linked list of compiled event handlers
+    // A compact prefilter for the exact handler list. Hash collisions only
+    // cause the exact lookup below to run; they can never hide a handler.
+    uint64_t handler_event_mask;
 
     // A T0 view/edit entry has no generated function pointer. The interpreter
     // evaluates its body against the active `~` context when apply()
@@ -90,6 +94,10 @@ typedef struct TemplateRegistry {
     // is decided by provenance rather than by syntax.
     bool behavior_mode;
     int behavior_count;         // behavior entries registered (0 = dispatch inert)
+    // Per-tier event masks keep an undeclared event out of the propagation
+    // walk without changing the exact per-entry handler contract.
+    uint64_t author_event_mask;
+    uint64_t behavior_event_mask;
 } TemplateRegistry;
 
 // Initialize a new template registry
@@ -121,6 +129,15 @@ bool template_registry_has_behavior(TemplateRegistry* registry);
 // Find the handler an entry declares for an event, or NULL.
 TemplateHandlerEntry* template_entry_find_handler(TemplateEntry* entry,
                                                   const char* event_name);
+
+// Fast, collision-tolerant event prefilters. A true result still requires the
+// exact handler lookup; false is definitive for the active registry entry.
+bool template_entry_may_handle_event(TemplateEntry* entry,
+                                     const char* event_name);
+bool template_registry_may_have_author_handler(TemplateRegistry* registry,
+                                               const char* event_name);
+bool template_registry_may_have_behavior_handler(TemplateRegistry* registry,
+                                                 const char* event_name);
 
 // Best behavior template governing `target` that handles `event_name`, or NULL.
 // Unlike template_registry_match, this never consults author templates.

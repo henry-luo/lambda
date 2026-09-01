@@ -4311,6 +4311,13 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             continue;
         }
 
+        // Reactive templates rebuild result nodes, while form/interaction
+        // state belongs to the retained view identity (S9.1.4). Preserve that
+        // identity for structurally corresponding descendants before retiring
+        // the old subtree.
+        view_state_preserve_subtree_identity(state, static_cast<DomNode*>(old_dom),
+                                             static_cast<DomNode*>(new_dom));
+
         if (old_dom->is_popover_open() && new_dom->has_attribute("popover")) {
             // Reconciliation replaces the DOM wrapper, but popover openness is
             // live state and must survive an unrelated class/style mutation.

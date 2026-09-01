@@ -42,6 +42,15 @@ extern "C" bool radiant_dispatch_behavior_reset_activation(EventContext* evcon,
                                                            View* target);
 bool radiant_behavior_claims_event(EventContext* evcon, View* target,
                                    const char* event_name);
+extern "C" bool radiant_author_template_event_live(const char* event_name);
+extern "C" bool radiant_author_template_dispatch_begin(Item event);
+extern "C" void radiant_author_template_dispatch_end(Item event);
+extern "C" void radiant_dispatch_author_template_participant(void* dom_node,
+                                                               Item event,
+                                                               const char* event_name);
+extern "C" void radiant_dom_event_set_lambda_dispatch_position(
+    Item event, Item current_target, int event_phase);
+extern "C" void radiant_dom_event_clear_lambda_dispatch_position(Item event);
 
 // Forward decls used by Event helpers below (signatures from js_runtime.h /
 // js_dom.h, declared here under extern "C" to avoid header coupling).
@@ -390,6 +399,12 @@ struct EventTargetIndexEntry {
 };
 HASHMAP_DEFINE_PTRKEY(event_target_index, EventTargetIndexEntry, key)
 
+struct EventTypeCountEntry {
+    const char* type;
+    int count;
+};
+HASHMAP_DEFINE_STRKEY(event_type_count, EventTypeCountEntry, type)
+
 // DOM listener registration is semantic realm state. The state capsule is
 // entered once at a JS/host boundary; all dispatch and lookup code below then
 // uses ordinary owner-thread loads/stores, never a lock or atomic operation.
@@ -398,6 +413,7 @@ struct JsDomEventRuntimeState {
     int entry_count = 0;
     int entry_capacity = 0;
     struct hashmap* entry_index = nullptr;
+    struct hashmap* type_counts = nullptr;
     uint64_t registration_order = 0;
 };
 
@@ -426,6 +442,7 @@ static bool js_dom_event_runtime_state_ensure() {
 #define _entry_count (js_dom_event_state->entry_count)
 #define _entry_capacity (js_dom_event_state->entry_capacity)
 #define _entry_index (js_dom_event_state->entry_index)
+#define _type_counts (js_dom_event_state->type_counts)
 #define _event_registration_order (js_dom_event_state->registration_order)
 
 // sentinel pointers for non-element targets
@@ -590,6 +607,45 @@ static NodeListeners* find_listeners(void* key) {
     return slot >= 0 ? &_entries[slot].listeners : nullptr;
 }
 
+// The cascade decides once whether any JS listener can observe this event.
+// Counts include IDL attributes and are decremented at tombstoning time, so a
+// removed or once listener never keeps a later dispatch on the slow path.
+static void note_listener_type(const char* type, int delta) {
+    if (!type || !type[0] || delta == 0) return;
+    if (!_type_counts && delta > 0) _type_counts = event_type_count_new(16);
+    if (!_type_counts) return;
+    EventTypeCountEntry lookup = {type, 0};
+    const EventTypeCountEntry* found =
+        (const EventTypeCountEntry*)hashmap_get(_type_counts, &lookup);
+    int old_count = found ? found->count : 0;
+    int new_count = old_count + delta;
+    if (new_count <= 0) {
+        if (found) hashmap_delete(_type_counts, &lookup);
+        return;
+    }
+    EventTypeCountEntry updated = {found ? found->type : type, new_count};
+    hashmap_set(_type_counts, &updated);
+    if (hashmap_oom(_type_counts)) {
+        hashmap_free(_type_counts);
+        _type_counts = nullptr;
+        log_error("js-dom-events: listener type index allocation failed");
+    }
+}
+
+static bool has_listener_type(const char* type) {
+    if (!_type_counts || !type || !type[0]) return false;
+    EventTypeCountEntry lookup = {type, 0};
+    const EventTypeCountEntry* found =
+        (const EventTypeCountEntry*)hashmap_get(_type_counts, &lookup);
+    return found && found->count > 0;
+}
+
+static void tombstone_listener(EventListener* listener) {
+    if (!listener || listener->removed) return;
+    listener->removed = true;
+    note_listener_type(listener->type, -1);
+}
+
 static void nl_push(NodeListeners* nl, EventListener listener) {
     if (nl->count >= nl->capacity) {
         int new_cap = nl->capacity == 0 ? 8 : nl->capacity * 2;
@@ -663,7 +719,7 @@ static void event_handler_property_set_for_key(void* key, Item target,
 
     EventListener* handler = nl_find_idl_listener(listeners, stack_type);
     if (!js_is_callable(value)) {
-        if (handler) handler->removed = true;
+        if (handler) tombstone_listener(handler);
         return;
     }
     if (handler) {
@@ -688,6 +744,7 @@ static void event_handler_property_set_for_key(void* key, Item target,
     listener.order = ++_event_registration_order;
     listener.is_idl_handler = true;
     nl_push(listeners, listener);
+    note_listener_type(listener.type, 1);
 }
 
 extern "C" void js_dom_event_handler_property_set(Item target,
@@ -915,6 +972,7 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
     listener.passive = passive;
 
     nl_push(nl, listener);
+    note_listener_type(listener.type, 1);
     log_debug("js_dom_add_event_listener: added '%s' listener (capture=%d, once=%d, passive=%d) on %p",
               type, (int)capture, (int)once, (int)passive, key);
 }
@@ -950,7 +1008,7 @@ void js_dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, 
             event_listener_root_item(el->callback_root).item == cb_item.item) {
             // tombstone — actual storage is reclaimed at next opportunity.
             // This protects in-flight dispatch loops walking the array.
-            el->removed = true;
+            tombstone_listener(el);
             log_debug("js_dom_remove_event_listener: removed '%s' listener from %p", type, key);
             return;
         }
@@ -1884,6 +1942,15 @@ static Item wrap_path_key(void* key, bool key_is_dom) {
 // fire listeners on a specific node for a given phase. `reported_phase`, if
 // non-zero, overrides the eventPhase value visible to listeners (used at the
 // target node so capture-then-bubble sub-passes both report AT_TARGET).
+static void set_event_dispatch_position(void* key, bool key_is_dom, Item event,
+                                        int phase, int reported_phase = 0) {
+    int visible_phase = reported_phase ? reported_phase : phase;
+    Item current_target = wrap_path_key(key, key_is_dom);
+    event_set_int(event, "eventPhase", visible_phase);
+    js_set_name_key(event, "currentTarget", current_target);
+    radiant_dom_event_set_lambda_dispatch_position(event, current_target, visible_phase);
+}
+
 static void fire_listeners(void* key, const char* type, Item event, int phase,
                            bool key_is_dom, int reported_phase = 0) {
     RootFrame roots(5);
@@ -1895,11 +1962,8 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
     NodeListeners* nl = find_listeners(key);
     if (!nl || nl->count == 0) return;
 
-    // set eventPhase (use reported_phase if specified; otherwise raw phase)
-    event_set_int(event_root.get(), "eventPhase", reported_phase ? reported_phase : phase);
-
-    // set currentTarget
-    js_set_name_key(event_root.get(), "currentTarget", wrap_path_key(key, key_is_dom));
+    set_event_dispatch_position(key, key_is_dom, event_root.get(), phase,
+                                reported_phase);
 
     // Check stop-immediate flag against per-event slot.
     #define _STOP_IMM event_flag_get(event_root.get(), "__stop_imm")
@@ -1921,7 +1985,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         if (phase == 3 && el->capture) continue;
         // signal — if its AbortSignal aborted, treat as removed
         Item listener_signal = event_listener_root_item(el->signal_root);
-        if (signal_is_aborted(listener_signal)) { el->removed = true; continue; }
+        if (signal_is_aborted(listener_signal)) { tombstone_listener(el); continue; }
         snap[snap_count++] = el->order;
     }
 
@@ -1932,7 +1996,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         // re-check tombstone in case a prior listener removed this one
         if (!live) continue;
         Item live_signal = event_listener_root_item(live->signal_root);
-        if (signal_is_aborted(live_signal)) { live->removed = true; continue; }
+        if (signal_is_aborted(live_signal)) { tombstone_listener(live); continue; }
 
         // Resolve callback — function or {handleEvent}
         // A prior listener may collect and move heap objects. Reload from the
@@ -1958,7 +2022,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
 
         // Mark for once-removal BEFORE invocation so that recursion / re-add
         // sees the slot as removed.
-        if (live->once) live->removed = true;
+        if (live->once) tombstone_listener(live);
 
         // call the callback with event as argument; isolate exceptions per spec
         Item args[1] = { event_root.get() };
@@ -2159,31 +2223,59 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     js_set_key_default(global_root.get(), event_key, event_root.get());
 
     #define _STOP_PROP event_flag_get(event_item, "__stop_prop")
+    #define _STOP_IMM event_flag_get(event_item, "__stop_imm")
+    // F18: masks are captured once for this cascade. A miss means the
+    // corresponding store cannot contribute at any path node this dispatch.
+    bool js_live = has_listener_type(type);
+    bool author_live = radiant_author_template_event_live(type);
+    bool author_cascade = author_live &&
+        radiant_author_template_dispatch_begin(event_item);
+    if (!author_cascade) author_live = false;
 
     // path[0] = target, path[1] = parent, ... path[n-1] = window
     // Phase 1: Capture — from root down to target (exclusive)
     for (int i = path_len - 1; i > 0; i--) {
         if (_STOP_PROP) break;
-        fire_listeners(path[i], type, event_item, 1, path_is_dom[i]);  // CAPTURING_PHASE
+        if (js_live) {
+            fire_listeners(path[i], type, event_item, 1, path_is_dom[i]);
+        }
     }
 
     // Phase 2: Target — per spec, capture-listeners run first then bubble
-    // listeners, both reported with eventPhase = AT_TARGET (2).
-    if (!_STOP_PROP) {
-        fire_listeners(path[0], type, event_item, 1, path_is_dom[0], 2);
+    // listeners, both reported with eventPhase = AT_TARGET (2). A plain stop
+    // still permits peers on this node; only immediate stop suppresses them.
+    bool target_reached = !_STOP_PROP;
+    if (target_reached) {
+        if (js_live) {
+            fire_listeners(path[0], type, event_item, 1, path_is_dom[0], 2);
+        }
     }
-    if (!_STOP_PROP) {
-        fire_listeners(path[0], type, event_item, 3, path_is_dom[0], 2);
+    if (target_reached && !_STOP_IMM) {
+        if (js_live) {
+            fire_listeners(path[0], type, event_item, 3, path_is_dom[0], 2);
+        }
+    }
+    if (target_reached && author_live && path_is_dom[0] && !_STOP_IMM) {
+        set_event_dispatch_position(path[0], path_is_dom[0], event_item, 3, 2);
+        radiant_dispatch_author_template_participant(path[0], event_item, type);
     }
 
     // Phase 3: Bubble — from target parent up to root
     if (bubbles) {
         for (int i = 1; i < path_len; i++) {
             if (_STOP_PROP) break;
-            fire_listeners(path[i], type, event_item, 3, path_is_dom[i]);  // BUBBLING_PHASE
+            if (js_live) {
+                fire_listeners(path[i], type, event_item, 3, path_is_dom[i]);
+            }
+            if (author_live && path_is_dom[i] && !_STOP_IMM) {
+                set_event_dispatch_position(path[i], path_is_dom[i], event_item, 3);
+                radiant_dispatch_author_template_participant(path[i], event_item, type);
+            }
         }
     }
 
+    if (author_cascade) radiant_author_template_dispatch_end(event_item);
+    #undef _STOP_IMM
     #undef _STOP_PROP
 
     // set eventPhase to NONE after dispatch
@@ -2191,6 +2283,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
 
     // currentTarget is reset to null after dispatch (per spec).
     js_set_name_key(event_item, "currentTarget", ItemNull);
+    radiant_dom_event_clear_lambda_dispatch_position(event_item);
 
     // Per DOM spec §2.10 step 26: at the end of dispatch, unset stop
     // propagation flag, stop immediate propagation flag, and dispatch flag.
@@ -2346,6 +2439,10 @@ void js_dom_events_reset(void) {
         hashmap_free(_entry_index);
         _entry_index = nullptr;
     }
+    if (_type_counts) {
+        hashmap_free(_type_counts);
+        _type_counts = nullptr;
+    }
     _event_registration_order = 0;
 }
 
@@ -2354,6 +2451,7 @@ void js_dom_events_reset(void) {
 #undef _entry_count
 #undef _entry_capacity
 #undef _entry_index
+#undef _type_counts
 #undef _event_registration_order
 
 extern "C" void js_dom_events_destroy_context(JsRuntimeState* runtime_state) {

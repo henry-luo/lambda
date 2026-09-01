@@ -65,6 +65,8 @@ RADIANT_C_API bool radiant_dom_event_is(Item item);
 RADIANT_C_API bool radiant_dom_event_type_is(Item item, const char* type);
 RADIANT_C_API bool radiant_dom_event_is_mouse_like(Item item);
 RADIANT_C_API bool radiant_dom_event_default_prevented(Item item);
+RADIANT_C_API bool radiant_dom_event_propagation_stopped(Item item);
+RADIANT_C_API bool radiant_dom_event_immediate_propagation_stopped(Item item);
 RADIANT_C_API bool radiant_dom_event_prevent_default(Item item);
 RADIANT_C_API void radiant_dom_event_set_trusted(Item item, bool trusted);
 RADIANT_C_API void radiant_dom_event_set_prototype_override(Item item,
@@ -78,6 +80,9 @@ RADIANT_C_API int radiant_dom_event_member_set(Item receiver, const char* name,
 RADIANT_C_API int radiant_dom_event_named_get(Item receiver, Item key, Item* out);
 RADIANT_C_API int radiant_dom_event_named_set(Item receiver, Item key,
                                               Item value, Item* out);
+RADIANT_C_API void radiant_dom_event_set_lambda_dispatch_position(
+    Item event, Item current_target, int event_phase);
+RADIANT_C_API void radiant_dom_event_clear_lambda_dispatch_position(Item event);
 RADIANT_C_API int radiant_dom_event_named_has(Item receiver, Item key, Item* out);
 RADIANT_C_API int radiant_dom_event_prototype(Item receiver, Item* out);
 RADIANT_C_API int radiant_dom_event_call(Item receiver, const char* name,

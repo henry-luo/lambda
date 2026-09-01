@@ -1131,6 +1131,21 @@ static RadiantDomEventRecord* radiant_dom_event_record(Item item) {
     return (RadiantDomEventRecord*)item.vmap->host_data;
 }
 
+static const char* radiant_dom_event_canonical_name(const char* name) {
+    if (!name) return name;
+    // Lambda-facing event fields use snake_case, while the shared JS record
+    // stores the DOM spellings. Keep one record and accept either projection.
+    if (strcmp(name, "current_target") == 0) return "currentTarget";
+    if (strcmp(name, "src_element") == 0) return "srcElement";
+    if (strcmp(name, "default_prevented") == 0) return "defaultPrevented";
+    if (strcmp(name, "event_phase") == 0) return "eventPhase";
+    if (strcmp(name, "is_trusted") == 0) return "isTrusted";
+    if (strcmp(name, "time_stamp") == 0) return "timeStamp";
+    if (strcmp(name, "return_value") == 0) return "returnValue";
+    if (strcmp(name, "cancel_bubble") == 0) return "cancelBubble";
+    return name;
+}
+
 static bool radiant_dom_event_key_equals(Item key, const char* name) {
     if (!name || !is_text_type_id(get_type_id(key))) return false;
     const char* chars = key.get_chars();
@@ -1143,11 +1158,21 @@ static const char* radiant_dom_event_core_name(Item key) {
     static const char* const names[] = {
         "type", "bubbles", "cancelable", "composed", "defaultPrevented",
         "eventPhase", "isTrusted", "timeStamp", "returnValue", "cancelBubble",
+        "currentTarget", "srcElement",
         "__default_prevented", "__stop_prop", "__stop_imm", "__dispatch_flag",
         "__in_passive",
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         if (radiant_dom_event_key_equals(key, names[i])) return names[i];
+    }
+    static const char* const lambda_names[] = {
+        "current_target", "src_element", "default_prevented", "event_phase",
+        "is_trusted", "time_stamp", "return_value", "cancel_bubble",
+    };
+    for (size_t i = 0; i < sizeof(lambda_names) / sizeof(lambda_names[0]); i++) {
+        if (radiant_dom_event_key_equals(key, lambda_names[i])) {
+            return radiant_dom_event_canonical_name(lambda_names[i]);
+        }
     }
     return nullptr;
 }
@@ -1172,6 +1197,7 @@ static bool radiant_dom_event_set_field(Item receiver, const char* name,
                                         Item value, Item* out) {
     RadiantDomEventRecord* record = radiant_dom_event_record(receiver);
     if (!record || !name || !out) return false;
+    name = radiant_dom_event_canonical_name(name);
 
     if (strcmp(name, "type") == 0) {
         const char* type = fn_to_cstr(value);
@@ -1266,6 +1292,16 @@ RADIANT_C_API bool radiant_dom_event_default_prevented(Item item) {
     return record && record->default_prevented;
 }
 
+RADIANT_C_API bool radiant_dom_event_propagation_stopped(Item item) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(item);
+    return record && record->stop_propagation;
+}
+
+RADIANT_C_API bool radiant_dom_event_immediate_propagation_stopped(Item item) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(item);
+    return record && record->stop_immediate;
+}
+
 RADIANT_C_API bool radiant_dom_event_prevent_default(Item item) {
     RadiantDomEventRecord* record = radiant_dom_event_record(item);
     if (!record || !record->cancelable || record->in_passive_listener) return false;
@@ -1295,6 +1331,7 @@ RADIANT_C_API int radiant_dom_event_member_get(Item receiver, const char* name,
                                                Item* out) {
     RadiantDomEventRecord* record = radiant_dom_event_record(receiver);
     if (!record || !name || !out) return 0;
+    name = radiant_dom_event_canonical_name(name);
     if (strcmp(name, "type") == 0) *out = js_name_item(record->type ? record->type : "");
     else if (strcmp(name, "bubbles") == 0) *out = (Item){.item = b2it(record->bubbles)};
     else if (strcmp(name, "cancelable") == 0) *out = (Item){.item = b2it(record->cancelable)};
@@ -1330,6 +1367,30 @@ RADIANT_C_API int radiant_dom_event_member_get(Item receiver, const char* name,
 RADIANT_C_API int radiant_dom_event_member_set(Item receiver, const char* name,
                                                Item value, Item* out) {
     return radiant_dom_event_set_field(receiver, name, value, out) ? 1 : 0;
+}
+
+RADIANT_C_API void radiant_dom_event_set_lambda_dispatch_position(
+        Item event, Item current_target, int event_phase) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(event);
+    if (!record || !event.vmap) return;
+
+    // Dynamic Lambda templates read snake_case backing fields, while JS reads
+    // DOM spellings. Both projections describe this one in-flight record.
+    record->event_phase = event_phase;
+    vmap_backing_set(event.vmap, js_name_item("currentTarget"), current_target);
+    vmap_backing_set(event.vmap, js_name_item("current_target"), current_target);
+    vmap_backing_set(event.vmap, js_name_item("event_phase"),
+                     (Item){.item = i2it(event_phase)});
+}
+
+RADIANT_C_API void radiant_dom_event_clear_lambda_dispatch_position(Item event) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(event);
+    if (!record || !event.vmap) return;
+
+    record->event_phase = 0;
+    vmap_backing_set(event.vmap, js_name_item("currentTarget"), ItemNull);
+    vmap_backing_set(event.vmap, js_name_item("current_target"), ItemNull);
+    vmap_backing_set(event.vmap, js_name_item("event_phase"), ItemNull);
 }
 
 RADIANT_C_API int radiant_dom_event_named_get(Item receiver, Item key, Item* out) {

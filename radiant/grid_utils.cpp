@@ -138,21 +138,6 @@ void destroy_grid_track_size(GridTrackSize* track_size) {
     mem_free(track_size);
 }
 
-// Create a new grid area
-GridArea* create_grid_area(const char* name, int row_start, int row_end, int column_start, int column_end) {
-    GridArea* area = (GridArea*)mem_calloc(1, sizeof(GridArea), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: caller attaches this area to persistent CSS grid state.
-    if (!area) return nullptr;
-
-    // The area root and its name have identical persistent CSS ownership.
-    area->name = mem_strdup(name, MEM_CAT_LAYOUT);
-    area->row_start = row_start;
-    area->row_end = row_end;
-    area->column_start = column_start;
-    area->column_end = column_end;
-
-    return area;
-}
-
 // Destroy a grid area
 void destroy_grid_area(GridArea* area) {
     if (!area) return;

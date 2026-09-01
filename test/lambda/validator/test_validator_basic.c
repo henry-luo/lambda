@@ -8,7 +8,7 @@
  * and progressively testing more complex validation scenarios.
  */
 
-#include "../validator.h"
+#include "validator.hpp"
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
