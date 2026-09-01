@@ -28,6 +28,7 @@
 #include "../lambda/input/input.hpp"
 #include "../lambda/module/radiant/radiant_dom_bridge.hpp"   // Runtime (heap and name_pool)
 #include "../lambda/runtime/runtime-state.h"
+#include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/io/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
 #include "../lambda/js/js_dom_events.h" // js_dom_dispatch_event + native event factories
@@ -41,6 +42,7 @@
 // only need the two-string builder for the paste/drop dispatch path.
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
                                                   const char* text_html);
+extern Item js_make_number(double value);
 extern "C" void js_dom_notify_mutation(DomJsMutationKind kind,
                                         void* target, void* parent);
 extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind,
@@ -1767,20 +1769,63 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
     return copied;
 }
 
-/**
- * Build a Lambda map Item representing an event object.
- * Contains: {type, target_class, target_tag, x, y}
- * For "input" events: adds "char" (typed character as UTF-8 string)
- * For "keydown" events: adds "key" (key name string, e.g. "Backspace", "Enter")
- * Uses doc->input (created during load_lambda_script_doc) for allocation.
- */
-static Item build_lambda_event_map(DomDocument* doc, View* target,
+// F17/ES24: legacy Lambda payload fields now project through the same event
+// wrapper JS receives. Nested Mark values still use the document Input arena;
+// only the outer event carrier moved from a one-shot Mark map to the record.
+class DomEventPayloadBuilder {
+public:
+    explicit DomEventPayloadBuilder(Item event) : event_(event) {}
+
+    void put(const char* name, const char* value) {
+        set(name, value ? js_name_item(value) : ItemNull);
+    }
+    void put(const char* name, int64_t value) {
+        set(name, (Item){.item = i2it(value)});
+    }
+    void put(const char* name, double value) {
+        set(name, js_make_number(value));
+    }
+    void put(const char* name, bool value) {
+        set(name, (Item){.item = b2it(value)});
+    }
+    void put(const char* name, Item value) {
+        set(name, value);
+    }
+    void putNull(const char* name) {
+        set(name, ItemNull);
+    }
+
+private:
+    void set(const char* name, Item value) {
+        Item result = ItemNull;
+        // The Lambda-only handler path has no JS realm. Project payload
+        // fields directly to the native carrier instead of entering JS
+        // property dispatch, which would lazily initialize intrinsics.
+        if (!radiant_dom_event_member_set(event_, name, value, &result)) {
+            log_error("dom event record: failed to set payload field '%s'", name);
+        }
+    }
+
+    Item event_;
+};
+
+static Item build_dom_event_record(DomDocument* doc, View* target,
                                    const char* event_name, EventContext* evcon,
-                                   const InputIntent* intent = nullptr) {
-    if (!doc || !doc->input) return ItemNull;
+                                   const InputIntent* intent = nullptr,
+                                   Item existing_event = ItemNull) {
+    RootFrame roots(1);
+    Rooted<Item> event_root(roots, existing_event);
+    if (!radiant_dom_event_is(event_root.get())) {
+        event_root.set(radiant_dom_event_create(event_name ? event_name : "", true,
+                                                false, false, JS_CLASS_EVENT));
+        radiant_dom_event_set_trusted(event_root.get(), evcon != nullptr);
+    }
+    if (!radiant_dom_event_is(event_root.get()) || !doc || !doc->input) {
+        return event_root.get();
+    }
 
     MarkBuilder builder(doc->input);
-    MapBuilder mb = builder.map();
+    DomEventPayloadBuilder mb(event_root.get());
     mb.put("type", event_name);
 
     // Emitted outside the intent-type guard: an option commit carries no edit
@@ -2065,7 +2110,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         }
     }
 
-    return mb.final();
+    return event_root.get();
 }
 
 // ============================================================================
@@ -2302,6 +2347,27 @@ static bool handler_verdict_is(Item verdict, const char* word) {
     return len == want && memcmp(text, word, want) == 0;
 }
 
+static Item event_context_dom_event(EventContext* evcon, const char* event_name) {
+    if (!evcon || !radiant_dom_event_is(evcon->dom_event) ||
+        !radiant_dom_event_type_is(evcon->dom_event, event_name)) {
+        return ItemNull;
+    }
+    return evcon->dom_event;
+}
+
+static void event_context_set_dom_event(EventContext* evcon, Item event) {
+    if (!evcon || !radiant_dom_event_is(event)) return;
+    if (evcon->dom_event_root_lifetime && !evcon->dom_event_root_gc) {
+        DomDocument* doc = event_context_target_document(evcon);
+        Runtime* runtime = dom_document_script_runtime(doc);
+        if (runtime && runtime->heap && runtime->heap->gc) {
+            gc_register_root(runtime->heap->gc, &evcon->dom_event.item);
+            evcon->dom_event_root_gc = runtime->heap->gc;
+        }
+    }
+    evcon->dom_event = event;
+}
+
 // Bind the document's script runtime, build the event value, invoke one template
 // handler, then reconcile any model change back into layout. Shared by both
 // dispatch walks: the author-template walk passes the item apply() matched as the
@@ -2369,8 +2435,15 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
         input_context = nullptr;
     }
 
-    // build event object map: {type, target_class, target_tag, x, y}
-    Item event_item = build_lambda_event_map(doc, target, event_name, evcon, intent);
+    // F17: author/UA handlers receive the in-flight host record. When no JS
+    // stage created it (a Lambda-only document), create the same record shape
+    // here instead of rebuilding a separate Mark map.
+    RootFrame event_roots(1);
+    Rooted<Item> event_root(event_roots,
+        build_dom_event_record(doc, target, event_name, evcon, intent,
+            event_context_dom_event(evcon, event_name)));
+    Item event_item = event_root.get();
+    event_context_set_dom_event(evcon, event_item);
 
     // set up emit context so handlers can call emit()
     EmitHandlerContext emit_ctx;
@@ -2391,6 +2464,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     bool declined = handler_verdict_is(verdict, "pass");
     if (evcon && handler_verdict_is(verdict, "prevent-default")) {
         evcon->default_prevented = true;
+        radiant_dom_event_prevent_default(event_root.get());
     }
 
     auto t_handler = high_resolution_clock::now();
@@ -6130,10 +6204,12 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     // beforeinput/input instead of reusing the live allocation context.
     if (!dispatch_scope.active && !active_batch_context) return false;
     if (dispatched) *dispatched = true;
-    Item ev = build_event(userdata);
-    Item target_item = js_dom_wrap_element(dom_target);
-    js_dom_dispatch_event(target_item, ev);
-    return read_prevented ? js_event_is_default_prevented(ev) : false;
+    RootFrame roots(2);
+    Rooted<Item> event_root(roots, build_event(userdata));
+    event_context_set_dom_event(evcon, event_root.get());
+    Rooted<Item> target_root(roots, js_dom_wrap_element(dom_target));
+    js_dom_dispatch_event(target_root.get(), event_root.get());
+    return read_prevented ? radiant_dom_event_default_prevented(event_root.get()) : false;
 }
 
 /**
@@ -6572,7 +6648,7 @@ extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
         js_dom_dispatch_event(target_item, input_ev);
         Item change_ev = js_create_event("change", true, false);
         js_dom_dispatch_event(target_item, change_ev);
-        prevented = js_event_is_default_prevented(change_ev);
+        prevented = radiant_dom_event_default_prevented(change_ev);
     }
     event_context_cleanup(&evcon);
     return prevented;
@@ -6655,6 +6731,8 @@ static bool radiant_dispatch_wheel_event(EventContext* evcon, View* target,
 
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) {
     memset(evcon, 0, sizeof(EventContext));
+    evcon->dom_event = ItemNull;
+    evcon->dom_event_root_lifetime = true;
     evcon->ui_context = uicon;
     evcon->event = *event;
     evcon->target_document = uicon
@@ -6669,6 +6747,14 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
 }
 
 void event_context_cleanup(EventContext* evcon) {
+    if (!evcon) return;
+    if (evcon->dom_event_root_gc) {
+        gc_unregister_root((gc_heap_t*)evcon->dom_event_root_gc,
+                           &evcon->dom_event.item);
+    }
+    evcon->dom_event = ItemNull;
+    evcon->dom_event_root_gc = nullptr;
+    evcon->dom_event_root_lifetime = false;
 }
 
 bool radiant_editing_animation_active(DocState* state) {
