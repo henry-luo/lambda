@@ -11,7 +11,6 @@
         { "pattern": "call\tensure_typed_array_p, ensure_typed_array" },
         { "pattern": "mov\t{{r}}, i64:8({{r}})" },
         { "pattern": "mov\t{{r}}, i64:16({{r}})" },
-        { "pattern": "and\t{{r}}, {{r}}, 72057594037927935" },
         { "pattern": "lts\t{{r}}, %p2, 0" },
         { "pattern": "ges\t{{r}}, %p2, {{r}}" },
         { "pattern": "mul\t{{r}}, %p2, 8" },

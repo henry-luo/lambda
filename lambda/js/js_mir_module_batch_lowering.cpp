@@ -7,19 +7,48 @@
 
 extern "C" void js_dynfunc_cache_reset(void);
 
+static NameEntry* jm_annex_b_publish_binding(NameEntry* binding) {
+    if (binding && binding->annex_b_outer_binding) {
+        return binding->annex_b_outer_binding;
+    }
+    return binding;
+}
+
+static NameEntry* jm_hoisted_var_binding(const JsNameSetEntry* entry) {
+    if (!entry || !entry->entry) return NULL;
+    // A sloppy block function owns a lexical declaration cell, while Annex B
+    // publishes through its resolver-linked var companion (D8.2.5).
+    return entry->from_func_decl
+        ? jm_annex_b_publish_binding(entry->entry) : entry->entry;
+}
+
 static JsModuleConstEntry* jm_register_module_var(JsMirTranspiler* mt,
         const char* name, int var_kind, TypeId modvar_type,
-        bool is_nested_func_hoist, const char* log_kind) {
+        bool is_nested_func_hoist, const char* log_kind,
+        NameEntry* binding = NULL) {
     if (!mt || !mt->module_consts || !name ||
             mt->module_var_count >= JS_MAX_MODULE_VARS) return NULL;
     JsModuleConstEntry lookup;
     memset(&lookup, 0, sizeof(lookup));
     lookup.name = jm_persist_name(name);
-    if (hashmap_get(mt->module_consts, &lookup)) return NULL;
+    JsModuleConstEntry* existing = (JsModuleConstEntry*)hashmap_get(
+        mt->module_consts, &lookup);
+    if (existing) {
+        // A preliminary var-hoist scan is spelling-keyed, but its entry can
+        // describe a nested same-named declaration. The later direct source
+        // declaration is the authoritative binding for this module slot.
+        // Direct IIFE declaration promotion has already selected the function
+        // declaration binding. A later Annex B scan names its distinct outer
+        // companion; replacing the promoted binding would make ordinary
+        // reads miss the slot and fall through to global lookup (D8.2.5).
+        if (binding && !existing->is_iife_func_decl) existing->binding = binding;
+        return existing;
+    }
 
     JsModuleConstEntry entry;
     memset(&entry, 0, sizeof(entry));
     entry.name = lookup.name;
+    entry.binding = binding;
     entry.const_type = MCONST_MODVAR;
     entry.int_val = mt->module_var_count++;
     entry.var_kind = var_kind;
@@ -32,9 +61,12 @@ static JsModuleConstEntry* jm_register_module_var(JsMirTranspiler* mt,
 }
 
 static void jm_emit_function_decl_runtime_bindings(JsMirTranspiler* mt,
-        JsFunctionNode* fn, MIR_reg_t var_reg, const char* vname) {
+        JsFunctionNode* fn, MIR_reg_t var_reg) {
     // Function declarations share module persistence and sloppy-eval export rules regardless of closure shape.
-    JsModuleConstEntry* pmc = jm_find_module_const(mt, vname);
+    NameEntry* publish_binding = fn
+        ? jm_annex_b_publish_binding(fn->entry) : NULL;
+    JsModuleConstEntry* pmc = publish_binding
+        ? jm_find_module_const_by_binding(mt, publish_binding) : NULL;
     if (pmc && pmc->const_type == MCONST_MODVAR) {
         jm_store_module_var(mt, (uint32_t)pmc->int_val, var_reg);
     }
@@ -89,6 +121,7 @@ static bool jm_is_undefined_module_var_batch_entry(JsMirTranspiler* mt,
     if (!mt || !entry || mt->is_eval_direct ||
             entry->const_type != MCONST_MODVAR ||
             entry->var_kind != JS_VAR_VAR ||
+            entry->is_iife_func_decl ||
             (int)entry->int_val < preamble_var_limit) {
         return false;
     }
@@ -183,48 +216,6 @@ static bool jm_emit_undefined_module_var_batch(JsMirTranspiler* mt,
         MIR_T_I64, MIR_new_int_op(mt->ctx,
             define_global_var_properties ? 1 : 0));
     return true;
-}
-
-static JsClassEntry* jm_find_class_for_superclass_binding(JsMirTranspiler* mt,
-        JsIdentifierNode* identifier, int depth) {
-    if (!mt || !identifier || !identifier->entry || !identifier->entry->node || depth > 8) {
-        return NULL;
-    }
-    JsAstNode* binding = (JsAstNode*)identifier->entry->node;
-    if (binding->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-        binding->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
-        return jm_find_collected_class(mt, (JsClassNode*)binding);
-    }
-    if (binding->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-        JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)binding;
-        for (JsAstNode* item = declaration->declarations; item; item = item->next) {
-            if (item->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
-            JsVariableDeclaratorNode* candidate = (JsVariableDeclaratorNode*)item;
-            if (!candidate->id || candidate->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
-            JsIdentifierNode* candidate_id = (JsIdentifierNode*)candidate->id;
-            if (!identifier->name || !candidate_id->name ||
-                identifier->name->len != candidate_id->name->len ||
-                strncmp(identifier->name->chars, candidate_id->name->chars,
-                    identifier->name->len) != 0) {
-                continue;
-            }
-            binding = (JsAstNode*)candidate;
-            break;
-        }
-    }
-    if (binding->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) return NULL;
-
-    JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)binding;
-    if (!declarator->init) return NULL;
-    if (declarator->init->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-        declarator->init->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
-        return jm_find_collected_class(mt, (JsClassNode*)declarator->init);
-    }
-    if (declarator->init->node_type == JS_AST_NODE_IDENTIFIER) {
-        return jm_find_class_for_superclass_binding(mt,
-            (JsIdentifierNode*)declarator->init, depth + 1);
-    }
-    return NULL;
 }
 
 // ============================================================================
@@ -415,22 +406,6 @@ void jm_clear_active_js_transpile(JsTranspiler* tp, JsMirTranspiler* mt, char* o
     jm_pop_empty_active_js_transpile_owners(state);
 }
 
-static void jm_collect_function_private_self_name(JsFunctionNode* fn,
-        struct hashmap* locals) {
-    if (!fn || !locals || fn->node_type != JS_AST_NODE_FUNCTION_EXPRESSION || !fn->name) return;
-    const char* self_name = jm_var_name(fn->name);
-    jm_name_set_add(locals, self_name);
-}
-
-static void jm_collect_function_param_names(JsFunctionNode* fn,
-        struct hashmap* names, struct hashmap* mirror) {
-    if (!fn) return;
-    for (JsAstNode* param = fn->params; param; param = param->next) {
-        if (names) jm_collect_pattern_names(param, names);
-        if (mirror) jm_collect_pattern_names(param, mirror);
-    }
-}
-
 static int jm_parent_link_slot_after_captures(JsFuncCollected* child,
         int shared_slot_count) {
     if (!child) return shared_slot_count;
@@ -554,7 +529,7 @@ static bool jm_parent_owns_capture(JsMirTranspiler* mt,
     if (!parent || !capture || !capture->name) return false;
     if (capture->entry && jm_entry_is_owned_by_function(parent->node, capture->entry)) {
         JsModuleConstEntry* module_entry = mt && mt->module_consts
-            ? jm_find_module_const(mt, capture->name) : NULL;
+            ? jm_find_module_const_by_binding(mt, capture->entry) : NULL;
         if (!((module_entry && module_entry->const_type == MCONST_MODVAR &&
                 (module_entry->is_iife_var || module_entry->is_iife_func_decl)) &&
                 JM_JS_FACT(parent, is_iife_body))) return true;
@@ -747,6 +722,13 @@ static const char* jm_capture_scope_env_slot_key(JsMirTranspiler* mt,
         }
     }
     return cap->name;
+}
+
+static bool jm_captures_same_binding(const FnCapture* left,
+        const FnCapture* right) {
+    if (!left || !right) return false;
+    if (left->entry || right->entry) return left->entry == right->entry;
+    return left->name && right->name && strcmp(left->name, right->name) == 0;
 }
 
 static bool jm_is_direct_program_class_decl(JsProgramNode* program, JsClassNode* class_node) {
@@ -948,12 +930,13 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename);
 
 // Helper: emit code to store an exported identifier value into module namespace
 void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
-                                  bool is_default) {
+        NameEntry* binding, bool is_default) {
     // Resolve the value through box_item (handles native-typed variables)
     JsIdentifierNode temp_id;
     memset(&temp_id, 0, sizeof(temp_id));
     temp_id.node_type = JS_AST_NODE_IDENTIFIER;
     temp_id.name = name_pool_create_len(mt->tp->name_pool, name, name_len);
+    temp_id.entry = binding;
 
     MIR_reg_t val = jm_transpile_box_item(mt, (JsAstNode*)&temp_id);
     const char* export_key = is_default ? "default" : name;
@@ -966,11 +949,13 @@ void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
 // When the two names match, behaves identically to jm_emit_module_export(..., false).
 void jm_emit_module_export_aliased(JsMirTranspiler* mt,
                                           const char* local_name, int local_len,
+                                          NameEntry* local_binding,
                                           const char* export_name, int export_len) {
     JsIdentifierNode temp_id;
     memset(&temp_id, 0, sizeof(temp_id));
     temp_id.node_type = JS_AST_NODE_IDENTIFIER;
     temp_id.name = name_pool_create_len(mt->tp->name_pool, local_name, local_len);
+    temp_id.entry = local_binding;
 
     MIR_reg_t val = jm_transpile_box_item(mt, (JsAstNode*)&temp_id);
     MIR_reg_t key = jm_box_property_name_literal(mt, export_name, export_len);
@@ -1173,8 +1158,7 @@ static bool jm_is_plain_script_module_var_decl_without_init(JsMirTranspiler* mt,
         JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
         if (decl->init || !decl->id || decl->id->node_type != JS_AST_NODE_IDENTIFIER) return false;
         JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
-        const char* vname = jm_var_name(id->name);
-        JsModuleConstEntry* mc = jm_find_module_const(mt, vname);
+        JsModuleConstEntry* mc = jm_find_module_const_by_binding(mt, id->entry);
         if (!mc || mc->const_type != MCONST_MODVAR || mc->var_kind != JS_VAR_VAR ||
                 (int)mc->int_val < 0) {
             return false;
@@ -1238,7 +1222,14 @@ static int js_mir_analyze_and_plan(void* opaque) {
     // Pre-seed module_consts from preamble (batch mode: test inherits harness definitions)
     if (mt->preamble_entries && mt->preamble_entry_count > 0) {
         for (int i = 0; i < mt->preamble_entry_count; i++) {
-            hashmap_set(mt->module_consts, &mt->preamble_entries[i]);
+            JsModuleConstEntry inherited = mt->preamble_entries[i];
+            // The preamble's direct-scope entries are owned by its separate
+            // parse unit. Relink public globals when this test's resolver
+            // supplies its own NameEntry instead of retaining a stale pointer.
+            inherited.binding = NULL;
+            inherited.binding_node = NULL;
+            inherited.is_preamble_external = true;
+            hashmap_set(mt->module_consts, &inherited);
         }
         log_debug("js-mir: pre-seeded %d preamble entries (var_count=%d)",
             mt->preamble_entry_count, mt->preamble_var_count);
@@ -1278,7 +1269,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                                 }
                             }
                             jm_register_module_var(mt, vname, (int)v->kind,
-                                modvar_type, false, "module var");
+                                modvar_type, false, "module var", vid->entry);
                         } else if (vd->id && (vd->id->node_type == JS_AST_NODE_OBJECT_PATTERN ||
                                                vd->id->node_type == JS_AST_NODE_ARRAY_PATTERN)) {
                             // destructured binding: collect all names from the pattern
@@ -1289,7 +1280,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
                             while (hashmap_iter(pat_names, &piter, &pitem)) {
                                 JsNameSetEntry* ne = (JsNameSetEntry*)pitem;
                                 jm_register_module_var(mt, ne->name, (int)v->kind,
-                                    (TypeId)0, false, "module var (destructured)");
+                                    (TypeId)0, false, "module var (destructured)",
+                                    ne->entry);
                             }
                             hashmap_free(pat_names);
                         }
@@ -1333,8 +1325,10 @@ static int js_mir_analyze_and_plan(void* opaque) {
                 log_debug("js-mir: suppress AnnexB nested func hoist '%s' (lexical collision)", e->name);
                 continue;
             }
+            // The planner records the binding written by the var environment;
+            // a block function's lexical cell is deliberately distinct.
             jm_register_module_var(mt, e->name, 0, (TypeId)0,
-                e->from_func_decl, "hoisted var");
+                e->from_func_decl, "hoisted var", jm_hoisted_var_binding(e));
         }
         hashmap_free(hoisted_vars);
     }
@@ -1366,7 +1360,9 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     bool is_self_import = (mt->filename != NULL && resolved_pp[0] != '\0' &&
                         strcmp(resolved_pp, mt->filename) == 0);
                     JsModuleConstEntry* mce = jm_register_module_var(mt, vname,
-                        0, (TypeId)0, false, "import default");
+                        0, (TypeId)0, false, "import default",
+                        imp->default_entry);
+                    if (mce) mce->binding_node = (JsAstNode*)imp;
                     if (mce && is_self_import) {
                         mce->is_live_default_binding = true;
                         mce->live_binding_specifier = name_pool_create_len(
@@ -1377,8 +1373,10 @@ static int js_mir_analyze_and_plan(void* opaque) {
                 // Namespace import: import * as X from 'module'
                 if (imp->namespace_name) {
                     const char* vname = jm_var_name(imp->namespace_name);
-                    jm_register_module_var(mt, vname, 0, (TypeId)0, false,
-                        "import namespace");
+                    JsModuleConstEntry* mce = jm_register_module_var(mt, vname,
+                        0, (TypeId)0, false, "import namespace",
+                        imp->namespace_entry);
+                    if (mce) mce->binding_node = (JsAstNode*)imp;
                 }
 
                 // Named imports: import { a, b as c } from 'module'
@@ -1387,8 +1385,10 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     if (spec->node_type == JS_AST_NODE_IMPORT_SPECIFIER) {
                         JsImportSpecifierNode* isp = (JsImportSpecifierNode*)spec;
                         const char* vname = jm_var_name(isp->local_name);
-                        jm_register_module_var(mt, vname, 0, (TypeId)0, false,
-                            "import named");
+                        JsModuleConstEntry* mce = jm_register_module_var(mt,
+                            vname, 0, (TypeId)0, false, "import named",
+                            isp->local_entry);
+                        if (mce) mce->binding_node = spec;
                     }
                     spec = spec->next;
                 }
@@ -1430,6 +1430,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                         JsModuleConstEntry mce;
                         memset(&mce, 0, sizeof(mce));
                         mce.name = jm_var_name(fn->name);
+                        mce.binding = fn->entry;
                         // Only add if not already in module_consts
                         JsModuleConstEntry lookup;
                         lookup.name = jm_persist_name(mce.name);
@@ -1595,6 +1596,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
             JsModuleConstEntry mce;
             memset(&mce, 0, sizeof(mce));
             mce.name = jm_var_name(fn->name);
+            mce.binding = fn->entry;
             JsModuleConstEntry lookup;
             lookup.name = jm_persist_name(mce.name);
             if (!iife_binding_is_unique(mce.name)) return;
@@ -1648,7 +1650,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                                     }
                                     JsModuleConstEntry* mce = jm_register_module_var(mt,
                                         vname, (int)vd->kind, (TypeId)0, false,
-                                        "iife var");
+                                        "iife var", vid->entry);
                                     if (mce) mce->is_iife_var = true;
                                 }
                             }
@@ -1671,7 +1673,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     if (jm_function_decl_annex_b_disallowed(e)) continue;
                     if (!iife_binding_is_unique(e->name)) continue;
                     JsModuleConstEntry* mce = jm_register_module_var(mt,
-                        e->name, 0, (TypeId)0, true, "nested iife func");
+                        e->name, 0, (TypeId)0, true, "nested iife func",
+                        jm_hoisted_var_binding(e));
                     if (mce) mce->is_iife_var = true;
                 }
                 hashmap_free(iife_func_hoists);
@@ -1698,6 +1701,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
             JsModuleConstEntry mce;
             memset(&mce, 0, sizeof(mce));
             mce.name = jm_var_name(ce->name);
+            mce.binding = ce->node ? ce->node->outer_entry : NULL;
             if (ce->is_declaration) {
                 // Check if this class name already has a MCONST_MODVAR (iife_var) entry.
                 // If so, reuse the same module_var index so the static getter 'this' lookup
@@ -1730,22 +1734,14 @@ static int js_mir_analyze_and_plan(void* opaque) {
             ce->node->superclass->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* super_id = (JsIdentifierNode*)ce->node->superclass;
             if (super_id->name) {
-                if (ce->name && ce->name->len == super_id->name->len &&
-                    strncmp(ce->name->chars, super_id->name->chars, ce->name->len) == 0) {
+                if (ce->node->entry && ce->node->entry == super_id->entry) {
                     // ClassDefinitionEvaluation evaluates heritage before its
                     // inner class-name binding is initialized. This is a TDZ
                     // read even when an outer var has the same spelling.
                     ce->has_self_extends = true;
                     continue;
                 }
-                // A minified nested function can reuse a class name as a local
-                // alias. Resolve `extends` through the parser's lexical binding
-                // before consulting spelling-only class metadata.
-                ce->superclass = jm_find_class_for_superclass_binding(mt, super_id, 0);
-                if (!ce->superclass && (!super_id->entry || !super_id->entry->node)) {
-                    ce->superclass = jm_find_class(mt, super_id->name->chars,
-                        (int)super_id->name->len);
-                }
+                ce->superclass = jm_find_class_for_binding(mt, super_id->entry);
                 // Detect self-referential extends (class x extends x {}):
                 // Per ES spec, the class name is in TDZ during the extends clause.
                 // At compile time, we simply clear the superclass to prevent infinite
@@ -1892,7 +1888,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
                         // A remaining capture with the same spelling carries the resolved
                         // shadow-binding fact, so no ancestor name scan is needed here.
                         if (mt->module_consts) {
-                            JsModuleConstEntry* mc_prop = jm_find_module_const(mt, cap_name);
+                            JsModuleConstEntry* mc_prop = jm_find_module_const_by_binding(mt,
+                                child_capture->entry);
                             if (mc_prop && !JM_CAPTURE_ARRAY(child)[ci].force_env_capture) {
                                 if (ci < JM_CAPTURE_COUNT(child) - 1) {
                                     memmove(&JM_CAPTURE_ARRAY(child)[ci], &JM_CAPTURE_ARRAY(child)[ci + 1],
@@ -2015,6 +2012,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
                 // Allocate scope_env_names (+2 for potential __parent_env__ and safety)
                 parent_fc->scope_env_names = (const char**)mem_calloc(
                     total_needed + 2, sizeof(const char*), MEM_CAT_JS_RUNTIME);
+                parent_fc->scope_env_bindings = (NameEntry**)mem_calloc(
+                    total_needed + 2, sizeof(NameEntry*), MEM_CAT_JS_RUNTIME);
 
                 // Re-iterate children in original order to fill names deterministically
                 int fill_idx = 0;
@@ -2039,6 +2038,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
                             if (!jm_name_set_has(scope_vars, slot_key)) {
                                 jm_name_set_add(scope_vars, slot_key);
                                 parent_fc->scope_env_names[fill_idx] = jm_persist_name(slot_key);
+                                parent_fc->scope_env_bindings[fill_idx] =
+                                    JM_CAPTURE_ARRAY(child)[k].entry;
                                 fill_idx++;
                             }
                         }
@@ -2067,6 +2068,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     }
                     if (assigned_nfe_slot) {
                         parent_fc->scope_env_names[extra_slot] = jm_persist_name(csn);
+                        parent_fc->scope_env_bindings[extra_slot] = child->node->entry;
                         extra_slot++;
                     }
                 }
@@ -2099,13 +2101,10 @@ static int js_mir_analyze_and_plan(void* opaque) {
                                 is_child_nfe_remap && JM_CAPTURE_ARRAY(child)[k].is_nfe_binding) {
                                 continue;
                             }
-                            // Find this capture's slot in the normal portion of scope env
-                            const char* slot_key = jm_capture_scope_env_slot_key(mt, parent_fc, child, &JM_CAPTURE_ARRAY(child)[k]);
-                            for (int s = 0; s < normal_slot_count; s++) {
-                                if (strcmp(slot_key, parent_fc->scope_env_names[s]) == 0) {
-                                    JM_CAPTURE_ARRAY(child)[k].scope_env_slot = s;
-                                    break;
-                                }
+                            int slot = jm_scope_env_slot_for_capture(parent_fc,
+                                &JM_CAPTURE_ARRAY(child)[k]);
+                            if (slot >= 0 && slot < normal_slot_count) {
+                                JM_CAPTURE_ARRAY(child)[k].scope_env_slot = slot;
                             }
                         }
                     }
@@ -2159,7 +2158,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
             if (!cap->is_let_const) return false;
             if (cap->is_nfe_binding) return false;
             if (mt->module_consts) {
-                JsModuleConstEntry* mc = jm_find_module_const(mt, name);
+                JsModuleConstEntry* mc = jm_find_module_const_by_binding(mt,
+                    cap->entry);
                 if (mc && jm_capture_uses_live_module_var(mt, cap)) return false;
             }
             if (strcmp(name, "_js_this") == 0 ||
@@ -2240,6 +2240,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
             mt->module_fc.scope_env_normal_count = total;
             mt->module_fc.scope_env_names = (const char**)mem_calloc(
                 scope_env_capacity, sizeof(const char*), MEM_CAT_JS_RUNTIME);
+            mt->module_fc.scope_env_bindings = (NameEntry**)mem_calloc(
+                scope_env_capacity, sizeof(NameEntry*), MEM_CAT_JS_RUNTIME);
 
             // Deterministic fill: iterate children in collection order
             hashmap_clear(scope_vars, false);
@@ -2253,6 +2255,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     if (!jm_name_set_has(scope_vars, key)) {
                         jm_name_set_add(scope_vars, key);
                         mt->module_fc.scope_env_names[fill_idx] = jm_persist_name(key);
+                        mt->module_fc.scope_env_bindings[fill_idx] =
+                            JM_CAPTURE_ARRAY(child)[k].entry;
                         fill_idx++;
                     }
                 }
@@ -2267,12 +2271,10 @@ static int js_mir_analyze_and_plan(void* opaque) {
                 if (jm_parent_function_id(mt, child) != AST_FUNCTION_ID_INVALID) continue;
                 for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                     if (!capture_qualifies(child, &JM_CAPTURE_ARRAY(child)[k])) continue;
-                    const char* key = capture_slot_key(&JM_CAPTURE_ARRAY(child)[k]);
-                    for (int s = 0; s < total; s++) {
-                        if (strcmp(key, mt->module_fc.scope_env_names[s]) == 0) {
-                            JM_CAPTURE_ARRAY(child)[k].scope_env_slot = s;
-                            break;
-                        }
+                    int slot = jm_scope_env_slot_for_capture(&mt->module_fc,
+                        &JM_CAPTURE_ARRAY(child)[k]);
+                    if (slot >= 0 && slot < total) {
+                        JM_CAPTURE_ARRAY(child)[k].scope_env_slot = slot;
                     }
                 }
                 if (closure_needs_mixed_module_env(child)) {
@@ -2344,7 +2346,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
         for (int s = 0; s < parent_fc->scope_env_count; s++) {
             bool found_in_captures = false;
             for (int c = 0; c < JM_CAPTURE_COUNT(parent_fc); c++) {
-                if (strcmp(parent_fc->scope_env_names[s], JM_CAPTURE_ARRAY(parent_fc)[c].name) == 0) {
+                if (jm_scope_env_slot_matches_capture(parent_fc, s,
+                        &JM_CAPTURE_ARRAY(parent_fc)[c])) {
                     found_in_captures = true;
                     break;
                 }
@@ -2362,10 +2365,10 @@ static int js_mir_analyze_and_plan(void* opaque) {
         JM_JS_FACT(parent_fc, reuse_parent_env) = true;
         int max_slot = 0;
         for (int s = 0; s < parent_fc->scope_env_count; s++) {
-            const char* sname = parent_fc->scope_env_names[s];
             // Find this scope_env var in parent_fc's own captures to get grandparent slot
             for (int c = 0; c < JM_CAPTURE_COUNT(parent_fc); c++) {
-                if (strcmp(sname, JM_CAPTURE_ARRAY(parent_fc)[c].name) == 0) {
+                if (jm_scope_env_slot_matches_capture(parent_fc, s,
+                        &JM_CAPTURE_ARRAY(parent_fc)[c])) {
                     // Propagated captures in a mixed module closure can live in
                     // private tail slots. Its nested closures reuse that actual
                     // incoming layout, not the original module scope slot.
@@ -2383,7 +2386,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
                         JsFuncCollected* child = &mt->func_entries[ci];
                         if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
                         for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
-                            if (strcmp(JM_CAPTURE_ARRAY(child)[k].name, sname) == 0) {
+                            if (jm_captures_same_binding(&JM_CAPTURE_ARRAY(child)[k],
+                                    &JM_CAPTURE_ARRAY(parent_fc)[c])) {
                                 JM_CAPTURE_ARRAY(child)[k].scope_env_slot = grandparent_slot;
                                 // Mixed loop closures record this same binding as
                                 // grandparent_slot; leaving its pre-reuse slot here
@@ -2424,17 +2428,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
         if (JM_JS_FACT(parent_fc, reuse_parent_env)) continue;  // Phase 1.7b already handles pure-transitive
         if (JM_CAPTURE_COUNT(parent_fc) == 0) continue; // no captures = no transitive vars possible
 
-        // Collect body locals for this function to distinguish locals from transitive captures
-        struct hashmap* parent_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-            jm_name_hash, jm_name_cmp, NULL, NULL);
         JsFunctionNode* parent_fn = parent_fc->node;
-        if (parent_fn && parent_fn->body) {
-            // parent captures can include names propagated from child closures;
-            // body locals still belong to this activation, not the parent link.
-            jm_collect_indexed_body_locals(mt, parent_fn->body, parent_locals, false);
-            jm_collect_function_param_names(parent_fn, parent_locals, NULL);
-            jm_collect_function_private_self_name(parent_fn, parent_locals);
-        }
 
         // Check if scope env has any transitive captures (vars that are also in parent_fc's captures)
         // Only count captures that the parent reads from its own parent's scope env
@@ -2445,13 +2439,16 @@ static int js_mir_analyze_and_plan(void* opaque) {
         bool parent_link_uses_grandparent = false;
         for (int s = 0; s < parent_fc->scope_env_count; s++) {
             bool is_capture = false;
-            // Check if this scope env var is a local of the parent (including function declarations)
-            JsNameSetEntry local_lookup;
-            local_lookup.name = jm_persist_name(parent_fc->scope_env_names[s]);
-            bool is_parent_local = (hashmap_get(parent_locals, &local_lookup) != NULL);
+            NameEntry* binding = jm_scope_env_binding_at(parent_fc, s);
+            // A resolved binding tells whether the parent owns this cell; a
+            // source-name set cannot distinguish an outer capture from a local
+            // shadow with the same spelling.
+            bool is_parent_local = binding && parent_fn &&
+                jm_entry_is_owned_by_function(parent_fn, binding);
             if (!is_parent_local) {
                 for (int c = 0; c < JM_CAPTURE_COUNT(parent_fc); c++) {
-                    if (strcmp(parent_fc->scope_env_names[s], JM_CAPTURE_ARRAY(parent_fc)[c].name) == 0) {
+                    if (jm_scope_env_slot_matches_capture(parent_fc, s,
+                            &JM_CAPTURE_ARRAY(parent_fc)[c])) {
                         // any parent capture is transitive for the child; if it is
                         // not backed by a shared scope_env slot, the parent's dense
                         // closure-env capture slot is still the live binding cell.
@@ -2468,7 +2465,6 @@ static int js_mir_analyze_and_plan(void* opaque) {
         }
 
         if (!has_transitive) {
-            hashmap_free(parent_locals);
             continue; // pure-local scope envs do not need a parent link
         }
         // a non-reused env with a transitive capture must preserve the original
@@ -2485,7 +2481,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
                 for (int k = 0; k < JM_CAPTURE_COUNT(child) && !needs_immediate_parent_link; k++) {
                     for (int pc = 0; pc < JM_CAPTURE_COUNT(parent_fc); pc++) {
                         FnCapture* parent_cap = &JM_CAPTURE_ARRAY(parent_fc)[pc];
-                        if (strcmp(JM_CAPTURE_ARRAY(child)[k].name, parent_cap->name) != 0 ||
+                        if (!jm_captures_same_binding(&JM_CAPTURE_ARRAY(child)[k],
+                                parent_cap) ||
                             parent_cap->grandparent_slot >= 0 ||
                             parent_cap->scope_env_slot < 0) continue;
                         if (jm_capture_binding_starts_after_function(parent_fc, parent_cap)) {
@@ -2536,15 +2533,17 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     JM_CAPTURE_ARRAY(child)[k].parent_env_link_slot_override = -1;
                     continue;
                 }
-                // Check if this capture name is a LOCAL of the parent — if so, skip
-                JsNameSetEntry ll;
-                ll.name = jm_persist_name(JM_CAPTURE_ARRAY(child)[k].name);
-                if (hashmap_get(parent_locals, &ll)) continue;
+                // A local parent binding has its own scope cell, not the
+                // inherited link that a transitive capture needs.
+                if (parent_fn && JM_CAPTURE_ARRAY(child)[k].entry &&
+                        jm_entry_is_owned_by_function(parent_fn,
+                            JM_CAPTURE_ARRAY(child)[k].entry)) continue;
 
                 // Check if this capture is a transitive capture (also in parent_fc's captures)
                 // Only for captures the parent reads from its own parent's scope env
                 for (int pc = 0; pc < JM_CAPTURE_COUNT(parent_fc); pc++) {
-                    if (strcmp(JM_CAPTURE_ARRAY(child)[k].name, JM_CAPTURE_ARRAY(parent_fc)[pc].name) == 0) {
+                    if (jm_captures_same_binding(&JM_CAPTURE_ARRAY(child)[k],
+                            &JM_CAPTURE_ARRAY(parent_fc)[pc])) {
                         int grandparent_slot = JM_CAPTURE_ARRAY(parent_fc)[pc].grandparent_slot;
                         if (grandparent_slot >= 0) {
                             JM_CAPTURE_ARRAY(child)[k].grandparent_slot = grandparent_slot;
@@ -2584,8 +2583,6 @@ static int js_mir_analyze_and_plan(void* opaque) {
             }
         }
 
-        hashmap_free(parent_locals);
-
         log_debug("js-mir: Phase 1.7c: '%s' has parent env link at slot %d (mixed scope env, %d slots)",
             parent_fc->name, parent_env_link_slot, parent_fc->scope_env_count);
     }
@@ -2621,12 +2618,14 @@ static int js_mir_analyze_and_plan(void* opaque) {
             if (jm_parent_function_id(mt, child) != fc->function_id) continue;
             for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                 for (int s = 0; s < fc->scope_env_count; s++) {
-                    if (strcmp(JM_CAPTURE_ARRAY(child)[k].name, fc->scope_env_names[s]) == 0) {
+                    if (jm_scope_env_slot_matches_capture(fc, s,
+                            &JM_CAPTURE_ARRAY(child)[k])) {
                         JM_CAPTURE_ARRAY(child)[k].scope_env_slot = s;
                         JM_CAPTURE_ARRAY(child)[k].grandparent_slot = -1;
                         JM_CAPTURE_ARRAY(child)[k].parent_env_link_slot_override = -1;
                         for (int c = 0; c < JM_CAPTURE_COUNT(fc); c++) {
-                            if (strcmp(JM_CAPTURE_ARRAY(child)[k].name, JM_CAPTURE_ARRAY(fc)[c].name) != 0) continue;
+                            if (!jm_captures_same_binding(&JM_CAPTURE_ARRAY(child)[k],
+                                    &JM_CAPTURE_ARRAY(fc)[c])) continue;
                             if (JM_CAPTURE_ARRAY(fc)[c].grandparent_slot >= 0) {
                                 JM_CAPTURE_ARRAY(child)[k].grandparent_slot =
                                     JM_CAPTURE_ARRAY(fc)[c].grandparent_slot;
@@ -2649,7 +2648,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
             // use the child's compact slots for these bindings. Phase 1.7c may
             // have already marked them as grandparent reads before 1.7d changed
             // this function from parent-env reuse to an owned compact env.
-            if (child->has_scope_env && child->scope_env_names) {
+            if (child->has_scope_env) {
                 // A child that still reuses its parent has no independent cell
                 // layout: its children must follow this newly owned environment.
                 // Remapping them through the child's pre-reuse layout aliases
@@ -2660,15 +2659,16 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     if (jm_parent_function_id(mt, grandchild) != child->function_id) continue;
                     for (int gk = 0; gk < JM_CAPTURE_COUNT(grandchild); gk++) {
                         for (int s = 0; s < capture_env_owner->scope_env_count; s++) {
-                            if (strcmp(JM_CAPTURE_ARRAY(grandchild)[gk].name,
-                                    capture_env_owner->scope_env_names[s]) == 0) {
+                            if (jm_scope_env_slot_matches_capture(capture_env_owner,
+                                    s, &JM_CAPTURE_ARRAY(grandchild)[gk])) {
                                 JM_CAPTURE_ARRAY(grandchild)[gk].scope_env_slot = s;
                                 JM_CAPTURE_ARRAY(grandchild)[gk].grandparent_slot = -1;
                                 JM_CAPTURE_ARRAY(grandchild)[gk].parent_env_link_slot_override = -1;
                                 if (capture_env_owner == child) {
                                     for (int c = 0; c < JM_CAPTURE_COUNT(child); c++) {
-                                        if (strcmp(JM_CAPTURE_ARRAY(grandchild)[gk].name,
-                                                JM_CAPTURE_ARRAY(child)[c].name) == 0 &&
+                                        if (jm_captures_same_binding(
+                                                &JM_CAPTURE_ARRAY(grandchild)[gk],
+                                                &JM_CAPTURE_ARRAY(child)[c]) &&
                                             JM_CAPTURE_ARRAY(child)[c].scope_env_slot >= 0 &&
                                             JM_CAPTURE_ARRAY(child)[c].grandparent_slot < 0) {
                                             // A capture owned by the mixed direct
@@ -3002,7 +3002,10 @@ static int js_mir_lower(void* opaque) {
             preamble_var_limit, false);
         size_t var_iter = 0; void* var_item;
         while (hashmap_iter(mt->module_consts, &var_iter, &var_item)) {
-            JsModuleConstEntry* mce = (JsModuleConstEntry*)var_item;
+        JsModuleConstEntry* mce = (JsModuleConstEntry*)var_item;
+            // The promoted declaration writes its module cell before any
+            // IIFE-body consumer can observe it; do not emit an unused undef.
+            if (mce->is_iife_func_decl) continue;
             if (mce->const_type == MCONST_MODVAR &&
                 mce->var_kind == JS_VAR_VAR &&
                 (int)mce->int_val >= preamble_var_limit) {
@@ -3180,8 +3183,9 @@ static int js_mir_lower(void* opaque) {
                     // all reads must go through js_get_module_var to see updates
                     // from self-reassignment inside the function body.
                     if (!JM_JS_FACT(fc, is_reassigned))
-                        jm_set_var(mt, vname, var_reg);
-                    jm_emit_function_decl_runtime_bindings(mt, fn, var_reg, vname);
+                        jm_set_var(mt, vname, var_reg, MIR_T_I64,
+                            LMD_TYPE_ANY, fn->entry);
+                    jm_emit_function_decl_runtime_bindings(mt, fn, var_reg);
                 }
             }
         }
@@ -3201,12 +3205,14 @@ static int js_mir_lower(void* opaque) {
             }
             const char* vname = jm_var_name(ce->name);
             // Create a variable holding null placeholder.
-            // Actual class instantiation is handled by jm_transpile_new_expr.
+            // Actual class instantiation is handled by jm_emit_new_expression.
             MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
             jm_emit_reg_op(mt, MIR_MOV, var_reg, MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL));
-            jm_set_var(mt, vname, var_reg);
+            jm_set_var(mt, vname, var_reg, MIR_T_I64, LMD_TYPE_ANY,
+                ce->node->outer_entry);
             // Also store null to module var so closures see the initial value
-            JsModuleConstEntry* mc = jm_find_module_const(mt, vname);
+            JsModuleConstEntry* mc = jm_find_module_const_by_binding(mt,
+                ce->node->outer_entry);
             if (mc && mc->const_type == MCONST_CLASS) {
                 jm_store_module_var(mt, (uint32_t)mc->int_val, var_reg);
             }
@@ -3252,6 +3258,7 @@ static int js_mir_lower(void* opaque) {
                         JsExportSpecifierNode* es = (JsExportSpecifierNode*)spec;
                         jm_emit_module_export_aliased(mt,
                             es->local_name->chars,  (int)es->local_name->len,
+                            es->local_entry,
                             es->export_name->chars, (int)es->export_name->len);
                     }
                     spec = spec->next;
@@ -3290,7 +3297,8 @@ static int js_mir_lower(void* opaque) {
                             // Will be filled after closure creation below
                             continue;
                         }
-                        JsMirVarEntry* var = jm_find_var(mt, JM_CAPTURE_ARRAY(fc)[ci].name);
+                        JsMirVarEntry* var = jm_find_var_by_binding(mt,
+                            JM_CAPTURE_ARRAY(fc)[ci].entry);
                         if (var) {
                             // Box native-typed variables before storing in env
                             MIR_reg_t value_to_store = var->reg;
@@ -3303,7 +3311,8 @@ static int js_mir_lower(void* opaque) {
                             bool found_mc = false;
                             if (mt->module_consts) {
                                 JsModuleConstEntry* mc =
-                                    jm_find_module_const(mt, JM_CAPTURE_ARRAY(fc)[ci].name);
+                                    jm_find_module_const_by_binding(mt,
+                                        JM_CAPTURE_ARRAY(fc)[ci].entry);
                                 if (mc) {
                                     found_mc = true;
                                     MIR_reg_t const_val = jm_emit_module_const_value(mt, mc);
@@ -3325,20 +3334,22 @@ static int js_mir_lower(void* opaque) {
                     // ordinary function expressions before their binding is visible.
                     jm_emit_finalize_function(mt, fn_item, fc, fn);
                     jm_emit_mov(mt, var_reg, fn_item);
-                    jm_set_var(mt, vname, var_reg);
+                    jm_set_var(mt, vname, var_reg, MIR_T_I64, LMD_TYPE_ANY,
+                        fn->entry);
 
                     // Patch self-reference: update env slot to point to the closure itself
                     if (self_ref_slot >= 0) {
                         jm_emit_store_i64(mt, self_ref_slot * (int)sizeof(uint64_t), env, var_reg);
                     }
 
-                    jm_emit_function_decl_runtime_bindings(mt, fn, var_reg, vname);
+                    jm_emit_function_decl_runtime_bindings(mt, fn, var_reg);
                 }
             }
             // Non-capturing function declarations already handled above
             // Module mode: export the function to namespace
             if (current_export && mt->is_module && fn->name) {
                 jm_emit_module_export(mt, fn->name->chars, (int)fn->name->len,
+                    fn->entry,
                     current_export->is_default);
             }
             stmt = stmt->next;
@@ -3350,7 +3361,7 @@ static int js_mir_lower(void* opaque) {
             // accessed by closures/methods (e.g., __publicField(ClassName, ...))
             JsClassNode* cls_node = (JsClassNode*)actual_stmt;
             if (cls_node->name) {
-                JsClassEntry* ce = jm_find_class(mt, cls_node->name->chars, (int)cls_node->name->len);
+                JsClassEntry* ce = jm_find_collected_class(mt, cls_node);
                 if (ce) {
                     // TDZ: class x extends x {} → throw ReferenceError
                     jm_emit_class_self_extends_check(mt, ce, cls_node->name);
@@ -3359,14 +3370,15 @@ static int js_mir_lower(void* opaque) {
                     // method setup before its lexical binding is authoritative.
                     jm_create_gc_root_slot(mt, cls_obj);
                     jm_emit_set_class_source(mt, cls_obj, cls_node);
-                    // Update local variable
-                    const char* vname = jm_var_name(cls_node->name);
-                    JsMirVarEntry* ve = jm_find_var(mt, vname);
+                    // Update the declaration's resolved local binding.
+                    JsMirVarEntry* ve = jm_find_var_by_binding(mt,
+                        cls_node->outer_entry);
                     if (ve) {
                         jm_emit_mov(mt, ve->reg, cls_obj);
                     }
                     // Store class object in module var
-                    JsModuleConstEntry* mc = jm_find_module_const(mt, vname);
+                    JsModuleConstEntry* mc = jm_find_module_const_by_binding(mt,
+                        cls_node->outer_entry);
                     if (mc && mc->const_type == MCONST_CLASS) {
                         jm_store_module_var(mt, (uint32_t)mc->int_val, cls_obj);
                     }
@@ -3481,6 +3493,7 @@ static int js_mir_lower(void* opaque) {
                         if (vd->id && vd->id->node_type == JS_AST_NODE_IDENTIFIER) {
                             JsIdentifierNode* vid = (JsIdentifierNode*)vd->id;
                             jm_emit_module_export(mt, vid->name->chars, (int)vid->name->len,
+                                vid->entry,
                                 current_export->is_default);
                         } else if (vd->id && (vd->id->node_type == JS_AST_NODE_OBJECT_PATTERN ||
                                               vd->id->node_type == JS_AST_NODE_ARRAY_PATTERN)) {
@@ -3503,6 +3516,7 @@ static int js_mir_lower(void* opaque) {
                                     js_name_len -= 4;
                                 }
                                 jm_emit_module_export(mt, js_name, js_name_len,
+                                    ne->entry,
                                     current_export->is_default);
                             }
                             hashmap_free(names);

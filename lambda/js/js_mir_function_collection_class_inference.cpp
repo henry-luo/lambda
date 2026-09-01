@@ -55,7 +55,10 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
         return NULL;
     }
 
-    JsFunctionNode* fn = jm_resolve_direct_call_function(mt, call);
+    // Native lowering uses only the stable direct-call path. A mutable `var`
+    // function expression remains a boxed runtime call, so it cannot publish
+    // a native result descriptor at this site.
+    JsFunctionNode* fn = jm_resolve_direct_call_function(mt, call, true);
     if (!fn) return NULL;
     if (fn->is_async) return NULL;
 
@@ -184,8 +187,6 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
 // Function/class collection from the sealed shared AST index
 // ============================================================================
 
-JsClassEntry* jm_find_class(JsMirTranspiler* mt, const char* name, int name_len);
-
 static String* jm_class_member_source_name(JsMirTranspiler* mt,
         JsClassEntry* owner, JsAstNode* key) {
     if (!mt || !key) return NULL;
@@ -255,6 +256,46 @@ JsClassEntry* jm_find_collected_class(JsMirTranspiler* mt,
             class_node->class_id >= (AstClassId)mt->class_count) return NULL;
     JsClassEntry* entry = &mt->class_entries[class_node->class_id];
     return entry->node == class_node ? entry : NULL;
+}
+
+static JsClassEntry* jm_find_class_for_binding_impl(JsMirTranspiler* mt,
+        NameEntry* binding, int depth) {
+    if (!mt || !binding || !binding->node || depth > 8) return NULL;
+    JsAstNode* definition = (JsAstNode*)binding->node;
+    if (definition->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+            definition->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+        return jm_find_collected_class(mt, (JsClassNode*)definition);
+    }
+    if (definition->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+        JsVariableDeclarationNode* declaration =
+            (JsVariableDeclarationNode*)definition;
+        for (JsAstNode* item = declaration->declarations; item; item = item->next) {
+            if (item->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+            JsVariableDeclaratorNode* candidate =
+                (JsVariableDeclaratorNode*)item;
+            if (candidate->entry == binding) {
+                definition = (JsAstNode*)candidate;
+                break;
+            }
+        }
+    }
+    if (definition->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) return NULL;
+    JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)definition;
+    if (!declarator->init) return NULL;
+    if (declarator->init->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+            declarator->init->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+        return jm_find_collected_class(mt, (JsClassNode*)declarator->init);
+    }
+    if (declarator->init->node_type == JS_AST_NODE_IDENTIFIER) {
+        return jm_find_class_for_binding_impl(mt,
+            ((JsIdentifierNode*)declarator->init)->entry, depth + 1);
+    }
+    return NULL;
+}
+
+JsClassEntry* jm_find_class_for_binding(JsMirTranspiler* mt,
+        NameEntry* binding) {
+    return jm_find_class_for_binding_impl(mt, binding, 0);
 }
 
 static bool jm_publish_collected_backend(JsMirTranspiler* mt,
@@ -538,9 +579,7 @@ static void jm_collect_indexed_class_aliases(JsMirTranspiler* mt) {
             }
             if (decl->init->node_type != JS_AST_NODE_IDENTIFIER) continue;
             JsIdentifierNode* source = (JsIdentifierNode*)decl->init;
-            JsClassEntry* entry = source->name &&
-                    source->source_span.start_byte < decl->source_span.start_byte
-                ? jm_find_class(mt, source->name->chars, (int)source->name->len) : NULL;
+            JsClassEntry* entry = jm_find_class_for_binding(mt, source->entry);
             if (entry && !entry->alias_name) entry->alias_name = binding->name;
         } else if (node->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
             JsAssignmentNode* assignment = (JsAssignmentNode*)node;
@@ -683,23 +722,6 @@ bool jm_func_has_param_named(JsFunctionNode* fn, const char* name, int name_len)
         }
     }
     return false;
-}
-
-// Find class entry by name
-JsClassEntry* jm_find_class(JsMirTranspiler* mt, const char* name, int name_len) {
-    for (int i = 0; i < mt->class_count; i++) {
-        JsClassEntry* ce = &mt->class_entries[i];
-        if (ce->name && (int)ce->name->len == name_len &&
-            strncmp(ce->name->chars, name, name_len) == 0) {
-            return ce;
-        }
-        // Check alias_name for class expressions: var X = class Y {}
-        if (ce->alias_name && (int)ce->alias_name->len == name_len &&
-            strncmp(ce->alias_name->chars, name, name_len) == 0) {
-            return ce;
-        }
-    }
-    return NULL;
 }
 
 // ============================================================================
@@ -1754,7 +1776,6 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
 // ============================================================================
 
 // Forward declarations for transpiler functions defined later
-MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call);
 MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, int param_count);
 void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw);
 void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw);

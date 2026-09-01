@@ -556,9 +556,10 @@ static bool js_interp_name_matches(const String* left, const String* right) {
 }
 
 static JsInterpImportBinding* js_interp_import_binding(JsScript* script,
-        String* local_name) {
+        NameEntry* entry, String* local_name) {
     for (JsInterpImportBinding* binding = script ? script->interp_imports : NULL;
             binding; binding = binding->next) {
+        if (entry && binding->entry == entry) return binding;
         if (js_interp_name_matches(binding->local_name, local_name)) return binding;
     }
     return NULL;
@@ -1190,11 +1191,9 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
         // are built, after an earlier identifier node captured no static entry.
         entry = js_interp_find_binding(frame, unresolved_name);
     }
-    if (!entry) {
-        JsInterpImportBinding* imported = js_interp_import_binding(frame->script,
-            unresolved_name);
-        if (imported) return js_interp_read_import_binding(frame->script, imported);
-    }
+    JsInterpImportBinding* imported = js_interp_import_binding(frame->script,
+        entry, unresolved_name);
+    if (imported) return js_interp_read_import_binding(frame->script, imported);
     if (!entry) {
         if (js_interp_name_equals(unresolved_name, "undefined")) return make_js_undefined();
         Item key = js_interp_name_key(unresolved_name);
@@ -1227,7 +1226,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     if (!frame) return ItemError;
     String* name = entry ? entry->name : unresolved_name;
     Item key = js_interp_name_key(name);
-    if (!entry && js_interp_import_binding(frame->script, name)) {
+    if (js_interp_import_binding(frame->script, entry, name)) {
         if (initialize) return value;
         return js_throw_type_error("Assignment to constant variable");
     }
@@ -1938,7 +1937,8 @@ static JsInterpCompletion js_interp_eval_reference(JsInterpFrame* frame,
             !out_reference->with_binding && !out_reference->arguments_env &&
             !out_reference->binding_uses_eval &&
             !js_eval_local_has_var_binding(key) && !special_binding &&
-            !js_interp_import_binding(frame->script, identifier->name) &&
+            !js_interp_import_binding(frame->script, out_reference->entry,
+                identifier->name) &&
             !js_global_binding_exists_after_with_lookup(key);
         return js_interp_normal(ItemNull);
     }
@@ -3329,7 +3329,8 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
             // has an entry and therefore follows the regular error path.
             if (!has_special_binding && !has_arguments_binding && !entry && !js_global_binding_exists(
                     js_interp_name_key(identifier->name)) &&
-                    !js_interp_import_binding(frame->script, identifier->name) &&
+                    !js_interp_import_binding(frame->script, entry,
+                        identifier->name) &&
                     !js_eval_local_has_var_binding(
                         js_interp_name_key(identifier->name))) {
                 return js_interp_normal(js_make_string("undefined"));

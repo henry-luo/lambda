@@ -979,6 +979,8 @@ struct FnAnalysis;
 // aligned with AstNamedNode on name
 typedef struct AstFuncNode : AstNode {
     String* name;
+    // Declaration or named-expression binding published by direct scope.
+    NameEntry* entry;
     union {
         AstNamedNode *param;
         AstNode *params;
@@ -1071,11 +1073,11 @@ typedef struct FnParamEvidence {
     int float_evidence;
     int string_evidence;
     int other_evidence;
-    int name_count;
-    // String* entries contain the parameter binding followed by any aliases.
-    // The list is compiler-owned scratch state, so inference has no fixed
-    // alias count or source-name width.
-    ArrayList* names;
+    int binding_count;
+    // NameEntry* entries contain the parameter binding followed by its aliases.
+    // Inference consumes resolved identities so a same-spelled inner binding
+    // never inherits the parameter's lane evidence (D8.2.4).
+    ArrayList* bindings;
     bool used_as_container;
     TypeId container_store_type;
     bool container_store_conflict;
@@ -1096,6 +1098,12 @@ typedef struct AstScript : AstNode {
 typedef struct AstClassNode : AstNode {
     AstClassId class_id;
     String* name;
+    // Named classes own a private lexical name binding for their heritage and
+    // members; lowering consumes this resolved identity instead of spelling.
+    NameEntry* entry;
+    // Class declarations also publish an outer lexical binding. It differs
+    // from `entry`, the private name visible only to heritage and members.
+    NameEntry* outer_entry;
     AstNode* superclass;
     AstNode* body;
 } AstClassNode;
@@ -1139,6 +1147,8 @@ typedef struct AstImportNode : AstNode {
     AstNode* specifiers;
     String* default_name;
     String* namespace_name;
+    NameEntry* default_entry;
+    NameEntry* namespace_entry;
     String* alias;
     StrView module;
     Script* script;
@@ -1151,6 +1161,7 @@ typedef AstImportNode AstImportDeclNode;
 typedef struct AstImportSpecifierNode : AstNode {
     String* local_name;
     String* remote_name;
+    NameEntry* local_entry;
 } AstImportSpecifierNode;
 
 typedef struct AstExportDeclNode : AstNode {
@@ -1165,6 +1176,7 @@ typedef struct AstExportDeclNode : AstNode {
 typedef struct AstExportSpecifierNode : AstNode {
     String* local_name;
     String* export_name;
+    NameEntry* local_entry;
 } AstExportSpecifierNode;
 
 typedef struct FnEffectSummary {
@@ -1336,6 +1348,21 @@ typedef struct FnAnalysis {
     // satellites, so this cell has the same lifetime as its definition.
     FnPromotionCell promotion;
 } FnAnalysis;
+
+static inline int ast_function_capture_count(const AstFuncNode* fn_node) {
+    if (!fn_node) return 0;
+    if (fn_node->analysis) return fn_node->analysis->capture_count;
+
+    // Synthetic functions can reach lowering before analysis publication. Their
+    // capture chain is FnCapture::next, not AstNode::next, so it must never use
+    // an AST-list utility for this fallback.
+    int count = 0;
+    for (const FnCapture* capture = fn_node->captures; capture;
+            capture = capture->next) {
+        count++;
+    }
+    return count;
+}
 
 static inline FnVariantAnalysis* fn_analysis_variant(
         FnAnalysis* analysis, FnEntryKind kind) {
