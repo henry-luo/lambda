@@ -73,7 +73,7 @@ The recursion restores the parent's coordinate/font context on the way out, but 
 ## 4. Dispatch — one record, author tier, UA tier
 
 The shared event builders in `event.cpp` construct one native DOM record and
-call `js_dom_dispatch_event`. Its one propagation walk owns the target →
+call `dom_dispatch_event`. Its one propagation walk owns the target →
 ancestor → document → window path. JS capture listeners run on the capture
 pass; at target/bubble each node's JS listeners run before its producing Lambda
 template handler. The record carries phase, current target, cancellation, and

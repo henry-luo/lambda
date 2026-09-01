@@ -44,7 +44,7 @@ Per ES5 and the DOM_Pkg placement rules, the seam runs between *resolving* and *
 | **Waist primitives** — the named, ≤4-argument operations policy drives mechanism through | **`radiant` module (M)** | `set_state`, `dispatch`, `radio_group`, `replace_range`, `dom_replace_range`, `dom_wrap_range`, `caret_operation`, `scroll_operation` |
 
 The recurring failure mode was a default action in a **fourth** home — the JS
-dispatch layer (`lambda/js/js_dom_events.cpp`) implementing activation only for
+dispatch layer (`lambda/dom/dom_events.cpp`) implementing activation only for
 `dispatchEvent`. F19 retires that copy: direct DOM dispatch now enters the
 native synthetic bridge and the package remains the single policy owner (§5.2,
 ES25/ES26).
@@ -282,7 +282,7 @@ native rejects rather than silently treating either as `_self` (ESO70).
 
 ## 3. The ledger
 
-Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`, `lambda/js/js_dom_events.cpp`). Anchors are `file:line` at that revision — treat them as pointers to the right neighborhood, not as stable addresses.
+Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`, `lambda/dom/dom_events.cpp`). Anchors are `file:line` at that revision — treat them as pointers to the right neighborhood, not as stable addresses.
 
 ### 3.1 Input & editing
 
@@ -355,7 +355,7 @@ Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`,
 | **Form submission from user interaction** | HTML §4.10.21; `submit` cancelable | submit-button activation, or implicit submission (Enter in a text field), runs the submission algorithm | native pointer/keyboard activation now reaches `form.ls` → `submit.ls`; the package checks validity, fires cancelable `submit`, builds the native entry list (including `form="..."` associations), serializes GET/urlencoded/multipart data, and calls `request_navigation`. The browsing waist currently accepts URL/target only, so POST body delivery remains open | 🟡 (F4; ESO71) |
 | `form.submit()` / `requestSubmit()` | HTML | as above | implemented, including `novalidate` / `formnovalidate`, the cancelable `submit` event with `submitter`, and the disconnected-form rule | ✅ |
 | **Reset from user interaction** | HTML; `reset` cancelable | reset-button activation resets the form | native pointer/keyboard activation and script-created clicks use the same package claim protocol; `form.ls` calls the existing cancelable reset waist, including associated controls | ✅ |
-| `form.reset()` | HTML | as above | implemented incl. `form=`-associated controls outside the subtree (`js_dom.cpp:8088`) | ✅ |
+| `form.reset()` | HTML | as above | implemented incl. `form=`-associated controls outside the subtree (`dom.cpp:8088`) | ✅ |
 | **Interactive constraint validation** | HTML | block submission, fire `invalid`, show the validation bubble | `validate.ls` owns `:valid`/`:invalid` on `init`/`input`/`blur`; F4 calls the existing validity bridge before `submit`, fires `invalid`, and focuses the first invalid control. There is still no validation bubble | 🟡 |
 | `invalid` | HTML; cancelable | suppress the UA validation message | dispatched from the JS validity bridges only | 🟡 |
 
@@ -369,7 +369,7 @@ Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`,
 | `target=` / iframe navigation | HTML | navigate the named context | `navigation.ls` resolves `_self`, `_parent`, `_top`, loaded named iframes, `_blank`, and unmatched names. Native validates and executes existing root/iframe targets; `new` targets await host context creation | 🟡 (ESO70; ES31) |
 | `accesskey` | HTML | activate the element | absent — zero occurrences repo-wide | ❌ |
 | `beforeunload` | HTML; cancelable | prompt before leaving | absent | ❌ |
-| `load` / `DOMContentLoaded` | HTML | none | `DOMContentLoaded` and window `load` dispatched (`script_runner.cpp:1751`); `<iframe>` `load` dispatched (`js_dom.cpp:3370`). **`<img>` `load`/`error` are not** | 🟡 |
+| `load` / `DOMContentLoaded` | HTML | none | `DOMContentLoaded` and window `load` dispatched (`script_runner.cpp:1751`); `<iframe>` `load` dispatched (`dom.cpp:3370`). **`<img>` `load`/`error` are not** | 🟡 |
 | window `resize` / `scroll` | — | none | dispatched via `radiant_dispatch_window_event` (`event.cpp:5761`), which also drives `matchMedia` notification | ✅ |
 | `animationstart` / `animationend` / `transitionend` | CSS Animations / Transitions | none | dispatched from `css_animation.cpp` | ✅ |
 
@@ -466,7 +466,7 @@ misrouted to `_self` (**ESO70**).
 
 ### 5.2 Activation behavior is single-sourced (F19)
 
-F19 deletes the activation pass from `lambda/js/js_dom_events.cpp` and routes a
+F19 deletes the activation pass from `lambda/dom/dom_events.cpp` and routes a
 direct DOM `dispatchEvent()` / `el.click()` through
 `radiant_dispatch_synthetic_dom_event`. The native bridge lets the shared
 author pass settle cancellation, then calls the same `dispatch_click_default_actions`

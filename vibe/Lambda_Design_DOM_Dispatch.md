@@ -49,7 +49,7 @@ Facts the unification builds on, all landed:
 
 ### 2.3 Flow 2 — JS DOM event handlers
 
-**Registration.** Listener storage is **external to the DOM structs** — a side-table in `js_dom_events.cpp` (`:363–404`): `NodeListenerEntry { key, owner_doc, node_ref, target_root, listeners }`, keyed by `DomNode*` for elements, sentinel addresses for `document`/`window`, or the object pointer for a plain `new EventTarget()`, with a pointer-key hashmap index over the entries. Each `EventListener` carries the type string, a GC-rooted callback, `capture`/`once`/`passive` flags, an optional `AbortSignal` root, and a `removed` tombstone. `on<type>` IDL handlers occupy per-element slots; inline HTML attributes compile into them via `js_dom_set_event_handler_function`.
+**Registration.** Listener storage is **external to the DOM structs** — a side-table in `dom_events.cpp` (`:363–404`): `NodeListenerEntry { key, owner_doc, node_ref, target_root, listeners }`, keyed by `DomNode*` for elements, sentinel addresses for `document`/`window`, or the object pointer for a plain `new EventTarget()`, with a pointer-key hashmap index over the entries. Each `EventListener` carries the type string, a GC-rooted callback, `capture`/`once`/`passive` flags, an optional `AbortSignal` root, and a `removed` tombstone. `on<type>` IDL handlers occupy per-element slots; inline HTML attributes compile into them via `js_dom_set_event_handler_function`.
 
 **Dispatch.** `js_dom_dispatch_event` (JS_13 §5) validates the one native
 record, builds the target→ancestors→document→window path, then runs capture,
@@ -128,7 +128,7 @@ record and pass while the current record still completes only once (ES25).
 | Cancellation | record's `'prevent-default'` result suppresses remaining UA action | `preventDefault()`/stop flags on the shared record | `'prevent-default'` writes the same record flag |
 | Effects | waist writes to canonical state | IDL writes to the same canonical state (ES10) | model mutation → dirty → retransform → incremental rebuild |
 | Synthetic events | runs after the synthetic author tier | runs in the shared author tier | runs at its ordinary path position |
-| Dispatcher entry | `dispatch_behavior_handler` (`event.cpp:2872`) | `js_dom_dispatch_event` (`js_dom_events.cpp`) | `dispatch_lambda_handler` (`event.cpp:3200`) |
+| Dispatcher entry | `dispatch_behavior_handler` (`event.cpp:2872`) | `js_dom_dispatch_event` (`dom_events.cpp`) | `dispatch_lambda_handler` (`event.cpp:3200`) |
 
 ### 2.7 What is shared
 
@@ -204,7 +204,7 @@ The unification target, stated once: **a single propagation engine delivers ever
 
 **ES24 (ratified 2026-09-01) — One event record.** An in-flight event is **one native record** (type, target, path position/phase, coordinates/key/intent payload, `bubbles`/`cancelable`, `default_prevented`, stop flags, `is_trusted`). Both realms see it through the existing host-object machinery: a Jube declared interface `type event { … }` in the radiant module (the same DOM3/DOM4 mechanism that already serves `dom_node` — D3.4.7/D7.4.1–D7.4.4), so the JS `Event` object becomes a branded wrapper over the record and the Lambda handler's `evt` is the same record through the same bindings. `preventDefault()`/`stopPropagation()` become waist operations on the record; the Lambda `'prevent-default'` verdict writes the same flag (ES15 verdicts stay — they are the Lambda-native spelling, now with one storage). `build_lambda_event_map` and the dual `evcon.default_prevented`-vs-JS-flag mirroring retire. JS expando properties on events remain a wrapper concern (ESO66).
 
-**ES25 (ratified 2026-09-01) — Synthetic dispatch enters the same engine.** `dispatchEvent()` and `el.click()` construct the native record (with `is_trusted = false`) and run the same two tiers: the full author pass — author templates and behavior claims see synthetic events, which is spec-correct and today false — then the UA tier through the behavior claim protocol. The embedded activation pass in `js_dom_events.cpp` is **deleted** once claims cover its remaining classes (checkbox/radio already have templates; popover needs one — the F4 pattern extended, closing ESO49). Trust-gated default actions consult `is_trusted` on the record where the spec requires.
+**ES25 (ratified 2026-09-01) — Synthetic dispatch enters the same engine.** `dispatchEvent()` and `el.click()` construct the native record (with `is_trusted = false`) and run the same two tiers: the full author pass — author templates and behavior claims see synthetic events, which is spec-correct and today false — then the UA tier through the behavior claim protocol. The embedded activation pass in `dom_events.cpp` is **deleted** once claims cover its remaining classes (checkbox/radio already have templates; popover needs one — the F4 pattern extended, closing ESO49). Trust-gated default actions consult `is_trusted` on the record where the spec requires.
 
 **ES26 (ratified 2026-09-01) — The reconciliation hacks retire with the second implementation.** `js_did_activation` state-diffing and the cancel-revert block die when exactly one activation implementation exists. Canceled-activation restore (the spec's legacy-canceled-activation steps) becomes the UA tier's own job, expressed in the claim protocol — pre-activation state capture and restore live with the tier that owns activation, not with a diff across realms.
 
@@ -378,8 +378,8 @@ fixtures (18/18).
 | `radiant/event.cpp` `invoke_template_handler` | shared flows 1+3: context bind, record verdict, retransform loop |
 | `radiant/event.cpp` `radiant_dispatch_built_event` / `radiant_dispatch_mouse_event` | shared trusted-event entry and author/UA boundary |
 | `radiant/event.cpp` `radiant_dispatch_synthetic_dom_event` / `dispatch_click_default_actions` | direct DOM synthetic bridge and one shared UA click stage; native keeps label association and execution mechanics |
-| `lambda/js/js_dom_events.cpp:363–404` | listener side-table structures + hashmap index |
-| `lambda/js/js_dom_events.cpp` `js_dom_dispatch_event` | direct DOM target dispatch enters the native bridge; exact-record re-entry stays on the shared author cascade |
+| `lambda/dom/dom_events.cpp:363–404` | listener side-table structures + hashmap index |
+| `lambda/dom/dom_events.cpp` `js_dom_dispatch_event` | direct DOM target dispatch enters the native bridge; exact-record re-entry stays on the shared author cascade |
 | `lambda/runtime/template_registry.h` | `TemplateEntry`/`is_behavior`/`is_edit`, specificity, behavior mode |
 | `lambda/runtime/render_map.h` | result→(template_ref, model) reverse lookup |
 | `lambda/module/radiant/radiant_dom_iface.cpp` | Jube declared interfaces — the mechanism ES24 extends with `type event` |
