@@ -415,6 +415,33 @@ static bool serialize_edge(const CssPropAccessor* accessor, DomElement* element,
     return format_number(out, out_size, value, "px");
 }
 
+static bool serialize_border_width(const CssPropAccessor* accessor,
+                                   DomElement* element, int pseudo_type,
+                                   char* out, size_t out_size) {
+    if (!accessor || !element || pseudo_type != 0) return false;
+    const BoundaryProp* boundary = element->boundary();
+    if (!boundary || !boundary->border) return false;
+    RadiantBorderSide side = radiant_border_side(
+        boundary->border, radiant_css_box_side(accessor->id));
+    if (!side.width) return false;
+    // CSSOM computed widths expose the resolved border edge, including UA styles.
+    return format_number(out, out_size, *side.width, "px");
+}
+
+static bool serialize_border_style(const CssPropAccessor* accessor,
+                                   DomElement* element, int pseudo_type,
+                                   char* out, size_t out_size) {
+    if (!accessor || !element || pseudo_type != 0) return false;
+    const BoundaryProp* boundary = element->boundary();
+    if (!boundary || !boundary->border) return false;
+    RadiantBorderSide side = radiant_border_side(
+        boundary->border, radiant_css_box_side(accessor->id));
+    if (!side.style) return false;
+    const CssEnumInfo* info = css_enum_info(*side.style);
+    return copy_text(out, out_size,
+        info && info->name ? info->name : property_initial(accessor->id));
+}
+
 static bool serialize_inset(const CssPropAccessor* accessor, DomElement* element,
                             int pseudo_type, char* out, size_t out_size) {
     if (!accessor || !element || pseudo_type != 0) return false;
@@ -620,14 +647,14 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DECL_ROW(CSS_PROPERTY_ROW_GAP),
     DECL_ROW(CSS_PROPERTY_COLUMN_GAP),
     DERIVED_ROW(CSS_PROPERTY_BACKGROUND_COLOR, serialize_background_color, 0),
-    DECL_ROW(CSS_PROPERTY_BORDER_TOP_WIDTH),
-    DECL_ROW(CSS_PROPERTY_BORDER_RIGHT_WIDTH),
-    DECL_ROW(CSS_PROPERTY_BORDER_BOTTOM_WIDTH),
-    DECL_ROW(CSS_PROPERTY_BORDER_LEFT_WIDTH),
-    DECL_ROW(CSS_PROPERTY_BORDER_TOP_STYLE),
-    DECL_ROW(CSS_PROPERTY_BORDER_RIGHT_STYLE),
-    DECL_ROW(CSS_PROPERTY_BORDER_BOTTOM_STYLE),
-    DECL_ROW(CSS_PROPERTY_BORDER_LEFT_STYLE),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_TOP_WIDTH, serialize_border_width, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_RIGHT_WIDTH, serialize_border_width, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_BOTTOM_WIDTH, serialize_border_width, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_LEFT_WIDTH, serialize_border_width, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_TOP_STYLE, serialize_border_style, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_RIGHT_STYLE, serialize_border_style, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_BOTTOM_STYLE, serialize_border_style, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_LEFT_STYLE, serialize_border_style, 0),
     DECL_ROW(CSS_PROPERTY_BORDER_TOP_COLOR),
     DECL_ROW(CSS_PROPERTY_BORDER_RIGHT_COLOR),
     DECL_ROW(CSS_PROPERTY_BORDER_BOTTOM_COLOR),
@@ -714,6 +741,11 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
         // Before the first UiContext exists, loader scripts can only observe
         // the already-cascaded declaration tree; keep this compatibility seam
         // inside the table instead of reviving a second JS serializer.
+        if (id >= CSS_PROPERTY_BORDER_TOP_WIDTH &&
+            id <= CSS_PROPERTY_BORDER_LEFT_STYLE) {
+            return accessor->serialize && accessor->serialize(
+                accessor, element, pseudo_type, out, out_size);
+        }
         return serialize_decl(accessor, element, pseudo_type, out, out_size);
     }
     if (pseudo_type != 0) return serialize_decl(accessor, element, pseudo_type, out, out_size);

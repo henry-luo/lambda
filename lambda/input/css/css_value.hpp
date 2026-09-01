@@ -572,6 +572,9 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_PUNCTUATION,
     CSS_VALUE_INSERT,
     CSS_VALUE_REPLACE,
+    // CSS Transforms 2 transform-style keywords
+    CSS_VALUE_FLAT,
+    CSS_VALUE_PRESERVE_3D,
     // Radiant extensions
     CSS_VALUE__REPLACED,
     CSS_VALUE__LAST_ENTRY

@@ -2472,11 +2472,13 @@ static int js_mir_analyze_and_plan(void* opaque) {
             }
             JsAstNode* s = program->body;
             while (s) {
-                jm_collect_indexed_body_locals(mt, s, top_hoists, true);
                 if (top_lex_collisions) jm_collect_all_let_const_names_recursive(s, top_lex_collisions);
                 jm_collect_direct_statement_let_const_names(s, all_names);
                 s = s->next;
             }
+            // Walk the program owner once so function-body var declarations do
+            // not leak into the module scope when a statement is the root.
+            jm_collect_indexed_body_locals(mt, (JsAstNode*)program, top_hoists, true);
             size_t th_iter = 0;
             void* th_item;
             while (hashmap_iter(top_hoists, &th_iter, &th_item)) {

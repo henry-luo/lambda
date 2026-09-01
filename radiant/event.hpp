@@ -2960,6 +2960,8 @@ void selection_get_range(DocState* state, int* start, int* end);
 // Focus API
 // ============================================================================
 
+bool is_view_programmatically_focusable(View* view);
+
 /**
  * Set focus to an element
  * @param from_keyboard true if focus was triggered by keyboard (Tab, etc.)
@@ -2971,6 +2973,9 @@ void focus_set(DocState* state, View* view, bool from_keyboard);
  * programmatically focusable even though they are excluded from Tab order.
  */
 void focus_set_programmatic(DocState* state, View* view);
+
+// Focus a DOM element through the retained document JS realm when present.
+bool radiant_focus_element(DomDocument* doc, View* target);
 
 /**
  * Clear focus (blur current element)

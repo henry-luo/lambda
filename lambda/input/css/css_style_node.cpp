@@ -18,6 +18,55 @@ static bool clone_tree_callback(StyleNode* node, void* context);
 static bool wrapper_callback(AvlNode* avl_node, void* ctx);
 static int css_get_cascade_level(const CssDeclaration* decl);
 
+static bool css_value_is_revert(const CssValue* value) {
+    return value && value->type == CSS_VALUE_TYPE_KEYWORD &&
+        value->data.keyword == CSS_VALUE_REVERT;
+}
+
+static bool css_revert_can_use_origin(const CssDeclaration* revert_decl,
+                                      const CssDeclaration* candidate) {
+    if (!revert_decl || !candidate || revert_decl->origin == candidate->origin) {
+        return false;
+    }
+
+    // CSS Cascading: revert removes declarations from the current origin and
+    // exposes only declarations from lower origins.
+    switch (revert_decl->origin) {
+        case CSS_ORIGIN_USER_AGENT:
+            return false;
+        case CSS_ORIGIN_USER:
+            return candidate->origin == CSS_ORIGIN_USER_AGENT;
+        case CSS_ORIGIN_AUTHOR:
+            return candidate->origin == CSS_ORIGIN_USER_AGENT ||
+                candidate->origin == CSS_ORIGIN_USER;
+        case CSS_ORIGIN_ANIMATION:
+            return candidate->origin == CSS_ORIGIN_USER_AGENT ||
+                candidate->origin == CSS_ORIGIN_USER ||
+                candidate->origin == CSS_ORIGIN_AUTHOR;
+        case CSS_ORIGIN_TRANSITION:
+            return candidate->origin == CSS_ORIGIN_USER_AGENT ||
+                candidate->origin == CSS_ORIGIN_USER ||
+                candidate->origin == CSS_ORIGIN_AUTHOR ||
+                candidate->origin == CSS_ORIGIN_ANIMATION;
+    }
+    return false;
+}
+
+static CssDeclaration* style_node_resolve_revert(StyleNode* node,
+                                                 CssDeclaration* revert_decl) {
+    if (!node || !revert_decl) return NULL;
+
+    for (WeakDeclaration* weak = node->weak_list; weak; weak = weak->next) {
+        CssDeclaration* candidate = weak->declaration;
+        if (!css_revert_can_use_origin(revert_decl, candidate)) continue;
+        if (css_value_is_revert(candidate->value)) {
+            return style_node_resolve_revert(node, candidate);
+        }
+        return candidate;
+    }
+    return NULL;
+}
+
 // Context structures for callbacks
 struct CollectContext {
     StyleNode** nodes;
@@ -682,7 +731,10 @@ static void style_node_destroy(StyleNode* node) {
 CssDeclaration* style_node_resolve_cascade(StyleNode* node) {
     if (!node) return NULL;
 
-    // The winning declaration is the highest priority one
+    // CSS-wide revert rolls the property back across the current origin.
+    if (node->winning_decl && css_value_is_revert(node->winning_decl->value)) {
+        return style_node_resolve_revert(node, node->winning_decl);
+    }
     return node->winning_decl;
 }
 
@@ -1052,9 +1104,8 @@ void style_tree_invalidate_computed_values(StyleTree* style_tree) {
 }
 
 void* style_node_compute_value(StyleNode* node, StyleTree* parent_tree) {
-    if (!node || !node->winning_decl) return NULL;
-
-    CssDeclaration* decl = node->winning_decl;
+    CssDeclaration* decl = style_node_resolve_cascade(node);
+    if (!decl) return NULL;
 
     // For basic properties, just return the declaration's value
     // In a full implementation, this would handle value computation for inherit, initial, etc.

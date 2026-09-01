@@ -3148,6 +3148,7 @@ static DisplayValue resolve_display_value_raw(void* child,
             display_contents_child_of_flex_or_grid(node);
         // CSS 2.1 §9.7 rule 2: absolute/fixed position also triggers blockification
         bool needs_blockify = is_floated || is_abspos || is_flex_or_grid_child;
+        bool has_css_all_reset = layout_element_css_all_reset_keyword(dom_elem) != CSS_VALUE__UNDEF;
         CssDeclaration* specified_display_decl = nullptr;
         if (dom_elem && dom_elem->specified_style && dom_elem->specified_style->tree) {
             specified_display_decl = style_tree_get_declaration(
@@ -3202,7 +3203,7 @@ static DisplayValue resolve_display_value_raw(void* child,
                 object_fallback ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW};
             return needs_blockify ? blockify_display(popover_display) : popover_display;
         }
-        if (dom_elem && !has_specified_display && !is_mathml &&
+        if (dom_elem && !has_specified_display && !has_css_all_reset && !is_mathml &&
             dom_elem->display.inner != CSS_VALUE_NONE &&
             dom_elem->display.inner != 0 && dom_elem->styles_resolved()) {
             // CSS 2.1 §9.7: Even pre-resolved elements must be blockified when
@@ -3224,8 +3225,9 @@ static DisplayValue resolve_display_value_raw(void* child,
                 AvlNode* node = avl_tree_search(style_tree->tree, CSS_PROPERTY_DISPLAY);
                 if (node) {
                     StyleNode* style_node = (StyleNode*)node->declaration;
-                    if (style_node && style_node->winning_decl) {
-                        CssDeclaration* decl = style_node->winning_decl;
+                    CssDeclaration* decl = style_node ?
+                        style_node_resolve_cascade(style_node) : nullptr;
+                    if (decl) {
                         const char* custom_layout_name = custom_layout_name_from_css_value(decl->value);
                         if (custom_layout_name && custom_layout_name[0] != '\0') {
                             display.outer = CSS_VALUE_BLOCK;
@@ -3267,6 +3269,13 @@ static DisplayValue resolve_display_value_raw(void* child,
         }
         if (!has_specified_display && is_mathml) {
             display = css_default_display_for_element(dom_elem, node);
+            return needs_blockify ? blockify_display(display) : display;
+        }
+        if (has_css_all_reset && !has_specified_display) {
+            // CSS Cascade: all:initial/unset removes the HTML default display;
+            // the CSS initial value of display is inline.
+            display = {CSS_VALUE_INLINE,
+                is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW};
             return needs_blockify ? blockify_display(display) : display;
         }
         display = css_default_display_for_element(dom_elem, node);
@@ -4423,7 +4432,7 @@ static bool resolve_property_callback(AvlNode* node, void* context, bool font_pa
     StyleNode* style_node = (StyleNode*)node->declaration;
     CssPropertyCode prop_id = (CssPropertyCode)node->property_id;
     if (css_property_is_font(prop_id) != font_pass) return true;
-    CssDeclaration* decl = style_node ? style_node->winning_decl : nullptr;
+    CssDeclaration* decl = style_node ? style_node_resolve_cascade(style_node) : nullptr;
     if (decl) resolve_css_property(prop_id, decl, lycon);
     return true;
 }
@@ -4688,7 +4697,8 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
 static bool apply_chromium_monospace_font_size_quirk(StyleTree* style_tree,
                                                      FontProp* parent_font_style,
                                                      ViewSpan* span,
-                                                     LayoutContext* lycon) {
+                                                     LayoutContext* lycon,
+                                                     DomElement* element) {
     if (!style_tree || !style_tree->tree || !span || !span->font ||
         !span->fontp()->family || span->fontp()->font_size <= 0) {
         return false;
@@ -4700,7 +4710,11 @@ static bool apply_chromium_monospace_font_size_quirk(StyleTree* style_tree,
         str_ieq_const(span->fontp()->family, strlen(span->fontp()->family), "monospace");
     bool parent_is_mono = parent_font_style && parent_font_style->family &&
         str_ieq_const(parent_font_style->family, strlen(parent_font_style->family), "monospace");
-    if (!has_author_font_family || !current_is_mono || parent_is_mono ||
+    bool textarea_font_size_override = element &&
+        element->tag() == MARKUP_NAME_TEXTAREA &&
+        style_tree_get_declaration(style_tree, CSS_PROPERTY_FONT_SIZE) != nullptr;
+    if ((!has_author_font_family && !textarea_font_size_override) ||
+        !current_is_mono || parent_is_mono ||
         !span->fontp()->font_size_from_medium) {
         return false;
     }
@@ -4839,12 +4853,24 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     bool has_any_font_prop = css_style_tree_has_font_property(style_tree, true);
     FontProp* parent_font_style = lycon->font.style;
     FontBox parent_font = lycon->font;
+    CssEnum all_reset_keyword = layout_element_css_all_reset_keyword(dom_elem);
+    bool all_initial = all_reset_keyword == CSS_VALUE_INITIAL;
+    if (all_initial) {
+        // CSS Cascade: all:initial establishes the element's initial font before
+        // relative units and non-inherited declarations are resolved.
+        ViewSpan* span = lam::view_require_element(lycon->view);
+        if (span && span->font) {
+            lycon->font.style = span->font;
+            lycon->font.current_font_size = span->fontp()->font_size;
+        }
+    }
     if (has_any_font_prop) {
         avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
     }
     if (has_any_font_prop) {
         ViewSpan* span = lam::view_require_element(lycon->view);
-        apply_chromium_monospace_font_size_quirk(style_tree, parent_font_style, span, lycon);
+        apply_chromium_monospace_font_size_quirk(
+            style_tree, parent_font_style, span, lycon, dom_elem);
         if (span && span->font && span->fontp()->font_size > 0) {
             lycon->font.style = span->font;
             lycon->font.current_font_size = span->fontp()->font_size;
@@ -4880,7 +4906,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         AvlNode* color_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_COLOR);
         if (color_node) {
             StyleNode* style_node = (StyleNode*)color_node->declaration;
-            CssDeclaration* decl = style_node ? style_node->winning_decl : NULL;
+            CssDeclaration* decl = style_node ? style_node_resolve_cascade(style_node) : NULL;
             if (decl) {
                 resolve_css_property(CSS_PROPERTY_COLOR, decl, lycon);
             }
@@ -4899,6 +4925,9 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         CSS_PROPERTY_LINE_HEIGHT,
         CSS_PROPERTY_TEXT_ALIGN,
         CSS_PROPERTY_TEXT_DECORATION,
+        CSS_PROPERTY_TEXT_EMPHASIS,
+        CSS_PROPERTY_TEXT_EMPHASIS_STYLE,
+        CSS_PROPERTY_TEXT_EMPHASIS_POSITION,
         CSS_PROPERTY_TEXT_TRANSFORM,
         CSS_PROPERTY_TEXT_INDENT,
         CSS_PROPERTY_TEXT_SPACING_TRIM,
@@ -4933,12 +4962,23 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             if (existing) {
                 continue;
             }
+            if (all_initial && prop_id != CSS_PROPERTY_DIRECTION) {
+                continue;
+            }
             if (prop_id == CSS_PROPERTY_WHITE_SPACE) {
                 NameId tag = dom_elem->tag();
                 if ((tag == MARKUP_NAME_PRE || tag == MARKUP_NAME_LISTING || tag == MARKUP_NAME_XMP) &&
                     inheritance_span->blk && inheritance_span->block_mut()->white_space == CSS_VALUE_PRE) {
                     continue;
                 }
+            }
+            if (dom_elem->tag() == MARKUP_NAME_RT &&
+                (prop_id == CSS_PROPERTY_TEXT_EMPHASIS ||
+                 prop_id == CSS_PROPERTY_TEXT_EMPHASIS_STYLE ||
+                 prop_id == CSS_PROPERTY_TEXT_EMPHASIS_POSITION)) {
+                // CSS Text Decoration 4 §3.1: the UA rt rule suppresses
+                // inherited emphasis unless author CSS explicitly overrides it.
+                continue;
             }
             // HTML spec: <th> uses "-internal-center-or-inherit" UA rule.
             // otherwise use the inherited value. E.g.:
@@ -5165,7 +5205,9 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         // CSS 2.1 §17.5: Border handling for table-internal elements depends on
         // CSS 2.1 §10.3, §17.5.3: 'width' does not apply to table-row,
         // CSS 2.1 §10.5, §17.5.3: 'height' does not apply to table-column
-        if (is_row_or_rowgroup || is_column) {
+        // CSS Tables 3 §2.1: replaced principal boxes retain authored sizing.
+        if ((is_row_or_rowgroup || is_column) &&
+            !layout_element_is_replaced(dom_elem)) {
             ViewBlock* block = lam::view_as_block(span);
             if (block && block->blk) {
                 if (block->block()->given_width >= 0) {
@@ -5255,6 +5297,21 @@ static void apply_border_side_shorthand(LayoutContext* lycon, ViewSpan* span, Cs
     }
     BorderProp* border = layout_ensure_border(lycon, span);
     RadiantBorderSide refs = radiant_border_side(border, side);
+    if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+        (value->data.keyword == CSS_VALUE_INITIAL ||
+         value->data.keyword == CSS_VALUE_UNSET)) {
+        // CSS-wide border resets compute to the initial `none` style; do not
+        // leave an earlier HTML UA border visible when the shorthand has no parts.
+        if (specificity >= *refs.style_specificity) {
+            *refs.style = CSS_VALUE_NONE;
+            *refs.style_specificity = specificity;
+        }
+        if (specificity >= *refs.width_specificity) {
+            *refs.width = 0.0f;
+            *refs.width_specificity = specificity;
+        }
+        return;
+    }
     MultiValue parts = {0};
     set_multi_value(lycon, &parts, value);
     // Physical and logical aliases must share cascade and none/hidden width semantics.
@@ -5885,6 +5942,96 @@ static void resolve_text_decoration_property(LayoutContext* lycon, ViewSpan* spa
     }
 }
 
+static const char* css_text_emphasis_value_name(const CssValue* value) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM) {
+        return value->data.custom_property.name;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    return nullptr;
+}
+
+static bool css_text_emphasis_value_is_name(const CssValue* value,
+                                            const char* name) {
+    const char* value_name = css_text_emphasis_value_name(value);
+    return value_name && str_ieq_const(value_name, strlen(value_name), name);
+}
+
+static bool css_text_emphasis_value_is_color(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_COLOR ||
+        value->type == CSS_VALUE_TYPE_FUNCTION) {
+        return true;
+    }
+    if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+    const CssEnumInfo* info = css_enum_info(value->data.keyword);
+    return info && (info->group == CSS_VALUE_GROUP_COLOR ||
+                    info->group == CSS_VALUE_GROUP_SYSTEM_COLOR);
+}
+
+static bool css_text_emphasis_value_has_style(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            CssValue* item = value->data.list.values[i];
+            if (!item) continue;
+            if (css_text_emphasis_value_is_name(item, "none")) return false;
+            if (css_text_emphasis_value_is_color(item)) continue;
+            if (item->type == CSS_VALUE_TYPE_STRING ||
+                css_text_emphasis_value_name(item)) return true;
+        }
+        return false;
+    }
+    if (css_text_emphasis_value_is_name(value, "none") ||
+        css_text_emphasis_value_is_color(value)) {
+        return false;
+    }
+    return value->type == CSS_VALUE_TYPE_STRING ||
+        css_text_emphasis_value_name(value) != nullptr;
+}
+
+static void resolve_text_emphasis_property(LayoutContext* lycon, ViewSpan* span,
+                                           CssPropertyCode property,
+                                           const CssValue* value) {
+    if (!span || !value) return;
+    span->ensure_font(lycon);
+    FontProp* font = span->font;
+    const CssValue* resolved = resolve_var_function(lycon, value);
+    if (!font || !resolved) return;
+
+    if (resolved->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = resolved->data.keyword;
+        if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) return;
+        if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_REVERT) {
+            font->text_emphasis_enabled = false;
+            font->text_emphasis_under = false;
+            return;
+        }
+    }
+
+    if (property == CSS_PROPERTY_TEXT_EMPHASIS_POSITION) {
+        bool under = false;
+        if (resolved->type == CSS_VALUE_TYPE_LIST) {
+            for (int i = 0; i < resolved->data.list.count; i++) {
+                if (css_text_emphasis_value_is_name(
+                        resolved->data.list.values[i], "under")) {
+                    under = true;
+                    break;
+                }
+            }
+        } else {
+            under = css_text_emphasis_value_is_name(resolved, "under");
+        }
+        font->text_emphasis_under = under;
+        return;
+    }
+
+    font->text_emphasis_enabled = css_text_emphasis_value_has_style(resolved);
+}
+
 static void resolve_float_clear_property(LayoutContext* lycon, ViewBlock* block,
                                          CssPropertyCode property,
                                          const CssValue* value) {
@@ -6051,6 +6198,15 @@ static bool resolve_common_keyword_property(LayoutContext* lycon, ViewSpan* span
                                             ViewBlock* block, CssPropertyCode property,
                                             const CssDeclaration* decl,
                                             const CssValue* value) {
+    if (property == CSS_PROPERTY_TRANSFORM_STYLE) {
+        if (value && value->type == CSS_VALUE_TYPE_KEYWORD &&
+            (value->data.keyword == CSS_VALUE_FLAT ||
+             value->data.keyword == CSS_VALUE_PRESERVE_3D)) {
+            span->ensure_transform(lycon);
+            span->transform->transform_style = value->data.keyword;
+        }
+        return true;
+    }
     if (property == CSS_PROPERTY_FONT_STYLE || property == CSS_PROPERTY_FONT_VARIANT) {
         if (shorthand_overrides_longhand(lycon, CSS_PROPERTY_FONT, decl)) return true;
         span->ensure_font(lycon);
@@ -6084,7 +6240,7 @@ static bool resolve_common_keyword_property(LayoutContext* lycon, ViewSpan* span
 static bool css_property_is_ignored(CssPropertyCode property) {
     static const CssPropertyCode ignored[] = {
         CSS_PROPERTY_DISPLAY, CSS_PROPERTY_MARGIN_TRIM,
-        CSS_PROPERTY_TRANSFORM_STYLE, CSS_PROPERTY_BACKFACE_VISIBILITY,
+        CSS_PROPERTY_BACKFACE_VISIBILITY,
         CSS_PROPERTY_BORDER_IMAGE_SLICE, CSS_PROPERTY_BORDER_IMAGE_OUTSET,
         CSS_PROPERTY_BORDER_IMAGE, CSS_PROPERTY_CLIP,
         CSS_PROPERTY_ANIMATION, CSS_PROPERTY_ANIMATION_NAME,
@@ -7068,6 +7224,11 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_TEXT_DECORATION_COLOR:
         case CSS_PROPERTY_TEXT_DECORATION_THICKNESS:
             resolve_text_decoration_property(lycon, span, prop_id, value);
+            break;
+        case CSS_PROPERTY_TEXT_EMPHASIS:
+        case CSS_PROPERTY_TEXT_EMPHASIS_STYLE:
+        case CSS_PROPERTY_TEXT_EMPHASIS_POSITION:
+            resolve_text_emphasis_property(lycon, span, prop_id, value);
             break;
         case CSS_PROPERTY_VERTICAL_ALIGN: {
             span->ensure_inline(lycon);

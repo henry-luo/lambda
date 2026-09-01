@@ -457,6 +457,7 @@ bool utf_is_emoji_presentation_default(uint32_t cp) {
 bool utf_is_zwj_composition_base(uint32_t cp) {
     return (cp >= 0x1F466 && cp <= 0x1F469) || /* Boy, Girl, Man, Woman */
            cp == 0x1F9D1 ||                     /* Person (gender-neutral) */
+           cp == 0x1F937 ||                     /* Person gesturing */
            cp == 0x1F441 ||                     /* Eye */
            (cp >= 0x1F3F3 && cp <= 0x1F3F4) || /* Flags */
            cp == 0x1F408 || cp == 0x1F415 ||   /* Cat, Dog */

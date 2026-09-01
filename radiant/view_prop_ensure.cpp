@@ -195,6 +195,7 @@ FontProp* DomElement::ensure_font(LayoutContext* lycon) {
                 ? &lycon->ui_context->default_font
                 : &lycon->ui_context->legacy_default_font;
             value->family = initial_font->family;
+            value->platform_fallback_family = initial_font->platform_fallback_family;
         }
         assert(value->font_size >= 0);
     }

@@ -3932,6 +3932,31 @@ static View* find_matching_input(View* root, const char* match_tag, const char* 
     return nullptr;
 }
 
+static View* find_initial_autofocus(View* root) {
+    if (!root || !root->is_element()) return nullptr;
+    DomElement* element = lam::dom_require_element(root);
+    if (element->has_attribute("autofocus") &&
+        is_view_programmatically_focusable(root)) {
+        return root;
+    }
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (child->node_type != DOM_NODE_ELEMENT) continue;
+        View* found = find_initial_autofocus(static_cast<View*>(child));
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+static bool apply_initial_autofocus(DomDocument* doc, DocState* state) {
+    if (!doc || !state || focus_has_current(state) ||
+        !doc->view_tree || !doc->view_tree->root) {
+        return false;
+    }
+    View* autofocus = find_initial_autofocus(doc->view_tree->root);
+    if (!autofocus || !radiant_focus_element(doc, autofocus)) return false;
+    return state->needs_reflow;
+}
+
 struct LambdaFocusRestore {
     bool valid;
     RenderMapLookup lookup;
@@ -4977,6 +5002,9 @@ static bool layout_single_file(
         // font-face loading and post-script cascade; DOM documents still need
         // this final commit to replace that stale layout-resource epoch.
         layout_html_doc(ui_context, doc, false);
+        if (apply_initial_autofocus(doc, state)) {
+            layout_html_doc(ui_context, doc, false);
+        }
         auto event_layout_end = std::chrono::high_resolution_clock::now();
         layout_end = event_layout_end;
         layout_phase_ran = true;

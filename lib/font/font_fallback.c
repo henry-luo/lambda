@@ -198,6 +198,12 @@ static bool fallback_family_is_color_emoji(const char* family) {
     return family && strstr(family, "Emoji") != NULL;
 }
 
+static bool font_handle_is_fixed_pitch(FontHandle* handle) {
+    if (!handle || !handle->tables) return false;
+    PostTable* post = font_tables_get_post(handle->tables);
+    return post && post->is_fixed_pitch != 0;
+}
+
 static FontHandle* resolve_exact_fallback_family(FontContext* ctx,
                                                   const FontStyleDesc* style,
                                                   const char* family,
@@ -253,8 +259,13 @@ static FontHandle* resolve_exact_fallback_family(FontContext* ctx,
 static uint64_t cp_fallback_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const CodepointFallbackEntry* e = (const CodepointFallbackEntry*)item;
     // include the source face because platform fallback depends on its coverage and traits.
-    struct { uint32_t cp; float sz; FontHandle* source; } key = {
-        e->codepoint, e->size_px, e->source_handle};
+    struct {
+        uint32_t cp;
+        float sz;
+        FontHandle* source;
+        const char* platform_family;
+    } key = {e->codepoint, e->size_px, e->source_handle,
+             e->platform_fallback_family};
     return hashmap_xxhash3(&key, sizeof(key), seed0, seed1);
 }
 
@@ -268,6 +279,11 @@ static int cp_fallback_compare(const void* a, const void* b, void* udata) {
         uintptr_t ea_source = (uintptr_t)ea->source_handle;
         uintptr_t eb_source = (uintptr_t)eb->source_handle;
         return ea_source < eb_source ? -1 : 1;
+    }
+    if (ea->platform_fallback_family != eb->platform_fallback_family) {
+        uintptr_t ea_family = (uintptr_t)ea->platform_fallback_family;
+        uintptr_t eb_family = (uintptr_t)eb->platform_fallback_family;
+        return ea_family < eb_family ? -1 : 1;
     }
     return 0;
 }
@@ -367,7 +383,9 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
     if (cache) {
         CodepointFallbackEntry key = {
             .codepoint = codepoint, .size_px = style->size_px,
-            .source_handle = source_handle, .handle = NULL};
+            .source_handle = source_handle,
+            .platform_fallback_family = style->platform_fallback_family,
+            .handle = NULL};
         CodepointFallbackEntry* cached = (CodepointFallbackEntry*)hashmap_get(cache, &key);
         if (cached) {
             if (cached->handle) {
@@ -381,44 +399,34 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
     float pixel_ratio = ctx->config.pixel_ratio;
     float physical_size = style->size_px * pixel_ratio;
 
-    // search through fallback fonts for one that has this codepoint
-    if (ctx->fallback_fonts) {
-        for (int i = 0; ctx->fallback_fonts[i]; i++) {
-            // Normal text metrics must not select a color-emoji face merely
-            // because it contains a symbol; explicit emoji presentation uses
-            // font_load_glyph_emoji() and owns that selection separately.
-            if (fallback_family_is_color_emoji(ctx->fallback_fonts[i])) continue;
-            FontHandle* handle = resolve_exact_fallback_family(
-                ctx, style, ctx->fallback_fonts[i], codepoint);
-            if (handle) {
-                CodepointFallbackEntry entry = {
-                    .codepoint = codepoint, .size_px = style->size_px,
-                    .source_handle = source_handle, .handle = handle};
-                font_handle_retain(handle);
-                if (source_handle) font_handle_retain(source_handle);
-                hashmap_set(cache, &entry);
-                log_debug("font_fallback: codepoint U+%04X → '%s'",
-                          codepoint, ctx->fallback_fonts[i]);
-                return handle;
-            }
-        }
-    }
-
     // platform-specific codepoint lookup (macOS: CoreText CTFontCreateForString)
     // Check the platform fallback handle cache first — most codepoints from
     // the same Unicode block resolve to the same font file.
-    {
+    if (!font_handle_is_fixed_pitch(source_handle)) {
         int face_index = 0;
         void* platform_font_ref = NULL;
         void* base_font_ref = NULL;
+        void* platform_base_ref = NULL;
 #ifdef __APPLE__
         if (source_handle) {
             base_font_ref = source_handle->ct_font_ref
                 ? source_handle->ct_font_ref : source_handle->ct_raster_ref;
         }
+        if (style->platform_fallback_family && style->platform_fallback_family[0] &&
+            utf_is_control(codepoint)) {
+            // keep the UA table face for ordinary metrics, but use its platform
+            // family as the CoreText starting point for missing glyphs.
+            platform_base_ref = font_platform_create_ct_font(
+                NULL, style->platform_fallback_family, style->size_px,
+                (int)style->weight, style->slant);
+            if (platform_base_ref) base_font_ref = platform_base_ref;
+        }
 #endif
         char* font_path = font_platform_find_codepoint_font(
             base_font_ref, codepoint, &face_index, &platform_font_ref);
+#ifdef __APPLE__
+        if (platform_base_ref) font_platform_destroy_ct_font(platform_base_ref);
+#endif
         if (font_path) {
             // CoreText descriptor positions are not SFNT collection indices;
             // discover the usable table face by coverage below.
@@ -442,7 +450,9 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                 }
                 CodepointFallbackEntry entry = {
                     .codepoint = codepoint, .size_px = style->size_px,
-                    .source_handle = source_handle, .handle = reused};
+                    .source_handle = source_handle,
+                    .platform_fallback_family = style->platform_fallback_family,
+                    .handle = reused};
                 font_handle_retain(reused);
                 if (source_handle) font_handle_retain(source_handle);
                 hashmap_set(cache, &entry);
@@ -468,7 +478,9 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
 #endif
                 CodepointFallbackEntry entry = {
                     .codepoint = codepoint, .size_px = style->size_px,
-                    .source_handle = source_handle, .handle = handle};
+                    .source_handle = source_handle,
+                    .platform_fallback_family = style->platform_fallback_family,
+                    .handle = handle};
                 font_handle_retain(handle);
                 if (source_handle) font_handle_retain(source_handle);
                 hashmap_set(cache, &entry);
@@ -500,7 +512,9 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
 #endif
                         CodepointFallbackEntry entry = {
                             .codepoint = codepoint, .size_px = style->size_px,
-                            .source_handle = source_handle, .handle = handle};
+                            .source_handle = source_handle,
+                            .platform_fallback_family = style->platform_fallback_family,
+                            .handle = handle};
                         font_handle_retain(handle);
                         if (source_handle) font_handle_retain(source_handle);
                         hashmap_set(cache, &entry);
@@ -520,10 +534,37 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
 #endif
     }
 
+    // search through fallback fonts for one that has this codepoint
+    if (ctx->fallback_fonts) {
+        for (int i = 0; ctx->fallback_fonts[i]; i++) {
+            // Normal text metrics must not select a color-emoji face merely
+            // because it contains a symbol; explicit emoji presentation uses
+            // font_load_glyph_emoji() and owns that selection separately.
+            if (fallback_family_is_color_emoji(ctx->fallback_fonts[i])) continue;
+            FontHandle* handle = resolve_exact_fallback_family(
+                ctx, style, ctx->fallback_fonts[i], codepoint);
+            if (handle) {
+                CodepointFallbackEntry entry = {
+                    .codepoint = codepoint, .size_px = style->size_px,
+                    .source_handle = source_handle,
+                    .platform_fallback_family = style->platform_fallback_family,
+                    .handle = handle};
+                font_handle_retain(handle);
+                if (source_handle) font_handle_retain(source_handle);
+                hashmap_set(cache, &entry);
+                log_debug("font_fallback: codepoint U+%04X → '%s'",
+                          codepoint, ctx->fallback_fonts[i]);
+                return handle;
+            }
+        }
+    }
+
     // negative cache — no fallback has this codepoint
     CodepointFallbackEntry neg = {
         .codepoint = codepoint, .size_px = style->size_px,
-        .source_handle = source_handle, .handle = NULL};
+        .source_handle = source_handle,
+        .platform_fallback_family = style->platform_fallback_family,
+        .handle = NULL};
     if (source_handle) font_handle_retain(source_handle);
     hashmap_set(cache, &neg);
     log_debug("font_fallback: no fallback for codepoint U+%04X", codepoint);

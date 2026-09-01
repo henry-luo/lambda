@@ -12,6 +12,7 @@
 #include "font_gpos.h"
 
 #include "../memtrack.h"
+#include "../utf.h"
 #include <math.h>
 
 // ============================================================================
@@ -959,32 +960,6 @@ LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* styl
 // Text measurement
 // ============================================================================
 
-/**
- * Check if a codepoint is an emoji that participates in ZWJ composition.
- * Only emoji characters form composed glyphs when joined by ZWJ.
- */
-static inline bool is_emoji_for_zwj(uint32_t cp) {
-    return (cp >= 0x1F000 && cp <= 0x1FFFF) ||  // SMP emoji blocks
-           (cp >= 0x2600 && cp <= 0x27BF)  ||    // Misc Symbols and Dingbats
-           (cp >= 0x2300 && cp <= 0x23FF)  ||    // Misc Technical
-           (cp >= 0x2B00 && cp <= 0x2BFF)  ||    // Misc Symbols and Arrows
-           cp == 0x200D || cp == 0x2764;
-}
-
-/**
- * Check if a codepoint can serve as the base (left side) of a ZWJ emoji
- * composition sequence. (Unicode UTS #51, emoji-zwj-sequences.txt)
- */
-static inline bool is_zwj_composition_base(uint32_t cp) {
-    return (cp >= 0x1F466 && cp <= 0x1F469) ||  // Boy, Girl, Man, Woman
-           cp == 0x1F9D1 ||                       // Person (gender-neutral)
-           cp == 0x1F441 ||                       // Eye
-           (cp >= 0x1F3F3 && cp <= 0x1F3F4) ||   // Flags
-           cp == 0x1F408 || cp == 0x1F415 ||      // Cat, Dog
-           cp == 0x1F43B || cp == 0x1F426 ||      // Bear, Bird
-           cp == 0x1F48B || cp == 0x2764;          // Kiss Mark, Heart
-}
-
 TextExtents font_measure_text(FontHandle* handle, const char* text, int byte_len) {
     TextExtents ext = {0};
     if (!handle || !text || byte_len <= 0) return ext;
@@ -1055,14 +1030,14 @@ TextExtents font_measure_text(FontHandle* handle, const char* text, int byte_len
         // that form composed glyphs in ZWJ sequences (Unicode UTS #51).
         if (after_zwj) {
             after_zwj = false;
-            if (is_emoji_for_zwj(cp)) {
-                prev_is_zwj_base = is_zwj_composition_base(cp);
+            if (utf_is_emoji_for_zwj(cp)) {
+                prev_is_zwj_base = utf_is_zwj_composition_base(cp);
                 prev_codepoint = cp;
                 continue;
             }
         }
 
-        prev_is_zwj_base = is_zwj_composition_base(cp);
+        prev_is_zwj_base = utf_is_zwj_composition_base(cp);
 
         GlyphInfo glyph = font_get_glyph(handle, cp);
         if (glyph.id == 0) continue;

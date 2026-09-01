@@ -75,8 +75,6 @@ extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
 
 // Stage 4C: seed the next window.prompt() answer (headless has no dialog UI).
 extern "C" void js_window_dialog_push_response(const char* value);
-extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus);
-extern "C" bool js_dom_focus_editing_host_for_automation(void* dom_elem);
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 
@@ -84,37 +82,6 @@ extern __thread Context* input_context;
 void parse_json(Input* input, const char* json_string);
 
 static bool g_replay_assert_state = false;
-
-static bool sim_focus_element_with_js_runtime(DomDocument* doc, View* target) {
-    if (!doc || !target) {
-        return false;
-    }
-
-    Runtime* runtime = doc->js.runtime;
-    if (!runtime) {
-        // Lambda template documents do not own a JavaScript runtime, but their
-        // contenteditable hosts still use the shared DOM focus/Selection path.
-        return js_dom_focus_editing_host_for_automation(target);
-    }
-
-    EvalContext* focus_ctx = runtime_get_eval_context(runtime);
-    if (!focus_ctx || !runtime->heap || !runtime->name_pool) return false;
-    Context* saved_input_ctx = input_context;
-    void* saved_doc = js_dom_get_document();
-    // Simulated events execute on the document's eval thread; a host callback
-    // must not borrow the thread by replacing another runtime's TLS owner.
-    if (!runtime_context_bind_retained(runtime, focus_ctx)) return false;
-    input_context = nullptr;
-    if (focus_ctx->js_state && !js_runtime_state_init(focus_ctx)) {
-        input_context = saved_input_ctx;
-        return false;
-    }
-    js_dom_set_document(doc);
-    js_dom_focus_method_bridge(target, true);
-    js_dom_restore_active_document(saved_doc);
-    input_context = saved_input_ctx;
-    return true;
-}
 
 static bool sim_target_is_rich_editing_surface(View* target) {
     target = editing_focus_target_from_target(target);
@@ -3574,7 +3541,7 @@ static void sim_focus_typing_target(UiContext* uicon, SimEvent* ev) {
     if (already_focused) return;
 
     if (sim_target_is_rich_editing_surface(target_elem) &&
-        sim_focus_element_with_js_runtime(uicon->document, native_focus_target)) {
+        radiant_focus_element(uicon->document, native_focus_target)) {
         sim_input_turn_mark_pending();
         return;
     }
@@ -3594,7 +3561,7 @@ static void sim_focus_typing_target(UiContext* uicon, SimEvent* ev) {
     state = uicon->document ? (DocState*)uicon->document->state : nullptr;
     if (native_focus_target && native_focus_target->is_element() &&
         (!state || focus_get(state) != native_focus_target) &&
-        sim_focus_element_with_js_runtime(uicon->document, native_focus_target)) {
+        radiant_focus_element(uicon->document, native_focus_target)) {
         sim_input_turn_mark_pending();
     }
 }
@@ -4076,7 +4043,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // A stale layout hit from the focus harness must not select a
             // different block before this explicit focus operation runs.
             if (sim_target_is_rich_editing_surface(target) &&
-                sim_focus_element_with_js_runtime(uicon->document, native_focus_target)) {
+                radiant_focus_element(uicon->document, native_focus_target)) {
                 sim_input_turn_mark_pending();
                 break;
             }
@@ -4095,7 +4062,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             native_focus_target = focus_target ? focus_target : target;
             if (target && target->is_element() &&
                 (!uicon->document->state || focus_get(uicon->document->state) != native_focus_target) &&
-                sim_focus_element_with_js_runtime(uicon->document, native_focus_target)) {
+                radiant_focus_element(uicon->document, native_focus_target)) {
                 sim_input_turn_mark_pending();
             }
             break;
@@ -4251,7 +4218,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     // The preceding focus/selection is the caller's intended paste
                     // position. Re-focusing can activate editor chrome instead.
                 } else if (sim_target_is_rich_editing_surface(target) &&
-                    sim_focus_element_with_js_runtime(uicon->document, focus_target)) {
+                    radiant_focus_element(uicon->document, focus_target)) {
                     sim_input_turn_mark_pending();
                 } else {
                     float x, y;

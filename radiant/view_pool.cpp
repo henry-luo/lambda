@@ -1397,6 +1397,102 @@ static void apply_css_transforms_to_bounds(View* view, float* x, float* y, float
     }
 }
 
+static bool transform_function_is_3d(TransformFunctionType type) {
+    return type == TRANSFORM_TRANSLATE3D || type == TRANSFORM_TRANSLATEZ ||
+        type == TRANSFORM_SCALE3D || type == TRANSFORM_SCALEZ ||
+        type == TRANSFORM_ROTATEX || type == TRANSFORM_ROTATEY ||
+        type == TRANSFORM_ROTATE3D || type == TRANSFORM_MATRIX3D ||
+        type == TRANSFORM_PERSPECTIVE;
+}
+
+static bool view_chain_has_3d_transform(View* view) {
+    for (View* current = view; current; current = current->parent_view()) {
+        if (!current->is_block()) continue;
+        ViewBlock* block = lam::view_require_block(current);
+        if (!block->transform || !block->transformp()->functions) continue;
+        for (TransformFunction* function = block->transformp()->functions;
+             function; function = function->next) {
+            if (transform_function_is_3d(function->type)) return true;
+        }
+    }
+    return false;
+}
+
+static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
+                                         float* width, float* height) {
+    RdtMatrix4 accumulated = rdt_matrix4_identity();
+    View* chain[256];
+    int count = 0;
+    for (View* current = view; current && count < 256;
+         current = current->parent_view()) {
+        chain[count++] = current;
+    }
+
+    for (int i = 0; i < count; i++) {
+        View* current = chain[i];
+        if (current->is_block() && i > 0) {
+            ViewBlock* parent = lam::view_require_block(current);
+            if (!parent->transform ||
+                parent->transformp()->transform_style != CSS_VALUE_PRESERVE_3D) {
+                // CSS Transforms 2 §4.1.3: a flat ancestor projects descendant
+                // depth into its plane before the ancestor transform is applied.
+                RdtMatrix4 flatten = rdt_matrix4_identity();
+                flatten.values[8] = 0.0f;
+                flatten.values[9] = 0.0f;
+                flatten.values[10] = 0.0f;
+                flatten.values[11] = 0.0f;
+                accumulated = rdt_matrix4_multiply(&flatten, &accumulated);
+            }
+        }
+
+        RdtMatrix4 local = rdt_matrix4_identity();
+        if (current->is_block()) {
+            ViewBlock* block = lam::view_require_block(current);
+            if (block->transform && block->transformp()->functions) {
+                const TransformProp* transform = block->transformp();
+                float origin_x = transform->origin_x_percent
+                    ? block->width * transform->origin_x / 100.0f
+                    : transform->origin_x;
+                float origin_y = transform->origin_y_percent
+                    ? block->height * transform->origin_y / 100.0f
+                    : transform->origin_y;
+                local = radiant::compute_transform_matrix_3d(
+                    transform->functions, block->width, block->height,
+                    origin_x, origin_y, transform->origin_z);
+            }
+        }
+        RdtMatrix4 offset = rdt_matrix4_translate(current->x, current->y, 0.0f);
+        RdtMatrix4 local_to_parent = rdt_matrix4_multiply(&offset, &local);
+        accumulated = rdt_matrix4_multiply(&local_to_parent, &accumulated);
+    }
+
+    float local_x[4] = {0.0f, *width, *width, 0.0f};
+    float local_y[4] = {0.0f, 0.0f, *height, *height};
+    float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;
+    for (int i = 0; i < 4; i++) {
+        float point_x = 0.0f, point_y = 0.0f, point_z = 0.0f, point_w = 1.0f;
+        rdt_matrix4_transform_point(&accumulated, local_x[i], local_y[i], 0.0f,
+                                    &point_x, &point_y, &point_z, &point_w);
+        if (fabsf(point_w) > 0.0001f) {
+            point_x /= point_w;
+            point_y /= point_w;
+        }
+        if (i == 0) {
+            min_x = max_x = point_x;
+            min_y = max_y = point_y;
+        } else {
+            min_x = min(min_x, point_x);
+            min_y = min(min_y, point_y);
+            max_x = max(max_x, point_x);
+            max_y = max(max_y, point_y);
+        }
+    }
+    *x = min_x;
+    *y = min_y;
+    *width = max_x - min_x;
+    *height = max_y - min_y;
+}
+
 static float text_rect_client_height(ViewText* text, TextRect* rect) {
     if (!rect) return 0.0f;
     float height = rect->height;
@@ -1501,7 +1597,12 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
         }
     }
 
-    apply_css_transforms_to_bounds(view, &css_x, &css_y, &css_width, &css_height);
+    if (view_chain_has_3d_transform(view)) {
+        apply_3d_transform_to_bounds(view, &css_x, &css_y,
+                                     &css_width, &css_height);
+    } else {
+        apply_css_transforms_to_bounds(view, &css_x, &css_y, &css_width, &css_height);
+    }
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"x\": %.1f,\n", css_x);
     strbuf_append_char_n(buf, ' ', indent + 4);
@@ -1523,7 +1624,12 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
  * @return Pointer to the last text node processed (to continue iteration from next sibling)
  */
 static bool text_rect_is_collapsed_whitespace(ViewText* text, TextRect* rect);
+static void append_text_fragment_json_with_vertical_prefix(
+    ViewText* text, StrBuf* buf, int indent, TextRect* rect,
+    TextRect* previous_rect, bool include_text_info);
 static bool text_has_visible_rect(ViewText* text);
+static bool text_in_vertical_fragmented_block(ViewText* text);
+static bool text_in_horizontal_fragmented_block(ViewText* text);
 
 static bool text_white_space_preserves_segment_break(ViewText* text) {
     CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
@@ -1643,8 +1749,8 @@ static void print_text_rects_json(ViewText* text, StrBuf* buf, int indent,
         if (!first_emitted) strbuf_append_str(buf, ",\n");
         first_emitted = false;
 
-        append_text_fragment_json(text, buf, indent, rect,
-                                  previous_emitted_rect, include_text_info);
+        append_text_fragment_json_with_vertical_prefix(
+            text, buf, indent, rect, previous_emitted_rect, include_text_info);
 
         previous_emitted_rect = rect;
         rect = rect->next;
@@ -2258,8 +2364,8 @@ static bool is_unrendered_shadow_dom_child(View* child) {
     return parent->shadow_root_element() && element->display.outer != CSS_VALUE_NONE;
 }
 
-static void print_unrendered_shadow_dom_json(DomElement* element,
-                                             StrBuf* buf, int indent) {
+static void print_unrendered_dom_json(DomElement* element, StrBuf* buf, int indent,
+                                      bool include_non_rendered_descendants) {
     if (!element) return;
     const char* tag_name = element->node_name() ? element->node_name() : "unknown";
     strbuf_append_char_n(buf, ' ', indent);
@@ -2285,19 +2391,44 @@ static void print_unrendered_shadow_dom_json(DomElement* element,
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* child_element = child->as_element();
-        if (should_skip_non_rendered_dom_tag(child_element->node_name()) ||
+        if ((!include_non_rendered_descendants &&
+             should_skip_non_rendered_dom_tag(child_element->node_name())) ||
             child_element->display.outer == CSS_VALUE_NONE) {
             continue;
         }
         if (!first_child) strbuf_append_str(buf, ",\n");
         first_child = false;
-        print_unrendered_shadow_dom_json(child_element, buf, indent + 4);
+        print_unrendered_dom_json(child_element, buf, indent + 4,
+                                  include_non_rendered_descendants);
     }
     strbuf_append_str(buf, "\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "]\n");
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "}");
+}
+
+static bool is_unrendered_replaced_dom_child(View* child) {
+    if (!child || child->view_type != RDT_VIEW_NONE || !child->is_element() ||
+        !child->parent || !child->parent->is_element()) {
+        return false;
+    }
+    DomElement* parent = child->parent->as_element();
+    if (child->is_block() && is_anonymous_element(lam::view_require_block(child))) {
+        return false;
+    }
+    if (parent->tag() == MARKUP_NAME_SELECT) {
+        NameId child_tag = child->as_element()->tag();
+        // HTML select rendering only exposes its native option tree; arbitrary
+        // DOM children appended to a closed combo box have no rendered node.
+        if (child_tag != MARKUP_NAME_OPTION &&
+            child_tag != MARKUP_NAME_OPTGROUP && child_tag != MARKUP_NAME_HR) {
+            return false;
+        }
+    }
+    // Replaced elements expose DOM-backed descendants in the layout snapshot
+    // even though those descendants have no layout boxes.
+    return parent->display.inner == RDT_DISPLAY_REPLACED;
 }
 
 // Helper to print children, skipping anonymous wrapper elements
@@ -2315,7 +2446,14 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
             if (is_unrendered_shadow_dom_child(child)) {
                 if (!*first_child) strbuf_append_str(buf, ",\n");
                 *first_child = false;
-                print_unrendered_shadow_dom_json(child->as_element(), buf, indent);
+                print_unrendered_dom_json(child->as_element(), buf, indent, false);
+                child = child->next_sibling;
+                continue;
+            }
+            if (is_unrendered_replaced_dom_child(child)) {
+                if (!*first_child) strbuf_append_str(buf, ",\n");
+                *first_child = false;
+                print_unrendered_dom_json(child->as_element(), buf, indent, true);
                 child = child->next_sibling;
                 continue;
             }
@@ -2916,12 +3054,50 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
 }
 
 // JSON generation for text nodes
+static bool text_in_vertical_fragmented_block(ViewText* text) {
+    if (!text) return false;
+    for (ViewElement* ancestor = text->parent_view(); ancestor;
+         ancestor = ancestor->parent_view()) {
+        ViewBlock* block = lam::view_as_block(ancestor);
+        if (!block || !block->is_element() || !block->block()) continue;
+        DomElement* element = block->as_element();
+        if (element->layout_fragments_count() > 1 &&
+            layout_block_inline_axis_is_vertical(block)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool text_in_horizontal_fragmented_block(ViewText* text) {
+    if (!text) return false;
+    for (ViewElement* ancestor = text->parent_view(); ancestor;
+         ancestor = ancestor->parent_view()) {
+        ViewBlock* block = lam::view_as_block(ancestor);
+        if (!block || !block->is_element() || !block->block()) continue;
+        DomElement* element = block->as_element();
+        if (element->layout_fragments_count() > 1 &&
+            !layout_block_inline_axis_is_vertical(block)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool text_parent_has_out_of_flow_child(ViewText* text) {
+    ViewElement* parent = text ? text->parent_view() : nullptr;
+    if (!parent) return false;
+    for (View* child = parent->first_placed_child(); child; child = child->next()) {
+        if (layout_view_is_out_of_flow(child)) return true;
+    }
+    return false;
+}
+
 static bool text_rect_is_collapsed_whitespace(ViewText* text, TextRect* rect) {
-    if (!text || !rect || rect->width > 0 || rect->length <= 0) return false;
+    if (!text || !rect || rect->length <= 0) return false;
     // A zero-font whitespace run still has a layout rect; only positive-height
     // zero-width runs were collapsed away at an inline line edge (CSS Text 3
     // §4.1.3), so retain the former for DOM geometry reporting.
-    if (rect->height <= 0.0f) return false;
     CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
     if (white_space != CSS_VALUE_NORMAL &&
         white_space != CSS_VALUE_NOWRAP &&
@@ -2936,7 +3112,13 @@ static bool text_rect_is_collapsed_whitespace(ViewText* text, TextRect* rect) {
             return false;
         }
     }
-    return true;
+    if (rect->height <= 0.0f) {
+        // cssom range extraction omits collapsed whitespace-only fragments in
+        // a fragmented vertical inline, even when the line cursor gave
+        // the fragment a physical width.
+        return text_in_vertical_fragmented_block(text);
+    }
+    return rect->width <= 0.0f;
 }
 
 static bool text_has_visible_rect(ViewText* text) {
@@ -2949,37 +3131,443 @@ static bool text_has_visible_rect(ViewText* text) {
     return false;
 }
 
+static int text_json_leading_whitespace_start(ViewText* text, TextRect* rect) {
+    if (!text || !rect || rect != text->rect ||
+        !text_in_vertical_fragmented_block(text) || !text->text_data()) {
+        return rect ? rect->start_index : 0;
+    }
+    int start = max(rect->start_index, 0);
+    unsigned char* data = text->text_data();
+    int cursor = 0;
+    while (cursor < start) {
+        unsigned char ch = data[cursor];
+        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f') {
+            return start;
+        }
+        cursor++;
+    }
+    return cursor == start ? 0 : start;
+}
+
+static bool text_json_is_collapsible_whitespace_node(DomNode* node) {
+    if (!node || node->node_type != DOM_NODE_TEXT) return false;
+    CssEnum white_space = get_white_space_value(node);
+    if (white_space != CSS_VALUE_NORMAL &&
+        white_space != CSS_VALUE_NOWRAP &&
+        white_space != CSS_VALUE_PRE_LINE) {
+        return false;
+    }
+    DomText* text = node->as_text();
+    unsigned char* data = text ? text->text_data() : nullptr;
+    if (!text || !data || text->length == 0) return false;
+    for (size_t i = 0; i < text->length; i++) {
+        unsigned char ch = data[i];
+        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f') {
+            return false;
+        }
+    }
+    return true;
+}
+
+static int text_json_preceding_whitespace(
+    ViewText* text, char* buffer, int capacity) {
+    bool in_vertical_context = text_in_vertical_fragmented_block(text);
+    if (!text || !buffer || capacity <= 0 ||
+        !in_vertical_context) return 0;
+    View* runs[32] = {};
+    int run_count = 0;
+    ViewElement* parent = text->parent_view();
+    if (parent) {
+        View* previous[32] = {};
+        int previous_count = 0;
+        for (View* sibling = parent->first_child;
+             sibling && sibling != static_cast<View*>(text);
+             sibling = sibling->next_sibling) {
+            if (previous_count >= 32) break;
+            previous[previous_count++] = sibling;
+        }
+        for (int i = previous_count - 1; i >= 0 && run_count < 32; i--) {
+            if (!text_json_is_collapsible_whitespace_node(previous[i])) break;
+            runs[run_count++] = previous[i];
+        }
+    }
+    int length = 0;
+    for (int i = run_count - 1; i >= 0; i--) {
+        DomText* run = runs[i]->as_text();
+        unsigned char* data = run ? run->text_data() : nullptr;
+        if (!run || !data) continue;
+        for (size_t j = 0; j < run->length && length < capacity; j++) {
+            buffer[length++] = (char)data[j];
+        }
+    }
+    return length;
+}
+
+static int text_json_visible_cluster_count(
+    const unsigned char* data, size_t length) {
+    if (!data || length == 0) return 0;
+    int count = 0;
+    size_t cursor = 0;
+    while (cursor < length) {
+        uint32_t codepoint = 0;
+        int bytes = str_utf8_decode(
+            (const char*)(data + cursor), length - cursor, &codepoint);
+        if (bytes <= 0 || cursor + (size_t)bytes > length) {
+            bytes = 1;
+            codepoint = data[cursor];
+        }
+        bool is_collapsed_space = codepoint == ' ' || codepoint == '\t' ||
+            codepoint == '\n' || codepoint == '\r' || codepoint == '\f';
+        if (!is_collapsed_space) count++;
+        cursor += (size_t)bytes;
+    }
+    return count;
+}
+
+static bool text_json_is_only_visible_rect(ViewText* text, TextRect* selected) {
+    if (!text || !selected) return false;
+    for (TextRect* rect = text->rect; rect; rect = rect->next) {
+        if (rect == selected || text_rect_is_collapsed_whitespace(text, rect)) continue;
+        return false;
+    }
+    return true;
+}
+
+static void append_text_fragment_json_with_vertical_prefix(
+    ViewText* text, StrBuf* buf, int indent, TextRect* rect,
+    TextRect* previous_rect, bool include_text_info) {
+    if (!text || !buf || !rect) return;
+    TextRect fragment = *rect;
+    int leading_start = text_json_leading_whitespace_start(text, rect);
+    if (leading_start < fragment.start_index) {
+        fragment.length += fragment.start_index - leading_start;
+        fragment.start_index = leading_start;
+    }
+
+    char content[2048];
+    int preceding_length = text_json_preceding_whitespace(
+        text, content, (int)sizeof(content) - 1); // INT_CAST_OK: fixed JSON buffer capacity
+    bool has_merged_prefix = preceding_length > 0 ||
+        leading_start < rect->start_index;
+    int content_length = preceding_length;
+    unsigned char* text_data = text->text_data();
+    if (text_data && fragment.length > 0) {
+        int copy_length = min((int)sizeof(content) - 1 - content_length,
+                              fragment.length);
+        if (copy_length > 0) {
+            memcpy(content + content_length,
+                   text_data + fragment.start_index, (size_t)copy_length);
+            content_length += copy_length;
+        }
+    }
+    if (text_in_vertical_fragmented_block(text) &&
+        text_json_is_only_visible_rect(text, rect) &&
+        text_data &&
+        fragment.width > 0.0f && fragment.height > 0.0f) {
+        int visible_clusters = text_json_visible_cluster_count(
+            text_data + fragment.start_index, (size_t)max(fragment.length, 0));
+        float content_height = fragment.width * visible_clusters;
+        if (content_height > 0.0f && content_height < fragment.height) {
+            // cssom range geometry excludes the line-box space after the last glyph.
+            fragment.height = content_height;
+        }
+    }
+    if (has_merged_prefix && content_length > 0) {
+        fragment.start_index = 0;
+        fragment.length = content_length;
+        append_text_fragment_json(text, buf, indent, &fragment,
+                                  previous_rect, include_text_info,
+                                  content, content_length);
+    } else {
+        append_text_fragment_json(text, buf, indent, &fragment,
+                                  previous_rect, include_text_info);
+    }
+}
+
+struct TextJsonCharPosition {
+    int index;
+    int length;
+    float y;
+};
+
+struct TextJsonLinePosition {
+    float y;
+    int first_char;
+    int last_char;
+};
+
+static bool print_horizontal_fragmented_text_json(ViewText* text,
+                                                   StrBuf* buf, int indent) {
+    if (!text_in_horizontal_fragmented_block(text) || !text->text_data() ||
+        text->length >= 2048) return false;
+
+    TextRect* visible_rects[2048];
+    int visible_rect_count = 0;
+    for (TextRect* rect = text->rect; rect; rect = rect->next) {
+        if (rect->width <= 0.0f || rect->height <= 0.0f ||
+            text_rect_is_collapsed_whitespace(text, rect)) {
+            continue;
+        }
+        if (visible_rect_count >= 2048) return false;
+        visible_rects[visible_rect_count++] = rect;
+    }
+    if (visible_rect_count < 2) return false;
+
+    TextJsonLinePosition lines[2048] = {};
+    int line_count = 0;
+    for (int i = 0; i < visible_rect_count; i++) {
+        TextRect* rect = visible_rects[i];
+        int start = max(rect->start_index, 0);
+        int end = start + max(rect->length, 0);
+        int line_index = -1;
+        for (int j = 0; j < line_count; j++) {
+            if (fabsf(lines[j].y - rect->y) <= 2.0f) {
+                line_index = j;
+                break;
+            }
+        }
+        if (line_index < 0) {
+            if (line_count >= 2048) return false;
+            line_index = line_count++;
+            lines[line_index].y = rect->y;
+            lines[line_index].first_char = start;
+            lines[line_index].last_char = end;
+        } else {
+            lines[line_index].first_char = min(
+                lines[line_index].first_char, start);
+            lines[line_index].last_char = max(
+                lines[line_index].last_char, end);
+        }
+    }
+    for (int i = 1; i < line_count; i++) {
+        TextJsonLinePosition current = lines[i];
+        int j = i - 1;
+        while (j >= 0 && lines[j].y > current.y) {
+            lines[j + 1] = lines[j];
+            j--;
+        }
+        lines[j + 1] = current;
+    }
+
+    unsigned char* data = text->text_data();
+    int source_length = (int)text->length; // INT_CAST_OK: source byte length for JSON ranges
+    bool emitted = false;
+    for (int line_index = 0; line_index < line_count; line_index++) {
+        TextJsonLinePosition* line = &lines[line_index];
+        TextRect* first_rect = nullptr;
+        float min_x = 1e30f;
+        float min_y = 1e30f;
+        float max_x = -1e30f;
+        float max_y = -1e30f;
+        for (int i = 0; i < visible_rect_count; i++) {
+            TextRect* rect = visible_rects[i];
+            if (fabsf(rect->y - line->y) > 2.0f) continue;
+            if (!first_rect) first_rect = rect;
+            min_x = min(min_x, rect->x);
+            min_y = min(min_y, rect->y);
+            max_x = max(max_x, rect->x + rect->width);
+            max_y = max(max_y, rect->y + rect->height);
+        }
+        if (!first_rect) continue;
+        int start = max(0, min(line->first_char, source_length));
+        int end = max(start, min(line->last_char, source_length));
+        if (end <= start) continue;
+        if (emitted) strbuf_append_str(buf, ",\n");
+        emitted = true;
+        TextRect fragment = *first_rect;
+        fragment.x = min_x;
+        fragment.y = min_y;
+        fragment.width = max_x - min_x;
+        fragment.height = max_y - min_y;
+        fragment.start_index = 0;
+        fragment.length = end - start;
+        append_text_fragment_json(text, buf, indent, &fragment, nullptr, true,
+                                  (const char*)(data + start), end - start);
+    }
+    return emitted;
+}
+
+static bool text_json_append_vertical_char_positions(
+        ViewText* text, TextJsonCharPosition* positions, int* position_count,
+        TextRect** visible_rects, int* visible_rect_count) {
+    if (!text || !positions || !position_count || !visible_rects ||
+        !visible_rect_count || !text->text_data() || text->length >= 2048) {
+        return false;
+    }
+    unsigned char* data = text->text_data();
+    int source_length = (int)text->length; // INT_CAST_OK: source byte length for JSON ranges
+    *position_count = 0;
+    *visible_rect_count = 0;
+    TextRect* first_visible = nullptr;
+    for (TextRect* rect = text->rect; rect; rect = rect->next) {
+        if (rect->width > 0.0f && rect->height > 0.0f &&
+            !text_rect_is_collapsed_whitespace(text, rect)) {
+            if (!first_visible) first_visible = rect;
+            visible_rects[(*visible_rect_count)++] = rect;
+        }
+    }
+    if (!first_visible || *visible_rect_count < 2) return false;
+
+    auto append_position = [&](int index, int length, float y) -> bool {
+        if (*position_count >= 2048) return false;
+        positions[*position_count].index = index;
+        positions[*position_count].length = length;
+        positions[*position_count].y = y;
+        (*position_count)++;
+        return true;
+    };
+
+    // Collapsed leading whitespace remains part of the browser range and is
+    // assigned to the first visible line by Range.getClientRects().
+    int prefix_end = min(first_visible->start_index, source_length);
+    int prefix = 0;
+    while (prefix < prefix_end) {
+        uint32_t codepoint = 0;
+        int bytes = str_utf8_decode((const char*)(data + prefix),
+                                    (size_t)(prefix_end - prefix), &codepoint);
+        if (bytes <= 0 || prefix + bytes > prefix_end) bytes = 1;
+        if (!append_position(prefix, bytes, first_visible->y)) return false;
+        prefix += bytes;
+    }
+
+    for (int rect_index = 0; rect_index < *visible_rect_count; rect_index++) {
+        TextRect* rect = visible_rects[rect_index];
+        int start = max(0, rect->start_index);
+        int end = min(source_length, start + max(rect->length, 0));
+        if (start >= end) continue;
+        int visible_chars = 0;
+        for (int cursor = start; cursor < end;) {
+            uint32_t codepoint = 0;
+            int bytes = str_utf8_decode((const char*)(data + cursor),
+                                        (size_t)(end - cursor), &codepoint);
+            if (bytes <= 0 || cursor + bytes > end) bytes = 1;
+            if (codepoint != ' ' && codepoint != '\t' && codepoint != '\n' &&
+                codepoint != '\r' && codepoint != '\f') {
+                visible_chars++;
+            }
+            cursor += bytes;
+        }
+        if (visible_chars <= 0) continue;
+        float char_advance = rect->height / visible_chars;
+        int visible_index = 0;
+        for (int cursor = start; cursor < end;) {
+            uint32_t codepoint = 0;
+            int bytes = str_utf8_decode((const char*)(data + cursor),
+                                        (size_t)(end - cursor), &codepoint);
+            if (bytes <= 0 || cursor + bytes > end) bytes = 1;
+            bool is_collapsed_space = codepoint == ' ' || codepoint == '\t' ||
+                codepoint == '\n' || codepoint == '\r' || codepoint == '\f';
+            float y = is_collapsed_space
+                ? rect->y + rect->height
+                : rect->y + visible_index++ * char_advance;
+            if (!append_position(cursor, bytes, y)) return false;
+            cursor += bytes;
+        }
+    }
+    return *position_count > 0;
+}
+
+static bool print_vertical_rtl_fragmented_text_json(ViewText* text,
+                                                     StrBuf* buf, int indent) {
+    if (!text_in_vertical_fragmented_block(text)) return false;
+    TextJsonCharPosition positions[2048];
+    TextRect* visible_rects[2048];
+    int position_count = 0;
+    int visible_rect_count = 0;
+    if (!text_json_append_vertical_char_positions(
+            text, positions, &position_count, visible_rects,
+            &visible_rect_count)) {
+        return false;
+    }
+    TextJsonLinePosition lines[2048];
+    int line_count = 0;
+    for (int i = 0; i < position_count; i++) {
+        int line_index = -1;
+        for (int j = 0; j < line_count; j++) {
+            if (fabsf(lines[j].y - positions[i].y) <= 2.0f) {
+                line_index = j;
+                break;
+            }
+        }
+        if (line_index < 0) {
+            if (line_count >= 2048) return false;
+            line_index = line_count++;
+            lines[line_index].y = positions[i].y;
+            lines[line_index].first_char = i;
+        }
+        lines[line_index].last_char = i;
+    }
+    for (int i = 1; i < line_count; i++) {
+        TextJsonLinePosition current = lines[i];
+        int j = i - 1;
+        while (j >= 0 && lines[j].y > current.y) {
+            lines[j + 1] = lines[j];
+            j--;
+        }
+        lines[j + 1] = current;
+    }
+
+    bool emitted = false;
+    unsigned char* data = text->text_data();
+    int source_length = (int)text->length; // INT_CAST_OK: source byte length for JSON ranges
+    for (int line_index = 0; line_index < line_count; line_index++) {
+        TextJsonLinePosition* line = &lines[line_index];
+        TextRect* rect = nullptr;
+        for (int i = 0; i < visible_rect_count; i++) {
+            if (fabsf(visible_rects[i]->y - line->y) <= 3.0f) {
+                rect = visible_rects[i];
+                break;
+            }
+        }
+        if (!rect && line_index < visible_rect_count) {
+            rect = visible_rects[line_index];
+        }
+        if (!rect) continue;
+        int start = positions[line->first_char].index;
+        int end = positions[line->last_char].index + positions[line->last_char].length;
+        start = max(0, min(start, source_length));
+        end = max(start, min(end, source_length));
+        if (end <= start) continue;
+        if (emitted) strbuf_append_str(buf, ",\n");
+        emitted = true;
+        TextRect fragment = *rect;
+        if (!text_parent_has_out_of_flow_child(text)) {
+            float line_min_x = fragment.x;
+            float line_max_x = fragment.x + fragment.width;
+            float line_min_y = fragment.y;
+            float line_max_y = fragment.y + fragment.height;
+            for (int i = 0; i < visible_rect_count; i++) {
+                TextRect* candidate = visible_rects[i];
+                if (fabsf(candidate->y - line->y) > 3.0f) continue;
+                line_min_x = min(line_min_x, candidate->x);
+                line_max_x = max(line_max_x, candidate->x + candidate->width);
+                line_min_y = min(line_min_y, candidate->y);
+                line_max_y = max(line_max_y, candidate->y + candidate->height);
+            }
+            fragment.x = line_min_x;
+            fragment.y = line_min_y;
+            fragment.width = line_max_x - line_min_x;
+            fragment.height = line_max_y - line_min_y;
+        }
+        fragment.start_index = 0;
+        fragment.length = end - start;
+        append_text_fragment_json(text, buf, indent, &fragment, nullptr, true,
+                                  (const char*)(data + start), end - start);
+    }
+    return emitted;
+}
+
 void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     TextRect* rect = text->rect;
     if (!rect) return;  // guard against null text rect (fuzzer-found)
     if (!text_has_visible_rect(text)) return;
+    if (print_horizontal_fragmented_text_json(text, buf, indent)) return;
+    if (print_vertical_rtl_fragmented_text_json(text, buf, indent)) return;
     TextRect* previous_emitted_rect = NULL;
 
     NEXT_RECT:
-    append_text_object_header(buf, indent);
-
-    unsigned char* text_data = text->text_data();
-    if (text_data && rect->length > 0) {
-        char content[2048];
-        int len = min(sizeof(content) - 1, rect->length);
-        strncpy(content, (char*)(text_data + rect->start_index), len);
-        content[len] = '\0';
-        append_json_string(buf, content);
-    } else {
-        append_json_string(buf, "[empty]");
-    }
-    strbuf_append_str(buf, ",\n");
-
-    if (!layout_json_is_compact_v2()) {
-        strbuf_append_char_n(buf, ' ', indent + 2);
-        strbuf_append_str(buf, "\"text_info\": {\n");
-        append_json_format_field(buf, indent + 4, "start_index", true, "%d", rect->start_index);
-        append_json_format_field(buf, indent + 4, "length", false, "%d", rect->length);
-        strbuf_append_char_n(buf, ' ', indent + 2);
-        strbuf_append_str(buf, "},\n");
-    }
-
-    append_text_rect_layout(text, buf, indent, rect, previous_emitted_rect);
+    append_text_fragment_json_with_vertical_prefix(
+        text, buf, indent, rect, previous_emitted_rect, true);
 
     previous_emitted_rect = rect;
     rect = rect->next;
@@ -3151,7 +3739,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
             if (is_unrendered_shadow_dom_child(child)) {
                 if (!first_child) strbuf_append_str(buf, ",\n");
                 first_child = false;
-                print_unrendered_shadow_dom_json(child->as_element(), buf, indent + 4);
+                print_unrendered_dom_json(child->as_element(), buf, indent + 4, false);
                 child = child->next_sibling;
                 continue;
             }

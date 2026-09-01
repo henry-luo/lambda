@@ -258,9 +258,20 @@ int rdt_video_open_file(RdtVideo* video, const char* file_path) {
         // create player item and player
         // NOTE: No ARC — use alloc/init to get +1 retained references
         video->asset = [[AVURLAsset alloc] initWithURL:url options:nil];
+        if (![video->asset isPlayable]) {
+            log_info("video: source is not playable: %s", file_path);
+            [video->asset release];
+            video->asset = nil;
+            set_state(video, RDT_VIDEO_STATE_ERROR);
+            return -1;
+        }
         video->player_item = [[AVPlayerItem alloc] initWithAsset:video->asset];
         video->player = [[AVPlayer alloc] initWithPlayerItem:video->player_item];
         video->player.volume = video->muted ? 0.0f : video->volume;
+
+        // Local media exposes track dimensions before playback becomes ready;
+        // publish them now so the first layout can use the intrinsic ratio.
+        populate_metadata(video, video->player_item, false);
 
         // AVPlayerItemVideoOutput can make otherwise playable items fail with
         // AVFoundationErrorDomain -11821 in headless/test environments. Keep

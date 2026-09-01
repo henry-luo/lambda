@@ -152,6 +152,16 @@ float layout_used_preferred_aspect_ratio(ViewBlock* block) {
     if (!block) return specified_ratio;
 
     bool uses_content_box_ratio = layout_aspect_ratio_uses_content_box(block);
+    if (block->tag() == MARKUP_NAME_VIDEO && block->embed &&
+        block->embedp()->video && (specified_ratio <= 0.0f || uses_content_box_ratio)) {
+        // CSS Sizing: a loaded video's intrinsic ratio participates in auto sizing
+        // before the 300×150 replaced-element fallback is considered.
+        float video_width = (float)rdt_video_get_width(block->embedp()->video);
+        float video_height = (float)rdt_video_get_height(block->embedp()->video);
+        if (video_width > 0.0f && video_height > 0.0f) {
+            return video_width / video_height;
+        }
+    }
     if (block->tag() == MARKUP_NAME_CANVAS &&
         (layout_css_size_is_automatic(block, true) ||
          layout_css_size_is_automatic(block, false)) &&
@@ -929,6 +939,34 @@ static bool intrinsic_measure_shaped_simple_latin_run(LayoutContext* lycon,
     return true;
 }
 
+static bool intrinsic_measure_shaped_bidi_run(LayoutContext* lycon,
+                                               const unsigned char* str,
+                                               size_t remaining,
+                                               CssEnum text_transform,
+                                               CssEnum font_variant,
+                                               bool break_anywhere,
+                                               bool break_word,
+                                               size_t* out_bytes,
+                                               float* out_width,
+                                               uint32_t* out_first_codepoint,
+                                               uint32_t* out_last_codepoint) {
+    if (!str || remaining == 0 || !out_bytes || !out_width ||
+        !out_first_codepoint || !out_last_codepoint) {
+        return false;
+    }
+    LayoutBidiRun result = {};
+    if (!layout_measure_bidi_run(
+            lycon, str, remaining, text_transform, font_variant,
+            break_anywhere, break_word, false, &result)) {
+        return false;
+    }
+    *out_bytes = result.bytes;
+    *out_width = result.width;
+    *out_first_codepoint = result.first_codepoint;
+    *out_last_codepoint = result.last_codepoint;
+    return true;
+}
+
 static bool text_line_has_tab(const char* text, size_t length) {
     for (size_t i = 0; i < length; i++) {
         if (text[i] == '\t') return true;
@@ -1247,9 +1285,13 @@ static bool intrinsic_should_skip_height_child(DomElement* elem) {
         return true;
     }
     ViewBlock* block = lam::view_as_block(elem);
+    CssEnum float_value = layout_specified_keyword(
+        elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
+    bool is_float = (block && block->position && element_has_float(block)) ||
+        float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT;
     // Floats contribute to intrinsic width but not their parent's normal-flow
     // block-size, matching CSS 2.2 §9.5's removal from block flow.
-    return (block && block->position && element_has_float(block)) ||
+    return is_float ||
         intrinsic_child_is_out_of_flow(elem, block);
 }
 
@@ -1442,6 +1484,39 @@ static float intrinsic_apply_full_text_transform(LayoutContext* lycon,
     return extra_advance;
 }
 
+static bool intrinsic_measure_grapheme_cluster(
+        LayoutContext* lycon, const unsigned char* text, size_t remaining,
+        size_t* cluster_bytes, float* cluster_width,
+        uint32_t* first_codepoint, uint32_t* last_codepoint) {
+    if (!lycon || !text || remaining == 0 || !cluster_bytes ||
+        !cluster_width || !first_codepoint || !last_codepoint ||
+        !font_box_handle(&lycon->font) || !lycon->font.style ||
+        lycon->font.style->letter_spacing != 0.0f) {
+        return false;
+    }
+    if (!layout_measure_grapheme_cluster_advance(
+            lycon, text, text + remaining, cluster_bytes, cluster_width)) {
+        return false;
+    }
+
+    int bytes = str_utf8_decode((const char*)text, *cluster_bytes,
+                                first_codepoint);
+    if (bytes <= 0) return false;
+    const unsigned char* cursor = text;
+    const unsigned char* cluster_end = text + *cluster_bytes;
+    *last_codepoint = *first_codepoint;
+    while (cursor < cluster_end) {
+        uint32_t codepoint = 0;
+        int codepoint_bytes = str_utf8_decode(
+            (const char*)cursor, (size_t)(cluster_end - cursor), &codepoint);
+        if (codepoint_bytes <= 0) return false;
+        *last_codepoint = codepoint;
+        cursor += codepoint_bytes;
+    }
+
+    return true;
+}
+
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
                                                    size_t length,
@@ -1569,6 +1644,69 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         }
 
         {
+            if (text_transform == CSS_VALUE_NONE &&
+                font_variant != CSS_VALUE_SMALL_CAPS &&
+                !break_anywhere && !break_word) {
+                size_t shaped_bidi_bytes = 0;
+                float shaped_bidi_width = 0.0f;
+                uint32_t shaped_bidi_first = 0;
+                uint32_t shaped_bidi_last = 0;
+                if (intrinsic_measure_shaped_bidi_run(
+                        lycon, &str[i], length - i, text_transform,
+                        font_variant, break_anywhere, break_word,
+                        &shaped_bidi_bytes, &shaped_bidi_width,
+                        &shaped_bidi_first, &shaped_bidi_last)) {
+                    float kerning = 0.0f;
+                    if (has_kerning && prev_codepoint) {
+                        kerning = font_get_kerning(
+                            font_box_handle(&lycon->font), prev_codepoint,
+                            shaped_bidi_first);
+                    }
+                    float advance = shaped_bidi_width + kerning;
+                    current_word += advance;
+                    total_width += advance;
+                    prev_codepoint = shaped_bidi_last;
+                    prev_text_autospace_codepoint = shaped_bidi_last;
+                    prev_is_zwj_base = false;
+                    is_word_start = false;
+                    i += shaped_bidi_bytes;
+                    continue;
+                }
+                size_t cluster_bytes = 0;
+                float cluster_width = 0.0f;
+                uint32_t cluster_first = 0;
+                uint32_t cluster_last = 0;
+                if (intrinsic_measure_grapheme_cluster(
+                        lycon, &str[i], length - i, &cluster_bytes,
+                        &cluster_width, &cluster_first, &cluster_last)) {
+                    float kerning = 0.0f;
+                    if (has_kerning && prev_codepoint) {
+                        kerning = font_get_kerning(
+                            font_box_handle(&lycon->font), prev_codepoint,
+                            cluster_first);
+                    }
+                    float advance = cluster_width + kerning;
+                    if (!text_autospace_bidi_unsupported &&
+                        layout_text_autospace_pair(
+                            text_autospace, prev_text_autospace_codepoint,
+                            cluster_first)) {
+                        advance += layout_text_autospace_advance(lycon);
+                    }
+                    current_word += advance;
+                    total_width += advance;
+                    prev_codepoint = cluster_last;
+                    prev_text_autospace_codepoint = cluster_last;
+                    prev_is_zwj_base = false;
+                    is_word_start = false;
+                    i += cluster_bytes;
+                    if (cjk_breaks && has_id_line_break_class(cluster_last)) {
+                        longest_word = fmax(longest_word, current_word);
+                        current_word = 0.0f;
+                    }
+                    continue;
+                }
+            }
+
             size_t shaped_bytes = 0;
             float shaped_width = 0.0f;
             uint32_t shaped_first_cp = 0;
@@ -2620,9 +2758,20 @@ static float intrinsic_replaced_width_with_max_height(LayoutContext* lycon,
     float max_height = intrinsic_replaced_max_height(lycon, element, view);
     if (max_height < 0.0f) return width;
 
-    // CSS Sizing transfers a definite max-height through a replaced object's
-    // natural ratio before its intrinsic inline contribution is consumed.
-    float ratio_limited_width = max_height * natural_width / natural_height;
+    bool border_box = intrinsic_view_uses_border_box(view, element);
+    float padding_border_height = layout_intrinsic_padding_border_axis(
+        lycon, element, false, lycon ? lycon->block.content_width : 0.0f);
+    // CSS UI box-sizing makes max-height constrain the border box; transfer the
+    // remaining content-box height through the replaced object's natural ratio.
+    float ratio_height = border_box
+        ? max(max_height - padding_border_height, 0.0f)
+        : max_height;
+    float ratio_limited_width = ratio_height * natural_width / natural_height;
+    if (border_box) {
+        float padding_border_width = layout_intrinsic_padding_border_axis(
+            lycon, element, true, lycon ? lycon->block.content_width : 0.0f);
+        ratio_limited_width += padding_border_width;
+    }
     return ratio_limited_width < width ? ratio_limited_width : width;
 }
 
@@ -2931,6 +3080,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // before an anonymous table cell records the element's contribution.
     bool intrinsic_needs_resolved_style =
         intrinsic_tag == MARKUP_NAME_BUTTON || intrinsic_tag == MARKUP_NAME_INPUT ||
+        intrinsic_tag == MARKUP_NAME_TEXTAREA ||
         intrinsic_tag == MARKUP_NAME_FIELDSET || intrinsic_tag == MARKUP_NAME_LEGEND ||
         intrinsic_tag == MARKUP_NAME_UL || intrinsic_tag == MARKUP_NAME_OL ||
         intrinsic_tag == MARKUP_NAME_MENU || intrinsic_tag == MARKUP_NAME_RUBY ||
@@ -3700,7 +3850,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     replaced_width = specified_width;
                 }
             }
-            if (image) {
+            if (image && (image->has_intrinsic_size || image->has_intrinsic_aspect_ratio)) {
                 replaced_width = intrinsic_replaced_width_with_max_height(
                     lycon, element, view_block_replaced, replaced_width,
                     (float)image->width, (float)image->height);

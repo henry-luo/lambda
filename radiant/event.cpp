@@ -53,6 +53,7 @@ extern "C" bool js_dom_is_reset_button(void* dom_elem);
 extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter_item);
 extern "C" bool js_dom_is_disabled(void* dom_elem);
 extern "C" bool js_dom_is_connected(void* dom_elem);
+extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus);
 #include "../lib/hashmap.h"           // hashmap utilities used by DocState maps
 #include "../lib/memtrack.h"          // mem_free
 #include <chrono>       // timing for reactive event dispatch
@@ -3284,6 +3285,35 @@ static bool dispatch_editing_input_event(EventContext* evcon, View* target,
     return radiant_dispatch_input_event(evcon, target, type, intent);
 }
 
+bool radiant_focus_element(DomDocument* doc, View* target) {
+    if (!doc || !target) return false;
+
+    Runtime* runtime = doc->js.runtime;
+    if (!runtime) {
+        // Lambda template documents do not own a JavaScript runtime, but their
+        // contenteditable hosts still use the shared DOM focus/Selection path.
+        return js_dom_focus_editing_host_for_automation(target);
+    }
+
+    EvalContext* focus_ctx = runtime_get_eval_context(runtime);
+    if (!focus_ctx || !runtime->heap || !runtime->name_pool) return false;
+    Context* saved_input_ctx = input_context;
+    void* saved_doc = js_dom_get_document();
+    // Programmatic focus runs on the document's evaluator; event handlers must
+    // allocate and dispatch while that retained context owns the thread.
+    if (!runtime_context_bind_retained(runtime, focus_ctx)) return false;
+    input_context = nullptr;
+    if (focus_ctx->js_state && !js_runtime_state_init(focus_ctx)) {
+        input_context = saved_input_ctx;
+        return false;
+    }
+    js_dom_set_document(doc);
+    js_dom_focus_method_bridge(target, true);
+    js_dom_restore_active_document(saved_doc);
+    input_context = saved_input_ctx;
+    return true;
+}
+
 static bool event_document_has_js_runtime(EventContext* evcon) {
     DomDocument* document = event_context_target_document(evcon);
     // Lambda template documents retain a Jube support capsule in `js`, but it
@@ -5742,7 +5772,7 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->active = false;
     s->handler_ctx = nullptr;
     s->doc = event_context_target_document(evcon);
-    if (!s->doc || !s->doc->js.mir_ctx || !s->doc->js.runtime) return false;
+    if (!s->doc || !s->doc->js.runtime) return false;
     Runtime* runtime = s->doc->js.runtime;
     s->handler_ctx = runtime_get_eval_context(runtime);
     if (!s->handler_ctx || !runtime->heap || !runtime->name_pool) return false;

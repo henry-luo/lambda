@@ -48,8 +48,9 @@ static bool get_element_counter_property_value(DomElement* elem, CssPropertyCode
     AvlNode* node = avl_tree_search(elem->specified_style->tree, property);
     if (!node) return false;
     StyleNode* sn = (StyleNode*)node->declaration;
-    if (!sn || !sn->winning_decl || !sn->winning_decl->value) return false;
-    CssValue* val = sn->winning_decl->value;
+    CssDeclaration* decl = style_node_resolve_cascade(sn);
+    if (!decl || !decl->value) return false;
+    CssValue* val = decl->value;
     if (!val) return false;
 
     if (val->type == CSS_VALUE_TYPE_LIST) {
@@ -85,8 +86,9 @@ static bool element_resets_counter(DomElement* elem, const char* counter_name) {
     AvlNode* node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_COUNTER_RESET);
     if (!node) return false;
     StyleNode* sn = (StyleNode*)node->declaration;
-    if (!sn || !sn->winning_decl || !sn->winning_decl->value) return false;
-    CssValue* val = sn->winning_decl->value;
+    CssDeclaration* decl = style_node_resolve_cascade(sn);
+    if (!decl || !decl->value) return false;
+    CssValue* val = decl->value;
 
     auto check_name = [&](CssValue* item) -> bool {
         const char* name = counter_name_from_reversed_value(item);
@@ -310,8 +312,8 @@ void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem
     if (!cr_node) return;
 
     StyleNode* style_node = (StyleNode*)cr_node->declaration;
-    CssValue* cr_value = (style_node && style_node->winning_decl) ?
-                         style_node->winning_decl->value : nullptr;
+    CssDeclaration* cr_decl = style_node ? style_node_resolve_cascade(style_node) : nullptr;
+    CssValue* cr_value = cr_decl ? cr_decl->value : nullptr;
     // CSS Lists 3: for reversed() counters without explicit values, the
     // dynamic initial value is the negated increment sum plus the last
     // non-zero negated increment and any first counter-set value.

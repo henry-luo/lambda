@@ -1056,7 +1056,7 @@ static Item js_css_supports(Item* args, int argc) {
         }
 
         CssDeclaration* decl = css_parse_declaration_text(text, len, pool);
-        result = decl != NULL;
+        result = css_declaration_is_supported(decl);
     }
 
     if (free_pool) mem_pool_destroy(pool);

@@ -855,6 +855,21 @@ static void jm_add_capture(JsFuncCollected* fc, const char* name, NameEntry* ent
     capture->force_env_capture = force_env_capture;
 }
 
+static bool jm_capture_binding_is_lexical_ancestor(JsMirTranspiler* mt,
+        JsFuncCollected* fc, NameEntry* entry) {
+    if (!mt || !mt->tp || !fc || !entry || !entry->node) return true;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId binding_id = ast_index_find(index, (AstNode*)entry->node);
+    if (binding_id == AST_NODE_ID_INVALID || binding_id >= index->count) return true;
+    AstFunctionId binding_owner = index->owner_functions[binding_id];
+    if (binding_owner == AST_FUNCTION_ID_INVALID) return true;
+    for (JsFuncCollected* ancestor = jm_parent_collected_func(mt, fc);
+            ancestor; ancestor = jm_parent_collected_func(mt, ancestor)) {
+        if (ancestor->function_id == binding_owner) return true;
+    }
+    return false;
+}
+
 void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
                          struct hashmap* outer_scope_names,
                          struct hashmap* module_consts,
@@ -951,6 +966,11 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
         if (strncmp(ref->name, "_js_", 4) == 0 &&
             js_builtin_global_find(ref->name + 4, (int)strlen(ref->name + 4)) &&
             !(ancestor_func_locals && jm_name_set_has(ancestor_func_locals, ref->name))) {
+            continue;
+        }
+        // A same-named declaration in a sibling function is not an outer
+        // binding; leave the identifier on the realm-property lookup path.
+        if (ref->entry && !jm_capture_binding_is_lexical_ancestor(mt, fc, ref->entry)) {
             continue;
         }
         if (!jm_name_set_has(outer_scope_names, ref->name)) continue;  // not in outer scope

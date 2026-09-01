@@ -248,6 +248,55 @@ typedef struct {
     float e31, e32, e33;   // row 3: 0, 0, 1
 } RdtMatrix;
 
+// 4x4 homogeneous matrix used while a preserve-3d subtree is accumulated.
+// The 2D RdtMatrix remains the backend representation after projection.
+typedef struct {
+    float values[16];
+} RdtMatrix4;
+
+static inline RdtMatrix4 rdt_matrix4_identity(void) {
+    RdtMatrix4 m = {};
+    m.values[0] = m.values[5] = m.values[10] = m.values[15] = 1.0f;
+    return m;
+}
+
+static inline RdtMatrix4 rdt_matrix4_multiply(const RdtMatrix4* a,
+                                              const RdtMatrix4* b) {
+    RdtMatrix4 result = {};
+    for (int row = 0; row < 4; row++) {
+        for (int column = 0; column < 4; column++) {
+            for (int index = 0; index < 4; index++) {
+                result.values[row * 4 + column] +=
+                    a->values[row * 4 + index] * b->values[index * 4 + column];
+            }
+        }
+    }
+    return result;
+}
+
+static inline RdtMatrix4 rdt_matrix4_translate(float x, float y, float z) {
+    RdtMatrix4 m = rdt_matrix4_identity();
+    m.values[3] = x;
+    m.values[7] = y;
+    m.values[11] = z;
+    return m;
+}
+
+static inline void rdt_matrix4_transform_point(const RdtMatrix4* matrix,
+                                               float x, float y, float z,
+                                               float* out_x, float* out_y,
+                                               float* out_z, float* out_w) {
+    if (!matrix || !out_x || !out_y || !out_z || !out_w) return;
+    *out_x = matrix->values[0] * x + matrix->values[1] * y +
+        matrix->values[2] * z + matrix->values[3];
+    *out_y = matrix->values[4] * x + matrix->values[5] * y +
+        matrix->values[6] * z + matrix->values[7];
+    *out_z = matrix->values[8] * x + matrix->values[9] * y +
+        matrix->values[10] * z + matrix->values[11];
+    *out_w = matrix->values[12] * x + matrix->values[13] * y +
+        matrix->values[14] * z + matrix->values[15];
+}
+
 // Per-view CSS transform matrix, for painted bounds and for hit-testing.
 bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
 
@@ -524,6 +573,9 @@ struct FontProp {
     Color text_deco_color;            // CSS text-decoration-color (default: {0} = use currentColor)
     float text_deco_thickness;        // CSS text-decoration-thickness in px (0 = auto from font metrics)
     float text_underline_offset;      // CSS text-underline-offset in px (0 = auto)
+    bool text_emphasis_enabled;       // CSS text-emphasis-style is not none
+    bool text_emphasis_under;         // CSS text-emphasis-position uses under in horizontal flow
+    const char* platform_fallback_family; // platform family used for UA glyph fallback
 };
 
 inline float font_prop_used_size(const FontProp* fp) {
@@ -558,6 +610,7 @@ inline FontStyleDesc font_style_desc_from_prop(const FontProp* fp) {
     sd.slant   = (fp->font_style == CSS_VALUE_ITALIC)  ? FONT_SLANT_ITALIC
                : (fp->font_style == CSS_VALUE_OBLIQUE) ? FONT_SLANT_OBLIQUE
                : FONT_SLANT_NORMAL;
+    sd.platform_fallback_family = fp->platform_fallback_family;
     return sd;
 }
 
@@ -3436,6 +3489,10 @@ extern RdtMatrix compute_transform_matrix(TransformFunction* functions,
                                           float perspective_distance = 0.0f,
                                           float perspective_origin_x = 0.0f,
                                           float perspective_origin_y = 0.0f);
+extern RdtMatrix4 compute_transform_matrix_3d(TransformFunction* functions,
+                                              float width, float height,
+                                              float origin_x, float origin_y,
+                                              float origin_z = 0.0f);
 extern bool has_transform(DomElement* elem);
 extern void transform_point(float& x, float& y, const RdtMatrix& m);
 

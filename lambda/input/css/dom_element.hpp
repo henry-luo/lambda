@@ -530,6 +530,7 @@ struct DomElementExt {
     DomElement* shadow_root;
     float pending_element_scroll_x;
     float pending_element_scroll_y;
+    bool has_inline_cb_edge_snapshot;
     const char** attribute_names_cache;
     int attribute_names_capacity;
     // Layout-only ruby column geometry. This lives outside InlineProp because
@@ -726,6 +727,11 @@ struct DomElement : DomNode {
     void set_has_collapsed_line_fragment_union(bool value) { set_has_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE, value); }
     bool has_split_inline_fragment_union() const { return has_fragment_union(FRAGMENT_UNION_SPLIT_INLINE); }
     void set_has_split_inline_fragment_union(bool value) { set_has_fragment_union(FRAGMENT_UNION_SPLIT_INLINE, value); }
+    bool has_inline_cb_edge_snapshot() const { return ext && ext->has_inline_cb_edge_snapshot; }
+    void set_has_inline_cb_edge_snapshot(bool value) {
+        DomElementExt* data = ensure_ext();
+        if (data) data->has_inline_cb_edge_snapshot = value;
+    }
 
     ParentItemKind parent_item_kind() const {
         return (ParentItemKind)((elmt_flags & ELMT_FLAG_PARENT_ITEM_KIND_MASK) >>
@@ -953,6 +959,7 @@ struct DomElement : DomNode {
         memset(ext->frags, 0, sizeof(ext->frags));
         ext->layout_fragments = nullptr;
         ext->layout_fragment_count = 0;
+        ext->has_inline_cb_edge_snapshot = false;
         ext->custom_layout_paint = nullptr;
         ext->ruby_column_anchor_x = 0.0f;
         ext->ruby_column_width = 0.0f;

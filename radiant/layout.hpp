@@ -97,6 +97,8 @@ bool layout_block_establishes_scroll_container(ViewBlock* block);
 bool layout_block_inline_axis_is_vertical(ViewBlock* block);
 bool layout_details_needs_default_summary(ViewBlock* block);
 float layout_list_item_marker_line_height(LayoutContext* lycon);
+float layout_text_overflow_ellipsis_width(struct FontHandle* font_handle,
+                                          float fallback_font_size);
 // maximum DOM nesting depth. guards call-stack overflow in layout_flow_node()
 // and layout_abs_block() — both use the same lycon->depth counter.
 constexpr int MAX_LAYOUT_DEPTH = 300;
@@ -253,11 +255,27 @@ struct LayoutSimpleLatinRun {
     uint32_t last_codepoint;
 };
 
+struct LayoutBidiRun {
+    size_t bytes;
+    float width;
+    uint32_t first_codepoint;
+    uint32_t last_codepoint;
+};
+
 bool layout_measure_simple_latin_run(LayoutContext* lycon,
                                      struct FontHandle* handle,
                                      const unsigned char* text,
                                      size_t remaining,
                                      LayoutSimpleLatinRun* result);
+bool layout_measure_bidi_run(LayoutContext* lycon,
+                             const unsigned char* text,
+                             size_t remaining,
+                             CssEnum text_transform,
+                             CssEnum font_variant,
+                             bool break_anywhere,
+                             bool break_word,
+                             bool hyphenation,
+                             LayoutBidiRun* result);
 // Intrinsic measurements may temporarily replace the active font and allocate
 // pooled font props. One scope owns both restorations so early exits cannot
 // leave speculative font state in the parent layout pass.
@@ -313,10 +331,19 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    CssEnum white_space = CSS_VALUE_NORMAL,
                                                    CssEnum overflow_wrap = CSS_VALUE_NORMAL,
                                                    CssEnum word_break = CSS_VALUE_NORMAL);
+float layout_broken_image_fallback_width(LayoutContext* lycon, ViewBlock* block,
+                                          const char* fallback_text);
 uint8_t layout_text_autospace_flags(LayoutContext* lycon, DomNode* text_node = nullptr);
 bool layout_text_contains_rtl_codepoint(const char* text, size_t length);
 bool layout_text_autospace_pair(uint8_t flags, uint32_t previous, uint32_t current);
 float layout_text_autospace_advance(LayoutContext* lycon);
+bool layout_get_grapheme_cluster_bytes(const unsigned char* cluster_start,
+                                       const unsigned char* text_end,
+                                       size_t* cluster_bytes);
+bool layout_measure_grapheme_cluster_advance(
+    LayoutContext* lycon, const unsigned char* cluster_start,
+    const unsigned char* text_end, size_t* cluster_bytes,
+    float* cluster_width);
 float layout_vertical_text_block_extent(const char* text, size_t length,
                                          float line_advance,
                                          float available_inline_size);
@@ -1886,6 +1913,7 @@ typedef struct LineMetricsSnapshot {
     int atomic_inline_count;
     float max_desc_before_last_text;
     bool has_expanded_inline_lh;
+    bool has_baseline_shift;
     float max_inline_line_height;
     float max_atomic_inline_height;
     float max_text_ascender;
@@ -1942,6 +1970,7 @@ typedef struct Linebox {
     int atomic_inline_count;        // number of atomic inline items placed on this line
     float max_desc_before_last_text; // max_descender value before last output_text (for trailing space rollback)
     bool has_expanded_inline_lh;    // true if an inline element's own line-height exceeds the parent block's
+    bool has_baseline_shift;        // true if vertical-align changes an inline baseline on this line
     float max_inline_line_height;   // max explicit line-height from baseline-aligned inline descendants
     float max_atomic_inline_height; // max margin-box height from inline-block/replaced descendants
     float max_text_ascender;        // maximum baseline-relative ascent from text on this line
@@ -3811,10 +3840,12 @@ void line_consume_trailing_collapsible_space(LayoutContext* lycon,
                                              bool update_ancestor_bounds);
 bool line_has_prior_flow_content(const Linebox* line);
 void line_align(LayoutContext* lycon);
+void layout_trim_isolated_inline_text_edges(LayoutContext* lycon, View* view);
 void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
                                               View* view, float offset);
 void layout_bidi_line(LayoutContext* lycon);
 int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir);
+int layout_find_last_strong_direction(DomNode* node, bool skip_explicit_dir);
 CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback);
 CssEnum layout_resolve_line_base_direction(LayoutContext* lycon);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
@@ -4256,6 +4287,7 @@ static inline bool layout_block_is_out_of_flow_positioned(const ViewBlock* block
 }
 
 bool layout_block_is_self_collapsing(ViewBlock* block);
+float layout_collapse_margins(float first, float second);
 static inline bool layout_block_is_out_of_flow(const ViewBlock* block) {
     return block &&
            (layout_position_is_abs_fixed(block->position) ||
@@ -4373,12 +4405,15 @@ float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* val
                                        DomElement* owner, float target_font_size);
 float layout_measure_space_advance(LayoutContext* lycon, struct FontHandle* handle,
                                    FontProp* style);
+float layout_measure_glyph_advance(LayoutContext* lycon, struct FontHandle* handle,
+                                   FontProp* style, uint32_t codepoint);
 size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,
                                                char* buffer, size_t buffer_size);
 bool layout_text_edge_has_whitespace(const char* text, bool end);
 bool layout_element_edge_has_whitespace(DomNode* element, bool end);
 // DomNode style resolution
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
+CssEnum layout_element_css_all_reset_keyword(DomElement* element);
 
 CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block);
 void setup_line_height(LayoutContext* lycon, ViewBlock* block);
@@ -4388,9 +4423,11 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struc
 void recompute_span_bounding_box_after_line_layout(
     ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh = nullptr);
 void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby);
+bool ruby_has_text_box_trim_ancestor(const ViewSpan* ruby, uint8_t trim);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
 bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
                                                 bool include_inline_table = false);
+bool layout_inline_span_starts_with_in_flow_block_fragment(ViewSpan* span);
 bool layout_inline_span_has_direct_visible_text_child(ViewSpan* span);
 ViewBlock* layout_inline_span_anonymous_inline_table_child(ViewSpan* span);
 bool layout_inline_span_has_direct_text_on_both_sides_of_anonymous_table(ViewSpan* span);

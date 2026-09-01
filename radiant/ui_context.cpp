@@ -328,6 +328,7 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
         0.0f, // normal fonts must not inherit initial-letter computed-size state
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     default_font.font_size_from_medium = true;
+    default_font.platform_fallback_family = default_font_times;
     legacy_default_font = (FontProp){default_font_times, 16.0f, // 16px (CSS logical pixels)
         1.0f, // default CSS zoom
         0.0f, // normal fonts must not inherit initial-letter computed-size state

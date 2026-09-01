@@ -413,7 +413,10 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
             // UA default: Chrome monospace ~13.333px, char width ≈ 8px
             float ta_font = 13.333f;
             char_w = ta_font * 0.60f;
-            scrollbar_reserve = 16.0f;
+            bool reserves_vertical_scrollbar = !block || !block->scroller ||
+                block->scroll()->overflow_y == CSS_VALUE_AUTO ||
+                block->scroll()->overflow_y == CSS_VALUE_SCROLL;
+            scrollbar_reserve = reserves_vertical_scrollbar ? 16.0f : 0.0f;
         }
         float content_w = ceilf(cols * char_w) + scrollbar_reserve;
         form->intrinsic_width = content_w;
@@ -498,6 +501,27 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
             }
         }
         form->intrinsic_height = content_height;
+    }
+}
+
+static void calc_image_input_size(LayoutContext* lycon, ViewBlock* block,
+                                  FormControlProp* form) {
+    if (!lycon || !block || !form) return;
+
+    const char* src = block->get_attribute("src");
+    if (src && src[0] != '\0') return;
+
+    // HTML image-button fallback uses alt when present; Chromium exposes the
+    // value label when alt is omitted on a source-less image input.
+    const char* fallback_text = block->get_attribute("alt");
+    if (!fallback_text) fallback_text = form->value;
+    if (!fallback_text || fallback_text[0] == '\0') return;
+
+    float fallback_width = layout_broken_image_fallback_width(
+        lycon, block, fallback_text);
+    if (fallback_width > 0.0f) {
+        form->intrinsic_width = fallback_width;
+        form->intrinsic_height = FormDefaults::IMAGE_INPUT_HEIGHT;
     }
 }
 
@@ -607,14 +631,18 @@ static float layout_select_listbox_row_height(bool has_visible_content) {
  * Chrome sizes select width to fit the longest option + dropdown arrow.
  */
 static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form, FontProp* font) {
+    // HTML listboxes size from their option content even when native appearance
+    // is disabled; the min-content fallback applies only to combo boxes.
+    bool is_multi_dropdown = form->multiple && form->select_size == 1;
+    bool is_listbox = form->select_size > 1 || (form->multiple && !is_multi_dropdown);
     float max_text_width = layout_select_option_text_width(
-        lycon, block->as_element(), form && form->appearance_none);
+        lycon, block->as_element(), form->appearance_none && !is_listbox);
     float selected_text_width = 0;
     // CSS `appearance: none` removes the UA chrome; treat option text as min-content
     // (longest unbreakable word) so the SELECT collapses toward author intent — matches
     // Chrome where appearance-less <select> with `width: 100%` shrinks rather than
     // expanding to the longest option's max-content width.
-    bool use_min_content = form && form->appearance_none;
+    bool use_min_content = form->appearance_none && !is_listbox;
     DocState* state = lycon && lycon->doc ? (DocState*)lycon->doc->state : nullptr;
     // Selection lives in ViewState; the form property is not an authoritative state cache.
     int selected_index = form_control_get_selected_index(state, (View*)block);
@@ -633,9 +661,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
     // A moderate overhead balances both cases across the test suite.
     // HTML §4.10.7 permits a platform multi-select drop-down when multiple
     // has display size 1; larger and default multi-selects remain list boxes.
-    bool is_multi_dropdown = form->multiple && form->select_size == 1;
     // Listbox: no arrow, width = text content; height = visible_rows * row_height + 2px border
-    bool is_listbox = form->select_size > 1 || (form->multiple && !is_multi_dropdown);
     if (is_listbox) {
         layout_materialize_pseudo_content(lycon, block);
         // HTML §4.10.7: visible rows = size if given, else 4 for multiple, else max(1, option_count)
@@ -839,7 +865,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         break;
 
     case FORM_CONTROL_IMAGE:
-        // Image button: replaced element, fixed size set in resolve_htm_style
+        calc_image_input_size(lycon, block, form);
         break;
 
     case FORM_CONTROL_HIDDEN:
