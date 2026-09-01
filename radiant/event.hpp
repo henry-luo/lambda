@@ -4233,6 +4233,12 @@ typedef struct EventContext {
     // radio select, video play/pause) check this flag to skip the default.
     bool default_prevented;
 
+    // F17/ES24: the native event record shared by JS and Lambda handlers for
+    // the current logical dispatch. Its exact root belongs to this context.
+    Item dom_event;
+    void* dom_event_root_gc;
+    bool dom_event_root_lifetime;
+
     // paste text (set before dispatching "paste" event)
     const char* paste_text;
     // Caret offset inside the current preedit, so the composition dispatch can

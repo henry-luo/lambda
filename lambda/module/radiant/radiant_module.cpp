@@ -2593,6 +2593,7 @@ static const JubeTypeDef radiant_types[] = {
     {"textarea_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     {"option_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     {"html_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"event", JUBE_TYPE_OWNING_NATIVE, NULL, radiant_dom_event_destroy},
 };
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void) {
@@ -2665,6 +2666,10 @@ RADIANT_C_API const void* radiant_dom_option_element_host_type(void) {
 
 RADIANT_C_API const void* radiant_dom_html_element_host_type(void) {
     return &radiant_types[17];
+}
+
+RADIANT_C_API const void* radiant_dom_event_host_type(void) {
+    return &radiant_types[18];
 }
 
 #pragma clang diagnostic push
@@ -2867,7 +2872,7 @@ static const JubeModuleDef radiant_module = {
     JUBE_ABI_VERSION,
     sizeof(JubeModuleDef),
     "radiant",
-    "0.2.0",
+    "0.3.0",
     "Radiant DOM and layout access",
     radiant_types,
     (int32_t)(sizeof(radiant_types) / sizeof(radiant_types[0])),

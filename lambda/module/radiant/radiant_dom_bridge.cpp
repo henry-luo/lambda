@@ -13,6 +13,7 @@
 #include "../../core/well_known_markup_names.h"
 #include "../../js/js_class.h"
 #include "../../js/js_dom.h"
+#include "../../js/js_runtime.h"
 #include "../../../radiant/view.hpp"
 #include "../../../radiant/render.hpp"
 #include "../../../radiant/event.hpp"
@@ -29,6 +30,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+extern "C" Item vmap_backing_get(VMap* vm, Item key);
+extern "C" bool vmap_backing_has(VMap* vm, Item key);
+extern "C" bool vmap_backing_set(VMap* vm, Item key, Item value);
+extern Item js_make_number(double value);
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void);
 RADIANT_C_API const void* radiant_dom_html_element_host_type(void);
@@ -1093,6 +1099,340 @@ RADIANT_C_API void* radiant_dom_unwrap_node(Item item) {
         return NULL;
     }
     return js_dom_unwrap_element_impl(item);
+}
+
+// ES24/F17: this is the only native state for an in-flight DOM Event. Payload
+// values stay in the owning VMap backing store, so values retained by script
+// remain traced without a retired conservative native-stack scan.
+typedef struct RadiantDomEventRecord {
+    char* type;
+    bool bubbles;
+    bool cancelable;
+    bool composed;
+    bool default_prevented;
+    bool stop_propagation;
+    bool stop_immediate;
+    bool dispatching;
+    bool in_passive_listener;
+    bool trusted;
+    int event_phase;
+    int class_id;
+    double timestamp;
+} RadiantDomEventRecord;
+
+static const char* const RADIANT_DOM_EVENT_PROTO_KEY =
+    "__radiant_dom_event_prototype";
+
+static RadiantDomEventRecord* radiant_dom_event_record(Item item) {
+    if (get_type_id(item) != LMD_TYPE_VMAP || !item.vmap ||
+        item.vmap->host_type != radiant_dom_event_host_type()) {
+        return nullptr;
+    }
+    return (RadiantDomEventRecord*)item.vmap->host_data;
+}
+
+static bool radiant_dom_event_key_equals(Item key, const char* name) {
+    if (!name || !is_text_type_id(get_type_id(key))) return false;
+    const char* chars = key.get_chars();
+    size_t len = key.get_len();
+    size_t want = strlen(name);
+    return chars && len == want && memcmp(chars, name, want) == 0;
+}
+
+static const char* radiant_dom_event_core_name(Item key) {
+    static const char* const names[] = {
+        "type", "bubbles", "cancelable", "composed", "defaultPrevented",
+        "eventPhase", "isTrusted", "timeStamp", "returnValue", "cancelBubble",
+        "__default_prevented", "__stop_prop", "__stop_imm", "__dispatch_flag",
+        "__in_passive",
+    };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (radiant_dom_event_key_equals(key, names[i])) return names[i];
+    }
+    return nullptr;
+}
+
+static bool radiant_dom_event_value_bool(Item value) {
+    return js_is_truthy(value);
+}
+
+static double radiant_dom_event_value_double(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_FLOAT) return it2d(value);
+    if (type == LMD_TYPE_INT) return (double)it2i(value);
+    if (type == LMD_TYPE_INT64) return (double)it2l(value);
+    Item number = js_to_number(value);
+    if (get_type_id(number) == LMD_TYPE_FLOAT) return it2d(number);
+    if (get_type_id(number) == LMD_TYPE_INT) return (double)it2i(number);
+    if (get_type_id(number) == LMD_TYPE_INT64) return (double)it2l(number);
+    return 0.0;
+}
+
+static bool radiant_dom_event_set_field(Item receiver, const char* name,
+                                        Item value, Item* out) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(receiver);
+    if (!record || !name || !out) return false;
+
+    if (strcmp(name, "type") == 0) {
+        const char* type = fn_to_cstr(value);
+        if (type) {
+            char* copy = mem_strdup(type, MEM_CAT_JS_RUNTIME);
+            if (copy) {
+                if (record->type) mem_free(record->type);
+                record->type = copy;
+            }
+        }
+    } else if (strcmp(name, "bubbles") == 0) {
+        record->bubbles = radiant_dom_event_value_bool(value);
+    } else if (strcmp(name, "cancelable") == 0) {
+        record->cancelable = radiant_dom_event_value_bool(value);
+    } else if (strcmp(name, "composed") == 0) {
+        record->composed = radiant_dom_event_value_bool(value);
+    } else if (strcmp(name, "defaultPrevented") == 0 ||
+               strcmp(name, "__default_prevented") == 0) {
+        record->default_prevented = radiant_dom_event_value_bool(value);
+    } else if (strcmp(name, "eventPhase") == 0) {
+        record->event_phase = (int)radiant_dom_event_value_double(value);
+    } else if (strcmp(name, "isTrusted") == 0) {
+        record->trusted = radiant_dom_event_value_bool(value);
+    } else if (strcmp(name, "timeStamp") == 0) {
+        record->timestamp = radiant_dom_event_value_double(value);
+    } else if (strcmp(name, "returnValue") == 0) {
+        if (!radiant_dom_event_value_bool(value) && record->cancelable &&
+            !record->in_passive_listener) {
+            record->default_prevented = true;
+        }
+    } else if (strcmp(name, "cancelBubble") == 0) {
+        if (radiant_dom_event_value_bool(value)) record->stop_propagation = true;
+    } else if (strcmp(name, "__stop_prop") == 0) {
+        record->stop_propagation = radiant_dom_event_value_bool(value);
+    } else if (strcmp(name, "__stop_imm") == 0) {
+        record->stop_immediate = radiant_dom_event_value_bool(value);
+    } else if (strcmp(name, "__dispatch_flag") == 0) {
+        record->dispatching = radiant_dom_event_value_bool(value);
+    } else if (strcmp(name, "__in_passive") == 0) {
+        record->in_passive_listener = radiant_dom_event_value_bool(value);
+    } else {
+        if (!vmap_backing_set(receiver.vmap, js_name_item(name), value)) {
+            return false;
+        }
+    }
+    *out = value;
+    return true;
+}
+
+RADIANT_C_API Item radiant_dom_event_create(const char* type, bool bubbles,
+                                            bool cancelable, bool composed,
+                                            int class_id) {
+    Item event = vmap_new();
+    if (get_type_id(event) != LMD_TYPE_VMAP || !event.vmap) return ItemNull;
+
+    RadiantDomEventRecord* record = (RadiantDomEventRecord*)mem_calloc(
+        1, sizeof(RadiantDomEventRecord), MEM_CAT_JS_RUNTIME);
+    if (!record) return ItemNull;
+    record->type = mem_strdup(type ? type : "", MEM_CAT_JS_RUNTIME);
+    if (!record->type) {
+        mem_free(record);
+        return ItemNull;
+    }
+    record->bubbles = bubbles;
+    record->cancelable = cancelable;
+    record->composed = composed;
+    record->class_id = class_id;
+    event.vmap->host_type = radiant_dom_event_host_type();
+    event.vmap->host_data = record;
+    return event;
+}
+
+RADIANT_C_API bool radiant_dom_event_is(Item item) {
+    return radiant_dom_event_record(item) != nullptr;
+}
+
+RADIANT_C_API bool radiant_dom_event_type_is(Item item, const char* type) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(item);
+    return record && type && record->type && strcmp(record->type, type) == 0;
+}
+
+RADIANT_C_API bool radiant_dom_event_is_mouse_like(Item item) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(item);
+    if (!record) return false;
+    return record->class_id == JS_CLASS_MOUSE_EVENT ||
+        record->class_id == JS_CLASS_WHEEL_EVENT ||
+        record->class_id == JS_CLASS_POINTER_EVENT;
+}
+
+RADIANT_C_API bool radiant_dom_event_default_prevented(Item item) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(item);
+    return record && record->default_prevented;
+}
+
+RADIANT_C_API bool radiant_dom_event_prevent_default(Item item) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(item);
+    if (!record || !record->cancelable || record->in_passive_listener) return false;
+    record->default_prevented = true;
+    return true;
+}
+
+RADIANT_C_API void radiant_dom_event_set_trusted(Item item, bool trusted) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(item);
+    if (record) record->trusted = trusted;
+}
+
+RADIANT_C_API void radiant_dom_event_set_prototype_override(Item item,
+                                                             Item prototype) {
+    if (!radiant_dom_event_record(item) || !item.vmap) return;
+    vmap_backing_set(item.vmap, js_name_item(RADIANT_DOM_EVENT_PROTO_KEY), prototype);
+}
+
+RADIANT_C_API void radiant_dom_event_destroy(void* native) {
+    RadiantDomEventRecord* record = (RadiantDomEventRecord*)native;
+    if (!record) return;
+    if (record->type) mem_free(record->type);
+    mem_free(record);
+}
+
+RADIANT_C_API int radiant_dom_event_member_get(Item receiver, const char* name,
+                                               Item* out) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(receiver);
+    if (!record || !name || !out) return 0;
+    if (strcmp(name, "type") == 0) *out = js_name_item(record->type ? record->type : "");
+    else if (strcmp(name, "bubbles") == 0) *out = (Item){.item = b2it(record->bubbles)};
+    else if (strcmp(name, "cancelable") == 0) *out = (Item){.item = b2it(record->cancelable)};
+    else if (strcmp(name, "composed") == 0) *out = (Item){.item = b2it(record->composed)};
+    else if (strcmp(name, "defaultPrevented") == 0 ||
+             strcmp(name, "__default_prevented") == 0) {
+        *out = (Item){.item = b2it(record->default_prevented)};
+    } else if (strcmp(name, "eventPhase") == 0) {
+        *out = (Item){.item = i2it(record->event_phase)};
+    } else if (strcmp(name, "isTrusted") == 0) {
+        *out = (Item){.item = b2it(record->trusted)};
+    } else if (strcmp(name, "timeStamp") == 0) {
+        *out = js_make_number(record->timestamp);
+    } else if (strcmp(name, "returnValue") == 0) {
+        *out = (Item){.item = b2it(!record->default_prevented)};
+    } else if (strcmp(name, "cancelBubble") == 0 ||
+               strcmp(name, "__stop_prop") == 0) {
+        *out = (Item){.item = b2it(record->stop_propagation)};
+    } else if (strcmp(name, "__stop_imm") == 0) {
+        *out = (Item){.item = b2it(record->stop_immediate)};
+    } else if (strcmp(name, "__dispatch_flag") == 0) {
+        *out = (Item){.item = b2it(record->dispatching)};
+    } else if (strcmp(name, "__in_passive") == 0) {
+        *out = (Item){.item = b2it(record->in_passive_listener)};
+    } else {
+        Item key = js_name_item(name);
+        if (!vmap_backing_has(receiver.vmap, key)) return 0;
+        *out = vmap_backing_get(receiver.vmap, key);
+    }
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_event_member_set(Item receiver, const char* name,
+                                               Item value, Item* out) {
+    return radiant_dom_event_set_field(receiver, name, value, out) ? 1 : 0;
+}
+
+RADIANT_C_API int radiant_dom_event_named_get(Item receiver, Item key, Item* out) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(receiver);
+    if (!record || !out) return 0;
+    const char* core_name = radiant_dom_event_core_name(key);
+    if (core_name) return radiant_dom_event_member_get(receiver, core_name, out);
+    if (!vmap_backing_has(receiver.vmap, key)) return 0;
+    *out = vmap_backing_get(receiver.vmap, key);
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_event_named_set(Item receiver, Item key,
+                                              Item value, Item* out) {
+    if (!radiant_dom_event_record(receiver) || !out) return 0;
+    const char* core_name = radiant_dom_event_core_name(key);
+    if (core_name) return radiant_dom_event_member_set(receiver, core_name, value, out);
+    if (!vmap_backing_set(receiver.vmap, key, value)) return 0;
+    *out = value;
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_event_named_has(Item receiver, Item key, Item* out) {
+    if (!radiant_dom_event_record(receiver) || !out) return 0;
+    Item value = ItemNull;
+    if (radiant_dom_event_named_get(receiver, key, &value)) {
+        *out = (Item){.item = ITEM_TRUE};
+        return 1;
+    }
+    *out = (Item){.item = ITEM_FALSE};
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_event_prototype(Item receiver, Item* out) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(receiver);
+    if (!record || !out) return 0;
+    Item override = ItemNull;
+    if (receiver.vmap) {
+        override = vmap_backing_get(receiver.vmap,
+                                    js_name_item(RADIANT_DOM_EVENT_PROTO_KEY));
+    }
+    TypeId override_type = get_type_id(override);
+    if (override_type == LMD_TYPE_MAP || override_type == LMD_TYPE_FUNC) {
+        *out = override;
+        return 1;
+    }
+    // Lambda template dispatch has no JS Input/realm. Returning an explicit
+    // null prototype keeps this host value out of JS intrinsic construction;
+    // JS-created events store their realm-specific class prototype above.
+    *out = ItemNull;
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_event_call(Item receiver, const char* name,
+                                         Item* args, int argc, Item* out) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(receiver);
+    if (!record || !name || !out) return 0;
+    if (strcmp(name, "preventDefault") == 0) {
+        radiant_dom_event_prevent_default(receiver);
+        *out = ItemNull;
+        return 1;
+    }
+    if (strcmp(name, "stopPropagation") == 0) {
+        record->stop_propagation = true;
+        *out = ItemNull;
+        return 1;
+    }
+    if (strcmp(name, "stopImmediatePropagation") == 0) {
+        record->stop_propagation = true;
+        record->stop_immediate = true;
+        *out = ItemNull;
+        return 1;
+    }
+    if (strcmp(name, "composedPath") == 0) {
+        Item path = vmap_backing_get(receiver.vmap,
+                                     js_name_item("__dispatch_path"));
+        Item copy = js_array_new(0);
+        if (get_type_id(path) == LMD_TYPE_ARRAY && path.array) {
+            for (int64_t i = 0; i < path.array->length; i++) {
+                js_array_push(copy, path.array->items[i]);
+            }
+        }
+        *out = copy;
+        return 1;
+    }
+    if (strcmp(name, "initEvent") == 0) {
+        if (!record->dispatching && argc >= 1) {
+            Item ignored = ItemNull;
+            radiant_dom_event_set_field(receiver, "type", args[0], &ignored);
+            record->bubbles = argc >= 2 && radiant_dom_event_value_bool(args[1]);
+            record->cancelable = argc >= 3 && radiant_dom_event_value_bool(args[2]);
+            record->default_prevented = false;
+            record->stop_propagation = false;
+            record->stop_immediate = false;
+            record->event_phase = 0;
+            radiant_dom_event_set_field(receiver, "target", ItemNull, &ignored);
+            radiant_dom_event_set_field(receiver, "srcElement", ItemNull, &ignored);
+            radiant_dom_event_set_field(receiver, "currentTarget", ItemNull, &ignored);
+        }
+        *out = ItemNull;
+        return 1;
+    }
+    return 0;
 }
 
 RADIANT_C_API bool radiant_dom_is_node(Item item) {

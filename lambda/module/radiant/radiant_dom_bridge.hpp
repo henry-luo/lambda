@@ -55,6 +55,33 @@ RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
 RADIANT_C_API Item radiant_dom_lookup_cached_node(void* dom_elem);
 RADIANT_C_API void* radiant_dom_unwrap_node(Item item);
 RADIANT_C_API bool radiant_dom_is_node(Item item);
+// ES24/F17: a DOM event is one GC-owned host record. Its declared interface
+// projects core dispatch state while the wrapper backing store retains payload
+// fields and script expandos for the record's lifetime.
+RADIANT_C_API Item radiant_dom_event_create(const char* type, bool bubbles,
+                                            bool cancelable, bool composed,
+                                            int class_id);
+RADIANT_C_API bool radiant_dom_event_is(Item item);
+RADIANT_C_API bool radiant_dom_event_type_is(Item item, const char* type);
+RADIANT_C_API bool radiant_dom_event_is_mouse_like(Item item);
+RADIANT_C_API bool radiant_dom_event_default_prevented(Item item);
+RADIANT_C_API bool radiant_dom_event_prevent_default(Item item);
+RADIANT_C_API void radiant_dom_event_set_trusted(Item item, bool trusted);
+RADIANT_C_API void radiant_dom_event_set_prototype_override(Item item,
+                                                             Item prototype);
+RADIANT_C_API void radiant_dom_event_destroy(void* native);
+RADIANT_C_API const void* radiant_dom_event_host_type(void);
+RADIANT_C_API int radiant_dom_event_member_get(Item receiver, const char* name,
+                                               Item* out);
+RADIANT_C_API int radiant_dom_event_member_set(Item receiver, const char* name,
+                                               Item value, Item* out);
+RADIANT_C_API int radiant_dom_event_named_get(Item receiver, Item key, Item* out);
+RADIANT_C_API int radiant_dom_event_named_set(Item receiver, Item key,
+                                              Item value, Item* out);
+RADIANT_C_API int radiant_dom_event_named_has(Item receiver, Item key, Item* out);
+RADIANT_C_API int radiant_dom_event_prototype(Item receiver, Item* out);
+RADIANT_C_API int radiant_dom_event_call(Item receiver, const char* name,
+                                         Item* args, int argc, Item* out);
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 RADIANT_C_API Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value);
 RADIANT_C_API Item radiant_dom_element_operation(Item elem_item,
