@@ -7,7 +7,6 @@
 
 #include "js_transpiler.hpp"
 #include "../ts/ts_ast.hpp"
-#include "../ts/ts_transpiler.hpp"
 #include "js_dom.h"
 #include "js_runtime.h"
 #include "js_typed_array.h"
@@ -59,10 +58,8 @@ struct JsModuleConstEntry {
     bool is_iife_var;   // true if promoted from IIFE scope (write-through always)
     TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type
     int var_kind;       // v20 TDZ: 0=var, 1=let, 2=const (for MCONST_MODVAR)
-    bool is_implicit_global; // true if registered as implicit global (not explicitly declared)
     bool is_nested_func_hoist; // true if from nested function decl name (Annex B candidate, not a real var)
     bool is_iife_func_decl; // true if direct sync-IIFE function decl promoted to module var for escaping closures
-    bool annexb_suppressed;    // AnnexB B.3.3.3: true if propagation suppressed (let/const collision, catch param, etc.)
     // Js57 P3 (Track B2): live binding for self-imported default. When set,
     // identifier reads emit js_get_live_binding_default(specifier) instead of
     // js_get_module_var(int_val); the inner read sees TDZ until `export default`
@@ -80,6 +77,7 @@ struct JsNameSetEntry {
     uint32_t binding_start; // source range of the resolved defining binding, if known
     uint32_t binding_end;
     NameEntry* entry; // AST binding identity, when this record came from an identifier
+    JsAstNode* binding_node; // defining node retained for source-keyed scope cells
 };
 
 static const uint64_t ITEM_NULL_VAL  = (uint64_t)LMD_TYPE_NULL << 56;
@@ -191,27 +189,10 @@ static inline void jm_set_param_type(JsFuncCollected* fc, int index, TypeId type
 static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_count) {
     for (int i = 0; i < func_count; i++) {
         FnAnalysis* analysis = jm_function_analysis(&func_entries[i]);
-        if (analysis && analysis->js_cached_var_locals) {
-            hashmap_free(analysis->js_cached_var_locals);
-            analysis->js_cached_var_locals = NULL;
-        }
-        if (analysis && analysis->js_cached_all_locals) {
-            hashmap_free(analysis->js_cached_all_locals);
-            analysis->js_cached_all_locals = NULL;
-        }
-        if (analysis && analysis->js_cached_direct_lexicals) {
-            hashmap_free(analysis->js_cached_direct_lexicals);
-            analysis->js_cached_direct_lexicals = NULL;
-        }
-        if (analysis && analysis->js_cached_annexb_suppressed) {
-            hashmap_free(analysis->js_cached_annexb_suppressed);
-            analysis->js_cached_annexb_suppressed = NULL;
-        }
         if (analysis && analysis->js_cached_scope_slot_collisions) {
             hashmap_free(analysis->js_cached_scope_slot_collisions);
             analysis->js_cached_scope_slot_collisions = NULL;
         }
-        if (analysis) analysis->js_cached_annexb_suppressed_ready = false;
         if (func_entries[i].scope_env_names) {
             mem_free(func_entries[i].scope_env_names);
             func_entries[i].scope_env_names = NULL;

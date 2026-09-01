@@ -9,9 +9,8 @@
 #include <cstring>
 
 struct JsMirCacheEntry {
-    uint64_t source_hash;
     uint64_t preamble_abi_hash;
-    JsMirCacheMode mode;
+    bool preamble_mode;
     char* source;
     size_t source_len;
     char* filename;
@@ -57,10 +56,8 @@ static uint64_t js_mir_cache_preamble_abi_hash(const JsPreambleState* preamble) 
         hash = js_mir_cache_mix(hash, (uint64_t)entry->int_val);
         hash = js_mir_cache_mix(hash, (uint64_t)entry->var_kind);
         hash = js_mir_cache_mix(hash, (uint64_t)entry->modvar_type);
-        hash = js_mir_cache_mix(hash, entry->is_implicit_global ? 1 : 0);
         hash = js_mir_cache_mix(hash, entry->is_nested_func_hoist ? 1 : 0);
         hash = js_mir_cache_mix(hash, entry->is_iife_func_decl ? 1 : 0);
-        hash = js_mir_cache_mix(hash, entry->annexb_suppressed ? 1 : 0);
         hash = js_mir_cache_mix(hash, entry->is_live_default_binding ? 1 : 0);
     }
     return hash;
@@ -69,7 +66,7 @@ static uint64_t js_mir_cache_preamble_abi_hash(const JsPreambleState* preamble) 
 static uint64_t js_mir_cache_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const JsMirCacheEntry* entry = (const JsMirCacheEntry*)item;
     uint64_t hash = hashmap_xxhash3(entry->source, entry->source_len, seed0, seed1);
-    hash = js_mir_cache_mix(hash, (uint64_t)entry->mode);
+    hash = js_mir_cache_mix(hash, entry->preamble_mode ? 1 : 0);
     hash = js_mir_cache_mix(hash, entry->preamble_abi_hash);
     hash = js_mir_cache_mix(hash,
         hashmap_xxhash3(entry->filename, entry->filename_len, seed0, seed1));
@@ -80,7 +77,7 @@ static int js_mir_cache_entry_compare(const void* left, const void* right, void*
     (void)udata;
     const JsMirCacheEntry* a = (const JsMirCacheEntry*)left;
     const JsMirCacheEntry* b = (const JsMirCacheEntry*)right;
-    if (a->mode != b->mode) return a->mode < b->mode ? -1 : 1;
+    if (a->preamble_mode != b->preamble_mode) return a->preamble_mode ? -1 : 1;
     if (a->preamble_abi_hash != b->preamble_abi_hash) {
         return a->preamble_abi_hash < b->preamble_abi_hash ? -1 : 1;
     }
@@ -112,15 +109,14 @@ static char* js_mir_cache_copy_bytes(const char* value, size_t length) {
 }
 
 static JsMirCacheEntry js_mir_cache_make_probe(
-    JsMirCacheMode mode, const char* source, size_t source_len,
+    bool preamble_mode, const char* source, size_t source_len,
     const char* filename, const JsPreambleState* preamble) {
     JsMirCacheEntry probe = {};
-    probe.mode = mode;
+    probe.preamble_mode = preamble_mode;
     probe.source = (char*)(source ? source : "");
     probe.source_len = source ? source_len : 0;
     probe.filename = (char*)(filename ? filename : "<string>");
     probe.filename_len = strlen(probe.filename);
-    probe.source_hash = hashmap_xxhash3(probe.source, probe.source_len, 0, 0);
     probe.preamble_abi_hash = js_mir_cache_preamble_abi_hash(preamble);
     return probe;
 }
@@ -140,13 +136,12 @@ JsMirCache* js_mir_cache_create(void) {
 
 void js_mir_cache_destroy(JsMirCache* cache) {
     if (!cache) return;
-    log_notice("js_mir_cache_summary: lookups=%llu hits=%llu misses=%llu compiles=%llu instantiations=%llu poisoned=%llu retained_entries=%zu retained_metadata_bytes=%zu",
+    log_notice("js_mir_cache_summary: lookups=%llu hits=%llu misses=%llu compiles=%llu instantiations=%llu retained_entries=%zu retained_metadata_bytes=%zu",
         (unsigned long long)cache->stats.lookups,
         (unsigned long long)cache->stats.hits,
         (unsigned long long)cache->stats.misses,
         (unsigned long long)cache->stats.compiles,
         (unsigned long long)cache->stats.instantiations,
-        (unsigned long long)cache->stats.poisoned,
         cache->stats.retained_entries,
         cache->stats.retained_metadata_bytes);
     hashmap_free(cache->entries);
@@ -154,15 +149,15 @@ void js_mir_cache_destroy(JsMirCache* cache) {
 }
 
 const JsPreambleState* js_mir_cache_lookup(
-    JsMirCache* cache, JsMirCacheMode mode,
+    JsMirCache* cache, bool preamble_mode,
     const char* source, size_t source_len, const char* filename,
     const JsPreambleState* preamble) {
     if (!cache || !cache->entries) return nullptr;
     JsMirCacheEntry probe = js_mir_cache_make_probe(
-        mode, source, source_len, filename, preamble);
+        preamble_mode, source, source_len, filename, preamble);
     cache->stats.lookups++;
     const JsMirCacheEntry* found = (const JsMirCacheEntry*)hashmap_get(cache->entries, &probe);
-    if (!found || found->source_hash != probe.source_hash) {
+    if (!found) {
         cache->stats.misses++;
         return nullptr;
     }
@@ -171,7 +166,7 @@ const JsPreambleState* js_mir_cache_lookup(
 }
 
 const JsPreambleState* js_mir_cache_adopt(
-    JsMirCache* cache, JsMirCacheMode mode,
+    JsMirCache* cache, bool preamble_mode,
     const char* source, size_t source_len, const char* filename,
     const JsPreambleState* preamble, JsPreambleState* compiled_state) {
     if (!cache || !cache->entries || !compiled_state ||
@@ -180,7 +175,7 @@ const JsPreambleState* js_mir_cache_adopt(
     }
 
     JsMirCacheEntry entry = js_mir_cache_make_probe(
-        mode, source, source_len, filename, preamble);
+        preamble_mode, source, source_len, filename, preamble);
     if (hashmap_get(cache->entries, &entry)) {
         // Cache mutation is single-threaded today. Refuse a duplicate adoption
         // so an artifact already referenced by an instance is never replaced.

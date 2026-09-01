@@ -1,6 +1,5 @@
 #include "js_c_ast_helpers.hpp"
 #include "../ts/ts_ast.hpp"
-#include "../ts/ts_transpiler.hpp"
 #include "../../lib/mempool.h"
 #include "../../lib/mem.h"
 #include "../../lib/log.h"
