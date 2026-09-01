@@ -154,22 +154,14 @@ bool flex_item_contains_anonymous_text(ViewElement* item, DomText* text) {
     return item->fi->anonymous_text == text;
 }
 
-static bool flex_text_ends_with_collapsible_space(DomText* text) {
+static bool flex_text_has_collapsible_edge(DomText* text, bool trailing) {
     if (!text || white_space_preserves_space_advance(get_white_space_value(
             static_cast<DomNode*>(text)))) {
         return false;
     }
     const char* data = (const char*)text->text_data();
-    return data && text->length > 0 && is_space(data[text->length - 1]);
-}
-
-static bool flex_text_starts_with_collapsible_space(DomText* text) {
-    if (!text || white_space_preserves_space_advance(get_white_space_value(
-            static_cast<DomNode*>(text)))) {
-        return false;
-    }
-    const char* data = (const char*)text->text_data();
-    return data && text->length > 0 && is_space(data[0]);
+    return data && text->length > 0 &&
+        is_space(data[trailing ? text->length - 1 : 0]);
 }
 
 static bool measure_anonymous_flex_text_run(LayoutContext* lycon,
@@ -203,13 +195,13 @@ static bool measure_anonymous_flex_text_run(LayoutContext* lycon,
               item->blk->white_space, item->blk->overflow_wrap,
               item->blk->word_break);
     if (preserve_trailing_space && run.length > 0 &&
-        flex_text_ends_with_collapsible_space(text) &&
+        flex_text_has_collapsible_edge(text, true) &&
         !white_space_preserves_space_advance(item->blk->white_space)) {
         widths.max_content += layout_measure_space_advance(
             lycon, font_box_handle(&lycon->font), lycon->font.style);
     }
     if (preserve_leading_space && run.length > 0 &&
-        flex_text_starts_with_collapsible_space(text) &&
+        flex_text_has_collapsible_edge(text, false) &&
         !white_space_preserves_space_advance(item->blk->white_space)) {
         widths.max_content += layout_measure_space_advance(
             lycon, font_box_handle(&lycon->font), lycon->font.style);
@@ -444,10 +436,8 @@ static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon,
             rect->length = (int)text_node->length; // INT_CAST_OK: text rectangle source length
             rect->line_number = lycon->block.line_number;
             text->rect = rect;
-            text->x = rect->x;
-            text->y = rect->y;
-            text->width = rect->width;
-            text->height = rect->height;
+            layout_set_view_geometry(text, rect->x, rect->y,
+                                     rect->width, rect->height);
             lycon->line.advance_x += space_width;
             lycon->line.is_line_start = false;
             lycon->line.has_space = true;
@@ -458,7 +448,7 @@ static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon,
         preserve_anonymous_flex_text_spacing(
             lycon, text, run->preserve_leading_space,
             run->preserve_trailing_space &&
-                flex_text_ends_with_collapsible_space(text_node));
+                flex_text_has_collapsible_edge(text_node, true));
     }
     *lycon = saved_context;
 }
@@ -1715,10 +1705,10 @@ IntrinsicSizes flex_measure_display_contents_intrinsic_widths(
                 continue;
             }
             bool preserve_leading_space = !text_is_whitespace &&
-                flex_text_starts_with_collapsible_space(child->as_text()) &&
+                flex_text_has_collapsible_edge(child->as_text(), false) &&
                 flex_adjacent_flattened_text(child, container, false) != nullptr;
             bool preserve_trailing_space = !text_is_whitespace &&
-                flex_text_ends_with_collapsible_space(child->as_text()) &&
+                flex_text_has_collapsible_edge(child->as_text(), true) &&
                 flex_adjacent_flattened_text(child, container, true) != nullptr;
             ViewElement* item = create_anonymous_flex_text_item(
                 lycon, container, child->as_text(), preserve_leading_space,
@@ -1811,10 +1801,10 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
                 flex_contents_whitespace_is_text_separator(child, container)) {
                 bool text_is_whitespace = !layout_text_node_has_content(child);
                 bool preserve_leading_space = !text_is_whitespace &&
-                    flex_text_starts_with_collapsible_space(child->as_text()) &&
+                    flex_text_has_collapsible_edge(child->as_text(), false) &&
                     flex_adjacent_flattened_text(child, container, false) != nullptr;
                 bool preserve_trailing_space = !text_is_whitespace &&
-                    flex_text_ends_with_collapsible_space(child->as_text()) &&
+                    flex_text_has_collapsible_edge(child->as_text(), true) &&
                     flex_adjacent_flattened_text(child, container, true) != nullptr;
                 if (node_index > 0 && flex_nodes[node_index - 1]->is_text() &&
                     item_count > 0) {

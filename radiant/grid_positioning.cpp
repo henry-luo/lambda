@@ -976,13 +976,8 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     if (!has_block_flow_child && (item->display.inner == CSS_VALUE_FLOW ||
                                   item->display.inner == CSS_VALUE_FLOW_ROOT)) {
         CssEnum text_align = item->blk ? item->block()->text_align : CSS_VALUE_START;
-        if (text_align == CSS_VALUE_START) {
-            text_align = item->blk && item->block()->direction == CSS_VALUE_RTL
-                ? CSS_VALUE_RIGHT : CSS_VALUE_LEFT;
-        } else if (text_align == CSS_VALUE_END) {
-            text_align = item->blk && item->block()->direction == CSS_VALUE_RTL
-                ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
-        }
+        text_align = layout_resolve_text_align(
+            text_align, item->blk ? item->block()->direction : CSS_VALUE_LTR);
         if (text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT) {
             // CSS Grid §11.7: auto margins can resolve an item's used width
             // after its provisional content line was laid out; realign that

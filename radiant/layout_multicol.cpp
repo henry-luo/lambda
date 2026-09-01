@@ -6,11 +6,14 @@
 
 static bool multicol_has_vertical_inline_axis(ViewBlock* block);
 static bool multicol_has_forced_break_descendant(View* view);
-static bool multicol_has_out_of_flow_descendant(View* view);
-static bool multicol_has_visible_inline_content(View* first);
+struct MulticolNestedHorizontalSequence;
+static bool multicol_has_visible_inline_content(View* first,
+                                                bool stop_at_spanner = false);
+static bool multicol_should_break_line_for_widows_orphans(
+    int line_slot, float visual_bottom, float target_height,
+    int line_index, int line_count, int widows, int orphans,
+    float next_bottom);
 static float multicol_normal_line_offset(float line_advance, float visual_height);
-static bool multicol_inline_fragment_edge_y(View* view, bool end_edge,
-                                             float* out_y);
 static void multicol_snapshot_inline_cb_edges(View* view);
 static void multicol_reposition_abs_children_for_fragmented_cb(
     LayoutContext* lycon, View* cb_view);
@@ -150,6 +153,54 @@ void calculate_multicol_dimensions(
     *out_gap = gap;
 }
 
+static int multicol_fragment_count(float extent, float capacity) {
+    if (extent <= 0.0f || capacity <= 0.0f) return 1;
+    int count = (int)ceilf(extent / capacity); // INT_CAST_OK: fragment count from positive flow extent
+    return count > 0 ? count : 1;
+}
+
+static int multicol_fragment_row_count(int fragment_count, int column_count) {
+    if (fragment_count < 1) fragment_count = 1;
+    if (column_count < 1) column_count = 1;
+    return (fragment_count + column_count - 1) / column_count;
+}
+
+struct MulticolFragmentGrid {
+    int layout_column_count;
+    int used_columns;
+    int row_count;
+};
+
+static MulticolFragmentGrid multicol_fragment_grid(
+    int fragment_count, int column_count, bool overflow_columns) {
+    if (fragment_count < 1) fragment_count = 1;
+    if (column_count < 1) column_count = 1;
+    MulticolFragmentGrid grid = {};
+    grid.layout_column_count = overflow_columns ? fragment_count : column_count;
+    grid.used_columns = overflow_columns ? fragment_count :
+        min(column_count, fragment_count);
+    grid.row_count = multicol_fragment_row_count(
+        fragment_count, grid.layout_column_count);
+    return grid;
+}
+
+static void multicol_fragment_grid_dimensions(
+    int fragment_count, int column_count, bool overflow_columns,
+    int* layout_column_count, int* used_columns, int* row_count) {
+    MulticolFragmentGrid grid = multicol_fragment_grid(
+        fragment_count, column_count, overflow_columns);
+    *layout_column_count = grid.layout_column_count;
+    *used_columns = grid.used_columns;
+    *row_count = grid.row_count;
+}
+
+static float multicol_last_fragment_piece_height(float total_height,
+                                                 float fragment_capacity) {
+    if (fragment_capacity <= 0.0f) return 0.0f;
+    float piece = fmodf(total_height, fragment_capacity);
+    return piece > 0.0f ? piece : fragment_capacity;
+}
+
 struct InlineFragmentItem {
     View* view;
     TextRect* rect;
@@ -164,6 +215,35 @@ struct InlineFragmentItem {
     bool reproject_rtl;
 };
 
+static void multicol_set_inline_position(TextRect* rect, View* view,
+                                         float x, float y) {
+    if (rect) {
+        rect->x = x;
+        rect->y = y;
+    } else if (view) {
+        view->x = x;
+        view->y = y;
+    }
+}
+
+static void multicol_init_inline_fragment_item(
+    InlineFragmentItem* item, View* view, TextRect* rect, bool forced_break) {
+    if (!item || !view) return;
+    item->view = view;
+    item->rect = rect;
+    item->original_x = rect ? rect->x : view->x;
+    // TextRect coordinates are parent-block local; keep the source origin so
+    // projection does not subtract the newly placed block offset twice.
+    item->original_y = rect ? rect->y : view->y;
+    item->line_y = item->original_y;
+    item->height = rect ? rect->height : view->height;
+    item->fragment_y_offset = 0.0f;
+    item->line_index = 0;
+    item->is_text = rect != nullptr;
+    item->is_forced_break = forced_break;
+    item->reproject_rtl = false;
+}
+
 struct MulticolGridRowData {
     int row_count;
     float row_top[MAX_MULTICOL_BLOCKS];
@@ -171,32 +251,9 @@ struct MulticolGridRowData {
     bool row_seen[MAX_MULTICOL_BLOCKS];
 };
 
-static bool multicol_collect_grid_rows(
-    ViewBlock* grid,
-    MulticolGridRowData* rows
-);
-static float multicol_grid_min_fragmentainer_height(
-    ViewBlock* grid,
-    int column_count
-);
-static bool multicol_fragment_grid_rows(
-    ViewBlock* container,
-    ViewBlock* child,
-    float item_height,
-    float fragment_height,
-    int column_count,
-    float column_width,
-    float column_gap,
-    float initial_fragment_offset,
-    int* out_used_columns,
-    float* out_union_height
-);
-
 static float multicol_group_target_height(ViewBlock* block, float balanced_height, float group_total_height);
-static float multicol_out_of_flow_balance_target(ViewBlock* block);
-static bool multicol_has_direct_inline_wrapper(ViewBlock* block);
-static bool multicol_has_mixed_direct_flow(ViewBlock* block);
-static bool multicol_should_reflow_mixed_direct_flow(ViewBlock* block);
+static bool multicol_is_scroll_container(ViewBlock* block);
+static bool multicol_has_definite_ancestor_fragmentainer(ViewBlock* block);
 static bool multicol_reflow_mixed_direct_flow(
     LayoutContext* lycon,
     ViewBlock* block,
@@ -214,9 +271,18 @@ static bool multicol_reflow_mixed_direct_flow(
     int* out_last_fragment = nullptr,
     float* out_end_offset = nullptr
 );
-static bool multicol_is_scroll_container(ViewBlock* block);
-static float multicol_definite_ancestor_fragmentainer_height(ViewBlock* block);
-static bool multicol_has_definite_ancestor_fragmentainer(ViewBlock* block);
+static int multicol_project_fragmented_descendants(
+    LayoutContext* lycon,
+    ViewBlock* child,
+    float fragment_height,
+    int column_count,
+    float column_width,
+    float column_gap,
+    float block_split_height,
+    float initial_fragment_offset,
+    bool nested_descendants_local = false,
+    const MulticolNestedHorizontalSequence* nested_horizontal_sequence = nullptr
+);
 static void multicol_group_init(
     ColumnGroup* group,
     ViewBlock* container,
@@ -236,8 +302,8 @@ static void multicol_cursor_advance_fragment(FragmentedFlowCursor* cursor);
 static void multicol_group_ensure_fragment_count(
     FragmentedFlowCursor* cursor, int required_fragment_count);
 static ColumnFragment* multicol_cursor_current_fragment(FragmentedFlowCursor* cursor);
-static void multicol_group_record_fragment_count(
-    ColumnGroup* group, int fragment_count);
+static void multicol_record_used_columns(
+    ColumnGroup* group, int used_columns, int* out_used_columns);
 static void multicol_cursor_place_block(
     FragmentedFlowCursor* cursor,
     ViewBlock* child,
@@ -273,6 +339,10 @@ static bool multicol_allows_overflow_columns(ViewBlock* container);
 static bool multicol_uses_fixed_wrapped_rows(ViewBlock* container);
 static bool multicol_uses_fixed_balanced_rows(ViewBlock* container);
 static float multicol_specified_row_height(ViewBlock* container);
+static LayoutFragmentBox* multicol_append_layout_fragment(
+    Pool* pool, DomElement* elem, LayoutFragmentBox** first,
+    LayoutFragmentBox** previous, int fragment_index, int column_index,
+    int row_index, float x, float y, float width, float height);
 static void multicol_store_layout_fragments(
     ViewBlock* child,
     int fragment_count,
@@ -316,61 +386,6 @@ struct MulticolNestedHorizontalSequence {
     bool wraps_rows;
 };
 
-template <typename FragmentFn>
-static bool multicol_for_each_nested_horizontal_fragment(
-    const MulticolNestedHorizontalSequence* sequence,
-    float flow_start,
-    float flow_extent,
-    FragmentFn visit,
-    int* out_fragment_count
-);
-static float multicol_nested_horizontal_unbreakable_start(
-    const MulticolNestedHorizontalSequence* sequence,
-    float flow_start,
-    float flow_extent
-);
-static bool multicol_find_nested_horizontal_fragment(
-    const MulticolNestedHorizontalSequence* sequence,
-    float flow_start,
-    float* out_x,
-    float* out_y
-);
-static bool multicol_store_nested_horizontal_fragments(
-    ViewBlock* child,
-    const MulticolNestedHorizontalSequence* sequence,
-    float flow_start,
-    float flow_extent,
-    float fragment_width,
-    float* out_min_x,
-    float* out_min_y,
-    float* out_max_x,
-    float* out_max_y,
-    int* out_fragment_count
-);
-static bool multicol_init_nested_horizontal_sequence(
-    ViewBlock* parent_block,
-    ViewBlock* nested_multicol,
-    float fragment_height,
-    int parent_column_count,
-    float parent_column_width,
-    float parent_column_gap,
-    float initial_fragment_offset,
-    MulticolNestedHorizontalSequence* out_sequence
-);
-static bool multicol_fragment_abspos_in_context(
-    LayoutContext* lycon, ViewBlock* containing_block, ViewBlock* child);
-static int multicol_project_fragmented_descendants(
-    LayoutContext* lycon,
-    ViewBlock* child,
-    float fragment_height,
-    int column_count,
-    float column_width,
-    float column_gap,
-    float block_split_height,
-    float initial_fragment_offset,
-    bool nested_descendants_local = false,
-    const MulticolNestedHorizontalSequence* nested_horizontal_sequence = nullptr
-);
 static float multicol_text_box_trim_fragmented_flow_height(
     ViewBlock* child,
     float item_height,
@@ -378,6 +393,7 @@ static float multicol_text_box_trim_fragmented_flow_height(
     int fragment_count,
     float initial_fragment_offset
 );
+
 // Forward declarations for layout functions
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
 void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block);
@@ -386,14 +402,14 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum outer_d
 void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewBlock* block);
 static bool multicol_is_single_column_height_only(ViewBlock* block);
 
-static float multicol_content_box_height_limit(ViewBlock* block) {
-    if (!block) return -1;
+static float multicol_content_box_limit(ViewBlock* block, LayoutAxis axis,
+                                        bool allow_column_height) {
+    if (!block) return -1.0f;
 
-    bool vertical_writing = multicol_has_vertical_inline_axis(block);
-    float limit = -1;
     const MultiColumnProp* multicol = block->multicol_prop();
     bool one_column_height_only = multicol_is_single_column_height_only(block);
-    if (multicol && multicol->column_height_is_specified &&
+    float limit = -1.0f;
+    if (allow_column_height && multicol && multicol->column_height_is_specified &&
         (block->blk || one_column_height_only ||
          (multicol->fill == COLUMN_FILL_AUTO &&
           !multicol_has_definite_ancestor_fragmentainer(block)) ||
@@ -402,29 +418,26 @@ static float multicol_content_box_height_limit(ViewBlock* block) {
         // when a single-column container has no separate block-style record.
         limit = multicol->column_height;
     } else if (!block->blk) {
-        return -1;
-    } else if (vertical_writing && block->block()->given_width >= 0) {
-        // CSS Writing Modes maps a vertical multicolumn block extent to
-        // physical x; using given_height here limits columns by inline size.
-        limit = block->block()->given_width;
-    } else if (!vertical_writing && block->block()->given_height >= 0) {
-        limit = block->block()->given_height;
-    } else if (vertical_writing && block->block()->given_max_width >= 0) {
-        limit = block->block()->given_max_width;
-    } else if (!vertical_writing && block->block()->given_max_height >= 0) {
-        limit = block->block()->given_max_height;
+        return -1.0f;
+    } else {
+        limit = layout_axis_given_size(block->block(), axis);
+        if (limit < 0.0f) {
+            limit = layout_axis_given_max_size(block->block(), axis);
+        }
     }
 
-    if (limit < 0) return -1;
-
+    if (limit < 0.0f) return -1.0f;
     if (block->bound && layout_uses_border_box(block)) {
-        float border_padding = vertical_writing
-            ? layout_box_metrics(block).pad_border_h
-            : layout_box_metrics(block).pad_border_v;
-        limit -= border_padding;
-        if (limit < 0) limit = 0;
+        limit -= layout_axis_box_metrics(block, axis).pad_border;
+        if (limit < 0.0f) limit = 0.0f;
     }
     return limit;
+}
+
+static float multicol_content_box_height_limit(ViewBlock* block) {
+    LayoutAxis axis = multicol_has_vertical_inline_axis(block)
+        ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
+    return multicol_content_box_limit(block, axis, true);
 }
 
 static bool multicol_is_single_column_height_only(ViewBlock* block) {
@@ -451,29 +464,9 @@ static bool multicol_has_definite_ancestor_fragmentainer(ViewBlock* block) {
 }
 
 static float multicol_content_box_inline_limit(ViewBlock* block) {
-    if (!block || !block->blk) return -1;
-
-    bool vertical_writing = multicol_has_vertical_inline_axis(block);
-    float limit = -1;
-    if (vertical_writing && block->block()->given_height >= 0) {
-        limit = block->block()->given_height;
-    } else if (!vertical_writing && block->block()->given_width >= 0) {
-        limit = block->block()->given_width;
-    } else if (vertical_writing && block->block()->given_max_height >= 0) {
-        limit = block->block()->given_max_height;
-    } else if (!vertical_writing && block->block()->given_max_width >= 0) {
-        limit = block->block()->given_max_width;
-    }
-
-    if (limit < 0) return -1;
-    if (block->bound && layout_uses_border_box(block)) {
-        float border_padding = vertical_writing
-            ? layout_box_metrics(block).pad_border_v
-            : layout_box_metrics(block).pad_border_h;
-        limit -= border_padding;
-        if (limit < 0) limit = 0;
-    }
-    return limit;
+    LayoutAxis axis = multicol_has_vertical_inline_axis(block)
+        ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
+    return multicol_content_box_limit(block, axis, false);
 }
 
 static bool multicol_has_vertical_inline_axis(ViewBlock* block) {
@@ -512,6 +505,70 @@ static void multicol_flow_margins(ViewBlock* container, ViewBlock* child,
 
     if (out_before) *out_before = margin->top;
     if (out_after) *out_after = margin->bottom;
+}
+
+static float multicol_resolve_line_advance(
+    LayoutContext* lycon, ViewBlock* block,
+    float current = 0.0f, float fallback = 0.0f) {
+    if (current > 0.0f) return current;
+    float line_advance = 0.0f;
+    if (lycon && block && block->blk && block->block()->line_height) {
+        line_advance = layout_resolve_line_height_value(
+            lycon, block->block()->line_height,
+            lam::dom_require<DOM_NODE_ELEMENT>(block),
+            block->fontp() ? block->fontp()->font_size : 16.0f);
+    }
+    if (line_advance <= 0.0f && block && block->fontp() &&
+        block->fontp()->font_handle) {
+        line_advance = calc_normal_line_height(block->fontp()->font_handle);
+    }
+    return line_advance > 0.0f ? line_advance : fallback;
+}
+
+static ViewBlock* multicol_in_flow_block(View* view) {
+    ViewBlock* block = lam::view_as_block(view);
+    return block && !layout_block_is_out_of_flow_positioned(block) &&
+        block->view_type != RDT_VIEW_MARKER ? block : nullptr;
+}
+
+static ViewBlock* multicol_find_parent_container(ViewElement* start) {
+    for (ViewElement* ancestor = start; ancestor;
+         ancestor = ancestor->parent_view()) {
+        if (!ancestor->is_block()) continue;
+        ViewBlock* block = lam::view_require_block(ancestor);
+        if (is_multicol_container(block)) return block;
+    }
+    return nullptr;
+}
+
+static float multicol_static_flow_offset(
+    ViewBlock* containing_block, ViewBlock* child, LayoutAxis axis) {
+    if (!containing_block || !child) return 0.0f;
+    float offset = 0.0f;
+    bool horizontal = axis == LAYOUT_AXIS_X;
+    for (View* sibling = containing_block->first_placed_child();
+         sibling && sibling != static_cast<View*>(child);
+         sibling = sibling->next()) {
+        ViewBlock* sibling_block = multicol_in_flow_block(sibling);
+        if (!sibling_block || !layout_view_is_block_flow_box(sibling_block)) {
+            continue;
+        }
+        float sibling_extent = horizontal
+            ? sibling_block->width : max(sibling_block->height, 0.0f);
+        if (sibling_block->blk &&
+            layout_axis_has_given_size(sibling_block, horizontal)) {
+            float given = layout_axis_given_size(sibling_block->block(), axis);
+            float used = layout_used_border_box_size(
+                sibling_block, given, horizontal);
+            sibling_extent = horizontal ? used : max(sibling_extent, used);
+        }
+        float margin_before = 0.0f;
+        float margin_after = 0.0f;
+        multicol_flow_margins(containing_block, sibling_block,
+                              &margin_before, &margin_after);
+        offset += sibling_extent + margin_before + margin_after;
+    }
+    return offset;
 }
 
 static float multicol_outer_flow_extent(ViewBlock* container, ViewBlock* child,
@@ -917,14 +974,8 @@ static bool multicol_follows_short_direct_spanner(
 
 static void multicol_align_spanner_content(ViewBlock* spanner, float available_width) {
     if (!spanner || !spanner->blk || available_width <= 0.0f) return;
-    CssEnum text_align = spanner->block()->text_align;
-    if (text_align == CSS_VALUE_START) {
-        text_align = spanner->block()->direction == CSS_VALUE_RTL
-            ? CSS_VALUE_RIGHT : CSS_VALUE_LEFT;
-    } else if (text_align == CSS_VALUE_END) {
-        text_align = spanner->block()->direction == CSS_VALUE_RTL
-            ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
-    }
+    CssEnum text_align = layout_resolve_text_align(
+        spanner->block()->text_align, spanner->block()->direction);
     if (text_align != CSS_VALUE_CENTER && text_align != CSS_VALUE_RIGHT) return;
     BoxMetrics spanner_box = layout_box_metrics(spanner);
     float content_width = available_width - spanner_box.pad_border_h;
@@ -1025,20 +1076,12 @@ static bool multicol_avoids_column_break(CssEnum value) {
 }
 
 static bool multicol_has_forced_break_descendant(View* view) {
-    if (!view) return false;
-    if (ViewBlock* block = lam::view_as_block(view)) {
-        if (block->blk && (multicol_forces_column_break(block->block()->break_before) ||
-                           multicol_forces_column_break(block->block()->break_after))) {
-            return true;
-        }
-    }
-    if (!view->is_element()) return false;
-    for (View* child = lam::view_require_element(view)->first_placed_child();
-         child; child = child->next()) {
-        if (!child->view_type) continue;
-        if (multicol_has_forced_break_descendant(child)) return true;
-    }
-    return false;
+    return view && layout_view_tree_any(view, [](View* candidate) {
+        ViewBlock* block = lam::view_as_block(candidate);
+        return block && block->blk &&
+            (multicol_forces_column_break(block->block()->break_before) ||
+             multicol_forces_column_break(block->block()->break_after));
+    });
 }
 
 static bool multicol_clear_matches_float(ViewBlock* clear_block,
@@ -1083,15 +1126,9 @@ static float multicol_parallel_forced_tail_extent(ViewBlock* float_block) {
 }
 
 static bool multicol_has_out_of_flow_descendant(View* view) {
-    if (!view || !view->is_element()) return false;
-    for (View* child = lam::view_require_element(view)->first_placed_child();
-         child; child = child->next()) {
-        if (layout_view_is_out_of_flow_positioned(child) ||
-            multicol_has_out_of_flow_descendant(child)) {
-            return true;
-        }
-    }
-    return false;
+    return view && view->is_element() && layout_view_tree_any(
+        lam::view_require_element(view)->first_placed_child(),
+        [](View* candidate) { return layout_view_is_out_of_flow_positioned(candidate); });
 }
 
 bool multicol_spanner_can_escape_child(ViewBlock* child) {
@@ -1107,7 +1144,12 @@ bool multicol_spanner_can_escape_child(ViewBlock* child) {
     return true;
 }
 
-static bool multicol_has_direct_spanner_child(ViewBlock* child);
+static ViewBlock* multicol_find_escaping_spanner(View* first);
+
+static bool multicol_has_direct_spanner_child(ViewBlock* child) {
+    return child && multicol_spanner_can_escape_child(child) &&
+        multicol_find_escaping_spanner(child->first_placed_child()) != nullptr;
+}
 
 static bool multicol_has_escaping_spanner_in_flow(ViewBlock* container) {
     if (!container) return false;
@@ -1126,52 +1168,11 @@ static bool multicol_has_escaping_spanner_in_flow(ViewBlock* container) {
     return false;
 }
 
-static bool multicol_inline_contains_spanner(View* view) {
-    for (View* descendant = view; descendant; descendant = descendant->next()) {
-        if (ViewBlock* descendant_block = lam::view_as_block(descendant)) {
-            if (multicol_is_spanner_block(descendant_block)) return true;
-            if (multicol_spanner_can_escape_child(descendant_block) &&
-                multicol_has_direct_spanner_child(descendant_block)) {
-                return true;
-            }
-        } else if (descendant->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(descendant);
-            if (multicol_inline_contains_spanner(span->first_child)) return true;
-        }
-    }
-    return false;
-}
-
-static bool multicol_has_direct_spanner_child(ViewBlock* child) {
-    if (!multicol_spanner_can_escape_child(child)) return false;
-
-    View* descendant = child->first_placed_child();
-    while (descendant) {
-        if (ViewBlock* descendant_block = lam::view_as_block(descendant)) {
-            if (multicol_is_spanner_block(descendant_block)) {
-                return true;
-            }
-            // A nested block that preserves the parent formatting context does
-            // not shield a deeper column spanner from this multicol container.
-            if (multicol_spanner_can_escape_child(descendant_block) &&
-                multicol_has_direct_spanner_child(descendant_block)) {
-                return true;
-            }
-        } else if (descendant->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(descendant);
-            if (multicol_inline_contains_spanner(span->first_child)) return true;
-        }
-        descendant = descendant->next();
-    }
-    return false;
-}
-
 static ViewBlock* multicol_find_escaping_spanner(View* first) {
     for (View* descendant = first; descendant; descendant = descendant->next()) {
         if (ViewBlock* descendant_block = lam::view_as_block(descendant)) {
             if (multicol_is_spanner_block(descendant_block)) return descendant_block;
-            if (multicol_spanner_can_escape_child(descendant_block) &&
-                multicol_has_direct_spanner_child(descendant_block)) {
+            if (multicol_spanner_can_escape_child(descendant_block)) {
                 ViewBlock* spanner = multicol_find_escaping_spanner(
                     descendant_block->first_placed_child());
                 if (spanner) return spanner;
@@ -1201,16 +1202,7 @@ static void multicol_reanchor_br_only_block(
     }
     if (!has_br || has_visible_text) return;
 
-    float line_advance = 0.0f;
-    if (block->blk && block->block()->line_height) {
-        line_advance = layout_resolve_line_height_value(
-            lycon, block->block()->line_height,
-            lam::dom_require<DOM_NODE_ELEMENT>(block),
-            block->fontp() ? block->fontp()->font_size : 16.0f);
-    }
-    if (line_advance <= 0.0f && block->fontp() && block->fontp()->font_handle) {
-        line_advance = calc_normal_line_height(block->fontp()->font_handle);
-    }
+    float line_advance = multicol_resolve_line_advance(lycon, block);
     for (View* child = block->first_placed_child(); child; child = child->next()) {
         if (child->view_type != RDT_VIEW_BR) continue;
         float line_offset = multicol_normal_line_offset(line_advance, child->height);
@@ -1218,7 +1210,8 @@ static void multicol_reanchor_br_only_block(
     }
 }
 
-static bool multicol_has_visible_inline_content(View* first) {
+static bool multicol_has_visible_inline_content(View* first,
+                                                bool stop_at_spanner) {
     for (View* current = first; current; current = current->next()) {
         if (current->node_type == DOM_NODE_TEXT) {
             if (layout_dom_text_has_non_whitespace(
@@ -1227,14 +1220,28 @@ static bool multicol_has_visible_inline_content(View* first) {
             }
             continue;
         }
+        if (stop_at_spanner) {
+            if (ViewBlock* current_block = lam::view_as_block(current)) {
+                if (multicol_is_spanner_block(current_block)) continue;
+                if (multicol_has_direct_spanner_child(current_block)) {
+                    if (multicol_has_visible_inline_content(
+                            current_block->first_placed_child(), true)) {
+                        return true;
+                    }
+                    continue;
+                }
+            }
+        }
         if (current->view_type == RDT_VIEW_INLINE) {
             ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(current);
-            if (multicol_has_visible_inline_content(span->first_child)) return true;
+            if (multicol_has_visible_inline_content(
+                    span->first_child, stop_at_spanner)) return true;
             continue;
         }
         if (current->is_element() &&
             multicol_has_visible_inline_content(
-                lam::view_require_element(current)->first_child)) {
+                lam::view_require_element(current)->first_child,
+                stop_at_spanner)) {
             return true;
         }
     }
@@ -1393,17 +1400,8 @@ static float multicol_reanchor_trailing_br_after_flow(
         return 0.0f;
     }
 
-    float line_advance = 0.0f;
-    if (block->blk && block->block()->line_height) {
-        line_advance = layout_resolve_line_height_value(
-            lycon, block->block()->line_height,
-            lam::dom_require<DOM_NODE_ELEMENT>(block),
-            block->fontp() ? block->fontp()->font_size : 16.0f);
-    }
-    if (line_advance <= 0.0f && block->fontp() && block->fontp()->font_handle) {
-        line_advance = calc_normal_line_height(block->fontp()->font_handle);
-    }
-    if (line_advance <= 0.0f) line_advance = first_br->height;
+    float line_advance = multicol_resolve_line_advance(
+        lycon, block, 0.0f, first_br->height);
     float visual_height = first_br->height > 0.0f ? first_br->height : line_advance;
 
     if (!saw_spanner) {
@@ -1437,42 +1435,12 @@ static float multicol_reanchor_trailing_br_after_flow(
     return br_count * line_advance;
 }
 
-static bool multicol_has_visible_inline_content_before_spanner(View* first) {
-    for (View* current = first; current; current = current->next()) {
-        if (ViewBlock* current_block = lam::view_as_block(current)) {
-            if (multicol_is_spanner_block(current_block)) continue;
-            if (multicol_has_direct_spanner_child(current_block)) {
-                if (multicol_has_visible_inline_content_before_spanner(
-                        current_block->first_placed_child())) {
-                    return true;
-                }
-                continue;
-            }
-            if (multicol_has_visible_inline_content(current)) return true;
-            continue;
-        }
-        if (current->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(current);
-            if (multicol_has_visible_inline_content_before_spanner(span->first_child)) {
-                return true;
-            }
-            continue;
-        }
-        if (current->node_type == DOM_NODE_TEXT &&
-            layout_dom_text_has_non_whitespace(
-                lam::dom_require<DOM_NODE_TEXT>(current))) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static bool multicol_requires_separate_spanner_group(ViewBlock* child) {
     if (!child || !multicol_has_direct_spanner_child(child)) return false;
     // css multicol §6: block-only spanner wrappers form their own column line;
     // ignore text that belongs to the spanner's own formatting context.
-    return !multicol_has_visible_inline_content_before_spanner(
-        child->first_placed_child());
+    return !multicol_has_visible_inline_content(
+        child->first_placed_child(), true);
 }
 
 static float multicol_spanner_prefix_flow_extent(ViewBlock* child) {
@@ -1495,8 +1463,7 @@ static float multicol_spanner_prefix_flow_extent(ViewBlock* child) {
         float margin_after = 0.0f;
         multicol_flow_margins(child, descendant_block,
                               &margin_before, &margin_after);
-        float extent = axis == LAYOUT_AXIS_X
-            ? descendant_block->width : descendant_block->height;
+        float extent = layout_axis_size(descendant_block, axis);
         prefix_extent += margin_before + max(extent, 0.0f) + margin_after;
     }
     return prefix_extent;
@@ -2162,11 +2129,7 @@ static float multicol_trailing_inline_flow_extent(ViewBlock* block, float flow_s
         if (leaf->view_type != RDT_VIEW_TEXT) return;
         ViewText* text = lam::view_require<RDT_VIEW_TEXT>(leaf);
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
-            if (rect->width <= 0.0f || rect->height <= 0.0f ||
-                layout_text_rect_content_kind(text, rect) ==
-                    LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE) {
-                continue;
-            }
+            if (!layout_text_rect_is_visible(text, rect)) continue;
             first_line_y = min(first_line_y, rect->y);
             last_line_y = max(last_line_y, rect->y);
             max_line_height = max(max_line_height, rect->height);
@@ -2298,11 +2261,8 @@ static bool multicol_find_fragmentable_line_metrics(
     bool found = false;
     for (View* child = block->first_placed_child(); child;
          child = child->next()) {
-        ViewBlock* child_block = lam::view_as_block(child);
-        if (!child_block || layout_block_is_out_of_flow_positioned(child_block) ||
-            child_block->view_type == RDT_VIEW_MARKER) {
-            continue;
-        }
+        ViewBlock* child_block = multicol_in_flow_block(child);
+        if (!child_block) continue;
         int child_line_count = 0;
         float child_line_advance = 0.0f;
         if (!multicol_find_fragmentable_line_metrics(
@@ -2334,11 +2294,8 @@ static bool multicol_has_fragmentable_block_children(ViewBlock* child) {
     bool all_blocks_avoid_break = true;
     for (View* descendant = child->first_placed_child(); descendant;
          descendant = descendant->next()) {
-        ViewBlock* descendant_block = lam::view_as_block(descendant);
-        if (!descendant_block || layout_block_is_out_of_flow_positioned(descendant_block) ||
-            descendant_block->view_type == RDT_VIEW_MARKER) {
-            continue;
-        }
+        ViewBlock* descendant_block = multicol_in_flow_block(descendant);
+        if (!descendant_block) continue;
         if (!layout_view_is_block_flow_box(descendant_block)) continue;
         in_flow_block_count++;
         if (!layout_block_has_size_containment_in_axis(descendant_block, false)) {
@@ -2378,11 +2335,8 @@ static bool multicol_has_unbreakable_scroll_children(ViewBlock* parent) {
     int child_count = 0;
     for (View* child = parent->first_placed_child(); child;
          child = child->next()) {
-        ViewBlock* child_block = lam::view_as_block(child);
-        if (!child_block || layout_block_is_out_of_flow_positioned(child_block) ||
-            child_block->view_type == RDT_VIEW_MARKER) {
-            continue;
-        }
+        ViewBlock* child_block = multicol_in_flow_block(child);
+        if (!child_block) continue;
         if (!layout_view_is_block_flow_box(child_block) ||
             !multicol_is_scroll_container(child_block)) {
             return false;
@@ -2479,11 +2433,8 @@ static float multicol_monolithic_initial_offset(
     if (!child) return offset;
     for (View* descendant = child->first_placed_child(); descendant;
          descendant = descendant->next()) {
-        ViewBlock* descendant_block = lam::view_as_block(descendant);
-        if (!descendant_block || layout_block_is_out_of_flow_positioned(descendant_block) ||
-            descendant_block->view_type == RDT_VIEW_MARKER) {
-            continue;
-        }
+        ViewBlock* descendant_block = multicol_in_flow_block(descendant);
+        if (!descendant_block) continue;
         // css fragmentation: retain leading padding in the descendant flow
         // when the parent wrapper itself starts at a fragment offset.
         float local_offset = descendant_block->y - child->y;
@@ -2615,7 +2566,7 @@ static float multicol_decorated_child_min_fragmentainer(
         float child_margin_before = 0.0f;
         multicol_flow_margins(item, child_block,
                               &child_margin_before, nullptr);
-        float child_extent = axis == LAYOUT_AXIS_X ? child_block->width : child_block->height;
+        float child_extent = layout_axis_size(child_block, axis);
         float min_fragmentainer = leading_decoration + child_margin_before +
             max(child_extent, 0.0f);
         if (item_margin_before) min_fragmentainer += item_margin_before[0];
@@ -2649,8 +2600,7 @@ static float multicol_fragmentable_item_min_fragmentainer(
         }
         float child_margin_before = 0.0f;
         multicol_flow_margins(item, child_block, &child_margin_before, nullptr);
-        float child_extent = axis == LAYOUT_AXIS_X
-            ? child_block->width : child_block->height;
+        float child_extent = layout_axis_size(child_block, axis);
         float item_margin = item_margin_before ? item_margin_before[0] : 0.0f;
         return item_margin + leading_decoration + child_margin_before +
             max(child_extent, 0.0f);
@@ -2667,16 +2617,15 @@ static float multicol_block_children_balance_floor(
         return 0.0f;
     }
 
+    LayoutAxis axis = multicol_has_vertical_inline_axis(parent)
+        ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
     int child_count = 0;
     float lower = 0.0f;
     float upper = 0.0f;
     for (View* child = parent->first_placed_child(); child;
          child = child->next()) {
-        ViewBlock* child_block = lam::view_as_block(child);
-        if (!child_block || layout_block_is_out_of_flow_positioned(child_block) ||
-            child_block->view_type == RDT_VIEW_MARKER) {
-            continue;
-        }
+        ViewBlock* child_block = multicol_in_flow_block(child);
+        if (!child_block) continue;
         bool child_is_avoid = child_block->blk &&
             child_block->block()->break_inside == CSS_VALUE_AVOID;
         bool child_is_fragmentable =
@@ -2692,9 +2641,7 @@ static float multicol_block_children_balance_floor(
         float margin_after = 0.0f;
         multicol_flow_margins(parent, child_block,
                               &margin_before, &margin_after);
-        float extent = multicol_has_vertical_inline_axis(parent)
-            ? child_block->width : child_block->height;
-        extent = max(extent, 0.0f);
+        float extent = max(layout_axis_size(child_block, axis), 0.0f);
         lower = max(lower, extent);
         upper += extent + margin_before + margin_after;
         child_count++;
@@ -2708,11 +2655,8 @@ static float multicol_block_children_balance_floor(
         bool has_item = false;
         for (View* child = parent->first_placed_child(); child;
              child = child->next()) {
-            ViewBlock* child_block = lam::view_as_block(child);
-            if (!child_block || layout_block_is_out_of_flow_positioned(child_block) ||
-                child_block->view_type == RDT_VIEW_MARKER) {
-                continue;
-            }
+            ViewBlock* child_block = multicol_in_flow_block(child);
+            if (!child_block) continue;
             bool child_is_avoid = child_block->blk &&
                 child_block->block()->break_inside == CSS_VALUE_AVOID;
             bool child_is_fragmentable =
@@ -2723,9 +2667,7 @@ static float multicol_block_children_balance_floor(
             float margin_after = 0.0f;
             multicol_flow_margins(parent, child_block,
                                   &margin_before, &margin_after);
-            float extent = multicol_has_vertical_inline_axis(parent)
-                ? child_block->width : child_block->height;
-            extent = max(extent, 0.0f);
+            float extent = max(layout_axis_size(child_block, axis), 0.0f);
             bool break_before = child_block->blk &&
                 multicol_forces_column_break(child_block->block()->break_before);
             if (break_before && has_item) {
@@ -2800,10 +2742,11 @@ static void multicol_init_flow_item(MulticolFlowItem* item,
     item->balance_height = height;
     multicol_flow_margins(container, child,
                           &item->margin_before, &item->margin_after);
-    if (child && child->blk && !multicol_has_vertical_inline_axis(container) &&
+    bool fixed_size_overflow = child && child->blk &&
         child->block()->given_height >= 0.0f &&
-        child->block()->break_inside != CSS_VALUE_AVOID &&
-        height > child->height + item->margin_before + item->margin_after + 0.5f) {
+        height > child->height + item->margin_before + item->margin_after + 0.5f;
+    if (fixed_size_overflow && !multicol_has_vertical_inline_axis(container) &&
+        child->block()->break_inside != CSS_VALUE_AVOID) {
         // css fragmentation: descendant overflow contributes to balancing,
         // while a fixed-size wrapper keeps its own fragment box size.
         item->height = child->height + item->margin_before + item->margin_after;
@@ -2814,9 +2757,6 @@ static void multicol_init_flow_item(MulticolFlowItem* item,
     item->inline_offset = inline_offset;
     // css fragmentation: a block container can break between in-flow block
     // children even when it has no multi-line inline content of its own.
-    bool fixed_size_overflow = child && child->blk &&
-        child->block()->given_height >= 0.0f &&
-        height > child->height + item->margin_before + item->margin_after + 0.5f;
     int descendant_line_count = 0;
     float descendant_line_advance = 0.0f;
     bool has_descendant_fragmentable_lines = fixed_size_overflow &&
@@ -3346,6 +3286,32 @@ static MulticolFragmentPlacement multicol_place_fragment(
     return placement;
 }
 
+template <typename SlotFn>
+static void multicol_for_each_nested_horizontal_slot(
+    const MulticolNestedHorizontalSequence* sequence,
+    float stop_at, SlotFn visit) {
+    if (!sequence) return;
+    float consumed = 0.0f;
+    for (int parent_column = 0;
+         parent_column < MAX_MULTICOL_BLOCKS &&
+         (stop_at < 0.0f || consumed < stop_at - 0.001f);
+         parent_column++) {
+        for (int nested_column = 0;
+             nested_column < sequence->nested_column_count &&
+             (stop_at < 0.0f || consumed < stop_at - 0.001f);
+             nested_column++) {
+            float capacity = sequence->fragment_height -
+                (parent_column == 0 ? sequence->initial_fragment_offset : 0.0f);
+            if (capacity <= 0.0f) continue;
+            float slot_start = consumed;
+            float slot_end = slot_start + capacity;
+            if (!visit(slot_start, slot_end, capacity,
+                       parent_column, nested_column)) return;
+            consumed = slot_end;
+        }
+    }
+}
+
 template <typename FragmentFn>
 static bool multicol_for_each_nested_horizontal_fragment(
     const MulticolNestedHorizontalSequence* sequence,
@@ -3363,53 +3329,36 @@ static bool multicol_for_each_nested_horizontal_fragment(
 
     float start = max(flow_start, 0.0f);
     float end = start + flow_extent;
-    float consumed = 0.0f;
     int fragment_count = 0;
-    for (int parent_column = 0;
-         parent_column < MAX_MULTICOL_BLOCKS && consumed < end - 0.001f;
-         parent_column++) {
-        for (int nested_column = 0;
-             nested_column < sequence->nested_column_count &&
-             consumed < end - 0.001f;
-             nested_column++) {
-            float capacity = sequence->fragment_height -
-                (parent_column == 0 ? sequence->initial_fragment_offset : 0.0f);
-            if (capacity <= 0.0f) continue;
-
-            float slot_start = consumed;
-            float slot_end = slot_start + capacity;
+    multicol_for_each_nested_horizontal_slot(
+        sequence, end,
+        [&](float slot_start, float slot_end, float, int parent_column,
+            int nested_column) {
             float overlap_start = max(start, slot_start);
             float overlap_end = min(end, slot_end);
-            if (overlap_end > overlap_start) {
-                int visual_parent_column = sequence->parent_direction_rtl
-                    ? sequence->parent_column_count - 1 -
-                        (parent_column % sequence->parent_column_count)
-                    : parent_column % sequence->parent_column_count;
-                int visual_nested_column = sequence->nested_direction_rtl
-                    ? sequence->nested_column_count - 1 - nested_column
-                    : nested_column;
-                int row_index = sequence->wraps_rows
-                    ? parent_column / sequence->parent_column_count : 0;
-                float nested_continuation_gap = visual_parent_column *
-                    sequence->nested_column_gap;
-                float slot_x = visual_parent_column *
-                        (sequence->parent_column_width +
-                         sequence->parent_column_gap) +
-                    visual_nested_column *
-                        (sequence->nested_column_width +
-                         sequence->nested_column_gap) +
-                    nested_continuation_gap;
-                float slot_y = (parent_column == 0
-                        ? sequence->initial_fragment_offset : 0.0f) +
-                    row_index * (sequence->fragment_height + sequence->row_gap);
-                visit(slot_x, slot_y + overlap_start - slot_start,
-                    overlap_end - overlap_start, visual_parent_column,
-                    row_index);
-                fragment_count++;
-            }
-            consumed = slot_end;
-        }
-    }
+            if (overlap_end <= overlap_start) return true;
+            int visual_parent_column = sequence->parent_direction_rtl
+                ? sequence->parent_column_count - 1 -
+                    (parent_column % sequence->parent_column_count)
+                : parent_column % sequence->parent_column_count;
+            int visual_nested_column = sequence->nested_direction_rtl
+                ? sequence->nested_column_count - 1 - nested_column
+                : nested_column;
+            int row_index = sequence->wraps_rows
+                ? parent_column / sequence->parent_column_count : 0;
+            float slot_x = visual_parent_column *
+                    (sequence->parent_column_width + sequence->parent_column_gap) +
+                visual_nested_column *
+                    (sequence->nested_column_width + sequence->nested_column_gap) +
+                visual_parent_column * sequence->nested_column_gap;
+            float slot_y = (parent_column == 0
+                    ? sequence->initial_fragment_offset : 0.0f) +
+                row_index * (sequence->fragment_height + sequence->row_gap);
+            visit(slot_x, slot_y + overlap_start - slot_start,
+                overlap_end - overlap_start, visual_parent_column, row_index);
+            fragment_count++;
+            return true;
+        });
     if (out_fragment_count) *out_fragment_count = fragment_count;
     return fragment_count > 0;
 }
@@ -3423,34 +3372,32 @@ static float multicol_nested_horizontal_unbreakable_start(
         flow_extent <= 0.0f) return max(flow_start, 0.0f);
 
     float start = max(flow_start, 0.0f);
-    float consumed = 0.0f;
+    float result = start;
     bool found_start = false;
     bool seek_fitting_slot = false;
-    for (int parent_column = 0;
-         parent_column < MAX_MULTICOL_BLOCKS; parent_column++) {
-        for (int nested_column = 0;
-             nested_column < sequence->nested_column_count; nested_column++) {
-            float capacity = sequence->fragment_height -
-                (parent_column == 0 ? sequence->initial_fragment_offset : 0.0f);
-            if (capacity <= 0.0f) continue;
-            float slot_start = consumed;
-            float slot_end = consumed + capacity;
+    multicol_for_each_nested_horizontal_slot(
+        sequence, -1.0f,
+        [&](float slot_start, float slot_end, float capacity, int, int) {
             if (!found_start && start < slot_end - 0.001f) {
                 float remaining = slot_end - start;
-                if (flow_extent <= remaining + 0.5f) return start;
+                if (flow_extent <= remaining + 0.5f) {
+                    result = start;
+                    return false;
+                }
                 if (flow_extent > sequence->fragment_height + 0.5f) {
-                    return slot_end;
+                    result = slot_end;
+                    return false;
                 }
                 found_start = true;
                 seek_fitting_slot = true;
             } else if (found_start && seek_fitting_slot &&
                        capacity >= flow_extent - 0.5f) {
-                return slot_start;
+                result = slot_start;
+                return false;
             }
-            consumed = slot_end;
-        }
-    }
-    return start;
+            return true;
+        });
+    return result;
 }
 
 static bool multicol_find_nested_horizontal_fragment(
@@ -3551,21 +3498,12 @@ static bool multicol_store_nested_horizontal_fragments(
     multicol_for_each_nested_horizontal_fragment(
         sequence, flow_start, flow_extent,
         [&](float x, float y, float piece_extent, int column_index, int row_index) {
-            LayoutFragmentBox* fragment = (LayoutFragmentBox*)pool_calloc(
-                pool, sizeof(LayoutFragmentBox));
+            LayoutFragmentBox* fragment = multicol_append_layout_fragment(
+                pool, elem, &first, &previous, fragment_index,
+                column_index, row_index, x - min_x, y - min_y,
+                fragment_width, piece_extent);
             if (!fragment) return;
-            fragment->x = x - min_x;
-            fragment->y = y - min_y;
-            fragment->width = fragment_width;
-            fragment->height = piece_extent;
-            fragment->fragment_index = fragment_index++;
-            fragment->column_index = column_index;
-            fragment->row_index = row_index;
-            fragment->next = nullptr;
-            if (!first) first = fragment;
-            if (previous) previous->next = fragment;
-            previous = fragment;
-            elem->layout_fragments_count_ref()++;
+            fragment_index++;
         }, nullptr);
     if (!first) return false;
     elem->set_layout_fragment_list(first);
@@ -3658,36 +3596,16 @@ static bool multicol_project_fragmented_inline_descendants(
                     rect = rect->next;
                     continue;
                 }
-                items[item_count].view = descendant;
-                items[item_count].rect = rect;
-                items[item_count].original_x = rect->x;
-                // TextRect coordinates are parent-block local; subtracting the
-                // newly placed block offset shifts every fragment a second time.
-                items[item_count].original_y = rect->y;
-                items[item_count].line_y = items[item_count].original_y;
-                items[item_count].height = rect->height;
-                items[item_count].fragment_y_offset = 0.0f;
-                items[item_count].line_index = 0;
-                items[item_count].is_text = true;
-                items[item_count].is_forced_break = false;
-                items[item_count].reproject_rtl = false;
+                multicol_init_inline_fragment_item(
+                    &items[item_count], descendant, rect, false);
                 item_count++;
                 rect = rect->next;
             }
         } else if (descendant->view_type == RDT_VIEW_BR) {
-            items[item_count].view = descendant;
-            items[item_count].rect = NULL;
-            items[item_count].original_x = descendant->x;
-            items[item_count].original_y = descendant->y;
-            items[item_count].line_y = items[item_count].original_y;
-            items[item_count].height = descendant->height;
-            items[item_count].fragment_y_offset = 0.0f;
-            items[item_count].line_index = 0;
-            items[item_count].is_text = false;
             // CSS 2.1 §9.2.1.1: out-of-flow inline descendants do not end
             // the line; only a BR contributes a forced line break here.
-            items[item_count].is_forced_break = descendant->view_type == RDT_VIEW_BR;
-            items[item_count].reproject_rtl = false;
+            multicol_init_inline_fragment_item(
+                &items[item_count], descendant, nullptr, true);
             item_count++;
         }
     });
@@ -3904,8 +3822,9 @@ static bool multicol_project_fragmented_inline_descendants(
         items[i].fragment_y_offset = parent_column_index * parent_pitch +
             parent_row_index * (fragment_height + row_gap);
 
+        float new_x = 0.0f;
+        float new_y = 0.0f;
         if (vertical_writing && inner_column_count == 1) {
-            float new_x = 0.0f;
             if (inner_fragment_index == 0) {
                 if (parent_mode == WM_VERTICAL_RL) {
                     new_x = projected_block_position - first_fragment_block_extent;
@@ -3931,7 +3850,7 @@ static bool multicol_project_fragmented_inline_descendants(
                 new_x = projected_block_position - first_fragment_block_extent -
                     (inner_fragment_index - 1) * fragment_height;
             }
-            float new_y = items[i].original_y +
+            new_y = items[i].original_y +
                 parent_column_index * parent_pitch +
                 parent_row_index * (fragment_height + row_gap);
             items[i].reproject_rtl = items[i].is_text && fragment_direction_rtl &&
@@ -3958,45 +3877,35 @@ static bool multicol_project_fragmented_inline_descendants(
                         parent_row_index * (fragment_height + row_gap);
                 }
             }
-            if (items[i].is_text) {
-                items[i].rect->x = new_x;
-                items[i].rect->y = new_y;
-            } else {
-                items[i].view->x = new_x;
-                items[i].view->y = new_y;
-            }
-            continue;
-        }
-
-        float normalized_x = multicol_normalize_inline_x(items[i].original_x, 0.0f, inner_pitch);
-        float line_local_delta_y = items[i].is_text ? items[i].original_y - items[i].line_y : 0;
-        float fragment_line_offset = slice_start_trim && inner_fragment_index > 0 ?
-            continuation_line_offset : first_fragment_line_offset;
-        float new_x = normalized_x +
-            parent_column_index * parent_pitch +
-            inner_column_index * inner_pitch;
-        float first_fragment_offset = inner_fragment_index == 0 ? initial_fragment_offset : 0.0f;
-        // TextRect coordinates are local to the fragmented block's union box.
-        float new_y = first_fragment_offset + fragment_line_offset +
-            parent_row_index * (fragment_height + row_gap) +
-            line_slot * line_advance +
-            line_local_delta_y;
-
-        if (!items[i].is_text && items[i].is_forced_break) {
-            // line-break boxes expose their local line-box position; only the
-            // text fragment carries the parent column and row offset.
-            new_x = normalized_x;
-            new_y = first_fragment_offset + fragment_line_offset +
-                line_slot * line_advance;
-        }
-
-        if (items[i].is_text) {
-            items[i].rect->x = new_x;
-            items[i].rect->y = new_y;
         } else {
-            items[i].view->x = new_x;
-            items[i].view->y = new_y;
+            float normalized_x = multicol_normalize_inline_x(
+                items[i].original_x, 0.0f, inner_pitch);
+            float line_local_delta_y = items[i].is_text
+                ? items[i].original_y - items[i].line_y : 0;
+            float fragment_line_offset = slice_start_trim && inner_fragment_index > 0
+                ? continuation_line_offset : first_fragment_line_offset;
+            new_x = normalized_x +
+                parent_column_index * parent_pitch +
+                inner_column_index * inner_pitch;
+            float first_fragment_offset = inner_fragment_index == 0
+                ? initial_fragment_offset : 0.0f;
+            // TextRect coordinates are local to the fragmented block's union box.
+            new_y = first_fragment_offset + fragment_line_offset +
+                parent_row_index * (fragment_height + row_gap) +
+                line_slot * line_advance + line_local_delta_y;
+
+            if (!items[i].is_text && items[i].is_forced_break) {
+                // line-break boxes expose their local line-box position; only the
+                // text fragment carries the parent column and row offset.
+                new_x = normalized_x;
+                new_y = first_fragment_offset + fragment_line_offset +
+                    line_slot * line_advance;
+            }
         }
+
+        multicol_set_inline_position(
+            items[i].rect, items[i].is_text ? nullptr : items[i].view,
+            new_x, new_y);
     }
 
     if (vertical_writing && child->block()->direction == CSS_VALUE_RTL) {
@@ -4451,10 +4360,8 @@ static int multicol_project_fragmented_descendants(
             // css multicol: a caption that crosses the initial fragmentainer
             // exposes the union of its fragment widths in CSSOM geometry.
             float caption_flow_extent = max(descendant_block->height, 0.0f);
-            int caption_fragment_count = (int)ceilf(
-                (initial_fragment_offset + caption_flow_extent) /
-                    fragment_height); // INT_CAST_OK: positive caption flow count
-            if (caption_fragment_count < 1) caption_fragment_count = 1;
+            int caption_fragment_count = multicol_fragment_count(
+                initial_fragment_offset + caption_flow_extent, fragment_height);
             if (caption_fragment_count > 1) {
                 descendant_block->width += (caption_fragment_count - 1) *
                     (column_width + column_gap);
@@ -4468,10 +4375,9 @@ static int multicol_project_fragmented_descendants(
             int table_fragment_count = table_element->layout_fragments_count();
             if (table_fragment_count > 1 && block_split_height > 0.0f) {
                 float caption_flow_extent = max(descendant_block->width, 0.0f);
-                int caption_fragment_count = (int)ceilf(
-                    (initial_fragment_offset + caption_flow_extent) /
-                        block_split_height); // INT_CAST_OK: positive caption flow count
-                if (caption_fragment_count < 1) caption_fragment_count = 1;
+                int caption_fragment_count = multicol_fragment_count(
+                    initial_fragment_offset + caption_flow_extent,
+                    block_split_height);
                 if (caption_fragment_count > table_fragment_count) {
                     caption_fragment_count = table_fragment_count;
                 }
@@ -4643,8 +4549,9 @@ static int multicol_project_fragmented_descendants(
                 ViewBlock* descendant_block = lam::view_require_block(descendant);
                 bool descendant_contained_monolithic =
                     multicol_is_contained_monolithic(descendant_block);
-                float descendant_flow_extent = vertical_writing
-                    ? descendant_block->width : descendant_block->height;
+                float descendant_flow_extent = layout_axis_size(
+                    descendant_block,
+                    vertical_writing ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y);
                 if (!vertical_writing && descendant_block->is_element() &&
                     descendant_block->as_element()->layout_fragments_count() > 1) {
                     // css fragmentation: a nested descendant's union box is
@@ -4661,9 +4568,8 @@ static int multicol_project_fragmented_descendants(
                 if (nested_multicol_spanner_projection &&
                     descendant_flow_extent > block_split_height &&
                     !descendant_contained_monolithic) {
-                    int descendant_fragment_count = (int)ceilf(
-                        descendant_flow_extent / block_split_height); // INT_CAST_OK: fragment count from positive heights
-                    if (descendant_fragment_count < 1) descendant_fragment_count = 1;
+                    int descendant_fragment_count = multicol_fragment_count(
+                        descendant_flow_extent, block_split_height);
                     int used_columns = min(descendant_fragment_count, column_count);
                     float fragment_visual_width = descendant_block->width > 0.0f
                         ? descendant_block->width : column_width;
@@ -4686,8 +4592,8 @@ static int multicol_project_fragmented_descendants(
                 }
                 if (!descendant_fragmented && descendant_flow_extent > block_split_height) {
                     int total_column_slots = column_count * inner_column_count;
-                    int descendant_fragment_count = (int)ceilf(descendant_flow_extent / block_split_height); // INT_CAST_OK: fragment count from positive heights
-                    if (descendant_fragment_count < 1) descendant_fragment_count = 1;
+                    int descendant_fragment_count = multicol_fragment_count(
+                        descendant_flow_extent, block_split_height);
                     float union_width;
                     float union_height = block_split_height;
                     if (vertical_writing) {
@@ -4730,6 +4636,10 @@ static int multicol_project_fragmented_descendants(
                             (column_width + column_gap);
                     }
                     if (!descendant_contained_monolithic) {
+                        float descendant_split_height = block_split_height;
+                        if (!vertical_writing && inner_column_count > 1) {
+                            descendant_split_height = block_split_height / inner_column_count;
+                        }
                         multicol_store_layout_fragments(descendant_block,
                             descendant_fragment_count, total_column_slots,
                             block_split_height, inner_column_width, inner_column_gap,
@@ -4738,10 +4648,6 @@ static int multicol_project_fragmented_descendants(
                             descendant_block->width = union_width;
                         }
                         descendant_block->height = union_height;
-                        float descendant_split_height = block_split_height;
-                        if (!vertical_writing && inner_column_count > 1) {
-                            descendant_split_height = block_split_height / inner_column_count;
-                        }
                         multicol_project_fragmented_descendants(lycon, descendant_block,
                             fragment_height, total_column_slots,
                             inner_column_width, inner_column_gap, descendant_split_height,
@@ -4776,8 +4682,9 @@ static int multicol_project_fragmented_descendants(
         if (!descendant_fragmented && descendant->is_block() &&
             !exhausted_parent_fragmentainers) {
             ViewBlock* descendant_block = lam::view_require_block(descendant);
-            float descendant_block_extent = vertical_writing
-                ? descendant_block->width : descendant_block->height;
+            float descendant_block_extent = layout_axis_size(
+                descendant_block,
+                vertical_writing ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y);
             if (nested_descendants_local && !vertical_writing && descendant_block->blk &&
                 layout_axis_has_given_size(descendant_block, false)) {
                 descendant_block_extent = max(descendant_block_extent,
@@ -4785,11 +4692,12 @@ static int multicol_project_fragmented_descendants(
             }
             if (descendant_block_extent > block_split_height &&
                 !multicol_is_contained_monolithic(descendant_block)) {
-                int descendant_fragment_count = (int)ceilf(descendant_block_extent / block_split_height); // INT_CAST_OK: fragment count from positive heights
-                if (descendant_fragment_count < 1) descendant_fragment_count = 1;
-                int used_columns = min(descendant_fragment_count, column_count);
-                int row_count = (descendant_fragment_count + column_count - 1) / column_count;
-                if (row_count < 1) row_count = 1;
+                int descendant_fragment_count = multicol_fragment_count(
+                    descendant_block_extent, block_split_height);
+                MulticolFragmentGrid descendant_grid = multicol_fragment_grid(
+                    descendant_fragment_count, column_count, false);
+                int used_columns = descendant_grid.used_columns;
+                int row_count = descendant_grid.row_count;
                 // Fragment union bounds retain the block border box; clipping
                 // it to the fragmentainer loses overflow in DOMRect geometry.
                 float fragment_visual_width = vertical_writing
@@ -4834,14 +4742,6 @@ static int multicol_project_fragmented_descendants(
                         union_height = block_split_height;
                     }
                 }
-                multicol_store_layout_fragments(descendant_block,
-                    descendant_fragment_count, column_count,
-                    block_split_height, column_width, column_gap,
-                    row_gap, fragment_visual_width, 0.0f);
-                if (vertical_writing || descendant_block->width < union_width) {
-                    descendant_block->width = union_width;
-                }
-                descendant_block->height = union_height;
                 if (layout_view_uses_table_grid_coordinates(descendant)) {
                     table_grid_fragmented = true;
                 }
@@ -4854,6 +4754,14 @@ static int multicol_project_fragmented_descendants(
                     descendant->x = new_x;
                     descendant->y = horizontal_table_grid ? 0.0f : new_y;
                 }
+                multicol_store_layout_fragments(descendant_block,
+                    descendant_fragment_count, column_count,
+                    block_split_height, column_width, column_gap,
+                    row_gap, fragment_visual_width, 0.0f);
+                if (vertical_writing || descendant_block->width < union_width) {
+                    descendant_block->width = union_width;
+                }
+                descendant_block->height = union_height;
                 multicol_project_fragmented_descendants(
                     lycon, descendant_block, block_split_height, column_count,
                     column_width, column_gap, block_split_height, 0.0f);
@@ -4929,15 +4837,11 @@ static int multicol_project_fragmented_descendants(
         bool preserve_escaping_spanner_descendants = nested_descendants_local &&
             child_is_multicol && descendant_block &&
             multicol_has_direct_spanner_child(descendant_block);
-        if (preserve_escaping_spanner_descendants) {
+        if (preserve_escaping_spanner_descendants ||
+            (descendant->is_block() && !descendant_fragmented)) {
             // css multicol: an escaping spanner is positioned in the ancestor
             // flow, while its wrapper's ordinary descendants stay local to
             // the wrapper's border box.
-            descendant->x = new_x;
-            descendant->y = new_y;
-        } else if (descendant->is_block() && !descendant_fragmented) {
-            // css fragmentation: moving a non-fragmented child changes its
-            // containing-block origin; its descendants remain local to it.
             descendant->x = new_x;
             descendant->y = new_y;
         } else if (has_block_flow_child) {
@@ -5104,6 +5008,36 @@ static Pool* multicol_layout_fragment_pool(DomElement* elem) {
     return elem->doc->document_pool;
 }
 
+static LayoutFragmentBox* multicol_append_layout_fragment(
+    Pool* pool, DomElement* elem, LayoutFragmentBox** first,
+    LayoutFragmentBox** previous, int fragment_index, int column_index,
+    int row_index, float x, float y, float width, float height) {
+    if (!pool || !elem || !first || !previous) return nullptr;
+    LayoutFragmentBox* fragment = (LayoutFragmentBox*)pool_calloc(
+        pool, sizeof(LayoutFragmentBox));
+    if (!fragment) return nullptr;
+    fragment->x = x;
+    fragment->y = y;
+    fragment->width = width;
+    fragment->height = height;
+    fragment->fragment_index = fragment_index;
+    fragment->column_index = column_index;
+    fragment->row_index = row_index;
+    fragment->next = nullptr;
+    if (!*first) *first = fragment;
+    if (*previous) (*previous)->next = fragment;
+    *previous = fragment;
+    elem->layout_fragments_count_ref()++;
+    return fragment;
+}
+
+static LayoutFragmentBox* multicol_fragment_at(LayoutFragmentBox* first, int index) {
+    for (int current = 0; first && current < index; current++) {
+        first = first->next;
+    }
+    return first;
+}
+
 static void multicol_store_layout_fragments(
     ViewBlock* child,
     int fragment_count,
@@ -5124,8 +5058,7 @@ static void multicol_store_layout_fragments(
     }
 
     DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
-    elem->set_layout_fragment_list(nullptr);
-    elem->layout_fragments_count_ref() = 0;
+    multicol_clear_layout_fragments(child);
 
     Pool* pool = multicol_layout_fragment_pool(elem);
     if (!pool) return;
@@ -5155,9 +5088,6 @@ static void multicol_store_layout_fragments(
     }
 
     for (int fi = 0; fi < fragment_count; fi++) {
-        LayoutFragmentBox* fragment = (LayoutFragmentBox*)pool_calloc(pool, sizeof(LayoutFragmentBox));
-        if (!fragment) break;
-
         int column_index = fi % column_count;
         int row_index = fi / column_count;
         float fragment_y = row_index * (fragment_height + row_gap);
@@ -5176,30 +5106,25 @@ static void multicol_store_layout_fragments(
             }
         }
 
-        fragment->fragment_index = fi;
-        fragment->column_index = column_index;
-        fragment->row_index = row_index;
+        float fragment_x = 0.0f;
+        float fragment_position_y = 0.0f;
         if (vertical_writing) {
             // Fragment offsets follow the logical block/inline axes rather
             // than retaining the horizontal serializer's x/y convention.
-            fragment->x = fi == 0 ? initial_fragment_offset : 0.0f;
-            fragment->y = fragment_inline_origin +
+            fragment_x = fi == 0 ? initial_fragment_offset : 0.0f;
+            fragment_position_y = fragment_inline_origin +
                 column_index * (column_width + column_gap) +
                 row_index * (column_width + column_gap);
-            fragment->width = fragment_visual_width;
-            fragment->height = fragment_piece_extent;
         } else {
-            fragment->x = column_index * (column_width + column_gap);
-            fragment->y = fragment_y + (fi == 0 ? initial_fragment_offset : 0.0f);
-            fragment->width = fragment_visual_width;
-            fragment->height = fragment_piece_extent;
+            fragment_x = column_index * (column_width + column_gap);
+            fragment_position_y = fragment_y +
+                (fi == 0 ? initial_fragment_offset : 0.0f);
         }
-        fragment->next = nullptr;
-
-        if (!first) first = fragment;
-        if (prev) prev->next = fragment;
-        prev = fragment;
-        elem->layout_fragments_count_ref()++;
+        LayoutFragmentBox* fragment = multicol_append_layout_fragment(
+            pool, elem, &first, &prev, fi, column_index, row_index,
+            fragment_x, fragment_position_y, fragment_visual_width,
+            fragment_piece_extent);
+        if (!fragment) break;
         remaining_extent -= fragment_piece_extent;
     }
 
@@ -5271,11 +5196,8 @@ static bool multicol_collect_grid_rows(
 
     bool has_item = false;
     for (View* view = grid->first_placed_child(); view; view = view->next()) {
-        ViewBlock* item = lam::view_as_block(view);
-        if (!item || layout_block_is_out_of_flow_positioned(item) ||
-            item->view_type == RDT_VIEW_MARKER) {
-            continue;
-        }
+        ViewBlock* item = multicol_in_flow_block(view);
+        if (!item) continue;
         GridItemProp* grid_item = grid_item_prop(item);
         if (!grid_item) return false;
 
@@ -5343,6 +5265,13 @@ static int multicol_grid_row_fragment_count(
     return fragment_count;
 }
 
+static float multicol_fragment_grid_union_height(
+    bool wraps_rows, int row_count, float fragment_height, float row_gap) {
+    return wraps_rows
+        ? row_count * fragment_height + (row_count - 1) * row_gap
+        : fragment_height;
+}
+
 static float multicol_grid_min_fragmentainer_height(
     ViewBlock* grid,
     int column_count
@@ -5404,15 +5333,16 @@ static bool multicol_fragment_grid_rows(
         &rows, used_fragment_height);
     if (fragment_count <= 1) return false;
 
-    int layout_column_count = column_count;
-    int used_columns = min(column_count, fragment_count);
-    int row_count = (fragment_count + layout_column_count - 1) /
-        layout_column_count;
+    int layout_column_count = 0;
+    int used_columns = 0;
+    int row_count = 0;
+    multicol_fragment_grid_dimensions(
+        fragment_count, column_count, false, &layout_column_count,
+        &used_columns, &row_count);
     float row_gap = multicol_row_gap(container);
     if (row_gap < 0.0f) row_gap = 0.0f;
-    float union_height = multicol_group_wraps_rows(container)
-        ? row_count * used_fragment_height + (row_count - 1) * row_gap
-        : used_fragment_height;
+    float union_height = multicol_fragment_grid_union_height(
+        multicol_group_wraps_rows(container), row_count, used_fragment_height, row_gap);
     float union_width = column_width +
         (used_columns - 1) * (column_width + column_gap);
 
@@ -5428,19 +5358,16 @@ static bool multicol_fragment_grid_rows(
 
     int fragment_index = 0;
     float fragment_start_top = rows.row_top[0];
-    for (int row = 1; row < rows.row_count; row++) {
-        if (rows.row_bottom[row] - fragment_start_top >
+    for (int row = 0; row < rows.row_count; row++) {
+        if (row > 0 && rows.row_bottom[row] - fragment_start_top >
             used_fragment_height + 0.5f) {
             fragment_index++;
             fragment_start_top = rows.row_top[row];
         }
 
         for (View* view = child->first_placed_child(); view; view = view->next()) {
-            ViewBlock* item = lam::view_as_block(view);
-            if (!item || layout_block_is_out_of_flow_positioned(item) ||
-                item->view_type == RDT_VIEW_MARKER) {
-                continue;
-            }
+            ViewBlock* item = multicol_in_flow_block(view);
+            if (!item) continue;
             GridItemProp* grid_item = grid_item_prop(item);
             if (!grid_item) return false;
             int item_row = grid_item->computed_grid_row_start - 1;
@@ -5462,19 +5389,6 @@ static bool multicol_fragment_grid_rows(
         }
     }
 
-    // The first row is not visited by the transition loop above.
-    for (View* view = child->first_placed_child(); view; view = view->next()) {
-        ViewBlock* item = lam::view_as_block(view);
-        if (!item || layout_block_is_out_of_flow_positioned(item) ||
-            item->view_type == RDT_VIEW_MARKER) {
-            continue;
-        }
-        GridItemProp* grid_item = grid_item_prop(item);
-        if (!grid_item || grid_item->computed_grid_row_start != 1) continue;
-        float target_y = child->y + (item->y - rows.row_top[0]);
-        item->y = target_y;
-    }
-
     if (out_used_columns) *out_used_columns = used_columns;
     if (out_union_height) *out_union_height = union_height;
     return true;
@@ -5485,16 +5399,7 @@ static bool multicol_fragment_abspos_in_context(
     if (!containing_block || !child || !child->is_element() || !child->position ||
         child->positionp()->position != CSS_VALUE_ABSOLUTE) return false;
 
-    ViewBlock* multicol = nullptr;
-    for (ViewElement* ancestor = containing_block; ancestor;
-         ancestor = ancestor->parent_view()) {
-        if (!ancestor->is_block()) continue;
-        ViewBlock* candidate = lam::view_require_block(ancestor);
-        if (is_multicol_container(candidate)) {
-            multicol = candidate;
-            break;
-        }
-    }
+    ViewBlock* multicol = multicol_find_parent_container(containing_block);
     if (!multicol || !multicol->multicol_prop()) return false;
 
     const MultiColumnProp* prop = multicol->multicol_prop();
@@ -5535,16 +5440,8 @@ static bool multicol_fragment_abspos_in_context(
     if (vertical_writing) {
         // css-position §4.4: vertical abspos fragments break on the physical
         // block axis, while each nested column keeps its inline-axis origin.
-        ViewBlock* parent_multicol = nullptr;
-        for (ViewElement* ancestor = multicol->parent_view(); ancestor;
-             ancestor = ancestor->parent_view()) {
-            if (!ancestor->is_block()) continue;
-            ViewBlock* candidate = lam::view_require_block(ancestor);
-            if (is_multicol_container(candidate)) {
-                parent_multicol = candidate;
-                break;
-            }
-        }
+        ViewBlock* parent_multicol = multicol_find_parent_container(
+            multicol->parent_view());
 
         float fragment_capacity = parent_multicol
             ? multicol_content_box_height_limit(parent_multicol)
@@ -5571,29 +5468,8 @@ static bool multicol_fragment_abspos_in_context(
         }
         if (fragment_inline_size <= 0.0f) return false;
 
-        float static_block_offset = 0.0f;
-        for (View* sibling = containing_block->first_placed_child();
-             sibling && sibling != static_cast<View*>(child);
-             sibling = sibling->next()) {
-            ViewBlock* sibling_block = lam::view_as_block(sibling);
-            if (!sibling_block || layout_block_is_out_of_flow_positioned(sibling_block) ||
-                sibling_block->view_type == RDT_VIEW_MARKER ||
-                !layout_view_is_block_flow_box(sibling_block)) {
-                continue;
-            }
-            float sibling_extent = sibling_block->width;
-            if (sibling_block->blk && layout_axis_has_given_size(sibling_block, true)) {
-                float given_width = layout_axis_given_size(
-                    sibling_block->block(), LAYOUT_AXIS_X);
-                sibling_extent = layout_used_border_box_size(
-                    sibling_block, given_width, true);
-            }
-            float margin_before = 0.0f;
-            float margin_after = 0.0f;
-            multicol_flow_margins(containing_block, sibling_block,
-                                  &margin_before, &margin_after);
-            static_block_offset += sibling_extent + margin_before + margin_after;
-        }
+        float static_block_offset = multicol_static_flow_offset(
+            containing_block, child, LAYOUT_AXIS_X);
 
         int parent_column_count = 1;
         float parent_column_inline_extent = 0.0f;
@@ -5637,16 +5513,14 @@ static bool multicol_fragment_abspos_in_context(
         float initial_block_offset = static_block_offset -
             first_parent_column * fragment_capacity;
         if (initial_block_offset < 0.0f) initial_block_offset = 0.0f;
-        int fragment_count = (int)ceilf(
-            (initial_block_offset + continuous_extent) /
-                fragment_capacity); // INT_CAST_OK: fragment count from positive block extent
+        int fragment_count = multicol_fragment_count(
+            initial_block_offset + continuous_extent, fragment_capacity);
         if (fragment_count <= 1) return false;
 
         DomElement* child_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
         Pool* pool = multicol_layout_fragment_pool(child_elem);
         if (!pool) return false;
-        child_elem->set_layout_fragment_list(nullptr);
-        child_elem->layout_fragments_count_ref() = 0;
+        multicol_clear_layout_fragments(child);
 
         float min_x = FLT_MAX;
         float max_x = -FLT_MAX;
@@ -5680,21 +5554,11 @@ static bool multicol_fragment_abspos_in_context(
                 fragment_x = fragment_capacity - piece_extent;
             }
 
-            LayoutFragmentBox* fragment = (LayoutFragmentBox*)pool_calloc(
-                pool, sizeof(LayoutFragmentBox));
+            LayoutFragmentBox* fragment = multicol_append_layout_fragment(
+                pool, child_elem, &first, &previous, fi,
+                visual_parent_column, parent_column / parent_column_count,
+                fragment_x, fragment_y, piece_extent, fragment_inline_size);
             if (!fragment) break;
-            fragment->x = fragment_x;
-            fragment->y = fragment_y;
-            fragment->width = piece_extent;
-            fragment->height = fragment_inline_size;
-            fragment->fragment_index = fi;
-            fragment->column_index = visual_parent_column;
-            fragment->row_index = parent_column / parent_column_count;
-            fragment->next = nullptr;
-            if (!first) first = fragment;
-            if (previous) previous->next = fragment;
-            previous = fragment;
-            child_elem->layout_fragments_count_ref()++;
             min_x = min(min_x, fragment_x);
             max_x = max(max_x, fragment_x + piece_extent);
             min_y = min(min_y, fragment_y);
@@ -5709,29 +5573,19 @@ static bool multicol_fragment_abspos_in_context(
             }
         }
 
+
         if (!first || child_elem->layout_fragments_count() <= 1) {
-            child_elem->set_layout_fragment_list(nullptr);
-            child_elem->layout_fragments_count_ref() = 0;
+            multicol_clear_layout_fragments(child);
             return false;
         }
         child_elem->set_layout_fragment_list(first);
-        child->x = min_x;
-        child->y = min_y;
-        child->width = max_x - min_x;
-        child->height = max_y - min_y;
+        layout_set_view_geometry(child, min_x, min_y,
+                                 max_x - min_x, max_y - min_y);
         return true;
     }
 
-    ViewBlock* parent_multicol = nullptr;
-    for (ViewElement* ancestor = multicol->parent_view(); ancestor;
-         ancestor = ancestor->parent_view()) {
-        if (!ancestor->is_block()) continue;
-        ViewBlock* candidate = lam::view_require_block(ancestor);
-        if (is_multicol_container(candidate)) {
-            parent_multicol = candidate;
-            break;
-        }
-    }
+    ViewBlock* parent_multicol = multicol_find_parent_container(
+        multicol->parent_view());
     if (parent_multicol && parent_multicol->multicol_prop()) {
         float fragment_capacity = multicol_content_box_height_limit(parent_multicol);
         if (fragment_capacity <= 0.0f) fragment_capacity = parent_multicol->height;
@@ -5757,33 +5611,8 @@ static bool multicol_fragment_abspos_in_context(
                 parent_multicol, multicol, fragment_capacity,
                 parent_column_count, parent_column_width, parent_column_gap,
                 initial_fragment_offset, &sequence)) {
-            float static_block_offset = 0.0f;
-            for (View* sibling = containing_block->first_placed_child();
-                 sibling && sibling != static_cast<View*>(child);
-                 sibling = sibling->next()) {
-                ViewBlock* sibling_block = lam::view_as_block(sibling);
-                if (!sibling_block ||
-                    layout_block_is_out_of_flow_positioned(sibling_block) ||
-                    sibling_block->view_type == RDT_VIEW_MARKER ||
-                    !layout_view_is_block_flow_box(sibling_block)) {
-                    continue;
-                }
-                float sibling_extent = max(sibling_block->height, 0.0f);
-                if (sibling_block->blk &&
-                    layout_axis_has_given_size(sibling_block, false)) {
-                    float given_height = layout_axis_given_size(
-                        sibling_block->block(), LAYOUT_AXIS_Y);
-                    sibling_extent = max(sibling_extent,
-                        layout_used_border_box_size(
-                            sibling_block, given_height, false));
-                }
-                float margin_before = 0.0f;
-                float margin_after = 0.0f;
-                multicol_flow_margins(containing_block, sibling_block,
-                                      &margin_before, &margin_after);
-                static_block_offset += sibling_extent + margin_before +
-                    margin_after;
-            }
+            float static_block_offset = multicol_static_flow_offset(
+                containing_block, child, LAYOUT_AXIS_Y);
 
             float flow_extent = max(child->height, 0.0f);
             if (child->blk && layout_axis_has_given_size(child, false)) {
@@ -5808,10 +5637,9 @@ static bool multicol_fragment_abspos_in_context(
                     child, &sequence, static_block_offset, flow_extent,
                     fragment_width, &min_x, &min_y, &max_x, &max_y,
                     &fragment_count)) {
-                child->x = containing_block->x + min_x;
-                child->y = containing_block->y + min_y;
-                child->width = max_x - min_x;
-                child->height = max_y - min_y;
+                layout_set_view_geometry(child,
+                    containing_block->x + min_x, containing_block->y + min_y,
+                    max_x - min_x, max_y - min_y);
                 return fragment_count > 1;
             }
         }
@@ -5831,7 +5659,7 @@ static bool multicol_fragment_abspos_in_context(
         float given_height = layout_axis_given_size(child->block(), LAYOUT_AXIS_Y);
         if (given_height > continuous_height) continuous_height = given_height;
     }
-    int fragment_count = (int)ceilf(continuous_height / fragment_height); // INT_CAST_OK: fragment count from positive heights
+    int fragment_count = multicol_fragment_count(continuous_height, fragment_height);
     if (fragment_count <= 1) return false;
 
     DomElement* child_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
@@ -5847,8 +5675,7 @@ static bool multicol_fragment_abspos_in_context(
 
     Pool* pool = multicol_layout_fragment_pool(child_elem);
     if (!pool) return false;
-    child_elem->set_layout_fragment_list(nullptr);
-    child_elem->layout_fragments_count_ref() = 0;
+    multicol_clear_layout_fragments(child);
 
     float first_slot_x = 0.0f;
     float first_slot_y = 0.0f;
@@ -5874,10 +5701,8 @@ static bool multicol_fragment_abspos_in_context(
         if (context_is_parent) {
             int parent_index = slot_index / local_column_count;
             int local_index = slot_index % local_column_count;
-            LayoutFragmentBox* parent_fragment = context_fragments;
-            for (int index = 0; parent_fragment && index < parent_index; index++) {
-                parent_fragment = parent_fragment->next;
-            }
+            LayoutFragmentBox* parent_fragment = multicol_fragment_at(
+                context_fragments, parent_index);
             if (!parent_fragment) return false;
             // css-position §4.4: an abspos box is broken in the continuous
             // nested column sequence; parent fragment offsets affect the
@@ -5886,10 +5711,8 @@ static bool multicol_fragment_abspos_in_context(
             slot_y = parent_fragment->y + row_index * fragment_height;
             column_index = local_index;
         } else if (has_context_fragments) {
-            LayoutFragmentBox* context_fragment = context_fragments;
-            for (int index = 0; context_fragment && index < slot_index; index++) {
-                context_fragment = context_fragment->next;
-            }
+            LayoutFragmentBox* context_fragment = multicol_fragment_at(
+                context_fragments, slot_index);
             if (!context_fragment) return false;
             slot_x = context_fragment->x;
             slot_y += context_fragment->y;
@@ -5908,21 +5731,10 @@ static bool multicol_fragment_abspos_in_context(
         float piece_height = min(remaining_height, fragment_height);
         if (piece_height <= 0.0f) piece_height = fragment_height;
 
-        LayoutFragmentBox* fragment = (LayoutFragmentBox*)pool_calloc(
-            pool, sizeof(LayoutFragmentBox));
+        LayoutFragmentBox* fragment = multicol_append_layout_fragment(
+            pool, child_elem, &first, &previous, fi, column_index,
+            row_index, local_x, local_y, fragment_visual_width, piece_height);
         if (!fragment) break;
-        fragment->x = local_x;
-        fragment->y = local_y;
-        fragment->width = fragment_visual_width;
-        fragment->height = piece_height;
-        fragment->fragment_index = fi;
-        fragment->column_index = column_index;
-        fragment->row_index = row_index;
-        fragment->next = nullptr;
-        if (!first) first = fragment;
-        if (previous) previous->next = fragment;
-        previous = fragment;
-        child_elem->layout_fragments_count_ref()++;
         min_x = min(min_x, local_x);
         max_x = max(max_x, local_x + fragment_visual_width);
         min_y = min(min_y, local_y);
@@ -5931,8 +5743,7 @@ static bool multicol_fragment_abspos_in_context(
     }
 
     if (!first || child_elem->layout_fragments_count() <= 1) {
-        child_elem->set_layout_fragment_list(nullptr);
-        child_elem->layout_fragments_count_ref() = 0;
+        multicol_clear_layout_fragments(child);
         return false;
     }
     child_elem->set_layout_fragment_list(first);
@@ -6100,11 +5911,7 @@ static bool multicol_inline_fragment_bounds_y(View* view, bool first_fragment,
         ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
         TextRect* selected = nullptr;
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
-            if (rect->width <= 0.0f || rect->height <= 0.0f ||
-                layout_text_rect_content_kind(text, rect) ==
-                    LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE) {
-                continue;
-            }
+            if (!layout_text_rect_is_visible(text, rect)) continue;
             selected = rect;
             if (first_fragment) break;
         }
@@ -6385,14 +6192,15 @@ static float multicol_fragmented_child_union(
         }
     }
 
-    int fragment_count = (int)ceilf(
-        (initial_fragment_offset + item_height) / fragment_capacity); // INT_CAST_OK: fragment count from positive heights
-    if (fragment_count < 1) fragment_count = 1;
+    int fragment_count = multicol_fragment_count(
+        initial_fragment_offset + item_height, fragment_capacity);
     bool overflow_columns = multicol_allows_overflow_columns(container);
-    int layout_column_count = overflow_columns ? fragment_count : column_count;
-    int used_columns = overflow_columns ? fragment_count : min(column_count, fragment_count);
-    int row_count = (fragment_count + layout_column_count - 1) / layout_column_count;
-    if (row_count < 1) row_count = 1;
+    int layout_column_count = 0;
+    int used_columns = 0;
+    int row_count = 0;
+    multicol_fragment_grid_dimensions(
+        fragment_count, column_count, overflow_columns, &layout_column_count,
+        &used_columns, &row_count);
     int contained_monolithic_child_count =
         !multicol_has_vertical_inline_axis(child)
             ? multicol_contained_monolithic_child_count(child) : 0;
@@ -6406,10 +6214,8 @@ static float multicol_fragmented_child_union(
         int last_fragment = -1;
         for (View* descendant = child->first_placed_child();
              descendant; descendant = descendant->next()) {
-            ViewBlock* descendant_block = lam::view_as_block(descendant);
-            if (!descendant_block ||
-                layout_block_is_out_of_flow_positioned(descendant_block) ||
-                descendant_block->view_type == RDT_VIEW_MARKER) continue;
+        ViewBlock* descendant_block = multicol_in_flow_block(descendant);
+        if (!descendant_block) continue;
             int placed_fragment = -1;
             if (!multicol_advance_monolithic_child_flow(
                     child, descendant_block, fragment_height, &flow,
@@ -6423,12 +6229,9 @@ static float multicol_fragmented_child_union(
         }
         if (last_fragment >= 0) {
             fragment_count = last_fragment + 1;
-            layout_column_count = overflow_columns ? fragment_count : column_count;
-            used_columns = overflow_columns ? fragment_count :
-                min(column_count, fragment_count);
-            row_count = (fragment_count + layout_column_count - 1) /
-                layout_column_count;
-            if (row_count < 1) row_count = 1;
+            multicol_fragment_grid_dimensions(
+                fragment_count, column_count, overflow_columns,
+                &layout_column_count, &used_columns, &row_count);
         }
     }
     float single_line_visual_height = 0.0f;
@@ -6437,16 +6240,7 @@ static float multicol_fragmented_child_union(
     bool single_line_overflow = false;
     if (overflow_columns && multicol_inline_line_metrics(
             child, &single_line_count, &single_line_advance, &single_line_visual_height)) {
-        float line_box_height = 0.0f;
-        if (child->blk && child->block()->line_height) {
-            line_box_height = layout_resolve_line_height_value(
-                lycon, child->block()->line_height,
-                lam::dom_require<DOM_NODE_ELEMENT>(child),
-                child->fontp() ? child->fontp()->font_size : 16.0f);
-        }
-        if (line_box_height <= 0.0f && child->fontp() && child->fontp()->font_handle) {
-            line_box_height = calc_normal_line_height(child->fontp()->font_handle);
-        }
+        float line_box_height = multicol_resolve_line_advance(lycon, child);
         if (line_box_height > single_line_visual_height) {
             single_line_visual_height = line_box_height;
         }
@@ -6461,15 +6255,18 @@ static float multicol_fragmented_child_union(
         int continuation_count = (int)ceilf(remaining_after_line / fragment_height); // INT_CAST_OK: fragment count from positive heights
         fragment_count = 1 + continuation_count;
         if (fragment_count < 1) fragment_count = 1;
-        layout_column_count = fragment_count;
-        used_columns = fragment_count;
-        row_count = 1;
+        multicol_fragment_grid_dimensions(
+            fragment_count, column_count, true, &layout_column_count,
+            &used_columns, &row_count);
     }
     // Fragment union bounds retain the block border box; clipping it to the
     // fragmentainer loses overflow in DOMRect geometry.
     bool vertical_writing = multicol_has_vertical_inline_axis(container);
     bool has_authored_inline_size = layout_axis_has_given_size(child, true);
     bool has_in_flow_block_child = multicol_has_in_flow_block_child(child);
+    bool preserve_authored_block_size = vertical_writing &&
+        has_authored_inline_size && has_in_flow_block_child &&
+        child->width <= fragment_height + 0.5f;
     bool zero_width_fragment = !vertical_writing && column_width <= 0.0f &&
         child->width <= 0.0f;
     float fragment_visual_width = vertical_writing
@@ -6484,9 +6281,6 @@ static float multicol_fragmented_child_union(
     float union_width;
     float union_height;
     if (vertical_writing) {
-        bool preserve_authored_block_size = has_authored_inline_size &&
-            has_in_flow_block_child &&
-            child->width <= fragment_height + 0.5f;
         // css writing modes: an authored vertical block-size remains the
         // wrapper's border box while overflowing descendants fragment; a
         // block-size larger than its fragmentainer is itself fragmented.
@@ -6504,10 +6298,8 @@ static float multicol_fragmented_child_union(
         }
     } else {
         union_width = fragment_visual_width + (used_columns - 1) * (column_width + column_gap);
-        union_height = row_count * fragment_height + (row_count - 1) * row_gap;
-        if (!multicol_group_wraps_rows(container)) {
-            union_height = fragment_height;
-        }
+        union_height = multicol_fragment_grid_union_height(
+            multicol_group_wraps_rows(container), row_count, fragment_height, row_gap);
         if (multicol_uses_fixed_balanced_rows(container) && row_count == 1 &&
             item_height > fragment_height + row_gap + 0.5f) {
             // css multicol-2 §4.2: overflow beyond a fixed balanced row
@@ -6521,9 +6313,8 @@ static float multicol_fragmented_child_union(
         if (multicol_uses_fixed_wrapped_rows(container) &&
             container->multicol_prop()->fill == COLUMN_FILL_AUTO &&
             row_count > 1) {
-            float total_fragmented_height = initial_fragment_offset + item_height;
-            float last_piece_height = fmodf(total_fragmented_height, fragment_capacity);
-            if (last_piece_height <= 0.0f) last_piece_height = fragment_capacity;
+            float last_piece_height = multicol_last_fragment_piece_height(
+                initial_fragment_offset + item_height, fragment_capacity);
             // css multicol-2 §4.2: auto-fill exposes the final fragment's
             // visual extent, while the container still owns complete rows.
             union_height = (row_count - 1) * (fragment_height + row_gap) +
@@ -6538,9 +6329,8 @@ static float multicol_fragmented_child_union(
             union_height = max(0.0f, union_height - initial_fragment_offset);
         }
         if (zero_height_fragmentainer) {
-            float total_fragmented_height = initial_fragment_offset + item_height;
-            float last_piece_height = fmodf(total_fragmented_height, fragment_capacity);
-            if (last_piece_height <= 0.0f) last_piece_height = fragment_capacity;
+            float last_piece_height = multicol_last_fragment_piece_height(
+                initial_fragment_offset + item_height, fragment_capacity);
             union_height = (row_count - 1) * row_gap + last_piece_height;
         }
         if (single_line_overflow) union_height = single_line_visual_height;
@@ -6562,9 +6352,6 @@ static float multicol_fragmented_child_union(
         union_width = 0.0f;
     }
 
-    bool preserve_authored_block_size = vertical_writing &&
-        has_authored_inline_size && has_in_flow_block_child &&
-        child->width <= fragment_height + 0.5f;
     if (!preserve_authored_block_size) {
         multicol_store_layout_fragments(child, fragment_count, layout_column_count,
             fragment_height, column_width, column_gap, row_gap, fragment_visual_width,
@@ -6616,19 +6403,13 @@ static float multicol_fragmented_child_union(
         // css multicol: descendant forced breaks can create rows beyond the
         // phase-one height; publish the union of those generated fragments.
         fragment_count = projected_fragment_count;
-        layout_column_count = overflow_columns ? fragment_count : column_count;
-        used_columns = overflow_columns ? fragment_count :
-            min(column_count, fragment_count);
-        row_count = (fragment_count + layout_column_count - 1) /
-            layout_column_count;
-        if (row_count < 1) row_count = 1;
+        multicol_fragment_grid_dimensions(
+            fragment_count, column_count, overflow_columns,
+            &layout_column_count, &used_columns, &row_count);
         union_width = fragment_visual_width +
             (used_columns - 1) * (column_width + column_gap);
-        union_height = row_count * fragment_height +
-            (row_count - 1) * row_gap;
-        if (!multicol_group_wraps_rows(container)) {
-            union_height = fragment_height;
-        }
+        union_height = multicol_fragment_grid_union_height(
+            multicol_group_wraps_rows(container), row_count, fragment_height, row_gap);
         if (!vertical_writing && !has_authored_inline_size) {
             child->width = union_width;
         }
@@ -6884,9 +6665,8 @@ static void multicol_distribute_flow_group(
                 // keeps one column's border box while its child overflows.
                 child->width = group->column_width;
             }
-            int nested_fragment_count = (int)ceilf(
-                (cursor->block_offset + descendant_flow_extent) / target_height); // INT_CAST_OK: fragment count from positive heights
-            if (nested_fragment_count < 1) nested_fragment_count = 1;
+            int nested_fragment_count = multicol_fragment_count(
+                cursor->block_offset + descendant_flow_extent, target_height);
             if (projected_fragment_count > nested_fragment_count) {
                 nested_fragment_count = projected_fragment_count;
             }
@@ -6901,8 +6681,8 @@ static void multicol_distribute_flow_group(
                 }
             }
             if (nested_fragment_count > 1) {
-                int nested_row_count = (required_fragment_count +
-                    group->column_count - 1) / group->column_count;
+                int nested_row_count = multicol_fragment_row_count(
+                    required_fragment_count, group->column_count);
                 float nested_group_height = group->wraps_rows
                     ? nested_row_count * target_height +
                         (nested_row_count - 1) * group->row_gap
@@ -6942,13 +6722,11 @@ static void multicol_distribute_flow_group(
                     group->column_count, group->column_width, group->column_gap,
                     cursor->block_offset, &parallel_used_columns,
                     &parallel_flow_height);
-            multicol_group_record_fragment_count(group, parallel_used_columns);
+            multicol_record_used_columns(
+                group, parallel_used_columns, used_column_count);
             if (parallel_union_height > group->group_used_height) {
                 group->group_used_height = parallel_union_height;
             }
-                if (used_column_count && parallel_used_columns > *used_column_count) {
-                    *used_column_count = parallel_used_columns;
-                }
             }
             continue;
         }
@@ -6967,10 +6745,8 @@ static void multicol_distribute_flow_group(
             }
             adjust_height(info, child, index == group_start, &placed_height,
                 placement_block_offset);
-            multicol_group_record_fragment_count(group, zero_used_columns);
-            if (used_column_count && zero_used_columns > *used_column_count) {
-                *used_column_count = zero_used_columns;
-            }
+            multicol_record_used_columns(
+                group, zero_used_columns, used_column_count);
             cursor->pending_margin_after = info.margin_after;
             cursor->has_item_in_fragment = true;
             if (index + 1 < group_end || info.break_after_column) {
@@ -7043,10 +6819,8 @@ static void multicol_distribute_flow_group(
         if (!content_handled && should_fragment &&
             !nested_fit_to_remaining_fragment) {
             int used_columns = 1;
-            int fragment_count = target_height > 0.0f
-                ? (int)ceilf(info.content_height / target_height) // INT_CAST_OK: fragment count from positive heights
-                : 1;
-            if (fragment_count < 1) fragment_count = 1;
+            int fragment_count = multicol_fragment_count(
+                info.content_height, target_height);
             float flow_height = multicol_text_box_trim_fragmented_flow_height(
                 child, info.content_height, target_height, fragment_count,
                 cursor->block_offset);
@@ -7060,10 +6834,8 @@ static void multicol_distribute_flow_group(
                 lycon, container, child, info.content_height, target_height,
                 group->column_count, group->column_width, group->column_gap,
                 cursor->block_offset, &used_columns, generated_flow_height);
-            multicol_group_record_fragment_count(group, used_columns);
-            if (used_column_count && used_columns > *used_column_count) {
-                *used_column_count = used_columns;
-            }
+            multicol_record_used_columns(
+                group, used_columns, used_column_count);
             multicol_cursor_advance_fragmented_block(cursor, fragmented_flow_height);
             placed_height = 0.0f;
         }
@@ -7254,10 +7026,9 @@ static float multicol_split_child_around_spanners(
         multicol_split_child_around_spanners(
             lycon, container, nested_spanner_child,
             column_count, column_width, column_gap, true);
-        child->x = nested_spanner_child->x;
-        child->y = nested_wrapper ? 0.0f : original_child_y + original_child_height;
-        child->width = nested_spanner_child->width;
-        child->height = nested_spanner_child->height;
+        layout_set_view_geometry(child, nested_spanner_child->x,
+            nested_wrapper ? 0.0f : original_child_y + original_child_height,
+            nested_spanner_child->width, nested_spanner_child->height);
         child->content_height = nested_spanner_child->content_height;
         // The wrapper's continuation box is empty, but its spanner still
         // contributes the original flow extent to the containing multicol.
@@ -7605,11 +7376,11 @@ static float multicol_split_child_around_spanners(
         if (multicol_group_wraps_rows(container)) {
             continuation_column = child_count % column_count;
         }
-        child->x = original_child_x + continuation_column * (column_width + column_gap);
-        child->y = child_fragment_origin_y + continuation_row *
-            (fragmentainer_height + row_gap);
-        child->width = original_child_width;
-        child->height = min(original_child_height, fragmentainer_height);
+        layout_set_view_geometry(child,
+            original_child_x + continuation_column * (column_width + column_gap),
+            child_fragment_origin_y + continuation_row *
+                (fragmentainer_height + row_gap), original_child_width,
+            min(original_child_height, fragmentainer_height));
         child->content_height = original_child_height;
         for (int k = 0; k < child_count; k++) {
             if (children[k].spans_all) {
@@ -7686,10 +7457,8 @@ static float multicol_split_child_around_spanners(
             child->height = original_child_height;
             child->content_height = original_child_height;
         } else if (has_inline_text) {
-            child->x = original_child_x;
-            child->y = inline_origin_y;
-            child->width = original_child_width;
-            child->height = new_height;
+            layout_set_view_geometry(child, original_child_x, inline_origin_y,
+                                     original_child_width, new_height);
             child->content_height = new_height;
         } else {
             if (child->width < union_width) child->width = union_width;
@@ -7806,9 +7575,37 @@ struct MulticolMixedInlineRecord {
     View* br;
     float original_x;
     float original_y;
+    float width;
     float height;
     int line_index;
 };
+
+static void multicol_init_mixed_inline_record(
+    MulticolMixedInlineRecord* record, View* view, TextRect* rect) {
+    if (!record || !view) return;
+    record->text = rect ? lam::view_require<RDT_VIEW_TEXT>(view) : nullptr;
+    record->rect = rect;
+    record->br = rect ? nullptr : view;
+    record->original_x = rect ? rect->x : view->x;
+    record->original_y = rect ? rect->y : view->y;
+    record->width = rect ? rect->width : 0.0f;
+    record->height = rect ? rect->height : view->height;
+    record->line_index = -1;
+}
+
+static bool multicol_collect_mixed_inline_view(
+    View* current,
+    MulticolMixedInlineRecord* records,
+    int* record_count,
+    bool reject_blocks = true
+);
+
+static bool multicol_collect_mixed_inline_records(
+    View* first,
+    MulticolMixedInlineRecord* records,
+    int* record_count,
+    bool reject_blocks = true
+);
 
 struct MulticolMixedInlineLine {
     float original_y;
@@ -7834,61 +7631,11 @@ static void multicol_realign_inline_for_fragmented_float(
     if (!block || fragment_width <= 0.0f || fragment_pitch <= 0.0f ||
         !block->blk) return;
 
-    struct InlineLineRecord {
-        ViewText* text;
-        TextRect* rect;
-        View* br;
-        float x;
-        float y;
-        float width;
-        float height;
-    };
     constexpr int MAX_FLOAT_INLINE_RECORDS = 512;
-    InlineLineRecord records[MAX_FLOAT_INLINE_RECORDS] = {};
+    MulticolMixedInlineRecord records[MAX_FLOAT_INLINE_RECORDS] = {};
     int record_count = 0;
-    auto collect = [&](auto&& collect, View* view) -> void {
-        if (!view || record_count >= MAX_FLOAT_INLINE_RECORDS) return;
-        if (view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
-            for (TextRect* rect = text->rect; rect &&
-                 record_count < MAX_FLOAT_INLINE_RECORDS; rect = rect->next) {
-                if (rect->width <= 0.0f || rect->height <= 0.0f ||
-                    layout_text_rect_content_kind(text, rect) ==
-                        LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE) {
-                    continue;
-                }
-                InlineLineRecord& record = records[record_count++];
-                record.text = text;
-                record.rect = rect;
-                record.br = nullptr;
-                record.x = rect->x;
-                record.y = rect->y;
-                record.width = rect->width;
-                record.height = rect->height;
-            }
-            return;
-        }
-        if (view->view_type == RDT_VIEW_BR) {
-            InlineLineRecord& record = records[record_count++];
-            record.text = nullptr;
-            record.rect = nullptr;
-            record.br = view;
-            record.x = view->x;
-            record.y = view->y;
-            record.width = 0.0f;
-            record.height = view->height;
-            return;
-        }
-        if (view->view_type == RDT_VIEW_INLINE && view->is_element()) {
-            for (View* child = lam::dom_require<DOM_NODE_ELEMENT>(view)->first_child;
-                 child; child = child->next_sibling) {
-                collect(collect, child);
-            }
-        }
-    };
-    for (View* child = block->first_placed_child(); child; child = child->next()) {
-        collect(collect, child);
-    }
+    multicol_collect_mixed_inline_records(
+        block->first_placed_child(), records, &record_count, false);
     if (record_count == 0) return;
 
     float local_float_left = float_x - block->x;
@@ -7897,30 +7644,24 @@ static void multicol_realign_inline_for_fragmented_float(
     int float_fragment = (int)floorf(
         local_float_left / fragment_pitch); // INT_CAST_OK: non-negative fragment index
     if (float_fragment < 0) float_fragment = 0;
-    CssEnum text_align = block->block()->text_align;
-    if (text_align == CSS_VALUE_START) {
-        text_align = block->block()->direction == CSS_VALUE_RTL
-            ? CSS_VALUE_RIGHT : CSS_VALUE_LEFT;
-    } else if (text_align == CSS_VALUE_END) {
-        text_align = block->block()->direction == CSS_VALUE_RTL
-            ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
-    }
+    CssEnum text_align = layout_resolve_text_align(
+        block->block()->text_align, block->block()->direction);
     if (text_align != CSS_VALUE_CENTER && text_align != CSS_VALUE_RIGHT) return;
 
     for (int i = 0; i < record_count; i++) {
-        InlineLineRecord& line = records[i];
-        float line_min_x = line.x;
-        float line_max_x = line.x + line.width;
-        float line_top = line.y;
-        float line_bottom = line.y + line.height;
+        MulticolMixedInlineRecord& line = records[i];
+        float line_min_x = line.original_x;
+        float line_max_x = line.original_x + line.width;
+        float line_top = line.original_y;
+        float line_bottom = line.original_y + line.height;
         int line_end = i + 1;
         while (line_end < record_count &&
-               fabsf(records[line_end].y - line.y) <= 1.0f) {
-            line_min_x = min(line_min_x, records[line_end].x);
+               fabsf(records[line_end].original_y - line.original_y) <= 1.0f) {
+            line_min_x = min(line_min_x, records[line_end].original_x);
             line_max_x = max(line_max_x,
-                records[line_end].x + records[line_end].width);
+                records[line_end].original_x + records[line_end].width);
             line_bottom = max(line_bottom,
-                records[line_end].y + records[line_end].height);
+                records[line_end].original_y + records[line_end].height);
             line_end++;
         }
         int line_fragment = (int)floorf(
@@ -7955,20 +7696,16 @@ static void multicol_realign_inline_for_fragmented_float(
     }
 }
 
-static bool multicol_collect_mixed_inline_view(
-    View* current,
-    MulticolMixedInlineRecord* records,
-    int* record_count
-);
-
 static bool multicol_collect_mixed_inline_records(
     View* first,
     MulticolMixedInlineRecord* records,
-    int* record_count
+    int* record_count,
+    bool reject_blocks
 ) {
     if (!first || !records || !record_count) return true;
     for (View* current = first; current; current = current->next()) {
-        if (!multicol_collect_mixed_inline_view(current, records, record_count)) {
+        if (!multicol_collect_mixed_inline_view(
+                current, records, record_count, reject_blocks)) {
             return false;
         }
     }
@@ -7978,46 +7715,31 @@ static bool multicol_collect_mixed_inline_records(
 static bool multicol_collect_mixed_inline_view(
     View* current,
     MulticolMixedInlineRecord* records,
-    int* record_count
+    int* record_count,
+    bool reject_blocks
 ) {
     if (!current || !records || !record_count) return true;
     if (*record_count >= MAX_MULTICOL_BLOCKS) return false;
     if (current->view_type == RDT_VIEW_TEXT) {
         ViewText* text = lam::view_require<RDT_VIEW_TEXT>(current);
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
-            if (rect->width <= 0.0f || rect->height <= 0.0f ||
-                layout_text_rect_content_kind(text, rect) ==
-                    LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE) {
-                continue;
-            }
+            if (!layout_text_rect_is_visible(text, rect)) continue;
             MulticolMixedInlineRecord& record = records[*record_count];
-            record.text = text;
-            record.rect = rect;
-            record.br = nullptr;
-            record.original_x = rect->x;
-            record.original_y = rect->y;
-            record.height = rect->height;
-            record.line_index = -1;
+            multicol_init_mixed_inline_record(&record, current, rect);
             (*record_count)++;
         }
         return true;
     }
     if (current->view_type == RDT_VIEW_BR) {
         MulticolMixedInlineRecord& record = records[*record_count];
-        record.text = nullptr;
-        record.rect = nullptr;
-        record.br = current;
-        record.original_x = current->x;
-        record.original_y = current->y;
-        record.height = current->height;
-        record.line_index = -1;
+        multicol_init_mixed_inline_record(&record, current, nullptr);
         (*record_count)++;
         return true;
     }
     if (current->view_type == RDT_VIEW_INLINE) {
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(current);
         if (!multicol_collect_mixed_inline_records(
-                span->first_child, records, record_count)) {
+                span->first_child, records, record_count, reject_blocks)) {
             return false;
         }
         return true;
@@ -8027,8 +7749,7 @@ static bool multicol_collect_mixed_inline_view(
     }
     // a nested block needs its own anonymous flow box; leave it to the
     // ordinary spanner/fragmentation paths until that box is represented.
-    if (lam::view_as_block(current)) return false;
-    return false;
+    return reject_blocks ? !lam::view_as_block(current) : true;
 }
 
 static bool multicol_reflow_mixed_direct_flow(
@@ -8061,10 +7782,13 @@ static bool multicol_reflow_mixed_direct_flow(
         &lycon->scratch, MAX_MULTICOL_BLOCKS * sizeof(MulticolMixedInlineRecord));
     MulticolMixedInlineLine* lines = (MulticolMixedInlineLine*)scratch_calloc(
         &lycon->scratch, MAX_MULTICOL_BLOCKS * sizeof(MulticolMixedInlineLine));
-    if (!items || !records || !lines) {
+    auto release_scratch = [&]() {
         if (lines) scratch_free(&lycon->scratch, lines);
         if (records) scratch_free(&lycon->scratch, records);
         if (items) scratch_free(&lycon->scratch, items);
+    };
+    if (!items || !records || !lines) {
+        release_scratch();
         return false;
     }
 
@@ -8108,16 +7832,8 @@ static bool multicol_reflow_mixed_direct_flow(
                 line_advance = delta;
             }
         }
-        if (line_advance <= 0.0f && block->blk && block->block()->line_height) {
-            line_advance = layout_resolve_line_height_value(
-                lycon, block->block()->line_height,
-                lam::dom_require<DOM_NODE_ELEMENT>(block),
-                block->fontp() ? block->fontp()->font_size : 16.0f);
-        }
-        if (line_advance <= 0.0f && block->fontp() && block->fontp()->font_handle) {
-            line_advance = calc_normal_line_height(block->fontp()->font_handle);
-        }
-        if (line_advance <= 0.0f) line_advance = lines[line_start].line_height;
+        line_advance = multicol_resolve_line_advance(
+            lycon, block, line_advance, lines[line_start].line_height);
         if (line_advance <= 0.0f) line_advance = 16.0f;
 
         MulticolMixedFlowItem& item = items[item_count++];
@@ -8207,18 +7923,14 @@ static bool multicol_reflow_mixed_direct_flow(
         collection_ok = false;
     }
     if (!collection_ok || !has_inline_flow || block_count < 1 || item_count <= block_count) {
-        scratch_free(&lycon->scratch, lines);
-        scratch_free(&lycon->scratch, records);
-        scratch_free(&lycon->scratch, items);
+        release_scratch();
         return false;
     }
 
     MulticolGroupScratch balance_scratch = {};
     if (!balance_scratch.init(&lycon->scratch)) {
         balance_scratch.release(&lycon->scratch);
-        scratch_free(&lycon->scratch, lines);
-        scratch_free(&lycon->scratch, records);
-        scratch_free(&lycon->scratch, items);
+        release_scratch();
         return false;
     }
     float total_height = 0.0f;
@@ -8246,9 +7958,7 @@ static bool multicol_reflow_mixed_direct_flow(
     }
     balance_scratch.release(&lycon->scratch);
     if (target_height <= 0.0f) {
-        scratch_free(&lycon->scratch, lines);
-        scratch_free(&lycon->scratch, records);
-        scratch_free(&lycon->scratch, items);
+        release_scratch();
         return false;
     }
 
@@ -8314,14 +8024,8 @@ static bool multicol_reflow_mixed_direct_flow(
                             record.original_x + record_width);
                     }
                     if (line_min_x < line_max_x) {
-                        CssEnum text_align = block->block()->text_align;
-                        if (text_align == CSS_VALUE_START) {
-                            text_align = block->block()->direction == CSS_VALUE_RTL
-                                ? CSS_VALUE_RIGHT : CSS_VALUE_LEFT;
-                        } else if (text_align == CSS_VALUE_END) {
-                            text_align = block->block()->direction == CSS_VALUE_RTL
-                                ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
-                        }
+                        CssEnum text_align = layout_resolve_text_align(
+                            block->block()->text_align, block->block()->direction);
                         if (text_align == CSS_VALUE_CENTER ||
                             text_align == CSS_VALUE_RIGHT) {
                             float decoration_extent =
@@ -8353,15 +8057,10 @@ static bool multicol_reflow_mixed_direct_flow(
                     if (normalize_inline_origin) {
                         record_x += relative_column * pitch;
                     }
-                    if (record.rect) {
-                        record.rect->x = normalize_inline_origin
-                            ? record_x : record_x + column * pitch;
-                        record.rect->y = line_y + line_delta;
-                    } else if (record.br) {
-                        record.br->x = normalize_inline_origin
-                            ? record_x : record_x + column * pitch;
-                        record.br->y = line_y + line_delta;
-                    }
+                    float projected_x = normalize_inline_origin
+                        ? record_x : record_x + column * pitch;
+                    multicol_set_inline_position(
+                        record.rect, record.br, projected_x, line_y + line_delta);
                 }
                 fragment_used += item.line_advance;
                 if (realign_after_parallel_float) previous_parallel_fragment = -1;
@@ -8624,9 +8323,7 @@ static bool multicol_reflow_mixed_direct_flow(
     if (out_last_fragment) *out_last_fragment = fragment_index;
     if (out_end_offset) *out_end_offset = fragment_used;
 
-    scratch_free(&lycon->scratch, lines);
-    scratch_free(&lycon->scratch, records);
-    scratch_free(&lycon->scratch, items);
+    release_scratch();
     return true;
 }
 
@@ -8785,19 +8482,10 @@ static float multicol_project_mixed_direct_inline_content(
             // fragmentation capacity, without moving its phase-one glyph box.
             visual_bottom -= normal_line_offset;
         }
-        bool should_break = line_slot > 0 && visual_bottom > target_height + 0.5f;
-        if (!should_break && widows > 1 && li + 1 < line_count) {
-            int remaining_after_this = line_count - (li + 1);
-            int remaining_with_this = line_count - li;
-            if (remaining_after_this > 0 &&
-                remaining_after_this < widows &&
-                remaining_with_this >= widows &&
-                line_slot + 1 >= orphans) {
-                float next_bottom = fragment_start_offset + (line_slot + 1) * line_advance +
-                    line_offset + visual_height;
-                should_break = next_bottom > target_height + 0.5f;
-            }
-        }
+        bool should_break = multicol_should_break_line_for_widows_orphans(
+            line_slot, visual_bottom, target_height, li, line_count,
+            widows, orphans, fragment_start_offset +
+            (line_slot + 1) * line_advance + line_offset + visual_height);
 
         if (should_break) {
             current_fragment++;
@@ -8872,14 +8560,29 @@ static float multicol_project_mixed_direct_inline_content(
 static bool multicol_text_has_visible_rect(DomText* text) {
     if (!text) return false;
     for (TextRect* rect = text->rect; rect; rect = rect->next) {
-        if (rect->width > 0.0f && rect->height > 0.0f &&
-            layout_text_rect_content_kind(
-                lam::view_require_text(static_cast<View*>(text)), rect) !=
-                LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE) {
-            return true;
-        }
+        if (layout_text_rect_is_visible(
+                lam::view_require_text(static_cast<View*>(text)), rect)) return true;
     }
     return false;
+}
+
+static bool multicol_should_break_line_for_widows_orphans(
+    int line_slot, float visual_bottom, float target_height,
+    int line_index, int line_count, int widows, int orphans,
+    float next_bottom
+) {
+    bool should_break = line_slot > 0 && visual_bottom > target_height + 0.5f;
+    if (!should_break && widows > 1 && line_index + 1 < line_count) {
+        int remaining_after_this = line_count - (line_index + 1);
+        int remaining_with_this = line_count - line_index;
+        if (remaining_after_this > 0 &&
+            remaining_after_this < widows &&
+            remaining_with_this >= widows &&
+            line_slot + 1 >= orphans) {
+            should_break = next_bottom > target_height + 0.5f;
+        }
+    }
+    return should_break;
 }
 
 static bool multicol_place_direct_block_after_inline_flow(
@@ -8982,12 +8685,15 @@ static int multicol_simulate_column_count(
         float fragment_used = 0.0f;
         float pending_margin_after = 0.0f;
         bool has_item = false;
+        auto advance_fragment = [&]() {
+            fragment_count++;
+            fragment_used = 0.0f;
+            pending_margin_after = 0.0f;
+            has_item = false;
+        };
         for (int i = 0; i < item_count; i++) {
             if (break_before[i] && has_item) {
-                fragment_count++;
-                fragment_used = 0.0f;
-                pending_margin_after = 0.0f;
-                has_item = false;
+                advance_fragment();
             }
 
             float margin_before = has_item
@@ -9033,10 +8739,7 @@ static int multicol_simulate_column_count(
                 continue;
             }
             if (has_item && fragment_used + needed > target_height + 0.5f) {
-                fragment_count++;
-                fragment_used = 0.0f;
-                pending_margin_after = 0.0f;
-                has_item = false;
+                advance_fragment();
                 needed = item_content_heights[i];
             }
 
@@ -9057,10 +8760,7 @@ static int multicol_simulate_column_count(
             has_item = true;
 
             if (break_after[i] && i + 1 < item_count) {
-                fragment_count++;
-                fragment_used = 0.0f;
-                pending_margin_after = 0.0f;
-                has_item = false;
+                advance_fragment();
             }
         }
         return fragment_count;
@@ -9068,10 +8768,13 @@ static int multicol_simulate_column_count(
 
     int fragment_count = 1;
     float fragment_used = 0;
+    auto advance_fragment = [&]() {
+        fragment_count++;
+        fragment_used = 0.0f;
+    };
     for (int i = 0; i < item_count; i++) {
         if (break_before[i] && fragment_used > 0) {
-            fragment_count++;
-            fragment_used = 0;
+            advance_fragment();
         }
 
         float item_height = item_heights[i];
@@ -9082,25 +8785,21 @@ static int multicol_simulate_column_count(
             while (fragment_used + remaining > target_height) {
                 float available = target_height - fragment_used;
                 if (available > 0.0f) remaining -= available;
-                fragment_count++;
-                fragment_used = 0.0f;
+                advance_fragment();
             }
             fragment_used += remaining;
             if (break_after[i] && i + 1 < item_count) {
-                fragment_count++;
-                fragment_used = 0.0f;
+                advance_fragment();
             }
             continue;
         }
         if (fragment_used > 0 && fragment_used + item_height > target_height) {
-            fragment_count++;
-            fragment_used = 0;
+            advance_fragment();
         }
         fragment_used += item_height;
 
         if (break_after[i] && i + 1 < item_count) {
-            fragment_count++;
-            fragment_used = 0;
+            advance_fragment();
         }
     }
     return fragment_count;
@@ -9409,6 +9108,14 @@ static void multicol_group_record_fragment_count(
     int materialized_count = min(fragment_count, MAX_MULTICOL_BLOCKS);
     if (materialized_count > group->fragment_count) {
         group->fragment_count = materialized_count;
+    }
+}
+
+static void multicol_record_used_columns(
+    ColumnGroup* group, int used_columns, int* out_used_columns) {
+    multicol_group_record_fragment_count(group, used_columns);
+    if (out_used_columns && used_columns > *out_used_columns) {
+        *out_used_columns = used_columns;
     }
 }
 
@@ -10066,11 +9773,7 @@ static void multicol_layout_children(LayoutContext* lycon, ViewBlock* block) {
     DomNode* child = block ? block->first_child : nullptr;
     if (!child) return;
     prescan_and_layout_floats(lycon, child, block);
-    do {
-        layout_flow_node(lycon, child);
-        child = child->next_sibling;
-    } while (child);
-    if (!lycon->line.is_line_start) line_break(lycon);
+    layout_flow_children(lycon, child, true);
 }
 
 static float multicol_adjust_contained_block_start(ViewBlock* container,
@@ -10596,20 +10299,11 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                     ? normal_line_offset : 0.0f;
                 float visual_bottom = fragment_start_offset + line_slot * line_advance +
                     line_offset + lr.line_height;
-                bool should_break = line_slot > 0 && visual_bottom > target_height + 0.5f;
-                if (!should_break && widows > 1 && li + 1 < line_count) {
-                    int remaining_after_this = line_count - (li + 1);
-                    int remaining_with_this = line_count - li;
-                    if (remaining_after_this > 0 &&
-                        remaining_after_this < widows &&
-                        remaining_with_this >= widows &&
-                        line_slot + 1 >= orphans) {
-                        float next_bottom = fragment_start_offset +
-                            (line_slot + 1) * line_advance + line_offset +
-                            lines[li + 1].line_height;
-                        should_break = next_bottom > target_height + 0.5f;
-                    }
-                }
+                bool should_break = multicol_should_break_line_for_widows_orphans(
+                    line_slot, visual_bottom, target_height, li, line_count,
+                    widows, orphans, fragment_start_offset +
+                    (line_slot + 1) * line_advance + line_offset +
+                    lines[li + 1].line_height);
                 if (should_break && line_slot < orphans) should_break = false;
                 if (should_break &&
                     (current_fragment < column_count - 1 || wraps_rows)) {
@@ -11088,12 +10782,10 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             if (row_height > 0.0f && group_extent > 0.0f) {
                 // css multicol-2 §4.2: auto-fill still reserves every
                 // fixed-height row needed by the fragmented flow.
-                int required_slot_count = (int)ceilf(group_total_height /
-                    row_height); // INT_CAST_OK: row slot count from positive flow extent
-                if (required_slot_count < 1) required_slot_count = 1;
-                int row_count = (required_slot_count + group.column_count - 1) /
-                    group.column_count;
-                if (row_count < 1) row_count = 1;
+                int required_slot_count = multicol_fragment_count(
+                    group_total_height, row_height);
+                int row_count = multicol_fragment_row_count(
+                    required_slot_count, group.column_count);
                 group_extent = max(group_extent, row_count * row_height);
             }
         }

@@ -33,6 +33,29 @@ static float grid_container_content_size_for_item_percentages(LayoutContext* lyc
     return content_size > 0.0f ? content_size : -1.0f;
 }
 
+struct GridNodeScratch {
+    LayoutContext* lycon;
+    DomNode** data;
+    int count;
+
+    GridNodeScratch(LayoutContext* context, ViewBlock* container, bool initialize)
+        : lycon(context), data(nullptr), count(0) {
+        int capacity = layout_count_potential_items(container, false);
+        if (capacity > 0) {
+            data = (DomNode**)scratch_calloc(
+                &lycon->scratch, (size_t)capacity * sizeof(DomNode*));
+        }
+        if (data) {
+            count = collect_grid_item_nodes(
+                lycon, container, container->first_child, data, capacity, initialize);
+        }
+    }
+
+    ~GridNodeScratch() {
+        if (data) scratch_free(&lycon->scratch, data);
+    }
+};
+
 static float grid_item_percentage_base_from_parent(LayoutContext* lycon, ViewBlock* grid_item) {
     if (!grid_item) return 0.0f;
     // CSS Display 3: a contents ancestor does not establish the item's
@@ -285,15 +308,9 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
         }
         // Check whether positioned children need the resolved grid lines.
         bool has_absolute_children = false;
-        int node_capacity = lycon->grid_container->allocated_items;
-        DomNode** nodes = node_capacity > 0
-            ? (DomNode**)scratch_calloc(&lycon->scratch,
-                (size_t)node_capacity * sizeof(DomNode*)) : nullptr;
-        int node_count = nodes
-            ? collect_grid_item_nodes(lycon, grid_container,
-                grid_container->first_child, nodes, node_capacity, false) : 0;
-        for (int node_index = 0; node_index < node_count; node_index++) {
-            DomNode* ch = nodes[node_index];
+        GridNodeScratch nodes(lycon, grid_container, false);
+        for (int node_index = 0; node_index < nodes.count; node_index++) {
+            DomNode* ch = nodes.data[node_index];
             if (ch->is_element()) {
                 DomElement* ce = ch->as_element();
                 if (ce->position &&
@@ -310,7 +327,6 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                 }
             }
         }
-        if (nodes) scratch_free(&lycon->scratch, nodes);
         // CSS Grid §11: explicit tracks size an empty grid, even without
         // positioned children that consume its grid lines.
         layout_grid_container(lycon, grid_container);
@@ -553,16 +569,10 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
         lycon, container_content_width, container_content_height,
         container_content_height > 0.0f);
 
-    int node_capacity = layout_count_potential_items(grid_container, false);
-    DomNode** nodes = node_capacity > 0
-        ? (DomNode**)scratch_calloc(&lycon->scratch,
-            (size_t)node_capacity * sizeof(DomNode*)) : nullptr;
-    int node_count = nodes
-        ? collect_grid_item_nodes(lycon, grid_container,
-            grid_container->first_child, nodes, node_capacity, true) : 0;
+    GridNodeScratch nodes(lycon, grid_container, true);
     int item_count = 0;
-    for (int node_index = 0; node_index < node_count; node_index++) {
-        DomNode* child = nodes[node_index];
+    for (int node_index = 0; node_index < nodes.count; node_index++) {
+        DomNode* child = nodes.data[node_index];
         if (child->is_element()) {
             DomElement* elem = child->as_element();
             // Always resolve styles first (position:absolute may not be known until after cascade)
@@ -583,8 +593,6 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
             }
         }
     }
-
-    if (nodes) scratch_free(&lycon->scratch, nodes);
 
     log_leave();
     return item_count;
@@ -611,10 +619,7 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
     // the same storage as a generic block and trips its structural invariant.
     elem->view_type = is_table ? RDT_VIEW_TABLE : RDT_VIEW_BLOCK;
     // Initialize dimensions (will be set by grid algorithm)
-    elem->x = 0;
-    elem->y = 0;
-    elem->width = 0;
-    elem->height = 0;
+    layout_set_view_geometry(elem, 0.0f, 0.0f, 0.0f, 0.0f);
     // Force boundary properties allocation for proper measurement
     elem->ensure_boundary(lycon);
     // The parent-item union is independent of the element-role union, so form
@@ -650,15 +655,9 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
         lycon, container_content_width, container_content_height,
         container_content_height > 0.0f);
 
-    int node_capacity = layout_count_potential_items(container, false);
-    DomNode** nodes = node_capacity > 0
-        ? (DomNode**)scratch_calloc(&lycon->scratch,
-            (size_t)node_capacity * sizeof(DomNode*)) : nullptr;
-    int node_count = nodes
-        ? collect_grid_item_nodes(lycon, container, container->first_child,
-            nodes, node_capacity, false) : 0;
-    for (int node_index = 0; node_index < node_count; node_index++) {
-        DomNode* child = nodes[node_index];
+    GridNodeScratch nodes(lycon, container, false);
+    for (int node_index = 0; node_index < nodes.count; node_index++) {
+        DomNode* child = nodes.data[node_index];
         if (child->is_element()) {
             ViewBlock* item = lam::view_require_block(child);
             // Skip absolute positioned and display:none items
@@ -685,8 +684,6 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
             }
         }
     }
-
-    if (nodes) scratch_free(&lycon->scratch, nodes);
 
     log_leave();
 }
@@ -864,15 +861,8 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
         layout_table_content(lycon, grid_item, grid_item->display);
     } else {
         // Standard flow layout for grid item content
-        DomNode* child = grid_item->first_child;
-        while (child) {
-            layout_flow_node(lycon, child);
-            child = child->next_sibling;
-        }
-        // Finalize any pending line content
-        if (!lycon->line.is_line_start) {
-            line_break(lycon);
-        }
+        // finalize any pending line content
+        layout_flow_children(lycon, grid_item->first_child, true);
     }
     // Update grid item content dimensions
     // Note: max_width and advance_y are relative to the content box

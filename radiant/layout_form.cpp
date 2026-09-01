@@ -83,6 +83,13 @@ static bool layout_select_child_is_hidden(DomElement* child) {
     return false;
 }
 
+static bool hide_select_child_if_needed(DomElement* child) {
+    if (!layout_select_child_is_hidden(child)) return false;
+    child->view_type = RDT_VIEW_NONE;
+    zero_form_child_box(child);
+    return true;
+}
+
 float form_control_em_size(LayoutContext* lycon, ViewBlock* block, float em) {
     float font_size = block && block->font && block->fontp()->font_size > 0.0f
         ? block->fontp()->font_size : 0.0f;
@@ -128,13 +135,11 @@ static void form_apply_axis_min_max(ViewBlock* block, bool horizontal,
                                     float* content_size) {
     if (!block || !block->blk || !border_size || !content_size) return;
     if (is_border_box) {
-        *border_size = horizontal ? layout_apply_min_max_axis(block, *border_size, true, false)
-                                  : layout_apply_min_max_axis(block, *border_size, false, false);
+        *border_size = layout_apply_min_max_axis(block, *border_size, horizontal, false);
         *content_size = layout_content_size_from_border_box(
             block, *border_size, horizontal);
     } else {
-        *content_size = horizontal ? layout_apply_min_max_axis(block, *content_size, true, false)
-                                   : layout_apply_min_max_axis(block, *content_size, false, false);
+        *content_size = layout_apply_min_max_axis(block, *content_size, horizontal, false);
         *border_size = layout_border_size_from_content_box(
             block, *content_size, horizontal);
     }
@@ -1042,11 +1047,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
             NameId ctag = celem->tag();
 
             if (ctag == MARKUP_NAME_OPTION) {
-                if (layout_select_child_is_hidden(celem)) {
-                    celem->view_type = RDT_VIEW_NONE;
-                    zero_form_child_box(celem);
-                    continue;
-                }
+                if (hide_select_child_if_needed(celem)) continue;
                 layout_form_option_child(celem, is_listbox, border_left,
                                          &current_y, option_width, row_height);
             } else if (ctag == MARKUP_NAME_HR) {
@@ -1060,11 +1061,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                     zero_form_child_box(celem);
                 }
             } else if (ctag == MARKUP_NAME_OPTGROUP) {
-                if (layout_select_child_is_hidden(celem)) {
-                    celem->view_type = RDT_VIEW_NONE;
-                    zero_form_child_box(celem);
-                    continue;
-                }
+                if (hide_select_child_if_needed(celem)) continue;
                 celem->view_type = RDT_VIEW_BLOCK;
                 if (is_listbox) {
                     // Native listboxes expose each optgroup label as one row;
@@ -1081,19 +1078,11 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                     DomElement* gcelem = gc->as_element();
                     uintptr_t gctag = gcelem->tag();
                     if (gctag == MARKUP_NAME_OPTION) {
-                        if (layout_select_child_is_hidden(gcelem)) {
-                            gcelem->view_type = RDT_VIEW_NONE;
-                            zero_form_child_box(gcelem);
-                            continue;
-                        }
+                        if (hide_select_child_if_needed(gcelem)) continue;
                         layout_form_option_child(gcelem, is_listbox, border_left,
                                                  &current_y, option_width, row_height);
                     } else if (gctag == MARKUP_NAME_OPTGROUP) {
-                        if (layout_select_child_is_hidden(gcelem)) {
-                            gcelem->view_type = RDT_VIEW_NONE;
-                            zero_form_child_box(gcelem);
-                            continue;
-                        }
+                        if (hide_select_child_if_needed(gcelem)) continue;
                         gcelem->view_type = RDT_VIEW_BLOCK;
                         zero_form_child_box(gcelem);
                     }

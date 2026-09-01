@@ -251,96 +251,73 @@ static bool self_alignment_equal(CssSelfAlignment left, CssSelfAlignment right) 
         left.legacy == right.legacy;
 }
 
-static bool resolve_place_self_component(CssDeclaration* shorthand,
-                                         CssDeclaration* longhand,
-                                         bool allow_physical,
-                                         CssSelfAlignment* component) {
+typedef CssSelfAlignment (*PlaceComponentParser)(const CssValue*, bool);
+
+static bool resolve_place_component(CssDeclaration* shorthand,
+                                    CssDeclaration* longhand,
+                                    bool allow_physical,
+                                    PlaceComponentParser parser,
+                                    CssSelfAlignment* component) {
     if (!component || !longhand ||
         (shorthand && css_declaration_cascade_compare(longhand, shorthand) <= 0)) {
         return true;
     }
-    CssSelfAlignment parsed = css_parse_self_alignment_value(longhand->value,
-                                                             allow_physical);
+    CssSelfAlignment parsed = parser(longhand->value, allow_physical);
     if (parsed.value == CSS_VALUE__UNDEF) return false;
     *component = parsed;
+    return true;
+}
+
+typedef bool (*PlaceShorthandParser)(const CssValue*, CssSelfAlignment*, CssSelfAlignment*);
+
+static bool serialize_place_alignment(
+        DomElement* element, int pseudo_type, char* out, size_t out_size,
+        CssPropertyCode shorthand_id, CssPropertyCode align_id,
+        CssPropertyCode justify_id, CssEnum initial_value,
+        PlaceShorthandParser shorthand_parser,
+        PlaceComponentParser component_parser) {
+    if (!element || pseudo_type != 0) return false;
+    CssDeclaration* shorthand = computed_decl(element, shorthand_id, 0);
+    CssSelfAlignment align = {initial_value};
+    CssSelfAlignment justify = {initial_value};
+    if (shorthand && (!shorthand->value ||
+        !shorthand_parser(shorthand->value, &align, &justify))) {
+        return serialize_decl_recursive(element, shorthand_id, 0, 0, out, out_size);
+    }
+    // CSS Cascade expands a shorthand before constituent longhands compete.
+    if (!resolve_place_component(shorthand, computed_decl(element, align_id, 0),
+            false, component_parser, &align) ||
+        !resolve_place_component(shorthand, computed_decl(element, justify_id, 0),
+            true, component_parser, &justify)) {
+        return false;
+    }
+
+    char align_text[64];
+    char justify_text[64];
+    if (!format_self_alignment(align_text, sizeof(align_text), align) ||
+        !format_self_alignment(justify_text, sizeof(justify_text), justify)) {
+        return false;
+    }
+    // CSS Align 3 §8 omits the second component when both longhand values match.
+    if (self_alignment_equal(align, justify)) return copy_text(out, out_size, align_text);
+    snprintf(out, out_size, "%s %s", align_text, justify_text);
     return true;
 }
 
 static bool serialize_place_self(const CssPropAccessor*, DomElement* element,
                                  int pseudo_type, char* out, size_t out_size) {
-    if (!element || pseudo_type != 0) return false;
-    CssDeclaration* shorthand = computed_decl(element, CSS_PROPERTY_PLACE_SELF, 0);
-    CssSelfAlignment align = {CSS_VALUE_AUTO};
-    CssSelfAlignment justify = {CSS_VALUE_AUTO};
-    if (shorthand && (!shorthand->value ||
-        !css_parse_place_self_alignment(shorthand->value, &align, &justify))) {
-        return serialize_decl_recursive(element, CSS_PROPERTY_PLACE_SELF, 0, 0,
-                                        out, out_size);
-    }
-    // CSS Cascade expands a shorthand before constituent longhands compete.
-    if (!resolve_place_self_component(shorthand,
-            computed_decl(element, CSS_PROPERTY_ALIGN_SELF, 0), false, &align) ||
-        !resolve_place_self_component(shorthand,
-            computed_decl(element, CSS_PROPERTY_JUSTIFY_SELF, 0), true, &justify)) {
-        return false;
-    }
-
-    char align_text[64];
-    char justify_text[64];
-    if (!format_self_alignment(align_text, sizeof(align_text), align) ||
-        !format_self_alignment(justify_text, sizeof(justify_text), justify)) {
-        return false;
-    }
-    // CSS Align 3 §8 omits the second component when both longhand values match.
-    if (self_alignment_equal(align, justify)) return copy_text(out, out_size, align_text);
-    snprintf(out, out_size, "%s %s", align_text, justify_text);
-    return true;
-}
-
-static bool resolve_place_content_component(CssDeclaration* shorthand,
-                                            CssDeclaration* longhand,
-                                            bool allow_physical,
-                                            CssSelfAlignment* component) {
-    if (!component || !longhand ||
-        (shorthand && css_declaration_cascade_compare(longhand, shorthand) <= 0)) {
-        return true;
-    }
-    CssSelfAlignment parsed = css_parse_content_alignment_value(longhand->value,
-                                                                allow_physical);
-    if (parsed.value == CSS_VALUE__UNDEF) return false;
-    *component = parsed;
-    return true;
+    return serialize_place_alignment(
+        element, pseudo_type, out, out_size, CSS_PROPERTY_PLACE_SELF,
+        CSS_PROPERTY_ALIGN_SELF, CSS_PROPERTY_JUSTIFY_SELF, CSS_VALUE_AUTO,
+        css_parse_place_self_alignment, css_parse_self_alignment_value);
 }
 
 static bool serialize_place_content(const CssPropAccessor*, DomElement* element,
                                     int pseudo_type, char* out, size_t out_size) {
-    if (!element || pseudo_type != 0) return false;
-    CssDeclaration* shorthand = computed_decl(element, CSS_PROPERTY_PLACE_CONTENT, 0);
-    CssSelfAlignment align = {CSS_VALUE_NORMAL};
-    CssSelfAlignment justify = {CSS_VALUE_NORMAL};
-    if (shorthand && (!shorthand->value ||
-        !css_parse_place_content_alignment(shorthand->value, &align, &justify))) {
-        return serialize_decl_recursive(element, CSS_PROPERTY_PLACE_CONTENT, 0, 0,
-                                        out, out_size);
-    }
-    // CSS Cascade expands a shorthand before constituent longhands compete.
-    if (!resolve_place_content_component(shorthand,
-            computed_decl(element, CSS_PROPERTY_ALIGN_CONTENT, 0), false, &align) ||
-        !resolve_place_content_component(shorthand,
-            computed_decl(element, CSS_PROPERTY_JUSTIFY_CONTENT, 0), true, &justify)) {
-        return false;
-    }
-
-    char align_text[64];
-    char justify_text[64];
-    if (!format_self_alignment(align_text, sizeof(align_text), align) ||
-        !format_self_alignment(justify_text, sizeof(justify_text), justify)) {
-        return false;
-    }
-    // CSS Align 3 §8 omits the second component when both longhand values match.
-    if (self_alignment_equal(align, justify)) return copy_text(out, out_size, align_text);
-    snprintf(out, out_size, "%s %s", align_text, justify_text);
-    return true;
+    return serialize_place_alignment(
+        element, pseudo_type, out, out_size, CSS_PROPERTY_PLACE_CONTENT,
+        CSS_PROPERTY_ALIGN_CONTENT, CSS_PROPERTY_JUSTIFY_CONTENT, CSS_VALUE_NORMAL,
+        css_parse_place_content_alignment, css_parse_content_alignment_value);
 }
 
 static bool serialize_display(const CssPropAccessor*, DomElement* element, int pseudo_type,

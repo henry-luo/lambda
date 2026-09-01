@@ -320,6 +320,26 @@ static void custom_layout_apply_parent_size(ViewBlock* block,
     }
 }
 
+static void custom_layout_expand_bounds(bool* has_bounds,
+                                        float* min_x, float* min_y,
+                                        float* max_x, float* max_y,
+                                        float left, float top,
+                                        float right, float bottom) {
+    if (!has_bounds || !min_x || !min_y || !max_x || !max_y) return;
+    if (!*has_bounds) {
+        *min_x = left;
+        *min_y = top;
+        *max_x = right;
+        *max_y = bottom;
+        *has_bounds = true;
+        return;
+    }
+    *min_x = min(*min_x, left);
+    *min_y = min(*min_y, top);
+    *max_x = max(*max_x, right);
+    *max_y = max(*max_y, bottom);
+}
+
 bool custom_layout_register(const char* name, CustomLayoutFn fn) {
     if (!name || name[0] == '\0' || !fn) return false;
     for (int i = 0; i < g_custom_layout_registry_count; i++) {
@@ -504,18 +524,8 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
         float child_top = placement->y;
         float child_right = placement->x + child->border_box.width;
         float child_bottom = placement->y + child->border_box.height;
-        if (!has_bounds) {
-            min_x = child_left;
-            min_y = child_top;
-            max_x = child_right;
-            max_y = child_bottom;
-            has_bounds = true;
-        } else {
-            min_x = min(min_x, child_left);
-            min_y = min(min_y, child_top);
-            max_x = max(max_x, child_right);
-            max_y = max(max_y, child_bottom);
-        }
+        custom_layout_expand_bounds(&has_bounds, &min_x, &min_y, &max_x, &max_y,
+                                    child_left, child_top, child_right, child_bottom);
     }
 
     for (int i = 0; i < child_count; i++) {
@@ -527,18 +537,8 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
         child->view->y = 0.0f;
         float child_right = child->border_box.width;
         float child_bottom = child->border_box.height;
-        if (!has_bounds) {
-            min_x = 0.0f;
-            min_y = 0.0f;
-            max_x = child_right;
-            max_y = child_bottom;
-            has_bounds = true;
-        } else {
-            min_x = min(min_x, 0.0f);
-            min_y = min(min_y, 0.0f);
-            max_x = max(max_x, child_right);
-            max_y = max(max_y, child_bottom);
-        }
+        custom_layout_expand_bounds(&has_bounds, &min_x, &min_y, &max_x, &max_y,
+                                    0.0f, 0.0f, child_right, child_bottom);
         log_error("CUSTOM_LAYOUT_MISSING_PLACEMENT %s layout='%s' child_index=%d",
                   block->source_loc(), layout_name, i);
     }

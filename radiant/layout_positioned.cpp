@@ -1078,28 +1078,19 @@ static float calculate_static_line_x(BlockContext* pa_block, Linebox* pa_line,
     return line_x;
 }
 
-static float inline_containing_block_origin_x(ViewBlock* containing_block) {
+static float inline_containing_block_origin(ViewBlock* containing_block,
+                                            LayoutAxis axis) {
     if (!containing_block || containing_block->view_type != RDT_VIEW_INLINE) {
         return 0.0f;
     }
     ViewSpan* cb_span = lam::view_require<RDT_VIEW_INLINE>(
         static_cast<View*>(containing_block));
     if (cb_span->has_fragment_union(FRAGMENT_UNION_INLINE_CB)) {
-        return cb_span->fragment_union(FRAGMENT_UNION_INLINE_CB)->min_x;
+        const FragmentUnion* fragment = cb_span->fragment_union(
+            FRAGMENT_UNION_INLINE_CB);
+        return axis == LAYOUT_AXIS_X ? fragment->min_x : fragment->min_y;
     }
-    return containing_block->x;
-}
-
-static float inline_containing_block_origin_y(ViewBlock* containing_block) {
-    if (!containing_block || containing_block->view_type != RDT_VIEW_INLINE) {
-        return 0.0f;
-    }
-    ViewSpan* cb_span = lam::view_require<RDT_VIEW_INLINE>(
-        static_cast<View*>(containing_block));
-    if (cb_span->has_fragment_union(FRAGMENT_UNION_INLINE_CB)) {
-        return cb_span->fragment_union(FRAGMENT_UNION_INLINE_CB)->min_y;
-    }
-    return containing_block->y;
+    return layout_axis_pos(containing_block, axis);
 }
 
 static float inline_containing_block_width(ViewBlock* containing_block) {
@@ -1120,6 +1111,19 @@ static float inline_containing_block_width(ViewBlock* containing_block) {
     return containing_block->width;
 }
 
+static bool positioned_has_percentage_width_child(ViewBlock* block) {
+    if (!block) return false;
+    for (View* child = block->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        ViewBlock* child_block = lam::view_as_block(child);
+        if (child_block && child_block->blk &&
+            !isnan(child_block->block()->given_width_percent)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static float static_position_line_x(BlockContext* pa_block, Linebox* pa_line,
                                     TextDirection static_direction, bool was_inline,
                                     ViewBlock* containing_block) {
@@ -1127,7 +1131,8 @@ static float static_position_line_x(BlockContext* pa_block, Linebox* pa_line,
         ? calculate_static_line_x(pa_block, pa_line, static_direction, was_inline)
         : 0.0f;
     if (was_inline && containing_block && containing_block->view_type == RDT_VIEW_INLINE) {
-        float inline_cb_origin = inline_containing_block_origin_x(containing_block);
+        float inline_cb_origin = inline_containing_block_origin(
+            containing_block, LAYOUT_AXIS_X);
         // CSS Position 3 §4.1: static inline coordinates are local to the
         // positioned inline containing block, not its block ancestor.
         line_x -= inline_cb_origin;
@@ -1924,19 +1929,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                     float h_bp = layout_box_metrics(block).pad_border_h;
                     float used_width = block->width + h_bp;
                     float remaining = cb_pad_width - block->positionp()->left - block->positionp()->right - used_width;
-                    TextDirection cb_dir = TD_LTR;
-                    if (cb->blk && cb->block_mut()->direction == CSS_VALUE_RTL) {
-                        cb_dir = TD_RTL;
-                    } else if (cb->specified_style) {
-                        CssValue* dir_val = (CssValue*)style_tree_get_computed_value(
-                            cb->specified_style, CSS_PROPERTY_DIRECTION,
-                            cb->parent && cb->parent->is_element() ?
-                                lam::dom_require<DOM_NODE_ELEMENT>(cb->parent)->specified_style : NULL);
-                        if (dir_val && dir_val->type == CSS_VALUE_TYPE_KEYWORD &&
-                            dir_val->data.keyword == CSS_VALUE_RTL) {
-                            cb_dir = TD_RTL;
-                        }
-                    }
+                    TextDirection cb_dir = get_static_position_direction(cb);
                     distribute_abs_auto_margins(block, LAYOUT_AXIS_X, remaining, cb_dir);
                     block->x = cb_border_left + block->positionp()->left + block->boundary()->margin.left;
                 }
@@ -2008,7 +2001,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                 : static_direction == TD_RTL
                     ? pa_line->advance_x - pa_line->left
                     : pa_line->advance_x - (pa_block ? pa_block->text_indent : 0.0f) -
-                        inline_containing_block_origin_y(cb);
+                        inline_containing_block_origin(cb, LAYOUT_AXIS_Y);
             if (cb->view_type != RDT_VIEW_INLINE) {
                 block->y = pa_line->advance_x;
             }
@@ -2019,7 +2012,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                     lam::view_require<RDT_VIEW_INLINE>(parent))) {
                 // CSS Position 3 §4.1: the static position of a blockified
                 // child is local to its own inline containing-block fragment.
-                block->y -= inline_containing_block_origin_y(cb);
+                block->y -= inline_containing_block_origin(cb, LAYOUT_AXIS_Y);
             } else if (static_direction == TD_RTL) {
                 // CSS Writing Modes: an outer inline containing block keeps the
                 // parent line's RTL indent as the child's local static offset.
@@ -2027,7 +2020,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             } else {
                 // css Position 3 §4.1: LTR static coordinates are local to the
                 // outer inline containing block's first fragment.
-                block->y -= inline_containing_block_origin_y(cb);
+                block->y -= inline_containing_block_origin(cb, LAYOUT_AXIS_Y);
             }
         }
     }
@@ -2161,23 +2154,20 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             if (pre_layout_width > 0) {
             // CSS 2.1 §10.3.7: non-replaced abspos auto width is resolved by
             // effect of that used width, not a second sizing pass.
-            bool has_child_pct_width = false;
             bool has_table_flow_child = false;
             bool has_percentage_spacing = layout_view_tree_has_percentage_spacing(block);
             for (View* ch = block->first_child; ch; ch = ch->next_sibling) {
                 if (!ch->is_element()) continue;
                 ViewBlock* child_block = lam::view_as_block(ch);
                 if (!child_block) continue;
-                if (child_block->blk && !isnan(child_block->block()->given_width_percent)) {
-                    has_child_pct_width = true;
-                }
                 if (view_tree_has_table_flow(child_block)) {
                     has_table_flow_child = true;
                 }
             }
 
             float final_width = pre_layout_width;
-            if (!has_child_pct_width && !has_percentage_spacing &&
+            if (!positioned_has_percentage_width_child(block) &&
+                !has_percentage_spacing &&
                 lycon->block.max_width > 0.0f) {
                 float post_layout_flow_width = lycon->block.max_width +
                     layout_axis_decoration_end(block->bound, LAYOUT_AXIS_X);
@@ -2205,18 +2195,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             // CSS 2.1 §10.3.7: When the pre-layout width was computed via shrink-to-fit
             // max_width < shrink-to-fit. The container must not shrink below the
             if (block->width < pre_layout_width) {
-                bool has_child_pct_width = false;
-                for (View* ch = block->first_child; ch; ch = ch->next_sibling) {
-                    if (ch->is_element()) {
-                        ViewBlock* cb = lam::view_as_block(ch);
-                        if (!cb) continue;
-                        if (cb->blk && !isnan(cb->block()->given_width_percent)) {
-                            has_child_pct_width = true;
-                            break;
-                        }
-                    }
-                }
-                if (has_child_pct_width) {
+                if (positioned_has_percentage_width_child(block)) {
                     block->width = pre_layout_width;
                 }
             }

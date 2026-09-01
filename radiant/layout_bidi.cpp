@@ -148,11 +148,13 @@ static uint32_t bidi_marker_representative_codepoint(CssEnum direction) {
     return direction == CSS_VALUE_RTL ? 0x0627 : 0x0041;
 }
 
-int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir) {
+static int bidi_find_strong_direction(DomNode* node, bool skip_explicit_dir,
+                                      bool first) {
     if (!node) return 0;
     if (node->is_text()) {
         DomText* text = node->as_text();
         if (!text->text || text->length == 0) return 0;
+        int last_strong = 0;
         const char* cursor = text->text;
         const char* end = cursor + text->length;
         while (cursor < end) {
@@ -160,10 +162,13 @@ int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir) {
             int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
             if (bytes <= 0) { cursor++; continue; }
             int strong_class = utf_bidi_strong_class(codepoint);
-            if (strong_class != 0) return strong_class;
+            if (strong_class != 0) {
+                if (first) return strong_class;
+                last_strong = strong_class;
+            }
             cursor += bytes;
         }
-        return 0;
+        return last_strong;
     }
     if (!node->is_element()) return 0;
     DomElement* element = node->as_element();
@@ -177,46 +182,23 @@ int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir) {
     // the containing block direction when the value starts with Arabic text.
     if (element->tag_id == MARKUP_NAME_TEXTAREA) return 0;
     if (skip_explicit_dir && element->get_attribute("dir")) return 0;
+    int last_strong = 0;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        int strong_class = layout_find_first_strong_direction(child, skip_explicit_dir);
-        if (strong_class != 0) return strong_class;
+        int strong_class = bidi_find_strong_direction(child, skip_explicit_dir, first);
+        if (strong_class != 0) {
+            if (first) return strong_class;
+            last_strong = strong_class;
+        }
     }
-    return 0;
+    return last_strong;
+}
+
+int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir) {
+    return bidi_find_strong_direction(node, skip_explicit_dir, true);
 }
 
 int layout_find_last_strong_direction(DomNode* node, bool skip_explicit_dir) {
-    if (!node) return 0;
-    if (node->is_text()) {
-        DomText* text = node->as_text();
-        if (!text->text || text->length == 0) return 0;
-        int last_strong = 0;
-        const char* cursor = text->text;
-        const char* end = cursor + text->length;
-        while (cursor < end) {
-            uint32_t codepoint = 0;
-            int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
-            if (bytes <= 0) { cursor++; continue; }
-            int strong_class = utf_bidi_strong_class(codepoint);
-            if (strong_class != 0) last_strong = strong_class;
-            cursor += bytes;
-        }
-        return last_strong;
-    }
-    if (!node->is_element()) return 0;
-    DomElement* element = node->as_element();
-    if (element->tag_id == MARKUP_NAME_SCRIPT ||
-        element->tag_id == MARKUP_NAME_STYLE ||
-        (element->tag_name && strcmp(element->tag_name, "::marker") == 0)) {
-        return 0;
-    }
-    if (element->tag_id == MARKUP_NAME_TEXTAREA) return 0;
-    if (skip_explicit_dir && element->get_attribute("dir")) return 0;
-    int last_strong = 0;
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        int strong_class = layout_find_last_strong_direction(child, skip_explicit_dir);
-        if (strong_class != 0) last_strong = strong_class;
-    }
-    return last_strong;
+    return bidi_find_strong_direction(node, skip_explicit_dir, false);
 }
 
 CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback) {
@@ -378,6 +360,24 @@ static float bidi_span_edge_width(ViewSpan* span, bool left) {
     return margin + padding + border;
 }
 
+static BidiCharFragment* bidi_append_atomic_fragment(
+    BidiCharFragment* chars, int* cursor, View* view, uint32_t codepoint,
+    float width) {
+    if (!chars || !cursor) return nullptr;
+    BidiCharFragment* fragment = &chars[(*cursor)++];
+    fragment->text = nullptr;
+    fragment->atomic_view = view;
+    fragment->rect = nullptr;
+    fragment->rect_slot = -1;
+    fragment->logical_index = *cursor - 1;
+    fragment->codepoint = codepoint;
+    fragment->width = width;
+    fragment->advance_width = width;
+    fragment->visual_width = width;
+    fragment->visual_x = 0.0f;
+    return fragment;
+}
+
 static float bidi_char_raw_width(LayoutContext* lycon, ViewText* text,
                                  uint32_t codepoint, float* visual_left,
                                  float* visual_width,
@@ -532,13 +532,11 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
                 // by its complete atomic border box, including inline padding.
                 span_info->left_edge = 0.0f;
                 span_info->right_edge = 0.0f;
-                BidiCharFragment* fragment = &chars[(*char_cursor)++];
-                fragment->atomic_view = static_cast<View*>(span_info->span);
-                fragment->codepoint = span_info->span->blk->direction == CSS_VALUE_RTL
-                    ? 0x0627 : 0x0041;
-                fragment->width = span_info->span->width;
-                fragment->advance_width = fragment->width;
-                fragment->visual_width = fragment->width;
+                bidi_append_atomic_fragment(
+                    chars, char_cursor, static_cast<View*>(span_info->span),
+                    span_info->span->blk->direction == CSS_VALUE_RTL
+                        ? 0x0627 : 0x0041,
+                    span_info->span->width);
                 span_info->logical_end = *char_cursor - 1;
                 continue;
             }
@@ -551,34 +549,17 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
         if (current->view_type == RDT_VIEW_MARKER) {
             MarkerProp* marker = (MarkerProp*)current->as_element()->blk;
             if (marker && !marker->is_outside && marker->width > 0.0f) {
-                BidiCharFragment* fragment = &chars[(*char_cursor)++];
-                fragment->text = nullptr;
-                fragment->atomic_view = current;
-                fragment->rect = nullptr;
-                fragment->rect_slot = -1;
-                fragment->logical_index = *char_cursor - 1;
-                fragment->codepoint = bidi_marker_representative_codepoint(direction);
-                fragment->width = marker->width;
-                fragment->advance_width = fragment->width;
-                fragment->visual_width = fragment->width;
-                fragment->visual_x = 0.0f;
+                bidi_append_atomic_fragment(
+                    chars, char_cursor, current,
+                    bidi_marker_representative_codepoint(direction), marker->width);
             }
             continue;
         }
         if (current->view_type == RDT_VIEW_INLINE_BLOCK) {
-            BidiCharFragment* fragment = &chars[(*char_cursor)++];
-            fragment->text = nullptr;
-            fragment->atomic_view = current;
-            fragment->rect = nullptr;
-            fragment->rect_slot = -1;
-            fragment->logical_index = *char_cursor - 1;
             // UAX #9 treats an atomic inline box as an object, not as a letter
             // from the box's fallback font; U+FFFC gives it neutral bidi type.
-            fragment->codepoint = 0xFFFC;
-            fragment->width = current->width;
-            fragment->advance_width = fragment->width;
-            fragment->visual_width = fragment->width;
-            fragment->visual_x = 0.0f;
+            bidi_append_atomic_fragment(chars, char_cursor, current, 0xFFFC,
+                                        current->width);
             continue;
         }
     }
@@ -858,13 +839,6 @@ static void bidi_place_visual_line(LayoutContext* lycon,
             if (shift != 0.0f) {
                 layout_shift_view_children(static_cast<View*>(span_info->span),
                                             shift, 0.0f);
-            }
-        }
-    }
-    for (int i = 0; i < rect_count; i++) {
-        for (int j = 0; j < rects[i].char_count; j++) {
-            if (chars[rects[i].first_char + j].codepoint == 0x00AD) {
-                break;
             }
         }
     }

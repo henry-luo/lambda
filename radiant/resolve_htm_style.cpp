@@ -350,6 +350,14 @@ static void apply_html_axis_value(LayoutContext* lycon, ViewBlock* block,
     }
 }
 
+static void apply_html_dimension_default(LayoutContext* lycon, ViewBlock* block,
+                                         LayoutAxis axis, float value,
+                                         const HtmlDimensionPolicy* policy) {
+    apply_html_axis_value(lycon, policy->persist ? block : nullptr, axis, value,
+                          false, 0.0f, policy->clear_unresolved_percent,
+                          policy->store_resolved_percent);
+}
+
 static void apply_html_dimension_attribute(LayoutContext* lycon, DomNode* element,
                                            ViewBlock* block, LayoutAxis axis,
                                            const char* attribute, float default_value,
@@ -357,10 +365,7 @@ static void apply_html_dimension_attribute(LayoutContext* lycon, DomNode* elemen
     const char* attr = element ? element->get_attribute(attribute) : nullptr;
     if (!attr) {
         if (policy->default_when_missing) {
-            apply_html_axis_value(lycon, policy->persist ? block : nullptr,
-                                  axis, default_value, false, 0.0f,
-                                  policy->clear_unresolved_percent,
-                                  policy->store_resolved_percent);
+            apply_html_dimension_default(lycon, block, axis, default_value, policy);
         }
         return;
     }
@@ -369,10 +374,7 @@ static void apply_html_dimension_attribute(LayoutContext* lycon, DomNode* elemen
     if (!parse_html_dimension_attr(attr, policy->allow_percent,
                                    policy->require_digit_start, &dimension)) {
         if (policy->default_when_invalid) {
-            apply_html_axis_value(lycon, policy->persist ? block : nullptr,
-                                  axis, default_value, false, 0.0f,
-                                  policy->clear_unresolved_percent,
-                                  policy->store_resolved_percent);
+            apply_html_dimension_default(lycon, block, axis, default_value, policy);
         }
         return;
     }
@@ -875,6 +877,26 @@ static void apply_html_q_quote_defaults(LayoutContext* lycon, DomElement* elemen
     }
 }
 
+static void apply_html_centered_popup_style(LayoutContext* lycon, ViewBlock* block,
+                                            float padding_em) {
+    block->ensure_position(lycon);
+    block->position->position = CSS_VALUE_FIXED;
+    block->position->top = block->position->right =
+        block->position->bottom = block->position->left = 0.0f;
+    block->position->has_top = block->position->has_right =
+        block->position->has_bottom = block->position->has_left = true;
+    block->ensure_boundary(lycon);
+    radiant_margin_set_type_all(&block->boundary_mut()->margin, CSS_VALUE_AUTO);
+    radiant_spacing_set_all(&block->boundary_mut()->padding,
+                            lycon->font.style->font_size * padding_em);
+    apply_html_uniform_border(lycon, block, 3.0f, CSS_VALUE_SOLID, nullptr, true);
+    block->ensure_block(lycon);
+    block->blk->given_width = block->blk->given_height = -1.0f;
+    block->blk->given_width_type = block->blk->given_height_type = CSS_VALUE_FIT_CONTENT;
+    block->ensure_scroll(lycon);
+    block->scroller->overflow_x = block->scroller->overflow_y = CSS_VALUE_AUTO;
+}
+
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     ViewSpan* span = lam::view_require_element(static_cast<View*>(elmt));
     // Default-style resolution runs for both block and inline elements,
@@ -896,22 +918,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (dom_elem->has_attribute("popover") &&
             (dom_elem->is_popover_open() || popover_has_display_override)) {
             // popover UA styling supplies the fit-content box even when author display keeps it in flow
-            block->ensure_position(lycon);
-            block->position->position = CSS_VALUE_FIXED;
-            block->position->top = block->position->right =
-                block->position->bottom = block->position->left = 0.0f;
-            block->position->has_top = block->position->has_right =
-                block->position->has_bottom = block->position->has_left = true;
-            block->ensure_boundary(lycon);
-            radiant_margin_set_type_all(&block->boundary_mut()->margin, CSS_VALUE_AUTO);
-            radiant_spacing_set_all(&block->boundary_mut()->padding,
-                                    lycon->font.style->font_size * 0.25f);
-            apply_html_uniform_border(lycon, block, 3.0f, CSS_VALUE_SOLID, nullptr, true);
-            block->ensure_block(lycon);
-            block->blk->given_width = block->blk->given_height = -1.0f;
-            block->blk->given_width_type = block->blk->given_height_type = CSS_VALUE_FIT_CONTENT;
-            block->ensure_scroll(lycon);
-            block->scroller->overflow_x = block->scroller->overflow_y = CSS_VALUE_AUTO;
+            apply_html_centered_popup_style(lycon, block, 0.25f);
             if (dom_elem->is_popover_open() && dom_elem->tag_id == MARKUP_NAME_OBJECT &&
                 !dom_elem->get_attribute(MARKUP_NAME_DATA)) {
                 // an open object fallback keeps the replaced default size while fit-content includes popup chrome
@@ -1784,22 +1791,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->display.inner = CSS_VALUE_NONE;
         } else if (elmt->is_element() && elmt->as_element()->is_dialog_modal()) {
             // modal dialogs use the fixed, centered fit-content UA box before authored insets apply
-            block->ensure_position(lycon);
-            block->position->position = CSS_VALUE_FIXED;
-            block->position->top = block->position->right =
-                block->position->bottom = block->position->left = 0.0f;
-            block->position->has_top = block->position->has_right =
-                block->position->has_bottom = block->position->has_left = true;
-            block->ensure_boundary(lycon);
-            radiant_margin_set_type_all(&block->boundary_mut()->margin, CSS_VALUE_AUTO);
-            radiant_spacing_set_all(&block->boundary_mut()->padding,
-                                    lycon->font.style->font_size);
-            apply_html_uniform_border(lycon, block, 3.0f, CSS_VALUE_SOLID, nullptr, true);
-            block->ensure_block(lycon);
-            block->blk->given_width = block->blk->given_height = -1.0f;
-            block->blk->given_width_type = block->blk->given_height_type = CSS_VALUE_FIT_CONTENT;
-            block->ensure_scroll(lycon);
-            block->scroller->overflow_x = block->scroller->overflow_y = CSS_VALUE_AUTO;
+            apply_html_centered_popup_style(lycon, block, 1.0f);
         }
         break;
     }

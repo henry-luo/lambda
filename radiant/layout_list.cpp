@@ -16,29 +16,15 @@
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
-// Static helpers: extract counter property values from element CSS
-
-static const char* counter_name_from_css_value(CssValue* item) {
-    if (!item) return nullptr;
-    if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
-        return item->data.custom_property.name;
-    }
-    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(item->data.keyword);
-        return info ? info->name : nullptr;
-    }
-    return nullptr;
-}
-
 static const char* counter_name_from_reversed_value(CssValue* item) {
     if (!item) return nullptr;
     if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function) {
         CssFunction* function = item->data.function;
         if (!function->name || strcmp(function->name, "reversed") != 0 ||
             function->arg_count < 1) return nullptr;
-        return function->args ? counter_name_from_css_value(function->args[0]) : nullptr;
+        return function->args ? layout_css_counter_name(function->args[0], false) : nullptr;
     }
-    return counter_name_from_css_value(item);
+    return layout_css_counter_name(item, false);
 }
 
 static bool get_element_counter_property_value(DomElement* elem, CssPropertyCode property,
@@ -55,7 +41,7 @@ static bool get_element_counter_property_value(DomElement* elem, CssPropertyCode
 
     if (val->type == CSS_VALUE_TYPE_LIST) {
         for (int i = 0; i < val->data.list.count; i++) {
-            const char* name = counter_name_from_css_value(val->data.list.values[i]);
+            const char* name = layout_css_counter_name(val->data.list.values[i], false);
             if (name && strcmp(name, counter_name) == 0) {
                 if (i + 1 < val->data.list.count &&
                     val->data.list.values[i + 1]->type == CSS_VALUE_TYPE_NUMBER) {
@@ -67,7 +53,7 @@ static bool get_element_counter_property_value(DomElement* elem, CssPropertyCode
             }
         }
     } else {
-        const char* name = counter_name_from_css_value(val);
+        const char* name = layout_css_counter_name(val, false);
         if (name && strcmp(name, counter_name) == 0) {
             *out_value = implicit_value;
             return true;
@@ -158,12 +144,6 @@ static bool sum_reversed_counter_incs(DomElement* parent, const char* counter_na
         }
     }
     return false;
-}
-// Extract counter name from a reversed() CSS function value
-static const char* get_reversed_counter_name(CssFunction* func) {
-    if (!func || !func->name || strcmp(func->name, "reversed") != 0 ||
-        func->arg_count < 1 || !func->args) return nullptr;
-    return counter_name_from_css_value(func->args[0]);
 }
 // Counter Spec Extraction from Style Trees
 
@@ -318,7 +298,9 @@ void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem
     // dynamic initial value is the negated increment sum plus the last
     // non-zero negated increment and any first counter-set value.
     auto compute_reversed = [&](CssFunction* func) {
-        const char* rev_name = get_reversed_counter_name(func);
+        if (!func || !func->name || strcmp(func->name, "reversed") != 0 ||
+            func->arg_count < 1 || !func->args) return;
+        const char* rev_name = layout_css_counter_name(func->args[0], false);
         if (!rev_name) return;
         int total = 0, last_nz = 0, set_val = 0;
         bool has_set = sum_reversed_counter_incs(dom_elem, rev_name, &total, &last_nz,
@@ -479,6 +461,35 @@ static bool list_marker_intrinsic_size(DomElement* parent_elem, ImageSurface* im
     return true;
 }
 
+static bool set_marker_image_geometry(DomElement* parent_elem,
+                                      MarkerProp* marker_prop,
+                                      float image_default_size, float image_gap,
+                                      float effective_zoom) {
+    if (!marker_prop) return false;
+    if (marker_prop->is_image_marker) {
+        marker_prop->content_width = image_default_size;
+        marker_prop->width = image_default_size + image_gap;
+        marker_prop->height = image_default_size;
+        return true;
+    }
+    if (!marker_prop->loaded_image) return false;
+    if (!marker_prop->loaded_image->has_intrinsic_size) {
+        marker_prop->content_width = image_default_size;
+        marker_prop->width = image_default_size + image_gap;
+        marker_prop->height = image_default_size;
+        return true;
+    }
+    float image_width = 0.0f;
+    float image_height = 0.0f;
+    if (list_marker_intrinsic_size(parent_elem, marker_prop->loaded_image,
+                                   effective_zoom, &image_width, &image_height)) {
+        marker_prop->content_width = image_width;
+        marker_prop->width = image_width + image_gap;
+        marker_prop->height = image_height;
+    }
+    return true;
+}
+
 // Create a ::marker element with the given properties
 static DomElement* create_marker_element(LayoutContext* lycon, DomElement* parent_elem,
                                          CssEnum marker_style, float font_size,
@@ -551,39 +562,16 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     }
     // CSS Lists 3 §4.2: compute marker width from content
     // For text markers, measure actual text width; for bullets, use fixed bullet size + padding
-    if (marker_prop->is_image_marker) {
-        // CSS Lists 3 §3.3: an image marker without intrinsic dimensions uses
-        // the default object size of 1em in both axes.
-        marker_prop->content_width = image_default_size;
-        marker_prop->width = image_default_size + image_gap;
-        marker_prop->height = image_default_size;
-    } else if (marker_prop->loaded_image) {
-        ImageSurface* img = marker_prop->loaded_image;
-        if (!img->has_intrinsic_size) {
-            // CSS Lists 3 uses the list marker's 1em default object size when
-            // an image has no natural width/height; do not expose SVG's generic
-            // 300x150 fallback as a marker's intrinsic dimensions.
-            marker_prop->content_width = image_default_size;
-            marker_prop->width = image_default_size + image_gap;
-            marker_prop->height = image_default_size;
-        } else {
-            float image_width = 0.0f;
-            float image_height = 0.0f;
-            if (list_marker_intrinsic_size(parent_elem, img, effective_zoom,
-                                           &image_width, &image_height)) {
-                marker_prop->content_width = image_width;
-                marker_prop->width = image_width + image_gap;
-                marker_prop->height = image_height;
-            }
-        }
-    } else if (marker_prop->text_content && font_handle) {
+    if (!set_marker_image_geometry(parent_elem, marker_prop, image_default_size,
+                                   image_gap, effective_zoom) &&
+        marker_prop->text_content && font_handle) {
         TextExtents extents = font_measure_text(font_handle, marker_prop->text_content,
                                                  (int)strlen(marker_prop->text_content)); // INT_CAST_OK: string length
         marker_prop->width = extents.width;
-    } else if (is_bullet_marker) {
+    } else if (!marker_prop->loaded_image && is_bullet_marker) {
         marker_prop->width = list_marker_bullet_inline_size(
             font_size, is_outside, marker_prop->reserves_first_line);
-    } else {
+    } else if (!marker_prop->loaded_image && !marker_prop->is_image_marker) {
         // fallback: use em-based estimate
         marker_prop->width = font_size * 1.375f;
     }
@@ -735,27 +723,8 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         MarkerProp* marker_prop = reinterpret_cast<MarkerProp*>(
             block->pseudo->marker->blk);
         marker_prop->is_outside = is_outside_position;
-        if (marker_prop->is_image_marker) {
-            // CSS pseudo-element mutations update ::marker separately; resolve
-            // its font before refreshing dimensions on the retained marker.
-            marker_prop->content_width = image_default_size;
-            marker_prop->width = image_default_size + image_gap;
-            marker_prop->height = image_default_size;
-        } else if (marker_prop->loaded_image &&
-                   !marker_prop->loaded_image->has_intrinsic_size) {
-            marker_prop->content_width = image_default_size;
-            marker_prop->width = image_default_size + image_gap;
-            marker_prop->height = image_default_size;
-        } else if (marker_prop->loaded_image) {
-            float image_width = 0.0f;
-            float image_height = 0.0f;
-            if (list_marker_intrinsic_size(parent_elem, marker_prop->loaded_image,
-                                           effective_zoom, &image_width, &image_height)) {
-                marker_prop->content_width = image_width;
-                marker_prop->width = image_width + image_gap;
-                marker_prop->height = image_height;
-            }
-        } else if (is_bullet_marker && !marker_prop->loaded_image) {
+        if (!set_marker_image_geometry(parent_elem, marker_prop, image_default_size,
+                                       image_gap, effective_zoom) && is_bullet_marker) {
             // Marker placement and its inline reservation form one retained
             // invariant; switching inside/outside must refresh both values.
             marker_prop->bullet_size = marker_font_size * 0.35f;

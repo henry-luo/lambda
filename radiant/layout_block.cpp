@@ -2377,6 +2377,15 @@ static bool block_has_layout_fragments(ViewBlock* block) {
     return elem->layout_fragment_list() && elem->layout_fragments_count() > 1;
 }
 
+static void shift_trimmed_child(View* child, float trim) {
+    child->y -= trim;
+    if (child->view_type == RDT_VIEW_INLINE) {
+        shift_inline_with_block_children_y(child, -trim);
+    } else {
+        shift_text_geometry(child, -trim, TEXT_RECT_SHIFT_ALL);
+    }
+}
+
 static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, float trim) {
     if (container == target) {
         bool has_fragmented_content = block_has_layout_fragments(container);
@@ -2400,23 +2409,18 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
                     child = child->next();
                     continue;
                 }
-                bool shift_child_box = true;
                 if (child->is_block()) {
                     ViewBlock* vb = lam::view_require_block(child);
                     if (is_inline_level_atomic_block(child, vb)) {
-                        shift_child_box = !(vb->blk &&
-                            (vb->block()->text_box_trim_applied & TEXT_BOX_TRIM_START));
-                        if (shift_child_box) child->y -= trim;
+                        if (!(vb->blk &&
+                              (vb->block()->text_box_trim_applied & TEXT_BOX_TRIM_START))) {
+                            child->y -= trim;
+                        }
                         child = child->next();
                         continue;
                     }
                 }
-                if (shift_child_box) child->y -= trim;
-                if (child->view_type == RDT_VIEW_INLINE) {
-                    shift_inline_with_block_children_y(child, -trim);
-                } else {
-                    shift_text_geometry(child, -trim, TEXT_RECT_SHIFT_ALL);
-                }
+                shift_trimmed_child(child, trim);
             }
             child = child->next();
         }
@@ -2460,12 +2464,7 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
                 apply_start_trim_recursive(bii, target, trim);
             }
         } else if (found_first) {
-            child->y -= trim;
-            if (child->view_type == RDT_VIEW_INLINE) {
-                shift_inline_with_block_children_y(child, -trim);
-            } else {
-                shift_text_geometry(child, -trim, TEXT_RECT_SHIFT_ALL);
-            }
+            shift_trimmed_child(child, trim);
         }
         child = child->next();
     }
@@ -3157,22 +3156,23 @@ static void layout_vertical_inline_line_cross_metrics(ViewBlock* parent,
     WritingMode mode = layout_block_writing_mode(parent);
     bool children_are_axis_mapped = parent->blk &&
         parent->blk->vertical_geometry_published;
+    auto include_centered_cross_extent = [&](float cross_extent) {
+        float centered_extent = max(cross_extent, 0.0f) * 0.5f;
+        *line_before = max(*line_before, centered_extent);
+        *line_after = max(*line_after, centered_extent);
+    };
     for (View* child = lam::view_require_element(parent)->first_placed_child();
          child; child = child->next()) {
         if (child->view_type == RDT_VIEW_INLINE) {
             // CSS Inline 3 §3: an inline box's block-size participates in the
             // line box even when its only content is nested text.
             float cross_extent = children_are_axis_mapped ? child->width : child->height;
-            float centered_extent = max(cross_extent, 0.0f) * 0.5f;
-            *line_before = max(*line_before, centered_extent);
-            *line_after = max(*line_after, centered_extent);
+            include_centered_cross_extent(cross_extent);
         } else if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(child);
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
                 float cross_extent = children_are_axis_mapped ? rect->width : rect->height;
-                float centered_extent = max(cross_extent, 0.0f) * 0.5f;
-                *line_before = max(*line_before, centered_extent);
-                *line_after = max(*line_after, centered_extent);
+                include_centered_cross_extent(cross_extent);
             }
         }
         if (!child->is_block()) continue;
@@ -5231,6 +5231,16 @@ static float fieldset_legend_content_width(ViewBlock* legend,
     return width;
 }
 
+static void center_fieldset_legend_children(ViewBlock* legend,
+                                            float content_start) {
+    if (!legend) return;
+    for (View* child = legend->first_child; child; child = child->next()) {
+        if (!child->view_type) continue;
+        child->x -= content_start;
+        child->y += max((legend->height - child->height) / 2.0f, 0.0f);
+    }
+}
+
 static void shift_vertical_fieldset_baselines(ViewBlock* fieldset,
                                               float delta) {
     if (!fieldset || delta == 0.0f) return;
@@ -5842,14 +5852,8 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                                     ? block->width - legend_view->width : 0.0f;
                                 legend_view->y = fieldset_box.border.top +
                                     fieldset_box.padding.top;
-                                for (View* child = legend_view->first_child;
-                                     child; child = child->next()) {
-                                    if (!child->view_type) continue;
-                                    child->x -= legend_content_start;
-                                    child->y += max(
-                                        (legend_view->height - child->height) / 2.0f,
-                                        0.0f);
-                                }
+                                center_fieldset_legend_children(
+                                    legend_view, legend_content_start);
                                 if (!vertical_rl_fieldset) {
                                     shift_fieldset_vertical_content_x(
                                         block, rendered_legend, legend_contribution, true);
@@ -6357,6 +6361,23 @@ static bool layout_vertical_subtree_has_isolated_inline(View* view) {
     return false;
 }
 
+static void layout_map_vertical_box(WritingMode mode, float block_extent,
+                                    float inline_extent,
+                                    float physical_inline_origin,
+                                    float logical_x, float logical_inline_offset,
+                                    float logical_y, float logical_width,
+                                    float logical_height, bool reverse_inline,
+                                    float* x, float* y, float* width, float* height) {
+    *x = mode == WM_VERTICAL_RL
+        ? block_extent - logical_y - logical_height : logical_y;
+    *y = reverse_inline
+        ? physical_inline_origin + inline_extent -
+            logical_inline_offset - logical_width
+        : logical_x;
+    *width = logical_height;
+    *height = logical_width;
+}
+
 void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                                                float block_extent,
                                                float inline_extent,
@@ -6375,11 +6396,11 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
             float logical_y = view->y - surrogate_block_origin + physical_block_origin;
             float logical_width = view->width;
             float logical_height = view->height;
-            view->x = mode == WM_VERTICAL_RL
-                ? block_extent - logical_y - logical_height : logical_y;
-            view->y = physical_inline_origin + logical_inline_offset;
-            view->width = logical_height;
-            view->height = logical_width;
+            layout_map_vertical_box(
+                mode, block_extent, inline_extent, physical_inline_origin,
+                physical_inline_origin + logical_inline_offset,
+                logical_inline_offset, logical_y, logical_width, logical_height,
+                false, &view->x, &view->y, &view->width, &view->height);
         }
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
@@ -6479,14 +6500,11 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                     // visually ordered by bidi; map its glyph from the line end.
                     logical_inline_offset = 0.0f;
                 }
-                rect->x = mode == WM_VERTICAL_RL
-                    ? block_extent - logical_y - logical_height : logical_y;
-                rect->y = reverse_text_inline
-                    ? physical_inline_origin + inline_extent -
-                        logical_inline_offset - logical_width
-                    : logical_x;
-                rect->width = rect->height;
-                rect->height = logical_width;
+                layout_map_vertical_box(
+                    mode, block_extent, inline_extent, physical_inline_origin,
+                    logical_x, logical_inline_offset, logical_y, logical_width,
+                    logical_height, reverse_text_inline, &rect->x, &rect->y,
+                    &rect->width, &rect->height);
             }
             adjust_text_bounds(text);
         } else if (view->view_type == RDT_VIEW_INLINE) {
@@ -6513,8 +6531,6 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
             float logical_y = vertical_central
                 ? (block_extent - logical_height) / 2.0f
                 : span->y - surrogate_block_origin + physical_block_origin;
-            span->x = mode == WM_VERTICAL_RL
-                ? block_extent - logical_y - logical_height : logical_y;
             bool reverse_span_inline = false;
             if (reverse_inline_axis && span->is_element()) {
                 CssEnum span_writing_mode = layout_element_css_writing_mode(
@@ -6526,12 +6542,11 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                     reverse_span_inline = false;
                 }
             }
-            span->y = reverse_span_inline
-                ? physical_inline_origin + inline_extent -
-                    logical_inline_offset - logical_width
-                : logical_x;
-            span->width = logical_height;
-            span->height = logical_width;
+            layout_map_vertical_box(
+                mode, block_extent, inline_extent, physical_inline_origin,
+                logical_x, logical_inline_offset, logical_y, logical_width,
+                logical_height, reverse_span_inline, &span->x, &span->y,
+                &span->width, &span->height);
             if (span->first_child) {
                 layout_map_vertical_writing_text_geometry(
                     span->first_child, mode, block_extent, inline_extent,
@@ -6577,8 +6592,6 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
             float logical_y = center_block_axis
                 ? (block_extent - view->height) / 2.0f
                 : view->y - surrogate_block_origin + physical_block_origin;
-            view->x = mode == WM_VERTICAL_RL
-                ? block_extent - logical_y - view->height : logical_y;
             ViewBlock* br_block = layout_nearest_block_ancestor(view->parent_view());
             bool reverse_br_inline = reverse_inline_axis;
             if (br_block && br_block->is_element() &&
@@ -6587,12 +6600,11 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                 br_block->view_type != RDT_VIEW_INLINE_BLOCK) {
                 reverse_br_inline = false;
             }
-            view->y = reverse_br_inline
-                ? physical_inline_origin + inline_extent -
-                    logical_inline_offset - logical_width
-                : logical_x;
-            view->width = view->height;
-            view->height = logical_width;
+            layout_map_vertical_box(
+                mode, block_extent, inline_extent, physical_inline_origin,
+                logical_x, logical_inline_offset, logical_y, logical_width,
+                view->height, reverse_br_inline, &view->x, &view->y,
+                &view->width, &view->height);
         }
         view = view->next();
     }
@@ -6710,6 +6722,32 @@ static float layout_image_ratio_transfer(ViewBlock* block, float definite_size,
     return transferred;
 }
 
+static float layout_replaced_ratio_transfer_after_clamp(
+    ViewBlock* block, float constrained_size, bool horizontal,
+    float natural_width, float natural_height, float css_ratio,
+    bool css_ratio_uses_content_box) {
+    if (css_ratio > 0.0f) {
+        float source_size = css_ratio_uses_content_box
+            ? layout_content_size_if_border_box(block, constrained_size, horizontal)
+            : constrained_size;
+        float transferred = horizontal
+            ? source_size / css_ratio : source_size * css_ratio;
+        if (horizontal && css_ratio_uses_content_box) {
+            return layout_border_size_if_content_box(block, transferred, false);
+        }
+        if (!horizontal && !css_ratio_uses_content_box) {
+            return layout_content_size_if_border_box(block, transferred, true);
+        }
+        return transferred;
+    }
+    if (horizontal) {
+        return natural_width > 0.0f
+            ? constrained_size * natural_height / natural_width : -1.0f;
+    }
+    return natural_height > 0.0f
+        ? constrained_size * natural_width / natural_height : -1.0f;
+}
+
 static void layout_apply_image_natural_ratio_constraints(
     ViewBlock* block, float natural_width, float natural_height,
     bool has_intrinsic_ratio, float* used_width, float* used_height,
@@ -6736,37 +6774,31 @@ static void layout_apply_image_natural_ratio_constraints(
         max_height = min_height;
     }
 
-    if (min_height >= 0.0f && natural_border_height < min_height) {
-        float constrained_height = border_box
-            ? max(min_height - padding_border_height, 0.0f) : min_height;
-        float content_width = constrained_height * natural_width / natural_height;
-        *used_width = content_width;
-        *used_height = constrained_height;
-        if (width_blocks_ratio_transfer) *width_blocks_ratio_transfer = true;
-    }
-    if (max_height >= 0.0f && natural_border_height > max_height) {
-        float constrained_height = border_box
-            ? max(max_height - padding_border_height, 0.0f) : max_height;
-        float content_width = constrained_height * natural_width / natural_height;
-        *used_width = content_width;
-        *used_height = constrained_height;
-        if (width_blocks_ratio_transfer) *width_blocks_ratio_transfer = true;
-    }
-    if (min_width >= 0.0f && natural_border_width < min_width) {
-        float constrained_width = border_box
-            ? max(min_width - padding_border_width, 0.0f) : min_width;
-        float content_height = constrained_width * natural_height / natural_width;
-        *used_width = constrained_width;
-        *used_height = content_height;
-        if (height_blocks_ratio_transfer) *height_blocks_ratio_transfer = true;
-    }
-    if (max_width >= 0.0f && natural_border_width > max_width) {
-        float constrained_width = border_box
-            ? max(max_width - padding_border_width, 0.0f) : max_width;
-        float content_height = constrained_width * natural_height / natural_width;
-        *used_width = constrained_width;
-        *used_height = content_height;
-        if (height_blocks_ratio_transfer) *height_blocks_ratio_transfer = true;
+    auto apply_ratio_constraint = [&](float natural_size, float constraint,
+                                      float padding_border_size, bool horizontal,
+                                      bool minimum) {
+        if (constraint < 0.0f ||
+            (minimum ? natural_size >= constraint : natural_size <= constraint)) return;
+        float constrained_size = border_box
+            ? max(constraint - padding_border_size, 0.0f) : constraint;
+        if (horizontal) {
+            *used_width = constrained_size;
+            *used_height = constrained_size * natural_height / natural_width;
+            if (height_blocks_ratio_transfer) *height_blocks_ratio_transfer = true;
+        } else {
+            *used_width = constrained_size * natural_width / natural_height;
+            *used_height = constrained_size;
+            if (width_blocks_ratio_transfer) *width_blocks_ratio_transfer = true;
+        }
+    };
+    for (bool horizontal : {false, true}) {
+        float natural_size = horizontal ? natural_border_width : natural_border_height;
+        float padding_border_size = horizontal
+            ? padding_border_width : padding_border_height;
+        float min_size = horizontal ? min_width : min_height;
+        float max_size = horizontal ? max_width : max_height;
+        apply_ratio_constraint(natural_size, min_size, padding_border_size, horizontal, true);
+        apply_ratio_constraint(natural_size, max_size, padding_border_size, horizontal, false);
     }
 }
 
@@ -8187,17 +8219,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             block->embed && block->embedp()->img && width_was_clamped) {
             float iw = block->embedp()->img->width;
             float ih = block->embedp()->img->height;
-            if (image_auto_size_css_aspect_ratio > 0.0f) {
-                float ratio_source_width = image_auto_size_css_ratio_uses_content_box
-                    ? layout_content_size_if_border_box(block, content_width, true)
-                    : content_width;
-                float ratio_height = ratio_source_width / image_auto_size_css_aspect_ratio;
-                lycon->block.given_height = image_auto_size_css_ratio_uses_content_box
-                    ? layout_border_size_if_content_box(block, ratio_height, false)
-                    : ratio_height;
-            } else if (iw > 0) {
-                lycon->block.given_height = content_width * ih / iw;
-            }
+            float ratio_height = layout_replaced_ratio_transfer_after_clamp(
+                block, content_width, true, iw, ih,
+                image_auto_size_css_aspect_ratio,
+                image_auto_size_css_ratio_uses_content_box);
+            if (ratio_height >= 0.0f) lycon->block.given_height = ratio_height;
         }
         // CSS 2.1 §10.3.2: For replaced elements with 'width: auto', the intrinsic
         if (layout_uses_border_box(block) &&
@@ -8332,17 +8358,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             block->embed && block->embedp()->img && height_was_clamped) {
             float iw = block->embedp()->img->width;
             float ih = block->embedp()->img->height;
-            if (image_auto_size_css_aspect_ratio > 0.0f) {
-                float ratio_source_height = image_auto_size_css_ratio_uses_content_box
-                    ? layout_content_size_if_border_box(block, content_height, false)
-                    : content_height;
-                float ratio_width = ratio_source_height * image_auto_size_css_aspect_ratio;
-                content_width = !image_auto_size_css_ratio_uses_content_box
-                    ? layout_content_size_if_border_box(block, ratio_width, true)
-                    : ratio_width;
-            } else if (ih > 0) {
-                content_width = content_height * iw / ih;
-            }
+            float ratio_width = layout_replaced_ratio_transfer_after_clamp(
+                block, content_height, false, iw, ih,
+                image_auto_size_css_aspect_ratio,
+                image_auto_size_css_ratio_uses_content_box);
+            if (ratio_width >= 0.0f) content_width = ratio_width;
         }
         // CSS 2.1 §10.6.2: For replaced elements with 'height: auto', the intrinsic
         if (layout_uses_border_box(block) &&
@@ -8963,13 +8983,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     first_legend->x = is_vertical_rl
                         ? block->width - first_legend->width : 0.0f;
                     first_legend->y = fieldset_box.border.top + fieldset_box.padding.top;
-                    for (View* child = first_legend->first_child; child; child = child->next()) {
-                        if (child->view_type) {
-                            child->x -= legend_content_start;
-                            child->y += max(
-                                (first_legend->height - child->height) / 2.0f, 0.0f);
-                        }
-                    }
+                    center_fieldset_legend_children(
+                        first_legend, legend_content_start);
                     // so vertical-lr and vertical-rl use the same invariant.
                     align_fieldset_vertical_content_to_legend(
                         block, rendered_legend, is_vertical_rl,
@@ -9328,10 +9343,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // A sampled display:none suppresses this provisional box and must not
         // leave the pre-resolution line break in the parent formatting context.
         block->view_type = RDT_VIEW_NONE;
-        block->x = 0.0f;
-        block->y = 0.0f;
-        block->width = 0.0f;
-        block->height = 0.0f;
+        layout_set_view_geometry(block, 0.0f, 0.0f, 0.0f, 0.0f);
         block->content_width = 0.0f;
         block->content_height = 0.0f;
         lycon->block = pa_block;

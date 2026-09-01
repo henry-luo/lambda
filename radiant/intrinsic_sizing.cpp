@@ -908,62 +908,56 @@ static bool intrinsic_can_shape_simple_latin_run(LayoutContext* lycon,
     return true;
 }
 
-static bool intrinsic_measure_shaped_simple_latin_run(LayoutContext* lycon,
-                                                      const unsigned char* str,
-                                                      size_t remaining,
-                                                      CssEnum text_transform,
-                                                      CssEnum font_variant,
-                                                      bool break_anywhere,
-                                                      bool break_word,
-                                                      size_t* out_bytes,
-                                                      float* out_width,
-                                                      uint32_t* out_first_codepoint,
-                                                      uint32_t* out_last_codepoint) {
+static bool intrinsic_measure_shaped_run(LayoutContext* lycon,
+                                         const unsigned char* str,
+                                         size_t remaining,
+                                         CssEnum text_transform,
+                                         CssEnum font_variant,
+                                         bool break_anywhere,
+                                         bool break_word,
+                                         bool simple_latin,
+                                         size_t* out_bytes,
+                                         float* out_width,
+                                         uint32_t* out_first_codepoint,
+                                         uint32_t* out_last_codepoint) {
     if (!str || remaining == 0 || !out_bytes || !out_width ||
         !out_first_codepoint || !out_last_codepoint) {
         return false;
     }
-    if (!intrinsic_can_shape_simple_latin_run(lycon, text_transform,
-                                              font_variant, break_anywhere, break_word)) {
+    if (simple_latin && !intrinsic_can_shape_simple_latin_run(
+            lycon, text_transform, font_variant, break_anywhere, break_word)) {
         return false;
     }
-    LayoutSimpleLatinRun result = {};
-    if (!layout_measure_simple_latin_run(
-            lycon, font_box_handle(&lycon->font), str, remaining, &result)) {
-        return false;
+    size_t bytes = 0;
+    float width = 0.0f;
+    uint32_t first_codepoint = 0;
+    uint32_t last_codepoint = 0;
+    if (simple_latin) {
+        LayoutSimpleLatinRun result = {};
+        if (!layout_measure_simple_latin_run(
+                lycon, font_box_handle(&lycon->font), str, remaining, &result)) {
+            return false;
+        }
+        bytes = result.bytes;
+        width = result.width;
+        first_codepoint = result.first_codepoint;
+        last_codepoint = result.last_codepoint;
+    } else {
+        LayoutBidiRun result = {};
+        if (!layout_measure_bidi_run(
+                lycon, str, remaining, text_transform, font_variant,
+                break_anywhere, break_word, false, &result)) {
+            return false;
+        }
+        bytes = result.bytes;
+        width = result.width;
+        first_codepoint = result.first_codepoint;
+        last_codepoint = result.last_codepoint;
     }
-    *out_bytes = result.bytes;
-    *out_width = result.width;
-    *out_first_codepoint = result.first_codepoint;
-    *out_last_codepoint = result.last_codepoint;
-    return true;
-}
-
-static bool intrinsic_measure_shaped_bidi_run(LayoutContext* lycon,
-                                               const unsigned char* str,
-                                               size_t remaining,
-                                               CssEnum text_transform,
-                                               CssEnum font_variant,
-                                               bool break_anywhere,
-                                               bool break_word,
-                                               size_t* out_bytes,
-                                               float* out_width,
-                                               uint32_t* out_first_codepoint,
-                                               uint32_t* out_last_codepoint) {
-    if (!str || remaining == 0 || !out_bytes || !out_width ||
-        !out_first_codepoint || !out_last_codepoint) {
-        return false;
-    }
-    LayoutBidiRun result = {};
-    if (!layout_measure_bidi_run(
-            lycon, str, remaining, text_transform, font_variant,
-            break_anywhere, break_word, false, &result)) {
-        return false;
-    }
-    *out_bytes = result.bytes;
-    *out_width = result.width;
-    *out_first_codepoint = result.first_codepoint;
-    *out_last_codepoint = result.last_codepoint;
+    *out_bytes = bytes;
+    *out_width = width;
+    *out_first_codepoint = first_codepoint;
+    *out_last_codepoint = last_codepoint;
     return true;
 }
 
@@ -1297,34 +1291,30 @@ static bool intrinsic_should_skip_height_child(DomElement* elem) {
 
 static float intrinsic_table_structure_height(LayoutContext* lycon, DomElement* elem, float width) {
     if (!elem) return 0.0f;
-
-    if (intrinsic_is_table_row_box(elem)) {
-        float row_height = 0.0f;
-        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-            if (!child->is_element()) continue;
-            DomElement* child_elem = child->as_element();
-            if (intrinsic_should_skip_height_child(child_elem)) continue;
-            float child_height = calculate_max_content_height(lycon, child, width);
-            if (child_height > row_height) row_height = child_height;
-        }
-        return row_height;
-    }
-
+    bool is_row = intrinsic_is_table_row_box(elem);
     float total_height = 0.0f;
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* child_elem = child->as_element();
         if (intrinsic_should_skip_height_child(child_elem)) continue;
 
+        float child_height;
+        if (is_row) {
+            child_height = calculate_max_content_height(lycon, child, width);
+            if (child_height > total_height) total_height = child_height;
+            continue;
+        }
+
         // Table row groups stack rows, but each row's height is the maximum of
         // its cells; generic block stacking would double-count sibling cells.
         if (intrinsic_is_table_row_box(child_elem) ||
             intrinsic_is_table_row_group_box(child_elem) ||
             intrinsic_is_table_box(child_elem)) {
-            total_height += intrinsic_table_structure_height(lycon, child_elem, width);
+            child_height = intrinsic_table_structure_height(lycon, child_elem, width);
         } else {
-            total_height += calculate_max_content_height(lycon, child, width);
+            child_height = calculate_max_content_height(lycon, child, width);
         }
+        total_height += child_height;
     }
 
     if (intrinsic_is_table_box(elem) && elem->tag() == MARKUP_NAME_TABLE) {
@@ -1651,9 +1641,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 float shaped_bidi_width = 0.0f;
                 uint32_t shaped_bidi_first = 0;
                 uint32_t shaped_bidi_last = 0;
-                if (intrinsic_measure_shaped_bidi_run(
+                if (intrinsic_measure_shaped_run(
                         lycon, &str[i], length - i, text_transform,
                         font_variant, break_anywhere, break_word,
+                        false,
                         &shaped_bidi_bytes, &shaped_bidi_width,
                         &shaped_bidi_first, &shaped_bidi_last)) {
                     float kerning = 0.0f;
@@ -1711,9 +1702,9 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             float shaped_width = 0.0f;
             uint32_t shaped_first_cp = 0;
             uint32_t shaped_last_cp = 0;
-            if (intrinsic_measure_shaped_simple_latin_run(
+            if (intrinsic_measure_shaped_run(
                     lycon, &str[i], length - i, text_transform, font_variant,
-                    break_anywhere, break_word, &shaped_bytes, &shaped_width,
+                    break_anywhere, break_word, true, &shaped_bytes, &shaped_width,
                     &shaped_first_cp, &shaped_last_cp)) {
                 float kerning = 0.0f;
                 if (has_kerning && prev_codepoint) {
@@ -2165,11 +2156,7 @@ static bool is_inline_level_element(DomElement* element) {
     CssEnum display_value = (CssEnum)0;
     if (intrinsic_specified_display_keyword(element, &display_value)) {
         // Check for inline display values
-        if (display_value == CSS_VALUE_INLINE ||
-            display_value == CSS_VALUE_INLINE_BLOCK ||
-            display_value == CSS_VALUE_INLINE_FLEX ||
-            display_value == CSS_VALUE_INLINE_GRID ||
-            display_value == CSS_VALUE_INLINE_TABLE) {
+        if (layout_display_is_inline_level(display_value)) {
             return true;
         }
         // Explicit block display
@@ -2248,6 +2235,13 @@ bool layout_has_cyclic_percentage_ratio_descendant(LayoutContext* lycon, DomElem
     return intrinsic_has_cyclic_percentage_descendant(lycon, element, true);
 }
 
+static bool intrinsic_display_is_atomic_inline(CssEnum display) {
+    return display == CSS_VALUE_INLINE_BLOCK ||
+        display == CSS_VALUE_INLINE_FLEX ||
+        display == CSS_VALUE_INLINE_GRID ||
+        display == CSS_VALUE_INLINE_TABLE;
+}
+
 static bool intrinsic_element_is_atomic_inline(DomElement* element) {
     if (!element || !is_inline_level_element(element)) return false;
     if (layout_element_is_replaced(element)) return true;
@@ -2263,32 +2257,22 @@ static bool intrinsic_element_is_atomic_inline(DomElement* element) {
         // are measured as block-flow content, not as one inline run.
         return true;
     }
-    if (view->display.outer == CSS_VALUE_INLINE_BLOCK ||
-        view->display.outer == CSS_VALUE_INLINE_FLEX ||
-        view->display.outer == CSS_VALUE_INLINE_GRID ||
-        view->display.outer == CSS_VALUE_INLINE_TABLE) {
+    if (intrinsic_display_is_atomic_inline(view->display.outer)) {
         return true;
     }
 
     CssEnum display = (CssEnum)0;
     if (intrinsic_specified_display_keyword(element, &display)) {
-        return display == CSS_VALUE_INLINE_BLOCK ||
-            display == CSS_VALUE_INLINE_FLEX ||
-            display == CSS_VALUE_INLINE_GRID ||
-            display == CSS_VALUE_INLINE_TABLE;
+        return intrinsic_display_is_atomic_inline(display);
     }
     return false;
-}
-
-static bool intrinsic_white_space_collapses_space_advance(CssEnum white_space) {
-    return !white_space_preserves_space_advance(white_space);
 }
 
 static bool intrinsic_node_is_collapsible_space_only(DomNode* node) {
     if (!node) return false;
     if (node->is_text()) {
         return text_node_is_ascii_whitespace(node) &&
-            intrinsic_white_space_collapses_space_advance(get_white_space_value(node));
+            !white_space_preserves_space_advance(get_white_space_value(node));
     }
     if (!node->is_element()) return false;
 
@@ -2391,7 +2375,7 @@ static bool intrinsic_node_has_collapsible_space_at_edge(DomNode* node, bool end
     if (!node) return false;
     if (node->is_text()) {
         return layout_text_edge_has_whitespace((const char*)node->text_data(), end) &&
-            intrinsic_white_space_collapses_space_advance(get_white_space_value(node));
+            !white_space_preserves_space_advance(get_white_space_value(node));
     }
     if (!node->is_element()) return false;
 
@@ -3008,6 +2992,19 @@ static void intrinsic_apply_first_line_indent(
     }
 }
 
+static void intrinsic_record_first_inline_break(
+        float text_indent, float first_child_min, float nonfirst_min_max,
+        float* inline_max, float* inline_min, float* first_break_sum,
+        bool* has_forced_break) {
+    if (*has_forced_break) return;
+    if (text_indent != 0.0f) {
+        intrinsic_apply_first_line_indent(text_indent, first_child_min,
+            nonfirst_min_max, inline_max, inline_min);
+    }
+    *first_break_sum = *inline_max;
+    *has_forced_break = true;
+}
+
 static float intrinsic_store_ratio_width_from_height(
         LayoutContext* lycon, DomElement* element, ViewBlock* view,
         float aspect_ratio, float height, bool minimum_height,
@@ -3388,10 +3385,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
          ((intrinsic_parent->block()->given_width_type == CSS_VALUE_AUTO ||
            intrinsic_parent->block()->given_width_type == CSS_VALUE__UNDEF) &&
           isnan(intrinsic_parent->block()->given_width_percent))) &&
-        (intrinsic_parent->display.outer == CSS_VALUE_INLINE_BLOCK ||
-         intrinsic_parent->display.outer == CSS_VALUE_INLINE_FLEX ||
-         intrinsic_parent->display.outer == CSS_VALUE_INLINE_GRID ||
-         intrinsic_parent->display.outer == CSS_VALUE_INLINE_TABLE ||
+        (intrinsic_display_is_atomic_inline(intrinsic_parent->display.outer) ||
          layout_element_is_floated(intrinsic_parent->as_element()));
     // Percentage widths resolve as auto during intrinsic sizing; their temporary
     // zero base must not become a definite width in the measurement cache. An
@@ -5476,17 +5470,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 child->as_element()->node_name() &&
                 strcmp(child->as_element()->node_name(), "br") == 0;
             if (is_br_element) {
-                // Apply text-indent to the first line before flushing.
-                // Text-indent only affects the first formatted line.
-                if (!inline_has_forced_break && text_indent != 0) {
-                    intrinsic_apply_first_line_indent(text_indent, first_inline_child_min,
-                        nonfirst_inline_min_max, &inline_max_sum, &inline_min_sum);
-                }
-                // Record inline_max_sum at the first forced break for parent propagation
-                if (!inline_has_forced_break) {
-                    first_inline_break_sum = inline_max_sum;
-                    inline_has_forced_break = true;
-                }
+                // Finalize first-line indent and propagation state before flushing.
+                intrinsic_record_first_inline_break(
+                    text_indent, first_inline_child_min, nonfirst_inline_min_max,
+                    &inline_max_sum, &inline_min_sum, &first_inline_break_sum,
+                    &inline_has_forced_break);
                 // Flush the current inline run
                 sizes.max_content = max(sizes.max_content, inline_max_sum);
                 sizes.min_content = max(sizes.min_content, inline_min_sum);
@@ -5534,19 +5522,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     inline_max_sum += intrinsic_inline_start_margin(
                         lycon, child->as_element());
                 }
-                // CSS 2.1 §16.1: Apply text-indent to the first line before
-                // flushing at the forced break. Text-indent only affects the
-                // first formatted line, so only apply when this is the first
-                // forced break encountered.
-                if (!inline_has_forced_break && text_indent != 0) {
-                    intrinsic_apply_first_line_indent(text_indent, first_inline_child_min,
-                        nonfirst_inline_min_max, &inline_max_sum, &inline_min_sum);
-                }
-                // Record inline_max_sum at the first forced break for parent propagation
-                if (!inline_has_forced_break) {
-                    first_inline_break_sum = inline_max_sum;
-                    inline_has_forced_break = true;
-                }
+                // Finalize first-line indent and propagation state before flushing.
+                intrinsic_record_first_inline_break(
+                    text_indent, first_inline_child_min, nonfirst_inline_min_max,
+                    &inline_max_sum, &inline_min_sum, &first_inline_break_sum,
+                    &inline_has_forced_break);
                 // Flush the current inline run (this is a forced line break)
                 sizes.max_content = max(sizes.max_content, inline_max_sum);
                 // The internal max-content covers the widest internal line
@@ -5813,26 +5793,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // CSS 2.1 §16.1: text-indent applies to the first formatted line.
         // If a forced break (<br>) already flushed the first line with text-indent
         // applied, skip indent here — it only applies to the first line.
-        if (!inline_has_forced_break) {
-            // For max-content: single unwrapped line, text-indent adds to total.
-            // For min-content: text-indent only applies to the first breakable segment.
-            //   min_content = max(first_segment + text_indent, widest_other_segment)
-            //   NOT max(widest_segment) + text_indent (which overcounts).
-            if (text_indent > 0) {
-                inline_max_sum += text_indent;
-                float first_seg_min = (first_inline_child_min >= 0) ? first_inline_child_min : inline_min_sum;
-                float first_line_min = first_seg_min + text_indent;
-                inline_min_sum = fmaxf(first_line_min, inline_min_sum);
-            } else if (text_indent < 0) {
-                // Negative text-indent: first line is narrower, but min/max content
-                // cannot go below zero from the indent alone.
-                inline_max_sum = fmaxf(inline_max_sum + text_indent, 0.0f);
-                // For min-content with negative indent: the first segment + indent
-                // may be narrower. Use max(first_seg + indent, max_of_nonfirst_segs).
-                float first_seg_min = (first_inline_child_min >= 0) ? first_inline_child_min : inline_min_sum;
-                float first_line_min = fmaxf(first_seg_min + text_indent, 0.0f);
-                inline_min_sum = fmaxf(first_line_min, nonfirst_inline_min_max);
-            }
+        if (!inline_has_forced_break && text_indent != 0) {
+            intrinsic_apply_first_line_indent(
+                text_indent, first_inline_child_min, nonfirst_inline_min_max,
+                &inline_max_sum, &inline_min_sum);
         }
         if (element_inline_axis_is_vertical) {
             // CSS Writing Modes maps this container's physical width to the
