@@ -54,6 +54,7 @@ extern "C" Item js_dom_form_reset_bridge(Item form_item);
 extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
 extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
                                                             void* submitter_node);
+extern "C" Item js_dom_scroll_into_view_bridge(void* dom_elem);
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -1101,6 +1102,58 @@ RADIANT_C_API Item fn_radiant_next_element_sibling(Item node_item) {
         if (sibling->is_element()) return radiant_dom_wrap_node(sibling->as_element());
     }
     return ItemNull;
+}
+
+// ES30: native answers only layout-coupled focus eligibility. The returned
+// snapshot preserves DOM order; focus.ls owns HTML's tabindex ordering.
+RADIANT_C_API Item fn_radiant_focus_candidates(Item root_item) {
+    DomElement* root = radiant_dom_element_from_item(root_item, "FOCUS_CANDIDATES");
+    if (!root) return radiant_array_new_item(0);
+
+    ArrayList* candidates = arraylist_new(16);
+    if (!candidates) return ItemNull;
+    focus_collect_candidates((View*)root, candidates, false);
+
+    RootFrame roots(2);
+    Rooted<Item> result(roots, radiant_array_new_item(candidates->length));
+    Rooted<Item> candidate(roots, ItemNull);
+    for (int i = 0; i < candidates->length; i++) {
+        View* view = static_cast<View*>(candidates->data[i]);
+        candidate.set(radiant_obj_new());
+        radiant_rooted_obj_set(candidate, "node",
+                               radiant_dom_wrap_node((DomElement*)view));
+        int tab_index = focus_tab_index(view);
+        radiant_rooted_obj_set(candidate, "tab_index", radiant_int_item(tab_index));
+        radiant_rooted_obj_set(candidate, "order", radiant_int_item(i));
+        radiant_rooted_obj_set(candidate, "sequential",
+                               radiant_bool_item(is_view_focusable(view)));
+        radiant_array_push_item(result.get(), candidate.get());
+    }
+    arraylist_free(candidates);
+    return result.get();
+}
+
+RADIANT_C_API Item fn_radiant_focused(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "FOCUSED");
+    DocState* state = elem && elem->doc ? (DocState*)elem->doc->state : nullptr;
+    return radiant_bool_item(state && focus_get(state) == (View*)elem);
+}
+
+RADIANT_C_API Item fn_radiant_focus_set(Item node_item, Item from_keyboard_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "FOCUS_SET");
+    DocState* state = elem && elem->doc ? (DocState*)elem->doc->state : nullptr;
+    if (!state || !is_view_programmatically_focusable((View*)elem)) {
+        return radiant_bool_item(false);
+    }
+    focus_set(state, (View*)elem, is_truthy(from_keyboard_item));
+    return radiant_bool_item(true);
+}
+
+RADIANT_C_API Item fn_radiant_scroll_into_view(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "SCROLL_INTO_VIEW");
+    if (!elem) return radiant_bool_item(false);
+    js_dom_scroll_into_view_bridge(elem);
+    return radiant_bool_item(true);
 }
 
 RADIANT_C_API Item fn_radiant_embedding_element(Item node_item) {
@@ -2695,6 +2748,14 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_first_element_child(Item node)", (fn_ptr)fn_radiant_first_element_child},
     {"next_element_sibling", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_next_element_sibling, JUBE_FN_NONE,
      "Item fn_radiant_next_element_sibling(Item node)", (fn_ptr)fn_radiant_next_element_sibling},
+    {"focus_candidates", "fn(root: dom_node) -> array", (fn_ptr)fn_radiant_focus_candidates, JUBE_FN_NONE,
+     "Item fn_radiant_focus_candidates(Item root)", (fn_ptr)fn_radiant_focus_candidates},
+    {"focused", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_focused, JUBE_FN_NONE,
+     "Item fn_radiant_focused(Item node)", (fn_ptr)fn_radiant_focused},
+    {"focus_set", "fn(node: dom_node, from_keyboard: bool) -> bool", (fn_ptr)fn_radiant_focus_set, JUBE_FN_NONE,
+     "Item fn_radiant_focus_set(Item node, Item from_keyboard)", (fn_ptr)fn_radiant_focus_set},
+    {"scroll_into_view", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_scroll_into_view, JUBE_FN_NONE,
+     "Item fn_radiant_scroll_into_view(Item node)", (fn_ptr)fn_radiant_scroll_into_view},
     {"embedding_element", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_embedding_element, JUBE_FN_NONE,
      "Item fn_radiant_embedding_element(Item node)", (fn_ptr)fn_radiant_embedding_element},
     {"embedded_document_root", "fn(iframe: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_embedded_document_root, JUBE_FN_NONE,

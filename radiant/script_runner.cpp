@@ -2542,6 +2542,10 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
             // Do NOT destroy heap/pool — they're retained on the document
         } else {
             log_info("execute_document_scripts: releasing transient JS context");
+            // Preserve this ownership fact after cleanup. A post-layout UA
+            // hook must not bind a second evaluator to a document whose JS
+            // realm was intentionally destroyed for a one-shot render.
+            dom_doc->js_realm_released_after_load = true;
             // transient scripts can leave timers rooted in this heap, sometimes
             // without a document pointer; shut down the loop before heap free.
             js_event_loop_shutdown();

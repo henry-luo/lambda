@@ -115,9 +115,9 @@ and generation validation.
 | `radiant.first_element_child(node)` | Return the first element child, or `null`. |
 | `radiant.next_element_sibling(node)` | Return the next element sibling, or `null`. |
 | `radiant.parent(node)` / `radiant.closest(node, selector)` | Retain the existing upward navigation operations. |
-| `radiant.focus_candidates(root)` | Return a DOM-order **snapshot** of elements accepted by the native focusability query; it does not apply `tabindex` ordering. |
-| `radiant.focused(node)` | Return the document's currently focused element, or `null`. |
-| `radiant.focus_set(node, from_keyboard)` | Commit the selected focus target atomically: canonical state, pseudo-state, blur/focus events, iframe ownership, and text-control focus capture remain native mechanism. |
+| `radiant.focus_candidates(root)` | Return a DOM-order **snapshot** of programmatically focusable elements plus each candidate's native sequential-focus eligibility; it does not apply `tabindex` ordering. |
+| `radiant.focused(node)` | Return whether `node` is the document's current focus target. |
+| `radiant.focus_set(node, from_keyboard)` | Commit the selected focus target atomically: canonical state, pseudo-state, iframe ownership, and text-control focus capture remain native mechanism; native emits the public focus transition at the originating event boundary. |
 | `radiant.scroll_into_view(node)` | Perform the geometry-dependent scroll after package policy chooses that it is required. |
 | `radiant.selection_operation(node, operation, extend)` | Generalize `caret_operation` to apply a named selection operation — character, word, line, document, page, or select-all — while native resolves the live range, updates canonical selection, emits `selectionchange`, and repaints. |
 
@@ -298,7 +298,7 @@ Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`,
 | ↳ **`keyintent`** (translation) | — | key → `inputType` | dispatched context-free, deliberately (F11) → `keymap.ls` | ✅ |
 | ↳ **`dropdownkey`** | — | UA handling of an open `<select>` popup | Up / Down / Enter / Escape → `form.ls`. **No typeahead** | 🟡 |
 | ↳ **document scrolling** | — | Space / PageUp / PageDown / Home / End / arrows scroll the nearest scrollport | after an uncancelled keydown and a declined `caretkey`, `scrollkey` reaches `scroll.ls`; native resolves/clamps the nearest live scrollport, emits `scroll`, updates the viewport mirror/observers, and repaints. Textarea PageUp/PageDown remain caret movement | ✅ (ESO48 / ES30) |
-| ↳ **Space/Enter activation** | — | activate the focused element | `input[type=checkbox]` / `input[type=radio]` (Space), `button`, `select`, and `<a href>` (Enter) use the click/activation path. `navigation.ls` claims an uncancelled link click and requests native execution; the focused link is therefore keyboard-operable | 🟡 (§5.4) |
+| ↳ **Space/Enter activation** | — | activate the focused element | Enter follows the keydown click/activation path. Space arms an identity-pinned target only after uncancelled `keydown`, then dispatches its click on `keyup`; checkbox/radio and button policy remains in `form.ls`, while a declined Space reaches `scroll.ls`. `navigation.ls` claims an uncancelled link click and requests native execution | ✅ (ES30; §5.4) |
 | `keyup` | UI Events; cancelable | none meaningful | dispatched; no package involvement | ✅ |
 | `keypress` | legacy, deprecated | — | not dispatched, deliberately; `onkeypress` is not registered | — |
 
@@ -322,8 +322,8 @@ Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`,
 | Event | Spec, cancelable | Default action per spec | Radiant | Status |
 | --- | --- | --- | --- | --- |
 | `focus` / `blur` / `focusin` / `focusout` | UI Events; not cancelable | none (focus already moved) | focus machinery and `:focus` / `:focus-within` / `:focus-visible` native; package `on blur` revalidates; `commit` runs before the blur decision | ✅ |
-| Tab / Shift+Tab | HTML sequential focus navigation | move focus in tabindex order, scroll the new target into view | `focus_move` walks `collect_focusable` in **plain DOM order** (`state_store.cpp:7897`) — positive `tabindex` is not ordered ahead of `tabindex=0`; and focus never scrolls the target into view. JS gets `focusin` so focus traps work | ⚠️ (§5.3, ESO52) |
-| `autofocus` processing | HTML | focus the first `autofocus` element in tree order | `cmd_layout.cpp:4116` finds the **first `<input>`** and tests *that one* for the attribute — `autofocus` on a `<textarea>`, `<select>`, `<button>`, or any later input is ignored | ⚠️ (§5.5) |
+| Tab / Shift+Tab | HTML sequential focus navigation | move focus in tabindex order, scroll the new target into view | `focus.ls` orders a native candidate snapshot: positive `tabindex` ascending, then zero/default DOM order; native commits canonical focus, emits focus events, and queues geometry-aware scroll | ✅ (ES30; ESO52) |
+| `autofocus` processing | HTML | focus the first `autofocus` element in tree order | the behavior-only `focusinit` hook lets `focus.ls` choose the first focusable `[autofocus]` candidate in DOM order; native commits and emits the focus transition | ✅ (ES30; ESO60) |
 | `selectstart` | Selection API; cancelable | begin a selection | dispatched when a pointer selection begins; selection storage is `DocState::sel` (document-scoped) | ✅ |
 | `selectionchange` | Selection API; not cancelable | none | dispatched from the selection projection | ✅ |
 
@@ -462,32 +462,77 @@ misrouted to `_self` (**ESO70**).
 
 ### 5.2 Activation behavior has two implementations
 
-`lambda/js/js_dom_events.cpp:2376–2650` implements a complete activation-behavior pass inside `dispatchEvent`: checkbox/radio pre-activation with canceled-activation restore, submit-button activation, reset-button activation, popover activation, and the post-activation `input`/`change` pair. `form.ls` implements the first of those for the native path. They are reconciled at `event.cpp:9271` by observing whether the JS realm actually changed checkedness:
+`lambda/js/js_dom_events.cpp` implements an activation-behavior pass inside
+`dispatchEvent`: checkbox/radio pre-activation with canceled-activation
+restore, submit-button activation, reset-button activation, popover
+activation, and the post-activation `input`/`change` pair. `form.ls`
+implements checkbox/radio policy for the native path. The two paths still
+meet at native canonical state, but native click dispatch must currently
+infer whether the JS path already staged checkedness:
 
 ```cpp
 bool js_did_activation = js_click_dispatched && click_check_radio && click_check_radio_changed;
 ```
 
-Two consequences follow, and both are already visible:
+The former radio-group discrepancy is resolved: the JS pre-activation path
+now calls the same `radiant.radio_group` waist that `form.ls` uses, captures
+every member's checkedness before listener dispatch, and restores that full
+snapshot when a listener cancels `click`. Thus a script-created
+`MouseEvent("click")` now has the package path's current peer scope and
+cancelation semantics. `test/ui/js_dispatch_radio_group.json` pins both
+exclusion and rollback. The scope's still-open `form=` association limitation
+is **ESO6**, not a synthetic/native mismatch.
 
-1. **They have diverged.** The JS copy sets a clicked radio checked but its own comment concedes *"group exclusion not implemented headlessly"* — the exclusivity walk `form.ls` performs is absent there. This is exactly the class of defect that made `radiant_uncheck_radio_group` a shadow implementation of radio policy until it was retired in F1b.
-2. **Submit and reset used to exist only in the JS copy.** F4 moved their policy into `form.ls`/`submit.ls`; native and JS click paths now consult the same behavior claim protocol, while the native browsing waist still owns only navigation execution. Popover activation remains JS-only.
+The structural divergence remains:
 
-ES10's rule ("only one of them may perform the default action for a given event") is now structural for submit/reset: both paths consult one claim protocol, and the package owns the local policy. Popover remains the un-migrated half of **ESO49**.
+1. **Checkbox/radio staging is still separately implemented.** Sharing group
+   discovery removes a tested semantic mismatch, but `js_dom_events.cpp`
+   still owns pre-activation timing, snapshots, rollback, and post-activation
+   notifications while `form.ls` owns the native policy.
+2. **Submit and reset used to exist only in the JS copy.** F4 moved their
+   policy into `form.ls`/`submit.ls`; native and JS click paths now consult the
+   same behavior claim protocol, while the native browsing waist still owns
+   only navigation execution. Popover activation remains JS-only.
 
-### 5.3 Sequential focus ignores `tabindex` order and never scrolls
+ES10's rule ("only one of them may perform the default action for a given
+event") is structural for submit/reset, but not yet for checkbox/radio or
+popover. ES25/ES26 sequence the proper fix: the shared event record and
+propagation engine first, then F19 routes synthetic dispatch through the same
+UA claim tier and deletes this embedded activation pass. Popover remains the
+un-migrated half of **ESO49**.
 
-`focus_move` (`state_store.cpp:7881`) collects focusables and steps through the list in **plain DOM order**. HTML's sequential focus navigation order places elements with positive `tabindex` first, in ascending value, before the `tabindex=0` set in tree order. Radiant's focusability *query* reads `tabindex` correctly (`event.cpp:7077`) — only the ordering ignores it.
+### 5.3 Sequential focus `tabindex` order and scroll — resolved
 
-Separately, focusing an element never scrolls it into view; `scroll_into_view` exists (`layout.cpp:338`) but is reached only from the JS API and fragment navigation. Tabbing through a long form walks focus off-screen. **ESO52.**
+`focus.ls` receives the native DOM-order candidate snapshot and applies HTML's
+positive-`tabindex` ordering before the zero/default tree-order set. Its
+selected node returns through `radiant.focus_set` and
+`radiant.scroll_into_view`; native retains S9.1.4's canonical focus state,
+range geometry, public focus-event emission, and paint. Negative `tabindex`
+remains programmatically focusable but is explicitly excluded from the
+sequential snapshot. `test/ui/dom_pkg_focus_policy.json` covers ordering,
+tie order, wraparound, negative exclusion, autofocus, and scroll. **ESO52
+landed 2026-09-01 (ES30).**
 
-### 5.4 Space activation fires on keydown
+### 5.4 Space activation on keyup — resolved
 
-`event.cpp:9746` documents the choice: *"browsers fire click on key-up for Space and key-down for Enter; we fire on key-down for both for simplicity so HTML form submission works without a mouse."* The stated motivation no longer holds (submission does not work without a mouse either, §3.7), and the shortcut forecloses Space-to-scroll (§3.2), which needs Space to reach the document when no activatable element is focused. Worth revisiting together with ESO48.
+After author `keydown` dispatch has declined, Space on a checkbox, radio, or
+button arms a `DOM_NODE_PIN_STATE` identity. Native keeps that identity valid
+across a handler-triggered reconciliation, dispatches `keyup`, and only then
+runs the ordinary click path; the package still owns the click policy.
+Cancellation on either key event suppresses the click, while an unarmed Space
+continues to `scroll.ls`. This honors S12.1.3's policy/mechanism seam and
+D4.5.1v3's lifetime rule without giving Lambda a raw pointer or scroll
+geometry. `test/ui/dom_pkg_space_keyup.json` proves state changes only on
+keyup. **Landed 2026-09-01 (ES30).**
 
-### 5.5 `autofocus` looks at one element
+### 5.5 `autofocus` tree-order processing — resolved
 
-`cmd_layout.cpp:4116` calls `find_matching_input(root, "input", nullptr)` and then tests *that* element for the `autofocus` attribute, rather than searching the document for the attribute. `autofocus` on a `<textarea>`, `<select>`, `<button>`, contenteditable host, or any non-first `<input>` is silently ignored. The fix is a tree-order search for the attribute over the focusable set — it belongs with the `focus.ls` work in DOM_State §6.2.
+The `focusinit` behavior-only hook invokes `focus.ls`, which filters the same
+focus candidate snapshot for `[autofocus]` in DOM order. It therefore covers
+`textarea`, `select`, `button`, contenteditable hosts, and later inputs rather
+than only the first input. Native commits the result and emits `focus` plus
+`focusin`; no package code owns mutable focus state. **ESO60 landed
+2026-09-01 (ES30).**
 
 ### 5.6 After a native applier is deleted, `'pass'` means "nothing happens"
 
@@ -501,11 +546,11 @@ New rows start at ESO48; ESO1–ESO47 remain in DOM_State §7. Rows here are def
 
 | # | Issue | Direction |
 | --- | --- | --- |
-| ESO48 | ~~**No keyboard scrolling for HTML documents.**~~ **landed 2026-09-01 (ES30)** — `scroll.ls` selects line/page/boundary operations after author keydown, activation, and caret policy decline; native applies them to the focused element's nearest live scrollport or the viewport, preserves canonical state/notifications, and repaints. Root and nested-scrollport event simulations cover the two target cases | — |
-| ESO49 | **Activation behavior has two implementations; popover activation still lives only in the JS one.** §5.2 | F4 moved submit/reset into `form.ls`/`submit.ls` and gave native/JS click paths the same claim protocol. Remaining work: migrate popover activation, and give the browsing layer a real POST body/method transport |
+| ESO48 | ~~**No keyboard scrolling for HTML documents.**~~ **landed 2026-09-01 (ES30)** — `scroll.ls` selects line/page/boundary operations after author keydown, activation, and caret policy decline; an armed Space keyup click counts as claimed, while unarmed Space scrolls. Native applies the named operation to the focused element's nearest live scrollport or the viewport, preserves canonical state/notifications, and repaints. Root and nested-scrollport event simulations cover the two target cases | — |
+| ESO49 | **Activation behavior still has two implementations; popover activation still lives only in the JS one.** §5.2 | JS radio pre-activation now shares the package's peer-discovery waist and cancellation snapshot (the semantic discrepancy is covered by `js_dispatch_radio_group.json`), while F4 gave submit/reset one claim protocol. Remaining work: F17–F19's one event engine, migrate popover activation, and give the browsing layer a real POST body/method transport |
 | ESO50 | **Pointer Events are partial** — `pointerdown`/`up`/`move` dispatch, but no `pointerover`/`out`/`enter`/`leave`/`cancel` and no `setPointerCapture` | boundary events follow the existing mouse boundary logic; capture needs a target-override in the dispatch path |
 | ESO51 | ~~**Link activation is on `mousedown`, and has no keyboard path.**~~ **landed 2026-09-01 (ES31)** | `navigation.ls` claims `linkactivation` after an uncancelled click; Enter dispatches that same click. It resolves fragments and existing root/iframe targets through the ES30/ES31 snapshot surface, and native executes only the pinned request |
-| ESO52 | **Sequential focus ignores `tabindex` ordering and never scrolls the target into view.** §5.3 | both belong to the `focus.ls` work (DOM_State §6.2), together with the ESO60 autofocus fix |
+| ESO52 | ~~**Sequential focus ignores `tabindex` ordering and never scrolls the target into view.**~~ **landed 2026-09-01 (ES30)** — `focus.ls` orders the native snapshot and native applies focus/scroll | — |
 | ESO53 | ~~**`:target` is never set.**~~ **landed 2026-09-01 (ES31)** | package snapshot resolution supplies the fragment element (or `null`) to the native transaction. It clears the prior target, writes exactly one `STATE_TARGET`, invalidates selectors, and queues native geometry-aware scrolling |
 | ESO54 | **contenteditable implements a strict subset of the text-control intent set.** §4 — plain clipboard/drop now claim the raw DOM range; word/line deletes, indent/outdent, and undo/redo still reach `domedit` and decline | tree-aware word/line operations remain; `historyUndo`/`historyRedo` additionally need the ring hoisted out of `FormControlProp` (ESO43) |
 | ESO55 | ~~**`ondblclick` / `onselect` were inert and `contextmenu` could not be canceled.**~~ **landed 2026-09-01** — `dblclick` is emitted after the final primary click, text-control selection writes already queue `select`, and a cancelable DOM `contextmenu` now precedes the F10 hook. `onkeypress` is removed because `keypress` remains deliberately unsupported | — |
@@ -515,7 +560,7 @@ New rows start at ESO48; ESO1–ESO47 remain in DOM_State §7. Rows here are def
 | ESO57 | **`<dialog>` is entirely absent**, and the popover implementation fires no `beforetoggle`/`toggle` and has no light dismiss | both need a top-layer concept in the view tree and an Esc/outside-click policy; the Esc path can follow the context-menu and dropdown precedent (`event.cpp:9561`) |
 | ESO58 | **Non-text `<input>` types have no interaction**: `range` (no thumb drag, no keys — `form.ls:130` says so), `number` (no spinner, no arrow-key step), and `file`/`color`/`date`-family, which `input_type_to_control()` degrades to `FORM_CONTROL_TEXT` (`view.hpp:2727`) | `range` and `number` are template-shaped and cheap; the picker types need host UI and are a separate decision |
 | ESO59 | **Composite-widget keyboard policy is missing**: `<select multiple>` / listbox has no click or key handling at all, `<select>` has no typeahead, and radio groups have no arrow-key navigation | all three belong in `form.ls` next to the existing `dropdownkey` handler; the listbox additionally needs its option rows to be hit-testable |
-| ESO60 | **`autofocus` only inspects the first `<input>`.** §5.5 | tree-order search over the focusable set; land with ESO52 |
+| ESO60 | ~~**`autofocus` only inspects the first `<input>`.**~~ **landed 2026-09-01 (ES30)** — `focusinit` runs package tree-order policy over the same focus snapshot | — |
 | ESO61 | **Small residue**: `accesskey` unimplemented; `beforeunload` unimplemented; `<img>` `load`/`error` not dispatched; `<area>` image-map activation absent; Ctrl+wheel zoom absent | individually cheap, none load-bearing; listed so they stop being rediscovered |
 
 ---
@@ -537,7 +582,7 @@ Ordered by how often the gap is hit by an ordinary page, not by implementation c
 4. ~~Keyboard scrolling after `caretkey` declines (ESO48)~~ **landed**.
 5. ~~`<details>` toggle (ESO56)~~ and ~~`:target` (ESO53)~~ **landed**; `:visited` remains blocked on history/privacy policy (ESO12).
 6. ~~`dblclick` / `select` / cancelable `contextmenu` dispatch (ESO55)~~ **landed**.
-7. `tabindex` ordering, focus scroll-into-view, `autofocus` scope (ESO52 + ESO60) — one `focus.ls` pass.
+7. ~~`tabindex` ordering, focus scroll-into-view, `autofocus` scope (ESO52 + ESO60)~~ **landed in `focus.ls`**.
 
 **Tier 3 — bounded features**
 

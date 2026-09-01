@@ -2557,6 +2557,11 @@ extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     if (!doc) return false;
     if (dom_document_script_runtime(doc)) return true;   // EO3: already owns one
 
+    // A static render deliberately drops its page realm after load. Rebinding
+    // UA behavior afterwards would create a second document evaluator and can
+    // observe the released JS context through the thread-local owner.
+    if (doc->js_realm_released_after_load) return false;
+
     // On by default: constraint validation now lives wholly in the dom package,
     // so a script-less HTML page needs an evaluator to validate at all. Set
     // RADIANT_DOM_PKG_CREATE_RUNTIME=0 to opt a session out.
@@ -2710,6 +2715,10 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     if (doc->dom_package_loaded) {
         return context && template_registry_has_behavior(g_template_registry);
     }
+
+    // No event can run after a one-shot render, and its JS evaluator has
+    // already been destroyed. Do not let an ambient stale context resurrect it.
+    if (doc->js_realm_released_after_load) return false;
 
     static int s_enabled = -1;
     if (s_enabled < 0) {
@@ -3025,6 +3034,27 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
         cursor = static_cast<View*>(static_cast<DomNode*>(dom_elem)->parent);
     }
     return false;
+}
+
+static void radiant_dispatch_focus_event(EventContext* evcon, View* target,
+                                         const char* type, View* related);
+
+void radiant_run_autofocus(DomDocument* doc) {
+    if (!doc || !doc->state || !doc->root || focus_has_current((DocState*)doc->state)) {
+        return;
+    }
+    // `focusinit` is behavior-only; its resulting native focus transition
+    // still emits the public focus/focusin pair after the package selects it.
+    EventContext evcon = {};
+    evcon.target_document = doc;
+    View* previous_focus = focus_get((DocState*)doc->state);
+    dispatch_behavior_handler(&evcon, static_cast<View*>(doc->root),
+                              "focusinit", nullptr, nullptr);
+    View* next_focus = focus_get((DocState*)doc->state);
+    if (next_focus && next_focus != previous_focus) {
+        radiant_dispatch_focus_event(&evcon, next_focus, "focus", previous_focus);
+        radiant_dispatch_focus_event(&evcon, next_focus, "focusin", previous_focus);
+    }
 }
 
 // F8/ES19: the behavior init phase.
@@ -7434,6 +7464,122 @@ static bool run_link_activation(EventContext* evcon, View* target) {
     return radiant_execute_pending_navigation(evcon->ui_context, document);
 }
 
+static void space_activation_clear(DocState* state, DomDocument* document) {
+    if (!state || !state->pending_space_activation.address) return;
+    if (document) {
+        dom_node_unpin(document, state->pending_space_activation,
+                       DOM_NODE_PIN_STATE);
+    }
+    state->pending_space_activation = {nullptr, 0};
+}
+
+static bool space_activation_arm(EventContext* evcon, DocState* state,
+                                 View* target) {
+    DomDocument* document = event_context_target_document(evcon);
+    if (!state || !document || !target || !target->is_element()) return false;
+    space_activation_clear(state, document);
+    DomNodeRef ref = dom_node_ref(static_cast<DomNode*>(target));
+    if (!dom_node_ref_validate(document, ref) ||
+        !dom_node_pin(document, ref, DOM_NODE_PIN_STATE)) {
+        return false;
+    }
+    state->pending_space_activation = ref;
+    return true;
+}
+
+static View* space_activation_take(EventContext* evcon, DocState* state,
+                                   DomNodeRef* out_ref) {
+    DomDocument* document = event_context_target_document(evcon);
+    if (out_ref) *out_ref = {nullptr, 0};
+    if (!state || !document || !state->pending_space_activation.address) return nullptr;
+    DomNodeRef ref = state->pending_space_activation;
+    state->pending_space_activation = {nullptr, 0};
+    DomNode* node = dom_node_ref_validate(document, ref);
+    if (out_ref) *out_ref = ref;
+    return node && node->is_element() ? static_cast<View*>(node) : nullptr;
+}
+
+static void space_activation_release(EventContext* evcon, DomNodeRef ref) {
+    DomDocument* document = event_context_target_document(evcon);
+    if (document && ref.address) {
+        dom_node_unpin(document, ref, DOM_NODE_PIN_STATE);
+    }
+}
+
+static bool keyboard_space_activation_target(DocState* state, View* target) {
+    if (!state || !target || !target->is_element()) return false;
+    if (is_checkbox(target) || is_radio(target)) return true;
+    ViewElement* element = lam::view_require_element(target);
+    if (element->tag() != MARKUP_NAME_BUTTON) return false;
+    DomElement* dom_element = lam::dom_require_element(target);
+    return !dom_element->form_control() ||
+        !form_control_is_disabled(state, static_cast<View*>(dom_element));
+}
+
+static bool run_keyboard_activation(EventContext* evcon, DocState* state,
+                                    View* focused, int key) {
+    if (!evcon || !state || !focused || !focused->is_element() ||
+        evcon->default_prevented || !js_dom_is_connected((void*)focused)) {
+        return false;
+    }
+    ViewElement* element = lam::view_require_element(focused);
+    uint32_t tag = element->tag();
+    if (tag == MARKUP_NAME_INPUT && key == RDT_KEY_SPACE &&
+        (is_checkbox(focused) || is_radio(focused))) {
+        bool js_click_dispatched = false;
+        radiant_dispatch_mouse_event(evcon, focused, "click",
+            0, 0, 0, 0, false, false, false, false, 1, &js_click_dispatched);
+        if (!js_click_dispatched && !evcon->default_prevented) {
+            dispatch_lambda_handler(evcon, focused, "click");
+        }
+        return true;
+    }
+    if (tag == MARKUP_NAME_BUTTON &&
+        (key == RDT_KEY_SPACE || key == RDT_KEY_ENTER)) {
+        DomElement* dom_element = lam::dom_require_element(focused);
+        bool disabled = dom_element->form_control() &&
+            form_control_is_disabled(state, static_cast<View*>(dom_element));
+        if (disabled) return false;
+        radiant_dispatch_mouse_event(evcon, focused, "click",
+            0, 0, 0, 0, false, false, false, false, 1);
+        run_form_button_default(evcon, focused);
+        return true;
+    }
+    if (tag == MARKUP_NAME_INPUT && key == RDT_KEY_ENTER &&
+        (js_dom_is_submit_button((void*)focused) ||
+         js_dom_is_reset_button((void*)focused))) {
+        DomElement* dom_element = lam::dom_require_element(focused);
+        bool disabled = dom_element->form_control() &&
+            form_control_is_disabled(state, static_cast<View*>(dom_element));
+        if (disabled) return false;
+        radiant_dispatch_mouse_event(evcon, focused, "click",
+            0, 0, 0, 0, false, false, false, false, 1);
+        run_form_button_default(evcon, focused);
+        return true;
+    }
+    if (tag == MARKUP_NAME_A && key == RDT_KEY_ENTER) {
+        DomElement* anchor = lam::dom_require_element(focused);
+        if (!anchor->get_attribute("href")) return false;
+        bool js_click_dispatched = false;
+        bool prevented = radiant_dispatch_mouse_event(evcon, focused, "click",
+            0, 0, 0, 0, false, false, false, false, 1, &js_click_dispatched);
+        if (prevented) evcon->default_prevented = true;
+        if (!js_click_dispatched && !evcon->default_prevented) {
+            dispatch_lambda_handler(evcon, focused, "click");
+        }
+        if (!evcon->default_prevented) run_link_activation(evcon, focused);
+        return true;
+    }
+    if (tag == MARKUP_NAME_SELECT &&
+        (key == RDT_KEY_SPACE || key == RDT_KEY_ENTER)) {
+        DomElement* dom_element = lam::dom_require_element(focused);
+        bool disabled = dom_element->form_control() &&
+            form_control_is_disabled(state, static_cast<View*>(dom_element));
+        return !disabled && dispatch_lambda_handler(evcon, focused, "click");
+    }
+    return false;
+}
+
 
 static bool click_target_is_disabled_control(DocState* state, View* target) {
     for (View* current = target; current; current = current->parent) {
@@ -7696,6 +7842,12 @@ bool is_view_focusable(View* view) {
             return false;
         }
 
+        // A negative tabindex removes even a naturally focusable control from
+        // sequential navigation. Programmatic focus keeps the broader rule.
+        if (delem->get_attribute("tabindex") && focus_tab_index(view) < 0) {
+            return false;
+        }
+
         switch (tag) {
         case MARKUP_NAME_A:
             // <a> is focusable if it has href
@@ -7711,11 +7863,7 @@ bool is_view_focusable(View* view) {
         }
         default:
             // Check for tabindex attribute
-            const char* tabindex = elem->get_attribute("tabindex");
-            if (tabindex) {
-                int ti = (int)str_to_int64_default(tabindex, strlen(tabindex), 0);
-                return ti >= 0;
-            }
+            if (elem->get_attribute("tabindex")) return true;
             // CE-2 (Radiant_Design_Content_Editable.md §5): a contenteditable
             // editing host is implicitly focusable (treated as tabindex=0)
             // when no explicit tabindex is set.
@@ -10705,7 +10853,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 DomDocument* focus_doc = evcon.target_document ? evcon.target_document : doc;
                 if (focus_doc && focus_doc->view_tree && focus_doc->view_tree->root) {
                     View* previous_focus = focus_get(state);
-                    focus_move(state, focus_doc->view_tree->root, forward);
+                    DomElement* focus_root = radiant_document_body_element(focus_doc);
+                    if (!focus_root) focus_root = focus_doc->root;
+                    InputIntent focus_key_intent = {};
+                    focus_key_intent.key = key_event->key;
+                    focus_key_intent.mods = key_event->mods;
+                    // The package owns target ordering. Package-off documents
+                    // retain the historical native move as the compatibility
+                    // fallback while the behavior registry remains optional.
+                    if (!dispatch_behavior_handler(&evcon, static_cast<View*>(focus_root),
+                                                   "focuskey", &focus_key_intent, nullptr)) {
+                        focus_move(state, focus_doc->view_tree->root, forward);
+                    }
                     View* next_focus = focus_get(state);
                     if (next_focus && next_focus != previous_focus) {
                         // Sequential focus navigation must emit focusin so
@@ -10767,88 +10926,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        // Space toggles a focused checkbox / radio (matches native browser
-        // and ARIA keyboard behavior). Space and Enter both "activate" a
-        // focused <button> (browsers fire click on key-up for Space and
-        // key-down for Enter; we fire on key-down for both for simplicity
-        // so HTML form submission works without a mouse).
-        if (focused && focused->is_element()
-            && (key_event->key == RDT_KEY_SPACE || key_event->key == RDT_KEY_ENTER)
-            && !(key_event->mods & (RDT_MOD_CTRL | RDT_MOD_SUPER | RDT_MOD_ALT))) {
-            ViewElement* fe = lam::view_require_element(focused);
-            uint32_t tag = fe->tag();
-            bool handled = false;
-            if (tag == MARKUP_NAME_INPUT && key_event->key == RDT_KEY_SPACE) {
-                if (is_checkbox(focused) || is_radio(focused)) {
-                    bool js_click_dispatched = false;
-                    radiant_dispatch_mouse_event(&evcon, focused, "click",
-                        0, 0, 0, 0, false, false, false, false, 1,
-                        &js_click_dispatched);
-                    // Keyboard activation goes through the same dispatch the
-                    // mouse path uses, so the behavior template owns it too.
-                    // It used to call the native activation directly and
-                    // without consulting the claim, so a checkbox activated by
-                    // Space ran native while the same checkbox clicked by mouse
-                    // ran the template — benign only because the two agreed.
-                    if (!js_click_dispatched && !evcon.default_prevented) {
-                        dispatch_lambda_handler(&evcon, focused, "click");
-                    }
-                    handled = true;
-                }
-            } else if (tag == MARKUP_NAME_BUTTON) {
-                // Disabled buttons are inert.
-                DomElement* delem = lam::dom_require_element(focused);
-                bool disabled = delem->form_control() && form_control_is_disabled(state, static_cast<View*>(delem));
-                if (!disabled) {
-                    radiant_dispatch_mouse_event(&evcon, focused, "click",
-                        0, 0, 0, 0, false, false, false, false, 1);
-                    run_form_button_default(&evcon, focused);
-                    handled = true;
-                }
-            } else if (tag == MARKUP_NAME_INPUT &&
-                       key_event->key == RDT_KEY_ENTER &&
-                       (js_dom_is_submit_button((void*)focused) ||
-                        js_dom_is_reset_button((void*)focused))) {
-                DomElement* delem = lam::dom_require_element(focused);
-                bool disabled = delem->form_control() &&
-                    form_control_is_disabled(state, static_cast<View*>(delem));
-                if (!disabled) {
-                    radiant_dispatch_mouse_event(&evcon, focused, "click",
-                        0, 0, 0, 0, false, false, false, false, 1);
-                    run_form_button_default(&evcon, focused);
-                    handled = true;
-                }
-            } else if (tag == MARKUP_NAME_A && key_event->key == RDT_KEY_ENTER) {
-                DomElement* anchor = lam::dom_require_element(focused);
-                if (anchor->get_attribute("href")) {
-                    bool js_click_dispatched = false;
-                    bool prevented = radiant_dispatch_mouse_event(&evcon, focused, "click",
-                        0, 0, 0, 0, false, false, false, false, 1,
-                        &js_click_dispatched);
-                    if (prevented) evcon.default_prevented = true;
-                    if (!js_click_dispatched && !evcon.default_prevented) {
-                        dispatch_lambda_handler(&evcon, focused, "click");
-                    }
-                    if (!evcon.default_prevented) {
-                        run_link_activation(&evcon, focused);
-                    }
-                    handled = true;
-                }
-            } else if (tag == MARKUP_NAME_SELECT) {
-                // Space / Enter on a focused <select> opens (or toggles)
-                // the dropdown popup, matching native browser behavior.
-                DomElement* delem = lam::dom_require_element(focused);
-                bool disabled = delem->form_control() && form_control_is_disabled(state, static_cast<View*>(delem));
-                if (!disabled) {
-                    handled = dispatch_lambda_handler(&evcon, focused, "click");
-                }
-            }
-            if (handled) {
-                evcon.need_repaint = true;
-                break;
-            }
-        }
-
         // Rich-text editing path (Phase R4): translate platform key events
         // into browser-like beforeinput intents for contenteditable
         // template output. Native form controls continue down the existing
@@ -10898,6 +10975,22 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 "keydown", key_event->key, key_event->mods, false);
             if (prevented) evcon.default_prevented = true;
             focused = focus_get(state);
+        }
+
+        // Enter activates immediately, but Space only arms a pending click.
+        // The identity pin lets a cancelable keydown reconcile the DOM without
+        // turning keyup into a dangling View* access (D4.5.1v3).
+        if (focused && !evcon.default_prevented &&
+            !(key_event->mods & (RDT_MOD_CTRL | RDT_MOD_SUPER | RDT_MOD_ALT))) {
+            if (key_event->key == RDT_KEY_SPACE &&
+                keyboard_space_activation_target(state, focused) &&
+                space_activation_arm(&evcon, state, focused)) {
+                break;
+            }
+            if (run_keyboard_activation(&evcon, state, focused, key_event->key)) {
+                evcon.need_repaint = true;
+                break;
+            }
         }
 
         // F4: a single-line text control's Enter is implicit submission, not
@@ -11134,18 +11227,29 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     state->editing.pending_text_input_prevented = false;
                     state->editing.pending_text_input_key = RDT_KEY_UNKNOWN;
                 }
+                DomNodeRef space_activation_ref = {nullptr, 0};
+                View* space_activation_target = event->key.key == RDT_KEY_SPACE
+                    ? space_activation_take(&evcon, state, &space_activation_ref) : nullptr;
                 View* focused = focus_get(state);
                 event_log_focused_target(cascade_log, cascade_id, focused);
                 WebViewHandle* focused_webview = focused_layer_webview_handle(focused);
                 if (focused_webview) {
                     webview_layer_platform_inject_key(
                         focused_webview, 1, event->key.key, event->key.mods);
+                    space_activation_release(&evcon, space_activation_ref);
                     break;
                 }
+                bool keyup_prevented = false;
                 if (focused) {
-                    radiant_dispatch_keyboard_event(&evcon, focused,
+                    keyup_prevented = radiant_dispatch_keyboard_event(&evcon, focused,
                         "keyup", event->key.key, event->key.mods, false);
                 }
+                if (space_activation_target && !keyup_prevented &&
+                    run_keyboard_activation(&evcon, state,
+                                            space_activation_target, RDT_KEY_SPACE)) {
+                    evcon.need_repaint = true;
+                }
+                space_activation_release(&evcon, space_activation_ref);
             }
         }
         break;

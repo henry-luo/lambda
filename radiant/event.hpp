@@ -2500,6 +2500,9 @@ typedef struct DocState {
     DomElement*          last_focused_text_control;
     EditingBehavior      editing_behavior;
     FocusState* focus;             // focus state with navigation info
+    // A Space keydown arms its keyup click against this identity. Pinning is
+    // required because author keydown handlers may reconcile before keyup.
+    DomNodeRef pending_space_activation;
     CursorState* cursor;           // mouse cursor state
     View* hover_target;            // currently hovered element
     View* active_target;           // currently active (pressed) element
@@ -2996,6 +2999,20 @@ void selection_get_range(DocState* state, int* start, int* end);
 void focus_set(DocState* state, View* view, bool from_keyboard);
 
 /**
+ * Collect focus candidates in DOM order. Sequential candidates exclude a
+ * negative tabindex; the broader mode includes programmatic-only targets for
+ * autofocus.
+ */
+void focus_collect_candidates(View* root, ArrayList* list, bool sequential_only);
+
+/**
+ * Return the effective tabindex used by sequential focus ordering.
+ */
+int focus_tab_index(View* view);
+bool is_view_focusable(View* view);
+bool is_view_programmatically_focusable(View* view);
+
+/**
  * Set focus from HTMLElement.focus(). Negative tabindex values remain
  * programmatically focusable even though they are excluded from Tab order.
  */
@@ -3030,6 +3047,10 @@ bool focus_restore(DocState* state);
 View* focus_get(DocState* state);
 bool focus_has_current(DocState* state);
 View* focus_get_visible(DocState* state);
+
+// ES30: package-owned autofocus selection. Native retains the focus write,
+// focus-event emission point, queued scroll geometry, and paint invalidation.
+void radiant_run_autofocus(struct DomDocument* doc);
 
 // ============================================================================
 // Doc-Level Interaction Target API

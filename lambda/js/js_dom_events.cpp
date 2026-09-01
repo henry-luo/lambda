@@ -1985,11 +1985,13 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
 }
 
 Item js_dom_dispatch_event(Item elem_item, Item event_item) {
-    RootFrame roots(4);
+    RootFrame roots(6);
     Rooted<Item> elem_root(roots, elem_item);
     Rooted<Item> event_root(roots, event_item);
     Rooted<Item> global_root(roots, ItemNull);
     Rooted<Item> previous_global_event_root(roots, ItemNull);
+    Rooted<Item> radio_group_root(roots, ItemNull);
+    Rooted<Item> radio_checked_root(roots, ItemNull);
     elem_item = elem_root.get();
     event_item = event_root.get();
     if (!js_dom_event_runtime_state_ensure()) return (Item){.item = ITEM_FALSE};
@@ -2047,8 +2049,23 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
                     act_old_checked = js_dom_get_checkedness(el);
                     const char* itype = js_dom_input_type_lower(el);
                     if (strcmp(itype, "radio") == 0) {
-                        // Per HTML, clicking a radio sets it to checked
-                        // (group exclusion not implemented headlessly).
+                        // Reuse the package waist's exact peer scope. The
+                        // snapshot restores every peer if click is canceled.
+                        radio_group_root.set(fn_radiant_radio_group(
+                            radiant_dom_wrap_node(el)));
+                        radio_checked_root.set(js_array_new(0));
+                        int64_t group_len = get_type_id(radio_group_root.get()) ==
+                            LMD_TYPE_ARRAY ? js_array_length(radio_group_root.get()) : 0;
+                        for (int64_t i = 0; i < group_len; i++) {
+                            DomElement* peer = (DomElement*)radiant_dom_unwrap_node(
+                                js_elements_get_int(radio_group_root.get(), i));
+                            bool peer_checked = peer && js_dom_get_checkedness(peer);
+                            js_array_push(radio_checked_root.get(),
+                                          (Item){.item = b2it(peer_checked ? 1 : 0)});
+                            if (peer && peer != el) {
+                                js_dom_set_checkedness(peer, false);
+                            }
+                        }
                         js_dom_set_checkedness(el, true);
                     } else {
                         // Checkbox: toggle.
@@ -2214,7 +2231,18 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     // ------------------------------------------------------------------
     if (act_kind == 1 && act_target) {
         if (prevented) {
-            // Restore prior checkedness.
+            // Restore the pre-activation group snapshot, including peers
+            // cleared before listeners observed the tentative radio state.
+            int64_t group_len = get_type_id(radio_group_root.get()) ==
+                LMD_TYPE_ARRAY ? js_array_length(radio_group_root.get()) : 0;
+            for (int64_t i = 0; i < group_len; i++) {
+                DomElement* peer = (DomElement*)radiant_dom_unwrap_node(
+                    js_elements_get_int(radio_group_root.get(), i));
+                if (peer) {
+                    js_dom_set_checkedness(peer, js_is_truthy(
+                        js_elements_get_int(radio_checked_root.get(), i)));
+                }
+            }
             js_dom_set_checkedness(act_target, act_old_checked);
         } else if (!act_disabled) {
             // Fire `input` (bubbles, non-cancelable) then `change`.

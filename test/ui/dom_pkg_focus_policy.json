@@ -1,0 +1,27 @@
+{
+  "name": "ES30 focus policy: tabindex order, autofocus, and scroll",
+  "html": "test/ui/dom_pkg_focus_policy.html",
+  "viewport": {"width": 640, "height": 320},
+  "events": [
+    {"type": "log", "message": "=== ES30 package focus policy ==="},
+    {"type": "assert_focus", "target": {"selector": "#auto-text"}},
+
+    {"type": "focus", "target": {"selector": "#far"}},
+    {"type": "assert_focus", "target": {"selector": "#far"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#tab1a"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#tab1b"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#tab3"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#zero-before"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#auto-text"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#zero-after"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#far"}},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 2, "negate": true}
+  ]
+}

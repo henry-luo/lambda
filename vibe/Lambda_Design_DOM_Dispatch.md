@@ -55,7 +55,16 @@ Facts the unification builds on, all landed:
 
 **Native entry.** The pipeline reaches JS through `radiant_dispatch_built_event` (`event.cpp:6111`): build a JS event via a native factory (`js_create_native_mouse_event`, …), wrap the target, call `js_dom_dispatch_event`, and return **only** `js_event_is_default_prevented(ev)`. The stage is gated by `JsDispatchScope` — a document without a live JS batch context skips it entirely, so Lambda-only pages never construct JS events.
 
-**The embedded activation pass.** `js_dom_events.cpp:2452–2660` implements HTML §6.4.4 activation inside `dispatchEvent`: checkbox/radio pre-activation with canceled-activation restore, popover activation, post-activation `input`/`change`. It exists because a synthetic `el.click()` / `dispatchEvent(new MouseEvent('click'))` never enters `event.cpp`'s pipeline yet must still activate per spec. Since F4, its submit/reset half consults the behavior claim protocol (`:2679`); the checkbox/radio and popover halves remain hardcoded (DOM_Default §5.2, ESO49).
+**The embedded activation pass.** `js_dom_events.cpp` implements HTML
+§6.4.4 activation inside `dispatchEvent`: checkbox/radio pre-activation with
+canceled-activation restore, popover activation, post-activation
+`input`/`change`. It exists because a synthetic `el.click()` /
+`dispatchEvent(new MouseEvent('click'))` never enters `event.cpp`'s pipeline
+yet must still activate per spec. Since F4, its submit/reset half consults the
+behavior claim protocol; its radio branch now reuses the package's
+`radiant.radio_group` peer-discovery waist and restores a complete peer
+snapshot on cancel. Checkbox/radio staging and popover activation nevertheless
+remain hardcoded here (DOM_Default §5.2, ESO49).
 
 ### 2.4 Flow 3 — author template handlers (Lambda pages)
 
@@ -119,7 +128,14 @@ JS handlers get a full `Event` object with `eventPhase`, `currentTarget`, stop f
 
 ### 3.3 Synthetic dispatch bypasses the Lambda flows — and bred the second activation implementation
 
-Because `dispatchEvent`/`el.click()` enter only the JS dispatcher, that dispatcher grew its own complete activation pass (§2.3). It has **already diverged** from the package: the JS copy sets a clicked radio checked but concedes in its own comment that group exclusion is "not implemented headlessly" — the exclusivity walk `form.ls` performs is absent. This is the identical failure class that made `radiant_uncheck_radio_group` a shadow copy of radio policy until F1b retired it (DOM_Default §5.2).
+Because `dispatchEvent`/`el.click()` enter only the JS dispatcher, that
+dispatcher grew its own complete activation pass (§2.3). Its previously
+observed radio-group mismatch is fixed: the JS branch reuses the package's
+peer-discovery waist and restores every peer on canceled activation, pinned by
+`test/ui/js_dispatch_radio_group.json`. It remains a second implementation of
+pre-/post-activation timing, however — precisely the failure shape that F19
+removes by giving synthetic dispatch access to the UA claim tier (DOM_Default
+§5.2, ESO49).
 
 ### 3.4 Coordination is state-diffing, not protocol
 
