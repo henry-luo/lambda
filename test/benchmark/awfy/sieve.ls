@@ -2,7 +2,7 @@
 // Expected result: 669
 // Ported from JavaScript AWFY suite
 
-pn sieve(flags, sz) {
+pn sieve(var flags, sz) {
     var prime_count = 0
     for i in 2 to sz {
         if (flags[i - 1]) {

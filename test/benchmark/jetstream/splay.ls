@@ -35,65 +35,100 @@ pn splay(var tree, key) {
     if (splay_is_empty(tree)) {
         return 0
     }
-    var dummy = create_node(0.0, null)
-    // The retained header owns the cursor sources. Extracting its fields gives
-    // the top-down loop explicit borrows rather than new COW value roots.
-    var links = {left: dummy, right: dummy, current: tree.root}
-    var left = links.left
-    var right = links.right
-    var current = links.current
-    var done = false
-    while (done == false) {
-        if (key < current.key) {
-            if (current.left == null) {
-                done = true
-            } else {
-                if (key < (current.left).key) {
-                    var tmp = current.left
-                    current.left = tmp.right
-                    tmp.right = current
-                    current = tmp
-                    if (current.left == null) {
-                        done = true
-                    }
-                }
-                if (done == false) {
-                    right.left = current
-                    right = current
-                    current = current.left
-                }
-            }
-        } else {
-            if (key > current.key) {
-                if (current.right == null) {
-                    done = true
-                } else {
-                    if (key > (current.right).key) {
-                        var tmp = current.right
-                        current.right = tmp.left
-                        tmp.left = current
-                        current = tmp
-                        if (current.right == null) {
-                            done = true
-                        }
-                    }
-                    if (done == false) {
-                        left.right = current
-                        left = current
-                        current = current.right
-                    }
-                }
-            } else {
-                done = true
-            }
-        }
-    }
-    left.right = current.left
-    right.left = current.right
-    current.left = dummy.right
-    current.right = dummy.left
-    tree.root = current
+    // Rebuild each rotated subtree through a local owner before returning it.
+    // The original top-down cursor links depended on mutable pointer aliases,
+    // which are snapshots under COW (D3.3.1).
+    var root = tree.root
+    root = splay_node(root, key)
+    tree.root = root
     return 0
+}
+
+pn rotate_right(var node) {
+    if (node == null) {
+        return node
+    }
+    if (node.left == null) {
+        return node
+    }
+    var left = node.left
+    var branch = left.right
+    node.left = branch
+    left.right = node
+    return left
+}
+
+pn rotate_left(var node) {
+    if (node == null) {
+        return node
+    }
+    if (node.right == null) {
+        return node
+    }
+    var right = node.right
+    var branch = right.left
+    node.right = branch
+    right.left = node
+    return right
+}
+
+pn splay_node(var node, key) {
+    if (node == null) {
+        return null
+    }
+    if (key < node.key) {
+        if (node.left == null) {
+            return node
+        }
+        var left = node.left
+        if (key < left.key) {
+            var branch = left.left
+            branch = splay_node(branch, key)
+            left.left = branch
+            node.left = left
+            node = rotate_right(node)
+        }
+        if (key > left.key) {
+            var branch = left.right
+            branch = splay_node(branch, key)
+            left.right = branch
+            if (left.right != null) {
+                left = rotate_left(left)
+            }
+            node.left = left
+        }
+        if (node.left == null) {
+            return node
+        }
+        return rotate_right(node)
+    }
+    if (key > node.key) {
+        if (node.right == null) {
+            return node
+        }
+        var right = node.right
+        if (key > right.key) {
+            var branch = right.right
+            branch = splay_node(branch, key)
+            right.right = branch
+            node.right = right
+            node = rotate_left(node)
+        }
+        if (key < right.key) {
+            var branch = right.left
+            branch = splay_node(branch, key)
+            right.left = branch
+            if (right.left != null) {
+                right = rotate_right(right)
+            }
+            node.right = right
+        }
+        if (node.right == null) {
+            return node
+        }
+        return rotate_left(node)
+    }
+    return node
 }
 
 pn splay_insert(var tree, key, value) {
@@ -106,16 +141,17 @@ pn splay_insert(var tree, key, value) {
         return 0
     }
     var node = create_node(key, value)
+    var old_root = tree.root
     if (key > (tree.root).key) {
-        node.left = tree.root
-        node.right = (tree.root).right
-        var root_ref = tree.root
-        root_ref.right = null
+        node.left = old_root
+        node.right = old_root.right
+        old_root.right = null
+        node.left = old_root
     } else {
-        node.right = tree.root
-        node.left = (tree.root).left
-        var root_ref = tree.root
-        root_ref.left = null
+        node.right = old_root
+        node.left = old_root.left
+        old_root.left = null
+        node.right = old_root
     }
     tree.root = node
     return 0
@@ -130,14 +166,14 @@ pn splay_remove(var tree, key) {
         return null
     }
     var removed = tree.root
-    if ((tree.root).left == null) {
-        tree.root = (tree.root).right
+    if (removed.left == null) {
+        tree.root = removed.right
     } else {
-        var right_tree = (tree.root).right
-        tree.root = (tree.root).left
-        splay(tree, key)
-        var root_ref2 = tree.root
-        root_ref2.right = right_tree
+        var left_tree = removed.left
+        var right_tree = removed.right
+        left_tree = splay_node(left_tree, key)
+        left_tree.right = right_tree
+        tree.root = left_tree
     }
     return removed
 }
@@ -183,7 +219,7 @@ pn count_nodes(node) {
 }
 
 // Collect keys in-order for verification
-pn traverse_keys(node, keys, idx_in) {
+pn traverse_keys(node, var keys, idx_in) {
     if (node == null) {
         return idx_in
     }

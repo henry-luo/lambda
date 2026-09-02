@@ -21,7 +21,7 @@ import time
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
 # Native reference results must use the driver built from Lambda's pinned MIR
 # sources so their backend revision matches the MIR Direct implementation.
-C2M = PROJECT_ROOT / "lambda/mir/c2m"
+C2M = PROJECT_ROOT / "lambda/mir" / ("c2m.exe" if sys.platform == "win32" else "c2m")
 TIMER_MAIN = PROJECT_ROOT / "test/benchmark/c2mir/bench_timer_main.c"
 TIMING_RE = re.compile(r"__TIMING__:([\d.]+(?:e[+-]?\d+)?)")
 SUITES = {
@@ -121,6 +121,19 @@ def build_command(source):
     return [str(C2M), "-Dmain=c2mir_bench_body", str(source), str(TIMER_MAIN), "-eg"]
 
 
+def ensure_c2m():
+    """Build the pinned native C2MIR driver when a clean build omitted it."""
+    if C2M.is_file():
+        return None
+    result = subprocess.run(
+        ["make", "c2mir-driver"], cwd=PROJECT_ROOT, capture_output=True, text=True,
+    )
+    if result.returncode == 0 and C2M.is_file():
+        return None
+    detail = result.stderr.strip() or result.stdout.strip() or "no build output"
+    return f"could not build native C2MIR driver: {detail}"
+
+
 def parse_timing(stdout):
     """Return the self-reported workload milliseconds, or None."""
     match = TIMING_RE.search(stdout)
@@ -151,8 +164,9 @@ def main():
             for name, _ in SUITES[suite]:
                 print(f"{suite}/{name}")
         return 0
-    if not C2M.is_file():
-        print(f"C2MIR driver not found: {C2M}", file=sys.stderr)
+    driver_error = ensure_c2m()
+    if driver_error is not None:
+        print(driver_error, file=sys.stderr)
         return 2
 
     failures = 0

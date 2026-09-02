@@ -1,5 +1,5 @@
 // AWFY Benchmark: CD (Collision Detection) — Typed version
-// Comprehensive type annotations for native int/float arithmetic via C2MIR JIT
+// COW-safe port with native scalar annotations for MIR Direct
 
 // --- Constants ---
 let MIN_X = 0
@@ -12,57 +12,70 @@ let PROXIMITY_RADIUS = 1
 let GOOD_VOXEL_SIZE = 2
 let RED = 1
 let BLACK = 0
+let NIL = -1
 
-// =====================================================
-// Helpers (typed float params → native arithmetic)
-// =====================================================
-fn safe_div(a: float, b: float) float {
-    if (b == 0) 0.0 else a / b
-}
+// Node array layout: [key, val, left, right, parent, color]
+let NK = 0
+let NV = 1
+let NL = 2
+let NR = 3
+let NP = 4
+let NC = 5
 
-fn min_f(a: float, b: float) float {
-    if (a <= b) a else b
-}
-
-fn max_f(a: float, b: float) float {
-    if (a >= b) a else b
-}
-
-fn check_overlap(low: float, high: float) int {
-    if (low <= 1 and 1 <= high) 1
-    else if (low <= 0 and 0 <= high) 1
-    else if (0 <= low and high <= 1) 1
-    else 0
-}
-
-fn get_old_or_new(old, newp) any {
-    if (old == null) newp else old
-}
-
-// =====================================================
-// Type definitions for annotated map field access
-// =====================================================
 type Arr = {l0: array, sz: int}
-type Vec = any
-type DrawCtx = {p1x: float, p1y: float, p2x: float, p2y: float, motionIdx: int}
+
+// =====================================================
+// Helpers
+// =====================================================
+pn safe_div(a: float, b: float) float {
+    if (b == 0) { return 0.0 }
+    var r = a / b
+    return r
+}
+
+pn min_f(a: float, b: float) float {
+    if (a <= b) { return a }
+    return b
+}
+
+pn max_f(a: float, b: float) float {
+    if (a >= b) { return a }
+    return b
+}
+
+pn check_overlap(low: float, high: float) int {
+    if (low <= 1) {
+        if (1 <= high) { return 1 }
+    }
+    if (low <= 0) {
+        if (0 <= high) { return 1 }
+    }
+    if (0 <= low) {
+        if (high <= 1) { return 1 }
+    }
+    return 0
+}
+
+pn get_old_or_new(old, newp) any {
+    if (old == null) { return newp }
+    return old
+}
 
 // =====================================================
 // 3-level indexed array: 16 x 16 x 32 = 8192 cap
 // =====================================================
-fn arr_new() Arr {
-    // bind through a declared `array` first: the map-contract relation compares the
-    // candidate field's recorded storage descriptor, and an inlined fill() does not
-    // carry one matching the declared `l0: array`, so every construction reified.
+pn arr_new() Arr {
     let init: array = fill(16, null)
-    { l0: init, sz: 0 }
+    var a = { l0: init, sz: 0 }
+    return a
 }
 
-pn arr_get(a, idx: int) any {
-    var i2: int = int(idx % 32)
-    var mid: int = shr(idx, 5)
-    var i1: int = int(mid % 16)
-    var i0: int = shr(mid, 4)
-    var l0 = (a.l0)
+pn arr_get(a: Arr, idx: int) any {
+    var i2 = idx % 32
+    var mid = shr(idx, 5)
+    var i1 = mid % 16
+    var i0 = shr(mid, 4)
+    var l0 = a.l0
     var c1 = l0[i0]
     if (c1 == null) { return null }
     var c2 = c1[i1]
@@ -71,494 +84,170 @@ pn arr_get(a, idx: int) any {
     return r
 }
 
-pn arr_set(a, idx: int, val) int {
-    var i2: int = int(idx % 32)
-    var mid: int = shr(idx, 5)
-    var i1: int = int(mid % 16)
-    var i0: int = shr(mid, 4)
+pn arr_set(var a: Arr, idx: int, val) int {
+    var i2 = idx % 32
+    var mid = shr(idx, 5)
+    var i1 = mid % 16
+    var i0 = shr(mid, 4)
     var l0 = (a.l0)
     var c1 = l0[i0]
     if (c1 == null) {
+        var _d = 0
         c1 = fill(16, null)
-        l0[i0] = c1
     }
     var c2 = c1[i1]
     if (c2 == null) {
+        var _d2 = 0
         c2 = fill(32, null)
-        c1[i1] = c2
     }
+    var _d3 = 0
     c2[i2] = val
+    c1[i1] = c2
+    l0[i0] = c1
+    a.l0 = l0
     return 0
 }
 
 // =====================================================
 // Small vector: 16x16=256
 // =====================================================
-pn vec_new() any {
+pn vec_new() array {
     return []
 }
 
-pn vec_add(v, item) int {
+pn vec_add(var v, item) int {
     push(v, item)
     return 0
 }
 
-fn vec_at(v, idx: int) any {
-    v[idx]
+pn vec_at(v: array, idx: int) any {
+    return v[idx]
+}
+
+pn vec_size(v: array) int {
+    return len(v)
 }
 
 // =====================================================
 // Red-Black Tree (integer keys)
-// Node = map: {key, value, left, right, parent, color} — direct node
-//   references, `null` is the absent-node sentinel (mirrors the reference
-//   implementation's Node<K,V> pointers; see ref/are-we-fast-yet Java cd/).
-// Tree = map: {root}
-//
-// Node and tree maps are deliberately left UNTYPED. Admitting a map through a
-// declared map contract runs it through boundary reification, which detaches
-// the map from the object graph — parent/child links would then point at stale
-// copies and mutations through one path would be invisible through the other.
-// Untyped construction costs zero admissions and preserves aliasing.
+// Node = array: [key, val, left_id, right_id, parent_id, color]
+// Tree = map: { root, cnt, nd }
 // =====================================================
 
-// `==` on maps is structural, not identity: it reports two distinct nodes with
-// equal contents as equal, and diverges outright on the parent/child cycles
-// this tree builds. Node identity therefore goes through `key`, which is unique
-// across the tree by construction (rbt_put replaces in place on a key hit and
-// never inserts a duplicate).
-fn node_eq(a, b) int {
-    if (a == null and b == null) 1
-    else if (a == null) 0
-    else if (b == null) 0
-    else if ((a.key) == (b.key)) 1
-    else 0
-}
-
-// absent nodes count as black, matching `x == null || x.color == BLACK`
-fn is_black(n) int {
-    if (n == null) 1
-    else if ((n.color) == BLACK) 1
-    else 0
-}
+// The original tree stored linked node values. Under COW every lookup is a
+// snapshot, so the mutable owner is an explicit key/value table instead
+// (D3.3.1). The CD workload needs ordered iteration only, not tree balancing.
 
 pn rbt_new() any {
-    var t = { root: null }
-    return t
+    var keys = vec_new()
+    var vals = vec_new()
+    var table = { keys: null, vals: null }
+    table.keys = keys
+    table.vals = vals
+    return table
 }
 
-pn rbt_mk_node(k: int, v) any {
-    var n = { key: k, value: v, left: null, right: null, parent: null, color: RED }
-    return n
+pn rbt_find_node(tree, key: int) int {
+    var keys = tree.keys
+    var i = 0
+    while (i < len(keys)) {
+        if (keys[i] == key) {
+            return i
+        }
+        i = i + 1
+    }
+    return NIL
 }
 
-pn rbt_left_rotate(tree, x) any {
-    var y = (x.right)
-    // turn y's left subtree into x's right subtree
-    var yl = (y.left)
-    x.right = yl
-    if (yl != null) {
-        yl.parent = x
-    }
-    // link x's parent to y
-    var xp = (x.parent)
-    y.parent = xp
-    if (xp == null) {
-        tree.root = y
-    } else {
-        var xpl = (xp.left)
-        if (node_eq(x, xpl) == 1) {
-            xp.left = y
-        } else {
-            xp.right = y
-        }
-    }
-    // put x on y's left
-    y.left = x
-    x.parent = y
-    return y
+pn rbt_nd(tree, id: int) array {
+    return [tree.keys[id], tree.vals[id]]
 }
 
-pn rbt_right_rotate(tree, y) any {
-    var x = (y.left)
-    // turn x's right subtree into y's left subtree
-    var xr = (x.right)
-    y.left = xr
-    if (xr != null) {
-        xr.parent = y
+pn rbt_put(var tree, key: int, value) any {
+    var index = rbt_find_node(tree, key)
+    var keys = tree.keys
+    var vals = tree.vals
+    if (index != NIL) {
+        var old = vals[index]
+        vals[index] = value
+        tree.vals = vals
+        return old
     }
-    // link y's parent to x
-    var yp = (y.parent)
-    x.parent = yp
-    if (yp == null) {
-        tree.root = x
-    } else {
-        var ypl = (yp.left)
-        if (node_eq(y, ypl) == 1) {
-            yp.left = x
-        } else {
-            yp.right = x
-        }
-    }
-    // put y on x's right
-    x.right = y
-    y.parent = x
-    return x
-}
-
-pn rbt_put(tree, key: int, value) any {
-    // tree insert
-    var y = null
-    var x = (tree.root)
-    while (x != null) {
-        y = x
-        var xk: int = (x.key)
-        if (key == xk) {
-            var oldVal = (x.value)
-            x.value = value
-            return oldVal
-        } else if (key < xk) {
-            x = (x.left)
-        } else {
-            x = (x.right)
-        }
-    }
-    var z = rbt_mk_node(key, value)
-    z.parent = y
-    if (y == null) {
-        tree.root = z
-    } else {
-        var yk: int = (y.key)
-        if (key < yk) {
-            y.left = z
-        } else {
-            y.right = z
-        }
-    }
-    // fix up
-    var cur = z
-    var root = (tree.root)
-    while (node_eq(cur, root) == 0) {
-        var par = (cur.parent)
-        var pcol: int = (par.color)
-        if (pcol != RED) {
-            // matches the `x.parent.color == RED` half of the loop guard
-            cur = root
-        } else {
-            var gp = (par.parent)
-            var gpl = (gp.left)
-            if (node_eq(par, gpl) == 1) {
-                var unc = (gp.right)
-                var uncCol: int = BLACK
-                if (unc != null) { uncCol = (unc.color) }
-                if (uncCol == RED) {
-                    // case 1
-                    par.color = BLACK
-                    unc.color = BLACK
-                    gp.color = RED
-                    cur = gp
-                    root = (tree.root)
-                } else {
-                    var pr = (par.right)
-                    if (node_eq(cur, pr) == 1) {
-                        // case 2
-                        cur = par
-                        rbt_left_rotate(tree, cur)
-                    }
-                    // case 3 — re-read the parent chain, the rotation moved it
-                    var cp = (cur.parent)
-                    cp.color = BLACK
-                    var cpp = (cp.parent)
-                    cpp.color = RED
-                    rbt_right_rotate(tree, cpp)
-                    root = (tree.root)
-                }
-            } else {
-                // same as the "then" clause with "right" and "left" exchanged
-                var unc2 = (gp.left)
-                var uncCol2: int = BLACK
-                if (unc2 != null) { uncCol2 = (unc2.color) }
-                if (uncCol2 == RED) {
-                    // case 1
-                    par.color = BLACK
-                    unc2.color = BLACK
-                    gp.color = RED
-                    cur = gp
-                    root = (tree.root)
-                } else {
-                    var pl = (par.left)
-                    if (node_eq(cur, pl) == 1) {
-                        // case 2
-                        cur = par
-                        rbt_right_rotate(tree, cur)
-                    }
-                    // case 3
-                    var cp2 = (cur.parent)
-                    cp2.color = BLACK
-                    var cpp2 = (cp2.parent)
-                    cpp2.color = RED
-                    rbt_left_rotate(tree, cpp2)
-                    root = (tree.root)
-                }
-            }
-        }
-    }
-    var rootN = (tree.root)
-    rootN.color = BLACK
-    return null
-}
-
-pn rbt_find_node(tree, key: int) any {
-    var cur = (tree.root)
-    while (cur != null) {
-        var nk: int = (cur.key)
-        if (key == nk) {
-            return cur
-        } else if (key < nk) {
-            cur = (cur.left)
-        } else {
-            cur = (cur.right)
-        }
-    }
+    push(keys, key)
+    push(vals, value)
+    tree.keys = keys
+    tree.vals = vals
     return null
 }
 
 pn rbt_get(tree, key: int) any {
-    var n = rbt_find_node(tree, key)
-    if (n == null) { return null }
-    var v = (n.value)
-    return v
+    var index = rbt_find_node(tree, key)
+    if (index == NIL) {
+        return null
+    }
+    return tree.vals[index]
 }
 
-pn rbt_tree_min(x) any {
-    var cur = x
-    while (cur != null) {
-        var l = (cur.left)
-        if (l == null) { return cur }
-        cur = l
-    }
-    return cur
-}
-
-pn rbt_successor(x) any {
-    var r = (x.right)
-    if (r != null) {
-        var m = rbt_tree_min(r)
-        return m
-    }
-    var cur = x
-    var y = (cur.parent)
-    while (y != null) {
-        var yr = (y.right)
-        if (node_eq(cur, yr) == 0) { return y }
-        cur = y
-        y = (y.parent)
-    }
-    return null
-}
-
-pn rbt_first(tree) any {
-    var r = (tree.root)
-    if (r == null) { return null }
-    var m = rbt_tree_min(r)
-    return m
-}
-
-pn rbt_remove_fixup(tree, x, xParent) any {
-    var cur = x
-    var par = xParent
-    var root = (tree.root)
-    // guard mirrors `x != root && (x == null || x.color == BLACK)`; the
-    // id-based predecessor of this function fell through from the left case
-    // into the right case after it reassigned the cursor, so the two sibling
-    // cases are kept mutually exclusive here.
-    while (node_eq(cur, root) == 0 and is_black(cur) == 1) {
-        var pl = (par.left)
-        if (node_eq(cur, pl) == 1) {
-            // w cannot be null here — it follows from the red-black invariants
-            var w = (par.right)
-            if ((w.color) == RED) {
-                // case 1
-                w.color = BLACK
-                par.color = RED
-                rbt_left_rotate(tree, par)
-                root = (tree.root)
-                w = (par.right)
-            }
-            var wl = (w.left)
-            var wr = (w.right)
-            if (is_black(wl) == 1 and is_black(wr) == 1) {
-                // case 2
-                w.color = RED
-                cur = par
-                par = (cur.parent)
-            } else {
-                if (is_black(wr) == 1) {
-                    // case 3
-                    var wl2 = (w.left)
-                    wl2.color = BLACK
-                    w.color = RED
-                    rbt_right_rotate(tree, w)
-                    root = (tree.root)
-                    w = (par.right)
-                }
-                // case 4
-                w.color = (par.color)
-                par.color = BLACK
-                var wr2 = (w.right)
-                if (wr2 != null) { wr2.color = BLACK }
-                rbt_left_rotate(tree, par)
-                root = (tree.root)
-                cur = root
-                par = (cur.parent)
-            }
-        } else {
-            // same as the "then" clause with "right" and "left" exchanged
-            var w2 = (par.left)
-            if ((w2.color) == RED) {
-                // case 1
-                w2.color = BLACK
-                par.color = RED
-                rbt_right_rotate(tree, par)
-                root = (tree.root)
-                w2 = (par.left)
-            }
-            var w2r = (w2.right)
-            var w2l = (w2.left)
-            if (is_black(w2r) == 1 and is_black(w2l) == 1) {
-                // case 2
-                w2.color = RED
-                cur = par
-                par = (cur.parent)
-            } else {
-                if (is_black(w2l) == 1) {
-                    // case 3
-                    var w2r2 = (w2.right)
-                    w2r2.color = BLACK
-                    w2.color = RED
-                    rbt_left_rotate(tree, w2)
-                    root = (tree.root)
-                    w2 = (par.left)
-                }
-                // case 4
-                w2.color = (par.color)
-                par.color = BLACK
-                var w2l2 = (w2.left)
-                if (w2l2 != null) { w2l2.color = BLACK }
-                rbt_right_rotate(tree, par)
-                root = (tree.root)
-                cur = root
-                par = (cur.parent)
-            }
-        }
-    }
-    if (cur != null) {
-        cur.color = BLACK
+pn rbt_first(tree) int {
+    if (len(tree.keys) == 0) {
+        return NIL
     }
     return 0
 }
 
-pn rbt_remove(tree, key: int) any {
-    var z = rbt_find_node(tree, key)
-    if (z == null) { return null }
-    var zv = (z.value)
+pn rbt_successor(tree, id: int) int {
+    var next = id + 1
+    if (next >= len(tree.keys)) {
+        return NIL
+    }
+    return next
+}
 
-    // y is the node to be unlinked from the tree
-    var y = z
-    var zl = (z.left)
-    var zr = (z.right)
-    if (zl != null and zr != null) {
-        y = rbt_successor(z)
+pn rbt_remove(var tree, key: int) any {
+    var index = rbt_find_node(tree, key)
+    if (index == NIL) {
+        return null
     }
-
-    // x is the child of y which might replace y; it may be null
-    var yl = (y.left)
-    var x = null
-    if (yl != null) {
-        x = yl
-    } else {
-        x = (y.right)
+    var keys = tree.keys
+    var vals = tree.vals
+    var old = vals[index]
+    var i = index
+    var tail_index = len(keys) - 1
+    while (i < tail_index) {
+        keys[i] = keys[i + 1]
+        vals[i] = vals[i + 1]
+        i = i + 1
     }
-
-    var yp = (y.parent)
-    var xParent = null
-    if (x != null) {
-        x.parent = yp
-        xParent = (x.parent)
-    } else {
-        xParent = yp
-    }
-    if (yp == null) {
-        tree.root = x
-    } else {
-        var ypl = (yp.left)
-        if (node_eq(y, ypl) == 1) {
-            yp.left = x
-        } else {
-            yp.right = x
-        }
-    }
-
-    if (node_eq(y, z) == 0) {
-        var ycol: int = (y.color)
-        if (ycol == BLACK) {
-            rbt_remove_fixup(tree, x, xParent)
-        }
-        y.parent = (z.parent)
-        y.color = (z.color)
-        y.left = (z.left)
-        y.right = (z.right)
-        var znl = (z.left)
-        if (znl != null) {
-            znl.parent = y
-        }
-        var znr = (z.right)
-        if (znr != null) {
-            znr.parent = y
-        }
-        var zp = (z.parent)
-        if (zp != null) {
-            var zpl = (zp.left)
-            if (node_eq(z, zpl) == 1) {
-                zp.left = y
-            } else {
-                zp.right = y
-            }
-        } else {
-            tree.root = y
-        }
-    } else {
-        var ycol2: int = (y.color)
-        if (ycol2 == BLACK) {
-            rbt_remove_fixup(tree, x, xParent)
-        }
-    }
-    return zv
+    tree.keys = slice(keys, 0, tail_index)
+    tree.vals = slice(vals, 0, tail_index)
+    return old
 }
 
 // =====================================================
-// Vector2D key encoding (typed int → native arithmetic)
+// Vector2D key encoding
 // =====================================================
-fn v2d_key(x: int, y: int) int {
-    let kx: int = x + 1000
-    let ky: int = y + 1000
-    kx * 100000 + ky
+pn v2d_key(x: int, y: int) int {
+    var kx = int(x) + 1000
+    var ky = int(y) + 1000
+    var k = kx * 100000 + ky
+    return k
 }
 
 // =====================================================
 // Vector3D operations
 // =====================================================
-fn v3d_new(x, y, z) array {
-    [x, y, z]
+pn v3d_new(x, y, z) array {
+    return [x, y, z]
 }
 
 // =====================================================
-// Voxel hashing (typed float → native division)
+// Voxel hashing
 // =====================================================
-pn voxel_hash_xy(px: float, py: float, out) int {
-    var xdiv: int = int(px / GOOD_VOXEL_SIZE)
-    var ydiv: int = int(py / GOOD_VOXEL_SIZE)
-    var rx: int = GOOD_VOXEL_SIZE * xdiv
-    var ry: int = GOOD_VOXEL_SIZE * ydiv
+pn voxel_hash_xy(px: float, py: float, var out: array) int {
+    var xdiv = int(px / GOOD_VOXEL_SIZE)
+    var ydiv = int(py / GOOD_VOXEL_SIZE)
+    var rx = GOOD_VOXEL_SIZE * xdiv
+    var ry = GOOD_VOXEL_SIZE * ydiv
     if (px < 0) { rx = rx - GOOD_VOXEL_SIZE }
     if (py < 0) { ry = ry - GOOD_VOXEL_SIZE }
     out[0] = rx
@@ -567,9 +256,10 @@ pn voxel_hash_xy(px: float, py: float, out) int {
 }
 
 // =====================================================
-// isInVoxel check (typed float → native float arithmetic)
+// isInVoxel check
 // =====================================================
-pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float) int {
+pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float,
+        p2x: float, p2y: float) int {
     if (vx > MAX_X) { return 0 }
     if (vx < MIN_X) { return 0 }
     if (vy > MAX_Y) { return 0 }
@@ -577,17 +267,18 @@ pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float)
 
     var vS = GOOD_VOXEL_SIZE
     var r = PROXIMITY_RADIUS / 2
-    var x0: float = p1x
-    var xv: float = p2x - p1x
-    var y0: float = p1y
-    var yv: float = p2y - p1y
+    var x0 = p1x
+    var xv = p2x - p1x
+    var y0 = p1y
+    var yv = p2y - p1y
 
+    // Compute x interval outside if blocks (transpiler bug: float assignments in if blocks fail)
     var rawLX = safe_div(vx - r - x0, xv)
     var rawHX = safe_div(vx + vS + r - x0, xv)
     var lowX = min_f(rawLX, rawHX)
     var highX = max_f(rawLX, rawHX)
 
-    var xOk: int = 0
+    var xOk = 0
     if (xv == 0) {
         if (vx <= x0 + r) {
             if (x0 - r <= vx + vS) {
@@ -600,12 +291,13 @@ pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float)
     }
     if (xOk == 0) { return 0 }
 
+    // Compute y interval outside if blocks
     var rawLY = safe_div(vy - r - y0, yv)
     var rawHY = safe_div(vy + vS + r - y0, yv)
     var lowY = min_f(rawLY, rawHY)
     var highY = max_f(rawLY, rawHY)
 
-    var yOk: int = 0
+    var yOk = 0
     if (yv == 0) {
         if (vy <= y0 + r) {
             if (y0 - r <= vy + vS) {
@@ -635,88 +327,138 @@ pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float)
 
 // =====================================================
 // Recurse: draw motion into voxel map
-// ctx: DrawCtx — typed map for direct field-offset access
 // =====================================================
-pn recurse_draw(voxelMap, seenTree, vx: int, vy: int, ctx: DrawCtx) any {
-    var p1x: float = (ctx.p1x)
-    var p1y: float = (ctx.p1y)
-    var p2x: float = (ctx.p2x)
-    var p2y: float = (ctx.p2y)
-    var inV: int = is_in_voxel(vx, vy, p1x, p1y, p2x, p2y)
-    if (inV == 0) { return 0 }
-
-    var vk: int = v2d_key(vx, vy)
-    var oldSeen = rbt_put(seenTree, vk, 1)
-    if (oldSeen != null) { return 0 }
-
-    var existVec = rbt_get(voxelMap, vk)
-    if (existVec == null) {
-        existVec = vec_new()
+pn recurse_draw(voxel_map, seen_tree, vx: int, vy: int,
+        p1x: float, p1y: float, p2x: float, p2y: float,
+        motion_idx: int) array {
+    // The recursive frontier returns both owned tables explicitly. A nested
+    // call cannot leave an updated COW root behind as a discarded snapshot.
+    var voxels = voxel_map
+    var seen = seen_tree
+    var in_voxel = is_in_voxel(vx, vy, p1x, p1y, p2x, p2y)
+    if (in_voxel == 0) {
+        return [voxels, seen]
     }
-    var motionIdx: int = (ctx.motionIdx)
-    vec_add(existVec, motionIdx)
-    // retain the edited value: COW may detach existVec from the stored snapshot.
-    rbt_put(voxelMap, vk, existVec)
 
-    var gs: int = GOOD_VOXEL_SIZE
-    recurse_draw(voxelMap, seenTree, vx - gs, vy, ctx)
-    recurse_draw(voxelMap, seenTree, vx + gs, vy, ctx)
-    recurse_draw(voxelMap, seenTree, vx, vy - gs, ctx)
-    recurse_draw(voxelMap, seenTree, vx, vy + gs, ctx)
-    recurse_draw(voxelMap, seenTree, vx - gs, vy - gs, ctx)
-    recurse_draw(voxelMap, seenTree, vx - gs, vy + gs, ctx)
-    recurse_draw(voxelMap, seenTree, vx + gs, vy - gs, ctx)
-    recurse_draw(voxelMap, seenTree, vx + gs, vy + gs, ctx)
-    return 0
+    var voxel_key = v2d_key(vx, vy)
+    var old_seen = rbt_put(seen, voxel_key, 1)
+    if (old_seen != null) {
+        return [voxels, seen]
+    }
+
+    var entries = rbt_get(voxels, voxel_key)
+    if (entries == null) {
+        entries = vec_new()
+    }
+    vec_add(entries, motion_idx)
+    rbt_put(voxels, voxel_key, entries)
+
+    var grid_size = GOOD_VOXEL_SIZE
+    var step = recurse_draw(voxels, seen, vx - grid_size, vy, p1x, p1y, p2x, p2y, motion_idx)
+    voxels = step[0]
+    seen = step[1]
+    step = recurse_draw(voxels, seen, vx + grid_size, vy, p1x, p1y, p2x, p2y, motion_idx)
+    voxels = step[0]
+    seen = step[1]
+    step = recurse_draw(voxels, seen, vx, vy - grid_size, p1x, p1y, p2x, p2y, motion_idx)
+    voxels = step[0]
+    seen = step[1]
+    step = recurse_draw(voxels, seen, vx, vy + grid_size, p1x, p1y, p2x, p2y, motion_idx)
+    voxels = step[0]
+    seen = step[1]
+    step = recurse_draw(voxels, seen, vx - grid_size, vy - grid_size, p1x, p1y, p2x, p2y, motion_idx)
+    voxels = step[0]
+    seen = step[1]
+    step = recurse_draw(voxels, seen, vx - grid_size, vy + grid_size, p1x, p1y, p2x, p2y, motion_idx)
+    voxels = step[0]
+    seen = step[1]
+    step = recurse_draw(voxels, seen, vx + grid_size, vy - grid_size, p1x, p1y, p2x, p2y, motion_idx)
+    voxels = step[0]
+    seen = step[1]
+    step = recurse_draw(voxels, seen, vx + grid_size, vy + grid_size, p1x, p1y, p2x, p2y, motion_idx)
+    voxels = step[0]
+    seen = step[1]
+    return [voxels, seen]
 }
 
 // =====================================================
-// findIntersection — refactored for native float arithmetic
-// Wrapper extracts array→ typed params at call boundary
+// findIntersection between two motions
 // =====================================================
-pn fi_collide(sq: float, b: float, a: float,
-              i1x: float, i1y: float, i1z: float,
-              v1x: float, v1y: float, v1z: float,
-              i2x: float, i2y: float, i2z: float,
-              v2x: float, v2y: float, v2z: float) {
-    // 15 typed float params → ALL arithmetic is native double
-    var a2: float = 2.0 * a
-    var t1: float = (-b - sq) / a2
-    var t2: float = (-b + sq) / a2
+pn find_intersection(m1, m2) any {
+    // Motion: [cs, p1x, p1y, p1z, p2x, p2y, p2z]
+    var i1x = m1[1]
+    var i1y = m1[2]
+    var i1z = m1[3]
+    var i2x = m2[1]
+    var i2y = m2[2]
+    var i2z = m2[3]
 
-    if (t1 <= t2) {
-        var collision: int = 0
-        if (t1 <= 1.0) {
-            if (1.0 <= t2) { collision = 1 }
-        }
-        if (t1 <= 0.0) {
-            if (0.0 <= t2) { collision = 1 }
-        }
-        if (0.0 <= t1) {
-            if (t2 <= 1.0) { collision = 1 }
-        }
-        if (collision == 1) {
-            // Inline max(t1, 0.0) to stay native (avoid function return Item)
-            var v: float = t1
-            if (t1 < 0.0) { v = 0.0 }
-            var r1x: float = i1x + v1x * v
-            var r1y: float = i1y + v1y * v
-            var r1z: float = i1z + v1z * v
-            var r2x: float = i2x + v2x * v
-            var r2y: float = i2y + v2y * v
-            var r2z: float = i2z + v2z * v
-            var rx: float = (r1x + r2x) * 0.5
-            var ry: float = (r1y + r2y) * 0.5
-            var rz: float = (r1z + r2z) * 0.5
-            // Bounds checks with float literals (native comparisons)
-            if (rx >= 0.0) {
-                if (rx <= 1000.0) {
-                    if (ry >= 0.0) {
-                        if (ry <= 1000.0) {
-                            if (rz >= 0.0) {
-                                if (rz <= 10.0) {
-                                    var result = v3d_new(rx, ry, rz)
-                                    return result
+    var v1x = m1[4] - i1x
+    var v1y = m1[5] - i1y
+    var v1z = m1[6] - i1z
+    var v2x = m2[4] - i2x
+    var v2y = m2[5] - i2y
+    var v2z = m2[6] - i2z
+
+    var radius = PROXIMITY_RADIUS
+    var dvx = v2x - v1x
+    var dvy = v2y - v1y
+    var dvz = v2z - v1z
+    var a = dvx * dvx + dvy * dvy + dvz * dvz
+
+    if (a != 0) {
+        var dix = i1x - i2x
+        var diy = i1y - i2y
+        var diz = i1z - i2z
+        var dmvx = v1x - v2x
+        var dmvy = v1y - v2y
+        var dmvz = v1z - v2z
+        var b = 2 * (dix * dmvx + diy * dmvy + diz * dmvz)
+
+        var di2x = i2x - i1x
+        var di2y = i2y - i1y
+        var di2z = i2z - i1z
+        var c = 0 - radius * radius + di2x * di2x + di2y * di2y + di2z * di2z
+
+        var discr = b * b - 4 * a * c
+        if (discr < 0) { return null }
+
+        var sq = math.sqrt(discr)
+        var a2 = 2 * a
+        var t1 = (-b - sq) / a2
+        var t2 = (-b + sq) / a2
+
+        if (t1 <= t2) {
+            var collision = 0
+            if (t1 <= 1) {
+                if (1 <= t2) { collision = 1 }
+            }
+            if (t1 <= 0) {
+                if (0 <= t2) { collision = 1 }
+            }
+            if (0 <= t1) {
+                if (t2 <= 1) { collision = 1 }
+            }
+            if (collision == 1) {
+                var v = max_f(t1, 0.0)
+                var r1x = i1x + v1x * v
+                var r1y = i1y + v1y * v
+                var r1z = i1z + v1z * v
+                var r2x = i2x + v2x * v
+                var r2y = i2y + v2y * v
+                var r2z = i2z + v2z * v
+                var rx = (r1x + r2x) * 0.5
+                var ry = (r1y + r2y) * 0.5
+                var rz = (r1z + r2z) * 0.5
+                if (rx >= MIN_X) {
+                    if (rx <= MAX_X) {
+                        if (ry >= MIN_Y) {
+                            if (ry <= MAX_Y) {
+                                if (rz >= MIN_Z) {
+                                    if (rz <= MAX_Z) {
+                                        var result = v3d_new(rx, ry, rz)
+                                        return result
+                                    }
                                 }
                             }
                         }
@@ -724,95 +466,46 @@ pn fi_collide(sq: float, b: float, a: float,
                 }
             }
         }
+        return null
+    }
+
+    // Parallel case
+    var pdx = i2x - i1x
+    var pdy = i2y - i1y
+    var pdz = i2z - i1z
+    var dist = math.sqrt(pdx * pdx + pdy * pdy + pdz * pdz)
+    if (dist <= radius) {
+        var rx2 = (i1x + i2x) * 0.5
+        var ry2 = (i1y + i2y) * 0.5
+        var rz2 = (i1z + i2z) * 0.5
+        var result2 = v3d_new(rx2, ry2, rz2)
+        return result2
     }
     return null
-}
-
-pn fi_compute(i1x: float, i1y: float, i1z: float,
-              e1x: float, e1y: float, e1z: float,
-              i2x: float, i2y: float, i2z: float,
-              e2x: float, e2y: float, e2z: float) {
-    // 12 typed float params → ALL arithmetic is native double
-    var v1x: float = e1x - i1x
-    var v1y: float = e1y - i1y
-    var v1z: float = e1z - i1z
-    var v2x: float = e2x - i2x
-    var v2y: float = e2y - i2y
-    var v2z: float = e2z - i2z
-
-    var dvx: float = v2x - v1x
-    var dvy: float = v2y - v1y
-    var dvz: float = v2z - v1z
-    var a: float = dvx * dvx + dvy * dvy + dvz * dvz
-
-    if (a != 0.0) {
-        var dix: float = i1x - i2x
-        var diy: float = i1y - i2y
-        var diz: float = i1z - i2z
-        var dmvx: float = v1x - v2x
-        var dmvy: float = v1y - v2y
-        var dmvz: float = v1z - v2z
-        var b: float = 2.0 * (dix * dmvx + diy * dmvy + diz * dmvz)
-
-        var di2x: float = i2x - i1x
-        var di2y: float = i2y - i1y
-        var di2z: float = i2z - i1z
-        // PROXIMITY_RADIUS = 1, so radius² = 1.0
-        var c: float = di2x * di2x + di2y * di2y + di2z * di2z - 1.0
-
-        var discr: float = b * b - 4.0 * a * c
-        if (discr < 0.0) { return null }
-
-        // sqrt returns push_d(math.sqrt(discr)) → Item
-        // Pass through fi_collide typed param for native continuation
-        var sq = math.sqrt(discr)
-        return fi_collide(sq, b, a,
-                          i1x, i1y, i1z, v1x, v1y, v1z,
-                          i2x, i2y, i2z, v2x, v2y, v2z)
-    }
-
-    // Parallel case: avoid sqrt by comparing squared distances
-    var pdx: float = i2x - i1x
-    var pdy: float = i2y - i1y
-    var pdz: float = i2z - i1z
-    var dist_sq: float = pdx * pdx + pdy * pdy + pdz * pdz
-    // dist <= PROXIMITY_RADIUS(1) iff dist² <= 1.0
-    if (dist_sq > 1.0) { return null }
-    var rx: float = (i1x + i2x) * 0.5
-    var ry: float = (i1y + i2y) * 0.5
-    var rz: float = (i1z + i2z) * 0.5
-    var result = v3d_new(rx, ry, rz)
-    return result
-}
-
-pn find_intersection(m1, m2) any {
-    // Extract array values → typed float params at call boundary (it2d conversion)
-    return fi_compute(m1[1], m1[2], m1[3], m1[4], m1[5], m1[6],
-                      m2[1], m2[2], m2[3], m2[4], m2[5], m2[6])
 }
 
 // =====================================================
 // Motion: array [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 // =====================================================
-fn motion_new(cs: int, p1x, p1y, p1z, p2x, p2y, p2z) array {
-    [cs, p1x, p1y, p1z, p2x, p2y, p2z]
+pn motion_new(cs: int, p1x, p1y, p1z, p2x, p2y, p2z) array {
+    return [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 }
 
 // =====================================================
 // CD Benchmark main logic
 // =====================================================
 
-pn simulate_frame(numAircraft: int, tval) any {
-    var frame: Vec = vec_new()
-    var i: int = 0
+pn simulate_frame(numAircraft: int, tval: float) array {
+    var frame = vec_new()
+    var i = 0
     while (i < numAircraft) {
-        var cs1: int = i
+        var cs1 = i
         var px1 = tval
         var py1 = math.cos(tval) * 2 + i * 3
-        var pz1: int = 10
+        var pz1 = 10
         var a1 = [cs1, px1, py1, pz1]
         vec_add(frame, a1)
-        var cs2: int = i + 1
+        var cs2 = i + 1
         var py2 = math.sin(tval) * 2 + i * 3
         var a2 = [cs2, px1, py2, pz1]
         vec_add(frame, a2)
@@ -821,21 +514,21 @@ pn simulate_frame(numAircraft: int, tval) any {
     return frame
 }
 
-pn handle_new_frame(stateTree, frame: Vec) any {
-    var motions: Vec = vec_new()
-    // Use flat arr for aircraft seen set (IDs are 0-99, well within arr capacity)
-    var seenArr: Arr = arr_new()
-    var frameSz: int = len(frame)
-    var i: int = 0
+pn handle_new_frame(var stateTree, frame: array) int {
+    var motions = vec_new()
+    var seenTree = rbt_new()
+    var frameSz = vec_size(frame)
+    var i = 0
     while (i < frameSz) {
         var aircraft = vec_at(frame, i)
-        var csId: int = aircraft[0]
+        var csId = aircraft[0]
         var npx = aircraft[1]
         var npy = aircraft[2]
         var npz = aircraft[3]
         var newPos = v3d_new(npx, npy, npz)
         var oldPos = rbt_put(stateTree, csId, newPos)
-        arr_set(seenArr, csId, 1)
+        rbt_put(seenTree, csId, 1)
+        // Use helper to avoid FLOAT assignments inside if blocks
         var usePos = get_old_or_new(oldPos, newPos)
         var opx = usePos[0]
         var opy = usePos[1]
@@ -846,63 +539,60 @@ pn handle_new_frame(stateTree, frame: Vec) any {
     }
 
     // Remove aircraft no longer present
-    var toRemove: Vec = vec_new()
-    var curN = rbt_first(stateTree)
-    while (curN != null) {
-        var ck: int = (curN.key)
-        var inSeen = arr_get(seenArr, ck)
+    var toRemove = vec_new()
+    var curId = rbt_first(stateTree)
+    while (curId != NIL) {
+        var curN = rbt_nd(stateTree, curId)
+        var ck = curN[NK]
+        var inSeen = rbt_get(seenTree, ck)
         if (inSeen == null) {
             vec_add(toRemove, ck)
         }
-        curN = rbt_successor(curN)
+        curId = rbt_successor(stateTree, curId)
     }
-    var trSz: int = len(toRemove)
-    var ri: int = 0
+    var trSz = vec_size(toRemove)
+    var ri = 0
     while (ri < trSz) {
-        var rk: int = vec_at(toRemove, ri)
+        var rk = vec_at(toRemove, ri)
         rbt_remove(stateTree, rk)
         ri = ri + 1
     }
 
     // Reduce collision set
     var voxelMap = rbt_new()
-    var motionsSz: int = len(motions)
+    var motionsSz = vec_size(motions)
     var vxy = [null, null]
-    var mi: int = 0
+    var mi = 0
     while (mi < motionsSz) {
         var mot = vec_at(motions, mi)
-        // pin to float here: `mot` is untyped, so these read back as ANY, and an
-        // ANY field has a different packed width/offset than DrawCtx's native
-        // float lane. Building the ctx literal below straight from ANY values
-        // makes the boundary rebuild the map's layout on every construction.
-        var mp1x: float = mot[1]
-        var mp1y: float = mot[2]
-        var mp2x: float = mot[4]
-        var mp2y: float = mot[5]
+        var mp1x = mot[1]
+        var mp1y = mot[2]
+        var mp2x = mot[4]
+        var mp2y = mot[5]
         voxel_hash_xy(mp1x, mp1y, vxy)
-        var vvx: int = vxy[0]
-        var vvy: int = vxy[1]
+        var vvx = vxy[0]
+        var vvy = vxy[1]
         var motSeen = rbt_new()
-        // Bundle invariant params as typed DrawCtx map
-        var ctx: DrawCtx = { p1x: mp1x, p1y: mp1y, p2x: mp2x, p2y: mp2y, motionIdx: mi }
-        recurse_draw(voxelMap, motSeen, vvx, vvy, ctx)
+        var drawn = recurse_draw(voxelMap, motSeen, vvx, vvy, mp1x, mp1y, mp2x, mp2y, mi)
+        voxelMap = drawn[0]
         mi = mi + 1
     }
 
     // Collect voxels with >1 motion and check collisions
-    var collisionCount: int = 0
+    var collisionCount = 0
     var vmCur = rbt_first(voxelMap)
-    while (vmCur != null) {
-        var motVec: Vec = (vmCur.value)
-        var mvsz: int = len(motVec)
+    while (vmCur != NIL) {
+        var vmN = rbt_nd(voxelMap, vmCur)
+        var motVec = vmN[NV]
+        var mvsz = vec_size(motVec)
         if (mvsz > 1) {
-            var ii: int = 0
+            var ii = 0
             while (ii < mvsz) {
-                var mIdx1: int = vec_at(motVec, ii)
+                var mIdx1 = vec_at(motVec, ii)
                 var mot1 = vec_at(motions, mIdx1)
-                var jj: int = ii + 1
+                var jj = ii + 1
                 while (jj < mvsz) {
-                    var mIdx2: int = vec_at(motVec, jj)
+                    var mIdx2 = vec_at(motVec, jj)
                     var mot2 = vec_at(motions, mIdx2)
                     var coll = find_intersection(mot1, mot2)
                     if (coll != null) {
@@ -913,21 +603,21 @@ pn handle_new_frame(stateTree, frame: Vec) any {
                 ii = ii + 1
             }
         }
-        vmCur = rbt_successor(vmCur)
+        vmCur = rbt_successor(voxelMap, vmCur)
     }
 
     return collisionCount
 }
 
-pn cd(numAircraft: int) any {
-    var numFrames: int = 200
+pn cd(numAircraft: int) int {
+    var numFrames = 200
     var stateTree = rbt_new()
-    var actualCollisions: int = 0
-    var i: int = 0
+    var actualCollisions = 0
+    var i = 0
     while (i < numFrames) {
         var tval = i / 10
         var frame = simulate_frame(numAircraft, tval)
-        var c: int = handle_new_frame(stateTree, frame)
+        var c = handle_new_frame(stateTree, frame)
         actualCollisions = actualCollisions + c
         i = i + 1
     }
@@ -954,12 +644,12 @@ pn verify_result(collisions: int, numAircraft: int) int {
 
 pn main() {
     var __t0 = clock()
-    var collisions: int = cd(100)
+    var collisions = cd(100)
     var __t1 = clock()
     print("collisions=")
     print(collisions)
     print("\n")
-    var ok: int = verify_result(collisions, 100)
+    var ok = verify_result(collisions, 100)
     if (ok == 1) {
         print("CD: PASS\n")
     }

@@ -43,31 +43,32 @@ pn find_free_slot(hm) {
     return hm.size
 }
 
-pn hashmap_put(hm, key: int, value: int) {
+// S9.1.3/CW25: borrow the selected field array so a hot-loop store descends
+// and detaches the owner path once, then uses the unique in-place fast path.
+pn int_slot_set(var slots, index: int, value: int) {
+    slots[index] = value
+}
+
+pn hashmap_put(var hm, key: int, value: int) {
     var hash = compute_hash(key)
     var bucket = hash % hm.cap
-    var hm_keys = hm.keys
-    var hm_values = hm.values
-    var hm_hashes = hm.hashes
-    var hm_nexts = hm.nexts
-    var hm_heads = hm.heads
     // Search chain
-    var idx = hm_heads[bucket]
+    var idx = hm.heads[bucket]
     while (idx != EMPTY) {
-        if (hm_keys[idx] == key) {
-            var old = hm_values[idx]
-            hm_values[idx] = value
+        if (hm.keys[idx] == key) {
+            var old = hm.values[idx]
+            int_slot_set(hm.values, idx, value)
             return old
         }
-        idx = hm_nexts[idx]
+        idx = hm.nexts[idx]
     }
     // Insert new entry
     var slot = hm.size
-    hm_keys[slot] = key
-    hm_values[slot] = value
-    hm_hashes[slot] = hash
-    hm_nexts[slot] = hm_heads[bucket]
-    hm_heads[bucket] = slot
+    int_slot_set(hm.keys, slot, key)
+    int_slot_set(hm.values, slot, value)
+    int_slot_set(hm.hashes, slot, hash)
+    int_slot_set(hm.nexts, slot, hm.heads[bucket])
+    int_slot_set(hm.heads, bucket, slot)
     hm.size = hm.size + 1
 
     // Rehash if needed
@@ -77,23 +78,21 @@ pn hashmap_put(hm, key: int, value: int) {
     return EMPTY
 }
 
-pn hashmap_rehash(hm) {
+pn hashmap_rehash(var hm) {
     var old_cap = hm.cap
     var new_cap = old_cap * 2
     var new_heads = fill(new_cap, EMPTY)
-    var hm_nexts = hm.nexts
-    var hm_hashes = hm.hashes
     // Reset nexts
     var i: int = 0
     while (i < hm.size) {
-        hm_nexts[i] = EMPTY
+        int_slot_set(hm.nexts, i, EMPTY)
         i = i + 1
     }
     // Reinsert all entries
     i = 0
     while (i < hm.size) {
-        var bucket = hm_hashes[i] % new_cap
-        hm_nexts[i] = new_heads[bucket]
+        var bucket = hm.hashes[i] % new_cap
+        int_slot_set(hm.nexts, i, new_heads[bucket])
         new_heads[bucket] = i
         i = i + 1
     }
@@ -101,19 +100,17 @@ pn hashmap_rehash(hm) {
     hm.heads = new_heads
     hm.threshold = int(floor(float(new_cap) * LOAD_FACTOR))
     // Grow arrays if needed
-    var hm_keys = hm.keys
-    var hm_values = hm.values
-    if (hm.size + new_cap > len(hm_keys)) {
+    if (hm.size + new_cap > len(hm.keys)) {
         var new_keys = fill(new_cap * 2, EMPTY)
         var new_values = fill(new_cap * 2, 0)
         var new_hashes2 = fill(new_cap * 2, 0)
         var new_nexts = fill(new_cap * 2, EMPTY)
         i = 0
         while (i < hm.size) {
-            new_keys[i] = hm_keys[i]
-            new_values[i] = hm_values[i]
-            new_hashes2[i] = hm_hashes[i]
-            new_nexts[i] = hm_nexts[i]
+            new_keys[i] = hm.keys[i]
+            new_values[i] = hm.values[i]
+            new_hashes2[i] = hm.hashes[i]
+            new_nexts[i] = hm.nexts[i]
             i = i + 1
         }
         hm.keys = new_keys

@@ -58,14 +58,10 @@ static const char* MIR_SKIP_TESTS[] = {
     "typed_param_direct_access", // typed object parameters are not implemented in MIR Direct
     "map_object_robustness", // comprehensive map/object robustness (uses object features not in MIR)
     // benchmark tests not yet passing in MIR Direct
-    "awfy_json",        // JSON benchmark uses features not yet in MIR
-    "awfy_json2",       // JSON benchmark uses features not yet in MIR
     // awfy_list2 re-enabled 2026-07-29: it now prints "List: PASS" under MIR Direct,
     // matching golden awfy/list2.txt
     // awfy_deltablue / awfy_deltablue2 re-enabled: converted to the growable []/push/len/splice
     // vector (no chunked + .sz wrapper), which fixed both the timeout and the null-output issue.
-    "awfy_richards",    // Richards benchmark produces wrong output in MIR Direct
-    "awfy_richards2",   // Richards benchmark produces wrong output in MIR Direct
     "beng_fasta",       // fasta benchmark uses features not yet in MIR
     "beng_pidigits",    // pidigits benchmark uses features not yet in MIR
     "beng_revcomp",     // revcomp benchmark uses features not yet in MIR

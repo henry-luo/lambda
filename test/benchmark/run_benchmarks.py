@@ -845,7 +845,7 @@ def c2mir_command(suite, name):
     source = c2mir_ports.port_source(suite, name)
     if source is None:
         return None, "missing_port"
-    if not c2mir_ports.C2M.is_file():
+    if c2mir_ports.ensure_c2m() is not None:
         return None, "toolchain_missing"
     return " ".join(shlex.quote(a) for a in c2mir_ports.build_command(source)), "ok"
 
