@@ -2655,6 +2655,8 @@ static bool validate_lambda_argument_limit(Transpiler* tp,
     return false;
 }
 
+static void direct_note_place_copy_var_borrow(SourceSpan span, AstNode* argument);
+
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         SourceSpan diagnostic_span, int arg_count) {
     if (!call || !call->function || !call->function->type ||
@@ -2733,6 +2735,9 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
                 if (var_arg_root_count < 64) {
                     var_arg_root_entries[var_arg_root_count++] = effective_root;
                 }
+                // A `var` call mutates this local root. Record a place-copy
+                // root before lowering so both tiers bind an S9.1.2 snapshot.
+                direct_note_place_copy_var_borrow(diagnostic_span, arg);
             }
             // CW25/E207: a PLACE argument (`f(var m.rows[i])`) carries `any` as
             // its own node type -- a member/index read does not propagate its
@@ -8747,6 +8752,16 @@ static void lambda_ast_note_plain_param_writes(Transpiler* tp, AstFuncNode* fn) 
 // so candidates accumulate here and are judged at FUNCTION_END.
 static NameEntry* g_place_copy_pending = NULL;
 
+static void direct_note_place_copy_mutated(NameEntry* entry, SourceSpan span) {
+    if (!entry || !entry->is_place_copy) return;
+    entry->place_copy_mutated = true;  // durable; gates the bind-time mark
+    if (entry->place_copy_mutation_pending) return;
+    entry->place_copy_mutation_pending = true;
+    entry->place_copy_mutation_span = span;
+    entry->place_copy_next = g_place_copy_pending;
+    g_place_copy_pending = entry;
+}
+
 static void direct_note_place_copy_mutation(SourceSpan span, AstNode* object) {
     AstIdentNode* root = compound_root_ident(object);
     NameEntry* entry = root ? root->entry : NULL;
@@ -8754,12 +8769,12 @@ static void direct_note_place_copy_mutation(SourceSpan span, AstNode* object) {
     // the target's own root ident was already counted as a read when the
     // object expression resolved; it is not an OBSERVATION of the copy
     if (entry->place_copy_target_reads < UINT16_MAX) entry->place_copy_target_reads++;
-    entry->place_copy_mutated = true;  // durable; gates the bind-time mark
-    if (entry->place_copy_mutation_pending) return;
-    entry->place_copy_mutation_pending = true;
-    entry->place_copy_mutation_span = span;
-    entry->place_copy_next = g_place_copy_pending;
-    g_place_copy_pending = entry;
+    direct_note_place_copy_mutated(entry, span);
+}
+
+static void direct_note_place_copy_var_borrow(SourceSpan span, AstNode* argument) {
+    AstIdentNode* root = compound_root_ident(argument);
+    direct_note_place_copy_mutated(root ? root->entry : NULL, span);
 }
 
 // `<place> = p` puts the copy back where it came from, which makes every

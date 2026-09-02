@@ -8913,6 +8913,28 @@ static bool dom_get_textlike_property(DomNode* node, Item elem_item,
         *result = sibling ? dom_wrap_element((void*)sibling) : ItemNull;
         return true;
     }
+    // NonDocumentTypeChildNode is implemented by CharacterData as well as by
+    // Element (DOM §4.2.8), so a Text or Comment node has these two. They were
+    // missing here, so every text node answered `undefined` for them -- through
+    // BOTH doors, script and JS -- rather than the neighbouring element. Found
+    // by the ES43 traversal oracle, which walks the real sibling chain and so
+    // disagreed with the property on all 15 text nodes of a small document.
+    if (strcmp(prop, "nextElementSibling") == 0) {
+        DomNode* sibling = dom_next_script_visible_sibling(node);
+        while (sibling && !sibling->is_element()) {
+            sibling = dom_next_script_visible_sibling(sibling);
+        }
+        *result = sibling ? dom_wrap_element(sibling->as_element()) : ItemNull;
+        return true;
+    }
+    if (strcmp(prop, "previousElementSibling") == 0) {
+        DomNode* sibling = dom_prev_script_visible_sibling(node);
+        while (sibling && !sibling->is_element()) {
+            sibling = dom_prev_script_visible_sibling(sibling);
+        }
+        *result = sibling ? dom_wrap_element(sibling->as_element()) : ItemNull;
+        return true;
+    }
     if (strcmp(prop, "previousSibling") == 0) {
         DomNode* sibling = dom_prev_script_visible_sibling(node);
         *result = sibling ? dom_wrap_element((void*)sibling) : ItemNull;

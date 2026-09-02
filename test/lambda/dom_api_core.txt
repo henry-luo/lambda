@@ -16,5 +16,9 @@
   parent_element_of_note: "SECTION",
   replaced: "#text",
   inner_after_replace: "<em></em><b>bold</b>",
-  matches_section: true
+  matches_section: true,
+  eq_operator_lies: true,
+  same_node_self: true,
+  same_node_other: false,
+  equal_node_clone: true
 }

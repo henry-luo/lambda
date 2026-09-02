@@ -4777,24 +4777,11 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             Item source = value;
             if (borrowed && borrowed->homes[index] &&
                     borrowed->entries[index] &&
-                    borrowed->entries[index]->cow_owned) {
-                // CW33 prologue prepare -- at the borrow chain's ROOT only,
-                // which on T0 is exactly `cow_owned` (an owner-rooted
-                // binding). Preparing mid-chain -- a `var`-param re-borrow OR
-                // a CW29-marked plain param passed onward -- honors a
-                // conservative capture-mark by DETACHING, which orphans the
-                // interior borrows outer frames still hold (cd2_orig:
-                // `zn = rbt_nd(tree)` then a nested `rbt_*(var tree)` call
-                // detached the tree out from under `zn`, losing every later
-                // `zn[..] = v`). Chain hops inherit uniqueness from the root
-                // prepare (§11.5 single-writer chain). The MIR allow-list bug
-                // that motivated an unconditional prepare was MIR-only; T0's
-                // gate was never the defect.
-                // CW33 callee-prologue prepare: un-share-at-borrow (S9.2.2)
-                // happens HERE, once, through the caller's own home -- the
-                // replacement is the caller's binding the moment it exists.
-                // Unconditional; cow_prepare_write is a byte-test no-op on an
-                // already-unique owner.
+                    !borrowed->entries[index]->is_var_param) {
+                // A `var` parameter re-borrows its caller's prepared root.
+                // Every other binding, including a mutated place copy, is an
+                // S9.1.2 snapshot and must detach before its `var` callee writes.
+                // cow_prepare_write is a byte-test no-op for a unique value.
                 Item prepared = cow_prepare_write((Item){.item = *borrowed->homes[index]});
                 if (item_is_error(prepared)) {
                     interp_signal(frame, EvalSignal::RETURNED, prepared);

@@ -11,7 +11,7 @@ extern "C" {
 
 #define JUBE_ABI_VERSION 4
 #define JUBE_ABI_VERSION_LEGACY 1
-#define JUBE_HOST_API_VERSION 1
+#define JUBE_HOST_API_VERSION 2
 #define JUBE_HOST_LANG_API_VERSION 1
 
 // Hosted compiler services are intentionally build-coupled while their opaque
@@ -34,6 +34,8 @@ typedef struct JubeHostDataAPI JubeHostDataAPI;
 typedef struct JubeHostValueAPI JubeHostValueAPI;
 typedef struct JubeHostScriptAPI JubeHostScriptAPI;
 typedef struct JubeHostDomAPI JubeHostDomAPI;
+typedef struct JubeHostRealmAPI JubeHostRealmAPI;
+typedef struct JubeHostDomCatalogAPI JubeHostDomCatalogAPI;
 typedef struct JubeHostLangAPI JubeHostLangAPI;
 typedef struct JubeSourceAPI JubeSourceAPI;
 typedef struct JubeDiagnosticAPI JubeDiagnosticAPI;
@@ -673,14 +675,36 @@ struct JubeHostScriptAPI {
     bool (*bigint_to_int64_exact)(Item value, int64_t* out_value);
 };
 
+// ---------------------------------------------------------------------------
+// The DOM operation catalog as an ABI section (ES39/ES40).
+//
+// One row per operation in lambda/dom/dom_api.def is expanded here into a slot
+// and, in jube_registry.cpp, into the matching body -- so the table cannot
+// drift from the catalog: adding a row adds a slot and a body together, and
+// the compiler checks the arity of each body against its row.
+//
+// Every operation has the shape Item f(Item x argc), which is what makes one
+// declaration serve every surface. A slot is null when the row's body is
+// engine-provided (DOM_F_ENGINE, filled at table time) or not yet written.
+// ---------------------------------------------------------------------------
+typedef Item (*JubeDomFn0)(void);
+typedef Item (*JubeDomFn1)(Item);
+typedef Item (*JubeDomFn2)(Item, Item);
+typedef Item (*JubeDomFn3)(Item, Item, Item);
+typedef Item (*JubeDomFn4)(Item, Item, Item, Item);
+typedef Item (*JubeDomFn5)(Item, Item, Item, Item, Item);
+
+struct JubeHostDomCatalogAPI {
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+    JubeDomFn##argc name;
+#include "../dom/dom_api.def"
+#undef DOM_OP
+};
+
 struct JubeHostDomAPI {
     void* (*get_document)(void);
-    Item (*get_document_object_value)(void);
     void* (*get_or_create_doc_node)(void* doc);
-    Item (*document_proxy_for_doc_bridge)(void* doc);
     void* (*unwrap_element_impl)(Item item);
-    void (*initialize_node_wrapper)(void* dom_elem);
-    bool (*is_css_namespace)(Item item);
     bool (*is_inline_style_item)(Item item);
     bool (*is_computed_style_item)(Item item);
     bool (*is_stylesheet)(Item item);
@@ -693,48 +717,11 @@ struct JubeHostDomAPI {
                                        Item* args, int argc);
     Item (*computed_style_get_property)(Item style_item, Item prop_name);
     bool (*style_resource_has_property)(Item style_item, Item prop_name);
-    void* reserved_style_callable_slot;
-    Item (*dom_get_prototype_value)(Item obj);
-    bool (*cssom_resource_has_property)(Item item, Item prop_name);
-    Item (*cssom_stylesheet_get_property)(Item sheet_item, Item prop_name);
-    Item (*cssom_rule_get_property)(Item rule_item, Item prop_name);
-    Item (*cssom_rule_set_property)(Item rule_item, Item prop_name, Item value);
     Item (*cssom_rule_decl_get_property)(Item decl_item, Item prop_name);
     Item (*cssom_rule_decl_set_property)(Item decl_item, Item prop_name, Item value);
     void* (*get_foreign_doc)(Item item);
     void* (*swap_active_document)(void* new_doc);
     void (*restore_active_document)(void* prev_doc);
-    Item (*document_proxy_get_property)(Item prop_name);
-    Item (*document_proxy_set_property)(Item prop_name, Item value);
-    // Frozen slot: Tune4 retired receiver/name document invocation (D6.2.2v2).
-    void* reserved_document_callable_slot;
-    bool (*item_is_range)(Item item);
-    bool (*item_is_selection)(Item item);
-    Item (*range_get_property)(Item obj, Item key);
-    Item (*range_set_property)(Item obj, Item key, Item value);
-    Item (*selection_get_property)(Item obj, Item key);
-    Item (*selection_set_property)(Item obj, Item key, Item value);
-    Item (*range_get_prototype_value)(void);
-    Item (*selection_get_prototype_value)(void);
-    bool (*range_native_property)(Item obj, Item key);
-    bool (*selection_native_property)(Item obj, Item key);
-    bool (*expando_has_property)(Item obj, Item key);
-    bool (*range_expando_has_property)(Item obj, Item key);
-    bool (*selection_expando_has_property)(Item obj, Item key);
-    Item (*expando_get_own_property_descriptor)(Item obj, Item key);
-    Item (*range_expando_get_own_property_descriptor)(Item obj, Item key);
-    Item (*selection_expando_get_own_property_descriptor)(Item obj, Item key);
-    Item (*expando_delete_property)(Item obj, Item key);
-    Item (*range_expando_delete_property)(Item obj, Item key);
-    Item (*selection_expando_delete_property)(Item obj, Item key);
-    Item (*expando_own_property_names)(Item obj);
-    Item (*range_expando_own_property_names)(Item obj);
-    Item (*selection_expando_own_property_names)(Item obj);
-    // Frozen callable slots: property records and intrinsic targets now carry
-    // direct operations, so no receiver/name engines cross this ABI (D6.2.2v2).
-    void* reserved_css_namespace_callable_slot;
-    void* reserved_stylesheet_callable_slot;
-    void* reserved_rule_decl_callable_slot;
     Item (*owner_document_for_node)(void* node);
     const char* (*to_attribute_cstr)(Item value);
     void (*after_set_attribute)(void* elem, const char* attr_name, const char* attr_value);
@@ -751,7 +738,6 @@ struct JubeHostDomAPI {
     void (*set_option_selected_dirty)(void* elem, bool selected);
     void (*set_option_text_bridge)(void* elem, const char* value);
     void (*after_srcdoc_set)(void* elem);
-    Item (*throw_contenteditable_syntax_error)(void);
     Item (*set_text_data_property)(void* text, Item value);
     Item (*text_control_set_value_bridge)(void* elem, Item value);
     Item (*text_control_set_selection_start_bridge)(void* elem, Item value);
@@ -800,23 +786,13 @@ struct JubeHostDomAPI {
     Item (*document_element_from_point_bridge)(void* doc, Item x, Item y);
     Item (*create_range)(void);
     Item (*get_selection)(void);
-    Item (*get_selection_function_for_document)(void* doc);
     bool (*doc_has_browsing_context)(void* doc);
     Item (*document_fonts_bridge)(void);
     Item (*document_stylesheets_bridge)(void);
-    Item (*document_default_view_bridge)(void* doc);
     Item (*document_implementation_bridge)(void);
     Item (*document_design_mode_bridge)(void);
     Item (*document_active_element_bridge)(void* doc);
     Item (*normalize_bridge)(void* elem);
-    Item (*live_child_collection_bridge)(void* elem, bool elements_only);
-    Item (*live_document_forms_bridge)(void* doc);
-    Item (*live_form_elements_bridge)(void* elem);
-    Item (*live_document_get_elements_by_tag_name_bridge)(void* doc, Item query);
-    Item (*live_document_get_elements_by_class_name_bridge)(void* doc, Item query);
-    Item (*live_document_get_elements_by_name_bridge)(void* doc, Item query);
-    Item (*live_element_get_elements_by_tag_name_bridge)(void* elem, Item query);
-    Item (*live_element_get_elements_by_class_name_bridge)(void* elem, Item query);
     Item (*clone_node_bridge)(void* elem, Item deep, bool has_deep);
     Item (*replace_child_bridge)(void* parent, Item new_child, Item old_child);
     Item (*replace_with_bridge)(void* node, Item* args, int argc);
@@ -827,7 +803,6 @@ struct JubeHostDomAPI {
     void (*notify_mutation)(int kind, void* target, void* parent);
     void (*notify_mutation_detail)(int kind, void* target, void* parent,
                                    const char* attribute_name, const char* old_value);
-
     // -- DOM3 Phase 1 additive tail: receiver-explicit Range/Selection behavior.
     // These carry the behavior the deleted strcmp chains used to reach through
     // cached method objects; the radiant module's declared-interface bindings
@@ -887,14 +862,12 @@ struct JubeHostDomAPI {
     Item (*selection_to_string)(Item self);
     Item (*selection_modify)(Item self, Item alter, Item direction, Item granularity);
     Item (*selection_force_direction)(Item self, Item direction);
-
     // -- DOM3 Phase 3 additive tail: style-host behavior.
     // style_get/set_property take the OWNER ELEMENT item (inline-style wrappers
     // carry the owner as host_data; adapters wrap it before calling).
     Item (*style_get_property)(Item owner_elem, Item prop);
     Item (*style_set_property)(Item owner_elem, Item prop, Item value);
     Item (*style_css_has)(Item style, Item prop);
-
     // -- DOM3 Phase 2 additive tail: CSSOM behavior.
     Item (*stylesheet_get_css_rules)(Item sheet);
     Item (*stylesheet_get_length)(Item sheet);
@@ -914,17 +887,46 @@ struct JubeHostDomAPI {
     Item (*rule_get_parent_rule)(Item rule);
     Item (*rule_decl_remove_property)(Item decl, Item prop);
     Item (*rule_decl_css_has)(Item decl, Item prop);
-
     // -- Radiant browser-global state. Kept behind the host boundary so the
     // module owns DOM-facing window semantics without reaching into dom.cpp.
     void* (*get_ui_context)(void);
     bool (*has_committed_geometry_snapshot)(void* doc);
-
     // -- Tune4 additive tail: document callables cross the host boundary as
     // direct operations; property names are resolved before invocation (D6.2.2v2).
     Item (*document_create_tree_walker_bridge)(Item root, Item what_to_show);
-    Item (*document_create_event_bridge)(Item interface_name);
     Item (*document_exec_command_bridge)(Item command, Item value);
+};
+
+// ES41 (Lambda_Design_DOM_Host_API.md): the JS *shape* of the DOM -- the
+// document proxy, prototype values, expandos, live collections, wrapper
+// initialisation, JS exceptions and Event construction -- is its own host
+// section. `->dom` is the DOM; a guest that is not JavaScript never touches
+// `->realm`.
+struct JubeHostRealmAPI {
+    Item (*get_document_object_value)(void);
+    Item (*document_proxy_for_doc_bridge)(void* doc);
+    Item (*document_proxy_get_property)(Item prop_name);
+    Item (*document_proxy_set_property)(Item prop_name, Item value);
+    Item (*dom_get_prototype_value)(Item obj);
+    Item (*range_get_prototype_value)(void);
+    Item (*selection_get_prototype_value)(void);
+    bool (*expando_has_property)(Item obj, Item key);
+    Item (*expando_get_own_property_descriptor)(Item obj, Item key);
+    Item (*expando_delete_property)(Item obj, Item key);
+    Item (*expando_own_property_names)(Item obj);
+    Item (*live_child_collection_bridge)(void* elem, bool elements_only);
+    Item (*live_document_forms_bridge)(void* doc);
+    Item (*live_form_elements_bridge)(void* elem);
+    Item (*live_document_get_elements_by_tag_name_bridge)(void* doc, Item query);
+    Item (*live_document_get_elements_by_class_name_bridge)(void* doc, Item query);
+    Item (*live_document_get_elements_by_name_bridge)(void* doc, Item query);
+    Item (*live_element_get_elements_by_tag_name_bridge)(void* elem, Item query);
+    Item (*live_element_get_elements_by_class_name_bridge)(void* elem, Item query);
+    void (*initialize_node_wrapper)(void* dom_elem);
+    Item (*throw_contenteditable_syntax_error)(void);
+    Item (*get_selection_function_for_document)(void* doc);
+    Item (*document_default_view_bridge)(void* doc);
+    Item (*document_create_event_bridge)(Item interface_name);
 };
 
 // Each hosted service table evolves independently. A module checks both the
@@ -1664,6 +1666,8 @@ struct JubeHostAPI {
     const JubeHostValueAPI* value;
     const JubeHostScriptAPI* script;
     const JubeHostDomAPI* dom;
+    const JubeHostRealmAPI* realm;   // ES41: the JS shape of the DOM (v2)
+    const JubeHostDomCatalogAPI* dom_catalog;  // ES40: the catalog, core + derived (v2)
     const JubeRuntimeCatalogAPI* runtime_catalog;
     // Additive tail: old generic Jube modules must size-gate this service.
     const JubeHostDataAPI* data;

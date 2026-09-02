@@ -1,0 +1,6 @@
+{
+  nodes_checked: 24,
+  divergent: [],
+  root_text: true,
+  sample: "\n            One\n            Two\n        "
+}
