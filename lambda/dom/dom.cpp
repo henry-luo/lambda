@@ -5468,6 +5468,48 @@ static void dom_collapse_selection_before_child_replace(DomElement* elem,
 
 static bool dom_remove_backed_child(DomElement* parent, DomNode* child);
 
+// Parse `html_str` as a fragment in `elem`'s document and append the resulting
+// nodes to `target`. Shared by the innerHTML setter and dom_core_parse_fragment
+// (ES39 core `parse_fragment`): one parse loop, two callers.
+static bool dom_parse_markup_into(DomElement* target, const char* html_str,
+                                  bool notify_mutation) {
+    DomDocument* doc = target ? target->doc : nullptr;
+    if (!doc || !doc->input) return false;
+    Html5Parser* parser = html5_fragment_parser_create(
+        doc->document_pool, doc->node_arena, doc->input);
+    if (!parser) return false;
+    html5_fragment_parse(parser, html_str);
+    Element* body_elem = html5_fragment_get_body(parser);
+    if (!body_elem) return false;
+    for (int64_t i = 0; i < body_elem->length; i++) {
+        TypeId type = get_type_id(body_elem->items[i]);
+        if (type == LMD_TYPE_ELEMENT) {
+            DomElement* child_dom = build_dom_tree_from_element(
+                body_elem->items[i].element, doc, nullptr);
+            if (child_dom && target->append_child(child_dom)) {
+                dom_post_insert((DomNode*)target, (DomNode*)child_dom,
+                                notify_mutation);
+                dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                                                 child_dom, target,
+                                                 nullptr, nullptr);
+            }
+        } else if (type == LMD_TYPE_STRING) {
+            String* str = dom_fragment_text(body_elem->items[i]);
+            if (!str) continue;
+            DomText* text_dom = target->append_text(str->chars);
+            if (text_dom) {
+                dom_post_insert((DomNode*)target, (DomNode*)text_dom,
+                                notify_mutation);
+                dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                                                 text_dom, target,
+                                                 nullptr, nullptr);
+            }
+        }
+    }
+    return true;
+}
+
+
 static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
                                       bool notify_mutation) {
     if (!elem || !html_str) return false;
@@ -5494,41 +5536,7 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
     }
 
     if (html_str[0] != '\0') {
-        if (!doc || !doc->input) return false;
-
-        Html5Parser* parser = html5_fragment_parser_create(
-            doc->document_pool, doc->node_arena, doc->input);
-        if (!parser) return false;
-
-        html5_fragment_parse(parser, html_str);
-        Element* body_elem = html5_fragment_get_body(parser);
-        if (!body_elem) return false;
-
-        for (int64_t i = 0; i < body_elem->length; i++) {
-            TypeId type = get_type_id(body_elem->items[i]);
-            if (type == LMD_TYPE_ELEMENT) {
-                DomElement* child_dom = build_dom_tree_from_element(
-                    body_elem->items[i].element, doc, nullptr);
-                if (child_dom && elem->append_child(child_dom)) {
-                    dom_post_insert((DomNode*)elem, (DomNode*)child_dom,
-                                    notify_mutation);
-                    dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
-                                                     child_dom, elem,
-                                                     nullptr, nullptr);
-                }
-            } else if (type == LMD_TYPE_STRING) {
-                String* s = dom_fragment_text(body_elem->items[i]);
-                if (!s) continue;
-                DomText* text_dom = elem->append_text(s->chars);
-                if (text_dom) {
-                    dom_post_insert((DomNode*)elem, (DomNode*)text_dom,
-                                    notify_mutation);
-                    dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
-                                                     text_dom, elem,
-                                                     nullptr, nullptr);
-                }
-            }
-        }
+        if (!dom_parse_markup_into(elem, html_str, notify_mutation)) return false;
     }
 
     dom_register_named_elements(elem);
@@ -5541,6 +5549,20 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
     log_debug("dom_replace_inner_html: replaced <%s>",
               elem->tag_name ? elem->tag_name : "?");
     return true;
+}
+
+// ES39 core `parse_fragment(context, markup)`: the markup is parsed in the
+// context node's document and returned as a detached fragment. The innerHTML
+// derivation (set_inner_html) is "remove children; parse_fragment; append",
+// and this is the parse step of it, on the same loop the setter uses.
+extern "C" Item dom_core_parse_fragment(Item context, Item markup) {
+    DomNode* ctx = (DomNode*)dom_unwrap_element(context);
+    DomDocument* doc = ctx && ctx->is_element() ? ((DomElement*)ctx)->doc : nullptr;
+    if (!doc || get_type_id(markup) != LMD_TYPE_STRING) return ItemNull;
+    DomElement* fragment = dom_element_create(doc, "#document-fragment", nullptr);
+    if (!fragment) return ItemNull;
+    if (!dom_parse_markup_into(fragment, fn_to_cstr(markup), false)) return ItemNull;
+    return dom_wrap_element(fragment);
 }
 
 static bool dom_replace_text_content(DomElement* elem, const char* text) {

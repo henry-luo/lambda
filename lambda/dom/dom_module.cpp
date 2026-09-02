@@ -26,198 +26,43 @@
 #include "../jube/jube_registry.h"
 #include "../../lib/log.h"
 
-// ---------------------------------------------------------------------------
-// Delegation helpers
-// ---------------------------------------------------------------------------
-
-static Item dom_op0(Item node, JubeDomElementOperation op) {
-    return dom_element_operation_impl(node, op, nullptr, 0);
-}
-
-static Item dom_op1(Item node, JubeDomElementOperation op, Item a) {
-    Item args[1] = { a };
-    return dom_element_operation_impl(node, op, args, 1);
-}
-
-static Item dom_op2(Item node, JubeDomElementOperation op, Item a, Item b) {
-    Item args[2] = { a, b };
-    return dom_element_operation_impl(node, op, args, 2);
-}
-
-/** Read a DOM IDL property by its spec (camelCase) name. */
-static Item dom_prop_get(Item node, const char* name) {
-    return dom_get_property_impl(node, js_name_item(name));
-}
+#include "dom_core.h"
 
 // ---------------------------------------------------------------------------
-// Tree reads
+// The published table is an expansion of the catalog (ES39/ES44). A row is
+// published to `dom.*` when it has a native body and is realm-neutral; rows
+// whose body is engine-provided (DOM_F_ENGINE, filled at table time in F30)
+// or realm-dependent (ESO81) stay in the catalog but out of this face until
+// their dependency is resolved. Nothing here is written by hand per operation.
 // ---------------------------------------------------------------------------
 
-extern "C" Item fn_dom_root(Item node) {
-    return dom_op0(node, JUBE_DOM_GET_ROOT_NODE);
-}
-
-extern "C" Item fn_dom_tag(Item node) {
-    return dom_prop_get(node, "tagName");
-}
-
-extern "C" Item fn_dom_text(Item node) {
-    return dom_prop_get(node, "textContent");
-}
-
-extern "C" Item fn_dom_parent(Item node) {
-    return dom_prop_get(node, "parentNode");
-}
-
-extern "C" Item fn_dom_first_element_child(Item node) {
-    return dom_prop_get(node, "firstElementChild");
-}
-
-extern "C" Item fn_dom_next_element_sibling(Item node) {
-    return dom_prop_get(node, "nextElementSibling");
-}
-
-// ---------------------------------------------------------------------------
-// Selector queries -- the same matcher the layout engine and JS queries use
-// ---------------------------------------------------------------------------
-
-extern "C" Item fn_dom_query(Item node, Item selector) {
-    return dom_op1(node, JUBE_DOM_QUERY_SELECTOR, selector);
-}
-
-extern "C" Item fn_dom_query_all(Item node, Item selector) {
-    return dom_op1(node, JUBE_DOM_QUERY_SELECTOR_ALL, selector);
-}
-
-extern "C" Item fn_dom_matches(Item node, Item selector) {
-    return dom_op1(node, JUBE_DOM_MATCHES, selector);
-}
-
-extern "C" Item fn_dom_closest(Item node, Item selector) {
-    return dom_op1(node, JUBE_DOM_CLOSEST, selector);
-}
-
-// getElementsByTagName / -ClassName are deliberately not exposed: they return
-// *live* HTMLCollections, whose refresh machinery is JS-realm state, and S9.2.2
-// gives Lambda snapshot semantics anyway. query_all() is the snapshot spelling
-// of the same query and is what a Lambda caller should reach for.
-
-extern "C" Item fn_dom_element_by_id(Item node, Item id) {
-    return dom_op1(node, JUBE_DOM_GET_ELEMENT_BY_ID, id);
-}
-
-// ---------------------------------------------------------------------------
-// Attributes
-// ---------------------------------------------------------------------------
-
-extern "C" Item fn_dom_attr(Item node, Item name) {
-    return dom_op1(node, JUBE_DOM_GET_ATTRIBUTE, name);
-}
-
-extern "C" Item fn_dom_set_attr(Item node, Item name, Item value) {
-    return dom_op2(node, JUBE_DOM_SET_ATTRIBUTE, name, value);
-}
-
-extern "C" Item fn_dom_has_attr(Item node, Item name) {
-    return dom_op1(node, JUBE_DOM_HAS_ATTRIBUTE, name);
-}
-
-extern "C" Item fn_dom_remove_attr(Item node, Item name) {
-    return dom_op1(node, JUBE_DOM_REMOVE_ATTRIBUTE, name);
-}
-
-// ---------------------------------------------------------------------------
-// Mutation
-// ---------------------------------------------------------------------------
-
-extern "C" Item fn_dom_append(Item parent, Item child) {
-    return dom_op1(parent, JUBE_DOM_APPEND_CHILD, child);
-}
-
-extern "C" Item fn_dom_insert_before(Item parent, Item child, Item ref) {
-    return dom_op2(parent, JUBE_DOM_INSERT_BEFORE, child, ref);
-}
-
-extern "C" Item fn_dom_remove_child(Item parent, Item child) {
-    return dom_op1(parent, JUBE_DOM_REMOVE_CHILD, child);
-}
-
-extern "C" Item fn_dom_remove(Item node) {
-    return dom_op0(node, JUBE_DOM_REMOVE);
-}
-
-extern "C" Item fn_dom_clone(Item node, Item deep) {
-    return dom_op1(node, JUBE_DOM_CLONE_NODE, deep);
-}
-
-extern "C" Item fn_dom_contains(Item node, Item other) {
-    return dom_op1(node, JUBE_DOM_CONTAINS, other);
-}
-
-// Property *writes* (textContent, innerHTML) are deliberately absent: they
-// reach JS intrinsic-constructor creation and segfault without a live JS realm,
-// which a Lambda-only script does not have. The ordinal executor above has no
-// such dependency, so attribute and tree mutation work. See ESO81.
-
-// ---------------------------------------------------------------------------
-// Serialization -- parse and serialize run through Radiant's HTML machinery,
-// so what a Lambda script writes is what the layout engine reads back.
-// ---------------------------------------------------------------------------
-
-extern "C" Item fn_dom_inner_html(Item node) {
-    return dom_prop_get(node, "innerHTML");
-}
-
-extern "C" Item fn_dom_outer_html(Item node) {
-    return dom_prop_get(node, "outerHTML");
-}
-
-// ---------------------------------------------------------------------------
-// Module descriptor
-//
-// Node-shaped parameters and results are declared `any` rather than `dom_node`:
-// the branded wrapper type is registered by the radiant module, and a Jube
-// signature resolves type names against its own module's table. The *values*
-// are the same branded wrappers either door produces, so member access on them
-// behaves identically -- only the static spelling is looser. Tightening it
-// needs cross-module type references (ESO80).
-// ---------------------------------------------------------------------------
-
-#define DOM_FN(lname, sig, impl) \
-    { lname, sig, (fn_ptr)impl, JUBE_FN_NONE, nullptr, (fn_ptr)impl }
-
-static const JubeFuncDef dom_functions[] = {
-    // tree reads
-    DOM_FN("root", "fn(node: any) -> any", fn_dom_root),
-    DOM_FN("tag", "fn(node: any) -> any", fn_dom_tag),
-    DOM_FN("text", "fn(node: any) -> any", fn_dom_text),
-    DOM_FN("parent", "fn(node: any) -> any", fn_dom_parent),
-    DOM_FN("first_element_child", "fn(node: any) -> any", fn_dom_first_element_child),
-    DOM_FN("next_element_sibling", "fn(node: any) -> any", fn_dom_next_element_sibling),
-    // queries
-    DOM_FN("query", "fn(node: any, selector: string) -> any", fn_dom_query),
-    DOM_FN("query_all", "fn(node: any, selector: string) -> any", fn_dom_query_all),
-    DOM_FN("matches", "fn(node: any, selector: string) -> any", fn_dom_matches),
-    DOM_FN("closest", "fn(node: any, selector: string) -> any", fn_dom_closest),
-    DOM_FN("element_by_id", "fn(node: any, id: string) -> any", fn_dom_element_by_id),
-    // attributes
-    DOM_FN("attr", "fn(node: any, name: string) -> any", fn_dom_attr),
-    DOM_FN("set_attr", "fn(node: any, name: string, value: any) -> any", fn_dom_set_attr),
-    DOM_FN("has_attr", "fn(node: any, name: string) -> any", fn_dom_has_attr),
-    DOM_FN("remove_attr", "fn(node: any, name: string) -> any", fn_dom_remove_attr),
-    // mutation
-    DOM_FN("append", "fn(parent: any, child: any) -> any", fn_dom_append),
-    DOM_FN("insert_before", "fn(parent: any, child: any, ref: any) -> any", fn_dom_insert_before),
-    DOM_FN("remove_child", "fn(parent: any, child: any) -> any", fn_dom_remove_child),
-    DOM_FN("remove", "fn(node: any) -> any", fn_dom_remove),
-    DOM_FN("clone", "fn(node: any, deep: any) -> any", fn_dom_clone),
-    DOM_FN("contains", "fn(node: any, other: any) -> any", fn_dom_contains),
-    // serialization
-    DOM_FN("inner_html", "fn(node: any) -> any", fn_dom_inner_html),
-    DOM_FN("outer_html", "fn(node: any) -> any", fn_dom_outer_html),
+struct DomCatalogRow {
+    const char* name;
+    const char* signature;
+    fn_ptr body;
+    unsigned flags;
 };
 
-#undef DOM_FN
+static const DomCatalogRow dom_catalog[] = {
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+    { #name, sig, (fn_ptr)(body), (unsigned)(flags) },
+#include "dom_api.def"
+#undef DOM_OP
+};
+static const int dom_catalog_count = (int)(sizeof(dom_catalog) / sizeof(dom_catalog[0]));
+
+static JubeFuncDef dom_functions[sizeof(dom_catalog) / sizeof(dom_catalog[0])];
+static int dom_function_count = 0;
+
+static void dom_build_published_table(void) {
+    if (dom_function_count) return;
+    for (int i = 0; i < dom_catalog_count; i++) {
+        const DomCatalogRow& row = dom_catalog[i];
+        if (!row.body || !(row.flags & DOM_F_NEUTRAL)) continue;
+        JubeFuncDef def = { row.name, row.signature, row.body, JUBE_FN_NONE, nullptr, row.body };
+        dom_functions[dom_function_count++] = def;
+    }
+}
 
 // Zero is success here, matching every other Jube module's init.
 static int dom_module_init(const JubeHostAPI* host) {
@@ -230,7 +75,7 @@ static int dom_module_init(const JubeHostAPI* host) {
     return 0;
 }
 
-static const JubeModuleDef dom_module = {
+static JubeModuleDef dom_module = {
     JUBE_ABI_VERSION,
     sizeof(JubeModuleDef),
     "dom",
@@ -238,13 +83,14 @@ static const JubeModuleDef dom_module = {
     "DOM access for Lambda scripts over the shared DOM core",
     nullptr, 0,                                   // types: the wrappers are the
                                                   // radiant module's dom_node
-    dom_functions,
-    (int32_t)(sizeof(dom_functions) / sizeof(dom_functions[0])),
+    dom_functions, 0,                             // count set at registration
     nullptr, 0,                                   // namespaces
     dom_module_init,
     nullptr,                                      // shutdown
 };
 
 extern "C" void dom_jube_register_static(void) {
+    dom_build_published_table();
+    dom_module.function_count = dom_function_count;
     jube_register_static_module(&dom_module);
 }

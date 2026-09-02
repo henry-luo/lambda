@@ -5,7 +5,7 @@
 > **Scope**: file/module layout, symbol namespaces, the host-table linkage question, the core/adapter boundary, and the Lambda `dom` module surface. **Out of scope**: event dispatch semantics (`Lambda_Design_DOM_Dispatch.md`), default-action placement (`Lambda_Design_DOM_Default.md`), state storage and waist semantics (`Lambda_Design_DOM_State.md`), the L3 Obscura-parity package (`Lambda_Design_DOM_Pkg.md` Phase 1+), and the DOM data structures themselves (deferred, §6).
 > **Companion docs**: `vibe/Lambda_Design_Native_Module.md` §8 (POC 1 `radiant-dom` — this proposal executes its carve-out half; the host DOM API redesign is Phase 2, §7), `vibe/Lambda_Design_DOM_Pkg.md` (the four-layer stack L1–L4 and Phase-0 gate this delivers), `vibe/Lambda_Jube_DOM3.md`/`DOM4.md` (declared interfaces, ordinal dispatch), `vibe/radiant/Radiant_Design_Dom_View_Struct.md` (OQ5 — the struct move this doc defers), `doc/dev/js/JS_13_Web_DOM.md`.
 > **Formal anchors**: D8 (module/runtime ownership), D3.4.7/D7.4.1–D7.4.4 (host-object metadata and the single VMap/Jube bridge), D6.2.2v2 (observable property Get + `[[Call]]`), D4.5.1v3 (the Radiant memory seam), S9.2.2 (read views are snapshots), S9.1.4 (state lives in view state), S12.1.3 (mutation only in handlers), S5.1.4 (no reference identity in Lambda).
-> **Ledger series**: extends the DOM area's `ES#`/`ESO#`/`F#` per `doc/Doc_Convention.md` §4 — no new series. Decisions **ES32–ES38**; open issues **ESO72–ESO83**; migration stages **F22–F27**. (Prior: ES31/ESO71 in `Lambda_Design_DOM_Default.md`, F21 in `Lambda_Design_DOM_Dispatch.md`.)
+> **Ledger series**: extends the DOM area's `ES#`/`ESO#`/`F#` per `doc/Doc_Convention.md` §4 — no new series. Decisions **ES32–ES38**; open issues **ESO72–ESO83**; migration stages **F22–F27**. Phase 2 continues the series in `Lambda_Design_DOM_Host_API.md` (ES39+, ESO84+, F28+). (Prior: ES31/ESO71 in `Lambda_Design_DOM_Default.md`, F21 in `Lambda_Design_DOM_Dispatch.md`.)
 
 ---
 
@@ -283,6 +283,8 @@ Cross-referenced, not duplicated here: live collections (DOM_Pkg Q4), the L3 Obs
 ---
 
 ## 7. DOM API Phase 2 (deferred) — the new DOM API: one catalog, one table, one implementation
+
+> **Proposal written 2026-09-02**: `vibe/Lambda_Design_DOM_Host_API.md` (ES39–ES44, F28–F33, ESO84–ESO89) is the full design this section sketched. It supersedes the sketch below where they differ; the sketch stays as the record of the direction as first stated.
 
 **Target set by user 2026-09-01**: `radiant_module`'s DOM surface and the `JubeHostDomAPI` **unify into one new DOM API** — "dedup and unify, not only the API functions, but also the impl behind." Recorded here as ratified *direction*; the detailed catalog design is Phase-2 work, **not part of F22–F27**, started when the user schedules it (ESO78).
 
