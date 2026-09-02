@@ -35,6 +35,7 @@ typedef struct JubeHostValueAPI JubeHostValueAPI;
 typedef struct JubeHostScriptAPI JubeHostScriptAPI;
 typedef struct JubeHostDomAPI JubeHostDomAPI;
 typedef struct JubeHostRealmAPI JubeHostRealmAPI;
+typedef struct JubeHostDomCatalogAPI JubeHostDomCatalogAPI;
 typedef struct JubeHostLangAPI JubeHostLangAPI;
 typedef struct JubeSourceAPI JubeSourceAPI;
 typedef struct JubeDiagnosticAPI JubeDiagnosticAPI;
@@ -672,6 +673,32 @@ struct JubeHostScriptAPI {
     // Narrows only exact in-range BigInts; modules must not infer overflow
     // from the legacy clamping extractor used inside the engine.
     bool (*bigint_to_int64_exact)(Item value, int64_t* out_value);
+};
+
+// ---------------------------------------------------------------------------
+// The DOM operation catalog as an ABI section (ES39/ES40).
+//
+// One row per operation in lambda/dom/dom_api.def is expanded here into a slot
+// and, in jube_registry.cpp, into the matching body -- so the table cannot
+// drift from the catalog: adding a row adds a slot and a body together, and
+// the compiler checks the arity of each body against its row.
+//
+// Every operation has the shape Item f(Item x argc), which is what makes one
+// declaration serve every surface. A slot is null when the row's body is
+// engine-provided (DOM_F_ENGINE, filled at table time) or not yet written.
+// ---------------------------------------------------------------------------
+typedef Item (*JubeDomFn0)(void);
+typedef Item (*JubeDomFn1)(Item);
+typedef Item (*JubeDomFn2)(Item, Item);
+typedef Item (*JubeDomFn3)(Item, Item, Item);
+typedef Item (*JubeDomFn4)(Item, Item, Item, Item);
+typedef Item (*JubeDomFn5)(Item, Item, Item, Item, Item);
+
+struct JubeHostDomCatalogAPI {
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+    JubeDomFn##argc name;
+#include "../dom/dom_api.def"
+#undef DOM_OP
 };
 
 struct JubeHostDomAPI {
@@ -1640,6 +1667,7 @@ struct JubeHostAPI {
     const JubeHostScriptAPI* script;
     const JubeHostDomAPI* dom;
     const JubeHostRealmAPI* realm;   // ES41: the JS shape of the DOM (v2)
+    const JubeHostDomCatalogAPI* dom_catalog;  // ES40: the catalog, core + derived (v2)
     const JubeRuntimeCatalogAPI* runtime_catalog;
     // Additive tail: old generic Jube modules must size-gate this service.
     const JubeHostDataAPI* data;

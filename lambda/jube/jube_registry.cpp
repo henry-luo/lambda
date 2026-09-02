@@ -1,4 +1,5 @@
 #include "jube_registry.h"
+#include "../dom/dom_core.h"
 #include "jube_interface.h"
 #include "jube_language.h"
 #include "../runtime/ast.hpp"
@@ -1499,6 +1500,16 @@ static const JubeHostScriptAPI jube_host_script_api = {
     js_promise_with_resolvers,
     jube_host_script_bigint_from_decimal,
     bigint_to_int64_exact,
+};
+
+// The catalog section: one body per dom_api.def row, in row order. The cast is
+// the row's own arity, so a body whose C signature disagrees with its row is a
+// compile error here as well as in dom_api_check.cpp.
+static const JubeHostDomCatalogAPI jube_host_dom_catalog = {
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+    (JubeDomFn##argc)(body),
+#include "../dom/dom_api.def"
+#undef DOM_OP
 };
 
 static const JubeHostDomAPI jube_host_dom_api = {
@@ -4246,6 +4257,7 @@ static JubeHostAPI jube_host_api = {
     &jube_host_script_api,
     &jube_host_dom_api,
     &jube_host_realm_api,
+    &jube_host_dom_catalog,
     &jube_host_runtime_catalog_api,
     &jube_host_data_api,
     &jube_host_node_api,
