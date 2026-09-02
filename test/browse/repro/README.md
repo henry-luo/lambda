@@ -95,6 +95,11 @@ load failure.
 guard. Use a low `RADIANT_JS_EXTERNAL_SCRIPT_BYTES` value to exercise the skip
 path locally; the online failures used multi-megabyte bundles.
 
+Deferred and async external scripts have a separate 128 KiB pre-layout budget,
+because they are not render-blocking and should not postpone the first viewer
+frame. Set `RADIANT_JS_PRELAYOUT_DEFER_BYTES` to a larger value (or `0` to
+disable it) when investigating a page that requires a larger deferred bundle.
+
 `script-total-budget-skip.html` captures pages that accumulate many smaller
 scripts. Once the browser JS source budget is exhausted, remaining scripts
 should be skipped gracefully instead of entering unstable JIT/runtime paths.
