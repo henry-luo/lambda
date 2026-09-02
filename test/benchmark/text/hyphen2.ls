@@ -1,11 +1,11 @@
 // Typed text benchmark: bounded word hyphenation over prose and HTML.
 
-pn is_letter(ch: string) int {
+pn is_letter(ch: string) bool {
     let cp: int = ord(ch)
     return (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122)
 }
 
-pn is_vowel(ch: string) int {
+pn is_vowel(ch: string) bool {
     let cp: int = ord(ch)
     return cp == 65 or cp == 69 or cp == 73 or cp == 79 or cp == 85 or
         cp == 97 or cp == 101 or cp == 105 or cp == 111 or cp == 117
@@ -65,6 +65,12 @@ pn main() {
         }
         round = round + 1
     }
-    print("hyphen: CHECKSUM:" ++ checksum ++ "\n")
+    // 731008 is the checksum of the C reference port (test/benchmark/text/c2mir/hyphen.c);
+    // a FAIL marker makes the runner exclude a wrong result instead of timing it
+    if (checksum == 731008) {
+        print("hyphen: CHECKSUM:" ++ checksum ++ "\n")
+    } else {
+        print("hyphen: FAIL checksum=" ++ checksum ++ "\n")
+    }
     print("__TIMING__:" ++ ((clock() - t0) * 1000.0) ++ "\n")
 }

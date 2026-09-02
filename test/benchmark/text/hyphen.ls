@@ -1,13 +1,14 @@
 // Text benchmark: bounded word hyphenation over mixed prose and HTML.
+// Expected checksum: 731008 (matches the C port)
 // This port keeps tags intact and applies deterministic vowel/consonant break
 // points, which gives the C2MIR and Lambda ports the same text workload.
 
-pn is_letter(ch) int {
+pn is_letter(ch) bool {
     let cp = ord(ch)
     return (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122)
 }
 
-pn is_vowel(ch) int {
+pn is_vowel(ch) bool {
     let cp = ord(ch)
     return cp == 65 or cp == 69 or cp == 73 or cp == 79 or cp == 85 or
         cp == 97 or cp == 101 or cp == 105 or cp == 111 or cp == 117
@@ -67,6 +68,12 @@ pn main() {
         }
         round = round + 1
     }
-    print("hyphen: CHECKSUM:" ++ checksum ++ "\n")
+    // 731008 is the checksum of the C reference port (test/benchmark/text/c2mir/hyphen.c);
+    // a FAIL marker makes the runner exclude a wrong result instead of timing it
+    if (checksum == 731008) {
+        print("hyphen: CHECKSUM:" ++ checksum ++ "\n")
+    } else {
+        print("hyphen: FAIL checksum=" ++ checksum ++ "\n")
+    }
     print("__TIMING__:" ++ ((clock() - t0) * 1000.0) ++ "\n")
 }
