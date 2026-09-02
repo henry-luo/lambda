@@ -314,6 +314,10 @@ struct MirTranspiler {
     // Used by transpile_return() to emit unboxed return values in procs.
     TypeId native_return_tid;
     Type* current_return_type;
+    // The fallback body behind an inferred specialization binds every
+    // parameter as an Item. It cannot borrow the sibling raw body's return
+    // lane until a consumer reopens that Item boundary.
+    bool in_inferred_slow_body;
     // Candidate lane while the prepass proves every exit of an unannotated
     // procedure. A self-recursive call may use the candidate inductive fact;
     // calls to any other open function remain rejected.
@@ -6422,6 +6426,12 @@ static bool mir_native_analysis_matches(MirTranspiler* mt,
 static TypeId mir_direct_native_return_type(MirTranspiler* mt,
         AstCallNode* call) {
     NativeFuncInfo* native = mir_direct_native_info(mt, call);
+    if (mt && mt->in_inferred_slow_body && native &&
+            native->has_inferred_specialization) {
+        // An inferred slow body routes through `_b`, whose result remains an
+        // Item until the consumer checks/unboxes it (D2.4.1-D2.4.3, D8.2.6).
+        return LMD_TYPE_ANY;
+    }
     TypeId result = native && native->has_native ? native->return_type : LMD_TYPE_ANY;
     AstNode* function = ast_unwrap_primary(call ? call->function : NULL);
     AstNode* target = function && function->node_type == AST_NODE_IDENT
@@ -6495,18 +6505,18 @@ static bool mir_direct_native_scalar_item_can_unbox(MirTranspiler* mt,
         // Context::mir_return_lane (D2.2.2, D3.3.1).
         direct_return = mir_decl_type_id(signature->returned);
     }
-    // A native can-raise call publishes a boxed join so its caller can observe
-    // Context::mir_return_lane. Only the ordinary non-propagating scalar
-    // consumer may consume that join as an Item and reopen the successful lane
-    // (D2.2.2, D3.3.1).
+    // A native can-raise call, or a non-raising one whose parameter guard
+    // short-circuits an ItemError, publishes a boxed join. Only the ordinary
+    // non-propagating scalar consumer may consume that join as an Item and
+    // reopen the successful lane (D2.4.1-D2.4.3, D3.3.1).
     // Inferred recursive/native bodies publish their return lane through the
     // active analysis pass rather than a registry entry. Requiring only the
     // registry's declared return type left those calls on the checked setter
     // even though the raw call emitter had already proved the same lane
     // (D3.2.1, D8.3.3).
     return native && native->has_native && direct_return == expected &&
-        signature && signature->can_raise && call && !call->propagate &&
-        !mt->in_handler_operand;
+        signature && call && !call->propagate && !mt->in_handler_operand &&
+        (signature->can_raise || mir_direct_call_has_parameter_error_guard(mt, call));
 }
 
 // A comparison can consume an integer arithmetic tree through its native
@@ -6744,8 +6754,7 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
                 return LMD_TYPE_ANY;
             }
             if (info && !call->propagate && call->argument &&
-                    !call->argument->next &&
-                    !mir_expr_may_be_null(mt, call->argument)) {
+                    !call->argument->next) {
                 TypeId argument_tid = mir_native_arithmetic_operand_type(mt,
                     call->argument);
                 // These scalar conversions have a carrier-preserving fast
@@ -6756,17 +6765,54 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
                         (argument_tid == LMD_TYPE_INT ||
                          argument_tid == LMD_TYPE_FLOAT ||
                          mir_is_exact_u32_value(mt, call->argument))) {
+                    // IntLane represents null explicitly, so int() keeps its
+                    // carrier across a nullable numeric read. Reporting the
+                    // result as an Item lets a generic numeric consumer pass
+                    // the raw lane to fn_add/fn_sub (D2.4.1-D2.4.3, D2.8.1).
                     return LMD_TYPE_INT;
                 }
                 if (info->fn == SYSFUNC_FLOAT &&
+                        !mir_expr_may_be_null(mt, call->argument) &&
                         (argument_tid == LMD_TYPE_INT ||
                          argument_tid == LMD_TYPE_FLOAT)) {
                     return LMD_TYPE_FLOAT;
                 }
                 if (info->fn == SYSFUNC_TRUNC &&
+                        !mir_expr_may_be_null(mt, call->argument) &&
                         (argument_tid == LMD_TYPE_INT ||
                          argument_tid == LMD_TYPE_FLOAT)) {
                     return argument_tid;
+                }
+            }
+        }
+        if (direct_callee && direct_callee->node_type == AST_NODE_SYS_FUNC) {
+            AstSysFuncNode* sys = (AstSysFuncNode*)direct_callee;
+            SysFuncInfo* info = sys->fn_info;
+            TypeId preserving_tid = mir_type_preserving_sysfunc_result(mt, info, call);
+            if (preserving_tid != LMD_TYPE_ANY) {
+                // Scalar math lowers through the native lane before the AST
+                // abstract-number wrapper is considered. Publish that same
+                // witness so an untyped binding cannot register its double as
+                // an Item (D2.4.1-D2.4.3, D8.2.6).
+                return preserving_tid;
+            }
+            // The registry records these math builtins as `any` because their
+            // general runtime form is element-wise over containers. When every
+            // argument is already a native scalar, their scalar branch is
+            // provably `push_d(...)`; retain that float witness so a typed
+            // array write does not fall back to a checked boxed store per lane.
+            if (info && info->native_c_name && info->native_func_ptr &&
+                    info->native_returns_float && sysfunc_native_math_always_float(info->fn) &&
+                    (info->native_arg_count == 1 || info->native_arg_count == 2)) {
+                AstNode* first = call->argument;
+                AstNode* second = first ? first->next : NULL;
+                bool arity_matches = info->native_arg_count == 1
+                    ? first && !second
+                    : first && second && !second->next;
+                if (arity_matches && mir_native_math_arg_type(mir_expr_carrier_type(mt, first)) &&
+                        (info->native_arg_count == 1 ||
+                         mir_native_math_arg_type(mir_expr_carrier_type(mt, second)))) {
+                    return LMD_TYPE_FLOAT;
                 }
             }
         }
@@ -6895,31 +6941,6 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
             // call results, not runtime `type` objects. Preserve their ledger
             // information on the AST while lowering through the boxed lane.
             return LMD_TYPE_ANY;
-        }
-        if (call->function && call->function->node_type == AST_NODE_SYS_FUNC) {
-            AstSysFuncNode* sys = (AstSysFuncNode*)call->function;
-            SysFuncInfo* info = sys->fn_info;
-            TypeId preserving_tid = mir_type_preserving_sysfunc_result(mt, info, call);
-            if (preserving_tid != LMD_TYPE_ANY) return preserving_tid;
-            // The registry records these math builtins as `any` because their
-            // general runtime form is element-wise over containers. When every
-            // argument is already a native scalar, their scalar branch is
-            // provably `push_d(...)`; retain that float witness so a typed
-            // array write does not fall back to a checked boxed store per lane.
-            if (info && info->native_c_name && info->native_func_ptr &&
-                    info->native_returns_float && sysfunc_native_math_always_float(info->fn) &&
-                    (info->native_arg_count == 1 || info->native_arg_count == 2)) {
-                AstNode* first = call->argument;
-                AstNode* second = first ? first->next : NULL;
-                bool arity_matches = info->native_arg_count == 1
-                    ? first && !second
-                    : first && second && !second->next;
-                if (arity_matches && mir_native_math_arg_type(mir_expr_carrier_type(mt, first)) &&
-                        (info->native_arg_count == 1 ||
-                         mir_native_math_arg_type(mir_expr_carrier_type(mt, second)))) {
-                    return LMD_TYPE_FLOAT;
-                }
-            }
         }
     }
     if (node->node_type == AST_NODE_ARRAY &&
@@ -7089,6 +7110,18 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
             // array` reads an arbitrary high-byte tag instead of the Range
             // header that already owns the runtime type.
             return LMD_TYPE_RANGE;
+        }
+
+        if ((bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB ||
+                bi->op == OPERATOR_MUL || bi->op == OPERATOR_DIV) &&
+                (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) &&
+                is_native_numeric_type_id(lt) && is_native_numeric_type_id(rt)) {
+            // The AST uses abstract `number` for an unannotated numeric tree,
+            // but float arithmetic already publishes an F64 register. Keep the
+            // carrier explicit so a surrounding type-preserving math call and
+            // its local binding do not treat that register as an Item
+            // (D2.4.1-D2.4.3, D8.2.6).
+            return LMD_TYPE_FLOAT;
         }
 
         if ((tid == LMD_TYPE_DECIMAL || tid == LMD_TYPE_COMPLEX) &&
@@ -12315,15 +12348,14 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 char name_buf[128];
                 snprintf(name_buf, sizeof(name_buf), "%.*s", (int)asn->name->len, asn->name->chars);
                 TypeId expr_tid = predicted_expr_tid;
-                // A call descriptor exposes a slow inferred body as an Item,
-                // even when its source contract names a scalar. Bind that
-                // carrier directly instead of recovering it through call-site
-                // state (D2.4.1–D2.4.3, D8.2.6).
-                AstNode* initializer_node = ast_unwrap_primary(asn->init);
-                if (initializer_node &&
-                        initializer_node->node_type == AST_NODE_CALL_EXPR &&
-                        initializer_value.rep == VALUE_REP_ITEM) {
-                    expr_tid = LMD_TYPE_ANY;
+                // The initializer selects its own physical carrier. Its AST
+                // contract can remain `any` for an open fallback even when
+                // this direct producer returned a native lane; rebuilding the
+                // descriptor from that contract would later unbox a raw
+                // double as though it were an Item (D2.4.1-D2.4.3, D8.2.6).
+                if (!initializer_native_int_lane &&
+                        initializer_value.rep != VALUE_REP_NONE) {
+                    expr_tid = mir_value_carrier_type(initializer_value);
                 }
                 // The AST retains the source annotation explicitly.  Inferring
                 // annotation-ness from a numeric TypeId made `let x: T` and
@@ -12497,6 +12529,11 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         (int)asn->name->len, asn->name->chars);
                     val = emit_native_scalar_declaration_boundary(mt, val,
                         declared_value_type, boundary);
+                    // The boundary preserved a proved native success lane.
+                    // Keep the descriptor aligned with that physical result
+                    // instead of retaining the source's boxed fallback
+                    // carrier (D2.4.1-D2.4.3).
+                    expr_tid = declared_value_type->type_id;
                 } else if (declaration_boundary_applies && !declaration_boundary_redundant) {
                     char boundary[192];
                     snprintf(boundary, sizeof(boundary), "declaration '%.*s'",
@@ -12686,6 +12723,11 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                             declared_lane_desc.kind == LANE_STORAGE_BOOL
                             ? emit_unbox_bool_lane(mt, val)
                             : emit_unbox(mt, val, var_tid);
+                    // The checked Item has now become this binding's native
+                    // carrier. Its descriptor must change with the register;
+                    // retaining `any` makes the final local copy unbox that
+                    // lane a second time (D2.4.1-D2.4.3, D8.2.6).
+                    expr_tid = var_tid;
                 }
 
                 if (declared_nullable_scalar_lane &&
@@ -17279,9 +17321,13 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         if (arg_count == 1 && info->fn == SYSFUNC_FLOAT) {
             arg = call_node->argument;
             TypeId arg_tid = mir_expr_carrier_type(mt, arg);
-            if (arg_tid == LMD_TYPE_FLOAT) RETURN_CALL_VALUE(em_require_rep(&mt->em,
+            // The raw conversion omits the Item null/error path. Its carrier
+            // witness therefore needs the same non-null proof as the oracle;
+            // a checked array read otherwise feeds a double to an Item ABI
+            // consumer (D2.4.1-D2.4.3, D2.8.1).
+            if (!mir_expr_may_be_null(mt, arg) && arg_tid == LMD_TYPE_FLOAT) RETURN_CALL_VALUE(em_require_rep(&mt->em,
                 transpile_expr_value(mt, arg), VALUE_REP_F64).reg);
-            if (arg_tid == LMD_TYPE_INT) {
+            if (!mir_expr_may_be_null(mt, arg) && arg_tid == LMD_TYPE_INT) {
                 RETURN_CALL_VALUE(emit_int_lane_to_double(mt,
                     emit_int_native_lane_typed(mt, mir_value_from_reg(mt, arg,
                         transpile_native_int_expr(mt, arg), VALUE_REP_INT_LANE))));
@@ -24133,6 +24179,7 @@ static MIR_reg_t emit_boxed_slow_body(MirTranspiler* mt, AstFuncNode* fn_node,
     Type* saved_return_type = mt->current_return_type;
     TypeId saved_native_return_tid = mt->native_return_tid;
     bool saved_block_returned = mt->block_returned;
+    bool saved_inferred_slow_body = mt->in_inferred_slow_body;
     AstFuncNode* saved_tco_func = mt->tco_func;
     MIR_label_t saved_tco_label = mt->tco_label;
     MIR_reg_t saved_tco_count_reg = mt->tco_count_reg;
@@ -24144,6 +24191,7 @@ static MIR_reg_t emit_boxed_slow_body(MirTranspiler* mt, AstFuncNode* fn_node,
         ? (fn_type->return_contract ? fn_type->return_contract : fn_type->returned)
         : NULL;
     mt->native_return_tid = LMD_TYPE_ANY;
+    mt->in_inferred_slow_body = true;
     mt->block_returned = false;
     mt->tco_func = NULL;
     mt->tco_label = NULL;
@@ -24168,6 +24216,7 @@ static MIR_reg_t emit_boxed_slow_body(MirTranspiler* mt, AstFuncNode* fn_node,
 
     mt->current_return_type = saved_return_type;
     mt->native_return_tid = saved_native_return_tid;
+    mt->in_inferred_slow_body = saved_inferred_slow_body;
     mt->block_returned = saved_block_returned;
     mt->tco_func = saved_tco_func;
     mt->tco_label = saved_tco_label;
