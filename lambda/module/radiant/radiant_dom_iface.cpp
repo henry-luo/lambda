@@ -415,11 +415,11 @@ RADIANT_METHOD_1(s_force_direction, selection_force_direction)
 // prototype identity comes live from the runtime's global Range/Selection
 // constructors (same source the deleted engine dispatch used)
 static Item radiant_range_prototype_seed(void) {
-    return radiant_host_api->dom->range_get_prototype_value();
+    return radiant_host_api->realm->range_get_prototype_value();
 }
 
 static Item radiant_selection_prototype_seed(void) {
-    return radiant_host_api->dom->selection_get_prototype_value();
+    return radiant_host_api->realm->selection_get_prototype_value();
 }
 
 #define BIND_GET(n, fn)      {n, NULL, fn, NULL, NULL, NULL, 0}

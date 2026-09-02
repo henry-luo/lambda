@@ -50,5 +50,12 @@ let _8 = dom.remove(remark)
   parent_element_of_note: dom.node_name(dom.parent_element(note)),
   replaced: dom.node_name(dom.replace_child(section, dom.create_element(root, "em"), note)),
   inner_after_replace: dom.inner_html(section),
-  matches_section: dom.matches(section, "section[data-kind=core]")
+  matches_section: dom.matches(section, "section[data-kind=core]"),
+  // identity: `==` says true for ANY two node wrappers (they materialise no
+  // entries and S5.1.4 gives the language no identity operator), so the DOM
+  // supplies same_node. These four lines are the regression test for ESO96.
+  eq_operator_lies: dom.get_element_by_id(root, "made") == dom.get_element_by_id(root, "intro"),
+  same_node_self: dom.same_node(section, dom.get_element_by_id(root, "made")),
+  same_node_other: dom.same_node(section, intro),
+  equal_node_clone: dom.equal_node(dom.create_element(root, "em"), dom.create_element(root, "em"))
 }

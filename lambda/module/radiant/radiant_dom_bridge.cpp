@@ -61,11 +61,11 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 // unchanged -- every call still crosses through the host API, per ES34 -- and
 // the alias block as a whole is inventory for the Phase-2 redesign (ESO78).
 #define dom_get_document radiant_host_api->dom->get_document
-#define js_get_document_object_value radiant_host_api->dom->get_document_object_value
+#define js_get_document_object_value radiant_host_api->realm->get_document_object_value
 #define dom_get_or_create_doc_node radiant_host_api->dom->get_or_create_doc_node
-#define dom_document_proxy_for_doc_bridge radiant_host_api->dom->document_proxy_for_doc_bridge
+#define dom_document_proxy_for_doc_bridge radiant_host_api->realm->document_proxy_for_doc_bridge
 #define dom_unwrap_element_impl radiant_host_api->dom->unwrap_element_impl
-#define dom_initialize_node_wrapper radiant_host_api->dom->initialize_node_wrapper
+#define dom_initialize_node_wrapper radiant_host_api->realm->initialize_node_wrapper
 #define dom_is_inline_style_item radiant_host_api->dom->is_inline_style_item
 #define dom_is_computed_style_item radiant_host_api->dom->is_computed_style_item
 #define dom_is_stylesheet radiant_host_api->dom->is_stylesheet
@@ -76,21 +76,21 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_element_operation_impl radiant_host_api->dom->dom_element_operation_impl
 #define dom_computed_style_get_property radiant_host_api->dom->computed_style_get_property
 #define dom_style_resource_has_property radiant_host_api->dom->style_resource_has_property
-#define dom_get_prototype_value radiant_host_api->dom->dom_get_prototype_value
+#define dom_get_prototype_value radiant_host_api->realm->dom_get_prototype_value
 #define js_get_intrinsic_prototype_for_class radiant_host_api->script->intrinsic_prototype_for_class
 #define dom_cssom_rule_decl_get_property radiant_host_api->dom->cssom_rule_decl_get_property
 #define dom_cssom_rule_decl_set_property radiant_host_api->dom->cssom_rule_decl_set_property
 #define dom_get_foreign_doc radiant_host_api->dom->get_foreign_doc
 #define dom_swap_active_document radiant_host_api->dom->swap_active_document
 #define dom_restore_active_document radiant_host_api->dom->restore_active_document
-#define dom_document_proxy_get_property radiant_host_api->dom->document_proxy_get_property
-#define dom_document_proxy_set_property radiant_host_api->dom->document_proxy_set_property
-#define dom_range_get_prototype_value radiant_host_api->dom->range_get_prototype_value
-#define dom_selection_get_prototype_value radiant_host_api->dom->selection_get_prototype_value
-#define dom_expando_has_property radiant_host_api->dom->expando_has_property
-#define dom_expando_get_own_property_descriptor radiant_host_api->dom->expando_get_own_property_descriptor
-#define dom_expando_delete_property radiant_host_api->dom->expando_delete_property
-#define dom_expando_own_property_names radiant_host_api->dom->expando_own_property_names
+#define dom_document_proxy_get_property radiant_host_api->realm->document_proxy_get_property
+#define dom_document_proxy_set_property radiant_host_api->realm->document_proxy_set_property
+#define dom_range_get_prototype_value radiant_host_api->realm->range_get_prototype_value
+#define dom_selection_get_prototype_value radiant_host_api->realm->selection_get_prototype_value
+#define dom_expando_has_property radiant_host_api->realm->expando_has_property
+#define dom_expando_get_own_property_descriptor radiant_host_api->realm->expando_get_own_property_descriptor
+#define dom_expando_delete_property radiant_host_api->realm->expando_delete_property
+#define dom_expando_own_property_names radiant_host_api->realm->expando_own_property_names
 #define dom_owner_document_for_node radiant_host_api->dom->owner_document_for_node
 #define dom_to_attribute_cstr radiant_host_api->dom->to_attribute_cstr
 #define js_is_truthy radiant_host_api->script->is_truthy
@@ -109,7 +109,7 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_set_option_selected_dirty radiant_host_api->dom->set_option_selected_dirty
 #define dom_set_option_text_bridge radiant_host_api->dom->set_option_text_bridge
 #define dom_after_srcdoc_set radiant_host_api->dom->after_srcdoc_set
-#define dom_throw_contenteditable_syntax_error radiant_host_api->dom->throw_contenteditable_syntax_error
+#define dom_throw_contenteditable_syntax_error radiant_host_api->realm->throw_contenteditable_syntax_error
 #define dom_set_text_data_property radiant_host_api->dom->set_text_data_property
 #define dom_text_control_set_value_bridge radiant_host_api->dom->text_control_set_value_bridge
 #define dom_text_control_set_selection_start_bridge radiant_host_api->dom->text_control_set_selection_start_bridge
@@ -154,23 +154,23 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_document_element_from_point_bridge radiant_host_api->dom->document_element_from_point_bridge
 #define dom_create_range radiant_host_api->dom->create_range
 #define dom_get_selection radiant_host_api->dom->get_selection
-#define dom_get_selection_function_for_document radiant_host_api->dom->get_selection_function_for_document
+#define dom_get_selection_function_for_document radiant_host_api->realm->get_selection_function_for_document
 #define dom_doc_has_browsing_context radiant_host_api->dom->doc_has_browsing_context
 #define dom_document_fonts_bridge radiant_host_api->dom->document_fonts_bridge
 #define dom_document_stylesheets_bridge radiant_host_api->dom->document_stylesheets_bridge
-#define dom_document_default_view_bridge radiant_host_api->dom->document_default_view_bridge
+#define dom_document_default_view_bridge radiant_host_api->realm->document_default_view_bridge
 #define dom_document_implementation_bridge radiant_host_api->dom->document_implementation_bridge
 #define dom_document_design_mode_bridge radiant_host_api->dom->document_design_mode_bridge
 #define dom_document_active_element_bridge radiant_host_api->dom->document_active_element_bridge
 #define dom_normalize_bridge radiant_host_api->dom->normalize_bridge
-#define dom_live_child_collection_bridge radiant_host_api->dom->live_child_collection_bridge
-#define dom_live_document_forms_bridge radiant_host_api->dom->live_document_forms_bridge
-#define dom_live_form_elements_bridge radiant_host_api->dom->live_form_elements_bridge
-#define dom_live_document_get_elements_by_tag_name_bridge radiant_host_api->dom->live_document_get_elements_by_tag_name_bridge
-#define dom_live_document_get_elements_by_class_name_bridge radiant_host_api->dom->live_document_get_elements_by_class_name_bridge
-#define dom_live_document_get_elements_by_name_bridge radiant_host_api->dom->live_document_get_elements_by_name_bridge
-#define dom_live_element_get_elements_by_tag_name_bridge radiant_host_api->dom->live_element_get_elements_by_tag_name_bridge
-#define dom_live_element_get_elements_by_class_name_bridge radiant_host_api->dom->live_element_get_elements_by_class_name_bridge
+#define dom_live_child_collection_bridge radiant_host_api->realm->live_child_collection_bridge
+#define dom_live_document_forms_bridge radiant_host_api->realm->live_document_forms_bridge
+#define dom_live_form_elements_bridge radiant_host_api->realm->live_form_elements_bridge
+#define dom_live_document_get_elements_by_tag_name_bridge radiant_host_api->realm->live_document_get_elements_by_tag_name_bridge
+#define dom_live_document_get_elements_by_class_name_bridge radiant_host_api->realm->live_document_get_elements_by_class_name_bridge
+#define dom_live_document_get_elements_by_name_bridge radiant_host_api->realm->live_document_get_elements_by_name_bridge
+#define dom_live_element_get_elements_by_tag_name_bridge radiant_host_api->realm->live_element_get_elements_by_tag_name_bridge
+#define dom_live_element_get_elements_by_class_name_bridge radiant_host_api->realm->live_element_get_elements_by_class_name_bridge
 #define dom_clone_node_bridge radiant_host_api->dom->clone_node_bridge
 #define dom_replace_child_bridge radiant_host_api->dom->replace_child_bridge
 #define dom_replace_with_bridge radiant_host_api->dom->replace_with_bridge
@@ -183,7 +183,7 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_get_ui_context radiant_host_api->dom->get_ui_context
 #define dom_has_committed_geometry_snapshot radiant_host_api->dom->has_committed_geometry_snapshot
 #define dom_create_tree_walker_bridge radiant_host_api->dom->document_create_tree_walker_bridge
-#define dom_document_create_event_bridge radiant_host_api->dom->document_create_event_bridge
+#define dom_document_create_event_bridge radiant_host_api->realm->document_create_event_bridge
 #define dom_document_exec_command_bridge radiant_host_api->dom->document_exec_command_bridge
 
 static const int RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE = 4096;

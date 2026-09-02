@@ -50,9 +50,24 @@ static Item dom_op3(Item node, JubeDomElementOperation op, Item a, Item b, Item 
     return dom_element_operation_impl(node, op, args, 3);
 }
 
-/** Read a DOM IDL property by its spec (camelCase) name. */
+/**
+ * Read a DOM IDL property by its spec (camelCase) name.
+ *
+ * The property protocol answers JS `undefined` when a property does not exist
+ * on this node kind -- Text has no firstElementChild, and CharacterData has no
+ * children -- because that protocol is realm-shared (D7.4.4) and undefined is
+ * what a JS caller must see. Lambda has no undefined: absence is null. So the
+ * catalog's reads normalise at this boundary, and only here; the JS door keeps
+ * undefined by calling dom_get_property_impl itself.
+ *
+ * Without this, `children(text_node)` returned `[undefined]` rather than `[]`
+ * (the link walk below stops on null, and undefined is not null) and every
+ * element-traversal read on a text node answered undefined instead of null --
+ * both found by the ES43 traversal oracle, not by inspection.
+ */
 static Item dom_prop_get(Item node, const char* name) {
-    return dom_get_property_impl(node, js_name_item(name));
+    Item v = dom_get_property_impl(node, js_name_item(name));
+    return get_type_id(v) == LMD_TYPE_UNDEFINED ? ItemNull : v;
 }
 
 static DomDocument* dom_document_of(Item node_item) {
@@ -89,6 +104,9 @@ extern "C" Item dom_core_last_child(Item n)       { return dom_prop_get(n, "last
 extern "C" Item dom_core_next_sibling(Item n)     { return dom_prop_get(n, "nextSibling"); }
 extern "C" Item dom_core_previous_sibling(Item n) { return dom_prop_get(n, "previousSibling"); }
 extern "C" Item dom_core_owner_document(Item n)   { return dom_prop_get(n, "ownerDocument"); }
+// identity: `==` cannot express it (S5.1.4 + zero-entry wrappers), so the DOM
+// supplies it as an operation, exactly as Node.isSameNode() does.
+extern "C" Item dom_core_same_node(Item a, Item b)  { return dom_op1(a, JUBE_DOM_IS_SAME_NODE, b); }
 
 // --- attributes
 extern "C" Item dom_core_get_attribute(Item n, Item name) {
@@ -258,6 +276,7 @@ extern "C" Item dom_fp_root_node(Item n) {
     return cur;
 }
 extern "C" Item dom_fp_contains(Item a, Item b)        { return dom_op1(a, JUBE_DOM_CONTAINS, b); }
+extern "C" Item dom_fp_equal_node(Item a, Item b)      { return dom_op1(a, JUBE_DOM_IS_EQUAL_NODE, b); }
 
 // children / child_nodes: snapshot arrays (S9.2.2) built from the core links,
 // which is exactly the derivation; the JS live collections are not used.

@@ -40,6 +40,7 @@ Item dom_core_last_child(Item n);
 Item dom_core_next_sibling(Item n);
 Item dom_core_previous_sibling(Item n);
 Item dom_core_owner_document(Item n);
+Item dom_core_same_node(Item a, Item b);
 // --- core: attributes
 Item dom_core_get_attribute(Item n, Item name);
 Item dom_core_set_attribute(Item n, Item name, Item value);
@@ -80,6 +81,7 @@ Item dom_fp_children(Item n);
 Item dom_fp_child_nodes(Item n);
 Item dom_fp_contains(Item a, Item b);
 Item dom_fp_root_node(Item n);
+Item dom_fp_equal_node(Item a, Item b);
 Item dom_fp_append_child(Item parent, Item child);
 Item dom_fp_remove(Item n);
 Item dom_fp_replace_child(Item parent, Item new_node, Item old_node);

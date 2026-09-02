@@ -2599,7 +2599,7 @@ RADIANT_C_API Item fn_radiant_velmt_padding(Item velmt_item) {
 
 static int radiant_module_init(const JubeHostAPI* host) {
     if (!host || host->api_version != JUBE_HOST_API_VERSION ||
-        !host->gc || !host->value || !host->script || !host->dom) {
+        !host->gc || !host->value || !host->script || !host->dom || !host->realm) {
         log_error("JUBE_RADIANT: missing host API during module init");
         return -1;
     }

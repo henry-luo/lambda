@@ -935,7 +935,6 @@ extern "C" void* dom_get_or_create_doc_node(void* doc);
 extern "C" Item dom_document_proxy_for_doc_bridge(void* doc);
 extern "C" void* dom_unwrap_element_impl(Item item);
 extern "C" void dom_initialize_node_wrapper(void* dom_elem);
-extern "C" bool dom_is_css_namespace(Item item);
 extern "C" bool dom_is_inline_style_item(Item item);
 extern "C" bool dom_is_computed_style_item(Item item);
 extern "C" bool dom_is_stylesheet(Item item);
@@ -958,8 +957,6 @@ extern "C" void* dom_swap_active_document(void* new_doc);
 extern "C" void dom_restore_active_document(void* prev_doc);
 extern "C" Item dom_document_proxy_get_property(Item prop_name);
 extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value);
-extern "C" bool dom_item_is_range(Item item);
-extern "C" bool dom_item_is_selection(Item item);
 extern "C" Item dom_range_get_prototype_value(void);
 extern "C" Item dom_selection_get_prototype_value(void);
 extern "C" bool dom_expando_has_property(Item obj, Item key);
@@ -1506,12 +1503,8 @@ static const JubeHostScriptAPI jube_host_script_api = {
 
 static const JubeHostDomAPI jube_host_dom_api = {
     dom_get_document,
-    js_get_document_object_value,
     dom_get_or_create_doc_node,
-    dom_document_proxy_for_doc_bridge,
     dom_unwrap_element_impl,
-    dom_initialize_node_wrapper,
-    dom_is_css_namespace,
     dom_is_inline_style_item,
     dom_is_computed_style_item,
     dom_is_stylesheet,
@@ -1521,46 +1514,12 @@ static const JubeHostDomAPI jube_host_dom_api = {
     dom_set_property_impl,
     dom_element_operation_impl,
     dom_computed_style_get_property,
-    NULL,  // dom_style_resource_has_property retired: style hosts are record-driven (DOM3)
-    NULL,  // dom_style_method retired: style hosts are record-driven (DOM3)
-    dom_get_prototype_value,
-    NULL,  // js_cssom_resource_has_property retired: CSSOM types are record-driven (DOM3)
-    NULL,  // js_cssom_stylesheet_get_property retired: CSSOM types are record-driven (DOM3)
-    NULL,  // js_cssom_rule_get_property retired: CSSOM types are record-driven (DOM3)
-    NULL,  // js_cssom_rule_set_property retired: CSSOM types are record-driven (DOM3)
+    NULL,
     dom_cssom_rule_decl_get_property,
     dom_cssom_rule_decl_set_property,
     dom_get_foreign_doc,
     dom_swap_active_document,
     dom_restore_active_document,
-    dom_document_proxy_get_property,
-    dom_document_proxy_set_property,
-    NULL,  // receiver/name document invocation retired by Tune4 (D6.2.2v2)
-    dom_item_is_range,
-    dom_item_is_selection,
-    NULL,  // dom_range_get_property retired: range/selection are record-driven (DOM3)
-    NULL,  // dom_range_set_property retired: range/selection are record-driven (DOM3)
-    NULL,  // dom_selection_get_property retired: range/selection are record-driven (DOM3)
-    NULL,  // dom_selection_set_property retired: range/selection are record-driven (DOM3)
-    dom_range_get_prototype_value,
-    dom_selection_get_prototype_value,
-    NULL,  // dom_range_native_property retired: range/selection are record-driven (DOM3)
-    NULL,  // dom_selection_native_property retired: range/selection are record-driven (DOM3)
-    dom_expando_has_property,
-    NULL,  // dom_range_expando_has_property retired: range/selection are record-driven (DOM3)
-    NULL,  // dom_selection_expando_has_property retired: range/selection are record-driven (DOM3)
-    dom_expando_get_own_property_descriptor,
-    NULL,  // dom_range_expando_get_own_property_descriptor retired: range/selection are record-driven (DOM3)
-    NULL,  // dom_selection_expando_get_own_property_descriptor retired: range/selection are record-driven (DOM3)
-    dom_expando_delete_property,
-    NULL,  // dom_range_expando_delete_property retired: range/selection are record-driven (DOM3)
-    NULL,  // dom_selection_expando_delete_property retired: range/selection are record-driven (DOM3)
-    dom_expando_own_property_names,
-    NULL,  // dom_range_expando_own_property_names retired: range/selection are record-driven (DOM3)
-    NULL,  // dom_selection_expando_own_property_names retired: range/selection are record-driven (DOM3)
-    NULL,  // CSS namespace invocation is intrinsic-target-owned (D6.2.2v2)
-    NULL,  // js_cssom_stylesheet_method retired: CSSOM types are record-driven (DOM3)
-    NULL,  // js_cssom_rule_decl_method retired: CSSOM types are record-driven (DOM3)
     dom_owner_document_for_node,
     dom_to_attribute_cstr,
     dom_after_set_attribute,
@@ -1577,7 +1536,6 @@ static const JubeHostDomAPI jube_host_dom_api = {
     dom_set_option_selected_dirty,
     dom_set_option_text_bridge,
     dom_after_srcdoc_set,
-    dom_throw_contenteditable_syntax_error,
     dom_set_text_data_property,
     dom_text_control_set_value_bridge,
     dom_text_control_set_selection_start_bridge,
@@ -1622,23 +1580,13 @@ static const JubeHostDomAPI jube_host_dom_api = {
     dom_document_element_from_point_bridge,
     dom_create_range,
     dom_get_selection,
-    dom_get_selection_function_for_document,
     dom_doc_has_browsing_context,
     dom_document_fonts_bridge,
     dom_document_stylesheets_bridge,
-    dom_document_default_view_bridge,
     dom_document_implementation_bridge,
     dom_document_design_mode_bridge,
     dom_document_active_element_bridge,
     dom_normalize_bridge,
-    dom_live_child_collection_bridge,
-    dom_live_document_forms_bridge,
-    dom_live_form_elements_bridge,
-    dom_live_document_get_elements_by_tag_name_bridge,
-    dom_live_document_get_elements_by_class_name_bridge,
-    dom_live_document_get_elements_by_name_bridge,
-    dom_live_element_get_elements_by_tag_name_bridge,
-    dom_live_element_get_elements_by_class_name_bridge,
     dom_clone_node_bridge,
     dom_replace_child_bridge,
     dom_replace_with_bridge,
@@ -1726,8 +1674,34 @@ static const JubeHostDomAPI jube_host_dom_api = {
     dom_get_ui_context,
     dom_has_committed_geometry_snapshot,
     dom_create_tree_walker_bridge,
-    dom_document_create_event_bridge,
     dom_document_exec_command_bridge,
+};
+
+static const JubeHostRealmAPI jube_host_realm_api = {
+    js_get_document_object_value,
+    dom_document_proxy_for_doc_bridge,
+    dom_document_proxy_get_property,
+    dom_document_proxy_set_property,
+    dom_get_prototype_value,
+    dom_range_get_prototype_value,
+    dom_selection_get_prototype_value,
+    dom_expando_has_property,
+    dom_expando_get_own_property_descriptor,
+    dom_expando_delete_property,
+    dom_expando_own_property_names,
+    dom_live_child_collection_bridge,
+    dom_live_document_forms_bridge,
+    dom_live_form_elements_bridge,
+    dom_live_document_get_elements_by_tag_name_bridge,
+    dom_live_document_get_elements_by_class_name_bridge,
+    dom_live_document_get_elements_by_name_bridge,
+    dom_live_element_get_elements_by_tag_name_bridge,
+    dom_live_element_get_elements_by_class_name_bridge,
+    dom_initialize_node_wrapper,
+    dom_throw_contenteditable_syntax_error,
+    dom_get_selection_function_for_document,
+    dom_document_default_view_bridge,
+    dom_document_create_event_bridge,
 };
 
 // H7A source records are intentionally plain C data.  A language can retain
@@ -4271,6 +4245,7 @@ static JubeHostAPI jube_host_api = {
     &jube_host_value_api,
     &jube_host_script_api,
     &jube_host_dom_api,
+    &jube_host_realm_api,
     &jube_host_runtime_catalog_api,
     &jube_host_data_api,
     &jube_host_node_api,
