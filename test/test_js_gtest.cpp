@@ -1101,19 +1101,14 @@ TEST(JavaScriptRegression, ModuleEntryPrelinksOwnAndImportNameTables) {
 
 TEST(JavaScriptRegression, DocumentExitCodeAfterContextRestoreDoesNotInternWithNullContext) {
     unlink("log.txt");
-    char output[4096];
-#ifdef _WIN32
-    const char* command =
-        "lambda.exe js \"test/js/js_document_exit_context.js\" "
-        "--document \"test/js/js_document_exit_context.html\" 2>&1";
-#else
-    const char* command =
-        "./lambda.exe js \"test/js/js_document_exit_context.js\" "
-        "--document \"test/js/js_document_exit_context.html\" 2>&1";
-#endif
-
-    int status = execute_command_status(command, output, sizeof(output));
-    ASSERT_EQ(status, 0) << output;
+    const char* args[] = {LAMBDA_EXE, "js", "test/js/js_document_exit_context.js",
+        "--document", "test/js/js_document_exit_context.html", NULL};
+    ShellOptions options = {};
+    options.merge_stderr = true;
+    options.timeout_ms = 15000;
+    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    ASSERT_EQ(result.exit_code, 0) << output;
     ASSERT_NE(strstr(output, "A plain-call=3"), nullptr) << output;
     ASSERT_NE(strstr(output, "B dispatched=3"), nullptr) << output;
 
@@ -1124,6 +1119,7 @@ TEST(JavaScriptRegression, DocumentExitCodeAfterContextRestoreDoesNotInternWithN
     ASSERT_EQ(strstr(log_content, "map_get: key must be string or symbol, got type null"), nullptr)
         << log_content;
     free(log_content);
+    shell_result_free(&result);
 }
 
 TEST(JavaScriptFuzz, FuzzIifeObjectLabelBlockDoesNotTimeout) {

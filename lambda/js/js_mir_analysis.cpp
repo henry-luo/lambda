@@ -691,6 +691,11 @@ static void jm_add_capture(JsFuncCollected* fc, const char* name, NameEntry* ent
 static bool jm_capture_binding_is_lexical_ancestor(JsMirTranspiler* mt,
         JsFuncCollected* fc, NameEntry* entry) {
     if (!mt || !mt->tp || !fc || !entry || !entry->node) return true;
+    if (jm_entry_is_enclosing_nonmodule_binding(fc->node, entry)) {
+        // Module-level block closures have no structural function parent, but
+        // their direct-scope edge still identifies the enclosing lexical cell.
+        return true;
+    }
     AstIndex* index = &mt->tp->ast_index;
     AstNodeId binding_id = ast_index_find(index, (AstNode*)entry->node);
     if (binding_id == AST_NODE_ID_INVALID || binding_id >= index->count) return true;
