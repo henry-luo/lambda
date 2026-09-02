@@ -630,29 +630,32 @@ static bool should_skip_directory(const char* name) {
     return false;
 }
 
+// Filename placeholders omit spaces before their name table has been parsed.
+static bool font_family_names_equivalent(const char* left, const char* right) {
+    if (!left || !right) return false;
+    char normalized_left[MAX_FONT_FAMILY_NAME];
+    char normalized_right[MAX_FONT_FAMILY_NAME];
+    int left_pos = 0;
+    int right_pos = 0;
+    for (int i = 0; left[i] && left_pos < MAX_FONT_FAMILY_NAME - 1; i++) {
+        if (left[i] != ' ') {
+            normalized_left[left_pos++] = (char)tolower((unsigned char)left[i]);
+        }
+    }
+    for (int i = 0; right[i] && right_pos < MAX_FONT_FAMILY_NAME - 1; i++) {
+        if (right[i] != ' ') {
+            normalized_right[right_pos++] = (char)tolower((unsigned char)right[i]);
+        }
+    }
+    normalized_left[left_pos] = '\0';
+    normalized_right[right_pos] = '\0';
+    return strcmp(normalized_left, normalized_right) == 0;
+}
+
 static bool is_priority_font_family(const char* name) {
     if (!name) return false;
-    // exact case-insensitive match
     for (int i = 0; priority_font_families[i]; i++) {
-        if (strcasecmp(name, priority_font_families[i]) == 0) return true;
-    }
-    // normalized match: compare with spaces stripped from both sides
-    // so that heuristic filename names like "DejaVuSans" match "DejaVu Sans"
-    char n1[MAX_FONT_FAMILY_NAME];
-    int j1 = 0;
-    for (int i = 0; name[i] && j1 < MAX_FONT_FAMILY_NAME - 1; i++) {
-        if (name[i] != ' ') n1[j1++] = (char)tolower((unsigned char)name[i]);
-    }
-    n1[j1] = '\0';
-    for (int i = 0; priority_font_families[i]; i++) {
-        char n2[MAX_FONT_FAMILY_NAME];
-        int j2 = 0;
-        const char* pf = priority_font_families[i];
-        for (int k = 0; pf[k] && j2 < MAX_FONT_FAMILY_NAME - 1; k++) {
-            if (pf[k] != ' ') n2[j2++] = (char)tolower((unsigned char)pf[k]);
-        }
-        n2[j2] = '\0';
-        if (strcmp(n1, n2) == 0) return true;
+        if (font_family_names_equivalent(name, priority_font_families[i])) return true;
     }
     return false;
 }
@@ -691,7 +694,8 @@ static FontEntry* create_font_placeholder(const char* file_path, Pool* pool, Are
             strcasecmp(dash, "-Light") == 0 || strcasecmp(dash, "-Medium") == 0 ||
             strcasecmp(dash, "-Semibold") == 0 || strcasecmp(dash, "-Thin") == 0 ||
             strcasecmp(dash, "-Black") == 0 || strcasecmp(dash, "-ExtraBold") == 0 ||
-            strcasecmp(dash, "-ExtraLight") == 0 || strcasecmp(dash, "-Heavy") == 0) {
+            strcasecmp(dash, "-ExtraLight") == 0 || strcasecmp(dash, "-Heavy") == 0 ||
+            strcasecmp(dash, "-Subset") == 0) {
             *dash = '\0';
         }
     }
@@ -1032,8 +1036,7 @@ FontDatabaseResult font_database_find_best_match_internal(FontDatabase* db, Font
         for (int i = 0; i < db->all_fonts->length; i++) {
             FontEntry* e = (FontEntry*)db->all_fonts->data[i];
             if (!e || !e->is_placeholder || !e->family_name) continue;
-            if (str_ieq(e->family_name, strlen(e->family_name),
-                         criteria->family_name, strlen(criteria->family_name))) {
+            if (font_family_names_equivalent(e->family_name, criteria->family_name)) {
                 if (e->format == FONT_FORMAT_TTC) {
                     parse_ttc_font_metadata(e->file_path, db, db->arena);
                 } else {

@@ -387,80 +387,6 @@ static bool has_following_content(DomNode* node, bool inline_only) {
     return false;
 }
 
-static void find_last_isolated_inline_text(View* view, int line_number,
-                                           ViewText** text_out,
-                                           TextRect** rect_out) {
-    while (view) {
-        if (layout_view_is_out_of_flow(view)) {
-            view = view->next();
-            continue;
-        }
-        if (view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = lam::view_require_text(view);
-            for (TextRect* rect = text->rect; rect; rect = rect->next) {
-                if (rect->line_number == line_number) {
-                    *text_out = text;
-                    *rect_out = rect;
-                }
-            }
-        } else if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-            // nested isolates own their boundary whitespace and are handled
-            // by their own pass rather than by an ancestor isolate.
-            if (!layout_inline_span_isolate(span) && span->first_child) {
-                find_last_isolated_inline_text(
-                    span->first_child, line_number, text_out, rect_out);
-            }
-        }
-        view = view->next();
-    }
-}
-
-static void trim_isolated_inline_text_edge(LayoutContext* lycon,
-                                           ViewSpan* span) {
-    if (!lycon || !span || !layout_inline_span_isolate(span) ||
-        !has_following_content(span, true)) {
-        return;
-    }
-    ViewText* text = nullptr;
-    TextRect* rect = nullptr;
-    find_last_isolated_inline_text(
-        span->first_child, lycon->block.line_number, &text, &rect);
-    if (!text || !rect || !layout_white_space_collapses(
-            get_white_space_value(static_cast<DomNode*>(text)))) {
-        return;
-    }
-    unsigned char* data = text->text_data();
-    int end = rect->start_index + rect->length;
-    if (!data || end <= rect->start_index || !is_space(data[end - 1])) return;
-
-    FontProp* font = text->font ? text->font : span->font;
-    if (!font) return;
-    float trim = layout_measure_space_advance(
-        lycon, font->font_handle, font) + font->word_spacing + font->letter_spacing;
-    if (trim <= 0.0f || rect->width <= 0.0f) return;
-
-    // CSS Text 3 §4.1.1: the collapsed boundary space is omitted from the
-    // text run's ink rectangle, but an isolated inline keeps its atomic width.
-    rect->width = max(0.0f, rect->width - trim);
-    adjust_text_bounds(text);
-}
-
-void layout_trim_isolated_inline_text_edges(LayoutContext* lycon, View* view) {
-    while (view) {
-        if (view->view_type == RDT_VIEW_INLINE) {
-            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-            if (layout_inline_span_isolate(span)) {
-                trim_isolated_inline_text_edge(lycon, span);
-            }
-            if (span->first_child) {
-                layout_trim_isolated_inline_text_edges(lycon, span->first_child);
-            }
-        }
-        view = view->next();
-    }
-}
-
 static bool inline_boundary_allows_soft_wrap(DomNode* inline_node) {
     if (!inline_node) return false;
     CssEnum white_space = get_white_space_value(inline_node);
@@ -1639,8 +1565,10 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         const FragmentUnion* split = span->fragment_union(FRAGMENT_UNION_SPLIT_INLINE);
         if (span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_x < min_x) min_x = span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_x;
         if (span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_x > max_x) max_x = span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_x;
-        final_min_y = split->min_y - roundf(edges.top);
-        final_max_y = split->max_y + roundf(edges.bottom);
+        // CSS 2.1 §9.2.1.1: a split inline's decoration belongs to its
+        // generated start/end fragments, not around its block fragment union.
+        final_min_y = split->min_y;
+        final_max_y = split->max_y;
         content_width = max_x - min_x;
         // CSS 2.1 §9.2.1.1: split inline boxes expose the union of their own
         layout_set_view_geometry(span, min_x, final_min_y,
@@ -1986,6 +1914,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // CSS Text 3 §7.2: text-align-last applies to lines immediately before
         // a forced line break. <br> is a forced break per CSS Text 3 §4.1.
         lycon->line.is_last_line = true;
+        lycon->block.is_line_after_forced_break = true;
         line_break(lycon);
         lycon->line.is_last_line = false;
         if (collapse_br_rect) {
@@ -2717,6 +2646,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // an atomic annotation child may overflow that box.
         span->set_has_fragment_union(FRAGMENT_UNION_SPLIT_INLINE, false);
     }
+    bool has_boundary_collapsed_space = lycon->line.last_text_rect &&
+        lycon->line.last_text_rect->is_boundary_collapsed_space &&
+        lycon->line.last_text_view && lycon->line.last_text_view->parent == span;
+    if (has_boundary_collapsed_space) {
+        // CSS Text 3 §4.1.1: the separator's advance belongs to the line,
+        // not to the inline box whose edge it crosses.
+        lycon->line.last_text_view->view_type = RDT_VIEW_NONE;
+    }
     compute_span_bounding_box(span, span_is_multi_line, font_box_handle(&lycon->font));
     if (misparented_ruby_annotation) {
         contribute_misparented_ruby_annotation_line_height(
@@ -2733,14 +2670,34 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
         span->x = collapsed_inline_fragment_x - border_left - padding_left;
     }
-    if (span->width == 0.0f && span->height == 0.0f && had_children &&
+    if (span->width == 0.0f && had_children &&
         layout_span_children_have_no_line_content(span)) {
         float continuation_x = collapsed_inline_fragment_x;
+        if (lycon->line.last_text_rect && lycon->line.last_text_view &&
+            lycon->line.last_text_view->parent == span &&
+            lycon->line.trailing_space_width > 0.0f) {
+            // CSSOM View anchors a zero-content inline before the collapsed
+            // trailing advance that its own whitespace contributes to the line.
+            if (lycon->block.direction == CSS_VALUE_RTL) {
+                continuation_x = lycon->line.last_text_rect->x +
+                    lycon->line.trailing_space_width;
+            } else {
+                continuation_x = lycon->line.last_text_rect->x +
+                    lycon->line.last_text_rect->width -
+                    lycon->line.trailing_space_width;
+            }
+        }
         bool has_left_float = false;
         bool has_float = inline_span_float_continuation_x(
             span, &continuation_x, &has_left_float);
         span->x = continuation_x;
         span->y = lycon->block.advance_y;
+        if (has_boundary_collapsed_space) {
+            // CSSOM View exposes the empty inline's line strut, not the
+            // boundary separator that advanced the cursor.
+            span->content_height = span_resolved_line_height;
+            span->height = span_resolved_line_height;
+        }
         if (has_float && lycon->line.is_line_start &&
             !lycon->line.has_phantom_inline_fragment) {
             lycon->line.start_view = layout_inline_fragment_root(static_cast<View*>(span));

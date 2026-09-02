@@ -319,10 +319,9 @@ float font_calc_normal_line_height(FontHandle* handle);
 float get_cjk_system_line_height(float font_size);
 
 // Get the normal line-height split into ascender and descender components.
-// Chrome/Blink splits the normal line-height as:
-//   ascender = asc + desc (content height above baseline)
-//   descender = leading (extra spacing below baseline)
-// This matches Chrome's strut/baseline behavior for inline formatting contexts.
+// Chrome/Blink keeps the rounded font ascender above the normal-line baseline
+// and places the remaining glyph descent and leading below it. This preserves
+// the baseline used by inline formatting contexts.
 // Out parameters: *out_ascender and *out_descender (both positive values).
 void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* out_descender);
 

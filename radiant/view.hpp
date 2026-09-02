@@ -1791,6 +1791,8 @@ typedef struct BlockProp {
     float text_indent;  // can be negative
     float text_indent_percent;  // NaN if not percentage, else raw percentage value for deferred resolution
     const CssValue* text_indent_calc;  // non-null if text-indent is calc() with percentage, deferred to layout
+    bool text_indent_hanging;  // CSS Text 3 §8.1: invert the lines selected for indentation
+    bool text_indent_each_line;  // CSS Text 3 §8.1: include lines after forced breaks
     float given_min_width, given_max_width;  // non-negative
     float given_min_height, given_max_height;  // non-negative
     CssEnum given_min_width_type, given_max_width_type;
@@ -1901,6 +1903,7 @@ typedef struct TextRect {
     float hanging_trim;  // preserved hanging space width excluded from line advance, not from CSSOM rects
     int start_index, length;  // start and length of the text in the style node
     int line_number;  // block-local line index assigned when this rect enters inline flow
+    bool is_boundary_collapsed_space;  // inter-element separator advances the line without a CSSOM text rect
     bool has_trailing_hyphen;  // CSS Text 3 §5.2: a hyphenation break generated a trailing mark
     const char* trailing_hyphenate_character;  // computed CSS Text 4 mark; null uses the UA default
     bool has_trailing_ellipsis; // -webkit-line-clamp: render '…' after text on this rect

@@ -3028,20 +3028,46 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
     (void)lycon;
     layout_walk_inline_views(view, align_view, no_finish);
 }
+
+typedef enum InterCharacterJustifyUnit {
+    INTER_CHARACTER_UNIT_NONE,
+    INTER_CHARACTER_UNIT_TEXT,
+    INTER_CHARACTER_UNIT_ATOMIC,
+} InterCharacterJustifyUnit;
+
+static bool view_is_intercharacter_atomic_inline(View* view, int line_number) {
+    return view && view->view_type == RDT_VIEW_INLINE_BLOCK &&
+        view->inline_line_number == line_number &&
+        (view->width > 0.0f || view->height > 0.0f) &&
+        layout_text_justify_method(static_cast<DomNode*>(view)) ==
+            CSS_VALUE_INTER_CHARACTER;
+}
+
 // CSS Text 3 §7.3: counts word spaces AND CJK inter-character gaps.
 static int count_spaces_in_view(LayoutContext* lycon, View* view, int line_number) {
     int count = 0;
+    InterCharacterJustifyUnit previous_unit = INTER_CHARACTER_UNIT_NONE;
     auto count_view = [&](View* view) -> bool {
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
             TextRect* rect = text->rect;
+            bool inter_character = layout_text_justify_method(
+                static_cast<DomNode*>(text)) == CSS_VALUE_INTER_CHARACTER;
             while (rect) {
                 if (rect->line_number == line_number) {
                     count += count_rendered_justify_opportunities(
                         text, rect, rect == lycon->line.last_text_rect);
+                    if (inter_character && rect->length > 0 && rect->width > 0.0f) {
+                        if (previous_unit == INTER_CHARACTER_UNIT_ATOMIC) count++;
+                        previous_unit = INTER_CHARACTER_UNIT_TEXT;
+                    }
                 }
                 rect = rect->next;
             }
+            if (!inter_character) previous_unit = INTER_CHARACTER_UNIT_NONE;
+        } else if (view_is_intercharacter_atomic_inline(view, line_number)) {
+            if (previous_unit == INTER_CHARACTER_UNIT_TEXT) count++;
+            previous_unit = INTER_CHARACTER_UNIT_ATOMIC;
         }
         return false;
     };
@@ -3058,14 +3084,28 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
         float offset;
         View** last_view;
         TextRect** last_rect;
-    } state = {cumulative_offset, last_view, last_rect};
+        ViewText* last_text;
+        TextRect* last_text_rect;
+        InterCharacterJustifyUnit previous_unit;
+    } state = {cumulative_offset, last_view, last_rect, nullptr, nullptr,
+               INTER_CHARACTER_UNIT_NONE};
     auto justify_view = [&](View* view) -> bool {
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
             TextRect* rect = text->rect;
             bool any_on_line = false;
+            bool inter_character = layout_text_justify_method(
+                static_cast<DomNode*>(text)) == CSS_VALUE_INTER_CHARACTER;
             while (rect) {
                 if (rect->line_number == line_number) {
+                    bool text_unit = inter_character && rect->length > 0 &&
+                        rect->width > 0.0f;
+                    if (text_unit && state.previous_unit ==
+                        INTER_CHARACTER_UNIT_ATOMIC) {
+                        // CSS Text 4: an atomic run is one typographic unit;
+                        // retain its following gap on the next text fragment.
+                        rect->width += space_per_gap;
+                    }
                     rect->x += state.offset;
                     *state.last_rect = rect;
                     *state.last_view = view;
@@ -3078,10 +3118,29 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
                         rect->width += added_space;
                         state.offset += added_space;
                     }
+                    if (text_unit) {
+                        state.last_text = text;
+                        state.last_text_rect = rect;
+                        state.previous_unit = INTER_CHARACTER_UNIT_TEXT;
+                    }
                 }
                 rect = rect->next;
             }
             if (any_on_line) adjust_text_bounds(text);
+            if (!inter_character) state.previous_unit = INTER_CHARACTER_UNIT_NONE;
+        }
+        else if (view_is_intercharacter_atomic_inline(view, line_number)) {
+            if (state.previous_unit == INTER_CHARACTER_UNIT_TEXT &&
+                state.last_text && state.last_text_rect) {
+                // CSS Text 4: distribute before an atomic run through the
+                // preceding text advance; consecutive atomics remain one unit.
+                state.last_text_rect->width += space_per_gap;
+                state.offset += space_per_gap;
+                adjust_text_bounds(state.last_text);
+            }
+            view->x += state.offset;
+            *state.last_view = view;
+            state.previous_unit = INTER_CHARACTER_UNIT_ATOMIC;
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
             view->x += state.offset;
@@ -3305,20 +3364,12 @@ void line_align(LayoutContext* lycon) {
                     }
 
                     if (last_rect) {
-                        bool justification_suppressed = false;
                         int num_gaps = count_rendered_justify_opportunities(
                             text, last_rect,
                             last_rect == lycon->line.last_text_rect,
-                            &justification_suppressed);
+                            nullptr);
 
                         float extra_width = available_width - line_width;
-
-                        if (justification_suppressed && !view->next() &&
-                            extra_width > 0.0f) {
-                            last_rect->width += extra_width;
-                            adjust_text_bounds(text);
-                            return;
-                        }
 
                         if (num_gaps > 0 && extra_width > 0) {
                             // Fast path only when no sibling views need repositioning.

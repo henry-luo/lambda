@@ -63,6 +63,10 @@ static const char* default_fallback_fonts[] = {
                             // so emoji codepoints get color glyphs, not mono outlines)
     "Apple Color Emoji",    // Emoji — macOS
     "Segoe UI Emoji",       // Emoji — Windows
+    // The layout fixture directory supplies these CJK faces on Linux. They must
+    // participate in codepoint fallback so normal-line metrics follow the glyph face.
+    "Noto Sans SC",
+    "Noto Sans KR",
     "Liberation Sans",
     "DejaVu Sans",
     "Helvetica",

@@ -55,7 +55,10 @@ static void resolve_missing_font_source_path(char** source, const char* base_pat
     }
 
     char resolved[2048];
-    if (!radiant_resolve_layout_relative_resource_path(
+    bool resolved_support = (*source)[0] == '/' &&
+        radiant_resolve_layout_support_resource_path(
+            *source, base_path, resolved, sizeof(resolved));
+    if (!resolved_support && !radiant_resolve_layout_relative_resource_path(
             *source, base_path, resolved, sizeof(resolved))) {
         return;
     }

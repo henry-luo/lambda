@@ -311,12 +311,7 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
     float ua_font_size = 13.3333f;
 
     float content_w = 0;
-    bool uses_ua_default_width = size == FormDefaults::TEXT_SIZE_CHARS &&
-        !form_control_has_specified_font(block);
-    if (uses_ua_default_width) {
-        // Preserve the calibrated UA preferred width for the unstyled control.
-        content_w = default_content_w;
-    } else if (font && font->font_size > 0 && lycon->ui_context) {
+    if (font && font->font_size > 0 && lycon->ui_context) {
         FontBox temp_font;
         setup_font(lycon->ui_context, &temp_font, font);
         if (font_box_handle(&temp_font)) {
