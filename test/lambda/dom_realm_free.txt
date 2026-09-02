@@ -1,0 +1,16 @@
+{
+  document_name: "#document",
+  document_type: 9,
+  document_parent: null,
+  document_is_root_of_intro: true,
+  owner_document_usable: "SECTION",
+  text_after_write: "written with no realm",
+  html_after_write: "<b>bold</b> tail",
+  node_value_of_element: null,
+  scroll_state: {
+    x: 0,
+    y: 0
+  },
+  bounding_box_keys: 8,
+  client_rects_count: 1
+}

@@ -16598,6 +16598,14 @@ static int js_typed_array_element_type_for_constructor_id(int ctor_id) {
 static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     if (!spec || spec->kind != JS_BUILTIN_GLOBAL_CONSTRUCTOR ||
             spec->runtime_id <= 0) return ItemError;
+    // Intrinsic constructors are allocated from the realm's own pool, so there
+    // is nothing to build without a realm. Saying so is the difference between
+    // an absent intrinsic and a null dereference: the DOM core is realm-neutral
+    // (ES33) and is reached by Lambda-only documents that have no js_input, and
+    // every route into here from such a script -- an element property with no
+    // handler, getBoundingClientRect, a keyed result object -- used to fault on
+    // js_input->pool a few lines below (ESO81).
+    if (!js_input || !js_input->pool) return ItemNull;
     int ctor_id = spec->runtime_id;
     const char* name = spec->name;
     int param_count = spec->param_count;

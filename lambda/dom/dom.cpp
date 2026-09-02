@@ -1710,6 +1710,19 @@ JS_FORWARD_EXPRESSION(void*, dom_get_ui_context, (void),
 
 static Item lookup_foreign_doc_wrapper(DomDocument* doc); // fwd decl
 
+// Resolve the DomDocument behind an Item, whether it is a node wrapper or the
+// document proxy. Callers that need a document (node creation, parsing) should
+// accept both spellings, since `owner_document` hands back the proxy (ESO93).
+extern "C" void* dom_document_from_item(Item item) {
+    DomNode* node = (DomNode*)dom_unwrap_element(item);
+    // Only elements carry the document pointer, so a character-data node is
+    // resolved through its nearest element ancestor.
+    for (DomNode* n = node; n; n = n->parent) {
+        if (n->is_element()) return ((DomElement*)n)->doc;
+    }
+    return node ? nullptr : js_document_proxy_doc_from_item(item);
+}
+
 extern "C" void* dom_get_or_create_doc_node(void* doc_v) {
     DomDocument* doc = (DomDocument*)doc_v;
     if (!doc) return nullptr;
@@ -2999,7 +3012,19 @@ static Item dom_parent_element_or_null(DomNode* node) {
 
 static Item dom_parent_node_or_null(DomNode* node) {
     DomNode* parent = node ? node->parent : nullptr;
-    return parent ? dom_wrap_element((void*)parent) : ItemNull;
+    if (parent) return dom_wrap_element((void*)parent);
+    // The document element has no DomNode parent, but per DOM 4.4 its parent is
+    // the Document. Answer the document node, so a walk upward terminates at the
+    // document rather than at <html> -- which is what made root_node and
+    // getRootNode() disagree between the two doors (ESO93).
+    if (node && node->is_element()) {
+        DomDocument* doc = ((DomElement*)node)->doc;
+        if (doc && doc->root == (DomElement*)node) {
+            void* doc_node = dom_get_or_create_doc_node(doc);
+            if (doc_node) return dom_wrap_element(doc_node);
+        }
+    }
+    return ItemNull;
 }
 JS_FORWARD_ITEM(dom_owner_document_for_node, (void* node_ptr), dom_owner_document_from_node, ((DomNode*)node_ptr))
 
@@ -9204,6 +9229,12 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     if (prop_id == JS_DOM_PROP_NODE_TYPE) {
         if (_is_tag(elem, "#document-fragment"))
             return (Item){.item = i2it(11)};
+        // The document node is carried as a DomElement tagged "#document"
+        // (dom_get_or_create_doc_node), so it must not report itself as an
+        // element -- a walk that reaches it would otherwise see node type 1
+        // where the spec says 9 (ESO93).
+        if (_is_tag(elem, "#document"))
+            return (Item){.item = i2it(9)};
         return (Item){.item = i2it((int64_t)elem->node_type)};
     }
 
@@ -9280,7 +9311,12 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             Item w = lookup_foreign_doc_wrapper(od);
             if (w.item != ITEM_NULL) return w;
         }
-        return js_get_document_object_value();
+        if (dom_realm_active()) return js_get_document_object_value();
+        // No realm, so no `document` global to hand back. The document node is
+        // the realm-neutral spelling of the same thing, and unlike the proxy it
+        // answers node properties and can be passed to create_node (ESO93).
+        void* doc_node = od ? dom_get_or_create_doc_node(od) : nullptr;
+        return doc_node ? dom_wrap_element(doc_node) : ItemNull;
     }
 
     // firstChild (any node type, not just elements)
@@ -9506,6 +9542,12 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         DomNode* node = (DomNode*)elem;
         if (node->is_text()) {
             return js_name_item("#text");
+        }
+        // "#document", "#document-fragment" and friends are spec-fixed names,
+        // not tag names: uppercasing them yields "#DOCUMENT", which no DOM
+        // exposes (ESO93).
+        if (elem->tag_name && elem->tag_name[0] == '#') {
+            return js_name_item(elem->tag_name);
         }
         return (Item){.item = s2it(uppercase_tag_name(elem->tag_name))};
     }
@@ -10150,10 +10192,18 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         }
     }
 
-    if (prop_id == JS_DOM_PROP___PROTO__) return js_get_prototype(elem_item);
-    bool proto_found = false;
-    Item proto_value = js_prototype_lookup_ex(elem_item, prop_name, &proto_found);
-    if (proto_found) return proto_value;
+    // The prototype chain is realm shape, not DOM mechanism (ES33/D7.4.4). With
+    // no realm bound there is nothing to walk, and reaching for one anyway
+    // faulted: the lookup builds an intrinsic constructor, which allocates from
+    // the JS realm's pool, so a Lambda-only script died on a null pool -- e.g.
+    // `dom.node_value(element)`, whose property has no element case and fell
+    // through to here (ESO81).
+    if (dom_realm_active()) {
+        if (prop_id == JS_DOM_PROP___PROTO__) return js_get_prototype(elem_item);
+        bool proto_found = false;
+        Item proto_value = js_prototype_lookup_ex(elem_item, prop_name, &proto_found);
+        if (proto_found) return proto_value;
+    }
 
     log_debug("dom_get_property: unknown property '%s' on <%s>",
               prop, elem->tag_name ? elem->tag_name : "?");
@@ -11043,7 +11093,23 @@ static void dom_set_number_property(Item object, const char* name,
     js_set_name_key(object, name, push_d((double)value));
 }
 
-Item dom_make_rect(double x, double y, double width, double height) {
+Item dom_make_rect_in(DomDocument* doc, double x, double y, double width, double height) {
+    // A rect is a *result*, and building results through the JS object model
+    // costs a realm: the shape allocation runs out of js_input's pool, so a
+    // Lambda-only document faulted here rather than getting its geometry
+    // (ESO81 -- getBoundingClientRect, getClientRects and the scroll state were
+    // the last three published operations still crashing). With no realm the
+    // same fields are built as a plain Lambda map out of the document's own
+    // Input; a JS caller still gets the JS-shaped object below.
+    if (!dom_realm_active() && doc && doc->input) {
+        MarkBuilder builder(doc->input);
+        return builder.map()
+            .put("x", x).put("y", y)
+            .put("top", y).put("left", x)
+            .put("right", x + width).put("bottom", y + height)
+            .put("width", width).put("height", height)
+            .final();
+    }
     Item rect = js_new_object();
     js_set_name_key(rect, "x", push_d(x));
     js_set_name_key(rect, "y", push_d(y));
@@ -11056,9 +11122,20 @@ Item dom_make_rect(double x, double y, double width, double height) {
     return rect;
 }
 
+Item dom_make_rect(double x, double y, double width, double height) {
+    return dom_make_rect_in(nullptr, x, y, width, height);
+}
+
 JS_FORWARD_STATIC_ITEM(dom_make_rect_object,
     (float x, float y, float width, float height),
     dom_make_rect, ((double)x, (double)y, (double)width, (double)height))
+
+// Same rect, but with the document that owns it, so the realm-free path above
+// has an allocator. Element and range geometry always know their document.
+static Item dom_make_rect_object_in(DomDocument* doc, float x, float y,
+                                    float width, float height) {
+    return dom_make_rect_in(doc, (double)x, (double)y, (double)width, (double)height);
+}
 
 static float dom_svg_number(Item value, float fallback) {
     Item numeric = js_to_number(value);
@@ -13259,14 +13336,14 @@ extern "C" Item dom_get_bounding_client_rect_bridge(void* dom_elem) {
     if (!elem) return ItemNull;
     if (elem->doc) dom_ensure_geometry_snapshot(elem->doc);
     if (layout_noscript_content_suppressed(elem)) {
-        return dom_make_rect_object(0.0, 0.0, 0.0, 0.0);
+        return dom_make_rect_object_in(elem->doc, 0.0f, 0.0f, 0.0f, 0.0f);
     }
     float abs_x = 0.0f;
     float abs_y = 0.0f;
     dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
     float width = elem->width;
     float height = elem->height;
-    return dom_make_rect_object(abs_x, abs_y,
+    return dom_make_rect_object_in(elem->doc, abs_x, abs_y,
         width > 0.0f ? width : (float)dom_geometry_dimension(elem, true),
         height > 0.0f ? height : (float)dom_geometry_dimension(elem, false));
 }
@@ -13287,24 +13364,10 @@ extern "C" Item dom_get_client_rects_bridge(void* dom_elem) {
     if (w <= 0.0f) w = (float)dom_geometry_dimension(elem, true);
     if (h <= 0.0f) h = (float)dom_geometry_dimension(elem, false);
 
-    Item rect = js_new_object();
-    Item k;
-    k = js_name_item("x");
-    js_set_key_default(rect, k, (Item){.item = i2it((int64_t)abs_x)});
-    k = js_name_item("y");
-    js_set_key_default(rect, k, (Item){.item = i2it((int64_t)abs_y)});
-    k = js_name_item("top");
-    js_set_key_default(rect, k, (Item){.item = i2it((int64_t)abs_y)});
-    k = js_name_item("left");
-    js_set_key_default(rect, k, (Item){.item = i2it((int64_t)abs_x)});
-    k = js_name_item("right");
-    js_set_key_default(rect, k, (Item){.item = i2it((int64_t)(abs_x + w))});
-    k = js_name_item("bottom");
-    js_set_key_default(rect, k, (Item){.item = i2it((int64_t)(abs_y + h))});
-    k = js_name_item("width");
-    js_set_key_default(rect, k, (Item){.item = i2it((int64_t)w)});
-    k = js_name_item("height");
-    js_set_key_default(rect, k, (Item){.item = i2it((int64_t)h)});
+    // This built the same eight fields by hand, which is why it kept crashing
+    // after dom_make_rect learned a realm-free path: one rect, one builder.
+    // (The hand-rolled copy also truncated every coordinate to an integer.)
+    Item rect = dom_make_rect_in(elem->doc, abs_x, abs_y, w, h);
 
     Item arr = js_array_new(0);
     js_array_push(arr, rect);

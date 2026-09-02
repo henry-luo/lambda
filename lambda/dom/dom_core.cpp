@@ -71,9 +71,9 @@ static Item dom_prop_get(Item node, const char* name) {
 }
 
 static DomDocument* dom_document_of(Item node_item) {
-    DomNode* node = (DomNode*)dom_unwrap_element(node_item);
-    if (!node) return nullptr;
-    return node->is_element() ? ((DomElement*)node)->doc : nullptr;
+    // Accepts a node or the document proxy: `create_node(owner_document(n), ...)`
+    // must work, and owner_document answers the proxy (ESO93).
+    return (DomDocument*)dom_document_from_item(node_item);
 }
 
 static const char* dom_cstr_or_null(Item v) {
@@ -158,6 +158,17 @@ extern "C" Item dom_core_create_node(Item doc, Item type, Item name, Item data) 
         return ItemNull;
     }
 }
+// Property WRITES through the realm-shared protocol (D7.4.4). These were kept
+// out of the Lambda face because they faulted with no JS realm (ESO81); the
+// fault was the unguarded prototype fallback in the getter, not the write, so
+// with that guarded they are ordinary neutral operations.
+extern "C" Item dom_core_set_text_content(Item n, Item text) {
+    return dom_set_property_impl(n, js_name_item("textContent"), text);
+}
+extern "C" Item dom_core_set_inner_html(Item n, Item html) {
+    return dom_set_property_impl(n, js_name_item("innerHTML"), html);
+}
+
 extern "C" Item dom_core_insert_before(Item parent, Item node, Item ref) {
     return dom_op2(parent, JUBE_DOM_INSERT_BEFORE, node, ref);
 }
@@ -189,6 +200,18 @@ extern "C" Item dom_core_client_rects(Item n) {
     return dom_op0(n, JUBE_DOM_GET_CLIENT_RECTS);
 }
 extern "C" Item dom_core_scroll_state(Item n) {
+    // Same reasoning as dom_make_rect: a keyed result object needs an
+    // allocator, and a Lambda-only document has no JS realm to borrow one
+    // from, so build the pair out of the node's own document (ESO81).
+    DomNode* node = (DomNode*)dom_unwrap_element(n);
+    DomDocument* doc = (node && node->is_element()) ? ((DomElement*)node)->doc : nullptr;
+    if (!dom_realm_active() && doc && doc->input) {
+        MarkBuilder builder(doc->input);
+        return builder.map()
+            .put("x", dom_prop_get(n, "scrollLeft"))
+            .put("y", dom_prop_get(n, "scrollTop"))
+            .final();
+    }
     Item out = js_new_object();
     js_set_key_cstr(out, "x", dom_prop_get(n, "scrollLeft"));
     js_set_key_cstr(out, "y", dom_prop_get(n, "scrollTop"));
