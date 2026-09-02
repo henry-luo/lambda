@@ -3691,6 +3691,8 @@ static void inherit_anonymous_table_block_props(LayoutContext* lycon, DomElement
         anon->blk->text_indent = parent->blk->text_indent;
         anon->blk->text_indent_percent = parent->blk->text_indent_percent;
         anon->blk->text_indent_calc = parent->blk->text_indent_calc;
+        anon->blk->text_indent_hanging = parent->blk->text_indent_hanging;
+        anon->blk->text_indent_each_line = parent->blk->text_indent_each_line;
         anon->blk->white_space = parent->blk->white_space;
         anon->blk->word_break = parent->blk->word_break;
         anon->blk->overflow_wrap = parent->blk->overflow_wrap;

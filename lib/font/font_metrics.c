@@ -450,7 +450,8 @@ float font_calc_normal_line_height(FontHandle* handle) {
  * Get normal line-height split into ascender/descender following Chrome/Blink:
  *   - On macOS (CoreText): ascender = asc + desc, descender = leading
  *   - USE_TYPO_METRICS path: ascender = typo_asc + typo_desc, descender = typo_line_gap
- *   - HHEA fallback: ascender = hhea_asc + |hhea_desc|, descender = hhea_line_gap
+ *   - HHEA fallback: ascender = rounded hhea ascender, descender = remaining
+ *     normal line-height below that baseline
  * Both *out_ascender and *out_descender are positive values (above/below baseline).
  */
 void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* out_descender) {
@@ -508,30 +509,24 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
 
     // 3. HHEA fallback
     if (m) {
+        float normal_line_height = font_calc_normal_line_height(handle);
         if (m->em_size <= 0) {
-            *out_ascender = m->hhea_ascender + (-m->hhea_descender);
-            *out_descender = m->hhea_line_height - *out_ascender;
-            if (*out_descender < 0) *out_descender = 0;
+            *out_ascender = roundf(m->hhea_ascender);
         } else {
             float fscale = font_size / m->em_size;
             HheaTable* hhea = font_tables_get_hhea(ft);
-            float raw_ascent, raw_descent, raw_leading;
+            float raw_ascent;
             if (hhea) {
                 raw_ascent  = (float)hhea->ascender * fscale;
-                raw_descent = -(float)hhea->descender * fscale;
-                raw_leading = (float)hhea->line_gap * fscale;
             } else {
                 raw_ascent = m->hhea_ascender;
-                raw_descent = -m->hhea_descender;
-                raw_leading = m->hhea_line_gap;
             }
-
-            float ra = roundf(raw_ascent);
-            float rd = roundf(raw_descent);
-            float rl = roundf(raw_leading);
-            *out_ascender = ra + rd;
-            *out_descender = rl;
+            *out_ascender = roundf(raw_ascent);
         }
+        // HHEA descender and line gap both occupy space below the baseline.
+        // Keeping the baseline at the rounded ascender aligns nested inline
+        // fragments with Chromium's normal line boxes on Linux.
+        *out_descender = fmaxf(0.0f, normal_line_height - *out_ascender);
     } else {
         *out_ascender = 0;
         *out_descender = 0;

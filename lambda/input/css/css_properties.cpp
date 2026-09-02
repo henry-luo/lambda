@@ -554,11 +554,37 @@ bool css_property_validate_value(CssPropertyCode id, CssValue* value) {
 
         case CSS_PROPERTY_TEXT_INDENT: {
             // CSS Text 3 §8.1: text-indent: <length-percentage> && hanging? && each-line?
-            // 'hanging' and 'each-line' keywords are not yet supported, so reject LIST
-            // values (e.g., "4ch hanging") to let the cascade fall back to the
-            // next matching declaration — matching Chrome's behavior.
             if (value->type == CSS_VALUE_TYPE_LIST) {
-                return false;
+                if (value->data.list.comma_separated || value->data.list.count < 2 ||
+                    value->data.list.count > 3 || !value->data.list.values) {
+                    return false;
+                }
+                bool has_indent = false;
+                bool has_hanging = false;
+                bool has_each_line = false;
+                for (int i = 0; i < value->data.list.count; i++) {
+                    CssValue* item = value->data.list.values[i];
+                    if (!item) return false;
+                    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                        if (item->data.keyword == CSS_VALUE_HANGING && !has_hanging) {
+                            has_hanging = true;
+                            continue;
+                        }
+                        if (item->data.keyword == CSS_VALUE_EACH_LINE && !has_each_line) {
+                            has_each_line = true;
+                            continue;
+                        }
+                        return false;
+                    }
+                    if (has_indent ||
+                        (item->type != CSS_VALUE_TYPE_LENGTH &&
+                         item->type != CSS_VALUE_TYPE_PERCENTAGE &&
+                         item->type != CSS_VALUE_TYPE_FUNCTION)) {
+                        return false;
+                    }
+                    has_indent = true;
+                }
+                return has_indent;
             }
             break;
         }

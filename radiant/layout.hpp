@@ -1810,7 +1810,10 @@ typedef struct BlockContext {
     float last_line_max_descender;
 
     float text_indent;
+    bool text_indent_hanging;
+    bool text_indent_each_line;
     bool is_first_line;
+    bool is_line_after_forced_break;
     FontProp* first_line_font;
     bool first_line_style_active;
     // CSS Inline 3 §7.7: an initial letter shortens following line boxes at
@@ -3844,7 +3847,6 @@ void line_consume_trailing_collapsible_space(LayoutContext* lycon,
                                              bool update_ancestor_bounds);
 bool line_has_prior_flow_content(const Linebox* line);
 void line_align(LayoutContext* lycon);
-void layout_trim_isolated_inline_text_edges(LayoutContext* lycon, View* view);
 void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
                                               View* view, float offset);
 void layout_bidi_line(LayoutContext* lycon);
@@ -4470,6 +4472,7 @@ bool has_id_line_break_class(uint32_t cp);
  * @return number of justification opportunities (spaces + CJK inter-char gaps)
  */
 int count_justify_opportunities(const char* str, int len);
+CssEnum layout_text_justify_method(DomNode* node);
 int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
                                          bool trim_trailing_space,
                                          bool* out_suppressed = nullptr);

@@ -7371,31 +7371,56 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_TEXT_INDENT: {
             if (!block) break;
             block->ensure_block(lycon);
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float indent = resolve_length_value(lycon, CSS_PROPERTY_TEXT_INDENT, value);
+            const CssValue* indent_value = value;
+            bool hanging = false;
+            bool each_line = false;
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                indent_value = nullptr;
+                for (int i = 0; i < value->data.list.count; i++) {
+                    const CssValue* item = value->data.list.values[i];
+                    if (!item) continue;
+                    if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                        hanging = hanging || item->data.keyword == CSS_VALUE_HANGING;
+                        each_line = each_line || item->data.keyword == CSS_VALUE_EACH_LINE;
+                    } else {
+                        indent_value = item;
+                    }
+                }
+            }
+            if (indent_value && indent_value->type == CSS_VALUE_TYPE_LENGTH) {
+                float indent = resolve_length_value(lycon, CSS_PROPERTY_TEXT_INDENT, indent_value);
                 if (indent > MAX_LAYOUT_DIMENSION) indent = MAX_LAYOUT_DIMENSION;
                 else if (indent < -MAX_LAYOUT_DIMENSION) indent = -MAX_LAYOUT_DIMENSION;
                 block->blk->text_indent = indent;
                 block->blk->text_indent_percent = NAN;
+                block->blk->text_indent_calc = nullptr;
             }
-            else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percent = value->data.percentage.value;
+            else if (indent_value && indent_value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                float percent = indent_value->data.percentage.value;
                 block->blk->text_indent = 0;
                 block->blk->text_indent_percent = percent;
+                block->blk->text_indent_calc = nullptr;
             }
-            else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+            else if (indent_value && indent_value->type == CSS_VALUE_TYPE_KEYWORD &&
+                     indent_value->data.keyword == CSS_VALUE_INHERIT) {
                 DomElement* dom_elem = lam::dom_require_element(lycon->view);
                 DomElement* parent = dom_parent_element(dom_elem);
                 if (parent && parent->blk) {
                     block->blk->text_indent = parent->blk->text_indent;
                     block->blk->text_indent_percent = parent->blk->text_indent_percent;
                     block->blk->text_indent_calc = parent->blk->text_indent_calc;
+                    block->blk->text_indent_hanging = parent->blk->text_indent_hanging;
+                    block->blk->text_indent_each_line = parent->blk->text_indent_each_line;
                 }
             }
-            else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+            else if (indent_value && indent_value->type == CSS_VALUE_TYPE_FUNCTION) {
                 block->blk->text_indent = 0;
                 block->blk->text_indent_percent = NAN;
-                block->blk->text_indent_calc = value;
+                block->blk->text_indent_calc = indent_value;
+            }
+            if (indent_value && indent_value->type != CSS_VALUE_TYPE_KEYWORD) {
+                block->blk->text_indent_hanging = hanging;
+                block->blk->text_indent_each_line = each_line;
             }
             break;
         }

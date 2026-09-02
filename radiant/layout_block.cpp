@@ -6163,6 +6163,9 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         }
     }
     lycon->block.text_indent = resolved_text_indent;
+    lycon->block.text_indent_hanging = block->blk && block->block()->text_indent_hanging;
+    lycon->block.text_indent_each_line = block->blk && block->block()->text_indent_each_line;
+    lycon->block.is_line_after_forced_break = false;
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
     if (bfc) {
         BlockContextOffset bfc_offset = block_context_offset_to_bfc(
