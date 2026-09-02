@@ -12,7 +12,7 @@ pn vec_new() any {
     return []
 }
 
-pn vec_add(v, item) any {
+pn vec_add(var v, item) any {
     push(v, item)
 }
 
@@ -37,19 +37,18 @@ pn hit_new() any {
     return ht
 }
 
-pn hit_add(ht, name, index) any {
+pn hit_add(var ht, name, index) any {
     var n: int = len(name)
     var conv = { v: 0 }
     conv.v = n
     var ni: int = (conv.v)
     var slot: int = ni % 32
-    var tbl = (ht.tbl)
     if (index < 255) {
         var val: int = (index + 1) % 256
-        tbl[slot] = val
+        ht.tbl[slot] = val
     }
     if (index >= 255) {
-        tbl[slot] = 0
+        ht.tbl[slot] = 0
     }
 }
 
@@ -115,9 +114,8 @@ pn jv_object() any {
     return v
 }
 
-pn jv_arr_add(arr, item) any {
-    var vals = (arr.vals)
-    vec_add(vals, item)
+pn jv_arr_add(var arr, item) any {
+    vec_add(arr.vals, item)
 }
 
 pn jv_arr_size(arr) any {
@@ -126,14 +124,11 @@ pn jv_arr_size(arr) any {
     return r
 }
 
-pn jv_obj_add(obj, name, value) any {
-    var names = (obj.names)
-    var vals = (obj.vals)
-    var ht = (obj.ht)
-    var idx = vec_size(names)
-    hit_add(ht, name, idx)
-    vec_add(names, name)
-    vec_add(vals, value)
+pn jv_obj_add(var obj, name, value) any {
+    var idx = vec_size(obj.names)
+    hit_add(obj.ht, name, idx)
+    vec_add(obj.names, name)
+    vec_add(obj.vals, value)
 }
 
 pn jv_obj_get(obj, name) any {
@@ -182,7 +177,7 @@ pn p_new(input: string) any {
     return p
 }
 
-pn p_read(p: Parser) any {
+pn p_read(var p: Parser) any {
     var cur: string = (p.cur)
     if (cur == "\n") {
         var ln: int = (p.ln) + 1
@@ -202,7 +197,7 @@ pn p_read(p: Parser) any {
     }
 }
 
-pn p_read_char(p: Parser, ch) any {
+pn p_read_char(var p: Parser, ch) any {
     var cur: string = (p.cur)
     if (cur != ch) {
         return 0
@@ -211,12 +206,12 @@ pn p_read_char(p: Parser, ch) any {
     return 1
 }
 
-pn p_start_capture(p: Parser) any {
+pn p_start_capture(var p: Parser) any {
     var idx: int = (p.idx)
     p.cs = idx
 }
 
-pn p_pause_capture(p: Parser) any {
+pn p_pause_capture(var p: Parser) any {
     var idx: int = (p.idx)
     var end: int = idx - 1
     var inp: string = (p.inp)
@@ -235,7 +230,7 @@ pn p_pause_capture(p: Parser) any {
     p.cs = -1
 }
 
-pn p_end_capture(p: Parser) any {
+pn p_end_capture(var p: Parser) any {
     var cur: string = (p.cur)
     var idx: int = (p.idx)
     var end: int = idx
@@ -273,7 +268,7 @@ pn p_is_ws(p: Parser) any {
     return 0
 }
 
-pn p_skip_ws(p: Parser) any {
+pn p_skip_ws(var p: Parser) any {
     var ws: int = p_is_ws(p)
     while (ws == 1) {
         p_read(p)
@@ -296,7 +291,7 @@ pn p_is_digit(p: Parser) any {
     return 0
 }
 
-pn p_read_digit(p: Parser) any {
+pn p_read_digit(var p: Parser) any {
     var d: int = p_is_digit(p)
     if (d == 0) {
         return 0
@@ -315,7 +310,7 @@ pn p_is_end(p: Parser) any {
 
 // --- Read functions ---
 
-pn p_read_null(p: Parser) any {
+pn p_read_null(var p: Parser) any {
     p_read(p)
     p_read(p)
     p_read(p)
@@ -323,7 +318,7 @@ pn p_read_null(p: Parser) any {
     return jv_null()
 }
 
-pn p_read_true(p: Parser) any {
+pn p_read_true(var p: Parser) any {
     p_read(p)
     p_read(p)
     p_read(p)
@@ -331,7 +326,7 @@ pn p_read_true(p: Parser) any {
     return jv_true()
 }
 
-pn p_read_false(p: Parser) any {
+pn p_read_false(var p: Parser) any {
     p_read(p)
     p_read(p)
     p_read(p)
@@ -340,7 +335,7 @@ pn p_read_false(p: Parser) any {
     return jv_false()
 }
 
-pn p_read_escape(p: Parser) any {
+pn p_read_escape(var p: Parser) any {
     p_read(p)
     var cur: string = (p.cur)
     var cbf: int = (p.cbf)
@@ -388,7 +383,7 @@ pn p_read_escape(p: Parser) any {
     p_read(p)
 }
 
-pn p_read_string_internal(p: Parser) any {
+pn p_read_string_internal(var p: Parser) any {
     p_read(p)
     p_start_capture(p)
     var cur: string = (p.cur)
@@ -408,13 +403,13 @@ pn p_read_string_internal(p: Parser) any {
     return result
 }
 
-pn p_read_string(p: Parser) any {
+pn p_read_string(var p: Parser) any {
     var s: string = p_read_string_internal(p)
     var r = jv_string(s)
     return r
 }
 
-pn p_read_fraction(p: Parser) any {
+pn p_read_fraction(var p: Parser) any {
     var rc: int = p_read_char(p, ".")
     if (rc == 0) {
         return 0
@@ -427,7 +422,7 @@ pn p_read_fraction(p: Parser) any {
     return 1
 }
 
-pn p_read_exponent(p: Parser) any {
+pn p_read_exponent(var p: Parser) any {
     var rc1: int = p_read_char(p, "e")
     if (rc1 == 0) {
         var rc2: int = p_read_char(p, "E")
@@ -447,7 +442,7 @@ pn p_read_exponent(p: Parser) any {
     return 1
 }
 
-pn p_read_number(p: Parser) any {
+pn p_read_number(var p: Parser) any {
     p_start_capture(p)
     var rm: int = p_read_char(p, "-")
     var cur: string = (p.cur)
@@ -465,7 +460,7 @@ pn p_read_number(p: Parser) any {
     return r
 }
 
-pn p_read_array(p: Parser) any {
+pn p_read_array(var p: Parser) any {
     p_read(p)
     var arr = jv_array()
     p_skip_ws(p)
@@ -485,7 +480,7 @@ pn p_read_array(p: Parser) any {
     return arr
 }
 
-pn p_read_object(p: Parser) any {
+pn p_read_object(var p: Parser) any {
     p_read(p)
     var obj = jv_object()
     p_skip_ws(p)
@@ -509,7 +504,7 @@ pn p_read_object(p: Parser) any {
     return obj
 }
 
-pn p_read_value(p: Parser) any {
+pn p_read_value(var p: Parser) any {
     var cur: string = (p.cur)
     if (cur == "n") {
         return p_read_null(p)

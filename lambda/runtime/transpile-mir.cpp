@@ -1972,6 +1972,12 @@ static bool mir_root_may_need_cow(MirVarEntry* root) {
     }
 }
 
+static bool mir_cow_path_needs_rebuild(MirVarEntry* root,
+        const AstCowPath* path) {
+    return root && path && path->count > 0 && mir_root_may_need_cow(root) &&
+        (root->cow_marked || root->cow_children_may_be_shared);
+}
+
 // S9.3.1: placing a binding's value into a container captures it, so from this
 // point on the binding has a second observer and writes through it must detach.
 //
@@ -9020,7 +9026,8 @@ static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
     if (bi->op == OPERATOR_AND) {
         MIR_reg_t result = new_reg(mt, "and", MIR_T_I64);
 
-        if (left_tid == LMD_TYPE_BOOL && right_tid == LMD_TYPE_BOOL) {
+        if (mir_expr_semantic_type(bi->left) == LMD_TYPE_BOOL &&
+                mir_expr_semantic_type(bi->right) == LMD_TYPE_BOOL) {
             // native bool AND
             MIR_reg_t left_val = em_require_rep(&mt->em,
                 transpile_expr_value(mt, bi->left), VALUE_REP_I64).reg;
@@ -9063,7 +9070,8 @@ static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
     if (bi->op == OPERATOR_OR) {
         MIR_reg_t result = new_reg(mt, "or", MIR_T_I64);
 
-        if (left_tid == LMD_TYPE_BOOL && right_tid == LMD_TYPE_BOOL) {
+        if (mir_expr_semantic_type(bi->left) == LMD_TYPE_BOOL &&
+                mir_expr_semantic_type(bi->right) == LMD_TYPE_BOOL) {
             MIR_reg_t left_val = em_require_rep(&mt->em,
                 transpile_expr_value(mt, bi->left), VALUE_REP_I64).reg;
             MIR_label_t l_true = new_label(mt);
@@ -9452,7 +9460,7 @@ static MirValue emit_unary_value(MirTranspiler* mt, AstUnaryNode* un) {
         return mir_unary_value(mt, un, result, VALUE_REP_ITEM);
     }
     case OPERATOR_NOT: {
-        if (operand_tid == LMD_TYPE_BOOL) {
+        if (mir_expr_semantic_type(un->operand) == LMD_TYPE_BOOL) {
             MIR_reg_t operand = em_require_rep(&mt->em,
                 transpile_expr_value(mt, un->operand), VALUE_REP_I64).reg;
             if (mir_expr_may_be_null(mt, un->operand)) {
@@ -15519,6 +15527,7 @@ typedef enum MirIndexResultKind {
     MIR_INDEX_RESULT_NATIVE_UINT64,
     MIR_INDEX_RESULT_NATIVE_FLOAT,
     MIR_INDEX_RESULT_BOXED_INT,
+    MIR_INDEX_RESULT_BOXED_BOOL,
     MIR_INDEX_RESULT_NATIVE_BOOL,
     // Retained aliases: under D1 (v4) the `int` lane stored doubles and these
     // converted. v5 restored i64 storage, so they equal the plain kinds above.
@@ -15708,6 +15717,20 @@ static void emit_index_result_move(MirTranspiler* mt, MIR_reg_t result,
             // A packed lane holds the raw value, so it must be boxed through the
             // encoder — OR-ing the int tag onto it produced a different number.
             MIR_reg_t boxed = emit_box_int(mt, loaded);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, boxed)));
+        }
+        break;
+    case MIR_INDEX_RESULT_BOXED_BOOL:
+        if (loaded_is_boxed) {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, loaded)));
+        } else {
+            // The guarded generic path still has semantic type any. Box its
+            // packed byte here so the representation firewall cannot later
+            // reinterpret false as the truthy integer zero; slow and OOB arms
+            // remain their original Items (D2.4.1-D2.4.3, D3.3.1v2).
+            MIR_reg_t boxed = emit_box_bool(mt, loaded);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, boxed)));
         }
@@ -16131,14 +16154,19 @@ static MirValue emit_generic_array_index_value(MirTranspiler* mt,
         MIR_reg_t boxed_obj = em_require_rep(&mt->em, object, VALUE_REP_ITEM).reg;
         MIR_reg_t arr_ptr = object.rep == VALUE_REP_RAW_GC_POINTER
             ? object.reg : emit_unbox_container(mt, boxed_obj);
+        // An inferred array parameter can carry fill(..., bool)'s packed
+        // ArrayNum bytes. Guard the live carrier before using its one-byte
+        // lane; a widened boxed Array takes item_at instead. Keep the joined
+        // result boxed because that slow arm remains semantically any
+        // (D2.4.1-D2.4.3, D2.6.2, D3.2.1).
         MirIndexLoadPolicy policy = {
-            MIR_INDEX_STORAGE_BOXED_ITEMS, MIR_T_I64, 8,
-            MIR_INDEX_RESULT_NATIVE_BOOL, MIR_INDEX_GUARD_CONTAINER_TYPE, LMD_TYPE_ARRAY,
-            MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_ITEM_AT,
+            MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_U8, 1,
+            MIR_INDEX_RESULT_BOXED_BOOL, MIR_INDEX_GUARD_ELEM_TYPE, LMD_TYPE_ARRAY_NUM,
+            MIR_INDEX_OOB_ITEM_NULL, MIR_INDEX_SLOW_ITEM_AT, (uint8_t)ELEM_BOOL,
         };
         return publish(emit_checked_index_load(mt, arr_ptr, boxed_obj, idx_native,
             policy, mir_index_expr_nonnegative(mt, field_node->field),
-            mir_typed_array_cache_for_object(mt, field_node->object)), VALUE_REP_I64);
+            mir_typed_array_cache_for_object(mt, field_node->object)), VALUE_REP_ITEM);
     }
 
     MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
@@ -16748,21 +16776,26 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
             idx_use_native, obj_elem_guarded, policy), VALUE_REP_F64);
     }
 
-    // ELEM_BOOL uses the existing packed byte lane. Keep the native result
-    // boolean-shaped so bool arithmetic and conditions do not re-enter the
-    // boxed item path merely because the storage width is one byte.
+    // ELEM_BOOL uses the existing packed byte lane. A declared bool result can
+    // stay native; an inferred-specialization witness may still leave the
+    // source expression typed `any`, so box that lane before its Item consumer
+    // can reinterpret false as truthy integer zero (D3.3.1v2).
     if (obj_tid == LMD_TYPE_ARRAY_NUM && obj_elem_type == LMD_TYPE_BOOL &&
         (is_integer_type_id(idx_tid) || idx_tid == LMD_TYPE_ANY)) {
+        bool native_bool_result = mir_expr_semantic_type(
+            (AstNode*)field_node) == LMD_TYPE_BOOL;
         MirIndexLoadPolicy policy = {
             MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_U8, 1,
-            MIR_INDEX_RESULT_NATIVE_BOOL,
+            native_bool_result ? MIR_INDEX_RESULT_NATIVE_BOOL
+                               : MIR_INDEX_RESULT_BOXED_BOOL,
             obj_elem_guarded ? MIR_INDEX_GUARD_ELEM_TYPE : MIR_INDEX_GUARD_NONE,
             LMD_TYPE_ARRAY_NUM, MIR_INDEX_OOB_ITEM_NULL,
             obj_elem_guarded ? MIR_INDEX_SLOW_ITEM_AT : MIR_INDEX_SLOW_NONE,
             (uint8_t)ELEM_BOOL,
         };
         return publish(emit_array_num_index_load(mt, field_node, idx_tid,
-            idx_use_native, obj_elem_guarded, policy), VALUE_REP_I64);
+            idx_use_native, obj_elem_guarded, policy),
+            native_bool_result ? VALUE_REP_I64 : VALUE_REP_ITEM);
     }
 
     // ======================================================================
@@ -18739,11 +18772,16 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     // Non-native param: standard boxed Item ABI
                     if (resolved_args[i]) {
                         MIR_reg_t val;
+                        MirVarEntry* borrow_root = type_param && type_param->is_var_param
+                            ? mir_direct_root_binding(mt, resolved_args[i]) : NULL;
                         if (short_circuit_error) {
                             val = transpile_box_item(mt, resolved_args[i]);
-                            // Check before locating or detaching a `var` root:
-                            // forwarding an error must leave caller storage
-                            // unchanged and must not enter the callee body.
+                            // Check before detaching a `var` root: forwarding
+                            // an error must leave caller storage unchanged and
+                            // must not enter the callee body. A successful check
+                            // still continues through the normal borrow-home
+                            // setup below; skipping it lost COW replacements
+                            // whenever an open argument needed this guard.
                             if (!has_parameter_error_guard) {
                                 parameter_error_label = new_label(mt);
                                 parameter_error_result = new_reg(mt, "param_error", MIR_T_I64);
@@ -18752,8 +18790,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                                 parameter_error_label);
                             has_parameter_error_guard = true;
                         } else {
-                            MirVarEntry* borrow_root = type_param && type_param->is_var_param
-                                ? mir_direct_root_binding(mt, resolved_args[i]) : NULL;
                             // An explicit var parameter borrows the caller's writable root.
                             // Detach before passing it because the callee's raw stores cannot
                             // write a replacement back into the caller after the call begins.
@@ -18761,45 +18797,50 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                                     mir_root_may_need_cow(borrow_root)
                                 ? mir_prepare_cow_root(mt, borrow_root)
                                 : transpile_box_item(mt, resolved_args[i]);
-                            if (type_param && type_param->is_var_param &&
-                                    !type_param->full_type &&
-                                    i < LAMBDA_MAX_FUNCTION_ARGS) {
-                                // CW33 M1a transport: untyped `var` position.
-                                // An address when the argument is a
-                                // boxed-classed rooted binding; 0 otherwise
-                                // (place borrows, raw ArrayNum roots) so the
-                                // callee's write-back degrades to a no-op
-                                // instead of reading a stale cell.
-                                MIR_disp_t vh_cell = (MIR_disp_t)offsetof(Context, mir_var_homes)
-                                    + (MIR_disp_t)i * (MIR_disp_t)sizeof(uint64_t*);
-                                bool vh_homed = borrow_root &&
-                                    borrow_root->root_slot >= 0 &&
-                                    borrow_root->type_id != LMD_TYPE_ARRAY_NUM;
-                                if (vh_homed) {
-                                    // sync register -> slot, then pass &slot
-                                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                                            (MIR_disp_t)borrow_root->root_slot *
-                                                (MIR_disp_t)sizeof(uint64_t),
-                                            mt->em.frame.root_base, 0, 1),
-                                        MIR_new_reg_op(mt->ctx, val)));
-                                    MIR_reg_t vh_addr = new_reg(mt, "var_home_addr", MIR_T_I64);
-                                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-                                        MIR_new_reg_op(mt->ctx, vh_addr),
-                                        MIR_new_reg_op(mt->ctx, mt->em.frame.root_base),
-                                        MIR_new_int_op(mt->ctx,
-                                            (int64_t)borrow_root->root_slot * (int64_t)sizeof(uint64_t))));
-                                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                        MIR_new_mem_op(mt->ctx, MIR_T_I64, vh_cell,
-                                            mt->em.frame.runtime, 0, 1),
-                                        MIR_new_reg_op(mt->ctx, vh_addr)));
-                                    var_home_roots[var_home_count++] = borrow_root;
-                                } else {
-                                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                        MIR_new_mem_op(mt->ctx, MIR_T_I64, vh_cell,
-                                            mt->em.frame.runtime, 0, 1),
-                                        MIR_new_int_op(mt->ctx, 0)));
-                                }
+                        }
+                        if (short_circuit_error && borrow_root &&
+                                borrow_root->cow_marked &&
+                                mir_root_may_need_cow(borrow_root)) {
+                            val = mir_prepare_cow_root(mt, borrow_root);
+                        }
+                        if (type_param && type_param->is_var_param &&
+                                !type_param->full_type &&
+                                i < LAMBDA_MAX_FUNCTION_ARGS) {
+                            // CW33 M1a transport: untyped `var` position.
+                            // An address when the argument is a
+                            // boxed-classed rooted binding; 0 otherwise
+                            // (place borrows, raw ArrayNum roots) so the
+                            // callee's write-back degrades to a no-op
+                            // instead of reading a stale cell.
+                            MIR_disp_t vh_cell = (MIR_disp_t)offsetof(Context, mir_var_homes)
+                                + (MIR_disp_t)i * (MIR_disp_t)sizeof(uint64_t*);
+                            bool vh_homed = borrow_root &&
+                                borrow_root->root_slot >= 0 &&
+                                borrow_root->type_id != LMD_TYPE_ARRAY_NUM;
+                            if (vh_homed) {
+                                // sync register -> slot, then pass &slot
+                                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                        (MIR_disp_t)borrow_root->root_slot *
+                                            (MIR_disp_t)sizeof(uint64_t),
+                                        mt->em.frame.root_base, 0, 1),
+                                    MIR_new_reg_op(mt->ctx, val)));
+                                MIR_reg_t vh_addr = new_reg(mt, "var_home_addr", MIR_T_I64);
+                                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                                    MIR_new_reg_op(mt->ctx, vh_addr),
+                                    MIR_new_reg_op(mt->ctx, mt->em.frame.root_base),
+                                    MIR_new_int_op(mt->ctx,
+                                        (int64_t)borrow_root->root_slot * (int64_t)sizeof(uint64_t))));
+                                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                    MIR_new_mem_op(mt->ctx, MIR_T_I64, vh_cell,
+                                        mt->em.frame.runtime, 0, 1),
+                                    MIR_new_reg_op(mt->ctx, vh_addr)));
+                                var_home_roots[var_home_count++] = borrow_root;
+                            } else {
+                                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                    MIR_new_mem_op(mt->ctx, MIR_T_I64, vh_cell,
+                                        mt->em.frame.runtime, 0, 1),
+                                    MIR_new_int_op(mt->ctx, 0)));
                             }
                         }
                         TypeId val_tid = mir_expr_carrier_type(mt, resolved_args[i]);
@@ -21838,9 +21879,22 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             }
         }
 
+        AstCowPath cow_path = {};
+        bool has_cow_path = ast_collect_cow_path(&cow_path, ca->object);
+        MirVarEntry* cow_root = has_cow_path
+            ? mir_direct_root_binding(mt, cow_path.root) : NULL;
+
         if (ca->key && !ca->key->next && !assign_key_native) {
             TypeId key_tid = mir_expr_carrier_type(mt, ca->key);
             if (key_tid == LMD_TYPE_ARRAY_NUM || key_tid == LMD_TYPE_RANGE || key_tid == LMD_TYPE_ANY) {
+                if (mir_cow_path_needs_rebuild(cow_root, &cow_path)) {
+                    // The generic-key shortcut must preserve the same nested
+                    // COW spine as native indexes. Returning only the detached
+                    // leaf from fn_index_assign loses its parent replacement.
+                    MIR_reg_t value = transpile_box_item(mt, ca->value);
+                    return mir_emit_cow_path_set(mt, cow_root, &cow_path,
+                        ca->key, false, value);
+                }
                 MIR_reg_t arr_item = transpile_box_item(mt, ca->object);
                 MIR_reg_t key_item = transpile_box_item(mt, ca->key);
                 MIR_reg_t val_item = transpile_box_item(mt, ca->value);
@@ -21913,11 +21967,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             return result;
         }
 
-        AstCowPath cow_path = {};
-        bool has_cow_path = ast_collect_cow_path(&cow_path, ca->object);
-        MirVarEntry* cow_root = has_cow_path ? mir_direct_root_binding(mt, cow_path.root) : NULL;
-        if (cow_root && cow_path.count > 0 && mir_root_may_need_cow(cow_root) &&
-                (cow_root->cow_marked || cow_root->cow_children_may_be_shared)) {
+        if (mir_cow_path_needs_rebuild(cow_root, &cow_path)) {
             // Snapshot the RHS before rebuilding the owner spine; the nested
             // path is re-resolved only after that evaluation completes. A
             // unique root can still contain shared children after an earlier
@@ -22408,8 +22458,7 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             update_gc_root_slot(mt, cow_root);
             return replacement;
         }
-        if (cow_root && cow_path.count > 0 && mir_root_may_need_cow(cow_root) &&
-                (cow_root->cow_marked || cow_root->cow_children_may_be_shared)) {
+        if (mir_cow_path_needs_rebuild(cow_root, &cow_path)) {
             // The path helper rebuilds every copied parent, avoiding a raw
             // write through a child shared by an earlier shallow detach.
             MIR_reg_t value = transpile_box_item(mt, ca->value);

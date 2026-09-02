@@ -1,12 +1,13 @@
 // AWFY Benchmark: NBody
-// Expected result: PASS (energy after 1000 iterations ≈ -0.169088)
+// Oracle at 36,000 canonical AWFY steps: the reference algorithm yields
+// -0.16901424478751628, so floor(-energy * 10^7) is 1690142.
 // 5-body gravitational simulation using flat arrays
 
 let PI = 3.141592653589793
 let SOLAR_MASS = 4.0 * PI * PI
 let DAYS_PER_YEAR = 365.24
 
-pn advance(bx, by, bz, bvx, bvy, bvz, bmass, dt) {
+pn advance(var bx, var by, var bz, var bvx, var bvy, var bvz, var bmass, dt) {
     var i = 0
     while (i < 5) {
         var j = i + 1
@@ -62,7 +63,7 @@ pn energy(bx, by, bz, bvx, bvy, bvz, bmass) {
     return e
 }
 
-pn offset_momentum(bvx, bvy, bvz, bmass) {
+pn offset_momentum(var bvx, var bvy, var bvz, var bmass) {
     var px = 0.0
     var py = 0.0
     var pz = 0.0
@@ -134,7 +135,7 @@ pn main() {
     var __t0 = clock()
     let result = benchmark()
     var __t1 = clock()
-    // Verify by scaling to integer: floor(energy * -10000000) should be 1690142
+    // Keep the reference-derived oracle stable across equivalent float formatting.
     var check = floor(result * -10000000.0)
     if (check == 1690142) {
         print("NBody: PASS\n")

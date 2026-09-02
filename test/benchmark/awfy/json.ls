@@ -13,7 +13,7 @@ pn vec_new() {
     return []
 }
 
-pn vec_add(v, item) {
+pn vec_add(var v, item) {
     push(v, item)
 }
 
@@ -38,21 +38,20 @@ pn hit_new() {
     return ht
 }
 
-pn hit_add(ht, name, index) {
+pn hit_add(var ht, name, index) {
     var n = len(name)
     var conv = { v: 0 }
     conv.v = n
     var ni = (conv.v)
     var slot = ni % 32
-    var tbl = (ht.tbl)
     if (index < 255) {
         var val = (index + 1) % 256
         var _d1 = 0
-        tbl[slot] = val
+        ht.tbl[slot] = val
     }
     if (index >= 255) {
         var _d2 = 0
-        tbl[slot] = 0
+        ht.tbl[slot] = 0
     }
 }
 
@@ -118,9 +117,8 @@ pn jv_object() {
     return v
 }
 
-pn jv_arr_add(arr, item) {
-    var vals = (arr.vals)
-    vec_add(vals, item)
+pn jv_arr_add(var arr, item) {
+    vec_add(arr.vals, item)
 }
 
 pn jv_arr_size(arr) {
@@ -129,14 +127,11 @@ pn jv_arr_size(arr) {
     return r
 }
 
-pn jv_obj_add(obj, name, value) {
-    var names = (obj.names)
-    var vals = (obj.vals)
-    var ht = (obj.ht)
-    var idx = vec_size(names)
-    hit_add(ht, name, idx)
-    vec_add(names, name)
-    vec_add(vals, value)
+pn jv_obj_add(var obj, name, value) {
+    var idx = vec_size(obj.names)
+    hit_add(obj.ht, name, idx)
+    vec_add(obj.names, name)
+    vec_add(obj.vals, value)
 }
 
 pn jv_obj_get(obj, name) {
@@ -182,7 +177,7 @@ pn p_new(input) {
     return p
 }
 
-pn p_read(p) {
+pn p_read(var p) {
     var cur = (p.cur)
     if (cur == "\n") {
         var ln = (p.ln) + 1
@@ -203,7 +198,7 @@ pn p_read(p) {
     }
 }
 
-pn p_read_char(p, ch) {
+pn p_read_char(var p, ch) {
     var cur = (p.cur)
     if (cur != ch) {
         return 0
@@ -212,12 +207,12 @@ pn p_read_char(p, ch) {
     return 1
 }
 
-pn p_start_capture(p) {
+pn p_start_capture(var p) {
     var idx = (p.idx)
     p.cs = idx
 }
 
-pn p_pause_capture(p) {
+pn p_pause_capture(var p) {
     var idx = (p.idx)
     var end = idx - 1
     var inp = (p.inp)
@@ -237,7 +232,7 @@ pn p_pause_capture(p) {
     p.cs = -1
 }
 
-pn p_end_capture(p) {
+pn p_end_capture(var p) {
     var cur = (p.cur)
     var idx = (p.idx)
     var end = idx
@@ -275,7 +270,7 @@ pn p_is_ws(p) {
     return 0
 }
 
-pn p_skip_ws(p) {
+pn p_skip_ws(var p) {
     var ws = p_is_ws(p)
     while (ws == 1) {
         p_read(p)
@@ -298,7 +293,7 @@ pn p_is_digit(p) {
     return 0
 }
 
-pn p_read_digit(p) {
+pn p_read_digit(var p) {
     var d = p_is_digit(p)
     if (d == 0) {
         return 0
@@ -317,7 +312,7 @@ pn p_is_end(p) {
 
 // --- Read functions ---
 
-pn p_read_null(p) {
+pn p_read_null(var p) {
     p_read(p)
     p_read(p)
     p_read(p)
@@ -325,7 +320,7 @@ pn p_read_null(p) {
     return jv_null()
 }
 
-pn p_read_true(p) {
+pn p_read_true(var p) {
     p_read(p)
     p_read(p)
     p_read(p)
@@ -333,7 +328,7 @@ pn p_read_true(p) {
     return jv_true()
 }
 
-pn p_read_false(p) {
+pn p_read_false(var p) {
     p_read(p)
     p_read(p)
     p_read(p)
@@ -342,7 +337,7 @@ pn p_read_false(p) {
     return jv_false()
 }
 
-pn p_read_escape(p) {
+pn p_read_escape(var p) {
     p_read(p)
     var cur = (p.cur)
     var cbf = (p.cbf)
@@ -396,7 +391,7 @@ pn p_read_escape(p) {
     p_read(p)
 }
 
-pn p_read_string_internal(p) {
+pn p_read_string_internal(var p) {
     p_read(p)
     p_start_capture(p)
     var cur = (p.cur)
@@ -416,13 +411,13 @@ pn p_read_string_internal(p) {
     return result
 }
 
-pn p_read_string(p) {
+pn p_read_string(var p) {
     var s = p_read_string_internal(p)
     var r = jv_string(s)
     return r
 }
 
-pn p_read_fraction(p) {
+pn p_read_fraction(var p) {
     var rc = p_read_char(p, ".")
     if (rc == 0) {
         return 0
@@ -435,7 +430,7 @@ pn p_read_fraction(p) {
     return 1
 }
 
-pn p_read_exponent(p) {
+pn p_read_exponent(var p) {
     var rc1 = p_read_char(p, "e")
     if (rc1 == 0) {
         var rc2 = p_read_char(p, "E")
@@ -456,7 +451,7 @@ pn p_read_exponent(p) {
     return 1
 }
 
-pn p_read_number(p) {
+pn p_read_number(var p) {
     p_start_capture(p)
     var rm = p_read_char(p, "-")
     var cur = (p.cur)
@@ -474,7 +469,7 @@ pn p_read_number(p) {
     return r
 }
 
-pn p_read_array(p) {
+pn p_read_array(var p) {
     p_read(p)
     var arr = jv_array()
     p_skip_ws(p)
@@ -494,7 +489,7 @@ pn p_read_array(p) {
     return arr
 }
 
-pn p_read_object(p) {
+pn p_read_object(var p) {
     p_read(p)
     var obj = jv_object()
     p_skip_ws(p)
@@ -518,7 +513,7 @@ pn p_read_object(p) {
     return obj
 }
 
-pn p_read_value(p) {
+pn p_read_value(var p) {
     var cur = (p.cur)
     if (cur == "n") {
         return p_read_null(p)

@@ -9,7 +9,7 @@ pn lcg_next(seed) {
     return (seed * 1664525 + 1013904223) % 1000000
 }
 
-pn partition(arr, lo, hi) {
+pn partition(var arr, lo, hi) {
     var pivot = arr[hi]
     var i = lo
     var j = lo
@@ -28,7 +28,7 @@ pn partition(arr, lo, hi) {
     return i
 }
 
-pn quicksort(arr, lo, hi) {
+pn quicksort(var arr, lo, hi) {
     if (lo >= hi) {
         return 0
     }

@@ -1,11 +1,12 @@
 // AWFY Benchmark: NBody (Typed version)
-// Synchronized with JetStream: 36000 total advance steps
+// Oracle at 36,000 canonical AWFY steps: the reference algorithm yields
+// -0.16901424478751628, so floor(-energy * 10^7) is 1690142.
 
 let PI = 3.141592653589793
 let SOLAR_MASS = 4.0 * PI * PI
 let DAYS_PER_YEAR = 365.24
 
-pn advance(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz: float[], bmass: float[], dt: float) any {
+pn advance(var bx: float[], var by: float[], var bz: float[], var bvx: float[], var bvy: float[], var bvz: float[], var bmass: float[], dt: float) any {
     var i: int = 0
     while (i < 5) {
         var j: int = i + 1
@@ -61,7 +62,7 @@ pn energy(bx: float[], by: float[], bz: float[], bvx: float[], bvy: float[], bvz
     return e
 }
 
-pn offset_momentum(bvx: float[], bvy: float[], bvz: float[], bmass: float[]) any {
+pn offset_momentum(var bvx: float[], var bvy: float[], var bvz: float[], var bmass: float[]) any {
     var px: float = 0.0
     var py: float = 0.0
     var pz: float = 0.0

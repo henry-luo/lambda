@@ -924,6 +924,9 @@ static bool script_task_timing_enabled() {
 
 static const size_t JS_EXTERNAL_SCRIPT_BUDGET_BYTES = 16u * 1024u * 1024u;
 static const size_t JS_TOTAL_SCRIPT_BUDGET_BYTES = 128u * 1024u * 1024u;
+// Deferred and async scripts are not render-blocking in a browser. Bound their
+// pre-layout work so a large application bundle cannot delay the first window.
+static const size_t JS_PRELAYOUT_DEFER_BUDGET_BYTES = 128u * 1024u;
 
 static size_t script_byte_limit_from_env(const char* name, size_t fallback) {
     const char* env = getenv(name);
@@ -940,7 +943,7 @@ static size_t script_byte_limit_from_env(const char* name, size_t fallback) {
 
 static size_t script_prelayout_defer_limit_bytes() {
     return script_byte_limit_from_env(
-        "RADIANT_JS_PRELAYOUT_DEFER_BYTES", JS_EXTERNAL_SCRIPT_BUDGET_BYTES);
+        "RADIANT_JS_PRELAYOUT_DEFER_BYTES", JS_PRELAYOUT_DEFER_BUDGET_BYTES);
 }
 
 static size_t script_external_compile_limit_bytes() {

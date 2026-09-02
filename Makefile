@@ -215,6 +215,9 @@ RE2_LIB = build_temp/re2-noabsl/cmake_build/libre2.a
 # time (that would dirty tracked files on every build).
 MIR_BUILD_DIR = lambda/mir
 MIR_LIB = $(MIR_BUILD_DIR)/libmir.a
+# This executable is only the native-reference benchmark driver.  Lambda's
+# production compiler remains MIR Direct and never invokes MIR's C frontend.
+MIR_C2M = $(MIR_BUILD_DIR)/c2m$(if $(filter yes,$(IS_MSYS2)),.exe,)
 # Upstream vnmakarov/mir commit the vendored source was taken from. Pinned so
 # GNUmakefile's `git log -1` does not resolve to the Lambda repo's HEAD, which
 # would rebuild all of MIR on every Lambda commit.
@@ -378,10 +381,8 @@ $(RE2_LIB):
 		ninja -j$(JOBS)
 	@echo "re2 library built: $(RE2_LIB)"
 
-# Build MIR JIT library from the vendored source at lambda/mir.
-# Only the libmir.a target is built (the upstream target includes mir.o,
-# mir-gen.o, and c2mir.o); Lambda does not invoke c2mir. MIR's own executables
-# (c2m, m2b, b2m, mir-bin-run) are not part of the vendored subset.
+# Build MIR JIT library from the vendored source at lambda/mir.  The default
+# build produces only libmir.a; the C2MIR reference driver is opt-in below.
 $(MIR_LIB): $(MIR_SOURCES)
 	@echo "Building MIR library from vendored source ($(MIR_BUILD_DIR))..."
 ifeq ($(IS_MSYS2),yes)
@@ -392,10 +393,22 @@ else
 endif
 	@echo "✅ MIR built: $(MIR_LIB)"
 
+# Build the pinned MIR C frontend solely for native C2MIR benchmark ports.
+# Keep it on demand so production Lambda builds do not acquire a C2MIR path.
+c2mir-driver: $(MIR_LIB)
+	@echo "Building native C2MIR benchmark driver ($(MIR_C2M))..."
+ifeq ($(IS_MSYS2),yes)
+	@$(MAKE) -C $(MIR_BUILD_DIR) c2m CC=/clang64/bin/clang.exe AR=/clang64/bin/llvm-ar.exe \
+		CFLAGS="-O2 -DNDEBUG -fPIC" GITCOMMIT=$(MIR_UPSTREAM_COMMIT)
+else
+	@$(MAKE) -C $(MIR_BUILD_DIR) c2m -j$(JOBS) GITCOMMIT=$(MIR_UPSTREAM_COMMIT)
+endif
+	@echo "✅ Native C2MIR driver built: $(MIR_C2M)"
+
 # Remove MIR build outputs, leaving the vendored source untouched.
 clean-mir:
 	@echo "Cleaning MIR build outputs in $(MIR_BUILD_DIR)..."
-	@rm -f $(MIR_BUILD_DIR)/libmir.a $(MIR_BUILD_DIR)/*.o $(MIR_BUILD_DIR)/*.d \
+	@rm -f $(MIR_LIB) $(MIR_C2M) $(MIR_BUILD_DIR)/*.o $(MIR_BUILD_DIR)/*.d \
 		$(MIR_BUILD_DIR)/c2mir/*.o $(MIR_BUILD_DIR)/c2mir/*.d
 
 # Verify the vendored source still matches upstream + patches/. Clones pristine
@@ -542,7 +555,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
-	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
+	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir c2mir-driver verify-mir-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
 	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui view-ui native-gui-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \

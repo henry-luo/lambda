@@ -79,6 +79,7 @@ static const char* SLOW_BENCHMARK_TESTS[] = {
     // awfy — timeouts or multi-second in debug build
     "awfy_cd",              // ~15s+ (timeout)
     "awfy_cd2",             // ~15s+ (timeout)
+    "awfy_cd2_orig",        // ~12s
     "awfy_havlak",          // ~9s
     "awfy_havlak2",         // ~9s
     "awfy_mandelbrot",      // ~15s+ (timeout)
@@ -106,7 +107,9 @@ static const char* SLOW_BENCHMARK_TESTS[] = {
     // kostya
     "kostya_base64",        // ~15s+ (timeout)
     "kostya_brainfuck",     // ~15s+ (timeout)
+    "kostya_brainfuck2",    // ~7s
     "kostya_collatz",       // ~15s+ (timeout)
+    "kostya_collatz2",      // ~10s
     "kostya_json_gen",      // ~4s
     "kostya_levenshtein",   // ~8s
     "kostya_matmul",        // ~15s+ (timeout)

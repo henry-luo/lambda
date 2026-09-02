@@ -25,13 +25,12 @@ pn count(r, i, step, x, y) {
     return max_count
 }
 
-pn mbrot(matrix, r, i, step, n) {
+pn mbrot(var matrix, r, i, step, n) {
     var y = n - 1
     while (y >= 0) {
         var x = n - 1
         while (x >= 0) {
-            var row = matrix[x]
-            row[y] = count(r, i, step, float(x), float(y))
+            matrix[x][y] = count(r, i, step, float(x), float(y))
             x = x - 1
         }
         y = y - 1
