@@ -27,6 +27,12 @@
 #include "js_props.h"
 #include "../dom/dom_ops.h"
 #include "js_runtime_state.hpp"
+#include "../jube/jube_registry.h"
+
+// Range/Selection wrappers are Jube host types; the realm publishes their
+// prototypes, the module owns their identity.
+extern "C" const void* radiant_dom_range_host_type(void);
+extern "C" const void* radiant_dom_selection_host_type(void);
 #include "../runtime/lambda-root-frame.hpp"
 #include "../../lib/log.h"
 #include <cstring>
@@ -267,4 +273,135 @@ extern "C" void dom_install_window_dialog_globals(void) {
     if (get_type_id(window) == LMD_TYPE_MAP) {
         js_set_key_cstr(window, "prompt", fn);
     }
+}
+
+extern "C" void dom_install_window_frames_global(void) {
+    // The core answered "which frames"; this decides where a realm sees them.
+    Item frames = dom_collect_frame_windows_array();
+    Item length_item = (Item){.item = i2it(js_array_length(frames))};
+    Item global = js_get_global_this();
+    js_set_key_cstr(global, "frames", frames);
+    js_set_key_cstr(global, "length", length_item);
+
+    Item window = js_get_key_cstr(global, "window");
+    if (get_type_id(window) == LMD_TYPE_MAP) {
+        js_set_key_cstr(window, "frames", frames);
+        js_set_key_cstr(window, "length", length_item);
+    }
+}
+
+// The automation harness reaches the document through two global hooks. Their
+// bodies are core behaviour; only the names they answer to are realm shape.
+extern "C" void dom_install_testdriver_globals(void) {
+    Item global = js_get_global_this();
+    if (get_type_id(global) != LMD_TYPE_MAP) return;
+    js_set_native_key(global, js_name_item("__lambda_testdriver_key"),
+        dom_testdriver_key);
+    js_set_native_key(global, js_name_item("__lambda_set_editing_behavior"),
+        dom_set_editing_behavior);
+}
+
+// Constructor-shaped globals: DOMParser and XMLSerializer.
+template <typename Method>
+static void dom_install_native_constructor_global(const char* ctor_name,
+        JsNativeP0 ctor_target, const char* method_name, Method method_target) {
+    JS_ROOTS(roots,
+        global_root, js_get_global_this(),
+        ctor_root, js_new_native_constructor(ctor_target),
+        proto_root, js_new_object(),
+        method_root, js_new_native_function(method_target));
+    js_set_function_name(ctor_root.get(), js_name_item(ctor_name));
+    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
+    js_set_key_default(proto_root.get(), js_name_item(method_name),
+        method_root.get());
+    js_initialize_native_constructor_prototype(ctor_root.get(),
+        proto_root.get());
+    js_set_key_default(global_root.get(), js_name_item(ctor_name),
+        ctor_root.get());
+}
+
+extern "C" void dom_install_dom_parser_global(void) {
+    // D6.2.2v2: the prototype owns the parse capability, so construction and
+    // method publication share one rooted native-constructor transaction.
+    dom_install_native_constructor_global("DOMParser", dom_parser_constructor,
+        "parseFromString", dom_parser_parse_from_string);
+}
+
+JS_FORWARD_VOID( dom_install_xml_serializer_global, (void), dom_install_native_constructor_global, ("XMLSerializer", dom_xml_serializer_constructor, "serializeToString", dom_xml_serializer_serialize_to_string))
+
+// window.getSelection() and the window/document self-references it needs.
+// The Selection object itself is core; this only decides where a realm sees it.
+extern "C" void dom_selection_install_globals(void) {
+    Item global = js_get_global_this();
+    Item fn = js_new_native_function(dom_global_get_selection);
+    js_set_key_cstr(global, "getSelection", fn);
+    // Ensure `window` resolves to globalThis so `window.getSelection()` works.
+    Item window_key = js_name_item("window");
+    Item existing = js_get_key_default(global, window_key);
+    if (get_type_id(existing) != LMD_TYPE_MAP) {
+        js_set_key_default(global, window_key, global);
+    } else {
+        // window is already a real object — install getSelection on it too
+        js_set_key_cstr(existing, "getSelection", fn);
+    }
+    // Stage 4C: `window.document` must resolve to the document proxy. Bare
+    // `document` is special-cased in the transpiler (js_mir_expression_lowering
+    // rewrites the identifier to a direct proxy access), so it never becomes a
+    // real property on the window/global object — which left `window.document`
+    // (a plain member access) `undefined`, breaking e.g.
+    // `window.document.createRange()` in dom-bridge. Install it explicitly. The
+    // proxy is a stable wrapper whose methods route to the current main document,
+    // and it is the same item bare `document` yields, so `window.document ===
+    // document` holds.
+    Item doc_proxy = js_get_document_object_value();
+    js_set_key_cstr(global, "document", doc_proxy);
+    if (get_type_id(existing) == LMD_TYPE_MAP)
+        js_set_key_cstr(existing, "document", doc_proxy);
+
+    Item flush_fn = js_new_native_this_span_function(
+        dom_flush_selectionchange);
+    js_set_key_cstr(global, "__lambdaFlushSelectionChange", flush_fn);
+    if (get_type_id(existing) == LMD_TYPE_MAP)
+        js_set_key_cstr(existing, "__lambdaFlushSelectionChange", flush_fn);
+
+    // Install placeholder Selection / Range constructors so `instanceof Selection`
+    // and feature-detection (`window.Selection`) succeed. The constructors are
+    // never actually invoked by typical WPT code (which uses document.createRange
+    // / getSelection); identity comes from their function names plus DOM host
+    // fast paths in js_instanceof_classname.
+    Item sel_ctor   = js_new_native_function(dom_global_get_selection);
+    Item range_ctor = js_new_native_constructor(dom_create_range);
+    js_set_function_name(sel_ctor, js_name_item("Selection"));
+    js_set_function_name(range_ctor, js_name_item("Range"));
+    js_set_key_cstr(global, "Selection", sel_ctor);
+    js_set_key_cstr(global, "Range", range_ctor);
+
+    // Install Selection.prototype and Range.prototype with method stubs so
+    // WPT idl checks like `Selection.prototype.deleteFromDocument.length`
+    // succeed. The methods themselves are never invoked through the
+    // prototype path (instances are DOM resources and dispatch through their
+    // own get_property hooks); these are pure idl shape.
+    Item sel_proto = js_get_key_cstr(sel_ctor, "prototype");
+    if (get_type_id(sel_proto) != LMD_TYPE_MAP) {
+        sel_proto = js_new_object();
+        js_set_key_cstr(sel_ctor, "prototype", sel_proto);
+    }
+    Item range_proto = js_get_key_cstr(range_ctor, "prototype");
+    if (get_type_id(range_proto) != LMD_TYPE_MAP) {
+        range_proto = js_new_object();
+        js_set_key_cstr(range_ctor, "prototype", range_proto);
+    }
+    // DOM3: force the jube type prototypes now that the ctors' .prototype
+    // objects exist — this publishes the declared method function objects onto
+    // Range.prototype / Selection.prototype (IDL shape, .length probes) before
+    // any script can read them.
+    jube_type_prototype((const JubeTypeDef*)radiant_dom_range_host_type());
+    jube_type_prototype((const JubeTypeDef*)radiant_dom_selection_host_type());
+
+    // Set document.defaultView = window so DOM tests' sanity checks pass.
+    Item doc = js_get_document_object_value();
+    dom_document_proxy_set_property(js_name_item("defaultView"), global);
+    (void)doc;
+
+    log_debug("dom_selection: installed global getSelection / Selection / Range");
 }

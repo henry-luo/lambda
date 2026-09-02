@@ -689,7 +689,7 @@ static uint32_t dom_to_u32(Item value) {
     return 0;
 }
 
-static Item dom_testdriver_key(Item key_item,
+extern "C" Item dom_testdriver_key(Item key_item,
                                   Item shift_item,
                                   Item ctrl_item,
                                   Item alt_item,
@@ -1558,7 +1558,7 @@ extern "C" bool dom_is_connected(void* dom_elem) {
 static void dom_initialize_event_attrs(DomElement* elem);
 static __thread bool s_dom_event_attrs_initializing = false;
 
-static void register_named_elements_recursive(DomElement* elem, Item global) {
+static void register_named_elements_recursive(DomElement* elem) {
     if (!elem) return;
     // Generated layout nodes are not script-visible DOM and can outlive a
     // source subtree; never expose their retained storage as Window globals.
@@ -1572,7 +1572,6 @@ static void register_named_elements_recursive(DomElement* elem, Item global) {
     }
 
     if (elem->id && elem->id[0] != '\0') {
-        Item key = js_name_item(elem->id);
         // HTML named-property access on Window reflects the *current* element
         // with this id. Register when there is no own property yet, and also
         // refresh a stale auto-registered wrapper whose element was detached
@@ -1580,9 +1579,9 @@ static void register_named_elements_recursive(DomElement* elem, Item global) {
         // genuine user-assigned global, and keep the first connected element in
         // tree order when ids collide within the current document.
         bool do_register = true;
-        if (it2b(js_has_own_property(global, key))) {
+        if (dom_realm_has_own(elem->id)) {
             DomNode* exn = static_cast<DomNode*>(
-                dom_unwrap_element(js_get_key_default(global, key)));
+                dom_unwrap_element(dom_realm_lookup(elem->id)));
             DomElement* ex = (exn && exn->is_element()) ? exn->as_element() : nullptr;
             if (!ex) {
                 do_register = false;                          // user-assigned global
@@ -1594,8 +1593,7 @@ static void register_named_elements_recursive(DomElement* elem, Item global) {
             // else: existing binding is a stale/detached wrapper → refresh it
         }
         if (do_register) {
-            Item wrapped = dom_wrap_element(elem);
-            js_set_key_default(global, key, wrapped);
+            dom_realm_define(elem->id, dom_wrap_element(elem));
             log_debug("dom: registered element id='%s' on global object", elem->id);
         }
     }
@@ -1603,7 +1601,7 @@ static void register_named_elements_recursive(DomElement* elem, Item global) {
     DomNode* child = elem->first_child;
     while (child) {
         if (child->is_element()) {
-            register_named_elements_recursive(child->as_element(), global);
+            register_named_elements_recursive(child->as_element());
         }
         child = child->next_sibling;
     }
@@ -1611,19 +1609,16 @@ static void register_named_elements_recursive(DomElement* elem, Item global) {
 
 void dom_register_named_elements(DomElement* root) {
     if (!root) return;
-    Item global = js_get_global_this();
     bool initialize_event_attrs = js_ast_interpreter_requested() &&
         !s_dom_event_attrs_initializing;
     if (initialize_event_attrs) s_dom_event_attrs_initializing = true;
-    register_named_elements_recursive(root, global);
+    register_named_elements_recursive(root);
     if (initialize_event_attrs) s_dom_event_attrs_initializing = false;
 }
 
 static void dom_install_window_frames_global(void);
 static void dom_install_window_dialog_globals(void);
 static void dom_install_window_computed_style_global(void);
-static void dom_install_dom_parser_global(void);
-static void dom_install_xml_serializer_global(void);
 static DomDocument* js_document_proxy_doc_from_item(Item item);
 
 // ============================================================================
@@ -1688,9 +1683,7 @@ extern "C" void dom_set_document(void* dom_doc) {
         dom_install_dom_parser_global();
         dom_install_xml_serializer_global();
         js_history_install_globals();
-        Item global = js_get_global_this();
-        js_set_native_key(global, js_string_key("__lambda_testdriver_key"), dom_testdriver_key);
-        js_set_native_key(global, js_string_key("__lambda_set_editing_behavior"), dom_set_editing_behavior);
+        dom_install_testdriver_globals();
     }
     log_debug("dom_set_document: set document=%p", dom_doc);
 }
@@ -3229,30 +3222,7 @@ static Item dom_parser_parse_from_string(Item source_item, Item type_item) {
     return parsed;
 }
 
-template <typename Method>
-static void dom_install_native_constructor_global(const char* ctor_name,
-        JsNativeP0 ctor_target, const char* method_name, Method method_target) {
-    JS_ROOTS(roots,
-        global_root, js_get_global_this(),
-        ctor_root, js_new_native_constructor(ctor_target),
-        proto_root, js_new_object(),
-        method_root, js_new_native_function(method_target));
-    js_set_function_name(ctor_root.get(), js_name_item(ctor_name));
-    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-    js_set_key_default(proto_root.get(), js_string_key(method_name),
-        method_root.get());
-    js_initialize_native_constructor_prototype(ctor_root.get(),
-        proto_root.get());
-    js_set_key_default(global_root.get(), js_string_key(ctor_name),
-        ctor_root.get());
-}
 
-static void dom_install_dom_parser_global(void) {
-    // D6.2.2v2: the prototype owns the parse capability, so construction and
-    // method publication share one rooted native-constructor transaction.
-    dom_install_native_constructor_global("DOMParser", dom_parser_constructor,
-        "parseFromString", dom_parser_parse_from_string);
-}
 
 // iframe.contentDocument / contentWindow accessors.
 // Both currently return the same wrapped foreign HTML document. The foreign
@@ -3307,24 +3277,18 @@ static void dom_collect_frame_windows(DomElement* elem, Item frames) {
     }
 }
 
-static void dom_install_window_frames_global(void) {
+// The walk that finds the frame windows is a DOM tree question; publishing the
+// result as window.frames/length is realm shape, so the two are split and the
+// installer in js_dom_realm.cpp calls this for the array.
+extern "C" Item dom_collect_frame_windows_array(void) {
     Item frames = js_array_new(0);
     DomDocument* doc = _js_main_document ? _js_main_document : _js_current_document;
     if (doc && doc->root) {
         dom_collect_frame_windows(doc->root, frames);
     }
-    int64_t length = js_array_length(frames);
-    Item length_item = (Item){.item = i2it(length)};
-    Item global = js_get_global_this();
-    js_set_key_cstr(global, "frames", frames);
-    js_set_key_cstr(global, "length", length_item);
-
-    Item window = js_get_key_cstr(global, "window");
-    if (get_type_id(window) == LMD_TYPE_MAP) {
-        js_set_key_cstr(window, "frames", frames);
-        js_set_key_cstr(window, "length", length_item);
-    }
+    return frames;
 }
+
 
 // ---------------------------------------------------------------------------
 // Stage 4C Phase B: window.prompt() with a harness-settable response queue.
@@ -5474,7 +5438,6 @@ static Item dom_xml_serializer_serialize_to_string(Item node_item) {
     strbuf_free(sb);
     return (Item){.item = s2it(result)};
 }
-JS_FORWARD_STATIC_VOID( dom_install_xml_serializer_global, (void), dom_install_native_constructor_global, ("XMLSerializer", dom_xml_serializer_constructor, "serializeToString", dom_xml_serializer_serialize_to_string))
 
 static void dom_collapse_selection_before_child_replace(DomElement* elem,
                                                            const char* context) {
@@ -5505,6 +5468,48 @@ static void dom_collapse_selection_before_child_replace(DomElement* elem,
 
 static bool dom_remove_backed_child(DomElement* parent, DomNode* child);
 
+// Parse `html_str` as a fragment in `elem`'s document and append the resulting
+// nodes to `target`. Shared by the innerHTML setter and dom_core_parse_fragment
+// (ES39 core `parse_fragment`): one parse loop, two callers.
+static bool dom_parse_markup_into(DomElement* target, const char* html_str,
+                                  bool notify_mutation) {
+    DomDocument* doc = target ? target->doc : nullptr;
+    if (!doc || !doc->input) return false;
+    Html5Parser* parser = html5_fragment_parser_create(
+        doc->document_pool, doc->node_arena, doc->input);
+    if (!parser) return false;
+    html5_fragment_parse(parser, html_str);
+    Element* body_elem = html5_fragment_get_body(parser);
+    if (!body_elem) return false;
+    for (int64_t i = 0; i < body_elem->length; i++) {
+        TypeId type = get_type_id(body_elem->items[i]);
+        if (type == LMD_TYPE_ELEMENT) {
+            DomElement* child_dom = build_dom_tree_from_element(
+                body_elem->items[i].element, doc, nullptr);
+            if (child_dom && target->append_child(child_dom)) {
+                dom_post_insert((DomNode*)target, (DomNode*)child_dom,
+                                notify_mutation);
+                dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                                                 child_dom, target,
+                                                 nullptr, nullptr);
+            }
+        } else if (type == LMD_TYPE_STRING) {
+            String* str = dom_fragment_text(body_elem->items[i]);
+            if (!str) continue;
+            DomText* text_dom = target->append_text(str->chars);
+            if (text_dom) {
+                dom_post_insert((DomNode*)target, (DomNode*)text_dom,
+                                notify_mutation);
+                dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                                                 text_dom, target,
+                                                 nullptr, nullptr);
+            }
+        }
+    }
+    return true;
+}
+
+
 static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
                                       bool notify_mutation) {
     if (!elem || !html_str) return false;
@@ -5531,41 +5536,7 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
     }
 
     if (html_str[0] != '\0') {
-        if (!doc || !doc->input) return false;
-
-        Html5Parser* parser = html5_fragment_parser_create(
-            doc->document_pool, doc->node_arena, doc->input);
-        if (!parser) return false;
-
-        html5_fragment_parse(parser, html_str);
-        Element* body_elem = html5_fragment_get_body(parser);
-        if (!body_elem) return false;
-
-        for (int64_t i = 0; i < body_elem->length; i++) {
-            TypeId type = get_type_id(body_elem->items[i]);
-            if (type == LMD_TYPE_ELEMENT) {
-                DomElement* child_dom = build_dom_tree_from_element(
-                    body_elem->items[i].element, doc, nullptr);
-                if (child_dom && elem->append_child(child_dom)) {
-                    dom_post_insert((DomNode*)elem, (DomNode*)child_dom,
-                                    notify_mutation);
-                    dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
-                                                     child_dom, elem,
-                                                     nullptr, nullptr);
-                }
-            } else if (type == LMD_TYPE_STRING) {
-                String* s = dom_fragment_text(body_elem->items[i]);
-                if (!s) continue;
-                DomText* text_dom = elem->append_text(s->chars);
-                if (text_dom) {
-                    dom_post_insert((DomNode*)elem, (DomNode*)text_dom,
-                                    notify_mutation);
-                    dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
-                                                     text_dom, elem,
-                                                     nullptr, nullptr);
-                }
-            }
-        }
+        if (!dom_parse_markup_into(elem, html_str, notify_mutation)) return false;
     }
 
     dom_register_named_elements(elem);
@@ -5578,6 +5549,20 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
     log_debug("dom_replace_inner_html: replaced <%s>",
               elem->tag_name ? elem->tag_name : "?");
     return true;
+}
+
+// ES39 core `parse_fragment(context, markup)`: the markup is parsed in the
+// context node's document and returned as a detached fragment. The innerHTML
+// derivation (set_inner_html) is "remove children; parse_fragment; append",
+// and this is the parse step of it, on the same loop the setter uses.
+extern "C" Item dom_core_parse_fragment(Item context, Item markup) {
+    DomNode* ctx = (DomNode*)dom_unwrap_element(context);
+    DomDocument* doc = ctx && ctx->is_element() ? ((DomElement*)ctx)->doc : nullptr;
+    if (!doc || get_type_id(markup) != LMD_TYPE_STRING) return ItemNull;
+    DomElement* fragment = dom_element_create(doc, "#document-fragment", nullptr);
+    if (!fragment) return ItemNull;
+    if (!dom_parse_markup_into(fragment, fn_to_cstr(markup), false)) return ItemNull;
+    return dom_wrap_element(fragment);
 }
 
 static bool dom_replace_text_content(DomElement* elem, const char* text) {

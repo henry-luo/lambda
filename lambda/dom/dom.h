@@ -425,6 +425,22 @@ Item dom_realm_constructor_prototype(const char* ctor_name);
 /** Give `value` the realm prototype for `<ctor_name>`; no-op when absent. */
 void dom_realm_apply_prototype(Item value, const char* ctor_name);
 
+// The realm's binding table, for the one DOM feature that genuinely writes to
+// it: HTML named-property access on Window (`<div id=foo>` reachable as
+// `window.foo`). The *policy* -- never clobber a user-assigned global, prefer a
+// connected element, refresh a stale detached wrapper -- is HTML semantics and
+// stays in the core; only "where does a realm keep its bindings" is the
+// adapter's to answer. All three no-op or answer null without a realm.
+
+/** Whether the realm has an own binding named `name`. */
+bool dom_realm_has_own(const char* name);
+
+/** The realm's binding for `name`, or ItemNull. */
+Item dom_realm_lookup(const char* name);
+
+/** Bind `name` to `value` in the realm. */
+void dom_realm_define(const char* name, Item value);
+
 #ifdef __cplusplus
 struct DomDocument;
 struct JsRuntimeState;
