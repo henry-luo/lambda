@@ -49,7 +49,6 @@ bool dom_item_is_selection(Item item);
 
 // Install window.getSelection on the global object. Called from
 // dom_set_document() once the document is bound.
-void dom_selection_install_globals(void);
 
 // Reset internal pools (call from dom batch reset).
 void dom_selection_reset(void);

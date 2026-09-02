@@ -57,3 +57,24 @@ extern "C" void dom_realm_apply_prototype(Item value, const char* ctor_name) {
     Item proto = dom_realm_constructor_prototype(ctor_name);
     if (proto.item != ItemNull.item) js_set_prototype(value, proto);
 }
+
+extern "C" bool dom_realm_has_own(const char* name) {
+    if (!name || !name[0]) return false;
+    Item global = js_get_global_this();
+    if (get_type_id(global) != LMD_TYPE_MAP) return false;
+    return it2b(js_has_own_property(global, js_name_item(name)));
+}
+
+extern "C" Item dom_realm_lookup(const char* name) {
+    if (!name || !name[0]) return ItemNull;
+    Item global = js_get_global_this();
+    if (get_type_id(global) != LMD_TYPE_MAP) return ItemNull;
+    return js_get_key_default(global, js_name_item(name));
+}
+
+extern "C" void dom_realm_define(const char* name, Item value) {
+    if (!name || !name[0]) return;
+    Item global = js_get_global_this();
+    if (get_type_id(global) != LMD_TYPE_MAP) return;
+    js_set_key_default(global, js_name_item(name), value);
+}
