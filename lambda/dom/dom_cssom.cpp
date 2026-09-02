@@ -77,9 +77,9 @@ static bool js_cssom_is_host(Item item, const void* legacy_marker,
     if (get_type_id(item) != LMD_TYPE_MAP) return false;
     return item.map->type == legacy_marker;
 }
-JS_FORWARD_RETURN(bool, js_is_stylesheet, (Item item), js_cssom_is_host, (item, &js_stylesheet_marker, &js_stylesheet_vmap_marker, radiant_dom_stylesheet_host_type))
-JS_FORWARD_RETURN(bool, js_is_css_rule, (Item item), js_cssom_is_host, (item, &js_css_rule_marker, &js_css_rule_vmap_marker, radiant_dom_css_rule_host_type))
-JS_FORWARD_RETURN(bool, js_is_rule_style_decl, (Item item), js_cssom_is_host, (item, &js_rule_decl_marker, &js_rule_decl_vmap_marker, radiant_dom_rule_style_decl_host_type))
+JS_FORWARD_RETURN(bool, dom_is_stylesheet, (Item item), js_cssom_is_host, (item, &js_stylesheet_marker, &js_stylesheet_vmap_marker, radiant_dom_stylesheet_host_type))
+JS_FORWARD_RETURN(bool, dom_is_css_rule, (Item item), js_cssom_is_host, (item, &js_css_rule_marker, &js_css_rule_vmap_marker, radiant_dom_css_rule_host_type))
+JS_FORWARD_RETURN(bool, dom_is_rule_style_decl, (Item item), js_cssom_is_host, (item, &js_rule_decl_marker, &js_rule_decl_vmap_marker, radiant_dom_rule_style_decl_host_type))
 
 // =============================================================================
 // Helper: camelCase to CSS hyphenated property name
@@ -107,7 +107,7 @@ static void cssom_camel_to_css_prop(const char* js_prop, char* css_buf, size_t b
 // CSSStyleSheet Wrapper
 // =============================================================================
 
-extern "C" Item js_cssom_wrap_stylesheet(void* stylesheet) {
+extern "C" Item dom_cssom_wrap_stylesheet(void* stylesheet) {
     if (!stylesheet) return ItemNull;
 
     Item wrapper = vmap_new();
@@ -116,7 +116,7 @@ extern "C" Item js_cssom_wrap_stylesheet(void* stylesheet) {
     wrapper.vmap->host_type = radiant_dom_stylesheet_host_type();
     wrapper.vmap->host_data = stylesheet;
 
-    log_debug("js_cssom_wrap_stylesheet: wrapped CssStylesheet=%p as VMap=%p", stylesheet, (void*)wrapper.vmap);
+    log_debug("dom_cssom_wrap_stylesheet: wrapped CssStylesheet=%p as VMap=%p", stylesheet, (void*)wrapper.vmap);
     return wrapper;
 }
 
@@ -127,7 +127,7 @@ static void* js_cssom_unwrap_host(Item item, bool (*is_host)(Item)) {
 }
 
 static CssStylesheet* unwrap_stylesheet(Item item) {
-    return (CssStylesheet*)js_cssom_unwrap_host(item, js_is_stylesheet);
+    return (CssStylesheet*)js_cssom_unwrap_host(item, dom_is_stylesheet);
 }
 
 // =============================================================================
@@ -180,7 +180,7 @@ static CssRule* get_font_face_as_style_rule(CssRule* rule) {
 // CSSRule Wrapper
 // =============================================================================
 
-extern "C" Item js_cssom_wrap_rule(void* rule, void* pool) {
+extern "C" Item dom_cssom_wrap_rule(void* rule, void* pool) {
     (void)pool;
     if (!rule) return ItemNull;
 
@@ -190,12 +190,12 @@ extern "C" Item js_cssom_wrap_rule(void* rule, void* pool) {
     wrapper.vmap->host_type = radiant_dom_css_rule_host_type();
     wrapper.vmap->host_data = rule;
 
-    log_debug("js_cssom_wrap_rule: wrapped CssRule=%p as VMap=%p", rule, (void*)wrapper.vmap);
+    log_debug("dom_cssom_wrap_rule: wrapped CssRule=%p as VMap=%p", rule, (void*)wrapper.vmap);
     return wrapper;
 }
 
 static CssRule* unwrap_rule(Item item) {
-    return (CssRule*)js_cssom_unwrap_host(item, js_is_css_rule);
+    return (CssRule*)js_cssom_unwrap_host(item, dom_is_css_rule);
 }
 
 // =============================================================================
@@ -220,21 +220,15 @@ static Item wrap_nested_declarations(CssRule* rule, Pool* pool) {
     Rooted<Item> result_root(roots,
         js_new_object_with_class(JS_CLASS_CSS_NESTED_DECLARATIONS));
     Rooted<Item> style_root(roots, wrap_rule_decl(rule, pool));
-    Rooted<Item> global_root(roots, js_get_global_this());
-    Rooted<Item> ctor_root(roots,
-        js_get_key_cstr(global_root.get(), "CSSNestedDeclarations"));
-    Rooted<Item> proto_root(roots, js_get_key_cstr(ctor_root.get(), "prototype"));
     // Class metadata does not participate in ordinary instanceof; CSSOM
     // wrappers must inherit the realm's exposed interface prototype.
-    if (get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
-        js_set_prototype(result_root.get(), proto_root.get());
-    }
+    dom_realm_apply_prototype(result_root.get(), "CSSNestedDeclarations");
     js_set_key_cstr(result_root.get(), "style", style_root.get());
     return result_root.get();
 }
 
 static CssRule* unwrap_rule_decl(Item item) {
-    return (CssRule*)js_cssom_unwrap_host(item, js_is_rule_style_decl);
+    return (CssRule*)js_cssom_unwrap_host(item, dom_is_rule_style_decl);
 }
 
 static Pool* unwrap_rule_decl_pool(Item item) {
@@ -332,7 +326,7 @@ static const char* serialize_style_rule_css_text(CssRule* rule, Pool* pool) {
 // =============================================================================
 
 // Receiver-explicit per-property getters (DOM3 declared-interface bindings).
-extern "C" Item js_cssom_stylesheet_get_css_rules(Item sheet_item) {
+extern "C" Item dom_cssom_stylesheet_get_css_rules(Item sheet_item) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return ItemNull;
     Pool* pool = get_document_pool();
@@ -344,12 +338,12 @@ extern "C" Item js_cssom_stylesheet_get_css_rules(Item sheet_item) {
     arr->capacity = 0;
     for (size_t i = 0; i < sheet->rule_count; i++) {
         if (sheet->rules[i] && sheet->rules[i]->type == CSS_RULE_CHARSET) continue;
-        array_push(arr, js_cssom_wrap_rule(sheet->rules[i], pool));
+        array_push(arr, dom_cssom_wrap_rule(sheet->rules[i], pool));
     }
     return (Item){.array = arr};
 }
 
-extern "C" Item js_cssom_stylesheet_get_length(Item sheet_item) {
+extern "C" Item dom_cssom_stylesheet_get_length(Item sheet_item) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return ItemNull;
     // exclude @charset rules from length count
@@ -361,13 +355,13 @@ extern "C" Item js_cssom_stylesheet_get_length(Item sheet_item) {
     return (Item){.item = i2it((int64_t)count)};
 }
 
-extern "C" Item js_cssom_stylesheet_get_disabled(Item sheet_item) {
+extern "C" Item dom_cssom_stylesheet_get_disabled(Item sheet_item) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return ItemNull;
     return sheet->disabled ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE};
 }
 
-extern "C" bool js_cssom_stylesheet_set_disabled(Item sheet_item, bool disabled) {
+extern "C" bool dom_cssom_stylesheet_set_disabled(Item sheet_item, bool disabled) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return false;
     if (sheet->disabled == disabled) return true;
@@ -376,32 +370,32 @@ extern "C" bool js_cssom_stylesheet_set_disabled(Item sheet_item, bool disabled)
     js_cssom_notify_stylesheet_mutation(sheet);
     return true;
 }
-JS_FORWARD_EXPRESSION(Item, js_cssom_stylesheet_get_type, (Item sheet_item), (unwrap_stylesheet(sheet_item) ? make_string_item("text/css") : ItemNull))
+JS_FORWARD_EXPRESSION(Item, dom_cssom_stylesheet_get_type, (Item sheet_item), (unwrap_stylesheet(sheet_item) ? make_string_item("text/css") : ItemNull))
 
-extern "C" Item js_cssom_stylesheet_get_href(Item sheet_item) {
+extern "C" Item dom_cssom_stylesheet_get_href(Item sheet_item) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     return sheet ? make_string_item(sheet->href) : ItemNull;
 }
 
-extern "C" Item js_cssom_stylesheet_get_title(Item sheet_item) {
+extern "C" Item dom_cssom_stylesheet_get_title(Item sheet_item) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     return sheet ? make_string_item(sheet->title) : ItemNull;
 }
 
-extern "C" Item js_cssom_stylesheet_index(Item sheet_item, int64_t index) {
+extern "C" Item dom_cssom_stylesheet_index(Item sheet_item, int64_t index) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return ItemNull;
     // raw index into the rules array (charset rules included), matching the
     // legacy bracket-access path
     if (index < 0 || (size_t)index >= sheet->rule_count) return ItemNull;
-    return js_cssom_wrap_rule(sheet->rules[index], get_document_pool());
+    return dom_cssom_wrap_rule(sheet->rules[index], get_document_pool());
 }
 
 // =============================================================================
 // CSSStyleSheet Method Dispatch
 // =============================================================================
 
-extern "C" Item js_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_arg) {
+extern "C" Item dom_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_arg) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return ItemNull;
     // index omitted (undefined/null) defaults to append-at-end per CSSOM
@@ -459,7 +453,7 @@ extern "C" Item js_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_
     return (Item){.item = i2it((int64_t)index)};
 }
 
-extern "C" Item js_cssom_delete_rule(Item sheet_item, Item index_arg) {
+extern "C" Item dom_cssom_delete_rule(Item sheet_item, Item index_arg) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return ItemNull;
     Item args[1] = {index_arg};
@@ -489,7 +483,7 @@ extern "C" Item js_cssom_delete_rule(Item sheet_item, Item index_arg) {
 // =============================================================================
 
 // Receiver-explicit per-property getters (DOM3 declared-interface bindings).
-extern "C" Item js_cssom_rule_get_selector_text(Item rule_item) {
+extern "C" Item dom_cssom_rule_get_selector_text(Item rule_item) {
     CssRule* rule = unwrap_rule(rule_item);
     if (!rule) return ItemNull;
     Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
@@ -508,7 +502,7 @@ extern "C" Item js_cssom_rule_get_selector_text(Item rule_item) {
     return make_string_item(sel_text);
 }
 
-extern "C" Item js_cssom_rule_get_style(Item rule_item) {
+extern "C" Item dom_cssom_rule_get_style(Item rule_item) {
     CssRule* rule = unwrap_rule(rule_item);
     if (!rule) return ItemNull;
     Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
@@ -526,7 +520,7 @@ extern "C" Item js_cssom_rule_get_style(Item rule_item) {
     return ItemNull;
 }
 
-extern "C" Item js_cssom_rule_get_css_rules(Item rule_item) {
+extern "C" Item dom_cssom_rule_get_css_rules(Item rule_item) {
     CssRule* rule = unwrap_rule(rule_item);
     if (!rule) return ItemNull;
     Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
@@ -544,7 +538,7 @@ extern "C" Item js_cssom_rule_get_css_rules(Item rule_item) {
             if (nr[i]->type == CSS_RULE_NESTED_DECLARATIONS) {
                 array_push(arr, wrap_nested_declarations(nr[i], pool));
             } else {
-                array_push(arr, js_cssom_wrap_rule(nr[i], pool));
+                array_push(arr, dom_cssom_wrap_rule(nr[i], pool));
             }
         }
         return (Item){.array = arr};
@@ -552,7 +546,7 @@ extern "C" Item js_cssom_rule_get_css_rules(Item rule_item) {
     return ItemNull;
 }
 
-extern "C" Item js_cssom_rule_get_css_text(Item rule_item) {
+extern "C" Item dom_cssom_rule_get_css_text(Item rule_item) {
     CssRule* rule = unwrap_rule(rule_item);
     if (!rule) return ItemNull;
     Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
@@ -567,7 +561,7 @@ extern "C" Item js_cssom_rule_get_css_text(Item rule_item) {
     return make_string_item(text);
 }
 
-extern "C" Item js_cssom_rule_get_type(Item rule_item) {
+extern "C" Item dom_cssom_rule_get_type(Item rule_item) {
     CssRule* rule = unwrap_rule(rule_item);
     if (!rule) return ItemNull;
     Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
@@ -591,18 +585,18 @@ extern "C" Item js_cssom_rule_get_type(Item rule_item) {
     return (Item){.item = i2it((int64_t)type_num)};
 }
 
-extern "C" Item js_cssom_rule_get_parent_rule(Item rule_item) {
+extern "C" Item dom_cssom_rule_get_parent_rule(Item rule_item) {
     CssRule* rule = unwrap_rule(rule_item);
     if (!rule) return ItemNull;
     Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
     (void)pool;
     if (rule->parent) {
-        return js_cssom_wrap_rule(rule->parent, pool);
+        return dom_cssom_wrap_rule(rule->parent, pool);
     }
     return ItemNull;
 }
 
-extern "C" Item js_cssom_rule_set_selector_text(Item rule_item, Item value) {
+extern "C" Item dom_cssom_rule_set_selector_text(Item rule_item, Item value) {
     CssRule* rule = unwrap_rule(rule_item);
     if (!rule) return ItemNull;
 
@@ -641,7 +635,7 @@ extern "C" Item js_cssom_rule_set_selector_text(Item rule_item, Item value) {
 // CSSStyleDeclaration (rule) Property Access
 // =============================================================================
 
-extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) {
+extern "C" Item dom_cssom_rule_decl_get_property(Item decl_item, Item prop_name) {
     CssRule* rule = unwrap_rule_decl(decl_item);
     if (!rule || (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTED_DECLARATIONS)) return make_string_item("");
 
@@ -698,12 +692,12 @@ extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) 
 
     if (last_match) {
         const char* val = css_serialize_declaration_value(last_match, pool);
-        log_debug("js_cssom_rule_decl_get_property: '%s' -> '%s'", prop, val);
+        log_debug("dom_cssom_rule_decl_get_property: '%s' -> '%s'", prop, val);
         return make_string_item(val);
     }
 
     // not found — return empty string (per CSSOM spec)
-    log_debug("js_cssom_rule_decl_get_property: '%s' not found in rule", prop);
+    log_debug("dom_cssom_rule_decl_get_property: '%s' not found in rule", prop);
     return make_string_item("");
 }
 
@@ -711,7 +705,7 @@ extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) 
 // CSSStyleDeclaration (rule) Property Set
 // =============================================================================
 
-extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value) {
+extern "C" Item dom_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value) {
     CssRule* rule = unwrap_rule_decl(decl_item);
     if (!rule || (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTED_DECLARATIONS)) return value;
 
@@ -736,7 +730,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
         const char* canonical = css_parse_unicode_range_canonical(val_str, val_len, pool);
         if (!canonical) {
             // invalid unicode-range — silently ignore (per CSSOM spec)
-            log_debug("js_cssom_rule_decl_set_property: invalid unicode-range '%s'", val_str);
+            log_debug("dom_cssom_rule_decl_set_property: invalid unicode-range '%s'", val_str);
             return value;
         }
 
@@ -756,7 +750,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
             if (!d) continue;
             if (d->property_name && strcmp(d->property_name, css_prop) == 0) {
                 rule->data.style_rule.declarations[i] = new_decl;
-                log_debug("js_cssom_rule_decl_set_property: replaced unicode-range = '%s'", canonical);
+                log_debug("dom_cssom_rule_decl_set_property: replaced unicode-range = '%s'", canonical);
                 js_cssom_notify_stylesheet_mutation();
                 return value;
             }
@@ -771,7 +765,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
             rule->data.style_rule.declarations = new_decls;
             rule->data.style_rule.declaration_count = count + 1;
         }
-        log_debug("js_cssom_rule_decl_set_property: added unicode-range = '%s'", canonical);
+        log_debug("dom_cssom_rule_decl_set_property: added unicode-range = '%s'", canonical);
         js_cssom_notify_stylesheet_mutation();
         return value;
     }
@@ -781,7 +775,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
         css_prop, strlen(css_prop), val_str, val_len, pool);
     if (!new_decl) {
         // parse error — silently ignore (per CSSOM spec)
-        log_debug("js_cssom_rule_decl_set_property: parse error for '%s: %s'", css_prop, val_str);
+        log_debug("dom_cssom_rule_decl_set_property: parse error for '%s: %s'", css_prop, val_str);
         return value;
     }
     // Retain authored token text for custom properties, var() values, and the
@@ -800,7 +794,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
 
         if (match) {
             rule->data.style_rule.declarations[i] = new_decl;
-            log_debug("js_cssom_rule_decl_set_property: replaced '%s' = '%s'", css_prop, val_str);
+            log_debug("dom_cssom_rule_decl_set_property: replaced '%s' = '%s'", css_prop, val_str);
             js_cssom_notify_stylesheet_mutation();
             return value;
         }
@@ -817,7 +811,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
         rule->data.style_rule.declarations = new_decls;
         rule->data.style_rule.declaration_count = count + 1;
     }
-    log_debug("js_cssom_rule_decl_set_property: added '%s' = '%s'", css_prop, val_str);
+    log_debug("dom_cssom_rule_decl_set_property: added '%s' = '%s'", css_prop, val_str);
     js_cssom_notify_stylesheet_mutation();
     return value;
 }
@@ -826,7 +820,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
 // CSSStyleDeclaration (rule) Method Dispatch
 // =============================================================================
 
-extern "C" Item js_cssom_rule_decl_remove_property(Item decl_item, Item prop_arg) {
+extern "C" Item dom_cssom_rule_decl_remove_property(Item decl_item, Item prop_arg) {
     CssRule* guard_rule = unwrap_rule_decl(decl_item);
     if (!guard_rule || (guard_rule->type != CSS_RULE_STYLE &&
             guard_rule->type != CSS_RULE_NESTED_DECLARATIONS)) {
@@ -871,7 +865,7 @@ extern "C" Item js_cssom_rule_decl_remove_property(Item decl_item, Item prop_arg
 
 // open-name membership for rule declarations: `in` answers from the CSS
 // property table without invoking a getter
-extern "C" Item js_cssom_decl_css_has(Item decl_item, Item prop_name) {
+extern "C" Item dom_cssom_decl_css_has(Item decl_item, Item prop_name) {
     (void)decl_item;
     const char* prop = fn_to_cstr(prop_name);
     if (!prop || !prop[0]) return (Item){.item = b2it(false)};
@@ -886,7 +880,7 @@ extern "C" Item js_cssom_decl_css_has(Item decl_item, Item prop_name) {
 // document.styleSheets
 // =============================================================================
 
-extern "C" Item js_cssom_get_document_stylesheets(void) {
+extern "C" Item dom_cssom_get_document_stylesheets(void) {
     DomDocument* doc = (DomDocument*)dom_get_document();
     if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) {
         // return empty array
@@ -904,7 +898,7 @@ extern "C" Item js_cssom_get_document_stylesheets(void) {
     arr->length = 0;
     arr->capacity = 0;
     for (int i = 0; i < doc->stylesheet_count; i++) {
-        array_push(arr, js_cssom_wrap_stylesheet(doc->stylesheets[i]));
+        array_push(arr, dom_cssom_wrap_stylesheet(doc->stylesheets[i]));
     }
 
     return (Item){.array = arr};
@@ -949,7 +943,7 @@ static CssStylesheet* js_cssom_create_inline_stylesheet(DomElement* elem) {
     return sheet;
 }
 
-extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
+extern "C" Item dom_cssom_get_style_element_sheet(Item elem_item) {
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
 
@@ -964,18 +958,18 @@ extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* sheet = doc->stylesheets[i];
         if (sheet && sheet->owner_style_element == elem) {
-            return js_cssom_wrap_stylesheet(sheet);
+            return dom_cssom_wrap_stylesheet(sheet);
         }
     }
 
     CssStylesheet* sheet = js_cssom_create_inline_stylesheet(elem);
-    return sheet ? js_cssom_wrap_stylesheet(sheet) : ItemNull;
+    return sheet ? dom_cssom_wrap_stylesheet(sheet) : ItemNull;
 }
 
 // =============================================================================
 // CSS Namespace Object (CSS.supports, CSS.escape)
 // =============================================================================
-JS_FORWARD_RETURN(bool, js_is_css_namespace, (Item item), js_object_has_class, (item, JS_CLASS_CSS_NAMESPACE))
+JS_FORWARD_RETURN(bool, dom_is_css_namespace, (Item item), js_object_has_class, (item, JS_CLASS_CSS_NAMESPACE))
 
 /**
  * CSS.supports(property, value) — two-argument form.
@@ -1062,9 +1056,9 @@ static Item js_css_supports(Item* args, int argc) {
     if (free_pool) mem_pool_destroy(pool);
     return (Item){.item = b2it(result)};
 }
-JS_FORWARD_ITEM(js_css_supports_operation, (Item* args, int argc), js_css_supports, (args, argc))
+JS_FORWARD_ITEM(dom_css_supports_operation, (Item* args, int argc), js_css_supports, (args, argc))
 
-extern "C" Item js_css_escape_operation(Item* args, int argc) {
+extern "C" Item dom_css_escape_operation(Item* args, int argc) {
     // CSS.escape(ident) — serialize a CSS identifier. The intrinsic target
     // selects this operation before invocation; spelling is metadata only
     // under D6.2.2v2.

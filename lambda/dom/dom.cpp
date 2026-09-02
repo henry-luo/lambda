@@ -9,6 +9,7 @@
  */
 
 #include "dom.h"
+#include "dom_realm_hooks.h"
 #include "dom_events.h"
 #include "dom_selection.h"
 #include "dom_history.h"
@@ -142,7 +143,7 @@ extern "C" Item radiant_dom_element_operation(Item elem_item,
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 
-static Item dom_element_prototype_operation_body(Item callee, Item this_value,
+extern "C" Item dom_element_prototype_operation_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
     (void)result_home;
     JsFunction* fn = get_type_id(callee) == LMD_TYPE_FUNC
@@ -280,8 +281,8 @@ static Item js_create_document_fonts_object(void) {
 }
 
 // Forward decls (defined further down in the foreign-doc / iframe section).
-extern "C" bool js_doc_has_browsing_context(void* doc);
-extern "C" void js_doc_mark_has_browsing_context(void* doc);
+extern "C" bool dom_doc_has_browsing_context(void* doc);
+extern "C" void dom_doc_mark_has_browsing_context(void* doc);
 static Url* dom_make_fallback_url(const char* raw_url);
 
 static inline DocState* dom_current_state();
@@ -1002,8 +1003,8 @@ extern "C" void dom_batch_reset() {
     _js_current_document = nullptr;
     dom_events_reset();
     js_xhr_reset();
-    js_storage_reset();
-    js_match_media_reset();
+    dom_storage_reset();
+    dom_match_media_reset();
     dom_observers_reset();
     reset_foreign_document_cache();
     tc_reset_focus_state(state);
@@ -1018,8 +1019,8 @@ extern "C" void dom_shutdown() {
     reset_dom_wrapper_cache();
     dom_events_reset();
     js_xhr_reset();
-    js_storage_reset();
-    js_match_media_reset();
+    dom_storage_reset();
+    dom_match_media_reset();
     dom_observers_reset();
     reset_foreign_document_cache();
     _js_current_document = nullptr;
@@ -1655,7 +1656,7 @@ extern "C" void dom_set_document(void* dom_doc) {
             log_error("dom_set_document: failed to activate radiant module");
             return;
         }
-        js_doc_mark_has_browsing_context(dom_doc);
+        dom_doc_mark_has_browsing_context(dom_doc);
         DomDocument* doc = (DomDocument*)dom_doc;
         // Batch-mode page scripts enter a fresh JS realm after document load;
         // rebind XHR to the retained document URL instead of leaving relative
@@ -1808,6 +1809,15 @@ static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"textarea", "HTMLTextAreaElement"},
 };
 
+extern "C" int dom_html_interface_count(void) {
+    return (int)(sizeof(s_dom_html_interfaces) / sizeof(s_dom_html_interfaces[0]));
+}
+
+extern "C" const char* dom_html_interface_ctor_name(int index) {
+    if (index < 0 || index >= dom_html_interface_count()) return nullptr;
+    return s_dom_html_interfaces[index].constructor_name;
+}
+
 static const char* dom_html_interface_name(DomElement* elem) {
     if (!elem || !elem->tag_name || elem->tag_name[0] == '#') return nullptr;
     int count = (int)(sizeof(s_dom_html_interfaces) /
@@ -1872,14 +1882,13 @@ extern "C" Item dom_get_prototype_value(Item obj) {
                     ? "HTMLElement" : "Element"));
         }
     }
-    Item global = js_get_global_this();
-    Item ctor = js_get_key_default(global, js_string_key(ctor_name));
-    if (get_type_id(ctor) != LMD_TYPE_FUNC && strcmp(ctor_name, "HTMLElement") == 0) {
-        ctor = js_get_key_cstr(global, "Element");
+    // A realm that publishes Element but not HTMLElement still has to answer
+    // for HTML elements, so the miss falls back one interface up.
+    Item proto = dom_realm_constructor_prototype(ctor_name);
+    if (proto.item == ItemNull.item && strcmp(ctor_name, "HTMLElement") == 0) {
+        proto = dom_realm_constructor_prototype("Element");
     }
-    if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
+    return proto;
 }
 
 extern "C" Item radiant_dom_wrap_node(void* dom_elem);
@@ -1909,7 +1918,7 @@ extern "C" void* dom_unwrap_element_impl(Item item) {
 
 // Jube POC: use the module-owned type test so later native wrappers do not
 // need every caller to know the concrete carrier representation.
-JS_FORWARD_RETURN(bool, js_is_dom_node, (Item item), radiant_dom_is_node, (item))
+JS_FORWARD_RETURN(bool, dom_is_node, (Item item), radiant_dom_is_node, (item))
 
 struct SelectOptionsOwnerEntry {
     Array* array;
@@ -2336,8 +2345,8 @@ static void _decorate_dom_collection(Item collection, const char* ctor_name) {
     if (!js_is_callable(existing)) {
         js_set_native_key(collection, named_key, _collection_named_item);
     }
-    Item ctor = js_get_key_default(js_get_global_this(), js_name_item(ctor_name));
-    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+    Item ctor = dom_realm_constructor(ctor_name);
+    if (ctor.item != ItemNull.item) {
         js_set_key_cstr(collection, "constructor", ctor);
     }
 }
@@ -2622,7 +2631,7 @@ static DomDocument* js_document_proxy_doc_from_item(Item item) {
 }
 
 // Returns the DomDocument* if `item` is a foreign-doc wrapper, else null.
-extern "C" void* js_get_foreign_doc(Item item) {
+extern "C" void* dom_get_foreign_doc(Item item) {
     TypeId tid = get_type_id(item);
     if (tid == LMD_TYPE_VMAP) {
         if (item.vmap &&
@@ -2636,7 +2645,7 @@ extern "C" void* js_get_foreign_doc(Item item) {
 }
 
 // Returns true if `item` is the document.implementation singleton.
-extern "C" bool js_is_dom_implementation(Item item) {
+extern "C" bool dom_is_implementation(Item item) {
     TypeId tid = get_type_id(item);
     if (tid != LMD_TYPE_MAP) return false;
     return dom_implementation_item.item != 0 &&
@@ -2666,13 +2675,13 @@ extern "C" Item js_get_document_object_value() {
 }
 
 // Dispatch property access on the document proxy object.
-JS_FORWARD_ITEM(js_document_proxy_get_property, (Item prop_name),
-    js_document_get_property, (prop_name))
+JS_FORWARD_ITEM(dom_document_proxy_get_property, (Item prop_name),
+    dom_document_get_property, (prop_name))
 
 // Dispatch property set on the document proxy object.
 // NOTE: Must use map_put directly instead of js_set_key_default to avoid
 // infinite recursion (js_set_key_default dispatches back here for DOM resources).
-extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
+extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
     if (get_type_id(prop_name) == LMD_TYPE_STRING) {
         String* s = it2s(prop_name);
         if ((s && s->len == 4 && strncmp(s->chars, "href", 4) == 0) ||
@@ -2777,16 +2786,16 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_foreign_document_state_ensure, (), (dom_r
 #define s_pending_iframe_load_count (dom_foreign_document_rt_state->pending_iframe_load_count)
 #define s_iframe_load_drain_scheduled (dom_foreign_document_rt_state->iframe_load_drain_scheduled)
 
-extern "C" bool js_doc_has_browsing_context(void* doc) {
+extern "C" bool dom_doc_has_browsing_context(void* doc) {
     if (!doc || !dom_foreign_document_state_get()) return false;
     for (int i = 0; i < s_doc_with_window_count; i++) {
         if (s_doc_with_window[i] == (DomDocument*)doc) return true;
     }
     return false;
 }
-extern "C" void js_doc_mark_has_browsing_context(void* doc) {
+extern "C" void dom_doc_mark_has_browsing_context(void* doc) {
     if (!doc || !dom_foreign_document_state_ensure()) return;
-    if (js_doc_has_browsing_context(doc)) return;
+    if (dom_doc_has_browsing_context(doc)) return;
     if (s_doc_with_window_count < DOC_WIN_TABLE_SIZE) {
         s_doc_with_window[s_doc_with_window_count++] = (DomDocument*)doc;
     }
@@ -3248,15 +3257,15 @@ static void dom_install_dom_parser_global(void) {
 // iframe.contentDocument / contentWindow accessors.
 // Both currently return the same wrapped foreign HTML document. The foreign
 // doc is marked as having a browsing context so its defaultView/getSelection
-// resolve normally. js_document_get_property maps "document" / "defaultView"
+// resolve normally. dom_document_get_property maps "document" / "defaultView"
 // back to the same wrapper so identity comparisons hold.
-extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
+extern "C" Item dom_iframe_get_content_document(DomElement* iframe) {
     if (!iframe || !dom_foreign_document_state_ensure()) return ItemNull;
     IframeContentEntry* e = lookup_iframe_entry(iframe);
     if (!e) {
         DomDocument* embedded_doc = iframe->embed ? iframe->embedp()->doc : nullptr;
         if (embedded_doc) {
-            js_doc_mark_has_browsing_context(embedded_doc);
+            dom_doc_mark_has_browsing_context(embedded_doc);
             replace_iframe_srcdoc_document(iframe, embedded_doc);
             if (s_iframe_cache_count < IFRAME_CACHE_SIZE) {
                 s_iframe_cache[s_iframe_cache_count].iframe = iframe;
@@ -3268,7 +3277,7 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
         }
         DomDocument* doc = create_foreign_html_doc("");
         if (!doc) return ItemNull;
-        js_doc_mark_has_browsing_context(doc);
+        dom_doc_mark_has_browsing_context(doc);
         // Hydrate the iframe document from srcdoc so DOM queries resolve
         // inside the browsing context.
         replace_iframe_srcdoc_document(iframe, doc);
@@ -3282,12 +3291,12 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
     }
     return wrap_foreign_doc_owned(e->doc, e->owns_doc);
 }
-JS_FORWARD_ITEM(js_iframe_get_content_window, (DomElement* iframe), js_iframe_get_content_document, (iframe))
+JS_FORWARD_ITEM(dom_iframe_get_content_window, (DomElement* iframe), dom_iframe_get_content_document, (iframe))
 
 static void dom_collect_frame_windows(DomElement* elem, Item frames) {
     if (!elem) return;
     if (elem->tag_name && strcmp(elem->tag_name, "iframe") == 0) {
-        js_array_push(frames, js_iframe_get_content_window(elem));
+        js_array_push(frames, dom_iframe_get_content_window(elem));
     }
     DomNode* child = elem->first_child;
     while (child) {
@@ -3320,7 +3329,7 @@ static void dom_install_window_frames_global(void) {
 // ---------------------------------------------------------------------------
 // Stage 4C Phase B: window.prompt() with a harness-settable response queue.
 // Headless `lambda.exe view` has no dialog UI, so event_sim seeds answers via
-// js_window_dialog_push_response() (the `set_prompt` event); each prompt() call
+// dom_window_dialog_push_response() (the `set_prompt` event); each prompt() call
 // dequeues one. A NULL response models pressing Cancel → JS null. This lets
 // script editors that gate on window.prompt (link URL, mention name) run
 // end-to-end. FIFO; context-owned with the document realm.
@@ -3329,7 +3338,7 @@ static void dom_install_window_frames_global(void) {
 #define s_prompt_head (js_runtime_state.dom.prompt_head)
 #define s_prompt_tail (js_runtime_state.dom.prompt_tail)
 
-extern "C" void js_window_dialog_push_response(const char* value) {
+extern "C" void dom_window_dialog_push_response(const char* value) {
     if (!js_active_runtime_state) return;
     int next = (s_prompt_tail + 1) % JS_DOM_PROMPT_QUEUE_CAP;
     if (next == s_prompt_head) return;  // queue full — drop
@@ -3337,7 +3346,7 @@ extern "C" void js_window_dialog_push_response(const char* value) {
     s_prompt_tail = next;
 }
 
-extern "C" void js_window_dialog_reset(void) {
+extern "C" void dom_window_dialog_reset(void) {
     if (!js_active_runtime_state) return;
     while (s_prompt_head != s_prompt_tail) {
         if (s_prompt_queue[s_prompt_head]) mem_free(s_prompt_queue[s_prompt_head]);
@@ -3349,7 +3358,7 @@ extern "C" void js_window_dialog_reset(void) {
 
 // window.prompt(message, default) — positional args (unused); returns the next
 // seeded response as a JS string, or null (empty queue / seeded Cancel).
-static Item js_window_prompt(Item message_item, Item default_item) {
+extern "C" Item dom_window_prompt(Item message_item, Item default_item) {
     (void)message_item; (void)default_item;
     if (!js_active_runtime_state) return ItemNull;
     if (s_prompt_head == s_prompt_tail) return ItemNull;
@@ -3365,15 +3374,7 @@ static Item js_window_prompt(Item message_item, Item default_item) {
 #undef s_prompt_head
 #undef s_prompt_tail
 
-static void dom_install_window_dialog_globals(void) {
-    Item global = js_get_global_this();
-    Item fn = js_new_native_function(js_window_prompt);
-    js_set_key_cstr(global, "prompt", fn);
-    Item window = js_get_key_cstr(global, "window");
-    if (get_type_id(window) == LMD_TYPE_MAP) {
-        js_set_key_cstr(window, "prompt", fn);
-    }
-}
+// [dom_install_window_dialog_globals moved to lambda/js/js_dom_realm.cpp]
 
 // ----------------------------------------------------------------------------
 // Iframe `load` event synthesis. After an <iframe> is inserted into the
@@ -3505,8 +3506,8 @@ extern "C" bool dom_navigate_submit_target(const char* target_name, const char* 
         return false;
     }
 
-    Item frame_doc_item = js_iframe_get_content_document(iframe);
-    DomDocument* frame_doc = (DomDocument*)js_get_foreign_doc(frame_doc_item);
+    Item frame_doc_item = dom_iframe_get_content_document(iframe);
+    DomDocument* frame_doc = (DomDocument*)dom_get_foreign_doc(frame_doc_item);
     if (!frame_doc) {
         url_destroy(resolved);
         return false;
@@ -3564,7 +3565,7 @@ extern "C" Item js_create_foreign_xml_doc(const char* qualified_name) {
 // Public: create a DocumentType node. Doctype shares the DomComment storage
 // shape, but carries DOM_NODE_DOCTYPE so Range/Selection validation can reject
 // it by node type instead of tag-name heuristics.
-extern "C" Item js_create_doctype_node(const char* name,
+extern "C" Item dom_create_doctype_node(const char* name,
                                         const char* public_id,
                                         const char* system_id) {
     DomDocument* doc = _js_current_document;
@@ -3615,7 +3616,7 @@ static Item dom_impl_create_document_type_method(Item name, Item public_id, Item
     const char* name_text = fn_to_cstr(name);
     const char* public_text = fn_to_cstr(public_id);
     const char* system_text = fn_to_cstr(system_id);
-    return js_create_doctype_node(name_text ? name_text : "",
+    return dom_create_doctype_node(name_text ? name_text : "",
         public_text ? public_text : "", system_text ? system_text : "");
 }
 
@@ -3636,10 +3637,10 @@ static void dom_set_implementation_method(Item implementation,
     js_mark_non_enumerable(implementation, key);
 }
 
-extern "C" Item js_get_dom_implementation(void) {
+extern "C" Item dom_get_implementation(void) {
     if (!dom_ensure_roots()) return ItemNull;
     if (get_type_id(dom_implementation_item) == LMD_TYPE_MAP &&
-        js_is_dom_implementation(dom_implementation_item)) {
+        dom_is_implementation(dom_implementation_item)) {
         return dom_implementation_item;
     }
     // Root-range cleanup clears expired realm cache slots to zero; zero must
@@ -3681,9 +3682,9 @@ static bool js_is_style_wrapper(Item item, const void* vmap_marker,
     return m->type == map_marker;
 }
 JS_FORWARD_STATIC_RETURN(bool, js_is_computed_style, (Item item), js_is_style_wrapper, (item, (const void*)&js_computed_style_vmap_marker, (const void*)&js_computed_style_marker, radiant_dom_computed_style_host_type))
-JS_FORWARD_RETURN(bool, js_is_computed_style_item, (Item item), js_is_computed_style, (item))
+JS_FORWARD_RETURN(bool, dom_is_computed_style_item, (Item item), js_is_computed_style, (item))
 JS_FORWARD_STATIC_RETURN(bool, js_is_inline_style, (Item item), js_is_style_wrapper, (item, (const void*)&js_inline_style_vmap_marker, (const void*)&js_inline_style_marker, radiant_dom_inline_style_host_type))
-JS_FORWARD_RETURN(bool, js_is_inline_style_item, (Item item), js_is_inline_style, (item))
+JS_FORWARD_RETURN(bool, dom_is_inline_style_item, (Item item), js_is_inline_style, (item))
 
 
 static Item dom_get_inline_style_wrapper(DomElement* elem) {
@@ -3803,10 +3804,10 @@ struct JsComputedStyleHost {
     int pseudo_type;
 };
 
-extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
+extern "C" Item dom_get_computed_style(Item elem_item, Item pseudo_item) {
     DomNode* node = (DomNode*)dom_unwrap_element(elem_item);
     if (!node || !node->is_element()) {
-        log_debug("js_get_computed_style: not a DOM element");
+        log_debug("dom_get_computed_style: not a DOM element");
         return ItemNull;
     }
 
@@ -3836,24 +3837,13 @@ extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
     wrapper.vmap->host_type = radiant_dom_computed_style_host_type();
     wrapper.vmap->host_data = host;
 
-    log_debug("js_get_computed_style: created wrapper for <%s> pseudo=%d",
+    log_debug("dom_get_computed_style: created wrapper for <%s> pseudo=%d",
               elem->tag_name ? elem->tag_name : "?", pseudo_type);
 
     return wrapper;
 }
-JS_FORWARD_STATIC_ITEM(js_window_get_computed_style, (Item elem_item, Item pseudo_item), js_get_computed_style, (elem_item, pseudo_item))
 
-static void dom_install_window_computed_style_global(void) {
-    Item global = js_get_global_this();
-    Item key = js_string_key("getComputedStyle");
-    Item existing = js_get_key_default(global, key);
-    if (js_is_callable(existing)) return;
-    Item fn = js_new_native_function(js_window_get_computed_style);
-    js_set_function_name(fn, key);
-    // getComputedStyle is a Window/global function now; direct MIR DOM shims
-    // were removed so calls resolve through ordinary property dispatch.
-    js_set_key_default(global, key, fn);
-}
+// [dom_install_window_computed_style_global moved to lambda/js/js_dom_realm.cpp]
 
 // ============================================================================
 // CSS var() Resolution for Custom Properties
@@ -4287,9 +4277,9 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
     return (final_str) ? final_str->chars : "";
 }
 
-extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) {
+extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name) {
     if (!js_is_computed_style(style_item)) {
-        log_debug("js_computed_style_get_property: not a computed style object");
+        log_debug("dom_computed_style_get_property: not a computed style object");
         return ItemNull;
     }
 
@@ -4357,7 +4347,7 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
             }
             return js_name_item("");
         }
-        log_debug("js_computed_style_get_property: unknown CSS property '%s' (from JS '%s')",
+        log_debug("dom_computed_style_get_property: unknown CSS property '%s' (from JS '%s')",
                   css_prop, js_prop);
         return js_name_item("");
     }
@@ -6015,11 +6005,11 @@ extern "C" Item dom_document_fonts_bridge(void) {
     }
     return js_document_fonts_value;
 }
-JS_FORWARD_ITEM(dom_document_stylesheets_bridge, (void), js_cssom_get_document_stylesheets, ())
+JS_FORWARD_ITEM(dom_document_stylesheets_bridge, (void), dom_cssom_get_document_stylesheets, ())
 
 extern "C" Item dom_document_default_view_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
-    if (!js_doc_has_browsing_context(doc)) {
+    if (!dom_doc_has_browsing_context(doc)) {
         return ItemNull;
     }
     if (doc && doc != _js_main_document) {
@@ -6031,7 +6021,7 @@ extern "C" Item dom_document_default_view_bridge(void* doc_ptr) {
     }
     return ItemNull;
 }
-JS_FORWARD_ITEM(dom_document_implementation_bridge, (void), js_get_dom_implementation, ())
+JS_FORWARD_ITEM(dom_document_implementation_bridge, (void), dom_get_implementation, ())
 JS_FORWARD_EXPRESSION(Item, dom_document_design_mode_bridge, (void), (js_name_item(js_document_design_mode ? "on" : "off")))
 
 extern "C" Item dom_document_active_element_bridge(void* doc_ptr) {
@@ -6285,9 +6275,9 @@ static JsDomPropId dom_prop_id(const char* prop) {
 }
 
 
-extern "C" Item js_document_get_property(Item prop_name) {
+extern "C" Item dom_document_get_property(Item prop_name) {
     if (!_js_current_document) {
-        log_debug("js_document_get_property: no document set");
+        log_debug("dom_document_get_property: no document set");
         return ItemNull;
     }
 
@@ -6470,7 +6460,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // contentDocument here). Also handle on the main doc proxy so existing
     // window-style access through `document` continues to function.
     if (_js_current_document != _js_main_document &&
-        js_doc_has_browsing_context(_js_current_document)) {
+        dom_doc_has_browsing_context(_js_current_document)) {
         if (prop_id == JS_DOM_PROP_DOCUMENT) {
             Item w = lookup_foreign_doc_wrapper(_js_current_document);
             return w.item ? w : ItemNull;
@@ -6540,14 +6530,14 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
 
     if (_js_current_document != _js_main_document &&
-        js_doc_has_browsing_context(_js_current_document)) {
+        dom_doc_has_browsing_context(_js_current_document)) {
         Item global_value = js_get_global_property(prop_name);
         if (get_type_id(global_value) == LMD_TYPE_FUNC) {
             return global_value;
         }
     }
 
-    log_debug("js_document_get_property: unknown property '%s'", prop);
+    log_debug("dom_document_get_property: unknown property '%s'", prop);
     return make_js_undefined();
 }
 
@@ -9125,11 +9115,11 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // so identity comparisons (===) work.
     if (elem->tag_name && strcasecmp(elem->tag_name, "iframe") == 0 &&
         (prop_id == JS_DOM_PROP_CONTENT_DOCUMENT || prop_id == JS_DOM_PROP_CONTENT_WINDOW)) {
-        extern Item js_iframe_get_content_document(DomElement* iframe);
-        extern Item js_iframe_get_content_window  (DomElement* iframe);
+        extern Item dom_iframe_get_content_document(DomElement* iframe);
+        extern Item dom_iframe_get_content_window  (DomElement* iframe);
         if (prop_id == JS_DOM_PROP_CONTENT_DOCUMENT)
-            return js_iframe_get_content_document(elem);
-        return js_iframe_get_content_window(elem);
+            return dom_iframe_get_content_document(elem);
+        return dom_iframe_get_content_window(elem);
     }
 
     // id
@@ -9515,11 +9505,11 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // HTMLStyleElement.sheet — associated CSSStyleSheet (doesn't require native_element)
     if (prop_id == JS_DOM_PROP_SHEET && elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
-        return js_cssom_get_style_element_sheet(elem_item);
+        return dom_cssom_get_style_element_sheet(elem_item);
     }
     if (prop_id == JS_DOM_PROP_DISABLED && _is_tag(elem, "style")) {
-        Item sheet = js_cssom_get_style_element_sheet(elem_item);
-        Item disabled = js_cssom_stylesheet_get_disabled(sheet);
+        Item sheet = dom_cssom_get_style_element_sheet(elem_item);
+        Item disabled = dom_cssom_stylesheet_get_disabled(sheet);
         return disabled.item == ITEM_NULL ? (Item){.item = ITEM_FALSE} : disabled;
     }
 
@@ -10241,8 +10231,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
 
     if (prop_id == JS_DOM_PROP_DISABLED && _is_tag(elem, "style")) {
         // HTML §4.2.6: style.disabled toggles its associated sheet, not an attribute.
-        Item sheet = js_cssom_get_style_element_sheet(elem_item);
-        js_cssom_stylesheet_set_disabled(sheet, js_is_truthy(value));
+        Item sheet = dom_cssom_get_style_element_sheet(elem_item);
+        dom_cssom_stylesheet_set_disabled(sheet, js_is_truthy(value));
         return value;
     }
 
@@ -10847,15 +10837,15 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
 }
 
 extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item value) {
-    if (js_is_rule_style_decl(elem_item)) {
+    if (dom_is_rule_style_decl(elem_item)) {
         // CSSOM style declarations are VMaps, not DOM elements; handle them
         // before DOM unwrapping so nested rule.style.x lowering stays native.
-        return js_cssom_rule_decl_set_property(elem_item, prop_name, value);
+        return dom_cssom_rule_decl_set_property(elem_item, prop_name, value);
     }
-    if (js_is_css_rule(elem_item)) {
-        Item style_obj = js_cssom_rule_get_style(elem_item);
-        if (js_is_rule_style_decl(style_obj)) {
-            return js_cssom_rule_decl_set_property(style_obj, prop_name, value);
+    if (dom_is_css_rule(elem_item)) {
+        Item style_obj = dom_cssom_rule_get_style(elem_item);
+        if (dom_is_rule_style_decl(style_obj)) {
+            return dom_cssom_rule_decl_set_property(style_obj, prop_name, value);
         }
         return ItemNull;
     }
@@ -10942,15 +10932,15 @@ extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item valu
 // ============================================================================
 
 extern "C" Item dom_get_style_property(Item elem_item, Item prop_name) {
-    if (js_is_rule_style_decl(elem_item)) {
+    if (dom_is_rule_style_decl(elem_item)) {
         // CSSOM style declarations are VMaps, not DOM elements; handle them
         // before DOM unwrapping so nested rule.style.x lowering stays native.
-        return js_cssom_rule_decl_get_property(elem_item, prop_name);
+        return dom_cssom_rule_decl_get_property(elem_item, prop_name);
     }
-    if (js_is_css_rule(elem_item)) {
-        Item style_obj = js_cssom_rule_get_style(elem_item);
-        if (js_is_rule_style_decl(style_obj)) {
-            return js_cssom_rule_decl_get_property(style_obj, prop_name);
+    if (dom_is_css_rule(elem_item)) {
+        Item style_obj = dom_cssom_rule_get_style(elem_item);
+        if (dom_is_rule_style_decl(style_obj)) {
+            return dom_cssom_rule_decl_get_property(style_obj, prop_name);
         }
         return js_name_item("");
     }
@@ -11024,7 +11014,7 @@ extern "C" Item dom_get_style_property(Item elem_item, Item prop_name) {
 
 // open-name membership for style hosts: `in` answers from the CSS property
 // table without invoking a getter (style VMaps have no ordinary shape)
-extern "C" Item js_style_css_has(Item style_item, Item prop_name) {
+extern "C" Item dom_style_css_has(Item style_item, Item prop_name) {
     (void)style_item;
     const char* prop = fn_to_cstr(prop_name);
     if (!prop || !prop[0]) return (Item){.item = b2it(false)};
@@ -11177,10 +11167,7 @@ static Item dom_svg_make_matrix_with_interface(RdtMatrix matrix,
             JS_SVG_MATRIX_FLIP_X, 0));
     js_set_key_cstr(result, "flipY", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_FLIP_Y, 0));
-    Item global = js_get_global_this();
-    Item ctor = js_get_key_default(global, js_string_key(interface_name));
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(result, proto);
+    dom_realm_apply_prototype(result, interface_name);
     return result;
 }
 JS_FORWARD_STATIC_ITEM(dom_svg_create_matrix, (void), dom_svg_make_matrix, (rdt_matrix_identity()))
@@ -11242,10 +11229,7 @@ static Item dom_svg_make_transform(Item matrix) {
     js_set_native_key(transform, js_string_key("setTranslate"), dom_svg_transform_set_translate);
     js_set_native_key(transform, js_string_key("setScale"), dom_svg_transform_set_scale);
     js_set_native_key(transform, js_string_key("setRotate"), dom_svg_transform_set_rotate);
-    Item global = js_get_global_this();
-    Item ctor = js_get_key_cstr(global, "SVGTransform");
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(transform, proto);
+    dom_realm_apply_prototype(transform, "SVGTransform");
     return transform;
 }
 JS_FORWARD_STATIC_ITEM(dom_svg_create_transform, (void), dom_svg_make_transform, (dom_svg_make_matrix(rdt_matrix_identity())))
@@ -11357,15 +11341,12 @@ static Item dom_svg_make_point(float x, float y, const char* interface_name) {
     dom_set_number_property(result, "z", 0.0f);
     dom_set_number_property(result, "w", 1.0f);
     js_set_native_key(result, js_string_key("matrixTransform"), dom_svg_point_matrix_transform);
-    Item global = js_get_global_this();
-    Item ctor = js_get_key_default(global, js_string_key(interface_name));
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(result, proto);
+    dom_realm_apply_prototype(result, interface_name);
     return result;
 }
 JS_FORWARD_STATIC_ITEM(dom_svg_create_point, (void), dom_svg_make_point, (0.0f, 0.0f, "SVGPoint"))
 
-static Item dom_point_constructor(Item x, Item y, Item z, Item w) {
+extern "C" Item dom_point_constructor(Item x, Item y, Item z, Item w) {
     Item result = dom_svg_make_point(dom_svg_number(x, 0.0f),
                                         dom_svg_number(y, 0.0f), "DOMPoint");
     dom_set_number_property(result, "z", dom_svg_number(z, 0.0f));
@@ -11373,7 +11354,7 @@ static Item dom_point_constructor(Item x, Item y, Item z, Item w) {
     return result;
 }
 
-static Item dom_matrix_constructor(Item init) {
+extern "C" Item dom_matrix_constructor(Item init) {
     RdtMatrix matrix = rdt_matrix_identity();
     if (get_type_id(init) == LMD_TYPE_ARRAY && js_array_length(init) >= 6) {
         matrix.e11 = dom_svg_number(js_elements_get_int(init, 0), 1.0f);
@@ -15531,7 +15512,7 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
     return ItemNull;
 }
 
-extern "C" Item js_classlist_get_property(Item elem_item, Item prop_name) {
+extern "C" Item dom_classlist_get_property(Item elem_item, Item prop_name) {
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
 
@@ -15551,7 +15532,7 @@ extern "C" Item js_classlist_get_property(Item elem_item, Item prop_name) {
     // numeric index → item(index)
     // (not common but classList[0] should work)
 
-    log_debug("js_classlist_get_property: unknown property '%s'", prop);
+    log_debug("dom_classlist_get_property: unknown property '%s'", prop);
     return ItemNull;
 }
 
@@ -15581,7 +15562,7 @@ static void camel_to_data_attr(const char* camel, char* buf, size_t buf_size) {
     buf[pos] = '\0';
 }
 
-extern "C" Item js_dataset_get_property(Item elem_item, Item prop_name) {
+extern "C" Item dom_dataset_get_property(Item elem_item, Item prop_name) {
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
 
@@ -15598,7 +15579,7 @@ extern "C" Item js_dataset_get_property(Item elem_item, Item prop_name) {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-extern "C" Item js_dataset_set_property(Item elem_item, Item prop_name, Item value) {
+extern "C" Item dom_dataset_set_property(Item elem_item, Item prop_name, Item value) {
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
 
@@ -15632,7 +15613,7 @@ extern "C" bool dom_dataset_set_object_property(Item dataset, Item key,
     // references to this dataset view; keep the receiver and operands precise.
     owner_root.set(js_get_key_cstr(dataset_root.get(), "__lambda_dataset_element"));
     if (!dom_unwrap_element(owner_root.get())) return false;
-    js_dataset_set_property(owner_root.get(), key_root.get(), value_root.get());
+    dom_dataset_set_property(owner_root.get(), key_root.get(), value_root.get());
     return true;
 }
 
@@ -15640,9 +15621,9 @@ extern "C" bool dom_dataset_set_object_property(Item dataset, Item key,
 // location API (v12) — document.URL / document.location
 // ============================================================================
 
-extern "C" Item js_location_get_property(Item prop_name) {
+extern "C" Item dom_location_get_property(Item prop_name) {
     if (!_js_current_document) {
-        log_debug("js_location_get_property: no document set");
+        log_debug("dom_location_get_property: no document set");
         return js_name_item("");
     }
 
@@ -15651,7 +15632,7 @@ extern "C" Item js_location_get_property(Item prop_name) {
 
     Url* url = _js_current_document->url;
     if (!url) {
-        log_debug("js_location_get_property: document has no URL");
+        log_debug("dom_location_get_property: document has no URL");
         return js_name_item("");
     }
 
@@ -15660,7 +15641,7 @@ extern "C" Item js_location_get_property(Item prop_name) {
         if (js_url_component_item(url, prop, &url_component)) return url_component;
     }
 
-    log_debug("js_location_get_property: unknown property '%s'", prop);
+    log_debug("dom_location_get_property: unknown property '%s'", prop);
     return js_name_item("");
 }
 
@@ -15895,97 +15876,20 @@ JS_FORWARD_ITEM(dom_style_remove_property_bridge, (void* dom_elem, Item prop_arg
 // surface conformance but are not used for actual collection access (which
 // is satisfied by Array .item() and indexed access).
 // ============================================================================
-JS_FORWARD_STATIC_ITEM(_coll_illegal_constructor, (Item /*first*/), js_throw_type_error, ("Illegal constructor"))
+// [moved to lambda/js/js_dom_realm.cpp — ESO79 slice 2]
 
-static void _set_iface_to_string_tag(Item proto, const char* name) {
-    if (get_type_id(proto) != LMD_TYPE_MAP || !name) return;
-    // WebIDL interface prototypes carry @@toStringTag; selector/tooltip
-    // libraries use this brand to distinguish a DOM Element from plain data.
-    js_set_key_default(proto, js_well_known_symbol_key(4), js_name_item(name));
-}
 
-static void _install_iface(Item global, const char* name) {
-    RootFrame roots(4);
-    Rooted<Item> global_root(roots, global);
-    Rooted<Item> key_root(roots, js_name_item(name));
-    Rooted<Item> ctor_root(roots,
-        js_get_key_default(global_root.get(), key_root.get()));
-    Rooted<Item> proto_root(roots, ItemNull);
-    if (js_is_callable(ctor_root.get())) {
-        proto_root.set(js_get_key_cstr(ctor_root.get(), "prototype"));
-        _set_iface_to_string_tag(proto_root.get(), name);
-        return;
-    }
-    // Interface constructors share one native illegal-constructor callback but
-    // must not share a cached JsFunction: each owns a distinct `.prototype`.
-    // WebIDL illegal constructors still have [[Construct]]; their body, rather
-    // than a missing capability, supplies the required TypeError (D6.2.2v2).
-    ctor_root.set(js_new_distinct_native_constructor(
-        _coll_illegal_constructor));
-    js_set_function_name(ctor_root.get(), key_root.get());
-    proto_root.set(js_new_object());
-    _set_iface_to_string_tag(proto_root.get(), name);
-    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-    js_initialize_native_constructor_prototype(ctor_root.get(),
-        proto_root.get());
-    js_set_key_default(global_root.get(), key_root.get(), ctor_root.get());
-}
 
-static Item _document_fragment_ctor(void) {
+extern "C" Item dom_document_fragment_ctor(void) {
     // Both construction paths must create the same detached native node so
     // fragment insertion retains the move-children invariant.
     return dom_create_document_fragment(_js_current_document);
 }
 
-template <typename Target>
-static void dom_install_value_constructor(Item global, const char* name,
-        Target target, bool set_string_tag) {
-    JS_ROOTS(roots,
-        global_root, global,
-        ctor_root, js_new_distinct_native_constructor(target),
-        proto_root, js_new_object());
-    Item name_key = js_string_key(name);
-    js_set_function_name(ctor_root.get(), name_key);
-    if (set_string_tag) _set_iface_to_string_tag(proto_root.get(), name);
-    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-    js_initialize_native_constructor_prototype(ctor_root.get(),
-        proto_root.get());
-    js_set_key_default(global_root.get(), name_key, ctor_root.get());
-}
-JS_FORWARD_STATIC_VOID( _install_document_fragment_iface, (Item global), dom_install_value_constructor, (global, "DocumentFragment", _document_fragment_ctor, true))
 
-static Item _iface_proto(Item global, const char* name) {
-    Item ctor = js_get_key_default(global, js_name_item(name));
-    if (!js_is_callable(ctor)) return ItemNull;
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
-}
 
-static void _install_nodelist_for_each(Item global) {
-    Item node_list_proto = _iface_proto(global, "NodeList");
-    Item array_ctor = js_get_key_cstr(global, "Array");
-    Item array_proto = js_get_key_cstr(array_ctor, "prototype");
-    Item array_for_each = js_get_key_cstr(array_proto, "forEach");
-    if (get_type_id(node_list_proto) == LMD_TYPE_MAP &&
-        js_is_callable(array_for_each)) {
-        // Query APIs return Arrays, but libraries feature-detect the WebIDL
-        // NodeList prototype before choosing their iteration path.
-        js_set_key_cstr(node_list_proto, "forEach", array_for_each);
-    }
-}
 
-static void _link_iface_proto(Item global, const char* name, const char* base_name) {
-    Item proto = _iface_proto(global, name);
-    Item base_proto = _iface_proto(global, base_name);
-    if (get_type_id(proto) == LMD_TYPE_MAP && get_type_id(base_proto) == LMD_TYPE_MAP) {
-        js_set_prototype(proto, base_proto);
-    }
-}
 
-static void _set_ctor_int_constant(Item ctor, const char* name, int64_t value) {
-    js_set_key_default(ctor, js_name_item(name),
-        (Item){.item = i2it(value)});
-}
 
 static bool _xpath_attr_name_matches(const char* expression, const char* attr_name) {
     if (!expression || !attr_name) return false;
@@ -16070,46 +15974,17 @@ static Item _xpath_evaluator_create_expression(Item expression, Item /*resolver*
     return compiled;
 }
 
-static Item _xpath_evaluator_ctor(void) {
+extern "C" Item dom_xpath_evaluator_ctor(void) {
     Item evaluator = js_new_object();
     Item create_expression = js_new_distinct_native_function(
         _xpath_evaluator_create_expression);
     js_set_function_name(create_expression, js_string_key("createExpression"));
     js_set_key_cstr(evaluator, "createExpression", create_expression);
 
-    Item global = js_get_global_this();
-    Item ctor = js_get_key_cstr(global, "XPathEvaluator");
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(evaluator, proto);
+    dom_realm_apply_prototype(evaluator, "XPathEvaluator");
     return evaluator;
 }
-JS_FORWARD_STATIC_VOID( _install_xpath_evaluator, (Item global), dom_install_value_constructor, (global, "XPathEvaluator", _xpath_evaluator_ctor, false))
 
-static void _install_node_iface(Item global) {
-    RootFrame roots(3);
-    Rooted<Item> global_root(roots, global);
-    Rooted<Item> ctor_root(roots,
-        js_new_distinct_native_constructor(_coll_illegal_constructor));
-    Rooted<Item> proto_root(roots, js_new_object());
-    js_set_function_name(ctor_root.get(), js_name_item("Node"));
-    _set_iface_to_string_tag(proto_root.get(), "Node");
-    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-    js_initialize_native_constructor_prototype(ctor_root.get(),
-        proto_root.get());
-    static const struct { const char* name; int value; } node_constants[] = {
-        {"ELEMENT_NODE", 1}, {"ATTRIBUTE_NODE", 2}, {"TEXT_NODE", 3},
-        {"CDATA_SECTION_NODE", 4}, {"ENTITY_REFERENCE_NODE", 5},
-        {"ENTITY_NODE", 6}, {"PROCESSING_INSTRUCTION_NODE", 7},
-        {"COMMENT_NODE", 8}, {"DOCUMENT_NODE", 9},
-        {"DOCUMENT_TYPE_NODE", 10}, {"DOCUMENT_FRAGMENT_NODE", 11},
-        {"NOTATION_NODE", 12},
-    };
-    for (size_t i = 0; i < sizeof(node_constants) / sizeof(node_constants[0]); i++) {
-        _set_ctor_int_constant(ctor_root.get(), node_constants[i].name,
-            node_constants[i].value);
-    }
-    js_set_key_cstr(global_root.get(), "Node", ctor_root.get());
-}
 
 static JsWebAnimationHost* js_web_animation_host(Item value) {
     if (get_type_id(value) == LMD_TYPE_VMAP && value.vmap &&
@@ -16241,7 +16116,7 @@ static Item js_web_animation_current_time_set(Item value) {
     return value;
 }
 
-static Item dom_element_animate(Item keyframes_item, Item options_item) {
+extern "C" Item dom_element_animate(Item keyframes_item, Item options_item) {
     DomElement* element = (DomElement*)dom_unwrap_element(js_get_this());
     if (!element || !element->doc) return ItemNull;
 
@@ -16309,90 +16184,11 @@ static Item dom_element_animate(Item keyframes_item, Item options_item) {
     return animation_root.get();
 }
 
-extern "C" void dom_install_collection_globals(void) {
-    Item global = js_get_global_this();
-    _install_iface(global, "Window");
-    _link_iface_proto(global, "Window", "EventTarget");
-    Item window_proto = _iface_proto(global, "Window");
-    if (get_type_id(window_proto) == LMD_TYPE_MAP) {
-        // The browsing-context global is the Window instance; exposing only
-        // `window` left WebIDL brand checks such as event.view instanceof Window
-        // unable to enter pointer-driven editor paths.
-        js_set_prototype(global, window_proto);
-    }
-    _install_node_iface(global);
-    // Document wrappers are module-owned, but bare WebIDL constructor lookup
-    // must still succeed before libraries inspect static Document features.
-    static const char* iface_links[][2] = {
-        {"Document", "Node"}, {"HTMLDocument", "Document"},
-        {"Element", "Node"}, {"HTMLElement", "Element"},
-        {"SVGElement", "Element"}, {"SVGGraphicsElement", "SVGElement"},
-        {"SVGSVGElement", "SVGGraphicsElement"},
-        {"SVGPathElement", "SVGGraphicsElement"},
-        {"SVGTextContentElement", "SVGGraphicsElement"},
-    };
-    for (size_t i = 0; i < sizeof(iface_links) / sizeof(iface_links[0]); i++) {
-        _install_iface(global, iface_links[i][0]);
-        _link_iface_proto(global, iface_links[i][0], iface_links[i][1]);
-    }
-    // JointJS Vectorizer gates its SVG implementation on window.SVGAngle;
-    // without this legacy WebIDL interface it installs a non-SVG fallback.
-    static const char* svg_ifaces[] = {"SVGAngle", "SVGMatrix", "SVGTransform", "SVGPoint"};
-    for (size_t i = 0; i < sizeof(svg_ifaces) / sizeof(svg_ifaces[0]); i++) {
-        _install_iface(global, svg_ifaces[i]);
-    }
-    dom_install_value_constructor(global, "DOMMatrix", dom_matrix_constructor, true);
-    dom_install_value_constructor(global, "DOMPoint", dom_point_constructor, true);
-    int html_interface_count = (int)(sizeof(s_dom_html_interfaces) /
-        sizeof(s_dom_html_interfaces[0]));
-    for (int i = 0; i < html_interface_count; i++) {
-        // Specialized HTML wrappers must inherit HTMLElement so WebIDL brand
-        // checks do not collapse every form control to the generic interface.
-        _install_iface(global, s_dom_html_interfaces[i].constructor_name);
-        _link_iface_proto(global, s_dom_html_interfaces[i].constructor_name,
-                          "HTMLElement");
-    }
-    _install_document_fragment_iface(global);
-    _link_iface_proto(global, "DocumentFragment", "Node");
-    _install_iface(global, "ShadowRoot");
-    _link_iface_proto(global, "ShadowRoot", "DocumentFragment");
-    Item element_proto = _iface_proto(global, "Element");
-    if (get_type_id(element_proto) == LMD_TYPE_MAP) {
-        // Bootstrap deliberately calls these WebIDL methods through
-        // Element.prototype.querySelector(All).call(element, selector).
-        RootFrame method_roots(2);
-        Rooted<Item> element_proto_root(method_roots, element_proto);
-        Rooted<Item> method_root(method_roots,
-            js_new_native_payload_function(dom_element_prototype_operation_body,
-                (uint64_t)JUBE_DOM_QUERY_SELECTOR, 1));
-        // Bootstrap needs these WebIDL prototype aliases before any instance
-        // exists. Each carries its direct operation payload; populating every
-        // Jube prototype here would mutate the sealed NameId module table.
-        js_set_key_cstr(element_proto_root.get(), "querySelector", method_root.get());
-        method_root.set(js_new_native_payload_function(
-            dom_element_prototype_operation_body,
-            (uint64_t)JUBE_DOM_QUERY_SELECTOR_ALL, 1));
-        js_set_key_cstr(element_proto_root.get(), "querySelectorAll", method_root.get());
-        js_set_native_key(element_proto_root.get(), js_string_key("animate"), dom_element_animate);
-    }
-    static const char* collection_ifaces[] = {
-        "Range", "Selection", "HTMLCollection", "HTMLFormControlsCollection",
-        "HTMLOptionsCollection", "NodeList",
-    };
-    for (size_t i = 0; i < sizeof(collection_ifaces) / sizeof(collection_ifaces[0]); i++) {
-        _install_iface(global, collection_ifaces[i]);
-    }
-    _install_iface(global, "CSSNestedDeclarations");
-    _install_nodelist_for_each(global);
-    _install_iface(global, "RadioNodeList");
-    _install_xpath_evaluator(global);
-    log_debug("dom_install_collection_globals: installed collection interfaces");
-}
 
 // ----------------------------------------------------------------------------
 // F-5: Option constructor — `new Option(text, value, defaultSelected, selected)`
 // ----------------------------------------------------------------------------
-static Item _option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item sel_arg) {
+extern "C" Item dom_option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item sel_arg) {
     DomDocument* doc = _js_current_document;
     if (!doc || !doc->input) return ItemNull;
     MarkBuilder builder(doc->input);
@@ -16429,16 +16225,6 @@ static Item _option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item s
     return dom_wrap_element(opt);
 }
 
-extern "C" void dom_install_option_constructor(void) {
-    Item global = js_get_global_this();
-    Item ctor = js_new_native_constructor(_option_ctor);
-    js_set_function_name(ctor, js_name_item("Option"));
-    Item proto = js_new_object();
-    js_set_key_cstr(proto, "constructor", ctor);
-    js_set_key_cstr(ctor, "prototype", proto);
-    js_set_key_cstr(global, "Option", ctor);
-    log_debug("dom_install_option_constructor: installed Option");
-}
 JS_FORWARD_VOID( dom_collections_release_context, (void), reset_live_dom_collections, ())
 
 #undef dom_collection_rt_state

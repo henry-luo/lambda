@@ -290,10 +290,15 @@ static void ast_index_visit(AstNode* child, AstNode* parent, void* opaque) {
     // that sibling's published parent so indexed scope projection remains
     // faithful to the AST ownership contract.
     AstFunctionId owner = walk->owner_function;
+    bool sibling_edge = false;
     if (parent && parent->next == child) {
+        sibling_edge = true;
         AstNodeId parent_id = ast_index_find(walk->index, parent);
         if (parent_id != AST_NODE_ID_INVALID) {
             parent = walk->index->parents[parent_id];
+            // A sibling inherits the structural parent's function owner, not
+            // the preceding sibling's owner retained by the list visitor.
+            owner = ast_index_parent_function(walk->index, parent);
         }
     }
     // Shared AST fragments can be retained by a synthetic callable (for
@@ -303,7 +308,8 @@ static void ast_index_visit(AstNode* child, AstNode* parent, void* opaque) {
     if (existing_id != AST_NODE_ID_INVALID) {
         bool is_function = ast_index_node_is_function(child);
         AstFunctionId child_owner = is_function
-            ? walk->index->owner_functions[existing_id] : walk->owner_function;
+            ? walk->index->owner_functions[existing_id]
+            : (sibling_edge ? owner : walk->owner_function);
         if ((!is_function && walk->index->owner_functions[existing_id] == child_owner) ||
                 (is_function && child_owner == walk->owner_function)) return;
         AstFunctionId previous_owner = walk->owner_function;
@@ -352,6 +358,9 @@ static void ast_index_visit(AstNode* child, AstNode* parent, void* opaque) {
             return;
         }
         walk->index->owner_functions[id] = owner;
+        walk->owner_function = owner;
+    } else if (sibling_edge) {
+        // Keep a sibling's descendants out of the preceding function's walk.
         walk->owner_function = owner;
     }
     ast_visit_core_children(child, ast_index_visit, walk);

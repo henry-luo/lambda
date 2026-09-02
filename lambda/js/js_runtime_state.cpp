@@ -72,7 +72,7 @@ static void js_reset_core_module_caches(void) {
     js_node_test_reset();
 }
 extern "C" void js_history_destroy_context(JsRuntimeState* state);
-extern "C" void js_window_dialog_reset(void);
+extern "C" void dom_window_dialog_reset(void);
 extern "C" void js_fetch_apply_bootstrap_base_path(void);
 extern "C" void js_fetch_destroy_context(JsRuntimeState* state);
 extern "C" void js_fs_pending_destroy_context(JsRuntimeState* state);
@@ -216,7 +216,7 @@ void js_runtime_state_release_heap_resources(void) {
     dom_events_reset();
     js_xhr_reset();
     js_history_reset();
-    js_window_dialog_reset();
+    dom_window_dialog_reset();
     dom_collections_release_context();
     dom_foreign_documents_release_context();
     js_fetch_reset();

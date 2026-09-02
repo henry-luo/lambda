@@ -1087,24 +1087,19 @@ RADIANT_C_API Item fn_radiant_document_root(Item node_item) {
     return doc && doc->root ? radiant_dom_wrap_node(doc->root) : ItemNull;
 }
 
+// ESO83/ES38: these three used to walk DomNode links themselves, which made the
+// waist see a *different tree* than script does -- the raw links expose
+// generated pseudo-nodes and anonymous table wrappers that the DOM core skips
+// (dom_visible_child). Both realms are script, so both must see the
+// script-visible tree; delegating to the core's property entry is what makes
+// that one traversal rather than two that quietly disagree. The call crosses
+// the ES34 seam, exactly as `closest` does below.
 RADIANT_C_API Item fn_radiant_first_element_child(Item node_item) {
-    DomNode* node = radiant_dom_node_from_item(node_item, "FIRST_ELEMENT_CHILD");
-    DomElement* elem = node && node->is_element() ? node->as_element() : nullptr;
-    if (!elem) return ItemNull;
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        if (child->is_element()) return radiant_dom_wrap_node(child->as_element());
-    }
-    return ItemNull;
+    return radiant_dom_get_property(node_item, radiant_string_item("firstElementChild"));
 }
 
 RADIANT_C_API Item fn_radiant_next_element_sibling(Item node_item) {
-    DomNode* node = radiant_dom_node_from_item(node_item, "NEXT_ELEMENT_SIBLING");
-    if (!node) return ItemNull;
-    for (DomNode* sibling = node->next_sibling; sibling;
-         sibling = sibling->next_sibling) {
-        if (sibling->is_element()) return radiant_dom_wrap_node(sibling->as_element());
-    }
-    return ItemNull;
+    return radiant_dom_get_property(node_item, radiant_string_item("nextElementSibling"));
 }
 
 // ES30: native answers only layout-coupled focus eligibility. The returned
@@ -1497,13 +1492,10 @@ RADIANT_C_API Item fn_radiant_has_attr(Item node_item, Item name_item) {
 // `closest` delegates to JUBE_DOM_CLOSEST rather than re-walking with its own
 // selector matcher, so there is exactly one implementation of the search.
 RADIANT_C_API Item fn_radiant_parent(Item node_item) {
-    DomElement* elem = radiant_dom_element_from_item(node_item, "PARENT");
-    if (!elem) return ItemNull;
-    DomNode* parent = ((DomNode*)elem)->parent;
-    // parentElement semantics: a non-element parent (the document) answers null
-    if (!parent || parent->node_type != DOM_NODE_ELEMENT) return ItemNull;
-    DomElement* parent_elem = parent->as_element();
-    return parent_elem ? radiant_dom_wrap_node(parent_elem) : ItemNull;
+    // parentElement semantics -- a non-element parent (the document) answers
+    // null -- are the core's too, so the name selects them rather than
+    // restating them here.
+    return radiant_dom_get_property(node_item, radiant_string_item("parentElement"));
 }
 
 RADIANT_C_API Item fn_radiant_closest(Item node_item, Item selector_item) {

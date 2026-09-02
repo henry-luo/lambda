@@ -476,12 +476,12 @@ static Item js_observer_new(JsObserverKind kind, Item callback, bool mutation) {
     observer_install_common_methods(observer, mutation);
     return observer->object;
 }
-JS_FORWARD_ITEM(js_mutation_observer_new, (Item callback), js_observer_new,
+JS_FORWARD_ITEM(dom_mutation_observer_new, (Item callback), js_observer_new,
     (JS_OBSERVER_MUTATION, callback, true))
-JS_FORWARD_ITEM(js_resize_observer_new, (Item callback), js_observer_new,
+JS_FORWARD_ITEM(dom_resize_observer_new, (Item callback), js_observer_new,
     (JS_OBSERVER_RESIZE, callback, false))
 
-extern "C" Item js_intersection_observer_new(Item callback, Item options) {
+extern "C" Item dom_intersection_observer_new(Item callback, Item options) {
     JsObserverState* observer = nullptr;
     JS_RETURN_IF_ERROR(observer_create(JS_OBSERVER_INTERSECTION, callback, &observer));
     if (!observer) return ItemNull;
