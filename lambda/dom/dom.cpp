@@ -9,6 +9,7 @@
  */
 
 #include "dom.h"
+#include "dom_realm_hooks.h"
 #include "dom_events.h"
 #include "dom_selection.h"
 #include "dom_history.h"
@@ -142,7 +143,7 @@ extern "C" Item radiant_dom_element_operation(Item elem_item,
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 
-static Item dom_element_prototype_operation_body(Item callee, Item this_value,
+extern "C" Item dom_element_prototype_operation_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
     (void)result_home;
     JsFunction* fn = get_type_id(callee) == LMD_TYPE_FUNC
@@ -1808,6 +1809,15 @@ static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"textarea", "HTMLTextAreaElement"},
 };
 
+extern "C" int dom_html_interface_count(void) {
+    return (int)(sizeof(s_dom_html_interfaces) / sizeof(s_dom_html_interfaces[0]));
+}
+
+extern "C" const char* dom_html_interface_ctor_name(int index) {
+    if (index < 0 || index >= dom_html_interface_count()) return nullptr;
+    return s_dom_html_interfaces[index].constructor_name;
+}
+
 static const char* dom_html_interface_name(DomElement* elem) {
     if (!elem || !elem->tag_name || elem->tag_name[0] == '#') return nullptr;
     int count = (int)(sizeof(s_dom_html_interfaces) /
@@ -3348,7 +3358,7 @@ extern "C" void dom_window_dialog_reset(void) {
 
 // window.prompt(message, default) — positional args (unused); returns the next
 // seeded response as a JS string, or null (empty queue / seeded Cancel).
-static Item js_window_prompt(Item message_item, Item default_item) {
+extern "C" Item dom_window_prompt(Item message_item, Item default_item) {
     (void)message_item; (void)default_item;
     if (!js_active_runtime_state) return ItemNull;
     if (s_prompt_head == s_prompt_tail) return ItemNull;
@@ -3364,15 +3374,7 @@ static Item js_window_prompt(Item message_item, Item default_item) {
 #undef s_prompt_head
 #undef s_prompt_tail
 
-static void dom_install_window_dialog_globals(void) {
-    Item global = js_get_global_this();
-    Item fn = js_new_native_function(js_window_prompt);
-    js_set_key_cstr(global, "prompt", fn);
-    Item window = js_get_key_cstr(global, "window");
-    if (get_type_id(window) == LMD_TYPE_MAP) {
-        js_set_key_cstr(window, "prompt", fn);
-    }
-}
+// [dom_install_window_dialog_globals moved to lambda/js/js_dom_realm.cpp]
 
 // ----------------------------------------------------------------------------
 // Iframe `load` event synthesis. After an <iframe> is inserted into the
@@ -3840,19 +3842,8 @@ extern "C" Item dom_get_computed_style(Item elem_item, Item pseudo_item) {
 
     return wrapper;
 }
-JS_FORWARD_STATIC_ITEM(js_window_get_computed_style, (Item elem_item, Item pseudo_item), dom_get_computed_style, (elem_item, pseudo_item))
 
-static void dom_install_window_computed_style_global(void) {
-    Item global = js_get_global_this();
-    Item key = js_string_key("getComputedStyle");
-    Item existing = js_get_key_default(global, key);
-    if (js_is_callable(existing)) return;
-    Item fn = js_new_native_function(js_window_get_computed_style);
-    js_set_function_name(fn, key);
-    // getComputedStyle is a Window/global function now; direct MIR DOM shims
-    // were removed so calls resolve through ordinary property dispatch.
-    js_set_key_default(global, key, fn);
-}
+// [dom_install_window_computed_style_global moved to lambda/js/js_dom_realm.cpp]
 
 // ============================================================================
 // CSS var() Resolution for Custom Properties
@@ -11355,7 +11346,7 @@ static Item dom_svg_make_point(float x, float y, const char* interface_name) {
 }
 JS_FORWARD_STATIC_ITEM(dom_svg_create_point, (void), dom_svg_make_point, (0.0f, 0.0f, "SVGPoint"))
 
-static Item dom_point_constructor(Item x, Item y, Item z, Item w) {
+extern "C" Item dom_point_constructor(Item x, Item y, Item z, Item w) {
     Item result = dom_svg_make_point(dom_svg_number(x, 0.0f),
                                         dom_svg_number(y, 0.0f), "DOMPoint");
     dom_set_number_property(result, "z", dom_svg_number(z, 0.0f));
@@ -11363,7 +11354,7 @@ static Item dom_point_constructor(Item x, Item y, Item z, Item w) {
     return result;
 }
 
-static Item dom_matrix_constructor(Item init) {
+extern "C" Item dom_matrix_constructor(Item init) {
     RdtMatrix matrix = rdt_matrix_identity();
     if (get_type_id(init) == LMD_TYPE_ARRAY && js_array_length(init) >= 6) {
         matrix.e11 = dom_svg_number(js_elements_get_int(init, 0), 1.0f);
@@ -15885,97 +15876,20 @@ JS_FORWARD_ITEM(dom_style_remove_property_bridge, (void* dom_elem, Item prop_arg
 // surface conformance but are not used for actual collection access (which
 // is satisfied by Array .item() and indexed access).
 // ============================================================================
-JS_FORWARD_STATIC_ITEM(_coll_illegal_constructor, (Item /*first*/), js_throw_type_error, ("Illegal constructor"))
+// [moved to lambda/js/js_dom_realm.cpp — ESO79 slice 2]
 
-static void _set_iface_to_string_tag(Item proto, const char* name) {
-    if (get_type_id(proto) != LMD_TYPE_MAP || !name) return;
-    // WebIDL interface prototypes carry @@toStringTag; selector/tooltip
-    // libraries use this brand to distinguish a DOM Element from plain data.
-    js_set_key_default(proto, js_well_known_symbol_key(4), js_name_item(name));
-}
 
-static void _install_iface(Item global, const char* name) {
-    RootFrame roots(4);
-    Rooted<Item> global_root(roots, global);
-    Rooted<Item> key_root(roots, js_name_item(name));
-    Rooted<Item> ctor_root(roots,
-        js_get_key_default(global_root.get(), key_root.get()));
-    Rooted<Item> proto_root(roots, ItemNull);
-    if (js_is_callable(ctor_root.get())) {
-        proto_root.set(js_get_key_cstr(ctor_root.get(), "prototype"));
-        _set_iface_to_string_tag(proto_root.get(), name);
-        return;
-    }
-    // Interface constructors share one native illegal-constructor callback but
-    // must not share a cached JsFunction: each owns a distinct `.prototype`.
-    // WebIDL illegal constructors still have [[Construct]]; their body, rather
-    // than a missing capability, supplies the required TypeError (D6.2.2v2).
-    ctor_root.set(js_new_distinct_native_constructor(
-        _coll_illegal_constructor));
-    js_set_function_name(ctor_root.get(), key_root.get());
-    proto_root.set(js_new_object());
-    _set_iface_to_string_tag(proto_root.get(), name);
-    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-    js_initialize_native_constructor_prototype(ctor_root.get(),
-        proto_root.get());
-    js_set_key_default(global_root.get(), key_root.get(), ctor_root.get());
-}
 
-static Item _document_fragment_ctor(void) {
+extern "C" Item dom_document_fragment_ctor(void) {
     // Both construction paths must create the same detached native node so
     // fragment insertion retains the move-children invariant.
     return dom_create_document_fragment(_js_current_document);
 }
 
-template <typename Target>
-static void dom_install_value_constructor(Item global, const char* name,
-        Target target, bool set_string_tag) {
-    JS_ROOTS(roots,
-        global_root, global,
-        ctor_root, js_new_distinct_native_constructor(target),
-        proto_root, js_new_object());
-    Item name_key = js_string_key(name);
-    js_set_function_name(ctor_root.get(), name_key);
-    if (set_string_tag) _set_iface_to_string_tag(proto_root.get(), name);
-    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-    js_initialize_native_constructor_prototype(ctor_root.get(),
-        proto_root.get());
-    js_set_key_default(global_root.get(), name_key, ctor_root.get());
-}
-JS_FORWARD_STATIC_VOID( _install_document_fragment_iface, (Item global), dom_install_value_constructor, (global, "DocumentFragment", _document_fragment_ctor, true))
 
-static Item _iface_proto(Item global, const char* name) {
-    Item ctor = js_get_key_default(global, js_name_item(name));
-    if (!js_is_callable(ctor)) return ItemNull;
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
-}
 
-static void _install_nodelist_for_each(Item global) {
-    Item node_list_proto = _iface_proto(global, "NodeList");
-    Item array_ctor = js_get_key_cstr(global, "Array");
-    Item array_proto = js_get_key_cstr(array_ctor, "prototype");
-    Item array_for_each = js_get_key_cstr(array_proto, "forEach");
-    if (get_type_id(node_list_proto) == LMD_TYPE_MAP &&
-        js_is_callable(array_for_each)) {
-        // Query APIs return Arrays, but libraries feature-detect the WebIDL
-        // NodeList prototype before choosing their iteration path.
-        js_set_key_cstr(node_list_proto, "forEach", array_for_each);
-    }
-}
 
-static void _link_iface_proto(Item global, const char* name, const char* base_name) {
-    Item proto = _iface_proto(global, name);
-    Item base_proto = _iface_proto(global, base_name);
-    if (get_type_id(proto) == LMD_TYPE_MAP && get_type_id(base_proto) == LMD_TYPE_MAP) {
-        js_set_prototype(proto, base_proto);
-    }
-}
 
-static void _set_ctor_int_constant(Item ctor, const char* name, int64_t value) {
-    js_set_key_default(ctor, js_name_item(name),
-        (Item){.item = i2it(value)});
-}
 
 static bool _xpath_attr_name_matches(const char* expression, const char* attr_name) {
     if (!expression || !attr_name) return false;
@@ -16060,7 +15974,7 @@ static Item _xpath_evaluator_create_expression(Item expression, Item /*resolver*
     return compiled;
 }
 
-static Item _xpath_evaluator_ctor(void) {
+extern "C" Item dom_xpath_evaluator_ctor(void) {
     Item evaluator = js_new_object();
     Item create_expression = js_new_distinct_native_function(
         _xpath_evaluator_create_expression);
@@ -16070,33 +15984,7 @@ static Item _xpath_evaluator_ctor(void) {
     dom_realm_apply_prototype(evaluator, "XPathEvaluator");
     return evaluator;
 }
-JS_FORWARD_STATIC_VOID( _install_xpath_evaluator, (Item global), dom_install_value_constructor, (global, "XPathEvaluator", _xpath_evaluator_ctor, false))
 
-static void _install_node_iface(Item global) {
-    RootFrame roots(3);
-    Rooted<Item> global_root(roots, global);
-    Rooted<Item> ctor_root(roots,
-        js_new_distinct_native_constructor(_coll_illegal_constructor));
-    Rooted<Item> proto_root(roots, js_new_object());
-    js_set_function_name(ctor_root.get(), js_name_item("Node"));
-    _set_iface_to_string_tag(proto_root.get(), "Node");
-    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-    js_initialize_native_constructor_prototype(ctor_root.get(),
-        proto_root.get());
-    static const struct { const char* name; int value; } node_constants[] = {
-        {"ELEMENT_NODE", 1}, {"ATTRIBUTE_NODE", 2}, {"TEXT_NODE", 3},
-        {"CDATA_SECTION_NODE", 4}, {"ENTITY_REFERENCE_NODE", 5},
-        {"ENTITY_NODE", 6}, {"PROCESSING_INSTRUCTION_NODE", 7},
-        {"COMMENT_NODE", 8}, {"DOCUMENT_NODE", 9},
-        {"DOCUMENT_TYPE_NODE", 10}, {"DOCUMENT_FRAGMENT_NODE", 11},
-        {"NOTATION_NODE", 12},
-    };
-    for (size_t i = 0; i < sizeof(node_constants) / sizeof(node_constants[0]); i++) {
-        _set_ctor_int_constant(ctor_root.get(), node_constants[i].name,
-            node_constants[i].value);
-    }
-    js_set_key_cstr(global_root.get(), "Node", ctor_root.get());
-}
 
 static JsWebAnimationHost* js_web_animation_host(Item value) {
     if (get_type_id(value) == LMD_TYPE_VMAP && value.vmap &&
@@ -16228,7 +16116,7 @@ static Item js_web_animation_current_time_set(Item value) {
     return value;
 }
 
-static Item dom_element_animate(Item keyframes_item, Item options_item) {
+extern "C" Item dom_element_animate(Item keyframes_item, Item options_item) {
     DomElement* element = (DomElement*)dom_unwrap_element(js_get_this());
     if (!element || !element->doc) return ItemNull;
 
@@ -16296,90 +16184,11 @@ static Item dom_element_animate(Item keyframes_item, Item options_item) {
     return animation_root.get();
 }
 
-extern "C" void dom_install_collection_globals(void) {
-    Item global = js_get_global_this();
-    _install_iface(global, "Window");
-    _link_iface_proto(global, "Window", "EventTarget");
-    Item window_proto = _iface_proto(global, "Window");
-    if (get_type_id(window_proto) == LMD_TYPE_MAP) {
-        // The browsing-context global is the Window instance; exposing only
-        // `window` left WebIDL brand checks such as event.view instanceof Window
-        // unable to enter pointer-driven editor paths.
-        js_set_prototype(global, window_proto);
-    }
-    _install_node_iface(global);
-    // Document wrappers are module-owned, but bare WebIDL constructor lookup
-    // must still succeed before libraries inspect static Document features.
-    static const char* iface_links[][2] = {
-        {"Document", "Node"}, {"HTMLDocument", "Document"},
-        {"Element", "Node"}, {"HTMLElement", "Element"},
-        {"SVGElement", "Element"}, {"SVGGraphicsElement", "SVGElement"},
-        {"SVGSVGElement", "SVGGraphicsElement"},
-        {"SVGPathElement", "SVGGraphicsElement"},
-        {"SVGTextContentElement", "SVGGraphicsElement"},
-    };
-    for (size_t i = 0; i < sizeof(iface_links) / sizeof(iface_links[0]); i++) {
-        _install_iface(global, iface_links[i][0]);
-        _link_iface_proto(global, iface_links[i][0], iface_links[i][1]);
-    }
-    // JointJS Vectorizer gates its SVG implementation on window.SVGAngle;
-    // without this legacy WebIDL interface it installs a non-SVG fallback.
-    static const char* svg_ifaces[] = {"SVGAngle", "SVGMatrix", "SVGTransform", "SVGPoint"};
-    for (size_t i = 0; i < sizeof(svg_ifaces) / sizeof(svg_ifaces[0]); i++) {
-        _install_iface(global, svg_ifaces[i]);
-    }
-    dom_install_value_constructor(global, "DOMMatrix", dom_matrix_constructor, true);
-    dom_install_value_constructor(global, "DOMPoint", dom_point_constructor, true);
-    int html_interface_count = (int)(sizeof(s_dom_html_interfaces) /
-        sizeof(s_dom_html_interfaces[0]));
-    for (int i = 0; i < html_interface_count; i++) {
-        // Specialized HTML wrappers must inherit HTMLElement so WebIDL brand
-        // checks do not collapse every form control to the generic interface.
-        _install_iface(global, s_dom_html_interfaces[i].constructor_name);
-        _link_iface_proto(global, s_dom_html_interfaces[i].constructor_name,
-                          "HTMLElement");
-    }
-    _install_document_fragment_iface(global);
-    _link_iface_proto(global, "DocumentFragment", "Node");
-    _install_iface(global, "ShadowRoot");
-    _link_iface_proto(global, "ShadowRoot", "DocumentFragment");
-    Item element_proto = _iface_proto(global, "Element");
-    if (get_type_id(element_proto) == LMD_TYPE_MAP) {
-        // Bootstrap deliberately calls these WebIDL methods through
-        // Element.prototype.querySelector(All).call(element, selector).
-        RootFrame method_roots(2);
-        Rooted<Item> element_proto_root(method_roots, element_proto);
-        Rooted<Item> method_root(method_roots,
-            js_new_native_payload_function(dom_element_prototype_operation_body,
-                (uint64_t)JUBE_DOM_QUERY_SELECTOR, 1));
-        // Bootstrap needs these WebIDL prototype aliases before any instance
-        // exists. Each carries its direct operation payload; populating every
-        // Jube prototype here would mutate the sealed NameId module table.
-        js_set_key_cstr(element_proto_root.get(), "querySelector", method_root.get());
-        method_root.set(js_new_native_payload_function(
-            dom_element_prototype_operation_body,
-            (uint64_t)JUBE_DOM_QUERY_SELECTOR_ALL, 1));
-        js_set_key_cstr(element_proto_root.get(), "querySelectorAll", method_root.get());
-        js_set_native_key(element_proto_root.get(), js_string_key("animate"), dom_element_animate);
-    }
-    static const char* collection_ifaces[] = {
-        "Range", "Selection", "HTMLCollection", "HTMLFormControlsCollection",
-        "HTMLOptionsCollection", "NodeList",
-    };
-    for (size_t i = 0; i < sizeof(collection_ifaces) / sizeof(collection_ifaces[0]); i++) {
-        _install_iface(global, collection_ifaces[i]);
-    }
-    _install_iface(global, "CSSNestedDeclarations");
-    _install_nodelist_for_each(global);
-    _install_iface(global, "RadioNodeList");
-    _install_xpath_evaluator(global);
-    log_debug("dom_install_collection_globals: installed collection interfaces");
-}
 
 // ----------------------------------------------------------------------------
 // F-5: Option constructor — `new Option(text, value, defaultSelected, selected)`
 // ----------------------------------------------------------------------------
-static Item _option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item sel_arg) {
+extern "C" Item dom_option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item sel_arg) {
     DomDocument* doc = _js_current_document;
     if (!doc || !doc->input) return ItemNull;
     MarkBuilder builder(doc->input);
@@ -16416,16 +16225,6 @@ static Item _option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item s
     return dom_wrap_element(opt);
 }
 
-extern "C" void dom_install_option_constructor(void) {
-    Item global = js_get_global_this();
-    Item ctor = js_new_native_constructor(_option_ctor);
-    js_set_function_name(ctor, js_name_item("Option"));
-    Item proto = js_new_object();
-    js_set_key_cstr(proto, "constructor", ctor);
-    js_set_key_cstr(ctor, "prototype", proto);
-    js_set_key_cstr(global, "Option", ctor);
-    log_debug("dom_install_option_constructor: installed Option");
-}
 JS_FORWARD_VOID( dom_collections_release_context, (void), reset_live_dom_collections, ())
 
 #undef dom_collection_rt_state
