@@ -402,6 +402,29 @@ void dom_schedule_microtask(Item callback);
 /** Run `callback` on the next task turn (zero-delay timer). */
 void dom_schedule_task(Item callback);
 
+// -----------------------------------------------------------------------------
+// Realm-prototype seam (ESO79/ES33)
+//
+// A DOM value built by the core often has to carry the realm's exposed
+// interface prototype, so that `range instanceof Range` and friends hold. That
+// lookup -- read <ctor_name> off the realm global, take its `prototype` -- is
+// JS object-model knowledge, and it was open-coded identically at eight sites
+// across dom.cpp, dom_selection.cpp and dom_cssom.cpp. The core now names what
+// it wants; the adapter in lambda/js/ knows where a realm keeps it.
+//
+// All three answer harmlessly when there is no realm (a Lambda-only document),
+// which is what lets these construction paths stay realm-neutral.
+// -----------------------------------------------------------------------------
+
+/** The realm's `<ctor_name>` constructor, or ItemNull when absent. */
+Item dom_realm_constructor(const char* ctor_name);
+
+/** The realm's `<ctor_name>.prototype`, or ItemNull when absent. */
+Item dom_realm_constructor_prototype(const char* ctor_name);
+
+/** Give `value` the realm prototype for `<ctor_name>`; no-op when absent. */
+void dom_realm_apply_prototype(Item value, const char* ctor_name);
+
 #ifdef __cplusplus
 struct DomDocument;
 struct JsRuntimeState;

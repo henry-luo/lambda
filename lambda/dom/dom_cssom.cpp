@@ -220,15 +220,9 @@ static Item wrap_nested_declarations(CssRule* rule, Pool* pool) {
     Rooted<Item> result_root(roots,
         js_new_object_with_class(JS_CLASS_CSS_NESTED_DECLARATIONS));
     Rooted<Item> style_root(roots, wrap_rule_decl(rule, pool));
-    Rooted<Item> global_root(roots, js_get_global_this());
-    Rooted<Item> ctor_root(roots,
-        js_get_key_cstr(global_root.get(), "CSSNestedDeclarations"));
-    Rooted<Item> proto_root(roots, js_get_key_cstr(ctor_root.get(), "prototype"));
     // Class metadata does not participate in ordinary instanceof; CSSOM
     // wrappers must inherit the realm's exposed interface prototype.
-    if (get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
-        js_set_prototype(result_root.get(), proto_root.get());
-    }
+    dom_realm_apply_prototype(result_root.get(), "CSSNestedDeclarations");
     js_set_key_cstr(result_root.get(), "style", style_root.get());
     return result_root.get();
 }

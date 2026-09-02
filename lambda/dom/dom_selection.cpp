@@ -193,13 +193,10 @@ static bool selection_state_set(DomSelection* s,
 }
 JS_FORWARD_STATIC_RETURN(bool, selection_state_clear, (DomSelection* s,                                   const char** out_exception), selection_state_set, (s, nullptr, nullptr, out_exception))
 
-static Item get_dom_constructor_prototype(const char* ctor_name) {
-    Item global = js_get_global_this();
-    Item ctor = js_get_key_default(global, make_key(ctor_name));
-    if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
-}
+// The realm lookup this used to open-code now lives behind dom.h's seam, so
+// Range/Selection wrappers and the CSSOM/SVG builders share one answer.
+JS_FORWARD_STATIC_ITEM(get_dom_constructor_prototype, (const char* ctor_name),
+    dom_realm_constructor_prototype, (ctor_name))
 
 #define JS_DOM_PROTOTYPE_VALUE(name, class_name) \
     extern "C" Item name(void) { return get_dom_constructor_prototype(class_name); }

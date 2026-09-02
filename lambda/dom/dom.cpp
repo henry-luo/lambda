@@ -1872,14 +1872,13 @@ extern "C" Item dom_get_prototype_value(Item obj) {
                     ? "HTMLElement" : "Element"));
         }
     }
-    Item global = js_get_global_this();
-    Item ctor = js_get_key_default(global, js_string_key(ctor_name));
-    if (get_type_id(ctor) != LMD_TYPE_FUNC && strcmp(ctor_name, "HTMLElement") == 0) {
-        ctor = js_get_key_cstr(global, "Element");
+    // A realm that publishes Element but not HTMLElement still has to answer
+    // for HTML elements, so the miss falls back one interface up.
+    Item proto = dom_realm_constructor_prototype(ctor_name);
+    if (proto.item == ItemNull.item && strcmp(ctor_name, "HTMLElement") == 0) {
+        proto = dom_realm_constructor_prototype("Element");
     }
-    if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
+    return proto;
 }
 
 extern "C" Item radiant_dom_wrap_node(void* dom_elem);
@@ -2336,8 +2335,8 @@ static void _decorate_dom_collection(Item collection, const char* ctor_name) {
     if (!js_is_callable(existing)) {
         js_set_native_key(collection, named_key, _collection_named_item);
     }
-    Item ctor = js_get_key_default(js_get_global_this(), js_name_item(ctor_name));
-    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+    Item ctor = dom_realm_constructor(ctor_name);
+    if (ctor.item != ItemNull.item) {
         js_set_key_cstr(collection, "constructor", ctor);
     }
 }
@@ -11177,10 +11176,7 @@ static Item dom_svg_make_matrix_with_interface(RdtMatrix matrix,
             JS_SVG_MATRIX_FLIP_X, 0));
     js_set_key_cstr(result, "flipY", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_FLIP_Y, 0));
-    Item global = js_get_global_this();
-    Item ctor = js_get_key_default(global, js_string_key(interface_name));
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(result, proto);
+    dom_realm_apply_prototype(result, interface_name);
     return result;
 }
 JS_FORWARD_STATIC_ITEM(dom_svg_create_matrix, (void), dom_svg_make_matrix, (rdt_matrix_identity()))
@@ -11242,10 +11238,7 @@ static Item dom_svg_make_transform(Item matrix) {
     js_set_native_key(transform, js_string_key("setTranslate"), dom_svg_transform_set_translate);
     js_set_native_key(transform, js_string_key("setScale"), dom_svg_transform_set_scale);
     js_set_native_key(transform, js_string_key("setRotate"), dom_svg_transform_set_rotate);
-    Item global = js_get_global_this();
-    Item ctor = js_get_key_cstr(global, "SVGTransform");
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(transform, proto);
+    dom_realm_apply_prototype(transform, "SVGTransform");
     return transform;
 }
 JS_FORWARD_STATIC_ITEM(dom_svg_create_transform, (void), dom_svg_make_transform, (dom_svg_make_matrix(rdt_matrix_identity())))
@@ -11357,10 +11350,7 @@ static Item dom_svg_make_point(float x, float y, const char* interface_name) {
     dom_set_number_property(result, "z", 0.0f);
     dom_set_number_property(result, "w", 1.0f);
     js_set_native_key(result, js_string_key("matrixTransform"), dom_svg_point_matrix_transform);
-    Item global = js_get_global_this();
-    Item ctor = js_get_key_default(global, js_string_key(interface_name));
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(result, proto);
+    dom_realm_apply_prototype(result, interface_name);
     return result;
 }
 JS_FORWARD_STATIC_ITEM(dom_svg_create_point, (void), dom_svg_make_point, (0.0f, 0.0f, "SVGPoint"))
@@ -16077,10 +16067,7 @@ static Item _xpath_evaluator_ctor(void) {
     js_set_function_name(create_expression, js_string_key("createExpression"));
     js_set_key_cstr(evaluator, "createExpression", create_expression);
 
-    Item global = js_get_global_this();
-    Item ctor = js_get_key_cstr(global, "XPathEvaluator");
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(evaluator, proto);
+    dom_realm_apply_prototype(evaluator, "XPathEvaluator");
     return evaluator;
 }
 JS_FORWARD_STATIC_VOID( _install_xpath_evaluator, (Item global), dom_install_value_constructor, (global, "XPathEvaluator", _xpath_evaluator_ctor, false))
