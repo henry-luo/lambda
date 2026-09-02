@@ -156,6 +156,28 @@ TEST(JsInterpreter, ExplicitAstSelectorUsesTheSharedScriptPath) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsMir, CapturesTopLevelForOfBindingsAfterSiblingFunctionDeclaration) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+
+    const char source[] =
+        "function invoke(callback) { return callback(); } "
+        "let sum = 0; "
+        "for (let value of [3, 4]) { "
+        "sum += invoke(function() { return value; }); } "
+        "globalThis.__lambdaForOfClosureResult = sum;";
+    Item result = transpile_js_to_mir(&runtime, source, "for-of-closure.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_FALSE(item_is_error(result));
+    Item sum = js_get_key_default(js_get_global_this(),
+        js_make_string("__lambdaForOfClosureResult"));
+    EXPECT_EQ(sum.item, flt2it(7.0).item);
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, SeparateClassicScriptsReadHarnessGlobalLexicalBindings) {
     Runtime runtime = {};
     runtime_init(&runtime);

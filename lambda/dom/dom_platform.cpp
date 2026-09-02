@@ -177,8 +177,8 @@ static Item storage_object(JsStorageState* storage) {
     js_object_define_property(object, js_make_string("length"), descriptor);
     return object;
 }
-JS_FORWARD_ITEM(js_storage_local_object, (void), storage_object, (&dom_local_storage))
-JS_FORWARD_ITEM(js_storage_session_object, (void), storage_object, (&dom_session_storage))
+JS_FORWARD_ITEM(dom_storage_local_object, (void), storage_object, (&dom_local_storage))
+JS_FORWARD_ITEM(dom_storage_session_object, (void), storage_object, (&dom_session_storage))
 
 static void reset_storage(JsStorageState* storage) {
     for (int i = 0; i < storage->count; i++) {
@@ -188,7 +188,7 @@ static void reset_storage(JsStorageState* storage) {
     memset(storage, 0, sizeof(*storage));
 }
 
-extern "C" void js_storage_reset(void) {
+extern "C" void dom_storage_reset(void) {
     reset_storage(&dom_local_storage);
     reset_storage(&dom_session_storage);
 }
@@ -225,7 +225,7 @@ static Item js_media_query_set_listener(Item callback, bool add) {
 JS_FORWARD_STATIC_ITEM(js_media_query_add_listener, (Item callback), js_media_query_set_listener, (callback, true))
 JS_FORWARD_STATIC_ITEM(js_media_query_remove_listener, (Item callback), js_media_query_set_listener, (callback, false))
 
-extern "C" Item js_match_media(Item query_item) {
+extern "C" Item dom_match_media(Item query_item) {
     if (dom_media_query_count >= JS_MEDIA_QUERY_CAP) {
         log_error("match-media: query capacity %d exhausted", JS_MEDIA_QUERY_CAP);
         return ItemNull;
@@ -260,7 +260,7 @@ extern "C" Item js_match_media(Item query_item) {
     return state->object;
 }
 
-extern "C" void js_match_media_notify_resize(void) {
+extern "C" void dom_match_media_notify_resize(void) {
     for (int i = 0; i < dom_media_query_count; i++) {
         JsMediaQueryState* state = &dom_media_queries[i];
         bool next = dom_evaluate_media_query(state->query);
@@ -277,7 +277,7 @@ extern "C" void js_match_media_notify_resize(void) {
     }
 }
 
-extern "C" void js_match_media_reset(void) {
+extern "C" void dom_match_media_reset(void) {
     for (int i = 0; i < dom_media_query_count; i++) {
         if (dom_media_queries[i].query) mem_free(dom_media_queries[i].query);
     }

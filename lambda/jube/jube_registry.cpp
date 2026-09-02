@@ -935,12 +935,12 @@ extern "C" void* dom_get_or_create_doc_node(void* doc);
 extern "C" Item dom_document_proxy_for_doc_bridge(void* doc);
 extern "C" void* dom_unwrap_element_impl(Item item);
 extern "C" void dom_initialize_node_wrapper(void* dom_elem);
-extern "C" bool js_is_css_namespace(Item item);
-extern "C" bool js_is_inline_style_item(Item item);
-extern "C" bool js_is_computed_style_item(Item item);
-extern "C" bool js_is_stylesheet(Item item);
-extern "C" bool js_is_css_rule(Item item);
-extern "C" bool js_is_rule_style_decl(Item item);
+extern "C" bool dom_is_css_namespace(Item item);
+extern "C" bool dom_is_inline_style_item(Item item);
+extern "C" bool dom_is_computed_style_item(Item item);
+extern "C" bool dom_is_stylesheet(Item item);
+extern "C" bool dom_is_css_rule(Item item);
+extern "C" bool dom_is_rule_style_decl(Item item);
 extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name);
 extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value);
 extern "C" Item dom_element_operation_impl(Item elem_item,
@@ -949,15 +949,15 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
 extern "C" Item dom_create_tree_walker_bridge(Item root, Item what_to_show);
 extern "C" Item dom_document_create_event_bridge(Item interface_name);
 extern "C" Item dom_document_exec_command_bridge(Item command, Item value);
-extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name);
+extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name);
 extern "C" Item dom_get_prototype_value(Item obj);
-extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
-extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value);
-extern "C" void* js_get_foreign_doc(Item item);
+extern "C" Item dom_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
+extern "C" Item dom_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value);
+extern "C" void* dom_get_foreign_doc(Item item);
 extern "C" void* dom_swap_active_document(void* new_doc);
 extern "C" void dom_restore_active_document(void* prev_doc);
-extern "C" Item js_document_proxy_get_property(Item prop_name);
-extern "C" Item js_document_proxy_set_property(Item prop_name, Item value);
+extern "C" Item dom_document_proxy_get_property(Item prop_name);
+extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value);
 extern "C" bool dom_item_is_range(Item item);
 extern "C" bool dom_item_is_selection(Item item);
 extern "C" Item dom_range_get_prototype_value(void);
@@ -1033,7 +1033,7 @@ extern "C" Item dom_document_element_from_point_bridge(void* doc, Item x, Item y
 extern "C" Item dom_create_range(void);
 extern "C" Item dom_get_selection(void);
 extern "C" Item dom_get_selection_function_for_document(void* doc);
-extern "C" bool js_doc_has_browsing_context(void* doc);
+extern "C" bool dom_doc_has_browsing_context(void* doc);
 extern "C" Item dom_document_fonts_bridge(void);
 extern "C" Item dom_document_stylesheets_bridge(void);
 extern "C" Item dom_document_default_view_bridge(void* doc);
@@ -1057,28 +1057,28 @@ extern "C" Item dom_insert_adjacent_html_bridge(void* elem, Item position, Item 
 extern "C" Item dom_append_variadic_bridge(void* elem, Item* args, int argc);
 extern "C" Item dom_prepend_variadic_bridge(void* elem, Item* args, int argc);
 // DOM3 Phase 2: receiver-explicit CSSOM behavior entries
-extern "C" Item js_cssom_stylesheet_get_css_rules(Item sheet);
-extern "C" Item js_cssom_stylesheet_get_length(Item sheet);
-extern "C" Item js_cssom_stylesheet_get_disabled(Item sheet);
-extern "C" Item js_cssom_stylesheet_get_type(Item sheet);
-extern "C" Item js_cssom_stylesheet_get_href(Item sheet);
-extern "C" Item js_cssom_stylesheet_get_title(Item sheet);
-extern "C" Item js_cssom_stylesheet_index(Item sheet, int64_t index);
-extern "C" Item js_cssom_insert_rule(Item sheet, Item text, Item index);
-extern "C" Item js_cssom_delete_rule(Item sheet, Item index);
-extern "C" Item js_cssom_rule_get_selector_text(Item rule);
-extern "C" Item js_cssom_rule_set_selector_text(Item rule, Item value);
-extern "C" Item js_cssom_rule_get_style(Item rule);
-extern "C" Item js_cssom_rule_get_css_rules(Item rule);
-extern "C" Item js_cssom_rule_get_css_text(Item rule);
-extern "C" Item js_cssom_rule_get_type(Item rule);
-extern "C" Item js_cssom_rule_get_parent_rule(Item rule);
-extern "C" Item js_cssom_rule_decl_remove_property(Item decl, Item prop);
-extern "C" Item js_cssom_decl_css_has(Item decl, Item prop);
+extern "C" Item dom_cssom_stylesheet_get_css_rules(Item sheet);
+extern "C" Item dom_cssom_stylesheet_get_length(Item sheet);
+extern "C" Item dom_cssom_stylesheet_get_disabled(Item sheet);
+extern "C" Item dom_cssom_stylesheet_get_type(Item sheet);
+extern "C" Item dom_cssom_stylesheet_get_href(Item sheet);
+extern "C" Item dom_cssom_stylesheet_get_title(Item sheet);
+extern "C" Item dom_cssom_stylesheet_index(Item sheet, int64_t index);
+extern "C" Item dom_cssom_insert_rule(Item sheet, Item text, Item index);
+extern "C" Item dom_cssom_delete_rule(Item sheet, Item index);
+extern "C" Item dom_cssom_rule_get_selector_text(Item rule);
+extern "C" Item dom_cssom_rule_set_selector_text(Item rule, Item value);
+extern "C" Item dom_cssom_rule_get_style(Item rule);
+extern "C" Item dom_cssom_rule_get_css_rules(Item rule);
+extern "C" Item dom_cssom_rule_get_css_text(Item rule);
+extern "C" Item dom_cssom_rule_get_type(Item rule);
+extern "C" Item dom_cssom_rule_get_parent_rule(Item rule);
+extern "C" Item dom_cssom_rule_decl_remove_property(Item decl, Item prop);
+extern "C" Item dom_cssom_decl_css_has(Item decl, Item prop);
 // DOM3 Phase 3: style-host behavior entries
 extern "C" Item dom_get_style_property(Item elem_item, Item prop_name);
 extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item value);
-extern "C" Item js_style_css_has(Item style_item, Item prop_name);
+extern "C" Item dom_style_css_has(Item style_item, Item prop_name);
 // DOM3 Phase 1: receiver-explicit Range/Selection behavior entries
 extern "C" Item js_range_get_start_container(Item self);
 extern "C" Item js_range_get_start_offset(Item self);
@@ -1511,16 +1511,16 @@ static const JubeHostDomAPI jube_host_dom_api = {
     dom_document_proxy_for_doc_bridge,
     dom_unwrap_element_impl,
     dom_initialize_node_wrapper,
-    js_is_css_namespace,
-    js_is_inline_style_item,
-    js_is_computed_style_item,
-    js_is_stylesheet,
-    js_is_css_rule,
-    js_is_rule_style_decl,
+    dom_is_css_namespace,
+    dom_is_inline_style_item,
+    dom_is_computed_style_item,
+    dom_is_stylesheet,
+    dom_is_css_rule,
+    dom_is_rule_style_decl,
     dom_get_property_impl,
     dom_set_property_impl,
     dom_element_operation_impl,
-    js_computed_style_get_property,
+    dom_computed_style_get_property,
     NULL,  // dom_style_resource_has_property retired: style hosts are record-driven (DOM3)
     NULL,  // dom_style_method retired: style hosts are record-driven (DOM3)
     dom_get_prototype_value,
@@ -1528,13 +1528,13 @@ static const JubeHostDomAPI jube_host_dom_api = {
     NULL,  // js_cssom_stylesheet_get_property retired: CSSOM types are record-driven (DOM3)
     NULL,  // js_cssom_rule_get_property retired: CSSOM types are record-driven (DOM3)
     NULL,  // js_cssom_rule_set_property retired: CSSOM types are record-driven (DOM3)
-    js_cssom_rule_decl_get_property,
-    js_cssom_rule_decl_set_property,
-    js_get_foreign_doc,
+    dom_cssom_rule_decl_get_property,
+    dom_cssom_rule_decl_set_property,
+    dom_get_foreign_doc,
     dom_swap_active_document,
     dom_restore_active_document,
-    js_document_proxy_get_property,
-    js_document_proxy_set_property,
+    dom_document_proxy_get_property,
+    dom_document_proxy_set_property,
     NULL,  // receiver/name document invocation retired by Tune4 (D6.2.2v2)
     dom_item_is_range,
     dom_item_is_selection,
@@ -1623,7 +1623,7 @@ static const JubeHostDomAPI jube_host_dom_api = {
     dom_create_range,
     dom_get_selection,
     dom_get_selection_function_for_document,
-    js_doc_has_browsing_context,
+    dom_doc_has_browsing_context,
     dom_document_fonts_bridge,
     dom_document_stylesheets_bridge,
     dom_document_default_view_bridge,
@@ -1704,25 +1704,25 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_selection_force_direction,
     dom_get_style_property,
     dom_set_style_property,
-    js_style_css_has,
-    js_cssom_stylesheet_get_css_rules,
-    js_cssom_stylesheet_get_length,
-    js_cssom_stylesheet_get_disabled,
-    js_cssom_stylesheet_get_type,
-    js_cssom_stylesheet_get_href,
-    js_cssom_stylesheet_get_title,
-    js_cssom_stylesheet_index,
-    js_cssom_insert_rule,
-    js_cssom_delete_rule,
-    js_cssom_rule_get_selector_text,
-    js_cssom_rule_set_selector_text,
-    js_cssom_rule_get_style,
-    js_cssom_rule_get_css_rules,
-    js_cssom_rule_get_css_text,
-    js_cssom_rule_get_type,
-    js_cssom_rule_get_parent_rule,
-    js_cssom_rule_decl_remove_property,
-    js_cssom_decl_css_has,
+    dom_style_css_has,
+    dom_cssom_stylesheet_get_css_rules,
+    dom_cssom_stylesheet_get_length,
+    dom_cssom_stylesheet_get_disabled,
+    dom_cssom_stylesheet_get_type,
+    dom_cssom_stylesheet_get_href,
+    dom_cssom_stylesheet_get_title,
+    dom_cssom_stylesheet_index,
+    dom_cssom_insert_rule,
+    dom_cssom_delete_rule,
+    dom_cssom_rule_get_selector_text,
+    dom_cssom_rule_set_selector_text,
+    dom_cssom_rule_get_style,
+    dom_cssom_rule_get_css_rules,
+    dom_cssom_rule_get_css_text,
+    dom_cssom_rule_get_type,
+    dom_cssom_rule_get_parent_rule,
+    dom_cssom_rule_decl_remove_property,
+    dom_cssom_decl_css_has,
     dom_get_ui_context,
     dom_has_committed_geometry_snapshot,
     dom_create_tree_walker_bridge,

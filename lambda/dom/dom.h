@@ -162,7 +162,7 @@ Item dom_owner_document_for_node(void* node);
  * @param item  Item to test
  * @return true if item is a wrapped DomElement
  */
-bool js_is_dom_node(Item item);
+bool dom_is_node(Item item);
 
 /**
  * Check if an Item is a document proxy object.
@@ -181,25 +181,25 @@ Item js_get_document_object_value(void);
 /**
  * Resolve dynamic property access on the document proxy.
  */
-Item js_document_proxy_get_property(Item prop_name);
+Item dom_document_proxy_get_property(Item prop_name);
 
 /**
  * Dispatch property set on document proxy.
  */
-Item js_document_proxy_set_property(Item prop_name, Item value);
+Item dom_document_proxy_set_property(Item prop_name, Item value);
 
 // =============================================================================
 // Foreign documents & document.implementation
 // =============================================================================
 
 /** Returns DomDocument* if `item` is a foreign-doc wrapper, else null. */
-void* js_get_foreign_doc(Item item);
+void* dom_get_foreign_doc(Item item);
 
 /** Returns true if `item` is the document.implementation singleton. */
-bool js_is_dom_implementation(Item item);
+bool dom_is_implementation(Item item);
 
 /** Get (lazily creating) the document.implementation singleton. */
-Item js_get_dom_implementation(void);
+Item dom_get_implementation(void);
 
 /** Build a foreign HTML document (used by createHTMLDocument). */
 Item js_create_foreign_html_doc(const char* title);
@@ -208,7 +208,7 @@ Item js_create_foreign_html_doc(const char* title);
 Item js_create_foreign_xml_doc(const char* qualified_name);
 
 /** Build a DocumentType node stub (used by createDocumentType). */
-Item js_create_doctype_node(const char* name, const char* public_id, const char* system_id);
+Item dom_create_doctype_node(const char* name, const char* public_id, const char* system_id);
 
 /** Save the current active document and switch to `new_doc`. Returns the prior doc. */
 void* dom_swap_active_document(void* new_doc);
@@ -224,7 +224,7 @@ void  dom_restore_active_document(void* prev_doc);
  * @param prop_name String Item with property name
  * @return Property value as Item
  */
-Item js_document_get_property(Item prop_name);
+Item dom_document_get_property(Item prop_name);
 
 // =============================================================================
 // Element Property Access (DOM-aware)
@@ -260,23 +260,23 @@ Item dom_get_style_property(Item elem, Item prop_name);
  * @param pseudo String Item for pseudo-element ("before", "after") or null
  * @return Computed style wrapper Item
  */
-Item js_get_computed_style(Item elem, Item pseudo);
+Item dom_get_computed_style(Item elem, Item pseudo);
 
 /**
  * Get a computed CSS property value from a computed style wrapper.
- * @param style_item  Computed style wrapper from js_get_computed_style
+ * @param style_item  Computed style wrapper from dom_get_computed_style
  * @param prop_name   String Item with CSS property name (camelCase or hyphenated)
  * @return String Item with the computed CSS value
  */
-Item js_computed_style_get_property(Item style_item, Item prop_name);
+Item dom_computed_style_get_property(Item style_item, Item prop_name);
 
 /**
  * Check if an Item is a computed style wrapper object.
  * @param item  Item to test
  * @return true if item wraps a computed style
  */
-bool js_is_computed_style_item(Item item);
-bool js_is_inline_style_item(Item item);
+bool dom_is_computed_style_item(Item item);
+bool dom_is_inline_style_item(Item item);
 
 // =============================================================================
 // classList API (v12)
@@ -289,7 +289,7 @@ bool js_is_inline_style_item(Item item);
  * @param prop_name  String Item with property name
  * @return Property value as Item
  */
-Item js_classlist_get_property(Item elem, Item prop_name);
+Item dom_classlist_get_property(Item elem, Item prop_name);
 
 // =============================================================================
 // dataset API (v12)
@@ -301,7 +301,7 @@ Item js_classlist_get_property(Item elem, Item prop_name);
  * @param prop_name  String Item with camelCase property name
  * @return String value or undefined
  */
-Item js_dataset_get_property(Item elem, Item prop_name);
+Item dom_dataset_get_property(Item elem, Item prop_name);
 
 /**
  * Set a dataset property (camelCase → data-kebab-case attribute).
@@ -310,7 +310,7 @@ Item js_dataset_get_property(Item elem, Item prop_name);
  * @param value      String value to set
  * @return The value that was set
  */
-Item js_dataset_set_property(Item elem, Item prop_name, Item value);
+Item dom_dataset_set_property(Item elem, Item prop_name, Item value);
 
 // =============================================================================
 // location API (v12)
@@ -322,7 +322,7 @@ Item js_dataset_set_property(Item elem, Item prop_name, Item value);
  * @param prop_name  String Item with property name
  * @return String value
  */
-Item js_location_get_property(Item prop_name);
+Item dom_location_get_property(Item prop_name);
 
 // =============================================================================
 // Node.contains() (v12)

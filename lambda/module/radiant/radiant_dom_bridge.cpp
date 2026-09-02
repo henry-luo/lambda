@@ -66,25 +66,25 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_document_proxy_for_doc_bridge radiant_host_api->dom->document_proxy_for_doc_bridge
 #define dom_unwrap_element_impl radiant_host_api->dom->unwrap_element_impl
 #define dom_initialize_node_wrapper radiant_host_api->dom->initialize_node_wrapper
-#define js_is_inline_style_item radiant_host_api->dom->is_inline_style_item
-#define js_is_computed_style_item radiant_host_api->dom->is_computed_style_item
-#define js_is_stylesheet radiant_host_api->dom->is_stylesheet
-#define js_is_css_rule radiant_host_api->dom->is_css_rule
-#define js_is_rule_style_decl radiant_host_api->dom->is_rule_style_decl
+#define dom_is_inline_style_item radiant_host_api->dom->is_inline_style_item
+#define dom_is_computed_style_item radiant_host_api->dom->is_computed_style_item
+#define dom_is_stylesheet radiant_host_api->dom->is_stylesheet
+#define dom_is_css_rule radiant_host_api->dom->is_css_rule
+#define dom_is_rule_style_decl radiant_host_api->dom->is_rule_style_decl
 #define dom_get_property_impl radiant_host_api->dom->dom_get_property_impl
 #define dom_set_property_impl radiant_host_api->dom->dom_set_property_impl
 #define dom_element_operation_impl radiant_host_api->dom->dom_element_operation_impl
-#define js_computed_style_get_property radiant_host_api->dom->computed_style_get_property
+#define dom_computed_style_get_property radiant_host_api->dom->computed_style_get_property
 #define dom_style_resource_has_property radiant_host_api->dom->style_resource_has_property
 #define dom_get_prototype_value radiant_host_api->dom->dom_get_prototype_value
 #define js_get_intrinsic_prototype_for_class radiant_host_api->script->intrinsic_prototype_for_class
-#define js_cssom_rule_decl_get_property radiant_host_api->dom->cssom_rule_decl_get_property
-#define js_cssom_rule_decl_set_property radiant_host_api->dom->cssom_rule_decl_set_property
-#define js_get_foreign_doc radiant_host_api->dom->get_foreign_doc
+#define dom_cssom_rule_decl_get_property radiant_host_api->dom->cssom_rule_decl_get_property
+#define dom_cssom_rule_decl_set_property radiant_host_api->dom->cssom_rule_decl_set_property
+#define dom_get_foreign_doc radiant_host_api->dom->get_foreign_doc
 #define dom_swap_active_document radiant_host_api->dom->swap_active_document
 #define dom_restore_active_document radiant_host_api->dom->restore_active_document
-#define js_document_proxy_get_property radiant_host_api->dom->document_proxy_get_property
-#define js_document_proxy_set_property radiant_host_api->dom->document_proxy_set_property
+#define dom_document_proxy_get_property radiant_host_api->dom->document_proxy_get_property
+#define dom_document_proxy_set_property radiant_host_api->dom->document_proxy_set_property
 #define dom_range_get_prototype_value radiant_host_api->dom->range_get_prototype_value
 #define dom_selection_get_prototype_value radiant_host_api->dom->selection_get_prototype_value
 #define dom_expando_has_property radiant_host_api->dom->expando_has_property
@@ -155,7 +155,7 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_create_range radiant_host_api->dom->create_range
 #define dom_get_selection radiant_host_api->dom->get_selection
 #define dom_get_selection_function_for_document radiant_host_api->dom->get_selection_function_for_document
-#define js_doc_has_browsing_context radiant_host_api->dom->doc_has_browsing_context
+#define dom_doc_has_browsing_context radiant_host_api->dom->doc_has_browsing_context
 #define dom_document_fonts_bridge radiant_host_api->dom->document_fonts_bridge
 #define dom_document_stylesheets_bridge radiant_host_api->dom->document_stylesheets_bridge
 #define dom_document_default_view_bridge radiant_host_api->dom->document_default_view_bridge
@@ -2979,8 +2979,8 @@ static Item radiant_dom_foreign_get_computed_style(Item elem_item, Item pseudo_i
 
 RADIANT_C_API int radiant_dom_foreign_document_get_property(Item object, Item key, Item* out) {
     if (!out) return 0;
-    void* foreign_doc = js_get_foreign_doc(object);
-    if (foreign_doc && js_doc_has_browsing_context(foreign_doc)) {
+    void* foreign_doc = dom_get_foreign_doc(object);
+    if (foreign_doc && dom_doc_has_browsing_context(foreign_doc)) {
         if (radiant_dom_key_equals(key, "defaultView", 11) ||
             radiant_dom_key_equals(key, "document", 8) ||
             radiant_dom_key_equals(key, "window", 6) ||
@@ -3000,7 +3000,7 @@ RADIANT_C_API int radiant_dom_foreign_document_get_property(Item object, Item ke
     // foreign document proxies use the normal document table with a temporary
     // active-document swap; otherwise reads accidentally target the main doc.
     void* prev = dom_swap_active_document(foreign_doc);
-    *out = js_document_proxy_get_property(key);
+    *out = dom_document_proxy_get_property(key);
     dom_restore_active_document(prev);
     return 1;
 }
@@ -3010,27 +3010,27 @@ RADIANT_C_API int radiant_dom_foreign_document_set_property(Item object,
                                                          Item value,
                                                          Item* out) {
     if (!out) return 0;
-    void* foreign_doc = js_get_foreign_doc(object);
+    void* foreign_doc = dom_get_foreign_doc(object);
     // writes share the document proxy setter, but must run under the foreign
     // active document so title/location/defaultView state lands on that proxy.
     void* prev = dom_swap_active_document(foreign_doc);
-    *out = js_document_proxy_set_property(key, value);
+    *out = dom_document_proxy_set_property(key, value);
     dom_restore_active_document(prev);
     return 1;
 }
 
 RADIANT_C_API int radiant_dom_document_host_get_property(Item object, Item key, Item* out) {
     if (!out) return 0;
-    if (js_get_foreign_doc(object)) {
+    if (dom_get_foreign_doc(object)) {
         return radiant_dom_foreign_document_get_property(object, key, out);
     }
     if (get_type_id(object) == LMD_TYPE_VMAP && object.vmap && object.vmap->host_data) {
         void* prev = dom_swap_active_document(object.vmap->host_data);
-        *out = js_document_proxy_get_property(key);
+        *out = dom_document_proxy_get_property(key);
         dom_restore_active_document(prev);
         return 1;
     }
-    *out = js_document_proxy_get_property(key);
+    *out = dom_document_proxy_get_property(key);
     return 1;
 }
 
@@ -3039,16 +3039,16 @@ RADIANT_C_API int radiant_dom_document_host_set_property(Item object,
                                                       Item value,
                                                       Item* out) {
     if (!out) return 0;
-    if (js_get_foreign_doc(object)) {
+    if (dom_get_foreign_doc(object)) {
         return radiant_dom_foreign_document_set_property(object, key, value, out);
     }
     if (get_type_id(object) == LMD_TYPE_VMAP && object.vmap && object.vmap->host_data) {
         void* prev = dom_swap_active_document(object.vmap->host_data);
-        *out = js_document_proxy_set_property(key, value);
+        *out = dom_document_proxy_set_property(key, value);
         dom_restore_active_document(prev);
         return 1;
     }
-    *out = js_document_proxy_set_property(key, value);
+    *out = dom_document_proxy_set_property(key, value);
     return 1;
 }
 
@@ -3201,7 +3201,7 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
     }
 
     if (operation == RADIANT_DOCUMENT_GET_SELECTION) {
-        *out = js_doc_has_browsing_context((void*)doc) ? dom_get_selection() : ItemNull;
+        *out = dom_doc_has_browsing_context((void*)doc) ? dom_get_selection() : ItemNull;
         return 1;
     }
 
@@ -3481,7 +3481,7 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
 RADIANT_C_API int radiant_dom_document_operation(Item object,
                                                   RadiantDocumentOperation operation,
                                                   Item* args, int argc, Item* out) {
-    void* target_doc = js_get_foreign_doc(object);
+    void* target_doc = dom_get_foreign_doc(object);
     if (!target_doc && get_type_id(object) == LMD_TYPE_VMAP && object.vmap) {
         target_doc = object.vmap->host_data;
     }

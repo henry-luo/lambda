@@ -42,7 +42,7 @@
 
 extern __thread EvalContext* context;
 extern "C" void* dom_current_active_text_control(void);
-extern "C" bool js_doc_has_browsing_context(void* doc);
+extern "C" bool dom_doc_has_browsing_context(void* doc);
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 
 static Item dom_flush_selectionchange(Item this_val, Item* args, int argc);
@@ -1123,10 +1123,10 @@ JS_FORWARD_RETURN(void*, dom_unwrap_selection, (Item item), selection_from, (ite
 // ============================================================================
 
 // Trampoline so we can register getSelection as a global function with arity 0.
-extern "C" Item js_global_get_selection(void) {
+extern "C" Item dom_global_get_selection(void) {
     Item self = js_get_this();
-    void* foreign = js_get_foreign_doc(self);
-    if (foreign && js_doc_has_browsing_context(foreign)) {
+    void* foreign = dom_get_foreign_doc(self);
+    if (foreign && dom_doc_has_browsing_context(foreign)) {
         void* prev = dom_swap_active_document(foreign);
         Item selection = dom_get_selection();
         dom_restore_active_document(prev);
@@ -1138,7 +1138,7 @@ extern "C" Item js_global_get_selection(void) {
 static Item js_bound_document_get_selection(Item env_item) {
     JS_ENV_UNPACK(env, env_item);
     DomDocument* doc = env ? (DomDocument*)(uintptr_t)env[0].item : nullptr;
-    if (!doc || !js_doc_has_browsing_context(doc)) return ItemNull;
+    if (!doc || !dom_doc_has_browsing_context(doc)) return ItemNull;
     void* prev = dom_swap_active_document(doc);
     Item selection = dom_get_selection();
     dom_restore_active_document(prev);
@@ -1147,14 +1147,14 @@ static Item js_bound_document_get_selection(Item env_item) {
 
 extern "C" Item dom_get_selection_function_for_document(void* doc) {
     Item* env = js_alloc_env(1);
-    if (!env) return js_new_native_function(js_global_get_selection);
+    if (!env) return js_new_native_function(dom_global_get_selection);
     env[0] = (Item){.item = (uint64_t)(uintptr_t)doc};
     return js_new_native_closure(js_bound_document_get_selection, 0, env, 1);
 }
 
 extern "C" void dom_selection_install_globals(void) {
     Item global = js_get_global_this();
-    Item fn = js_new_native_function(js_global_get_selection);
+    Item fn = js_new_native_function(dom_global_get_selection);
     js_set_key_cstr(global, "getSelection", fn);
     // Ensure `window` resolves to globalThis so `window.getSelection()` works.
     Item window_key = make_key("window");
@@ -1190,7 +1190,7 @@ extern "C" void dom_selection_install_globals(void) {
     // never actually invoked by typical WPT code (which uses document.createRange
     // / getSelection); identity comes from their function names plus DOM host
     // fast paths in js_instanceof_classname.
-    Item sel_ctor   = js_new_native_function(js_global_get_selection);
+    Item sel_ctor   = js_new_native_function(dom_global_get_selection);
     Item range_ctor = js_new_native_constructor(dom_create_range);
     js_set_function_name(sel_ctor, make_key("Selection"));
     js_set_function_name(range_ctor, make_key("Range"));
@@ -1221,7 +1221,7 @@ extern "C" void dom_selection_install_globals(void) {
 
     // Set document.defaultView = window so DOM tests' sanity checks pass.
     Item doc = js_get_document_object_value();
-    js_document_proxy_set_property(make_key("defaultView"), global);
+    dom_document_proxy_set_property(make_key("defaultView"), global);
     (void)doc;
 
     log_debug("dom_selection: installed global getSelection / Selection / Range");

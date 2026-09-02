@@ -2666,10 +2666,10 @@ JitImport jit_runtime_imports[] = {
     {"js_symbol_key_for", FPTR(js_symbol_key_for)},
     {"js_symbol_well_known", FPTR(js_symbol_well_known)},
     // v12: DOM extensions
-    {"js_classlist_get_property", FPTR(js_classlist_get_property)},
-    {"js_dataset_get_property", FPTR(js_dataset_get_property)},
-    {"js_dataset_set_property", FPTR(js_dataset_set_property)},
-    {"js_location_get_property", FPTR(js_location_get_property)},
+    {"dom_classlist_get_property", FPTR(dom_classlist_get_property)},
+    {"dom_dataset_get_property", FPTR(dom_dataset_get_property)},
+    {"dom_dataset_set_property", FPTR(dom_dataset_set_property)},
+    {"dom_location_get_property", FPTR(dom_location_get_property)},
     // v14: Generator runtime
     {"js_generator_create", FPTR(js_generator_create)},
     {"js_generator_create_mir", FPTR(js_generator_create_mir)},

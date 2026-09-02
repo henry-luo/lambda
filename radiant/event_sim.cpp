@@ -74,7 +74,7 @@ extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
                                                          bool move);
 
 // Stage 4C: seed the next window.prompt() answer (headless has no dialog UI).
-extern "C" void js_window_dialog_push_response(const char* value);
+extern "C" void dom_window_dialog_push_response(const char* value);
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 
@@ -4264,7 +4264,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // Seed the next window.prompt() answer (input_text==NULL → Cancel).
             log_info("event_sim: set_prompt response=%s",
                      ev->input_text ? ev->input_text : "(cancel)");
-            js_window_dialog_push_response(ev->input_text);
+            dom_window_dialog_push_response(ev->input_text);
             break;
         }
 
