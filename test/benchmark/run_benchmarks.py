@@ -65,6 +65,7 @@ LAMBDA_EXE = os.environ.get("LAMBDA_EXE", "./lambda.exe")
 NODE_EXE = "node"
 PYTHON_EXE = "python3"
 QJS_EXE = "qjs"
+QJS_STACK_SIZE = 4 * 1024 * 1024
 TIMING_RE = re.compile(r"__TIMING__:([\d.]+(?:e[+-]?\d+)?)")
 
 TIME_JSON_PATH = "test/benchmark/benchmark_results_v3.json"
@@ -252,6 +253,18 @@ if (typeof process === 'undefined') {
 }
 if (typeof console === 'undefined') {
     globalThis.console = { log: function() { std.out.puts(Array.prototype.join.call(arguments, ' ') + '\\n'); std.out.flush(); } };
+}
+"""
+
+# Node benchmark sources are scripts, not ES modules. Executing them directly
+# from the module wrapper forces strict mode and rejects their legacy globals.
+# Function() preserves script semantics while the outer module supplies `std`.
+QJS_COMMONJS_SHIM = """
+function require(name) {
+    if (name === 'fs') {
+        return {readFileSync: function(path, encoding) { return std.loadFile(path); }};
+    }
+    throw new Error('QuickJS benchmark wrapper does not provide module: ' + name);
 }
 """
 
@@ -496,18 +509,26 @@ def lambda_run_cmd(script_path, tier):
     return f"{prefix}{LAMBDA_EXE} run {script_path}"
 
 
+def qjs_run_cmd(wrapper):
+    return f"{QJS_EXE} --stack-size {QJS_STACK_SIZE} --std -m {wrapper}"
+
+
+def write_qjs_script_wrapper(wrapper, code, trailer=""):
+    program = (QJS_POLYFILL + QJS_COMMONJS_SHIM +
+               code.replace("'use strict';", "").replace('"use strict";', "") +
+               trailer)
+    with open(wrapper, "w") as f:
+        f.write("import * as std from 'std';\n")
+        f.write(f"Function('std', {json.dumps(program)})(std);\n")
+
+
 def make_qjs_wrapper(js_path):
     """Create a QuickJS-compatible wrapper for a Node.js benchmark script."""
     os.makedirs("temp", exist_ok=True)
     wrapper = os.path.join("temp", "qjs_" + os.path.basename(js_path))
     with open(js_path) as f:
         code = f.read()
-    with open(wrapper, "w") as f:
-        f.write("import * as std from 'std';\n")
-        f.write(QJS_POLYFILL)
-        code = code.replace("'use strict';", "")
-        code = code.replace('"use strict";', "")
-        f.write(code)
+    write_qjs_script_wrapper(wrapper, code)
     return wrapper
 
 
@@ -590,18 +611,13 @@ def make_jetstream_qjs_wrapper(bench_name, js_path):
     wrapper = os.path.join("temp", f"_qjs_jetstream_{bench_name}.js")
     with open(js_path) as f:
         code = f.read()
-    code = code.replace("'use strict';", "")
-    code = code.replace('"use strict";', "")
-    with open(wrapper, "w") as f:
-        f.write("import * as std from 'std';\n")
-        f.write(QJS_POLYFILL)
-        f.write(code)
-        f.write("\n// Timing wrapper: one runIteration() of this benchmark, repeated\n"
-                "// with the file's OWN loop count so every engine runs the same work\n")
-        f.write("var _t0 = performance.now();\n")
-        f.write(f"for (var _i = 0; _i < {run_count}; _i++) {{ {run_expr}; }}\n")
-        f.write("var _t1 = performance.now();\n")
-        f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
+    trailer = ("\n// Timing wrapper: one runIteration() of this benchmark, repeated\n"
+               "// with the file's OWN loop count so every engine runs the same work\n"
+               "var _t0 = performance.now();\n"
+               f"for (var _i = 0; _i < {run_count}; _i++) {{ {run_expr}; }}\n"
+               "var _t1 = performance.now();\n"
+               'console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
+    write_qjs_script_wrapper(wrapper, code, trailer)
     return wrapper
 
 
@@ -1003,7 +1019,7 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
             if standalone_js and os.path.exists(standalone_js):
                 print(f"  QuickJS  ", end="", flush=True)
                 wrapper = make_qjs_wrapper(standalone_js)
-                w, e, ok, status, detail = time_run_benchmark(f"{QJS_EXE} --std -m {wrapper}", num_runs, timeout_s)
+                w, e, ok, status, detail = time_run_benchmark(qjs_run_cmd(wrapper), num_runs, timeout_s)
                 record_time_result(results, row, suite, name, "quickjs", w, e, ok, status, detail,
                                    e2e_engine="quickjs_e2e")
                 print(f" {fmt_ms(e if e is not None else w)}")
@@ -1073,7 +1089,7 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
                 wrapper = make_jetstream_qjs_wrapper(name, qjs_js)
                 if wrapper:
                     print(f"  QuickJS  ", end="", flush=True)
-                    w, e, ok, status, detail = time_run_benchmark(f"{QJS_EXE} --std -m {wrapper}", num_runs, timeout_s)
+                    w, e, ok, status, detail = time_run_benchmark(qjs_run_cmd(wrapper), num_runs, timeout_s)
                     record_time_result(results, row, suite, name, "quickjs", w, e, ok, status, detail,
                                    e2e_engine="quickjs_e2e")
                     print(f" {fmt_ms(e if e is not None else w)}")
@@ -1323,7 +1339,7 @@ def mem_run_single(b, engines, num_runs, timeout_s, results):
             if standalone_js and os.path.exists(standalone_js):
                 print(f"  QuickJS  ", end="", flush=True)
                 wrapper = make_qjs_wrapper(standalone_js)
-                peak, ok = mem_measure_n(f"{QJS_EXE} --std -m {wrapper}", num_runs, timeout_s)
+                peak, ok = mem_measure_n(qjs_run_cmd(wrapper), num_runs, timeout_s)
                 results[suite][name]["quickjs"] = peak
                 row["quickjs"] = peak
                 print(f" peak={fmt_mem(peak)}" if ok else " failed")
