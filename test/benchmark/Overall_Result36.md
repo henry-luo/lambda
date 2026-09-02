@@ -12,6 +12,7 @@
 - **Results source:** `test/benchmark/benchmark_results_v36.json`
 - **Separately measured:** C2MIR, C2MIR measured on 2026-09-02, 3 run(s) from `temp/benchmark_results_v36_c2mir.json`. Native C2MIR refresh after rebuilding the on-demand lambda/mir/c2m driver; 59 canonical rows, three runs each.
 - **Separately measured:** MIR (untyped), MIR (untyped, auto), MIR (typed), MIR (typed, auto) measured on 2026-09-02, 3 run(s) from `temp/result36_mir_recheck.json`. MIR wrong-output refresh after release rebuild and live self-verification; 11 previously excluded rows, three runs each, JIT and auto tiers.
+- **Separately measured:** C2MIR, C2MIR, LambdaJS, LambdaJS, MIR (untyped), MIR (untyped, auto), MIR (typed), MIR (typed, auto), Node.js, Node.js, QuickJS, QuickJS measured on 2026-09-02, 3 run(s) from `temp/result36_hyphen_queens.json`. text/hyphen and awfy/queens re-measured after fixing the benchmark sources: hyphen/hyphen2 predicates now return bool (an int-declared bool return raised E201 on every call and produced a wrong checksum; the checksum is now verified against the C port's 731008) and queens/queens2 use var params with a validated placement (plain-param snapshots had reduced the search to 8 probes). Two rows, three runs each, all engines, HEAD release build.
 - **MIR columns:** untyped and typed; `*` means the typed column reuses the untyped result because no typed source exists
 
 JetStream JavaScript-engine wrappers run each benchmark's own `Benchmark.runIteration()` workload — the loop count is read from the file itself (nbody/cube3d/raytrace3d 8, richards/splay 50, crypto_sha1 25, deltablue 20, navier_stokes/hashmap 1). Each Lambda `.ls` port implements exactly one `runIteration()`, so every engine times the same work. A previous revision hard-coded 8 repeats for every file, which made the JS engines run 8/50 of Lambda's work on richards and splay, and 8x too much on navier_stokes and hashmap.
@@ -29,13 +30,13 @@ Each engine's own `__TIMING__` figure: the timed workload only, with startup and
 | Suite | Total | Timed MIR (untyped) | Timed MIR (typed) | Timed C2MIR | Timed LambdaJS | Timed QuickJS | Timed Node.js | MIR (untyped)/Node geo | MIR (typed)/Node geo | C2MIR/Node geo | LambdaJS/Node geo | QuickJS/Node geo |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | R7RS | 10 | 10 | 10 | 10 | 10 | 10 | 10 | 0.50x | 0.39x | 0.18x | 12.1x | 6.48x |
-| AWFY | 14 | 14 | 14 | 14 | 14 | 14 | 14 | 1.38x | 1.08x | 0.09x | 40.0x | 5.22x |
+| AWFY | 14 | 14 | 14 | 14 | 14 | 14 | 14 | 1.65x | 1.09x | 0.09x | 39.8x | 5.19x |
 | BENG | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 0.52x | 0.36x | 0.10x | 12.3x | 1.69x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 2.24x | 1.57x | 0.22x | 57.2x | 11.9x |
 | LARCENY | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 2.35x | 0.91x | 0.32x | 33.8x | 13.3x |
 | JetStream | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 7.54x | 4.52x | 0.29x | 77.1x | 12.0x |
-| Text | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0.30x | 0.22x | 0.02x | 66.6x | 9.37x |
-| **Overall** | 59 | 59 | 59 | 59 | 59 | 59 | 59 | 1.31x | 0.85x | 0.15x | 30.8x | 6.84x |
+| Text | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0.32x | 0.22x | 0.02x | 68.0x | 9.57x |
+| **Overall** | 59 | 59 | 59 | 59 | 59 | 59 | 59 | 1.37x | 0.85x | 0.15x | 30.9x | 6.84x |
 
 > The benchmark runner keeps one canonical row for each known duplicate workload, so no reporting deduplication is required.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
@@ -46,7 +47,7 @@ Each engine's own `__TIMING__` figure: the timed workload only, with startup and
 
 How far MIR (typed) is from the same workload written in a statically typed language. These columns are a reference bound, not another Lambda execution path: they say what is still on the table, and C2MIR is the sharper of the two because it shares MIR's code generator, so a gap there is attributable to Lambda's front end rather than to the backend.
 
-- **MIR (typed) / C2MIR geomean:** 5.66x over 59 of 59 rows
+- **MIR (typed) / C2MIR geomean:** 5.67x over 59 of 59 rows
 
 **Widest gaps vs C2MIR**
 
@@ -58,9 +59,9 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | awfy/cd | 493.8 | 14.2 | 34.8x |
 | jetstream/hashmap | 87.6 | 2.84 | 30.9x |
 | jetstream/cube3d | 14.1 | 0.513 | 27.5x |
-| text/hyphen | 2.03 | 0.091 | 22.3x |
+| text/hyphen | 1.85 | 0.082 | 22.6x |
 | kostya/base64 | 11.5 | 0.555 | 20.7x |
-| awfy/queens | 0.310 | 0.017 | 18.4x |
+| awfy/queens | 0.345 | 0.018 | 19.4x |
 | awfy/towers | 0.427 | 0.025 | 17.1x |
 | beng/knucleotide | 4.72 | 0.278 | 17.0x |
 | kostya/json_gen | 24.0 | 1.53 | 15.7x |
@@ -111,7 +112,7 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | sieve | micro | 0.042 | 0.047 | 0.015 | 10.2 | 0.605 | 0.390 | 0.11x | 0.12x | 0.04x | 26.3x | 1.55x |
 | permute | micro | 0.763 | 0.131 | 0.028 | 10.8 | 1.55 | 0.812 | 0.94x | 0.16x | 0.03x | 13.3x | 1.91x |
-| queens | micro | 0.032 | 0.310 | 0.017 | 6.65 | 1.05 | 0.647 | 0.05x | 0.48x | 0.03x | 10.3x | 1.62x |
+| queens | micro | 0.393 | 0.345 | 0.018 | 6.34 | 0.974 | 0.643 | 0.61x | 0.54x | 0.03x | 9.86x | 1.52x |
 | towers | micro | 1.18 | 0.427 | 0.025 | 30.7 | 2.24 | 1.13 | 1.05x | 0.38x | 0.02x | 27.2x | 1.99x |
 | bounce | micro | 0.067 | 0.108 | 0.022 | 7.30 | 0.869 | 0.552 | 0.12x | 0.20x | 0.04x | 13.2x | 1.57x |
 | list | micro | 0.773 | 0.211 | 0.021 | 3.25 | 0.918 | 0.483 | 1.60x | 0.44x | 0.04x | 6.73x | 1.90x |
@@ -182,7 +183,7 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | fast_diff | text-diff | 258.8 | 152.0 | 13.4 | 2.61s | 635.5 | 39.5 | 6.55x | 3.85x | 0.34x | 66.1x | 16.1x |
 | microdiff | data-diff | 0.157 | 0.158 | 0.017 | 1.30s | 108.6 | 16.3 | 0.010x | 0.010x | 0.001x | 79.7x | 6.66x |
-| hyphen | hyphenation | 2.78 | 2.03 | 0.091 | 378.3 | 51.7 | 6.73 | 0.41x | 0.30x | 0.01x | 56.2x | 7.68x |
+| hyphen | hyphenation | 3.35 | 1.85 | 0.082 | 369.5 | 50.5 | 6.18 | 0.54x | 0.30x | 0.01x | 59.8x | 8.18x |
 
 ---
 
@@ -201,13 +202,13 @@ Same processes, where possible: the reference engines report their wall and `__T
 | Suite | Total | Timed MIR (untyped, auto) | Timed MIR (typed, auto) | Timed C2MIR | Timed LambdaJS | Timed QuickJS | Timed Node.js | MIR (untyped, auto)/Node geo | MIR (typed, auto)/Node geo | C2MIR/Node geo | LambdaJS/Node geo | QuickJS/Node geo |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | R7RS | 10 | 10 | 10 | 10 | 10 | 10 | 10 | 2.34x | 0.87x | 0.99x | 1.56x | 0.42x |
-| AWFY | 14 | 14 | 14 | 14 | 14 | 14 | 14 | 2.70x | 3.15x | 0.90x | 7.68x | 0.81x |
+| AWFY | 14 | 14 | 14 | 14 | 14 | 14 | 14 | 2.71x | 3.14x | 0.90x | 7.68x | 0.81x |
 | BENG | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 0.85x | 0.78x | 1.02x | 2.64x | 0.33x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 16.0x | 12.1x | 0.72x | 14.4x | 2.91x |
 | LARCENY | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 7.76x | 3.12x | 1.00x | 6.56x | 1.94x |
 | JetStream | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 16.5x | 12.1x | 0.90x | 23.6x | 3.67x |
-| Text | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 10.2x | 2.79x | 0.78x | 28.4x | 2.67x |
-| **Overall** | 59 | 59 | 59 | 59 | 59 | 59 | 59 | 4.36x | 2.79x | 0.92x | 6.36x | 1.09x |
+| Text | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3.41x | 2.73x | 0.78x | 28.6x | 2.68x |
+| **Overall** | 59 | 59 | 59 | 59 | 59 | 59 | 59 | 4.13x | 2.79x | 0.92x | 6.36x | 1.09x |
 
 > Ratio < 1.0 means the engine finished the whole run faster than Node.js.
 
@@ -232,7 +233,7 @@ Same processes, where possible: the reference engines report their wall and `__T
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | sieve | micro | 15.5 | 16.7 | 43.6 | 50.5 | 6.61 | 44.6 | 0.35x | 0.37x | 0.98x | 1.13x | 0.15x |
 | permute | micro | 31.5 | 35.1 | 44.8 | 53.6 | 7.19 | 44.8 | 0.70x | 0.78x | 1.00x | 1.20x | 0.16x |
-| queens | micro | 19.5 | 29.3 | 44.3 | 52.5 | 6.72 | 45.0 | 0.43x | 0.65x | 0.99x | 1.17x | 0.15x |
+| queens | micro | 20.0 | 27.6 | 44.2 | 50.1 | 5.93 | 42.9 | 0.47x | 0.64x | 1.03x | 1.17x | 0.14x |
 | towers | micro | 22.2 | 59.5 | 44.1 | 78.8 | 8.11 | 45.4 | 0.49x | 1.31x | 0.97x | 1.74x | 0.18x |
 | bounce | micro | 18.2 | 19.0 | 44.6 | 132.1 | 7.40 | 45.0 | 0.40x | 0.42x | 0.99x | 2.94x | 0.16x |
 | list | micro | 22.4 | 25.3 | 44.6 | 47.1 | 6.50 | 44.8 | 0.50x | 0.56x | 1.00x | 1.05x | 0.15x |
@@ -303,5 +304,5 @@ Same processes, where possible: the reference engines report their wall and `__T
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | fast_diff | text-diff | 6.33s | 6.34s | 61.5 | 2.78s | 642.8 | 83.6 | 75.8x | 75.8x | 0.74x | 33.2x | 7.69x |
 | microdiff | data-diff | 24.9 | 24.7 | 45.1 | 1.38s | 114.7 | 59.7 | 0.42x | 0.41x | 0.76x | 23.2x | 1.92x |
-| hyphen | hyphenation | 1.78s | 36.9 | 45.9 | 1.59s | 68.6 | 53.3 | 33.4x | 0.69x | 0.86x | 29.9x | 1.29x |
+| hyphen | hyphenation | 63.9 | 33.1 | 43.5 | 1.55s | 66.6 | 51.1 | 1.25x | 0.65x | 0.85x | 30.4x | 1.30x |
 

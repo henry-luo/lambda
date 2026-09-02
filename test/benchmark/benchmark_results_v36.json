@@ -82,6 +82,30 @@
         "merged_at": "2026-09-02T21:31:43",
         "cells": 48,
         "note": "MIR wrong-output refresh after release rebuild and live self-verification; 11 previously excluded rows, three runs each, JIT and auto tiers."
+      },
+      {
+        "engines": [
+          "c2mir",
+          "c2mir_e2e",
+          "lambdajs",
+          "lambdajs_e2e",
+          "mir",
+          "mir_auto_e2e",
+          "mir_typed",
+          "mir_typed_auto_e2e",
+          "nodejs",
+          "nodejs_e2e",
+          "quickjs",
+          "quickjs_e2e"
+        ],
+        "source": "temp/result36_hyphen_queens.json",
+        "source_started_at": "2026-09-02T22:57:50",
+        "source_finished_at": "2026-09-02T22:57:51",
+        "source_runs": 3,
+        "source_platform": "Darwin arm64",
+        "merged_at": "2026-09-02T22:58:13",
+        "cells": 24,
+        "note": "text/hyphen and awfy/queens re-measured after fixing the benchmark sources: hyphen/hyphen2 predicates now return bool (an int-declared bool return raised E201 on every call and produced a wrong checksum; the checksum is now verified against the C port's 731008) and queens/queens2 use var params with a validated placement (plain-param snapshots had reduced the search to 8 probes). Two rows, three runs each, all engines, HEAD release build."
       }
     ]
   },
@@ -1182,7 +1206,7 @@
     },
     "queens": {
       "category": "micro",
-      "mir": 0.032,
+      "mir": 0.393,
       "_status": {
         "mir": "ok",
         "mir_auto_e2e": "ok",
@@ -1259,17 +1283,17 @@
           }
         }
       },
-      "mir_auto_e2e": 19.547542,
-      "mir_typed": 0.31,
-      "mir_typed_auto_e2e": 29.327292,
-      "c2mir": 0.016846,
-      "lambdajs": 6.65025,
-      "lambdajs_e2e": 52.543292,
-      "quickjs": 1.047,
-      "quickjs_e2e": 6.718958,
-      "nodejs": 0.646875,
-      "nodejs_e2e": 44.982042,
-      "c2mir_e2e": 44.328584
+      "mir_auto_e2e": 20.044375,
+      "mir_typed": 0.345,
+      "mir_typed_auto_e2e": 27.603666,
+      "c2mir": 0.017822,
+      "lambdajs": 6.338583,
+      "lambdajs_e2e": 50.095,
+      "quickjs": 0.974,
+      "quickjs_e2e": 5.928125,
+      "nodejs": 0.642791,
+      "nodejs_e2e": 42.907125,
+      "c2mir_e2e": 44.217542
     },
     "towers": {
       "category": "micro",
@@ -4830,7 +4854,7 @@
     },
     "hyphen": {
       "category": "hyphenation",
-      "mir": 2.782,
+      "mir": 3.346,
       "_status": {
         "mir": "ok",
         "mir_auto_e2e": "ok",
@@ -4907,17 +4931,17 @@
           }
         }
       },
-      "mir_auto_e2e": 1776.401417,
-      "mir_typed": 2.029,
-      "mir_typed_auto_e2e": 36.938875,
-      "c2mir": 0.091064,
-      "lambdajs": 378.255,
-      "lambdajs_e2e": 1593.677792,
-      "quickjs": 51.699,
-      "quickjs_e2e": 68.624875,
-      "nodejs": 6.734,
-      "nodejs_e2e": 53.26075,
-      "c2mir_e2e": 45.932125
+      "mir_auto_e2e": 63.933208,
+      "mir_typed": 1.852,
+      "mir_typed_auto_e2e": 33.126417,
+      "c2mir": 0.082031,
+      "lambdajs": 369.455,
+      "lambdajs_e2e": 1550.955625,
+      "quickjs": 50.516,
+      "quickjs_e2e": 66.56475,
+      "nodejs": 6.177,
+      "nodejs_e2e": 51.062167,
+      "c2mir_e2e": 43.464375
     }
   },
   "jetstream": {
