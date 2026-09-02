@@ -24,13 +24,13 @@ extern "C" {
 // =============================================================================
 
 /** Check if an Item is a wrapped CSSStyleSheet */
-bool js_is_stylesheet(Item item);
+bool dom_is_stylesheet(Item item);
 
 /** Check if an Item is a wrapped CSSStyleRule */
-bool js_is_css_rule(Item item);
+bool dom_is_css_rule(Item item);
 
 /** Check if an Item is a wrapped CSSStyleDeclaration (rule declarations) */
-bool js_is_rule_style_decl(Item item);
+bool dom_is_rule_style_decl(Item item);
 
 // =============================================================================
 // CSSStyleSheet Wrapper
@@ -41,8 +41,8 @@ bool js_is_rule_style_decl(Item item);
  * @param stylesheet  CssStylesheet* (void* for C linkage)
  * @return Item wrapping the stylesheet
  */
-Item js_cssom_wrap_stylesheet(void* stylesheet);
-Item js_cssom_stylesheet_get_disabled(Item sheet);
+Item dom_cssom_wrap_stylesheet(void* stylesheet);
+Item dom_cssom_stylesheet_get_disabled(Item sheet);
 
 /**
  * Get property of a CSSStyleSheet wrapper.
@@ -72,7 +72,7 @@ Item js_cssom_stylesheet_get_disabled(Item sheet);
  * @param pool  Pool* for serialization (stored in data_cap)
  * @return Item wrapping the rule
  */
-Item js_cssom_wrap_rule(void* rule, void* pool);
+Item dom_cssom_wrap_rule(void* rule, void* pool);
 
 /**
  * Get property of a CSSStyleRule wrapper.
@@ -81,7 +81,7 @@ Item js_cssom_wrap_rule(void* rule, void* pool);
  * @param prop_name  String Item with property name
  * @return Property value
  */
-Item js_cssom_rule_get_style(Item rule_item);
+Item dom_cssom_rule_get_style(Item rule_item);
 
 /**
  * Set property on a CSSStyleRule wrapper.
@@ -103,7 +103,7 @@ Item js_cssom_rule_get_style(Item rule_item);
  * @param prop_name  String Item with property name
  * @return Property value as string Item
  */
-Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
+Item dom_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
 
 /**
  * Set property on a CSSStyleDeclaration wrapper (rule declarations).
@@ -113,7 +113,7 @@ Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
  * @param value      String Item with CSS value
  * @return The value that was set
  */
-Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value);
+Item dom_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value);
 
 /**
  * Call method on a CSSStyleDeclaration wrapper.
@@ -134,7 +134,7 @@ Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value)
  * Returns an array-like Item with stylesheet wrappers.
  * @return Array Item of wrapped stylesheets, or ITEM_NULL
  */
-Item js_cssom_get_document_stylesheets(void);
+Item dom_cssom_get_document_stylesheets(void);
 
 // =============================================================================
 // HTMLStyleElement .sheet Access
@@ -146,17 +146,17 @@ Item js_cssom_get_document_stylesheets(void);
  * @param elem  Wrapped DOM element Item (must be a <style> element)
  * @return Wrapped CSSStyleSheet Item, or ITEM_NULL
  */
-Item js_cssom_get_style_element_sheet(Item elem);
+Item dom_cssom_get_style_element_sheet(Item elem);
 
 /** Update a stylesheet's disabled state and request a document recascade. */
-bool js_cssom_stylesheet_set_disabled(Item sheet, bool disabled);
+bool dom_cssom_stylesheet_set_disabled(Item sheet, bool disabled);
 
 // =============================================================================
 // CSS Namespace Object (CSS.supports, CSS.escape)
 // =============================================================================
 
 /** Check if an Item is the CSS namespace object */
-bool js_is_css_namespace(Item item);
+bool dom_is_css_namespace(Item item);
 
 /**
  * Get the global CSS namespace object (for CSS.supports(), CSS.escape()).
@@ -168,8 +168,8 @@ Item js_get_css_object_value(void);
  * Call method on the CSS namespace object.
  * Supported: supports(property, value), supports(conditionText), escape(ident)
  */
-Item js_css_supports_operation(Item* args, int argc);
-Item js_css_escape_operation(Item* args, int argc);
+Item dom_css_supports_operation(Item* args, int argc);
+Item dom_css_escape_operation(Item* args, int argc);
 
 /** Reset the CSS namespace object (for cleanup between tests) */
 void js_reset_css_namespace_object(void);

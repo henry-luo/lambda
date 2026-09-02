@@ -6561,7 +6561,7 @@ void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const cha
     // is also the key used by window.addEventListener in the module bridge.
     Item event_item = js_create_event(type, false, false);
     dom_dispatch_event(js_get_global_this(), event_item);
-    if (strcmp(type, "resize") == 0) js_match_media_notify_resize();
+    if (strcmp(type, "resize") == 0) dom_match_media_notify_resize();
     if (strcmp(type, "resize") == 0 || strcmp(type, "scroll") == 0) {
         dom_observers_post_layout();
     }

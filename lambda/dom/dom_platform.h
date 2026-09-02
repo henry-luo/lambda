@@ -6,13 +6,13 @@
 extern "C" {
 #endif
 
-Item js_storage_local_object(void);
-Item js_storage_session_object(void);
-void js_storage_reset(void);
+Item dom_storage_local_object(void);
+Item dom_storage_session_object(void);
+void dom_storage_reset(void);
 
-Item js_match_media(Item query_item);
-void js_match_media_notify_resize(void);
-void js_match_media_reset(void);
+Item dom_match_media(Item query_item);
+void dom_match_media_notify_resize(void);
+void dom_match_media_reset(void);
 
 // Host-facing entry point (F23) — see the note in dom.h.
 #ifdef __cplusplus

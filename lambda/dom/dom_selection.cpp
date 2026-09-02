@@ -42,10 +42,9 @@
 
 extern __thread EvalContext* context;
 extern "C" void* dom_current_active_text_control(void);
-extern "C" bool js_doc_has_browsing_context(void* doc);
+extern "C" bool dom_doc_has_browsing_context(void* doc);
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 
-static Item dom_flush_selectionchange(Item this_val, Item* args, int argc);
 
 // ============================================================================
 // Helpers
@@ -193,13 +192,10 @@ static bool selection_state_set(DomSelection* s,
 }
 JS_FORWARD_STATIC_RETURN(bool, selection_state_clear, (DomSelection* s,                                   const char** out_exception), selection_state_set, (s, nullptr, nullptr, out_exception))
 
-static Item get_dom_constructor_prototype(const char* ctor_name) {
-    Item global = js_get_global_this();
-    Item ctor = js_get_key_default(global, make_key(ctor_name));
-    if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
-    Item proto = js_get_key_cstr(ctor, "prototype");
-    return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
-}
+// The realm lookup this used to open-code now lives behind dom.h's seam, so
+// Range/Selection wrappers and the CSSOM/SVG builders share one answer.
+JS_FORWARD_STATIC_ITEM(get_dom_constructor_prototype, (const char* ctor_name),
+    dom_realm_constructor_prototype, (ctor_name))
 
 #define JS_DOM_PROTOTYPE_VALUE(name, class_name) \
     extern "C" Item name(void) { return get_dom_constructor_prototype(class_name); }
@@ -1123,10 +1119,10 @@ JS_FORWARD_RETURN(void*, dom_unwrap_selection, (Item item), selection_from, (ite
 // ============================================================================
 
 // Trampoline so we can register getSelection as a global function with arity 0.
-extern "C" Item js_global_get_selection(void) {
+extern "C" Item dom_global_get_selection(void) {
     Item self = js_get_this();
-    void* foreign = js_get_foreign_doc(self);
-    if (foreign && js_doc_has_browsing_context(foreign)) {
+    void* foreign = dom_get_foreign_doc(self);
+    if (foreign && dom_doc_has_browsing_context(foreign)) {
         void* prev = dom_swap_active_document(foreign);
         Item selection = dom_get_selection();
         dom_restore_active_document(prev);
@@ -1138,7 +1134,7 @@ extern "C" Item js_global_get_selection(void) {
 static Item js_bound_document_get_selection(Item env_item) {
     JS_ENV_UNPACK(env, env_item);
     DomDocument* doc = env ? (DomDocument*)(uintptr_t)env[0].item : nullptr;
-    if (!doc || !js_doc_has_browsing_context(doc)) return ItemNull;
+    if (!doc || !dom_doc_has_browsing_context(doc)) return ItemNull;
     void* prev = dom_swap_active_document(doc);
     Item selection = dom_get_selection();
     dom_restore_active_document(prev);
@@ -1147,85 +1143,11 @@ static Item js_bound_document_get_selection(Item env_item) {
 
 extern "C" Item dom_get_selection_function_for_document(void* doc) {
     Item* env = js_alloc_env(1);
-    if (!env) return js_new_native_function(js_global_get_selection);
+    if (!env) return js_new_native_function(dom_global_get_selection);
     env[0] = (Item){.item = (uint64_t)(uintptr_t)doc};
     return js_new_native_closure(js_bound_document_get_selection, 0, env, 1);
 }
 
-extern "C" void dom_selection_install_globals(void) {
-    Item global = js_get_global_this();
-    Item fn = js_new_native_function(js_global_get_selection);
-    js_set_key_cstr(global, "getSelection", fn);
-    // Ensure `window` resolves to globalThis so `window.getSelection()` works.
-    Item window_key = make_key("window");
-    Item existing = js_get_key_default(global, window_key);
-    if (get_type_id(existing) != LMD_TYPE_MAP) {
-        js_set_key_default(global, window_key, global);
-    } else {
-        // window is already a real object — install getSelection on it too
-        js_set_key_cstr(existing, "getSelection", fn);
-    }
-    // Stage 4C: `window.document` must resolve to the document proxy. Bare
-    // `document` is special-cased in the transpiler (js_mir_expression_lowering
-    // rewrites the identifier to a direct proxy access), so it never becomes a
-    // real property on the window/global object — which left `window.document`
-    // (a plain member access) `undefined`, breaking e.g.
-    // `window.document.createRange()` in dom-bridge. Install it explicitly. The
-    // proxy is a stable wrapper whose methods route to the current main document,
-    // and it is the same item bare `document` yields, so `window.document ===
-    // document` holds.
-    Item doc_proxy = js_get_document_object_value();
-    js_set_key_cstr(global, "document", doc_proxy);
-    if (get_type_id(existing) == LMD_TYPE_MAP)
-        js_set_key_cstr(existing, "document", doc_proxy);
-
-    Item flush_fn = js_new_native_this_span_function(
-        dom_flush_selectionchange);
-    js_set_key_cstr(global, "__lambdaFlushSelectionChange", flush_fn);
-    if (get_type_id(existing) == LMD_TYPE_MAP)
-        js_set_key_cstr(existing, "__lambdaFlushSelectionChange", flush_fn);
-
-    // Install placeholder Selection / Range constructors so `instanceof Selection`
-    // and feature-detection (`window.Selection`) succeed. The constructors are
-    // never actually invoked by typical WPT code (which uses document.createRange
-    // / getSelection); identity comes from their function names plus DOM host
-    // fast paths in js_instanceof_classname.
-    Item sel_ctor   = js_new_native_function(js_global_get_selection);
-    Item range_ctor = js_new_native_constructor(dom_create_range);
-    js_set_function_name(sel_ctor, make_key("Selection"));
-    js_set_function_name(range_ctor, make_key("Range"));
-    js_set_key_cstr(global, "Selection", sel_ctor);
-    js_set_key_cstr(global, "Range", range_ctor);
-
-    // Install Selection.prototype and Range.prototype with method stubs so
-    // WPT idl checks like `Selection.prototype.deleteFromDocument.length`
-    // succeed. The methods themselves are never invoked through the
-    // prototype path (instances are DOM resources and dispatch through their
-    // own get_property hooks); these are pure idl shape.
-    Item sel_proto = js_get_key_cstr(sel_ctor, "prototype");
-    if (get_type_id(sel_proto) != LMD_TYPE_MAP) {
-        sel_proto = js_new_object();
-        js_set_key_cstr(sel_ctor, "prototype", sel_proto);
-    }
-    Item range_proto = js_get_key_cstr(range_ctor, "prototype");
-    if (get_type_id(range_proto) != LMD_TYPE_MAP) {
-        range_proto = js_new_object();
-        js_set_key_cstr(range_ctor, "prototype", range_proto);
-    }
-    // DOM3: force the jube type prototypes now that the ctors' .prototype
-    // objects exist — this publishes the declared method function objects onto
-    // Range.prototype / Selection.prototype (IDL shape, .length probes) before
-    // any script can read them.
-    jube_type_prototype((const JubeTypeDef*)radiant_dom_range_host_type());
-    jube_type_prototype((const JubeTypeDef*)radiant_dom_selection_host_type());
-
-    // Set document.defaultView = window so DOM tests' sanity checks pass.
-    Item doc = js_get_document_object_value();
-    js_document_proxy_set_property(make_key("defaultView"), global);
-    (void)doc;
-
-    log_debug("dom_selection: installed global getSelection / Selection / Range");
-}
 
 // ----------------------------------------------------------------------------
 // Phase 8D: selectionchange event bridge
@@ -1252,7 +1174,7 @@ static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
     dom_dispatch_event(document_root.get(), event_root.get());
     return ItemNull;
 }
-JS_FORWARD_STATIC_ITEM(dom_flush_selectionchange, (Item this_val, Item* args, int argc), _wpt_selectionchange_fire, (this_val, args, argc))
+JS_FORWARD_ITEM(dom_flush_selectionchange, (Item this_val, Item* args, int argc), _wpt_selectionchange_fire, (this_val, args, argc))
 
 extern "C" void dom_queue_selectionchange(DomSelection* sel) {
     if (!sel || !sel->state) return;

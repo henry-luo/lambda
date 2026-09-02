@@ -7,9 +7,9 @@
 extern "C" {
 #endif
 
-Item js_mutation_observer_new(Item callback);
-Item js_resize_observer_new(Item callback);
-Item js_intersection_observer_new(Item callback, Item options);
+Item dom_mutation_observer_new(Item callback);
+Item dom_resize_observer_new(Item callback);
+Item dom_intersection_observer_new(Item callback, Item options);
 
 void dom_observers_mutation_notify(DomJsMutationKind kind,
                                       void* target, void* parent,

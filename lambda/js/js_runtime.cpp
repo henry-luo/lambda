@@ -12997,9 +12997,9 @@ JS_RUNTIME_THIS_BODY(js_intrinsic_iterator_identity_body, this_value)
 JS_RUNTIME_BINARY_BODY(js_intrinsic_proxy_revocable_body,
     js_proxy_revocable(arg0, arg1))
 JS_RUNTIME_ARGS_BODY(js_intrinsic_css_supports_body,
-    js_css_supports_operation(args, argc))
+    dom_css_supports_operation(args, argc))
 JS_RUNTIME_ARGS_BODY(js_intrinsic_css_escape_body,
-    js_css_escape_operation(args, argc))
+    dom_css_escape_operation(args, argc))
 
 #undef JS_RUNTIME_BINARY_BODY
 #undef JS_RUNTIME_THIS_UNARY_BODY

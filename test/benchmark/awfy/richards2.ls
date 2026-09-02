@@ -1,18 +1,25 @@
-// AWFY Benchmark: Richards
+// AWFY Benchmark: Richards — VALUE-SEMANTICS port of richards2.ls
 // OS kernel task scheduler simulation
-// Ported from JavaScript AWFY suite
-// Result: PASS when queuePacketCount=23246 and holdCount=9297
+// Result: PASS when qpc=2322 and hc=928 (identical to richards2.ls)
+//
+// richards2.ls is written in the reference-semantics style: one TCB record is
+// reached from `sched.tl`, from `task_table[identity]`, and from `sched.ct`,
+// and every task function mutates whichever handle it happens to hold. That
+// shape depends on aliasing, which S9.1.2/S9.3.1 rule out — values never alias,
+// so those three would be three independent copies drifting apart.
+//
+// This port applies the handle-store idiom (C4.2e; doc/Lambda_Procedural.md
+// "Sharing Mutable State"): every record has exactly one owner, and every field
+// that used to hold a pointer holds an id into that owner instead.
+//
+//   w.tasks[id]  owns every TCB          — `link`, `ct`, `tl` are task ids
+//   w.datas[id]  owns each task's data   — indexed by the owning task's id
+//   w.pkts[id]   owns every Packet       — `link`, `input`, queue heads are packet ids
+//
+// `w` is the single mutation root and travels as one `var` parameter, so
+// S9.1.3's exclusivity check is trivially satisfied at every call site.
+// NONE (-1) replaces the null pointer.
 
-type Packet = {link: map?, identity: int, pkind: int, datum: int, data: int[]}
-type TCB = {link: map?, identity: int, priority: int, input: map?, pp: bool,
-            tw: bool, th: bool, handle: map?, fn_id: int}
-type Scheduler = {qpc: int, hc: int, ct: map?, cti: int, tl: map?}
-type DeviceData = {pending: map?}
-type HandlerData = {work_in: map?, device_in: map?}
-type IdleData = {control: int, icount: int}
-type WorkerData = {destination: int, wcount: int}
-
-// Constants
 let IDLER     = 0
 let WORKER    = 1
 let HANDLER_A = 2
@@ -25,6 +32,7 @@ let DEVICE_PACKET_KIND = 0
 let WORK_PACKET_KIND   = 1
 
 let DATA_SIZE = 4
+let NUM_PACKETS = 8      // the benchmark allocates 8 packets, then recirculates them
 
 // Task function IDs
 let FN_IDLE    = 0
@@ -32,61 +40,43 @@ let FN_WORKER  = 1
 let FN_HANDLER = 2
 let FN_DEVICE  = 3
 
-// --- Packet ---
-// { link: null, identity: 0, pkind: 0, datum: 0, data: [0,0,0,0] }
+let NONE = -1            // the handle-store spelling of a null pointer
 
-pn create_packet(link, identity, pkind) any {
-    var pkt = { link: null, identity: 0, pkind: 0, datum: 0, data: [0, 0, 0, 0] }
-    pkt.link = link
-    pkt.identity = identity
-    pkt.pkind = pkind
-    return pkt
+// --- Packet: owned by w.pkts, addressed by slot id ---
+
+pn create_packet(var w, link: int, identity: int, pkind: int) int {
+    var pid = w.np
+    w.np = pid + 1
+    w.pkts[pid] = {link: link, identity: identity, pkind: pkind,
+                   datum: 0, data: [0, 0, 0, 0]}
+    return pid
 }
 
-// append packet to end of queue, return queue head
-pn append_packet(packet, queue_head) any {
-    packet.link = null
-    if (queue_head == null) {
-        return packet
+// append packet to end of queue, return queue head id
+pn append_packet(var w, pid: int, queue_head: int) int {
+    w.pkts[pid].link = NONE
+    if (queue_head == NONE) {
+        return pid
     }
     var mouse = queue_head
-    var lnk = (mouse.link)
-    while (lnk != null) {
+    var lnk = w.pkts[mouse].link
+    while (lnk != NONE) {
         mouse = lnk
-        lnk = (mouse.link)
+        lnk = w.pkts[mouse].link
     }
-    mouse.link = packet
+    w.pkts[mouse].link = pid
     return queue_head
 }
 
-// --- TaskControlBlock ---
-// { link: null, identity: 0, priority: 0, input: null,
-//   pp: false, tw: false, th: false,
-//   handle: null, fn_id: 0 }
+// --- TaskControlBlock: owned by w.tasks, addressed by task identity ---
 
-pn create_tcb(link, identity, priority, initial_work, state_pp, state_tw, state_th, handle, fn_id) any {
-    var tcb = { link: null, identity: 0, priority: 0, input: null,
-                pp: false, tw: false, th: false,
-                handle: null, fn_id: 0 }
-    tcb.link = link
-    tcb.identity = identity
-    tcb.priority = priority
-    tcb.input = initial_work
-    tcb.pp = state_pp
-    tcb.tw = state_tw
-    tcb.th = state_th
-    tcb.handle = handle
-    tcb.fn_id = fn_id
-    return tcb
-}
-
-pn tcb_is_held_or_waiting(tcb) int {
-    var th = (tcb.th)
+pn tcb_is_held_or_waiting(var w, tid: int) int {
+    var th = w.tasks[tid].th
     if (th == true) {
         return 1
     }
-    var pp = (tcb.pp)
-    var tw = (tcb.tw)
+    var pp = w.tasks[tid].pp
+    var tw = w.tasks[tid].tw
     if (pp == false) {
         if (tw == true) {
             return 1
@@ -95,10 +85,10 @@ pn tcb_is_held_or_waiting(tcb) int {
     return 0
 }
 
-pn tcb_is_waiting_with_packet(tcb) int {
-    var pp = (tcb.pp)
-    var tw = (tcb.tw)
-    var th = (tcb.th)
+pn tcb_is_waiting_with_packet(var w, tid: int) int {
+    var pp = w.tasks[tid].pp
+    var tw = w.tasks[tid].tw
+    var th = w.tasks[tid].th
     if (pp == true) {
         if (tw == true) {
             if (th == false) {
@@ -109,330 +99,290 @@ pn tcb_is_waiting_with_packet(tcb) int {
     return 0
 }
 
-pn tcb_set_running(tcb) any {
-    tcb.pp = false
-    tcb.tw = false
-    tcb.th = false
+pn tcb_set_running(var w, tid: int) {
+    w.tasks[tid].pp = false
+    w.tasks[tid].tw = false
+    w.tasks[tid].th = false
 }
 
-pn tcb_set_packet_pending(tcb) any {
-    tcb.pp = true
-    tcb.tw = false
-    tcb.th = false
+pn tcb_set_packet_pending(var w, tid: int) {
+    w.tasks[tid].pp = true
+    w.tasks[tid].tw = false
+    w.tasks[tid].th = false
 }
 
-pn tcb_set_waiting(tcb) any {
-    tcb.pp = false
-    tcb.tw = true
-    tcb.th = false
-}
-
-pn tcb_set_waiting_with_packet(tcb) any {
-    tcb.pp = true
-    tcb.tw = true
-    tcb.th = false
-}
-
-pn tcb_add_input(tcb, packet, old_task) any {
-    var inp = (tcb.input)
-    if (inp == null) {
-        tcb.input = packet
-        tcb.pp = true
-        var tp = (tcb.priority)
-        var op = (old_task.priority)
+pn tcb_add_input(var w, tid: int, pid: int, old_task: int) int {
+    var inp = w.tasks[tid].input
+    if (inp == NONE) {
+        w.tasks[tid].input = pid
+        w.tasks[tid].pp = true
+        var tp = w.tasks[tid].priority
+        var op = w.tasks[old_task].priority
         if (tp > op) {
-            return tcb
+            return tid
         }
         return old_task
     }
-    var new_input = append_packet(packet, inp)
-    tcb.input = new_input
+    var new_input = append_packet(w, pid, inp)
+    w.tasks[tid].input = new_input
     return old_task
 }
 
-pn tcb_run_task(tcb, sched, task_table) any {
-    var message = null
-    var ww = tcb_is_waiting_with_packet(tcb)
+pn tcb_run_task(var w, tid: int) int {
+    var message = NONE
+    var ww = tcb_is_waiting_with_packet(w, tid)
     if (ww == 1) {
-        message = (tcb.input)
-        var msg_link = (message.link)
-        tcb.input = msg_link
-        var inp2 = (tcb.input)
-        if (inp2 == null) {
-            tcb_set_running(tcb)
+        message = w.tasks[tid].input
+        var msg_link = w.pkts[message].link
+        w.tasks[tid].input = msg_link
+        var inp2 = w.tasks[tid].input
+        if (inp2 == NONE) {
+            tcb_set_running(w, tid)
         }
-        if (inp2 != null) {
-            tcb_set_packet_pending(tcb)
+        if (inp2 != NONE) {
+            tcb_set_packet_pending(w, tid)
         }
     }
-    var fid = (tcb.fn_id)
-    var hnd = (tcb.handle)
+    // the running task's data record is w.datas[tid]; tid is also w.ct here
+    var fid = w.tasks[tid].fn_id
     if (fid == 0) {
-        return task_fn_idle(message, hnd, sched, task_table)
+        return task_fn_idle(w, message, tid)
     }
     if (fid == 1) {
-        return task_fn_worker(message, hnd, sched, task_table)
+        return task_fn_worker(w, message, tid)
     }
     if (fid == 2) {
-        return task_fn_handler(message, hnd, sched, task_table)
+        return task_fn_handler(w, message, tid)
     }
-    return task_fn_device(message, hnd, sched, task_table)
-}
-
-// --- Data Records ---
-
-pn create_device_data() any {
-    var rec = { pending: null }
-    return rec
-}
-
-pn create_handler_data() any {
-    var rec = { work_in: null, device_in: null }
-    return rec
-}
-
-pn create_idle_data() any {
-    var rec = { control: 1, icount: 1000 }
-    return rec
-}
-
-pn create_worker_data() any {
-    var rec = { destination: 2, wcount: 0 }
-    return rec
+    return task_fn_device(w, message, tid)
 }
 
 // --- Scheduler helpers ---
 
-pn find_task(task_table, identity) any {
-    var t = task_table[identity]
-    return t
-}
-
-pn hold_self(sched, current_task) any {
-    var hc = (sched.hc) + 1
-    sched.hc = hc
-    current_task.th = true
-    var lnk = (current_task.link)
+pn hold_self(var w, ct: int) int {
+    var hc = w.hc + 1
+    w.hc = hc
+    w.tasks[ct].th = true
+    var lnk = w.tasks[ct].link
     return lnk
 }
 
-pn mark_waiting(current_task) any {
-    current_task.tw = true
-    return current_task
+pn mark_waiting(var w, ct: int) int {
+    w.tasks[ct].tw = true
+    return ct
 }
 
-pn queue_packet(sched, task_table, packet, current_task) any {
-    var pid = (packet.identity)
-    var t = find_task(task_table, pid)
-    if (t == null) {
-        return null
+pn queue_packet(var w, pid: int, ct: int) int {
+    var did = w.pkts[pid].identity       // the packet's destination task
+    if (did < 0) {
+        return NONE
     }
-    var qpc = (sched.qpc) + 1
-    sched.qpc = qpc
-    packet.link = null
-    var cti = (sched.cti)
-    packet.identity = cti
-    var result = tcb_add_input(t, packet, current_task)
+    var qpc = w.qpc + 1
+    w.qpc = qpc
+    w.pkts[pid].link = NONE
+    var cti = w.cti
+    w.pkts[pid].identity = cti           // identity is reused as the sender id
+    var result = tcb_add_input(w, did, pid, ct)
     return result
 }
 
-pn release_task(sched, task_table, identity, current_task) any {
-    var t = find_task(task_table, identity)
-    if (t == null) {
-        return null
+pn release_task(var w, tid: int, ct: int) int {
+    if (tid < 0) {
+        return NONE
     }
-    t.th = false
-    var tp = (t.priority)
-    var cp = (current_task.priority)
+    w.tasks[tid].th = false
+    var tp = w.tasks[tid].priority
+    var cp = w.tasks[ct].priority
     if (tp > cp) {
-        return t
+        return tid
     }
-    return current_task
+    return ct
 }
 
 // --- Task functions ---
 
-pn task_fn_idle(work, data, sched, task_table) any {
-    var ct = (sched.ct)
-    var ic = (data.icount) - 1
-    data.icount = ic
+pn task_fn_idle(var w, work: int, tid: int) int {
+    var ct = w.ct
+    var ic = w.datas[tid].icount - 1
+    w.datas[tid].icount = ic
     if (ic == 0) {
-        return hold_self(sched, ct)
+        return hold_self(w, ct)
     }
-    var ctrl = (data.control)
+    var ctrl = w.datas[tid].control
     var r = band(ctrl, 1)
     if (r == 0) {
         var nctrl = shr(ctrl, 1)
-        data.control = nctrl
-        return release_task(sched, task_table, DEVICE_A, ct)
+        w.datas[tid].control = nctrl
+        return release_task(w, DEVICE_A, ct)
     }
     var nctrl2 = bxor(shr(ctrl, 1), 0xD008)
-    data.control = nctrl2
-    return release_task(sched, task_table, DEVICE_B, ct)
+    w.datas[tid].control = nctrl2
+    return release_task(w, DEVICE_B, ct)
 }
 
-pn task_fn_worker(work, data, sched, task_table) any {
-    var ct = (sched.ct)
-    if (work == null) {
-        return mark_waiting(ct)
+pn task_fn_worker(var w, work: int, tid: int) int {
+    var ct = w.ct
+    if (work == NONE) {
+        return mark_waiting(w, ct)
     }
-    var dest = (data.destination)
+    var dest = w.datas[tid].destination
     if (dest == HANDLER_A) {
-        data.destination = HANDLER_B
+        w.datas[tid].destination = HANDLER_B
     }
     if (dest != HANDLER_A) {
-        data.destination = HANDLER_A
+        w.datas[tid].destination = HANDLER_A
     }
-    var ndest = (data.destination)
-    work.identity = ndest
-    work.datum = 0
+    var ndest = w.datas[tid].destination
 
-    var wdata = (work.data)
+    // read-modify-write: mutate the packet once, then put it back, so the
+    // in-loop writes land on the owner rather than on a detached copy
+    var p = w.pkts[work]
+    p.identity = ndest
+    p.datum = 0
     var i: int = 0
     while (i < DATA_SIZE) {
-        var wc = (data.wcount) + 1
-        data.wcount = wc
+        var wc = w.datas[tid].wcount + 1
+        w.datas[tid].wcount = wc
         if (wc > 26) {
-            data.wcount = 1
+            w.datas[tid].wcount = 1
             wc = 1
         }
         var ch = 64 + wc
-        wdata[i] = ch
+        p.data[i] = ch
         i = i + 1
     }
-    return queue_packet(sched, task_table, work, ct)
+    w.pkts[work] = p
+    return queue_packet(w, work, ct)
 }
 
-pn task_fn_handler(work, data, sched, task_table) any {
-    var ct = (sched.ct)
-    if (work != null) {
-        var wk = (work.pkind)
+pn task_fn_handler(var w, work: int, tid: int) int {
+    var ct = w.ct
+    if (work != NONE) {
+        var wk = w.pkts[work].pkind
         if (wk == WORK_PACKET_KIND) {
-            var wi = (data.work_in)
-            var nwi = append_packet(work, wi)
-            data.work_in = nwi
+            var wi = w.datas[tid].work_in
+            var nwi = append_packet(w, work, wi)
+            w.datas[tid].work_in = nwi
         }
         if (wk == DEVICE_PACKET_KIND) {
-            var di = (data.device_in)
-            var ndi = append_packet(work, di)
-            data.device_in = ndi
+            var di = w.datas[tid].device_in
+            var ndi = append_packet(w, work, di)
+            w.datas[tid].device_in = ndi
         }
     }
-    var work_pkt = (data.work_in)
-    if (work_pkt == null) {
-        return mark_waiting(ct)
+    var work_pkt = w.datas[tid].work_in
+    if (work_pkt == NONE) {
+        return mark_waiting(w, ct)
     }
-    var cnt = (work_pkt.datum)
+    var cnt = w.pkts[work_pkt].datum
     if (cnt >= DATA_SIZE) {
-        var wl = (work_pkt.link)
-        data.work_in = wl
-        return queue_packet(sched, task_table, work_pkt, ct)
+        var wl = w.pkts[work_pkt].link
+        w.datas[tid].work_in = wl
+        return queue_packet(w, work_pkt, ct)
     }
-    var dev_pkt = (data.device_in)
-    if (dev_pkt == null) {
-        return mark_waiting(ct)
+    var dev_pkt = w.datas[tid].device_in
+    if (dev_pkt == NONE) {
+        return mark_waiting(w, ct)
     }
-    var dl = (dev_pkt.link)
-    data.device_in = dl
-    var wd = (work_pkt.data)
-    var dval = wd[cnt]
-    dev_pkt.datum = dval
+    var dl = w.pkts[dev_pkt].link
+    w.datas[tid].device_in = dl
+    var dval = w.pkts[work_pkt].data[cnt]
+    w.pkts[dev_pkt].datum = dval
     var nc = cnt + 1
-    work_pkt.datum = nc
-    return queue_packet(sched, task_table, dev_pkt, ct)
+    w.pkts[work_pkt].datum = nc
+    return queue_packet(w, dev_pkt, ct)
 }
 
-pn task_fn_device(work, data, sched, task_table) any {
-    var ct = (sched.ct)
-    if (work == null) {
-        var pend = (data.pending)
-        if (pend == null) {
-            return mark_waiting(ct)
+pn task_fn_device(var w, work: int, tid: int) int {
+    var ct = w.ct
+    if (work == NONE) {
+        var pend = w.datas[tid].pending
+        if (pend == NONE) {
+            return mark_waiting(w, ct)
         }
         var fw = pend
-        data.pending = null
-        return queue_packet(sched, task_table, fw, ct)
+        w.datas[tid].pending = NONE
+        return queue_packet(w, fw, ct)
     }
-    data.pending = work
-    return hold_self(sched, ct)
+    w.datas[tid].pending = work
+    return hold_self(w, ct)
 }
 
 // --- Scheduler ---
 
-pn create_task(sched, task_table, identity, priority, work, state_pp, state_tw, state_th, handle, fn_id) any {
-    var tl = (sched.tl)
-    var tcb = create_tcb(tl, identity, priority, work, state_pp, state_tw, state_th, handle, fn_id)
-    sched.tl = tcb
-    task_table[identity] = tcb
+// the aliasing original wrote `sched.tl = tcb; task_table[identity] = tcb`,
+// giving two holders of one record; here the store holds the only TCB and the
+// task list holds its id
+pn create_task(var w, identity: int, priority: int, work: int,
+               state_pp: bool, state_tw: bool, state_th: bool, fn_id: int) {
+    var tl = w.tl
+    w.tasks[identity] = {link: tl, identity: identity, priority: priority,
+                         input: work, pp: state_pp, tw: state_tw, th: state_th,
+                         fn_id: fn_id}
+    w.tl = identity
 }
 
-pn schedule(sched, task_table) any {
-    var ct = (sched.tl)
-    sched.ct = ct
-    while (ct != null) {
-        var how = tcb_is_held_or_waiting(ct)
+pn schedule(var w) {
+    var ct = w.tl
+    w.ct = ct
+    while (ct != NONE) {
+        var how = tcb_is_held_or_waiting(w, ct)
         if (how == 1) {
-            var nxt = (ct.link)
+            var nxt = w.tasks[ct].link
             ct = nxt
-            sched.ct = ct
+            w.ct = ct
         }
         if (how == 0) {
-            var cid = (ct.identity)
-            sched.cti = cid
-            sched.ct = ct
-            ct = tcb_run_task(ct, sched, task_table)
-            // After runTask, ct is the returned task (next to run)
-            // update sched.ct for the next iteration
-            sched.ct = ct
+            var cid = w.tasks[ct].identity
+            w.cti = cid
+            w.ct = ct
+            ct = tcb_run_task(w, ct)
+            w.ct = ct
         }
     }
 }
 
-pn benchmark() any {
-    // Scheduler state
-    var sched = { qpc: 0, hc: 0, ct: null, cti: 0, tl: null }
-    var task_table = fill(6, null)
+pn benchmark() int {
+    // one world value: the single owner of every task, data record, and packet
+    var w = {qpc: 0, hc: 0, ct: NONE, cti: 0, tl: NONE, np: 0,
+             tasks: fill(6, null), datas: fill(6, null), pkts: fill(8, null)}
 
-    // createIdler(IDLER, 0, null, createRunning)
-    // createRunning: pp=false, tw=false, th=false
-    var idle_data = create_idle_data()
-    create_task(sched, task_table, IDLER, 0, null, false, false, false, idle_data, FN_IDLE)
+    // createIdler(IDLER, 0, null, createRunning) — pp=false, tw=false, th=false
+    create_task(w, IDLER, 0, NONE, false, false, false, FN_IDLE)
+    w.datas[IDLER] = {control: 1, icount: 1000}
 
     // createWorker(WORKER, 1000, workQ, createWaitingWithPacket)
-    var workq = create_packet(null, WORKER, WORK_PACKET_KIND)
-    workq = create_packet(workq, WORKER, WORK_PACKET_KIND)
-    var worker_data = create_worker_data()
-    // createWaitingWithPacket: pp=true, tw=true, th=false
-    create_task(sched, task_table, WORKER, 1000, workq, true, true, false, worker_data, FN_WORKER)
+    var workq = create_packet(w, NONE, WORKER, WORK_PACKET_KIND)
+    workq = create_packet(w, workq, WORKER, WORK_PACKET_KIND)
+    create_task(w, WORKER, 1000, workq, true, true, false, FN_WORKER)
+    w.datas[WORKER] = {destination: HANDLER_A, wcount: 0}
 
     // createHandler(HANDLER_A, 2000, workQ, createWaitingWithPacket)
-    workq = create_packet(null, DEVICE_A, DEVICE_PACKET_KIND)
-    workq = create_packet(workq, DEVICE_A, DEVICE_PACKET_KIND)
-    workq = create_packet(workq, DEVICE_A, DEVICE_PACKET_KIND)
-    var handler_data_a = create_handler_data()
-    create_task(sched, task_table, HANDLER_A, 2000, workq, true, true, false, handler_data_a, FN_HANDLER)
+    workq = create_packet(w, NONE, DEVICE_A, DEVICE_PACKET_KIND)
+    workq = create_packet(w, workq, DEVICE_A, DEVICE_PACKET_KIND)
+    workq = create_packet(w, workq, DEVICE_A, DEVICE_PACKET_KIND)
+    create_task(w, HANDLER_A, 2000, workq, true, true, false, FN_HANDLER)
+    w.datas[HANDLER_A] = {work_in: NONE, device_in: NONE}
 
     // createHandler(HANDLER_B, 3000, workQ, createWaitingWithPacket)
-    workq = create_packet(null, DEVICE_B, DEVICE_PACKET_KIND)
-    workq = create_packet(workq, DEVICE_B, DEVICE_PACKET_KIND)
-    workq = create_packet(workq, DEVICE_B, DEVICE_PACKET_KIND)
-    var handler_data_b = create_handler_data()
-    create_task(sched, task_table, HANDLER_B, 3000, workq, true, true, false, handler_data_b, FN_HANDLER)
+    workq = create_packet(w, NONE, DEVICE_B, DEVICE_PACKET_KIND)
+    workq = create_packet(w, workq, DEVICE_B, DEVICE_PACKET_KIND)
+    workq = create_packet(w, workq, DEVICE_B, DEVICE_PACKET_KIND)
+    create_task(w, HANDLER_B, 3000, workq, true, true, false, FN_HANDLER)
+    w.datas[HANDLER_B] = {work_in: NONE, device_in: NONE}
 
-    // createDevice(DEVICE_A, 4000, null, createWaiting)
-    // createWaiting: pp=false, tw=true, th=false
-    var device_data_a = create_device_data()
-    create_task(sched, task_table, DEVICE_A, 4000, null, false, true, false, device_data_a, FN_DEVICE)
+    // createDevice(DEVICE_A, 4000, null, createWaiting) — pp=false, tw=true, th=false
+    create_task(w, DEVICE_A, 4000, NONE, false, true, false, FN_DEVICE)
+    w.datas[DEVICE_A] = {pending: NONE}
 
     // createDevice(DEVICE_B, 5000, null, createWaiting)
-    var device_data_b = create_device_data()
-    create_task(sched, task_table, DEVICE_B, 5000, null, false, true, false, device_data_b, FN_DEVICE)
+    create_task(w, DEVICE_B, 5000, NONE, false, true, false, FN_DEVICE)
+    w.datas[DEVICE_B] = {pending: NONE}
 
-    // Run scheduler
-    schedule(sched, task_table)
+    schedule(w)
 
-    var qpc = (sched.qpc)
-    var hc = (sched.hc)
+    var qpc = w.qpc
+    var hc = w.hc
     if (qpc == 2322) {
         if (hc == 928) {
             return 1
@@ -448,7 +398,6 @@ pn benchmark() any {
 
 pn main() {
     var __t0 = clock()
-    // Synchronized with JetStream: 50 iterations with icount=1000
     var pass = true
     var k: int = 0
     while (k < 50) {

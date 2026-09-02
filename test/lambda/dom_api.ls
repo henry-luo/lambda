@@ -9,28 +9,28 @@ import dom
 
 let doc = radiant.load("test/js/dom_identity.html")
 let root = radiant.root(doc)
-let intro = dom.query(root, "#intro")
+let intro = dom.query_selector(root, "#intro")
 let body = dom.closest(intro, "body")
 
 // mutate, then read the mutation back out through serialization
-let _ = dom.set_attr(intro, "data-checked", "yes")
-let copy = dom.clone(intro, true)
-let _appended = dom.append(body, copy)
-let p_after_append = len(dom.query_all(root, "p"))
+let _ = dom.set_attribute(intro, "data-checked", "yes")
+let copy = dom.clone_node(intro, true)
+let _appended = dom.append_child(body, copy)
+let p_after_append = len(dom.query_selector_all(root, "p"))
 let _removed = dom.remove(copy)
 
 {
-  root_tag: dom.tag(root),
-  intro_tag: dom.tag(intro),
-  intro_text: dom.text(intro),
-  body_tag: dom.tag(body),
+  root_tag: dom.node_name(root),
+  intro_tag: dom.node_name(intro),
+  intro_text: dom.text_content(intro),
+  body_tag: dom.node_name(body),
   matches_html: dom.matches(root, "html"),
-  closest_body: dom.tag(dom.closest(intro, "body")),
-  by_id: dom.tag(dom.element_by_id(root, "intro")),
-  attr_read_back: dom.attr(intro, "data-checked"),
-  has_attr: dom.has_attr(intro, "data-checked"),
+  closest_body: dom.node_name(dom.closest(intro, "body")),
+  by_id: dom.node_name(dom.get_element_by_id(root, "intro")),
+  attr_read_back: dom.get_attribute(intro, "data-checked"),
+  has_attr: dom.has_attribute(intro, "data-checked"),
   outer_html: dom.outer_html(intro),
   p_count_with_clone: p_after_append,
-  p_count_after_remove: len(dom.query_all(root, "p")),
+  p_count_after_remove: len(dom.query_selector_all(root, "p")),
   contains_intro: dom.contains(root, intro)
 }

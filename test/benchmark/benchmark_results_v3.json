@@ -96,9 +96,26 @@
       "mir": 9.85,
       "c2mir": 9.846,
       "lambdajs": 92.772625,
-      "quickjs": null,
+      "quickjs": 118.189,
       "nodejs": 13.675209,
-      "python": 155.768
+      "python": 155.768,
+      "_status": {
+        "quickjs": "ok",
+        "quickjs_e2e": "ok"
+      },
+      "_status_detail": {
+        "quickjs": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "quickjs_e2e": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "quickjs_e2e": 126.567875
     }
   },
   "awfy": {
@@ -402,9 +419,26 @@
       "mir": 2.875,
       "c2mir": 3.81,
       "lambdajs": 120.830958,
-      "quickjs": null,
+      "quickjs": 14.058,
       "nodejs": 5.071875,
-      "python": 3.876
+      "python": 3.876,
+      "_status": {
+        "quickjs": "ok",
+        "quickjs_e2e": "ok"
+      },
+      "_status_detail": {
+        "quickjs": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "quickjs_e2e": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "quickjs_e2e": 35.371208
     },
     "pidigits": {
       "category": "bignum",
@@ -420,18 +454,52 @@
       "mir": 1.248,
       "c2mir": 1.432,
       "lambdajs": 14.417708,
-      "quickjs": null,
+      "quickjs": 7.539,
       "nodejs": 2.4115,
-      "python": 1.462
+      "python": 1.462,
+      "_status": {
+        "quickjs": "ok",
+        "quickjs_e2e": "ok"
+      },
+      "_status_detail": {
+        "quickjs": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "quickjs_e2e": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "quickjs_e2e": 16.535792
     },
     "revcomp": {
       "category": "string",
       "mir": 1.846,
       "c2mir": 1.834,
       "lambdajs": 45.27125,
-      "quickjs": null,
+      "quickjs": 3.06,
       "nodejs": 3.325417,
-      "python": 0.085
+      "python": 0.085,
+      "_status": {
+        "quickjs": "ok",
+        "quickjs_e2e": "ok"
+      },
+      "_status_detail": {
+        "quickjs": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "quickjs_e2e": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "quickjs_e2e": 10.097875
     },
     "spectralnorm": {
       "category": "numeric",
@@ -615,9 +683,26 @@
       "mir": 23.524,
       "c2mir": 81.107,
       "lambdajs": 3562.482,
-      "quickjs": 228.5,
+      "quickjs": 223.008,
       "nodejs": 17.692,
-      "python": 45.6
+      "python": 45.6,
+      "_status": {
+        "quickjs": "ok",
+        "quickjs_e2e": "ok"
+      },
+      "_status_detail": {
+        "quickjs": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "quickjs_e2e": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "quickjs_e2e": 244.771125
     },
     "navier_stokes": {
       "category": "numeric",
@@ -660,32 +745,53 @@
       "mir": 348.372,
       "c2mir": 435.134,
       "lambdajs": 2148.275,
-      "quickjs": 170.5,
+      "quickjs": 158.164,
       "nodejs": 18.584,
-      "python": 144.1
+      "python": 144.1,
+      "_status": {
+        "quickjs": "ok",
+        "quickjs_e2e": "ok"
+      },
+      "_status_detail": {
+        "quickjs": {
+          "status_counts": {
+            "ok": 1
+          }
+        },
+        "quickjs_e2e": {
+          "status_counts": {
+            "ok": 1
+          }
+        }
+      },
+      "quickjs_e2e": 164.928875
     }
   },
   "_metadata": {
     "schema_version": 2,
     "mode": "time",
-    "started_at": "2026-08-02T20:13:49",
-    "command": "run_benchmarks.py -e mir --bench towers,mandelbrot,permute,sieve,queens,bounce",
+    "started_at": "2026-09-02T12:17:40",
+    "command": "test/benchmark/run_benchmarks.py -e quickjs -s r7rs,beng,jetstream -b ack,knucleotide,regexredux,revcomp,cube3d,raytrace -n 1 -t 180 --typed",
     "engines": [
-      "mir"
+      "quickjs"
     ],
-    "runs": 3,
-    "timeout_s": 120,
+    "runs": 1,
+    "timeout_s": 180,
     "suite_cooldown_seconds": 10,
     "results_output": "test/benchmark/benchmark_results_v3.json",
     "fresh": false,
-    "suite_filters": [],
+    "suite_filters": [
+      "r7rs",
+      "beng",
+      "jetstream"
+    ],
     "bench_filters": [
-      "towers",
-      "mandelbrot",
-      "permute",
-      "sieve",
-      "queens",
-      "bounce"
+      "ack",
+      "knucleotide",
+      "regexredux",
+      "revcomp",
+      "cube3d",
+      "raytrace"
     ],
     "canonical_duplicate_suites": {
       "mandelbrot": "awfy",
@@ -696,20 +802,22 @@
     },
     "platform": "Darwin arm64",
     "lambda_exe": "./lambda.exe",
-    "lambda_exe_size_bytes": 20501656,
+    "lambda_exe_size_bytes": 19137992,
     "lambda_archive": null,
     "lambda_archive_size_bytes": null,
     "lambda_archive_sha256": null,
     "test262_baseline": {
       "status": "not_run"
     },
-    "lambda_commit": "fd01fe57d450b3ccf3d43937cb8b78ecde64d1db",
+    "lambda_commit": "33a178ed0f6a26fa95a1c595ad514ec5f52a72bd",
     "node_version": "v22.13.0",
     "python_version": "Python 3.14.6",
     "quickjs_version": "2025-09-13",
     "profile_check": "not_recorded",
     "log_dir": null,
-    "typed_variants": false,
-    "finished_at": "2026-08-02T20:14:01"
+    "typed_variants": true,
+    "finished_at": "2026-09-02T12:18:01",
+    "legacy_variants": false,
+    "mir_key_source": "untyped <bench>.ls"
   }
 }

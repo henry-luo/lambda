@@ -14001,20 +14001,20 @@ extern "C" Item js_get_global_this() {
         js_install_native_constructor(js_global_this_obj, "XMLHttpRequest",
             js_xhr_new);
 
-        js_set_key_cstr(js_global_this_obj, "localStorage", js_storage_local_object());
-        js_set_key_cstr(js_global_this_obj, "sessionStorage", js_storage_session_object());
+        js_set_key_cstr(js_global_this_obj, "localStorage", dom_storage_local_object());
+        js_set_key_cstr(js_global_this_obj, "sessionStorage", dom_storage_session_object());
         js_install_native_method(js_global_this_obj, "matchMedia",
-            js_match_media);
+            dom_match_media);
         js_install_native_constructor(js_global_this_obj, "MutationObserver",
-            js_mutation_observer_new);
+            dom_mutation_observer_new);
         // Editor sanitizers use the standard NodeFilter mask with a detached
         // document TreeWalker; expose the shared DOM constants rather than
         // giving an editor-specific traversal path.
         js_set_key_cstr(js_global_this_obj, "NodeFilter", js_node_filter_new());
         js_install_native_constructor(js_global_this_obj, "ResizeObserver",
-            js_resize_observer_new);
+            dom_resize_observer_new);
         js_install_native_constructor(js_global_this_obj, "IntersectionObserver",
-            js_intersection_observer_new);
+            dom_intersection_observer_new);
 
         // AbortController constructor
         {
