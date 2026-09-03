@@ -10,7 +10,6 @@
 // so aria-invalid trailed the truth by one edit (ESO37). Here it is called from
 // the same handlers as revalidate and after it, so the verdict it mirrors is
 // the one just computed.
-import radiant
 import dom
 
 // Write only on an actual change. This matters more here than it did natively:
@@ -45,10 +44,10 @@ pub pn reflect(elem) {
 // not the normalized fraction the engine stores.
 pub pn reflect_range(elem) {
     reflect(elem)
-    let v = radiant.range_value(elem);
+    let v = dom.range_value(elem);
     if (v != null) {
         set_if_changed(elem, "aria-valuenow", string(v))
-        set_if_changed(elem, "aria-valuemin", string(radiant.range_min(elem)))
-        set_if_changed(elem, "aria-valuemax", string(radiant.range_max(elem)))
+        set_if_changed(elem, "aria-valuemin", string(dom.range_min(elem)))
+        set_if_changed(elem, "aria-valuemax", string(dom.range_max(elem)))
     }
 }

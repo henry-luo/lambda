@@ -14,7 +14,6 @@
 //
 // Ordinary text keeps the single-node fast path below. Structural commands and
 // a range that spans nodes use the raw range waist, which owns the tree surgery.
-import radiant
 import dom
 import commands: lambda.package.dom.commands
 
@@ -47,7 +46,7 @@ pub pn apply_fn(host, evt) {
             // still claims it through the verdict channel.
             if (len(data) == 0) { 'prevent-default' }
             else if ((t == "insertText" or t == "insertReplacementText") and
-                     radiant.dom_replace_dom_range(host, data)) {
+                     dom.dom_replace_dom_range(host, data)) {
                 'prevent-default'
             }
             else if (t == "insertText" or t == "insertReplacementText") { 'pass' }
@@ -58,7 +57,7 @@ pub pn apply_fn(host, evt) {
             else { 'prevent-default' }
         }
         else if (t == "deleteContentBackward" or t == "deleteContentForward") {
-            if (radiant.dom_delete_dom_range(host)) { 'prevent-default' } else { 'pass' }
+            if (dom.dom_delete_dom_range(host)) { 'prevent-default' } else { 'pass' }
         }
         // Clipboard and text-drag payloads are already native-provided plain
         // text. Their policy is only to replace the selected DOM range; rich
@@ -67,11 +66,11 @@ pub pn apply_fn(host, evt) {
         else if (t == "insertFromPaste" or t == "insertFromDrop") {
             let data = if (evt.data == null) "" else evt.data;
             if (len(data) == 0) { 'pass' }
-            else if (radiant.dom_replace_dom_range(host, data)) { 'prevent-default' }
+            else if (dom.dom_replace_dom_range(host, data)) { 'prevent-default' }
             else { 'pass' }
         }
         else if (t == "deleteByCut" or t == "deleteByDrag") {
-            if (radiant.dom_delete_dom_range(host)) { 'prevent-default' } else { 'pass' }
+            if (dom.dom_delete_dom_range(host)) { 'prevent-default' } else { 'pass' }
         }
         else { 'pass' }
     }
@@ -83,7 +82,7 @@ pub pn apply_fn(host, evt) {
         // exactly as they do in editing.ls.
         if (t == "insertText" or t == "insertReplacementText") {
             let data = if (evt.data == null) "" else evt.data;
-            if (radiant.dom_replace_range(host, s, e, data) == null) { 'pass' }
+            if (dom.dom_replace_range(host, s, e, data) == null) { 'pass' }
             else { 'prevent-default' }
         }
         // The raw range waist deliberately covers cross-text-node clipboard
@@ -93,7 +92,7 @@ pub pn apply_fn(host, evt) {
         else if (t == "insertFromPaste" or t == "insertFromDrop") {
             let data = if (evt.data == null) "" else evt.data;
             if (len(data) == 0) { 'pass' }
-            else if (radiant.dom_replace_dom_range(host, data)) { 'prevent-default' }
+            else if (dom.dom_replace_dom_range(host, data)) { 'prevent-default' }
             else { 'pass' }
         }
         // F13.3. A composition edit replaces the range the IME named with the
@@ -112,12 +111,12 @@ pub pn apply_fn(host, evt) {
             let data = if (evt.data == null) "" else evt.data;
             let caret = if (t == "insertCompositionText" and evt.composition_caret != null)
                             evt.composition_caret else len(data);
-            let value = radiant.dom_edit_text(host);
+            let value = dom.dom_edit_text(host);
             let unchanged = value != null and slice(value, s, e) == data;
             if (unchanged) {
                 if (dom.set_caret(host, s + caret)) { 'prevent-default' } else { 'pass' }
             }
-            else if (radiant.dom_replace_range(host, s, e, data) == null) { 'pass' }
+            else if (dom.dom_replace_range(host, s, e, data) == null) { 'pass' }
             else {
                 dom.set_caret(host, s + caret)
                 'prevent-default'
@@ -131,11 +130,11 @@ pub pn apply_fn(host, evt) {
         // the DOM side now agrees.
         else if (t == "deleteContentBackward" or t == "deleteContentForward") {
             let back = t == "deleteContentBackward";
-            let value = radiant.dom_edit_text(host);
+            let value = dom.dom_edit_text(host);
             let ds = if (s != e) s else if (back and s > 0) s - 1 else s;
             let de = if (s != e) e else if (not back and e < len(value)) e + 1 else e;
             if (ds == de) { 'pass' }
-            else if (radiant.dom_replace_range(host, ds, de, "") == null) { 'pass' }
+            else if (dom.dom_replace_range(host, ds, de, "") == null) { 'pass' }
             else { 'prevent-default' }
         }
         // Cut and move-drag delete exactly the range geometry that native
@@ -143,7 +142,7 @@ pub pn apply_fn(host, evt) {
         // text on the clipboard, so sharing the raw delete avoids a second
         // tree-surgery policy branch.
         else if (t == "deleteByCut" or t == "deleteByDrag") {
-            if (radiant.dom_delete_dom_range(host)) { 'prevent-default' } else { 'pass' }
+            if (dom.dom_delete_dom_range(host)) { 'prevent-default' } else { 'pass' }
         }
         // F14.1. The formatting intents arrive here on the keyboard path — the
         // ordinary edit dispatch sends them to `domedit` exactly as it does for

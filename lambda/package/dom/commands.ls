@@ -11,7 +11,6 @@
 // Scope is the subset real editors invoke, not the full deprecated surface. A
 // command this module does not implement declines, and `execCommand` reports
 // false for it — the same answer `queryCommandSupported` would give.
-import radiant
 import dom
 
 // The name a page passes to execCommand, mapped to the WHATWG intent the
@@ -59,10 +58,10 @@ pn toggle_format(host, tag) {
         // with no channel through this waist, so the command declines rather
         // than reporting a change it did not make.
         if (s == e) { false }
-        else if (radiant.dom_range_format(host, tag)) {
-            radiant.dom_unwrap_range(host, s, e, tag)
+        else if (dom.dom_range_format(host, tag)) {
+            dom.dom_unwrap_range(host, s, e, tag)
         }
-        else { radiant.dom_wrap_range(host, s, e, tag) }
+        else { dom.dom_wrap_range(host, s, e, tag) }
     }
 }
 
@@ -75,7 +74,7 @@ pub pn run(host, intent, value) {
     if (tag != null) { toggle_format(host, tag) }
     else if (intent == "insertHTML") {
         let html = if (value == null) "" else value;
-        if (len(html) == 0) { false } else { radiant.dom_insert_html(host, html) }
+        if (len(html) == 0) { false } else { dom.dom_insert_html(host, html) }
     }
     // insertText is the same range replacement dom_edit.ls performs for typed
     // text, addressed by command name instead of by input type. It is here, not
@@ -84,11 +83,11 @@ pub pn run(host, intent, value) {
     // exactly what typing would have done.
     else if (intent == "insertText") {
         let data = if (value == null) "" else value;
-        radiant.dom_replace_dom_range(host, data)
+        dom.dom_replace_dom_range(host, data)
     }
     else if (intent == "deleteContentBackward" or
              intent == "deleteContentForward") {
-        radiant.dom_delete_dom_range(host)
+        dom.dom_delete_dom_range(host)
     }
     else if (intent == "insertParagraph") {
         dom.edit_split_block(host)

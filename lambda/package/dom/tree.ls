@@ -7,7 +7,7 @@
 // share a name -- so each belongs here, where it can be read and changed
 // without touching the engine.
 //
-// The definitions are the derivations recorded in lambda/dom/dom_api.def; the
+// The definitions are the derivations recorded in lambda/dom/dom.def; the
 // oracle test/lambda/dom_derive_forms.ls holds these and the native bodies to
 // the same answers.
 import dom

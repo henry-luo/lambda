@@ -9,7 +9,6 @@
 // max and step (RAD_19 known-issue 6). `pattern` is still not covered: Lambda
 // exposes no regex system function today, so there is nothing to compile the
 // pattern with (ESO29). Native had the same gap for the same reason.
-import radiant
 import dom
 
 // --- helpers ---------------------------------------------------------------
@@ -71,7 +70,7 @@ pub fn value_is_url(text) {
 // Returns true when every constraint the control declares is satisfied.
 pub fn is_valid(elem, text, input_type) {
     // A custom validity message set through the IDL overrides everything.
-    if (radiant.custom_validity(elem) != "") { false }
+    if (dom.custom_validity(elem) != "") { false }
     else if (dom.get_state(elem, "required") and len(text) == 0) { false }
     else if (len(text) == 0) {
         // an empty, non-required control is valid regardless of the rest

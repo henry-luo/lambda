@@ -1,7 +1,6 @@
 // Sequential-focus policy (ES30). Native supplies a DOM-order eligibility
 // snapshot and performs the canonical focus/scroll writes; this module owns
 // HTML tabindex ordering and autofocus choice.
-import radiant
 import dom
 
 fn before(a, b) {
@@ -58,7 +57,7 @@ fn autofocus_candidate(candidates, i) {
 
 pub pn navigate(root, evt) {
     let forward = not evt.shift;
-    let target = next_candidate(radiant.focus_candidates(dom.document_element(root)), forward);
+    let target = next_candidate(dom.focus_candidates(dom.document_element(root)), forward);
     if (target == null) { 'pass' }
     else {
         dom.focus_set(target.node, true)
@@ -67,7 +66,7 @@ pub pn navigate(root, evt) {
 }
 
 pub pn autofocus(root) {
-    let target = autofocus_candidate(radiant.focus_candidates(dom.document_element(root)), 0);
+    let target = autofocus_candidate(dom.focus_candidates(dom.document_element(root)), 0);
     if (target == null) { 'pass' }
     else {
         dom.focus_set(target.node, false)

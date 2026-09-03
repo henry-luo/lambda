@@ -7,7 +7,6 @@
 //
 // An intent this file does not handle returns 'pass' and the native applier
 // runs unchanged, so the flip can land one input type at a time.
-import radiant
 import dom
 
 // --- word boundaries -------------------------------------------------------
@@ -152,7 +151,7 @@ fn fit(elem, data, text_len, sel_len) {
 // The engine fires the event; the template only answers. The snapshot itself
 // stays engine-side — value_at_focus reads it.
 pub pn commit(elem) {
-    let before = radiant.value_at_focus(elem);
+    let before = dom.value_at_focus(elem);
     // No snapshot means this is the first blur after init, which is not a
     // commit — treating it as one would fire `change` on every focus pass.
     if (before != null and before != dom.get_state(elem, "value")) {

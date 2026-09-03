@@ -4,7 +4,7 @@
 // scroll. Native owns the live nearest scrollport, range clamp, scroll event,
 // geometry observers, and paint; a policy handler never receives pixels or a
 // mutable scroll offset.
-import radiant
+import dom
 
 fn operation_for(key, shift, alt, ctrl, meta) {
     // Modified arrows belong to selection and platform navigation policy. A
@@ -26,5 +26,5 @@ fn operation_for(key, shift, alt, ctrl, meta) {
 pub pn navigate(body, evt) {
     let op = operation_for(evt.key, evt.shift, evt.alt, evt.ctrl, evt.meta);
     if (op == null) { 'pass' }
-    else { radiant.scroll_operation(body, op) }
+    else { dom.scroll_operation(body, op) }
 }

@@ -2,7 +2,6 @@
 // See vibe/Lambda_Design_DOM_State.md — these templates own the state
 // transitions and default actions that used to live in radiant/event.cpp.
 // The engine owns the storage; every write goes through the waist primitives.
-import radiant
 import dom
 import tree: lambda.package.dom.tree
 import validate: lambda.package.dom.validate
@@ -68,15 +67,15 @@ on click(evt) {
 // release paths share (ESO28).
 // One commit path for the pointer, Enter, and the harness's select_option.
 pn commit_option(elem, index) {
-    radiant.set_selected_index(elem, index)
-    radiant.set_dropdown_open(elem, false)
+    dom.set_selected_index(elem, index)
+    dom.set_dropdown_open(elem, false)
 }
 
 view <select> state dropdown_open {}
 on init(evt) { aria.reflect(~) }
 on click(evt) {
     if (dom.get_state(~, "disabled")) { return 'pass' }
-    radiant.set_dropdown_open(~, not radiant.dropdown_open(~))
+    dom.set_dropdown_open(~, not dom.dropdown_open(~))
 }
 // F2b: the commit half. The dropdown overlay is not a DOM element, so native
 // resolves which option the pointer hit from the popup geometry and hands the
@@ -90,14 +89,14 @@ on optioncommit(evt) {
 // pointer does — not a second copy of it — which is the point of moving the
 // other three keys here rather than leaving them native alongside it.
 on dropdownkey(evt) {
-    let count = radiant.option_count(~);
-    let hover = radiant.hover_index(~);
-    if (evt.key == "ArrowUp") { if (hover > 0) radiant.set_hover_index(~, hover - 1) else true }
-    else if (evt.key == "ArrowDown") { if (hover < count - 1) radiant.set_hover_index(~, hover + 1) else true }
+    let count = dom.option_count(~);
+    let hover = dom.hover_index(~);
+    if (evt.key == "ArrowUp") { if (hover > 0) dom.set_hover_index(~, hover - 1) else true }
+    else if (evt.key == "ArrowDown") { if (hover < count - 1) dom.set_hover_index(~, hover + 1) else true }
     else if (evt.key == "Enter") {
         if (hover >= 0 and hover < count) { commit_option(~, hover) } else { true }
     }
-    else if (evt.key == "Escape") { radiant.set_dropdown_open(~, false) }
+    else if (evt.key == "Escape") { dom.set_dropdown_open(~, false) }
     else { 'pass' }
 }
 

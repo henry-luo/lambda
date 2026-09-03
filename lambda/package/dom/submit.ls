@@ -1,7 +1,6 @@
 // Form submission policy (HTML 4.10.21.3). Native supplies association,
 // validity events, entry construction, and the navigation waist; this module
 // chooses the submitter overrides and serialization format.
-import radiant
 import dom
 import ue: lambda.package.dom.urlencode
 
@@ -49,21 +48,21 @@ fn validation_enabled(form, submitter) {
 pub fn run(form, submitter) {
     if (form == null) { 'pass' }
     else if (validation_enabled(form, submitter) and
-             not radiant.check_validity(form)) {
+             not dom.check_validity(form)) {
         'prevent-default'
     }
-    else if (not radiant.submit_event(form, submitter)) {
+    else if (not dom.submit_event(form, submitter)) {
         'prevent-default'
     }
     else {
         // submit is cancelable and must precede serialization/navigation.
-        let entries = radiant.form_entries(form, submitter);
+        let entries = dom.form_entries(form, submitter);
         let method_name = lower(submit_attr(form, submitter,
             "formmethod", "method", "get"));
         let enctype = lower(submit_attr(form, submitter,
             "formenctype", "enctype", "application/x-www-form-urlencoded"));
         let action = submit_attr(form, submitter,
-            "formaction", "action", radiant.form_url(form));
+            "formaction", "action", dom.form_url(form));
         let target = attr_or(form, "target", "_self");
 
         if (method_name == "get") {
@@ -74,7 +73,7 @@ pub fn run(form, submitter) {
                 method: "get", enctype: enctype, body: ""})
         }
         else if (enctype == "multipart/form-data") {
-            let boundary = radiant.form_boundary();
+            let boundary = dom.form_boundary();
             dom.request_navigation({target: target, url: action,
                 method: method_name, enctype: enctype,
                 body: multipart(entries, boundary)})
@@ -92,7 +91,7 @@ pub fn run(form, submitter) {
 pub fn reset(form) {
     if (form == null) { 'pass' }
     else {
-        radiant.reset_form(form)
+        dom.reset_form(form)
         'prevent-default'
     }
 }

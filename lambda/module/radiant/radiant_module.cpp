@@ -3076,3 +3076,38 @@ extern "C" Item dom_engine_dispatch_event(Item node_item, Item type_item,
     return radiant_bool_item(radiant_dispatch_event_with_flags_from_script(
         (void*)elem, type, is_truthy(bubbles_item), is_truthy(cancelable_item)));
 }
+
+// F32/ES45: the rest of the engine's DOM surface, so `dom.*` can be the sole
+// API and radiant.* can keep only what is not DOM at all.
+RADIANT_PROVIDE_ENGINE_1(caret_surface, fn_radiant_caret_surface)
+RADIANT_PROVIDE_ENGINE_1(focus_candidates, fn_radiant_focus_candidates)
+RADIANT_PROVIDE_ENGINE_1(check_validity, fn_radiant_check_validity)
+RADIANT_PROVIDE_ENGINE_1(close_context_menu, fn_radiant_close_context_menu)
+RADIANT_PROVIDE_ENGINE_1(custom_validity, fn_radiant_custom_validity)
+RADIANT_PROVIDE_ENGINE_1(dom_delete_dom_range, fn_radiant_dom_delete_dom_range)
+RADIANT_PROVIDE_ENGINE_1(dom_edit_text, fn_radiant_dom_edit_text)
+RADIANT_PROVIDE_ENGINE_2(dom_insert_html, fn_radiant_dom_insert_html)
+RADIANT_PROVIDE_ENGINE_2(dom_range_format, fn_radiant_dom_range_format)
+RADIANT_PROVIDE_ENGINE_2(dom_replace_dom_range, fn_radiant_dom_replace_dom_range)
+RADIANT_PROVIDE_ENGINE_4(dom_replace_range, fn_radiant_dom_replace_range)
+RADIANT_PROVIDE_ENGINE_4(dom_unwrap_range, fn_radiant_dom_unwrap_range)
+RADIANT_PROVIDE_ENGINE_4(dom_wrap_range, fn_radiant_dom_wrap_range)
+RADIANT_PROVIDE_ENGINE_1(dropdown_open, fn_radiant_dropdown_open)
+RADIANT_PROVIDE_ENGINE_1(embedded_document_root, fn_radiant_embedded_document_root)
+RADIANT_PROVIDE_ENGINE_1(embedding_element, fn_radiant_embedding_element)
+RADIANT_PROVIDE_ENGINE_0(form_boundary, fn_radiant_form_boundary)
+RADIANT_PROVIDE_ENGINE_2(form_entries, fn_radiant_form_entries)
+RADIANT_PROVIDE_ENGINE_1(form_url, fn_radiant_form_url)
+RADIANT_PROVIDE_ENGINE_1(hover_index, fn_radiant_hover_index)
+RADIANT_PROVIDE_ENGINE_1(option_count, fn_radiant_option_count)
+RADIANT_PROVIDE_ENGINE_1(range_max, fn_radiant_range_max)
+RADIANT_PROVIDE_ENGINE_1(range_min, fn_radiant_range_min)
+RADIANT_PROVIDE_ENGINE_1(range_value, fn_radiant_range_value)
+RADIANT_PROVIDE_ENGINE_1(reset_form, fn_radiant_reset_form)
+RADIANT_PROVIDE_ENGINE_2(scroll_operation, fn_radiant_scroll_operation)
+RADIANT_PROVIDE_ENGINE_1(selected_index, fn_radiant_selected_index)
+RADIANT_PROVIDE_ENGINE_2(set_dropdown_open, fn_radiant_set_dropdown_open)
+RADIANT_PROVIDE_ENGINE_2(set_hover_index, fn_radiant_set_hover_index)
+RADIANT_PROVIDE_ENGINE_2(set_selected_index, fn_radiant_set_selected_index)
+RADIANT_PROVIDE_ENGINE_2(submit_event, fn_radiant_submit_event)
+RADIANT_PROVIDE_ENGINE_1(value_at_focus, fn_radiant_value_at_focus)

@@ -1,6 +1,5 @@
 // Link navigation policy (ES31). This module resolves DOM-visible browsing
 // context targets and fragment elements; native executes the validated request.
-import radiant
 import dom
 
 fn is_iframe(node) {
@@ -14,7 +13,7 @@ fn find_named_frame(node, target_name) {
         else {
             // An iframe's active nested document is a separate browsing
             // context, not part of its fallback-child DOM traversal.
-            let inside = find_named_frame(radiant.embedded_document_root(node), target_name);
+            let inside = find_named_frame(dom.embedded_document_root(node), target_name);
             if (inside != null) { inside }
             else { find_named_frame(dom.next_element_sibling(node), target_name) }
         }
@@ -56,12 +55,12 @@ fn fragment_target(root, fragment) {
 }
 
 fn parent_root(root) {
-    let iframe = radiant.embedding_element(root);
+    let iframe = dom.embedding_element(root);
     if (iframe == null) { root } else { dom.document_element(iframe) }
 }
 
 fn top_root(root) {
-    let iframe = radiant.embedding_element(root);
+    let iframe = dom.embedding_element(root);
     if (iframe == null) { root } else { top_root(dom.document_element(iframe)) }
 }
 
@@ -85,7 +84,7 @@ fn resolve_target(source, raw_target) {
     }
     else {
         let frame = find_named_frame(top_root(source_root), target_name);
-        let frame_root = if (frame == null) null else radiant.embedded_document_root(frame);
+        let frame_root = if (frame == null) null else dom.embedded_document_root(frame);
         if (frame == null) {
             {target: null, target_root: null, target_kind: "new", target_name: target_name}
         }
