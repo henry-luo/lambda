@@ -41,7 +41,6 @@ inline VMap* item_payload<LMD_TYPE_VMAP>(Item raw) { return raw.vmap; }
 template<>
 inline Element* item_payload<LMD_TYPE_ELEMENT>(Item raw) { return raw.element; }
 template<>
-template<>
 inline Type* item_payload<LMD_TYPE_TYPE>(Item raw) { return raw.type; }
 template<>
 inline Function* item_payload<LMD_TYPE_FUNC>(Item raw) { return raw.function; }

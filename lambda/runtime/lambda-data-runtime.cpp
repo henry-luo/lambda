@@ -2464,6 +2464,14 @@ Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found
                           typemap_name_hash(key, key_len), is_found);
 }
 
+// D2.6.6v2: the attribute face is the shared Map face, so one accessor serves
+// every container kind — the caller no longer unpacks shape and buffer by hand
+// through a per-kind cast.
+static Item map_get_attr(Map* owner, const char* key, bool* is_found) {
+    return map_get_for_owner((Container*)owner, (TypeMap*)owner->type,
+                             owner->data, key, is_found);
+}
+
 Item map_get(Map* map, Item key) {
     if (!map || !key.item) { return ItemNull;}
     bool is_found;
@@ -2474,8 +2482,7 @@ Item map_get(Map* map, Item key) {
         log_error("map_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
         return ItemNull;  // only string or symbol keys are supported
     }
-    return map_get_for_owner((Container*)map, (TypeMap*)map->type,
-                             map->data, key_str, &is_found);
+    return map_get_attr(map, key_str, &is_found);
 }
 
 static Item map_get_by_name_id_keyed(Container* owner, TypeMap* map_type,
@@ -2688,18 +2695,12 @@ Object* object_fill_items(Object* obj, const Item* values, int value_count) {
     return obj;
 }
 
+// D2.6.6v2: an object wears its declared structural kind and reads its
+// attributes through the shared Map face, so this is map_get under a different
+// static parameter type. It keeps its own symbol because the system-function
+// registry and generated code reference it by name.
 Item object_get(Object* obj, Item key) {
-    if (!obj || !key.item) { return ItemNull; }
-    bool is_found;
-    char *key_str = NULL;
-    if (is_text_type_id(key._type_id)) {
-        key_str = (char*)key.get_chars();
-    } else {
-        log_error("object_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
-        return ItemNull;
-    }
-    return map_get_for_owner((Container*)obj, (TypeMap*)obj->type,
-                             obj->data, key_str, &is_found);
+    return map_get((Map*)obj, key);
 }
 
 // Register a compiled method function pointer on a TypeObject's method table
@@ -2798,8 +2799,7 @@ Item elmt_get(Element* elmt, Item key) {
     }
 
     // PRIORITY 1: First try to get user-defined attribute
-    Item result = map_get_for_owner((Container*)elmt, (TypeMap*)elmt->type,
-                                    elmt->data, key_str, &is_found);
+    Item result = map_get_attr((Map*)elmt, key_str, &is_found);
     if (is_found) {
         return result;
     }

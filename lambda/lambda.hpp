@@ -838,22 +838,24 @@ struct TypeMap;
 // fields). These two accessors are the only correct way to reach the attribute
 // face of a value whose kind is not statically fixed — reading `.map->type` on
 // an object silently returns its `items` pointer.
+// Which kinds answer with an attribute face. Arrays inherit the face from Map
+// too, but theirs is the JS-props companion (`ArrayPropsShape`), not Lambda
+// attributes, so they stay out of this predicate.
+static inline bool lambda_type_id_has_attr_face(TypeId type_id) {
+    return is_element_family_type_id(type_id) || type_id == LMD_TYPE_MAP;
+}
+
+// D2.6.6v2: every container extends Map, so the shape and its buffer sit at ONE
+// offset and a single cast to the shared base reaches them. The kind test that
+// remains selects WHICH kinds have attributes, not where they live.
 static inline struct TypeMap* lambda_attr_shape(TypeId type_id, const void* container) {
-    if (!container) return nullptr;
-    if (is_element_family_type_id(type_id)) {
-        return (struct TypeMap*)((const Element*)container)->type;
-    }
-    if (type_id == LMD_TYPE_MAP) return (struct TypeMap*)((const Map*)container)->type;
-    return nullptr;
+    if (!container || !lambda_type_id_has_attr_face(type_id)) return nullptr;
+    return (struct TypeMap*)((const Map*)container)->type;
 }
 
 static inline void* lambda_attr_data(TypeId type_id, const void* container) {
-    if (!container) return nullptr;
-    if (is_element_family_type_id(type_id)) {
-        return ((const Element*)container)->data;
-    }
-    if (type_id == LMD_TYPE_MAP) return ((const Map*)container)->data;
-    return nullptr;
+    if (!container || !lambda_type_id_has_attr_face(type_id)) return nullptr;
+    return ((const Map*)container)->data;
 }
 
 // ============================================================================

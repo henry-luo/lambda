@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdarg>
 #include "../lambda-data.hpp"
 #include "mark_builder.hpp"
 #include "../core/shape_builder.hpp"
@@ -329,21 +330,22 @@ public:
     // ========================================================================
     
 private:
-    // Map helpers
-    Item map_update_inline(Map* map, String* key, Item value);
-    Item map_update_immutable(Map* map, String* key, Item value);
-    Item map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder, bool is_inline);
-    Item map_delete_inline(Map* map, String* key);
-    Item map_delete_immutable(Map* map, String* key);
-    
-    // Element helpers
-    Item elmt_update_attr_inline(Element* elmt, String* attr_name, Item value);
-    Item elmt_update_attr_immutable(Element* elmt, String* attr_name, Item value);
-    Item elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* builder, bool is_inline, 
-                                     String* new_attr_name = nullptr, Item new_attr_value = ItemNull);
+    // Attribute helpers — one path for maps and elements alike. D2.6.6v2 puts
+    // every container's attribute face at the same offsets, so these take the
+    // shared `Map` base and elements upcast at the call site.
+    ShapeBuilder container_shape_builder(const Map* container);
+    Map* container_clone_header(const Map* container);
+    Item container_rebuild_with_new_shape(Map* old_container, ShapeBuilder* builder,
+                                          bool is_inline);
+    void container_store_field(Item rebuilt, const char* key, Item value, TypeId value_type);
+    Item container_update_attr(Item container, String* key, Item value);
+    Item container_update_attr_inline(Map* container, String* key, Item value);
+    Item container_update_attr_immutable(Map* container, String* key, Item value);
+    Item container_update_attr_batch(Item container, int count, va_list args);
+    Item container_delete_attr(Item container, String* key);
+
+    // Element-only helpers (the content face has no map counterpart)
     Item elmt_copy_with_new_children(Element* old_elmt, Item* new_children, int64_t new_length);
-    Item elmt_delete_attr_inline(Element* elmt, String* attr_name);
-    Item elmt_delete_attr_immutable(Element* elmt, String* attr_name);
     
     // Version helpers
     EditVersion* create_version(Item root, const char* description);
@@ -353,7 +355,6 @@ private:
     String* ensure_string_key(const char* key);
     bool find_field_in_shape(ShapeEntry* shape, const char* key, TypeId* out_type, int64_t* out_offset);
     void store_value_at_offset(void* field_ptr, Item value, TypeId type_id);
-    void decrement_ref_count(void* field_ptr, TypeId type_id);
 };
 
 // ============================================================================
