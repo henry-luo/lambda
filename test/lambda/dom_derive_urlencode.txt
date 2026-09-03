@@ -1,0 +1,8 @@
+{
+  words_checked: 15,
+  divergent_words: [],
+  ascii_codes_checked: 95,
+  encoded_sample: "a+b%26c%3Dd%2Be%2Ff%3Fg%23h",
+  utf8_sample: "%C3%9Cn%C3%AFc%C3%B8d%C3%A9",
+  agrees_on_utf8: true
+}

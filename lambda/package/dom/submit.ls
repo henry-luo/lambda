@@ -2,6 +2,7 @@
 // validity events, entry construction, and the navigation waist; this module
 // chooses the submitter overrides and serialization format.
 import radiant
+import ue: lambda.package.dom.urlencode
 
 fn attr_or(elem, name, fallback) {
     let value = radiant.attr(elem, name);
@@ -16,8 +17,8 @@ fn submit_attr(form, submitter, submitter_name, form_name, fallback) {
 }
 
 fn encoded_pair(pair) {
-    radiant.form_encode(string(pair[0])) ++ "=" ++
-        radiant.form_encode(string(pair[1]))
+    ue.form_encode(string(pair[0])) ++ "=" ++
+        ue.form_encode(string(pair[1]))
 }
 
 fn urlencoded(entries) {
