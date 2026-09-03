@@ -61,6 +61,12 @@ bool dom_collection_has_live_property_state(Item collection);
 // on interned keys. dom.cpp, dom_observers.cpp and dom_selection.cpp
 // each built this themselves.
 Item dom_make_rect(double x, double y, double width, double height);
+// Same rect, told which document owns it. Inside a realm the two are identical;
+// with no realm this one can still build the fields, out of the document's own
+// Input rather than the JS object model (ESO81). This header is included from
+// C, so it is an overload rather than a defaulted argument.
+Item dom_make_rect_in(struct DomDocument* doc,
+                      double x, double y, double width, double height);
 
 /**
  * Return whether the document has a committed geometry snapshot.
@@ -134,6 +140,8 @@ bool dom_activate_popover(void* popover, int action);
  * @return Item wrapping the element, or ITEM_NULL if dom_elem is NULL
  */
 Item dom_wrap_element(void* dom_elem);
+// Document behind a node wrapper or the document proxy (ESO93). Returns DomDocument*.
+void* dom_document_from_item(Item item);
 
 /**
  * Unwrap a Lambda Item to get the DomElement*.
@@ -433,6 +441,12 @@ void dom_realm_apply_prototype(Item value, const char* ctor_name);
 // adapter's to answer. All three no-op or answer null without a realm.
 
 /** Whether the realm has an own binding named `name`. */
+// Is a JS realm bound to this document? The DOM core is realm-neutral (ES33),
+// but a few answers only exist inside a realm -- prototype chains above all.
+// Core code asks this before reaching for any of them, so a Lambda-only script
+// gets absence rather than a crash (ESO81).
+bool dom_realm_active(void);
+
 bool dom_realm_has_own(const char* name);
 
 /** The realm's binding for `name`, or ItemNull. */

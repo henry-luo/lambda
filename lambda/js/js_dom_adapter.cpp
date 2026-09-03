@@ -16,6 +16,7 @@
 #include "../dom/dom.h"
 #include "js_event_loop.h"
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 
 extern "C" void dom_schedule_microtask(Item callback) {
     js_microtask_enqueue(callback);
@@ -39,6 +40,7 @@ extern "C" void dom_schedule_task(Item callback) {
 // ---------------------------------------------------------------------------
 
 extern "C" Item dom_realm_constructor(const char* ctor_name) {
+    if (!dom_realm_active()) return ItemNull;
     if (!ctor_name || !ctor_name[0]) return ItemNull;
     Item global = js_get_global_this();
     if (get_type_id(global) != LMD_TYPE_MAP) return ItemNull;
@@ -54,11 +56,23 @@ extern "C" Item dom_realm_constructor_prototype(const char* ctor_name) {
 }
 
 extern "C" void dom_realm_apply_prototype(Item value, const char* ctor_name) {
+    if (!dom_realm_active()) return;
     Item proto = dom_realm_constructor_prototype(ctor_name);
     if (proto.item != ItemNull.item) js_set_prototype(value, proto);
 }
 
+extern "C" bool dom_realm_active(void) {
+    // Two things must hold, and the second is the one that bites: a global
+    // object to walk, and the realm's own allocator. Intrinsic constructors are
+    // built on demand out of js_input's pool, so a script with a global but no
+    // realm input still faults there -- which is exactly what a Lambda-only
+    // document has.
+    if (!js_input) return false;
+    return get_type_id(js_get_global_this()) == LMD_TYPE_MAP;
+}
+
 extern "C" bool dom_realm_has_own(const char* name) {
+    if (!dom_realm_active()) return false;
     if (!name || !name[0]) return false;
     Item global = js_get_global_this();
     if (get_type_id(global) != LMD_TYPE_MAP) return false;
@@ -66,6 +80,7 @@ extern "C" bool dom_realm_has_own(const char* name) {
 }
 
 extern "C" Item dom_realm_lookup(const char* name) {
+    if (!dom_realm_active()) return ItemNull;
     if (!name || !name[0]) return ItemNull;
     Item global = js_get_global_this();
     if (get_type_id(global) != LMD_TYPE_MAP) return ItemNull;
@@ -73,6 +88,7 @@ extern "C" Item dom_realm_lookup(const char* name) {
 }
 
 extern "C" void dom_realm_define(const char* name, Item value) {
+    if (!dom_realm_active()) return;
     if (!name || !name[0]) return;
     Item global = js_get_global_this();
     if (get_type_id(global) != LMD_TYPE_MAP) return;

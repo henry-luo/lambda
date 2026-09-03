@@ -208,7 +208,7 @@ DOM_OP(DERIVED, clone_node,      tree, 2, "fn(n: any, deep: bool) -> any", dom_f
 // --- 5.3 character data
 DOM_OP(DERIVED, text_content,    text, 1, "fn(n: any) -> string", dom_fp_text_content, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "if (node_type(n) == 3 or node_type(n) == 8) node_value(n) else join([for (k in child_nodes(n)) text_content(k)], \"\")")
-DOM_OP(DERIVED, set_text_content, text, 2, "fn(n: any, s: string) -> null", DOM_NO_BODY, DOM_F_NEUTRAL | DOM_F_MUTATES,
+DOM_OP(DERIVED, set_text_content, text, 2, "fn(n: any, s: string) -> null", dom_core_set_text_content, DOM_F_NEUTRAL | DOM_F_MUTATES | DOM_F_FASTPATH,
        "for (k in child_nodes(n)) remove_child(n, k); if (s != \"\") append_child(n, create_text_node(owner_document(n), s))")
 
 // --- 5.4 queries over matches + traversal
@@ -228,7 +228,7 @@ DOM_OP(DERIVED, inner_html,      parse, 1, "fn(n: any) -> string", dom_fp_inner_
        "serialize(n, false)")
 DOM_OP(DERIVED, outer_html,      parse, 1, "fn(n: any) -> string", dom_fp_outer_html, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "serialize(n, true)")
-DOM_OP(DERIVED, set_inner_html,  parse, 2, "fn(n: any, html: string) -> null", DOM_NO_BODY, DOM_F_NEUTRAL | DOM_F_MUTATES,
+DOM_OP(DERIVED, set_inner_html,  parse, 2, "fn(n: any, html: string) -> null", dom_core_set_inner_html, DOM_F_NEUTRAL | DOM_F_MUTATES | DOM_F_FASTPATH,
        "for (k in child_nodes(n)) remove_child(n, k); let f = parse_fragment(n, html); for (k in child_nodes(f)) append_child(n, k)")
 
 // --- 5.6 ranges and selection sugar (fast paths are the existing bindings)

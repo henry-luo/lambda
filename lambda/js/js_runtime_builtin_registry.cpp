@@ -254,6 +254,10 @@ const JsIntrinsicTargetSpec* js_intrinsic_target_find(int catalog_id) {
 }
 
 static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec) {
+    // Builtins are allocated from the realm's pool; with no realm there is no
+    // builtin to hand back. Realm-neutral DOM callers reach here through
+    // property lookup on a Lambda-only document (ESO81).
+    if (!js_input || !js_input->pool) return ItemNull;
     if (!spec || !js_active_runtime_state || !js_builtin_cache_ensure_roots()) {
         return ItemError;
     }

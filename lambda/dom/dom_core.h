@@ -51,6 +51,8 @@ Item dom_core_create_node(Item doc, Item type, Item name, Item data);
 Item dom_core_insert_before(Item parent, Item node, Item ref);
 Item dom_core_remove_child(Item parent, Item node);
 Item dom_core_set_node_value(Item n, Item data);
+Item dom_core_set_text_content(Item n, Item text);
+Item dom_core_set_inner_html(Item n, Item html);
 // --- core: match / parse / serialize
 Item dom_core_matches(Item n, Item selector);
 Item dom_core_parse_fragment(Item context, Item markup);
