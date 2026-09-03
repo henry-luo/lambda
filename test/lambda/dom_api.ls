@@ -2,13 +2,14 @@
 // This is the POC-1 exit test: a pure Lambda script queries, mutates and
 // serializes a real Radiant DOM, through the same core the JS surface uses.
 //
-// The document itself still comes from `radiant.load`: creating one needs
-// Radiant's loader, which lives above this module's link target (ESO80).
-import radiant
+// The document comes from `dom.load` too: acquiring one needs the engine's
+// loader, which lives above this module's link target, so loading is split at a
+// provider seam -- the engine parses, the core wraps (ESO80, closed at F31).
+// This script imports nothing but `dom`.
 import dom
 
-let doc = radiant.load("test/js/dom_identity.html")
-let root = radiant.root(doc)
+let doc = dom.load("test/js/dom_identity.html")
+let root = dom.query_selector(doc, "html")
 let intro = dom.query_selector(root, "#intro")
 let body = dom.closest(intro, "body")
 

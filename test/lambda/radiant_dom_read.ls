@@ -1,7 +1,8 @@
 import radiant
+import dom
 
-let doc = radiant.load("test/js/dom_identity.html")
-let root = radiant.root(doc)
+let doc = dom.load("test/js/dom_identity.html")
+let root = dom.document_element(doc)
 let body = root.last_element_child
 let main = body.first_element_child
 let intro = main.first_element_child

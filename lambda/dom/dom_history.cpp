@@ -1,4 +1,6 @@
 #include "dom_history.h"
+#include "realm/dom_realm.h"
+#include "dom_engine.h"
 #include "dom.h"
 #include "dom_events.h"
 #include "../js/js_event_loop.h"
@@ -89,24 +91,24 @@ static Item js_history_drain_events(void) {
     JsHistoryEventTask* task =
         (JsHistoryEventTask*)arraylist_get(js_history_event_tasks, 0);
     arraylist_remove(js_history_event_tasks, 0);
-    Item window = js_get_global_this();
+    Item window = dom_realm_global();
 
     if (task->dispatch_popstate) {
         Item event = js_create_event("popstate", false, false);
-        js_set_key_cstr(event, "state", task->state);
+        dom_realm_set_cstr(event, "state", task->state);
         dom_dispatch_event(window, event);
     }
     if (task->dispatch_hashchange) {
         Item event = js_create_event("hashchange", false, false);
-        js_set_key_cstr(event, "oldURL", js_history_string(task->old_url));
-        js_set_key_cstr(event, "newURL", js_history_string(task->new_url));
+        dom_realm_set_cstr(event, "oldURL", js_history_string(task->old_url));
+        dom_realm_set_cstr(event, "newURL", js_history_string(task->new_url));
         dom_dispatch_event(window, event);
     }
     js_history_task_destroy(task);
 
     if (js_history_event_tasks->length > 0) {
         js_history_drain_scheduled = true;
-        Item callback = js_new_native_function(js_history_drain_events);
+        Item callback = dom_realm_new_function(js_history_drain_events);
         js_setTimeout(callback, (Item){.item = i2it(0)});
     }
     return make_js_undefined();
@@ -138,7 +140,7 @@ static bool js_history_queue_events(const RadiantHistoryTraversal* traversal,
 
     if (!js_history_drain_scheduled) {
         js_history_drain_scheduled = true;
-        Item callback = js_new_native_function(js_history_drain_events);
+        Item callback = dom_realm_new_function(js_history_drain_events);
         js_setTimeout(callback, (Item){.item = i2it(0)});
     }
     return true;
@@ -147,11 +149,11 @@ static bool js_history_queue_events(const RadiantHistoryTraversal* traversal,
 static void js_history_refresh_object(void) {
     DomDocument* document = js_history_document();
     if (!document) return;
-    Item global = js_get_global_this();
-    Item history = js_get_key_cstr(global, "history");
+    Item global = dom_realm_global();
+    Item history = dom_realm_get_cstr(global, "history");
     if (get_type_id(history) != LMD_TYPE_MAP) return;
-    js_set_key_cstr(history, "length", (Item){.item = i2it(radiant_history_length(document))});
-    js_set_key_cstr(history, "state", radiant_history_state(document));
+    dom_realm_set_cstr(history, "length", (Item){.item = i2it(dom_engine_history_length(document))});
+    dom_realm_set_cstr(history, "state", radiant_history_state(document));
 }
 
 static const char* js_history_optional_url(Item value) {
@@ -182,7 +184,7 @@ static Item js_history_go(Item delta_item) {
     if (!isfinite(number)) return make_js_undefined();
     int delta = (int)number;
     RadiantHistoryTraversal traversal = {};
-    if (radiant_history_go(document, delta, &traversal)) {
+    if (dom_engine_history_go(document, delta, &traversal)) {
         js_history_refresh_object();
         js_history_queue_events(&traversal, true);
     }
@@ -197,7 +199,7 @@ extern "C" Item js_history_set_location(Item value) {
     const char* url_text = fn_to_cstr(value);
     if (!document || !url_text) return value;
     RadiantHistoryTraversal traversal = {};
-    if (radiant_history_set_location(document, url_text, &traversal)) {
+    if (dom_engine_history_set_location(document, url_text, &traversal)) {
         js_history_refresh_object();
         js_history_queue_events(&traversal, false);
     }
@@ -206,25 +208,25 @@ extern "C" Item js_history_set_location(Item value) {
 
 extern "C" void js_history_install_globals(void) {
     DomDocument* document = js_history_document();
-    if (!document || !radiant_history_initialize(document)) return;
+    if (!document || !dom_engine_history_initialize(document)) return;
 
-    Item global = js_get_global_this();
+    Item global = dom_realm_global();
     Item document_proxy = js_get_document_object_value();
-    js_set_key_cstr(global, "location", document_proxy);
+    dom_realm_set_cstr(global, "location", document_proxy);
 
     Item history = js_new_object();
 #define JS_HISTORY_METHODS(M) \
     M("pushState", js_history_push) M("replaceState", js_history_replace) \
     M("back", js_history_back) M("forward", js_history_forward) M("go", js_history_go)
 #define JS_HISTORY_INSTALL_METHOD(name, target) \
-    js_set_native_key(history, make_string_item(name), target);
+    dom_realm_set_native(history, make_string_item(name), target);
     JS_HISTORY_METHODS(JS_HISTORY_INSTALL_METHOD)
 #undef JS_HISTORY_INSTALL_METHOD
 #undef JS_HISTORY_METHODS
-    js_set_key_cstr(history, "scrollRestoration", make_string_item(radiant_history_scroll_restoration(document)));
-    js_set_key_cstr(global, "history", history);
-    js_set_native_key(global, make_string_item("focus"), js_history_window_noop);
-    js_set_native_key(global, make_string_item("blur"), js_history_window_noop);
+    dom_realm_set_cstr(history, "scrollRestoration", make_string_item(dom_engine_history_scroll_restoration(document)));
+    dom_realm_set_cstr(global, "history", history);
+    dom_realm_set_native(global, make_string_item("focus"), js_history_window_noop);
+    dom_realm_set_native(global, make_string_item("blur"), js_history_window_noop);
     js_history_refresh_object();
 }
 

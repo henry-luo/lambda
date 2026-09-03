@@ -8,7 +8,8 @@
 // (layout_node_is_hidden_by_closed_details and the synthetic-summary sizing in
 // layout_block.cpp, plus the disclosure marker in resolve_htm_style.cpp).
 // The reflow follows from the mutation notice `set_attr` carries.
-import radiant
+import dom
+import tree: lambda.package.dom.tree
 
 // HTML 4.11.1 exclusive accordion: details sharing a non-empty `name` in one
 // node tree may have at most one member open, so opening one closes the rest.
@@ -28,11 +29,11 @@ import radiant
 // avoid closing the very element being opened, and it answers with an empty
 // group for an unnamed details, which makes this a no-op rather than a case.
 pn close_group_peers(details) {
-    for (peer in radiant.details_group(details)) {
-        if (radiant.has_attr(peer, "open")) {
-            radiant.set_attr(peer, "open", null)
+    for (peer in tree.details_group(details)) {
+        if (dom.has_attribute(peer, "open")) {
+            dom.remove_attribute(peer, "open")
             // every element whose openness changed reports its own toggle
-            radiant.dispatch(peer, "toggle")
+            dom.dispatch(peer, "toggle")
         }
     }
 }
@@ -50,9 +51,9 @@ pn close_group_peers(details) {
 // invisible while the details is closed, so the two rules can only differ on an
 // already-open details.
 pub pn toggle_from_summary(summary) {
-    if (radiant.closest(summary, "details > summary") == null) { 'pass' }
+    if (dom.closest(summary, "details > summary") == null) { 'pass' }
     else {
-        let details = radiant.parent(summary);
+        let details = dom.parent_element(summary);
         if (details == null) { 'pass' }
         else {
             // present-or-absent, like every other boolean content attribute:
@@ -63,17 +64,17 @@ pub pn toggle_from_summary(summary) {
             // boolean attribute's value is the empty string, so `attr(..) !=
             // null` answers a *value* question and its truth rests on whether
             // an empty value round-trips as "" rather than null.
-            let was_open = radiant.has_attr(details, "open");
-            if (was_open) { radiant.set_attr(details, "open", null) }
+            let was_open = dom.has_attribute(details, "open");
+            if (was_open) { dom.remove_attribute(details, "open") }
             else {
                 // close the group before opening, so the group is never
                 // momentarily two-open and every peer's toggle precedes ours
                 close_group_peers(details)
-                radiant.set_attr(details, "open", "")
+                dom.set_attribute(details, "open", "")
             }
             // HTML queues `toggle` on the element whose openness changed, which
             // is the details, not the summary that was clicked.
-            radiant.dispatch(details, "toggle")
+            dom.dispatch(details, "toggle")
         }
     }
 }

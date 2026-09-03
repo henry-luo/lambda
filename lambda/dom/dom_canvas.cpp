@@ -10,6 +10,7 @@
  */
 
 #include "../js/js_runtime.h"
+#include "realm/dom_realm.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_class.h"
 #include "../lambda-data.hpp"
@@ -225,7 +226,7 @@ static FontHandle* parse_css_font_shorthand(const char* font_str, int len) {
 }
 
 static float canvas_font_size_px(Item ctx_obj) {
-    Item font_str = js_get_name_key(ctx_obj, "font");
+    Item font_str = dom_realm_get_name(ctx_obj, "font");
     if (get_type_id(font_str) != LMD_TYPE_STRING) return 16.0f;
     String* s = it2s(font_str);
     if (!s || s->len <= 0) return 16.0f;
@@ -256,15 +257,15 @@ static float canvas_fallback_text_width(Item ctx_obj, String* s) {
 // ============================================================================
 
 extern "C" Item js_offscreen_canvas_new(Item width_arg, Item height_arg) {
-    Item obj = js_new_object_with_class(JS_CLASS_OFFSCREEN_CANVAS);
+    Item obj = dom_realm_new_object_of_class(JS_CLASS_OFFSCREEN_CANVAS);
 
     // store width/height
     int64_t w = (get_type_id(width_arg) == LMD_TYPE_INT) ? it2i(width_arg) : 300;
     int64_t h = (get_type_id(height_arg) == LMD_TYPE_INT) ? it2i(height_arg) : 150;
     Item wk = js_name_item("width");
     Item hk = js_name_item("height");
-    js_set_key_default(obj, wk, (Item){.item = i2it(w)});
-    js_set_key_default(obj, hk, (Item){.item = i2it(h)});
+    dom_realm_set(obj, wk, (Item){.item = i2it(w)});
+    dom_realm_set(obj, hk, (Item){.item = i2it(h)});
 
     return obj;
 }
@@ -274,18 +275,18 @@ extern "C" Item js_offscreen_canvas_new(Item width_arg, Item height_arg) {
 // ============================================================================
 
 extern "C" Item js_canvas_get_context(Item canvas) {
-    Item obj = js_new_object_with_class(JS_CLASS_CANVAS_RENDERING_CONTEXT_2D);
+    Item obj = dom_realm_new_object_of_class(JS_CLASS_CANVAS_RENDERING_CONTEXT_2D);
 
     // store canvas reference
-    js_set_name_key(obj, "canvas", canvas);
+    dom_realm_set_name(obj, "canvas", canvas);
 
     // initial font property (CSS default)
     Item font_key = js_name_item("font");
     Item font_val = js_name_item("10px sans-serif");
-    js_set_key_default(obj, font_key, font_val);
+    dom_realm_set(obj, font_key, font_val);
 
     // no font handle yet — will be resolved on first measureText or when font is set
-    js_set_name_key(obj, "__font_handle_id", (Item){.item = i2it(-1)});
+    dom_realm_set_name(obj, "__font_handle_id", (Item){.item = i2it(-1)});
 
     return obj;
 }
@@ -296,7 +297,7 @@ extern "C" Item js_canvas_get_context(Item canvas) {
 
 extern "C" void js_canvas_ctx_set_font(Item ctx_obj, Item font_val) {
     // store the font string
-    js_set_name_key(ctx_obj, "font", font_val);
+    dom_realm_set_name(ctx_obj, "font", font_val);
 
     // resolve font handle
     if (get_type_id(font_val) != LMD_TYPE_STRING) return;
@@ -306,7 +307,7 @@ extern "C" void js_canvas_ctx_set_font(Item ctx_obj, Item font_val) {
     FontHandle* handle = parse_css_font_shorthand(s->chars, s->len);
     if (handle) {
         int id = canvas_store_font_handle(handle);
-        js_set_name_key(ctx_obj, "__font_handle_id", (Item){.item = i2it(id)});
+        dom_realm_set_name(ctx_obj, "__font_handle_id", (Item){.item = i2it(id)});
     }
 }
 
@@ -317,7 +318,7 @@ extern "C" void js_canvas_ctx_set_font(Item ctx_obj, Item font_val) {
 extern "C" Item js_canvas_measure_text(Item ctx_obj, Item text_arg) {
     // get font handle ID
     Item fh_key = js_name_item("__font_handle_id");
-    Item fh_val = js_get_key_default(ctx_obj, fh_key);
+    Item fh_val = dom_realm_get(ctx_obj, fh_key);
     int fh_id = -1;
     if (get_type_id(fh_val) == LMD_TYPE_INT) {
         fh_id = (int)it2i(fh_val);
@@ -325,14 +326,14 @@ extern "C" Item js_canvas_measure_text(Item ctx_obj, Item text_arg) {
 
     // if no font handle, try to resolve from current font string
     if (fh_id < 0) {
-        Item font_str = js_get_name_key(ctx_obj, "font");
+        Item font_str = dom_realm_get_name(ctx_obj, "font");
         if (get_type_id(font_str) == LMD_TYPE_STRING) {
             String* s = it2s(font_str);
             if (s && s->len > 0) {
                 FontHandle* handle = parse_css_font_shorthand(s->chars, s->len);
                 if (handle) {
                     fh_id = canvas_store_font_handle(handle);
-                    js_set_key_default(ctx_obj, fh_key, (Item){.item = i2it(fh_id)});
+                    dom_realm_set(ctx_obj, fh_key, (Item){.item = i2it(fh_id)});
                 }
             }
         }
@@ -358,7 +359,7 @@ extern "C" Item js_canvas_measure_text(Item ctx_obj, Item text_arg) {
     Item result = js_new_object();
     Item wk = js_name_item("width");
     Item wv = push_d((double)width);
-    js_set_key_default(result, wk, wv);
+    dom_realm_set(result, wk, wv);
     return result;
 }
 
@@ -371,7 +372,7 @@ extern "C" bool js_canvas_property_set_intercept(Item obj, Item key, Item value)
     if (get_type_id(obj) != LMD_TYPE_MAP) return false;
 
     // reentrancy guard — prevent infinite recursion when js_canvas_ctx_set_font
-    // calls js_set_key_default internally
+    // calls dom_realm_set internally
     static bool s_in_intercept = false;
     if (s_in_intercept) return false;
 

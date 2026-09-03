@@ -57,12 +57,21 @@ enum DomOpId {
 // in jube_registry.cpp, which will not compile if a body disagrees with its row.
 static constexpr int dom_catalog_row_count =
 #define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) 1 +
+#define DOM_RAW(name, cluster, ret, params, body, flags) 1 +
 #include "dom_api.def"
 #undef DOM_OP
+#undef DOM_RAW
     0;
 static_assert(sizeof(JubeHostDomCatalogAPI) / sizeof(void*) == dom_catalog_row_count,
               "JubeHostDomCatalogAPI must have exactly one slot per dom_api.def row");
-static_assert(dom_catalog_row_count == DOM_OP_ID_COUNT,
-              "row count must agree with the operation-id enum");
+// Only DOM_OP rows carry an operation id: a DOM_RAW row has no Lambda face and
+// no uniform arity, so there is nothing for an id to name.
+static constexpr int dom_catalog_op_row_count =
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) 1 +
+#include "dom_api.def"
+#undef DOM_OP
+    0;
+static_assert(dom_catalog_op_row_count == DOM_OP_ID_COUNT,
+              "DOM_OP row count must agree with the operation-id enum");
 
 }  // namespace

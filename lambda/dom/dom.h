@@ -143,6 +143,21 @@ Item dom_wrap_element(void* dom_elem);
 // Document behind a node wrapper or the document proxy (ESO93). Returns DomDocument*.
 void* dom_document_from_item(Item item);
 
+// Acquiring a document needs the engine's loader, which lives in the radiant
+// target above this one, so loading is split at the seam: the engine parses and
+// answers a DomDocument*, and the core wraps it as a node. Splitting it this way
+// keeps the engine half free of any dependency on module *initialisation* --
+// `import dom` alone must work, and the module's host API is only bound when
+// `radiant` is imported (ESO80).
+void* dom_engine_load_document_native(const char* path);
+
+// Bind the engine module's host API if it is not bound already. `import dom`
+// must stand on its own, but every engine-side wrapper call goes through that
+// pointer, and it is only set when `radiant` is imported -- so importing dom
+// alone used to load a document and then crash wrapping it. The dom module
+// calls this at init; without an engine linked the weak default does nothing.
+void dom_engine_bind_host(const void* host_api);
+
 /**
  * Unwrap a Lambda Item to get the DomElement*.
  * @param item  Item previously returned by dom_wrap_element

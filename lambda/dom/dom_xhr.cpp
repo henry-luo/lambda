@@ -4,10 +4,11 @@
  * Synchronous HTTP via http_fetch() from input_http.cpp.
  * Each XHR instance stores its C-level state (method, url, headers,
  * response data) in a flat array indexed by an ID property on the
- * JS object. Methods use js_get_this() to resolve the current XHR.
+ * JS object. Methods use dom_realm_receiver() to resolve the current XHR.
  */
 
 #include "dom_xhr.h"
+#include "realm/dom_realm.h"
 #include "../js/js_event_loop.h"
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
@@ -120,13 +121,13 @@ static void xhr_clear_response(XhrState* xhr) {
 static void xhr_set_str(Item obj, const char* key, const char* value) {
     Item k = js_name_item(key);
     Item v = value ? js_name_item(value) : ItemNull;
-    js_set_key_default(obj, k, v);
+    dom_realm_set(obj, k, v);
 }
 
 static void xhr_set_int(Item obj, const char* key, int value) {
     Item k = js_name_item(key);
     Item v = (Item){.item = i2it(value)};
-    js_set_key_default(obj, k, v);
+    dom_realm_set(obj, k, v);
 }
 
 static Item js_xhr_get_status(void) {
@@ -136,18 +137,18 @@ static Item js_xhr_get_status(void) {
 
 static void xhr_define_status_accessor(Item obj) {
     Item descriptor = js_new_object();
-    js_set_key_cstr(descriptor, "get", js_new_native_function(js_xhr_get_status));
-    js_set_key_cstr(descriptor, "enumerable", (Item){.item = ITEM_TRUE});
-    js_set_key_cstr(descriptor, "configurable", (Item){.item = ITEM_TRUE});
-    js_object_define_property(obj, js_name_item("status"), descriptor);
+    dom_realm_set_cstr(descriptor, "get", dom_realm_new_function(js_xhr_get_status));
+    dom_realm_set_cstr(descriptor, "enumerable", (Item){.item = ITEM_TRUE});
+    dom_realm_set_cstr(descriptor, "configurable", (Item){.item = ITEM_TRUE});
+    dom_realm_define_property(obj, js_name_item("status"), descriptor);
 }
 
 static Item xhr_get_prop(Item obj, const char* key) {
-    return js_get_name_key(obj, key);
+    return dom_realm_get_name(obj, key);
 }
 
 static int xhr_id_from_this() {
-    Item self = js_get_this();
+    Item self = dom_realm_receiver();
     Item id_val = xhr_get_prop(self, "__xhr_id");
     TypeId tid = get_type_id(id_val);
     if (tid == LMD_TYPE_INT) {
@@ -172,8 +173,8 @@ static void xhr_fire_readystatechange(XhrState* xhr) {
 
     // fire onreadystatechange if set
     Item cb = xhr_get_prop(xhr->js_object, "onreadystatechange");
-    if (js_is_callable(cb)) {
-        js_call_function(cb, xhr->js_object, nullptr, 0);
+    if (dom_realm_is_callable(cb)) {
+        dom_realm_call(cb, xhr->js_object, nullptr, 0);
     }
 }
 
@@ -325,12 +326,12 @@ static void xhr_complete_response(XhrState* xhr, long status,
     const char* completion_handler = status >= 200 && status < 600
         ? "onload" : "onerror";
     Item completion = xhr_get_prop(xhr->js_object, completion_handler);
-    if (js_is_callable(completion)) {
-        js_call_function(completion, xhr->js_object, nullptr, 0);
+    if (dom_realm_is_callable(completion)) {
+        dom_realm_call(completion, xhr->js_object, nullptr, 0);
     }
     Item onloadend = xhr_get_prop(xhr->js_object, "onloadend");
-    if (js_is_callable(onloadend)) {
-        js_call_function(onloadend, xhr->js_object, nullptr, 0);
+    if (dom_realm_is_callable(onloadend)) {
+        dom_realm_call(onloadend, xhr->js_object, nullptr, 0);
     }
 }
 
@@ -384,32 +385,32 @@ extern "C" Item js_xhr_new(void) {
     M("getAllResponseHeaders", js_xhr_get_all_response_headers) \
     M("overrideMimeType", js_xhr_override_mime_type)
 #define JS_XHR_INSTALL_METHOD(name, target) \
-    js_set_key_default(obj, make_string_item(name), js_new_native_function(target));
+    dom_realm_set(obj, make_string_item(name), dom_realm_new_function(target));
     JS_XHR_METHODS(JS_XHR_INSTALL_METHOD)
 #undef JS_XHR_INSTALL_METHOD
 #undef JS_XHR_METHODS
 
     // addEventListener / removeEventListener stubs (jQuery sets onreadystatechange directly)
-    Item noop_fn = js_new_native_function(js_xhr_noop);
-    js_set_key_default(obj, make_string_item("addEventListener"), noop_fn);
-    js_set_key_default(obj, make_string_item("removeEventListener"), noop_fn);
+    Item noop_fn = dom_realm_new_function(js_xhr_noop);
+    dom_realm_set(obj, make_string_item("addEventListener"), noop_fn);
+    dom_realm_set(obj, make_string_item("removeEventListener"), noop_fn);
 
     Item upload = js_new_object();
     // XMLHttpRequestUpload is a distinct EventTarget; request libraries
     // register progress listeners on both targets before send().
-    js_set_key_default(upload, make_string_item("addEventListener"), noop_fn);
-    js_set_key_default(upload, make_string_item("removeEventListener"), noop_fn);
-    js_set_key_default(obj, make_string_item("upload"), upload);
+    dom_realm_set(upload, make_string_item("addEventListener"), noop_fn);
+    dom_realm_set(upload, make_string_item("removeEventListener"), noop_fn);
+    dom_realm_set(obj, make_string_item("upload"), upload);
 
     // callback slots (initially null)
-    js_set_key_cstr(obj, "onreadystatechange", ItemNull);
-    js_set_key_cstr(obj, "onload", ItemNull);
-    js_set_key_cstr(obj, "onerror", ItemNull);
-    js_set_key_cstr(obj, "ontimeout", ItemNull);
-    js_set_key_cstr(obj, "onabort", ItemNull);
-    js_set_key_cstr(obj, "onloadend", ItemNull);
-    js_set_key_cstr(obj, "onloadstart", ItemNull);
-    js_set_key_cstr(obj, "onprogress", ItemNull);
+    dom_realm_set_cstr(obj, "onreadystatechange", ItemNull);
+    dom_realm_set_cstr(obj, "onload", ItemNull);
+    dom_realm_set_cstr(obj, "onerror", ItemNull);
+    dom_realm_set_cstr(obj, "ontimeout", ItemNull);
+    dom_realm_set_cstr(obj, "onabort", ItemNull);
+    dom_realm_set_cstr(obj, "onloadend", ItemNull);
+    dom_realm_set_cstr(obj, "onloadstart", ItemNull);
+    dom_realm_set_cstr(obj, "onprogress", ItemNull);
 
     log_debug("xhr: created XHR id=%d", id);
     return obj;
@@ -540,9 +541,9 @@ static bool xhr_schedule_async_send(XhrState* xhr) {
         (Item){.item = i2it((int64_t)xhr->request_token)},
     };
     Item task = js_bind_function(
-        js_new_native_function(js_xhr_async_send_task), xhr->js_object,
+        dom_realm_new_function(js_xhr_async_send_task), xhr->js_object,
         args, 2);
-    if (!js_is_callable(task)) return false;
+    if (!dom_realm_is_callable(task)) return false;
     Item delay = {.item = i2it(0)};
     Item timer = js_setTimeout(task, delay);
     return get_type_id(timer) != LMD_TYPE_NULL;
@@ -571,8 +572,8 @@ extern "C" Item js_xhr_send(Item body_arg) {
         xhr->request_token++;
 
         Item loadstart_cb = xhr_get_prop(xhr->js_object, "onloadstart");
-        if (js_is_callable(loadstart_cb)) {
-            js_call_function(loadstart_cb, xhr->js_object, nullptr, 0);
+        if (dom_realm_is_callable(loadstart_cb)) {
+            dom_realm_call(loadstart_cb, xhr->js_object, nullptr, 0);
         }
         if (xhr->ready_state != 1 || !xhr->send_pending) {
             return make_js_undef();
@@ -686,12 +687,12 @@ extern "C" Item js_xhr_send(Item body_arg) {
         xhr_fire_readystatechange(xhr);
 
         Item onerror = xhr_get_prop(xhr->js_object, "onerror");
-        if (js_is_callable(onerror)) {
-            js_call_function(onerror, xhr->js_object, nullptr, 0);
+        if (dom_realm_is_callable(onerror)) {
+            dom_realm_call(onerror, xhr->js_object, nullptr, 0);
         }
         Item onloadend = xhr_get_prop(xhr->js_object, "onloadend");
-        if (js_is_callable(onloadend)) {
-            js_call_function(onloadend, xhr->js_object, nullptr, 0);
+        if (dom_realm_is_callable(onloadend)) {
+            dom_realm_call(onloadend, xhr->js_object, nullptr, 0);
         }
 
         log_error("xhr: network error for %s %s", xhr->method, xhr->url);
@@ -719,12 +720,12 @@ extern "C" Item js_xhr_abort(void) {
     xhr_fire_readystatechange(xhr);
 
     Item onabort = xhr_get_prop(xhr->js_object, "onabort");
-    if (js_is_callable(onabort)) {
-        js_call_function(onabort, xhr->js_object, nullptr, 0);
+    if (dom_realm_is_callable(onabort)) {
+        dom_realm_call(onabort, xhr->js_object, nullptr, 0);
     }
     Item onloadend = xhr_get_prop(xhr->js_object, "onloadend");
-    if (js_is_callable(onloadend)) {
-        js_call_function(onloadend, xhr->js_object, nullptr, 0);
+    if (dom_realm_is_callable(onloadend)) {
+        dom_realm_call(onloadend, xhr->js_object, nullptr, 0);
     }
 
     log_debug("xhr: aborted");

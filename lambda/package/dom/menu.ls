@@ -11,7 +11,7 @@
 // `dispatch_form_text_paste` / `dispatch_form_select_all`, which fire
 // `beforeinput` and land in editing.apply. So the exec half has been package
 // policy since F5; only the gate in front of it was still native.
-import radiant
+import dom
 
 // One bit per item, in CtxMenuItem order (event.hpp): Cut, Copy, Paste,
 // Delete, Select All. Written as literals because Lambda has no shift operator,
@@ -29,11 +29,11 @@ fn bit(present, value) { if (present) value else 0 }
 // quiescence rule F8 exists to protect. Caching is sound here because the menu
 // is modal: nothing these rules read can change while it is up.
 pub fn enabled_mask(elem, has_clip) {
-    if (radiant.get_state(elem, "disabled")) { 0 }
+    if (dom.get_state(elem, "disabled")) { 0 }
     else {
-        let readonly = radiant.get_state(elem, "readonly");
-        let has_sel = radiant.selection_start(elem) != radiant.selection_end(elem);
-        let value = radiant.get_state(elem, "value");
+        let readonly = dom.get_state(elem, "readonly");
+        let has_sel = dom.tc_selection_start(elem) != dom.tc_selection_end(elem);
+        let value = dom.get_state(elem, "value");
         let has_val = value != null and len(value) > 0;
         bit(has_sel and not readonly, CUT) +
         bit(has_sel, COPY) +
@@ -48,11 +48,11 @@ pub fn enabled_mask(elem, has_clip) {
 // to contenteditable or a plain document selection is a change here rather than
 // in C++.
 pub pn open_for(body) {
-    let target = radiant.context_menu_target(body);
+    let target = dom.context_menu_target(body);
     if (target == null) { 'pass' }
-    else if (not radiant.text_control(target)) { 'pass' }
+    else if (not dom.tc_value(target)) { 'pass' }
     else {
-        let clip = radiant.clipboard_text();
-        radiant.open_context_menu(target, enabled_mask(target, clip != null))
+        let clip = dom.clipboard_text();
+        dom.open_context_menu(target, enabled_mask(target, clip != null))
     }
 }

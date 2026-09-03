@@ -47,17 +47,23 @@ RADIANT_C_API Item radiant_dom_document_host_prototype(Item object);
 const JubeHostAPI* radiant_host_api = nullptr;
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
-extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
-extern "C" Item dom_check_validity_bridge(Item elem_item);
-extern "C" bool dom_focus_first_invalid_form_control(void* form_elem);
-extern "C" Item dom_form_reset_bridge(Item form_item);
-extern "C" bool dom_navigate_submit_target(const char* target_name, const char* url);
-extern "C" void* dom_popover_target_for_button(void* button);
-extern "C" int dom_popover_target_action(void* button);
-extern "C" bool dom_activate_popover(void* popover, int action);
 extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
                                                             void* submitter_node);
-extern "C" Item dom_scroll_into_view_bridge(void* dom_elem);
+
+// F31: the module declares no extern into a DOM body. These nine were the last
+// direct entries -- form validation and reset, the form-data collector, submit
+// navigation, the popover trio and scrollIntoView -- and each now crosses the
+// host API like everything else (ES34). The three that already had slots used
+// them; the six that did not were added to the table's additive tail.
+#define dom_check_validity_bridge radiant_host_api->dom_catalog->check_validity_bridge
+#define dom_form_reset_bridge radiant_host_api->dom_catalog->form_reset_bridge
+#define dom_scroll_into_view_bridge radiant_host_api->dom_catalog->scroll_into_view_bridge
+#define js_formdata_collect_form_entries radiant_host_api->dom_catalog->formdata_collect_form_entries
+#define dom_focus_first_invalid_form_control radiant_host_api->dom_catalog->focus_first_invalid_form_control
+#define dom_navigate_submit_target radiant_host_api->dom_catalog->navigate_submit_target
+#define dom_popover_target_for_button radiant_host_api->dom_catalog->popover_target_for_button
+#define dom_popover_target_action radiant_host_api->dom_catalog->popover_target_action
+#define dom_activate_popover radiant_host_api->dom_catalog->activate_popover_native
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -1064,6 +1070,23 @@ RADIANT_C_API Item fn_radiant_load(Item path_item) {
     // The POC exposes the document through its root wrapper until document
     // wrappers become a first-class native type in the VMap phase.
     return radiant_dom_wrap_node(doc->root);
+}
+
+// The strong half of the document-loading seam (dom.h, ESO80). It answers a
+// document pointer and nothing more: no wrapping, no host API, so it works
+// under `import dom` alone, before any radiant module init has run.
+// The engine half of the binding seam (dom.h): make the module's host API
+// usable even when only `dom` was imported. Idempotent, and never overrides a
+// binding the radiant module's own init already made.
+extern "C" void dom_engine_bind_host(const void* host_api) {
+    if (!radiant_host_api && host_api) {
+        radiant_host_api = (const JubeHostAPI*)host_api;
+    }
+}
+
+extern "C" void* dom_engine_load_document_native(const char* path) {
+    DomDocument* doc = radiant_load_html_document(path, "DOM_LOAD");
+    return (doc && doc->root) ? (void*)doc : nullptr;
 }
 
 RADIANT_C_API Item fn_radiant_root(Item doc_item) {
@@ -2599,7 +2622,7 @@ RADIANT_C_API Item fn_radiant_velmt_padding(Item velmt_item) {
 
 static int radiant_module_init(const JubeHostAPI* host) {
     if (!host || host->api_version != JUBE_HOST_API_VERSION ||
-        !host->gc || !host->value || !host->script || !host->dom || !host->realm) {
+        !host->gc || !host->value || !host->script || !host->dom_catalog || !host->realm) {
         log_error("JUBE_RADIANT: missing host API during module init");
         return -1;
     }
@@ -2744,161 +2767,7 @@ RADIANT_C_API const void* radiant_dom_event_host_type(void) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
 static const JubeFuncDef radiant_functions[] = {
-    {"load", "fn(path: string) -> dom_node", (fn_ptr)fn_radiant_load, JUBE_FN_NONE,
-     "Item fn_radiant_load(Item path)", (fn_ptr)fn_radiant_load},
-    {"root", "fn(doc: dom_node) -> dom_node", (fn_ptr)fn_radiant_root, JUBE_FN_NONE,
-     "Item fn_radiant_root(Item doc)", (fn_ptr)fn_radiant_root},
-    {"document_root", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_document_root, JUBE_FN_NONE,
-     "Item fn_radiant_document_root(Item node)", (fn_ptr)fn_radiant_document_root},
-    {"first_element_child", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_first_element_child, JUBE_FN_NONE,
-     "Item fn_radiant_first_element_child(Item node)", (fn_ptr)fn_radiant_first_element_child},
-    {"next_element_sibling", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_next_element_sibling, JUBE_FN_NONE,
-     "Item fn_radiant_next_element_sibling(Item node)", (fn_ptr)fn_radiant_next_element_sibling},
-    {"focus_candidates", "fn(root: dom_node) -> array", (fn_ptr)fn_radiant_focus_candidates, JUBE_FN_NONE,
-     "Item fn_radiant_focus_candidates(Item root)", (fn_ptr)fn_radiant_focus_candidates},
-    {"focused", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_focused, JUBE_FN_NONE,
-     "Item fn_radiant_focused(Item node)", (fn_ptr)fn_radiant_focused},
-    {"focus_set", "fn(node: dom_node, from_keyboard: bool) -> bool", (fn_ptr)fn_radiant_focus_set, JUBE_FN_NONE,
-     "Item fn_radiant_focus_set(Item node, Item from_keyboard)", (fn_ptr)fn_radiant_focus_set},
-    {"scroll_into_view", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_scroll_into_view, JUBE_FN_NONE,
-     "Item fn_radiant_scroll_into_view(Item node)", (fn_ptr)fn_radiant_scroll_into_view},
-    {"embedding_element", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_embedding_element, JUBE_FN_NONE,
-     "Item fn_radiant_embedding_element(Item node)", (fn_ptr)fn_radiant_embedding_element},
-    {"embedded_document_root", "fn(iframe: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_embedded_document_root, JUBE_FN_NONE,
-     "Item fn_radiant_embedded_document_root(Item iframe)", (fn_ptr)fn_radiant_embedded_document_root},
-    {"navigation_destination", "fn(source: dom_node, url: string, target_root: dom_node) -> map", (fn_ptr)fn_radiant_navigation_destination, JUBE_FN_NONE,
-     "Item fn_radiant_navigation_destination(Item source, Item url, Item target_root)", (fn_ptr)fn_radiant_navigation_destination},
-    {"attr", "fn(node: dom_node, name: string) -> string", (fn_ptr)fn_radiant_attr, JUBE_FN_NONE,
-     "Item fn_radiant_attr(Item node, Item name)", (fn_ptr)fn_radiant_attr},
-    {"set_attr", "fn(node: dom_node, name: string, value: string) -> dom_node", (fn_ptr)fn_radiant_set_attr, JUBE_FN_NONE,
-     "Item fn_radiant_set_attr(Item node, Item name, Item value)", (fn_ptr)fn_radiant_set_attr},
-    {"get_state", "fn(node: dom_node, name: string) -> any", (fn_ptr)fn_radiant_get_state, JUBE_FN_NONE,
-     "Item fn_radiant_get_state(Item node, Item name)", (fn_ptr)fn_radiant_get_state},
-    {"set_state", "fn(node: dom_node, name: string, value: any) -> bool", (fn_ptr)fn_radiant_set_state, JUBE_FN_NONE,
-     "Item fn_radiant_set_state(Item node, Item name, Item value)", (fn_ptr)fn_radiant_set_state},
-    {"dispatch", "fn(node: dom_node, name: string) -> bool", (fn_ptr)fn_radiant_dispatch, JUBE_FN_NONE,
-     "Item fn_radiant_dispatch(Item node, Item name)", (fn_ptr)fn_radiant_dispatch},
-    {"form_of", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_form_of, JUBE_FN_NONE,
-     "Item fn_radiant_form_of(Item node)", (fn_ptr)fn_radiant_form_of},
-    {"has_attr", "fn(node: dom_node, name: string) -> bool", (fn_ptr)fn_radiant_has_attr, JUBE_FN_NONE,
-     "Item fn_radiant_has_attr(Item node, Item name)", (fn_ptr)fn_radiant_has_attr},
-    {"parent", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_parent, JUBE_FN_NONE,
-     "Item fn_radiant_parent(Item node)", (fn_ptr)fn_radiant_parent},
-    {"closest", "fn(node: dom_node, selector: string) -> dom_node|null", (fn_ptr)fn_radiant_closest, JUBE_FN_NONE,
-     "Item fn_radiant_closest(Item node, Item selector)", (fn_ptr)fn_radiant_closest},
-    {"form_entries", "fn(form: dom_node, submitter: dom_node|null) -> array", (fn_ptr)fn_radiant_form_entries, JUBE_FN_NONE,
-     "Item fn_radiant_form_entries(Item form, Item submitter)", (fn_ptr)fn_radiant_form_entries},
-    {"form_url", "fn(form: dom_node) -> string", (fn_ptr)fn_radiant_form_url, JUBE_FN_NONE,
-     "Item fn_radiant_form_url(Item form)", (fn_ptr)fn_radiant_form_url},
-    {"form_encode", "fn(value: string) -> string", (fn_ptr)fn_radiant_form_encode, JUBE_FN_NONE,
-     "Item fn_radiant_form_encode(Item value)", (fn_ptr)fn_radiant_form_encode},
-    {"submit_event", "fn(form: dom_node, submitter: dom_node|null) -> bool", (fn_ptr)fn_radiant_submit_event, JUBE_FN_NONE,
-     "Item fn_radiant_submit_event(Item form, Item submitter)", (fn_ptr)fn_radiant_submit_event},
-    {"check_validity", "fn(form: dom_node) -> bool", (fn_ptr)fn_radiant_check_validity, JUBE_FN_NONE,
-     "Item fn_radiant_check_validity(Item form)", (fn_ptr)fn_radiant_check_validity},
-    {"reset_form", "fn(form: dom_node) -> bool", (fn_ptr)fn_radiant_reset_form, JUBE_FN_NONE,
-     "Item fn_radiant_reset_form(Item form)", (fn_ptr)fn_radiant_reset_form},
-    {"form_boundary", "fn() -> string", (fn_ptr)fn_radiant_form_boundary, JUBE_FN_NONE,
-     "Item fn_radiant_form_boundary()", (fn_ptr)fn_radiant_form_boundary},
-    {"request_navigation", "fn(request: map) -> bool", (fn_ptr)fn_radiant_request_navigation, JUBE_FN_NONE,
-     "Item fn_radiant_request_navigation(Item request)", (fn_ptr)fn_radiant_request_navigation},
-    {"radio_group", "fn(node: dom_node) -> array", (fn_ptr)fn_radiant_radio_group, JUBE_FN_NONE,
-     "Item fn_radiant_radio_group(Item node)", (fn_ptr)fn_radiant_radio_group},
-    {"details_group", "fn(node: dom_node) -> array", (fn_ptr)fn_radiant_details_group, JUBE_FN_NONE,
-     "Item fn_radiant_details_group(Item node)", (fn_ptr)fn_radiant_details_group},
-    {"dropdown_open", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_dropdown_open, JUBE_FN_NONE,
-     "Item fn_radiant_dropdown_open(Item node)", (fn_ptr)fn_radiant_dropdown_open},
-    {"set_dropdown_open", "fn(node: dom_node, open: bool) -> bool", (fn_ptr)fn_radiant_set_dropdown_open, JUBE_FN_NONE,
-     "Item fn_radiant_set_dropdown_open(Item node, Item open)", (fn_ptr)fn_radiant_set_dropdown_open},
-    {"activate_popover", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_activate_popover, JUBE_FN_NONE,
-     "Item fn_radiant_activate_popover(Item node)", (fn_ptr)fn_radiant_activate_popover},
-    {"option_count", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_option_count, JUBE_FN_NONE,
-     "Item fn_radiant_option_count(Item node)", (fn_ptr)fn_radiant_option_count},
-    {"selected_index", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_selected_index, JUBE_FN_NONE,
-     "Item fn_radiant_selected_index(Item node)", (fn_ptr)fn_radiant_selected_index},
-    {"set_selected_index", "fn(node: dom_node, index: int) -> bool", (fn_ptr)fn_radiant_set_selected_index, JUBE_FN_NONE,
-     "Item fn_radiant_set_selected_index(Item node, Item index)", (fn_ptr)fn_radiant_set_selected_index},
-    {"custom_validity", "fn(node: dom_node) -> string", (fn_ptr)fn_radiant_custom_validity, JUBE_FN_NONE,
-     "Item fn_radiant_custom_validity(Item node)", (fn_ptr)fn_radiant_custom_validity},
-    {"text_control", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_text_control, JUBE_FN_NONE,
-     "Item fn_radiant_text_control(Item node)", (fn_ptr)fn_radiant_text_control},
     // F5 editing waist — all offsets in codepoints
-    {"selection_start", "fn(node: dom_node) -> int", (fn_ptr)fn_radiant_selection_start, JUBE_FN_NONE,
-     "Item fn_radiant_selection_start(Item node)", (fn_ptr)fn_radiant_selection_start},
-    {"selection_end", "fn(node: dom_node) -> int", (fn_ptr)fn_radiant_selection_end, JUBE_FN_NONE,
-     "Item fn_radiant_selection_end(Item node)", (fn_ptr)fn_radiant_selection_end},
-    {"set_selection", "fn(node: dom_node, start: int, end: int) -> bool", (fn_ptr)fn_radiant_set_selection, JUBE_FN_NONE,
-     "Item fn_radiant_set_selection(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_selection},
-    {"replace_range", "fn(node: dom_node, start: int, end: int, text: string) -> bool", (fn_ptr)fn_radiant_replace_range, JUBE_FN_NONE,
-     "Item fn_radiant_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_replace_range},
-    {"set_password_reveal", "fn(node: dom_node, start: int, end: int) -> bool", (fn_ptr)fn_radiant_set_password_reveal, JUBE_FN_NONE,
-     "Item fn_radiant_set_password_reveal(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_password_reveal},
-    {"dom_set_caret", "fn(node: dom_node, offset: int) -> bool", (fn_ptr)fn_radiant_dom_set_caret, JUBE_FN_NONE,
-     "Item fn_radiant_dom_set_caret(Item node, Item offset)", (fn_ptr)fn_radiant_dom_set_caret},
-    {"dom_insert_at_boundary", "fn(node: dom_node, text: string) -> int|null", (fn_ptr)fn_radiant_dom_insert_at_boundary, JUBE_FN_NONE,
-     "Item fn_radiant_dom_insert_at_boundary(Item node, Item text)", (fn_ptr)fn_radiant_dom_insert_at_boundary},
-    {"dom_edit_node", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_dom_edit_node, JUBE_FN_NONE,
-     "Item fn_radiant_dom_edit_node(Item node)", (fn_ptr)fn_radiant_dom_edit_node},
-    {"dom_edit_start", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_dom_edit_start, JUBE_FN_NONE,
-     "Item fn_radiant_dom_edit_start(Item node)", (fn_ptr)fn_radiant_dom_edit_start},
-    {"dom_edit_end", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_dom_edit_end, JUBE_FN_NONE,
-     "Item fn_radiant_dom_edit_end(Item node)", (fn_ptr)fn_radiant_dom_edit_end},
-    {"dom_edit_text", "fn(node: dom_node) -> string|null", (fn_ptr)fn_radiant_dom_edit_text, JUBE_FN_NONE,
-     "Item fn_radiant_dom_edit_text(Item node)", (fn_ptr)fn_radiant_dom_edit_text},
-    {"dom_replace_range", "fn(node: dom_node, start: int, end: int, text: string) -> int|null", (fn_ptr)fn_radiant_dom_replace_range, JUBE_FN_NONE,
-     "Item fn_radiant_dom_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_dom_replace_range},
-    {"dom_range_format", "fn(node: dom_node, tag: string) -> bool", (fn_ptr)fn_radiant_dom_range_format, JUBE_FN_NONE,
-     "Item fn_radiant_dom_range_format(Item node, Item tag)", (fn_ptr)fn_radiant_dom_range_format},
-    {"dom_wrap_range", "fn(node: dom_node, start: int, end: int, tag: string) -> bool", (fn_ptr)fn_radiant_dom_wrap_range, JUBE_FN_NONE,
-     "Item fn_radiant_dom_wrap_range(Item node, Item start, Item end, Item tag)", (fn_ptr)fn_radiant_dom_wrap_range},
-    {"dom_unwrap_range", "fn(node: dom_node, start: int, end: int, tag: string) -> bool", (fn_ptr)fn_radiant_dom_unwrap_range, JUBE_FN_NONE,
-     "Item fn_radiant_dom_unwrap_range(Item node, Item start, Item end, Item tag)", (fn_ptr)fn_radiant_dom_unwrap_range},
-    {"dom_insert_html", "fn(node: dom_node, html: string) -> bool", (fn_ptr)fn_radiant_dom_insert_html, JUBE_FN_NONE,
-     "Item fn_radiant_dom_insert_html(Item node, Item html)", (fn_ptr)fn_radiant_dom_insert_html},
-    {"dom_replace_dom_range", "fn(node: dom_node, text: string) -> bool", (fn_ptr)fn_radiant_dom_replace_dom_range, JUBE_FN_NONE,
-     "Item fn_radiant_dom_replace_dom_range(Item node, Item text)", (fn_ptr)fn_radiant_dom_replace_dom_range},
-    {"dom_delete_dom_range", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_dom_delete_dom_range, JUBE_FN_NONE,
-     "Item fn_radiant_dom_delete_dom_range(Item node)", (fn_ptr)fn_radiant_dom_delete_dom_range},
-    {"dom_insert_paragraph", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_dom_insert_paragraph, JUBE_FN_NONE,
-     "Item fn_radiant_dom_insert_paragraph(Item node)", (fn_ptr)fn_radiant_dom_insert_paragraph},
-    {"dom_insert_line_break", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_dom_insert_line_break, JUBE_FN_NONE,
-     "Item fn_radiant_dom_insert_line_break(Item node)", (fn_ptr)fn_radiant_dom_insert_line_break},
-    {"key_intent", "fn(node: dom_node, name: string) -> bool", (fn_ptr)fn_radiant_key_intent, JUBE_FN_NONE,
-     "Item fn_radiant_key_intent(Item node, Item name)", (fn_ptr)fn_radiant_key_intent},
-    {"hover_index", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_hover_index, JUBE_FN_NONE,
-     "Item fn_radiant_hover_index(Item node)", (fn_ptr)fn_radiant_hover_index},
-    {"set_hover_index", "fn(node: dom_node, index: int) -> bool", (fn_ptr)fn_radiant_set_hover_index, JUBE_FN_NONE,
-     "Item fn_radiant_set_hover_index(Item node, Item index)", (fn_ptr)fn_radiant_set_hover_index},
-    {"caret_surface", "fn(node: dom_node) -> string|null", (fn_ptr)fn_radiant_caret_surface, JUBE_FN_NONE,
-     "Item fn_radiant_caret_surface(Item node)", (fn_ptr)fn_radiant_caret_surface},
-    {"caret_operation", "fn(node: dom_node, operation: string, extend: bool) -> bool", (fn_ptr)fn_radiant_caret_operation, JUBE_FN_NONE,
-     "Item fn_radiant_caret_operation(Item node, Item operation, Item extend)", (fn_ptr)fn_radiant_caret_operation},
-    {"scroll_operation", "fn(node: dom_node, operation: string) -> bool", (fn_ptr)fn_radiant_scroll_operation, JUBE_FN_NONE,
-     "Item fn_radiant_scroll_operation(Item node, Item operation)", (fn_ptr)fn_radiant_scroll_operation},
-    {"open_context_menu", "fn(node: dom_node, enabled_mask: int) -> bool", (fn_ptr)fn_radiant_open_context_menu, JUBE_FN_NONE,
-     "Item fn_radiant_open_context_menu(Item node, Item enabled_mask)", (fn_ptr)fn_radiant_open_context_menu},
-    {"close_context_menu", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_close_context_menu, JUBE_FN_NONE,
-     "Item fn_radiant_close_context_menu(Item node)", (fn_ptr)fn_radiant_close_context_menu},
-    {"context_menu_target", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_context_menu_target, JUBE_FN_NONE,
-     "Item fn_radiant_context_menu_target(Item node)", (fn_ptr)fn_radiant_context_menu_target},
-    {"clipboard_text", "fn() -> string|null", (fn_ptr)fn_radiant_clipboard_text, JUBE_FN_NONE,
-     "Item fn_radiant_clipboard_text()", (fn_ptr)fn_radiant_clipboard_text},
-    {"ime_preedit", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_ime_preedit, JUBE_FN_NONE,
-     "Item fn_radiant_ime_preedit(Item node)", (fn_ptr)fn_radiant_ime_preedit},
-    {"set_ime_preedit", "fn(node: dom_node, text: any, caret: int) -> bool", (fn_ptr)fn_radiant_set_ime_preedit, JUBE_FN_NONE,
-     "Item fn_radiant_set_ime_preedit(Item node, Item text, Item caret)", (fn_ptr)fn_radiant_set_ime_preedit},
-    {"clear_ime_preedit", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_clear_ime_preedit, JUBE_FN_NONE,
-     "Item fn_radiant_clear_ime_preedit(Item node)", (fn_ptr)fn_radiant_clear_ime_preedit},
-    {"range_value", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_range_value, JUBE_FN_NONE,
-     "Item fn_radiant_range_value(Item node)", (fn_ptr)fn_radiant_range_value},
-    {"range_min", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_range_min, JUBE_FN_NONE,
-     "Item fn_radiant_range_min(Item node)", (fn_ptr)fn_radiant_range_min},
-    {"range_max", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_range_max, JUBE_FN_NONE,
-     "Item fn_radiant_range_max(Item node)", (fn_ptr)fn_radiant_range_max},
-    {"value_at_focus", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_value_at_focus, JUBE_FN_NONE,
-     "Item fn_radiant_value_at_focus(Item node)", (fn_ptr)fn_radiant_value_at_focus},
-    {"request_change", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_request_change, JUBE_FN_NONE,
-     "Item fn_radiant_request_change(Item node)", (fn_ptr)fn_radiant_request_change},
     {"free", "fn(node: dom_node) -> null", (fn_ptr)fn_radiant_free, JUBE_FN_NONE,
      "Item fn_radiant_free(Item node)", (fn_ptr)fn_radiant_free},
     {"layout", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_layout, JUBE_FN_NONE,
@@ -2976,4 +2845,186 @@ RADIANT_C_API const JubeModuleDef* radiant_jube_module(void) {
 
 RADIANT_C_API void radiant_jube_register_static(void) {
     jube_register_static_module(&radiant_module);
+}
+
+// The engine half of the DOM_F_ENGINE catalog rows (F32). Each forwards to the
+// same body `radiant.*` publishes, so `dom.get_state` and `radiant.get_state`
+// are one implementation -- which is what lets the behaviour package migrate to
+// `dom.*` without behaviour changing under it (ES44).
+//
+// dispatch is wired to radiant's event-name form; the catalog row types its
+// second argument as an event object, and reconciling those two spellings is
+// part of the package migration rather than of this wiring.
+#define RADIANT_PROVIDE_ENGINE_0(name, fn) \
+    extern "C" Item dom_engine_##name(void) { return fn(); }
+#define RADIANT_PROVIDE_ENGINE_4(name, fn) \
+    extern "C" Item dom_engine_##name(Item a, Item b, Item c, Item d) { return fn(a, b, c, d); }
+#define RADIANT_PROVIDE_ENGINE_1(name, fn) \
+    extern "C" Item dom_engine_##name(Item a) { return fn(a); }
+#define RADIANT_PROVIDE_ENGINE_2(name, fn) \
+    extern "C" Item dom_engine_##name(Item a, Item b) { return fn(a, b); }
+#define RADIANT_PROVIDE_ENGINE_3(name, fn) \
+    extern "C" Item dom_engine_##name(Item a, Item b, Item c) { return fn(a, b, c); }
+
+RADIANT_PROVIDE_ENGINE_2(get_state, fn_radiant_get_state)
+RADIANT_PROVIDE_ENGINE_3(set_state, fn_radiant_set_state)
+RADIANT_PROVIDE_ENGINE_1(request_change, fn_radiant_request_change)
+RADIANT_PROVIDE_ENGINE_2(dispatch, fn_radiant_dispatch)
+RADIANT_PROVIDE_ENGINE_1(focused, fn_radiant_focused)
+RADIANT_PROVIDE_ENGINE_2(focus_set, fn_radiant_focus_set)
+RADIANT_PROVIDE_ENGINE_1(activate_popover, fn_radiant_activate_popover)
+RADIANT_PROVIDE_ENGINE_3(caret_operation, fn_radiant_caret_operation)
+RADIANT_PROVIDE_ENGINE_1(clear_ime_preedit, fn_radiant_clear_ime_preedit)
+RADIANT_PROVIDE_ENGINE_0(clipboard_text, fn_radiant_clipboard_text)
+RADIANT_PROVIDE_ENGINE_1(context_menu_target, fn_radiant_context_menu_target)
+RADIANT_PROVIDE_ENGINE_2(edit_insert_at_boundary, fn_radiant_dom_insert_at_boundary)
+RADIANT_PROVIDE_ENGINE_1(edit_insert_break, fn_radiant_dom_insert_line_break)
+RADIANT_PROVIDE_ENGINE_4(edit_replace_range, fn_radiant_replace_range)
+RADIANT_PROVIDE_ENGINE_1(edit_split_block, fn_radiant_dom_insert_paragraph)
+RADIANT_PROVIDE_ENGINE_2(key_intent, fn_radiant_key_intent)
+RADIANT_PROVIDE_ENGINE_3(navigation_destination, fn_radiant_navigation_destination)
+RADIANT_PROVIDE_ENGINE_2(open_context_menu, fn_radiant_open_context_menu)
+RADIANT_PROVIDE_ENGINE_1(request_navigation, fn_radiant_request_navigation)
+RADIANT_PROVIDE_ENGINE_2(set_caret, fn_radiant_dom_set_caret)
+RADIANT_PROVIDE_ENGINE_3(set_ime_preedit, fn_radiant_set_ime_preedit)
+RADIANT_PROVIDE_ENGINE_3(set_password_reveal, fn_radiant_set_password_reveal)
+RADIANT_PROVIDE_ENGINE_1(tc_value, fn_radiant_text_control)
+RADIANT_PROVIDE_ENGINE_1(ime_preedit, fn_radiant_ime_preedit)
+RADIANT_PROVIDE_ENGINE_1(tc_selection_start, fn_radiant_selection_start)
+RADIANT_PROVIDE_ENGINE_1(tc_selection_end, fn_radiant_selection_end)
+RADIANT_PROVIDE_ENGINE_1(edit_node, fn_radiant_dom_edit_node)
+RADIANT_PROVIDE_ENGINE_1(edit_start, fn_radiant_dom_edit_start)
+RADIANT_PROVIDE_ENGINE_1(edit_end, fn_radiant_dom_edit_end)
+
+// is_focusable has no radiant.* spelling to forward to: the engine keeps the
+// predicate internal and publishes only focus_candidates, the whole list. A
+// caller asking about one element should not have to collect every focusable
+// element and search it, so the seam exposes the predicate itself. A DomElement
+// is a View in this engine, which is why the cast is a cast and not a lookup.
+extern bool is_view_focusable(View* view);
+
+extern "C" Item dom_engine_is_focusable(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "IS_FOCUSABLE");
+    return radiant_bool_item(elem && is_view_focusable((View*)elem));
+}
+
+// The flag-carrying dispatch seam (F32). radiant.dispatch keeps its name-only
+// signature; the catalog's row is the one that takes an event.
+extern "C" bool radiant_dispatch_event_with_flags_from_script(void* dom_node,
+                                                              const char* event_name,
+                                                              bool bubbles, bool cancelable);
+
+extern "C" Item dom_engine_dispatch_event(Item node_item, Item type_item,
+                                          Item bubbles_item, Item cancelable_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "DISPATCH_EVENT");
+    const char* type = fn_to_cstr(type_item);
+    if (!elem || !type || !type[0]) return radiant_bool_item(false);
+    return radiant_bool_item(radiant_dispatch_event_with_flags_from_script(
+        (void*)elem, type, is_truthy(bubbles_item), is_truthy(cancelable_item)));
+}
+
+// F32/ES45: the rest of the engine's DOM surface, so `dom.*` can be the sole
+// API and radiant.* can keep only what is not DOM at all.
+RADIANT_PROVIDE_ENGINE_1(caret_surface, fn_radiant_caret_surface)
+RADIANT_PROVIDE_ENGINE_1(focus_candidates, fn_radiant_focus_candidates)
+RADIANT_PROVIDE_ENGINE_1(check_validity, fn_radiant_check_validity)
+RADIANT_PROVIDE_ENGINE_1(close_context_menu, fn_radiant_close_context_menu)
+RADIANT_PROVIDE_ENGINE_1(custom_validity, fn_radiant_custom_validity)
+RADIANT_PROVIDE_ENGINE_1(dom_delete_dom_range, fn_radiant_dom_delete_dom_range)
+RADIANT_PROVIDE_ENGINE_1(dom_edit_text, fn_radiant_dom_edit_text)
+RADIANT_PROVIDE_ENGINE_2(dom_insert_html, fn_radiant_dom_insert_html)
+RADIANT_PROVIDE_ENGINE_2(dom_range_format, fn_radiant_dom_range_format)
+RADIANT_PROVIDE_ENGINE_2(dom_replace_dom_range, fn_radiant_dom_replace_dom_range)
+RADIANT_PROVIDE_ENGINE_4(dom_replace_range, fn_radiant_dom_replace_range)
+RADIANT_PROVIDE_ENGINE_4(dom_unwrap_range, fn_radiant_dom_unwrap_range)
+RADIANT_PROVIDE_ENGINE_4(dom_wrap_range, fn_radiant_dom_wrap_range)
+RADIANT_PROVIDE_ENGINE_1(dropdown_open, fn_radiant_dropdown_open)
+RADIANT_PROVIDE_ENGINE_1(embedded_document_root, fn_radiant_embedded_document_root)
+RADIANT_PROVIDE_ENGINE_1(embedding_element, fn_radiant_embedding_element)
+RADIANT_PROVIDE_ENGINE_0(form_boundary, fn_radiant_form_boundary)
+RADIANT_PROVIDE_ENGINE_2(form_entries, fn_radiant_form_entries)
+RADIANT_PROVIDE_ENGINE_1(form_url, fn_radiant_form_url)
+RADIANT_PROVIDE_ENGINE_1(hover_index, fn_radiant_hover_index)
+RADIANT_PROVIDE_ENGINE_1(option_count, fn_radiant_option_count)
+RADIANT_PROVIDE_ENGINE_1(range_max, fn_radiant_range_max)
+RADIANT_PROVIDE_ENGINE_1(range_min, fn_radiant_range_min)
+RADIANT_PROVIDE_ENGINE_1(range_value, fn_radiant_range_value)
+RADIANT_PROVIDE_ENGINE_1(reset_form, fn_radiant_reset_form)
+RADIANT_PROVIDE_ENGINE_2(scroll_operation, fn_radiant_scroll_operation)
+RADIANT_PROVIDE_ENGINE_1(selected_index, fn_radiant_selected_index)
+RADIANT_PROVIDE_ENGINE_2(set_dropdown_open, fn_radiant_set_dropdown_open)
+RADIANT_PROVIDE_ENGINE_2(set_hover_index, fn_radiant_set_hover_index)
+RADIANT_PROVIDE_ENGINE_2(set_selected_index, fn_radiant_set_selected_index)
+RADIANT_PROVIDE_ENGINE_2(submit_event, fn_radiant_submit_event)
+RADIANT_PROVIDE_ENGINE_1(value_at_focus, fn_radiant_value_at_focus)
+
+// ---------------------------------------------------------------------------
+// The strong half of the seams declared in lambda/dom/dom_engine.h.
+//
+// These live here, not in a file of their own, for a link reason worth stating:
+// a static archive contributes an object only to resolve an undefined symbol,
+// and a weak definition already resolves one. A provider object that nothing
+// else references is therefore never pulled in, and the core's weak defaults
+// win silently -- which is exactly what happened when these were their own
+// translation unit: form input and history went quiet with a clean build. This
+// object is pulled in for the module registration, so its strong definitions
+// are present at the final link.
+// ---------------------------------------------------------------------------
+#include "../../dom/dom_engine.h"
+#include "radiant_input_value.hpp"
+
+extern "C" bool radiant_author_template_event_live(const char* event_name);
+extern "C" void radiant_dispatch_author_template_participant(void* dom_node, Item event,
+                                                             const char* event_name);
+extern "C" void radiant_dom_reset_wrapper_cache(void);
+extern "C" bool radiant_dom_exec_command(void* document, const char* command, const char* value);
+struct RadiantHistoryTraversal;
+extern "C" bool radiant_history_initialize(DomDocument* document);
+extern "C" int radiant_history_length(DomDocument* document);
+extern "C" const char* radiant_history_scroll_restoration(DomDocument* document);
+extern "C" bool radiant_history_go(DomDocument* document, int delta, RadiantHistoryTraversal* t);
+extern "C" bool radiant_history_set_location(DomDocument* document, const char* url_text,
+                                             RadiantHistoryTraversal* t);
+#define PROVIDE(ret, name, params, args) \
+    extern "C" ret dom_engine_##name params { return radiant_##name args; }
+#define PROVIDE_VOID(name, params, args) \
+    extern "C" void dom_engine_##name params { radiant_##name args; }
+
+extern "C" bool dom_engine_author_template_event_live(const char* n) {
+    return radiant_author_template_event_live(n);
+}
+extern "C" void dom_engine_dispatch_author_template_participant(void* d, Item e, const char* n) {
+    radiant_dispatch_author_template_participant(d, e, n);
+}
+extern "C" DocState* dom_engine_document_ensure_state(DomDocument* d, const char* o) {
+    return radiant_document_ensure_state(d, o);
+}
+extern "C" void dom_engine_reset_wrapper_cache(void) { radiant_dom_reset_wrapper_cache(); }
+extern "C" bool dom_engine_exec_command(void* d, const char* c, const char* v) {
+    return radiant_dom_exec_command(d, c, v);
+}
+
+PROVIDE(bool, history_initialize, (DomDocument* d), (d))
+PROVIDE(int, history_length, (DomDocument* d), (d))
+PROVIDE(const char*, history_scroll_restoration, (DomDocument* d), (d))
+PROVIDE(bool, history_go, (DomDocument* d, int delta, RadiantHistoryTraversal* t), (d, delta, t))
+PROVIDE(bool, history_set_location,
+        (DomDocument* d, const char* u, RadiantHistoryTraversal* t), (d, u, t))
+
+extern "C" int dom_engine_input_value_kind(const char* type) {
+    return (int)radiant_input_value_kind(type);
+}
+PROVIDE(const char*, input_live_value, (DomElement* e), (e))
+PROVIDE(bool, input_set_live_value, (DomElement* e, const char* v), (e, v))
+PROVIDE_VOID(input_reset_live_value, (DomElement* e), (e))
+PROVIDE(bool, input_value_sanitize,
+        (const char* t, const char* v, char* out, size_t n), (t, v, out, n))
+PROVIDE_VOID(input_value_validate,
+        (const char* t, const char* v, const char* mn, const char* mx, const char* st,
+         RadiantInputValidity* out), (t, v, mn, mx, st, out))
+
+PROVIDE_VOID(reconcile_dom_mutations, (UiContext* u, DomDocument* d), (u, d))
+
+extern "C" void dom_engine_sync_pseudo_state(void* view, uint32_t flag, bool set) {
+    radiant_sync_pseudo_state((View*)view, flag, set);
 }

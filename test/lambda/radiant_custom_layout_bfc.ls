@@ -1,4 +1,5 @@
 import radiant
+import dom
 
 let ok = radiant.register_layout("bfc_smoke", (parent, children, ctx) => {
   placements: [for (child in children) {
@@ -8,8 +9,8 @@ let ok = radiant.register_layout("bfc_smoke", (parent, children, ctx) => {
   }]
 })
 
-let doc = radiant.load("test/lambda/radiant_custom_layout_bfc.html")
-let root = radiant.root(doc)
+let doc = dom.load("test/lambda/radiant_custom_layout_bfc.html")
+let root = dom.document_element(doc)
 let first_layout = radiant.layout(root)
 let did_layout = first_layout and radiant.layout(root)
 let graph = root.owner_document.query_selector("#graph")

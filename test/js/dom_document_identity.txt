@@ -1,0 +1,10 @@
+true
+true
+true
+9
+#document
+9
+BODY
+HTML
+DOM Identity Test
+null

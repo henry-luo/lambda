@@ -6,6 +6,7 @@
  */
 
 #include "dom_cssom.h"
+#include "realm/dom_realm.h"
 #include "dom.h"
 #include "../js/js_runtime.h"
 #include "../js/js_class.h"
@@ -218,12 +219,12 @@ static Item wrap_rule_decl(CssRule* rule, Pool* pool) {
 static Item wrap_nested_declarations(CssRule* rule, Pool* pool) {
     RootFrame roots(5);
     Rooted<Item> result_root(roots,
-        js_new_object_with_class(JS_CLASS_CSS_NESTED_DECLARATIONS));
+        dom_realm_new_object_of_class(JS_CLASS_CSS_NESTED_DECLARATIONS));
     Rooted<Item> style_root(roots, wrap_rule_decl(rule, pool));
     // Class metadata does not participate in ordinary instanceof; CSSOM
     // wrappers must inherit the realm's exposed interface prototype.
     dom_realm_apply_prototype(result_root.get(), "CSSNestedDeclarations");
-    js_set_key_cstr(result_root.get(), "style", style_root.get());
+    dom_realm_set_cstr(result_root.get(), "style", style_root.get());
     return result_root.get();
 }
 

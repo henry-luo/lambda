@@ -315,34 +315,34 @@ static Item radiant_iface_arg(Item* args, int argc, int i) {
 
 #define RADIANT_GETTER(name, entry)                                          \
     static int name(Item receiver, Item* out) {                              \
-        *out = radiant_host_api->dom->entry(receiver);                       \
+        *out = radiant_host_api->dom_catalog->entry(receiver);                       \
         return 1;                                                            \
     }
 
 #define RADIANT_METHOD_0(name, entry)                                        \
     static int name(Item receiver, Item* args, int argc, Item* out) {        \
         (void)args; (void)argc;                                              \
-        *out = radiant_host_api->dom->entry(receiver);                       \
+        *out = radiant_host_api->dom_catalog->entry(receiver);                       \
         return 1;                                                            \
     }
 
 #define RADIANT_METHOD_1(name, entry)                                        \
     static int name(Item receiver, Item* args, int argc, Item* out) {        \
-        *out = radiant_host_api->dom->entry(receiver,                        \
+        *out = radiant_host_api->dom_catalog->entry(receiver,                        \
             radiant_iface_arg(args, argc, 0));                               \
         return 1;                                                            \
     }
 
 #define RADIANT_METHOD_2(name, entry)                                        \
     static int name(Item receiver, Item* args, int argc, Item* out) {        \
-        *out = radiant_host_api->dom->entry(receiver,                        \
+        *out = radiant_host_api->dom_catalog->entry(receiver,                        \
             radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1)); \
         return 1;                                                            \
     }
 
 #define RADIANT_METHOD_3(name, entry)                                        \
     static int name(Item receiver, Item* args, int argc, Item* out) {        \
-        *out = radiant_host_api->dom->entry(receiver,                        \
+        *out = radiant_host_api->dom_catalog->entry(receiver,                        \
             radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1), \
             radiant_iface_arg(args, argc, 2));                               \
         return 1;                                                            \
@@ -350,7 +350,7 @@ static Item radiant_iface_arg(Item* args, int argc, int i) {
 
 #define RADIANT_METHOD_4(name, entry)                                        \
     static int name(Item receiver, Item* args, int argc, Item* out) {        \
-        *out = radiant_host_api->dom->entry(receiver,                        \
+        *out = radiant_host_api->dom_catalog->entry(receiver,                        \
             radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1), \
             radiant_iface_arg(args, argc, 2), radiant_iface_arg(args, argc, 3)); \
         return 1;                                                            \
@@ -584,60 +584,60 @@ static Item radiant_style_owner_item(Item receiver) {
 }
 
 static int st_css_text_get(Item r, Item* out) {
-    *out = radiant_host_api->dom->style_get_property(radiant_style_owner_item(r),
+    *out = radiant_host_api->dom_catalog->style_get_property(radiant_style_owner_item(r),
                                                      radiant_style_key("cssText"));
     return 1;
 }
 
 static int st_css_text_set(Item r, Item v, Item* out) {
-    *out = radiant_host_api->dom->style_set_property(radiant_style_owner_item(r),
+    *out = radiant_host_api->dom_catalog->style_set_property(radiant_style_owner_item(r),
                                                      radiant_style_key("cssText"), v);
     return 1;
 }
 
 static int st_length_get(Item r, Item* out) {
-    *out = radiant_host_api->dom->style_get_property(radiant_style_owner_item(r),
+    *out = radiant_host_api->dom_catalog->style_get_property(radiant_style_owner_item(r),
                                                      radiant_style_key("length"));
     return 1;
 }
 
 static int st_named_get(Item r, Item key, Item* out) {
-    *out = radiant_host_api->dom->style_get_property(radiant_style_owner_item(r), key);
+    *out = radiant_host_api->dom_catalog->style_get_property(radiant_style_owner_item(r), key);
     return 1;
 }
 
 static int st_named_set(Item r, Item key, Item v, Item* out) {
-    *out = radiant_host_api->dom->style_set_property(radiant_style_owner_item(r), key, v);
+    *out = radiant_host_api->dom_catalog->style_set_property(radiant_style_owner_item(r), key, v);
     return 1;
 }
 
 static int st_named_has(Item r, Item key, Item* out) {
-    *out = radiant_host_api->dom->style_css_has(r, key);
+    *out = radiant_host_api->dom_catalog->style_has_property(r, key);
     return 1;
 }
 
 static int st_get_property_value(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom->style_get_property(radiant_style_owner_item(r),
+    *out = radiant_host_api->dom_catalog->style_get_property(radiant_style_owner_item(r),
         radiant_iface_arg(args, argc, 0));
     return 1;
 }
 
 static int st_set_property(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom->style_set_property_bridge(r.vmap->host_data,
+    *out = radiant_host_api->dom_catalog->style_set_property_bridge(r.vmap->host_data,
         radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1),
         radiant_iface_arg(args, argc, 2), argc >= 3);
     return 1;
 }
 
 static int st_remove_property(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom->style_remove_property_bridge(r.vmap->host_data,
+    *out = radiant_host_api->dom_catalog->style_remove_property_bridge(r.vmap->host_data,
         radiant_iface_arg(args, argc, 0));
     return 1;
 }
 
 // computed style: read-only; the resolver entry takes the style item itself
 static int cs_get(Item r, Item key, Item* out) {
-    *out = radiant_host_api->dom->computed_style_get_property(r, key);
+    *out = radiant_host_api->dom_catalog->computed_style_get_property(r, key);
     return 1;
 }
 
@@ -697,7 +697,7 @@ static const JubeMemberBind radiant_computed_style_members[] = {
 
 #define RADIANT_GETTER_D(name, entry)                                        \
     static int name(Item receiver, Item* out) {                              \
-        *out = radiant_host_api->dom->entry(receiver);                       \
+        *out = radiant_host_api->dom_catalog->entry(receiver);                       \
         return 1;                                                            \
     }
 
@@ -724,18 +724,18 @@ static int cssom_swallow_set(Item receiver, Item key, Item value, Item* out) {
 }
 
 static int sh_indexed_get(Item receiver, int64_t index, Item* out) {
-    *out = radiant_host_api->dom->stylesheet_index(receiver, index);
+    *out = radiant_host_api->dom_catalog->stylesheet_index(receiver, index);
     return 1;
 }
 
 static int sh_insert_rule(Item receiver, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom->stylesheet_insert_rule(receiver,
+    *out = radiant_host_api->dom_catalog->stylesheet_insert_rule(receiver,
         radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1));
     return 1;
 }
 
 static int sh_delete_rule(Item receiver, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom->stylesheet_delete_rule(receiver,
+    *out = radiant_host_api->dom_catalog->stylesheet_delete_rule(receiver,
         radiant_iface_arg(args, argc, 0));
     return 1;
 }
@@ -748,23 +748,23 @@ RADIANT_GETTER_D(cr_type, rule_get_type)
 RADIANT_GETTER_D(cr_parent_rule, rule_get_parent_rule)
 
 static int cr_selector_text_set(Item receiver, Item value, Item* out) {
-    *out = radiant_host_api->dom->rule_set_selector_text(receiver, value);
+    *out = radiant_host_api->dom_catalog->set_selector_text(receiver, value);
     return 1;
 }
 
 // rule declarations: CSS property names are the open-name surface
 static int rd_named_get(Item receiver, Item key, Item* out) {
-    *out = radiant_host_api->dom->cssom_rule_decl_get_property(receiver, key);
+    *out = radiant_host_api->dom_catalog->rule_style_get_property(receiver, key);
     return 1;
 }
 
 static int rd_named_set(Item receiver, Item key, Item value, Item* out) {
-    *out = radiant_host_api->dom->cssom_rule_decl_set_property(receiver, key, value);
+    *out = radiant_host_api->dom_catalog->rule_style_set_property(receiver, key, value);
     return 1;
 }
 
 static int rd_named_has(Item receiver, Item key, Item* out) {
-    *out = radiant_host_api->dom->rule_decl_css_has(receiver, key);
+    *out = radiant_host_api->dom_catalog->rule_style_has_property(receiver, key);
     return 1;
 }
 
@@ -787,7 +787,7 @@ static int rd_set_property(Item receiver, Item* args, int argc, Item* out) {
 }
 
 static int rd_remove_property(Item receiver, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom->rule_decl_remove_property(receiver,
+    *out = radiant_host_api->dom_catalog->rule_style_remove_property(receiver,
         radiant_iface_arg(args, argc, 0));
     return 1;
 }

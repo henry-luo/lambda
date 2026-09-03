@@ -16,6 +16,8 @@
  */
 
 #include "../lambda-data.hpp"
+#include "realm/dom_realm.h"
+#include "../runtime/lambda-root-frame.hpp"
 #include "dom.h"
 #include "dom_ops.h"
 #include "dom_core.h"
@@ -31,23 +33,27 @@
 // Delegation helpers
 // ---------------------------------------------------------------------------
 
+extern "C" Item dom_absent_to_null(Item v) {
+    return get_type_id(v) == LMD_TYPE_UNDEFINED ? ItemNull : v;
+}
+
 static Item dom_op0(Item node, JubeDomElementOperation op) {
-    return dom_element_operation_impl(node, op, nullptr, 0);
+    return dom_absent_to_null(dom_element_operation_impl(node, op, nullptr, 0));
 }
 
 static Item dom_op1(Item node, JubeDomElementOperation op, Item a) {
     Item args[1] = { a };
-    return dom_element_operation_impl(node, op, args, 1);
+    return dom_absent_to_null(dom_element_operation_impl(node, op, args, 1));
 }
 
 static Item dom_op2(Item node, JubeDomElementOperation op, Item a, Item b) {
     Item args[2] = { a, b };
-    return dom_element_operation_impl(node, op, args, 2);
+    return dom_absent_to_null(dom_element_operation_impl(node, op, args, 2));
 }
 
 static Item dom_op3(Item node, JubeDomElementOperation op, Item a, Item b, Item c) {
     Item args[3] = { a, b, c };
-    return dom_element_operation_impl(node, op, args, 3);
+    return dom_absent_to_null(dom_element_operation_impl(node, op, args, 3));
 }
 
 /**
@@ -89,6 +95,120 @@ static double dom_number_of(Item v) {
 // "#document-fragment" in this DOM, so DOM_NODE_* has no member for them; the
 // spec constant is the catalog's contract, not the struct's.
 enum { DOM_CORE_KIND_DOCUMENT_FRAGMENT = 11 };
+
+// The weak half of the document-loading seam declared in dom.h: a runtime with
+// no engine linked has nowhere to load a document from, and says so.
+extern "C" __attribute__((weak)) void* dom_engine_load_document_native(const char* path) {
+    (void)path;
+    return nullptr;
+}
+
+extern "C" __attribute__((weak)) void dom_engine_bind_host(const void* host_api) {
+    (void)host_api;
+}
+
+// ---------------------------------------------------------------------------
+// Engine-provided catalog rows (F32).
+//
+// A row flagged DOM_F_ENGINE is one the *host* must implement: state, event
+// dispatch, focus, text controls, editing. Those bodies live in the engine
+// above this link target, so each is reached through a weak provider seam --
+// the same shape as dom.load. A runtime linked without an engine gets the
+// default here and answers absence instead of failing to link.
+//
+// These are what let `dom.*` cover what `radiant.*` covers, which is the
+// prerequisite for migrating the behaviour package off `radiant.*` (ES44).
+// ---------------------------------------------------------------------------
+#define DOM_ENGINE_SEAM_0(name) \
+    extern "C" __attribute__((weak)) Item dom_engine_##name(void) { return ItemNull; }
+#define DOM_ENGINE_SEAM_4(name) \
+    extern "C" __attribute__((weak)) Item dom_engine_##name(Item a, Item b, Item c, Item d) { \
+        (void)a; (void)b; (void)c; (void)d; return ItemNull; }
+#define DOM_ENGINE_SEAM_1(name) \
+    extern "C" __attribute__((weak)) Item dom_engine_##name(Item a) { \
+        (void)a; return ItemNull; }
+#define DOM_ENGINE_SEAM_2(name) \
+    extern "C" __attribute__((weak)) Item dom_engine_##name(Item a, Item b) { \
+        (void)a; (void)b; return ItemNull; }
+#define DOM_ENGINE_SEAM_3(name) \
+    extern "C" __attribute__((weak)) Item dom_engine_##name(Item a, Item b, Item c) { \
+        (void)a; (void)b; (void)c; return ItemNull; }
+
+DOM_ENGINE_SEAM_2(get_state)
+DOM_ENGINE_SEAM_3(set_state)
+DOM_ENGINE_SEAM_1(request_change)
+DOM_ENGINE_SEAM_2(dispatch)
+DOM_ENGINE_SEAM_1(focused)
+DOM_ENGINE_SEAM_2(focus_set)
+DOM_ENGINE_SEAM_1(activate_popover)
+DOM_ENGINE_SEAM_3(caret_operation)
+DOM_ENGINE_SEAM_1(clear_ime_preedit)
+DOM_ENGINE_SEAM_0(clipboard_text)
+DOM_ENGINE_SEAM_1(context_menu_target)
+DOM_ENGINE_SEAM_2(edit_insert_at_boundary)
+DOM_ENGINE_SEAM_1(edit_insert_break)
+DOM_ENGINE_SEAM_4(edit_replace_range)
+DOM_ENGINE_SEAM_1(edit_split_block)
+DOM_ENGINE_SEAM_2(key_intent)
+DOM_ENGINE_SEAM_3(navigation_destination)
+DOM_ENGINE_SEAM_2(open_context_menu)
+DOM_ENGINE_SEAM_1(request_navigation)
+DOM_ENGINE_SEAM_2(set_caret)
+DOM_ENGINE_SEAM_3(set_ime_preedit)
+DOM_ENGINE_SEAM_3(set_password_reveal)
+DOM_ENGINE_SEAM_1(tc_value)
+DOM_ENGINE_SEAM_1(ime_preedit)
+DOM_ENGINE_SEAM_1(tc_selection_start)
+DOM_ENGINE_SEAM_1(tc_selection_end)
+DOM_ENGINE_SEAM_1(edit_node)
+DOM_ENGINE_SEAM_1(edit_start)
+DOM_ENGINE_SEAM_1(edit_end)
+DOM_ENGINE_SEAM_1(is_focusable)
+DOM_ENGINE_SEAM_4(dispatch_event)
+DOM_ENGINE_SEAM_1(caret_surface)
+DOM_ENGINE_SEAM_1(focus_candidates)
+DOM_ENGINE_SEAM_1(check_validity)
+DOM_ENGINE_SEAM_1(close_context_menu)
+DOM_ENGINE_SEAM_1(custom_validity)
+DOM_ENGINE_SEAM_1(dom_delete_dom_range)
+DOM_ENGINE_SEAM_1(dom_edit_text)
+DOM_ENGINE_SEAM_2(dom_insert_html)
+DOM_ENGINE_SEAM_2(dom_range_format)
+DOM_ENGINE_SEAM_2(dom_replace_dom_range)
+DOM_ENGINE_SEAM_4(dom_replace_range)
+DOM_ENGINE_SEAM_4(dom_unwrap_range)
+DOM_ENGINE_SEAM_4(dom_wrap_range)
+DOM_ENGINE_SEAM_1(dropdown_open)
+DOM_ENGINE_SEAM_1(embedded_document_root)
+DOM_ENGINE_SEAM_1(embedding_element)
+DOM_ENGINE_SEAM_0(form_boundary)
+DOM_ENGINE_SEAM_2(form_entries)
+DOM_ENGINE_SEAM_1(form_url)
+DOM_ENGINE_SEAM_1(hover_index)
+DOM_ENGINE_SEAM_1(option_count)
+DOM_ENGINE_SEAM_1(range_max)
+DOM_ENGINE_SEAM_1(range_min)
+DOM_ENGINE_SEAM_1(range_value)
+DOM_ENGINE_SEAM_1(reset_form)
+DOM_ENGINE_SEAM_2(scroll_operation)
+DOM_ENGINE_SEAM_1(selected_index)
+DOM_ENGINE_SEAM_2(set_dropdown_open)
+DOM_ENGINE_SEAM_2(set_hover_index)
+DOM_ENGINE_SEAM_2(set_selected_index)
+DOM_ENGINE_SEAM_2(submit_event)
+DOM_ENGINE_SEAM_1(value_at_focus)
+
+// `dom.load`: the engine parses, the core wraps. The result is the document
+// node, which since ESO101 answers both the Document's properties and the
+// Node's -- so a script can query straight off what load returns.
+extern "C" Item dom_engine_load_document(Item path) {
+    const char* p = dom_cstr_or_null(path);
+    if (!p) return ItemNull;
+    void* doc = dom_engine_load_document_native(p);
+    if (!doc) return ItemNull;
+    void* doc_node = dom_get_or_create_doc_node(doc);
+    return doc_node ? dom_wrap_element(doc_node) : ItemNull;
+}
 
 // ===========================================================================
 // CORE
@@ -183,6 +303,167 @@ extern "C" Item dom_core_set_node_value(Item n, Item data) {
     return dom_op3(n, JUBE_DOM_REPLACE_DATA, zero, all, data);
 }
 
+// --- the generic entries (ES45)
+//
+// A binding layer needs to reach an operation it only knows by name or ordinal:
+// `el[name]` is dynamic, so JS cannot use a fixed row per property. These three
+// are that generic path, and making them rows is what puts the *whole* of JS's
+// DOM access behind the API rather than most of it.
+//
+// get_property and set_property already have the catalog's shape. The ordinal
+// executor does not -- it takes an enum and a C array -- so the row spells the
+// arguments as a Lambda array and unpacks them here, which keeps every row
+// fixed-arity and leaves the variadic form where it belongs, behind the API.
+// These pass absence through exactly as the protocol answers it. The rest of
+// the catalog normalises JS `undefined` to null because Lambda has no undefined
+// (ESO98) -- but that rule belongs at the *Lambda face*, and these three are the
+// shared binding path both realms dispatch through. Normalising here turned
+// every absent property into null for JS as well, which is a different value,
+// and took two thirds of the DOM UI fixtures with it.
+extern "C" Item dom_core_get_property(Item n, Item name) {
+    return dom_get_property_impl(n, name);
+}
+
+extern "C" Item dom_core_set_property(Item n, Item name, Item value) {
+    return dom_set_property_impl(n, name, value);
+}
+
+extern "C" Item dom_core_invoke(Item n, Item op, Item args) {
+    if (get_type_id(op) != LMD_TYPE_INT) return ItemNull;
+    JubeDomElementOperation operation = (JubeDomElementOperation)it2i(op);
+    int64_t argc = get_type_id(args) == LMD_TYPE_ARRAY ? js_array_length(args) : 0;
+    if (argc <= 0) return dom_element_operation_impl(n, operation, nullptr, 0);
+    // The executor allocates while it reads this span, so the unpacked arguments
+    // live in a root region, not a native buffer (D5.2.1). The region is sized to
+    // argc and fails closed on reservation overflow, so no arity cap is needed.
+    RootSpan roots((size_t)argc);
+    Item* unpacked = roots.items();
+    if (!unpacked) return ItemError;
+    for (int64_t k = 0; k < argc; k++) unpacked[k] = js_elements_get_int(args, k);
+    return dom_element_operation_impl(n, operation, unpacked, (int)argc);
+}
+
+// --- CSS statics and the two node writes JS reached for directly (ES45)
+//
+// These four were the DOM operations the JS runtime called by direct extern
+// rather than through the API. Each gets a row in the catalog's uniform shape
+// so JS crosses the same entry point every other caller does; the bodies below
+// are adapters, not new mechanism.
+extern "C" Item dom_dispatch_event_bridge(Item target, Item event);
+extern "C" Item dom_css_supports_operation(Item* args, int argc);
+extern "C" Item dom_css_escape_operation(Item* args, int argc);
+extern "C" Item dom_dataset_set_property(Item elem_item, Item prop_name, Item value);
+extern "C" void dom_event_handler_property_set(Item target, const char* property_name,
+                                                int property_name_len, Item value);
+
+// CSS.supports is overloaded in the spec -- supports(property, value) and
+// supports(conditionText) -- which is why the body underneath is variadic. The
+// row is fixed at two arguments and the one-argument spelling passes null,
+// keeping every row in the catalog the same shape.
+extern "C" Item dom_core_css_supports(Item property, Item value) {
+    Item args[2] = { property, value };
+    int argc = get_type_id(value) == LMD_TYPE_NULL ? 1 : 2;
+    return dom_absent_to_null(dom_css_supports_operation(args, argc));
+}
+
+extern "C" Item dom_core_css_escape(Item text) {
+    Item args[1] = { text };
+    return dom_absent_to_null(dom_css_escape_operation(args, 1));
+}
+
+// element.dataset.foo = v is a data-* attribute write. The row takes the
+// element, not the dataset proxy: unwrapping the proxy is a JS-object concern
+// and stays on the JS side, where the proxy exists.
+extern "C" Item dom_core_set_data(Item n, Item name, Item value) {
+    return dom_absent_to_null(dom_dataset_set_property(n, name, value));
+}
+
+// el.onclick = fn. This shares the listener store add_listener and
+// remove_listener use -- it finds the node's listeners, tombstones the previous
+// IDL handler and installs the new one -- so it is a derived operation in
+// substance. Stating it as a derivation needs a read for the current IDL
+// handler, which no row exposes yet; until then the row wraps the existing body
+// and the derivation string records what it would be.
+extern "C" Item dom_core_set_event_handler(Item n, Item name, Item handler) {
+    const char* prop = dom_cstr_or_null(name);
+    if (!prop) return ItemNull;
+    dom_event_handler_property_set(n, prop, (int)strlen(prop), handler);
+    return ItemNull;
+}
+
+// --- events
+// `dispatch` takes either spelling: a bare type name, which is how the engine's
+// script dispatch has always been called, or an event value carrying its own
+// flags. The catalog types the second argument as an event and the engine took
+// a name, and that gap is why `click` -- whose derivation dispatches a
+// cancelable, bubbling, composed event -- could not be expressed at all.
+//
+// An event value is an ordinary Lambda map: {type, bubbles, cancelable}. There
+// is deliberately no constructor for it. Lambda has map literals, and a native
+// factory for something the language already writes would be one more body to
+// keep in step (`create_event` remains what it has always been: JS's legacy
+// document.createEvent, which returns a JS object and so needs the realm).
+// Read a field of an event value. The event is an ordinary Lambda map, so this
+// reads it as one: dom_realm_get_cstr builds its key through the JS realm's
+// allocator and faults on a realm-less document, which is the whole reason the
+// map spelling exists.
+static Item dom_map_field(Item map_item, const char* key) {
+    if (get_type_id(map_item) != LMD_TYPE_MAP || !map_item.map) return ItemNull;
+    return dom_absent_to_null(map_get(map_item.map, js_name_item(key)));
+}
+
+static bool dom_event_flag(Item event, const char* key, bool fallback) {
+    Item v = dom_map_field(event, key);
+    return get_type_id(v) == LMD_TYPE_BOOL ? it2b(v) : fallback;
+}
+
+extern "C" Item dom_core_dispatch(Item n, Item event) {
+    if (get_type_id(event) == LMD_TYPE_STRING) {
+        // The historical spelling: a name, with the flags the engine fixed for
+        // the `input`/`change` notifications it was written for.
+        return dom_engine_dispatch(n, event);
+    }
+    Item type = dom_map_field(event, "type");
+    if (get_type_id(type) != LMD_TYPE_STRING) {
+        // Not a name and not a Lambda event map: it is a JS Event object, which
+        // is class-stamped rather than keyed data, so its own dispatch path
+        // handles it. One row serves both realms; without this, routing JS's
+        // dispatchEvent here silently dropped every event -- the handler,
+        // lifecycle and jQuery suites all failed at once.
+        return dom_absent_to_null(dom_dispatch_event_bridge(n, event));
+    }
+    Item bubbles = { .item = b2it(dom_event_flag(event, "bubbles", true)) };
+    Item cancelable = { .item = b2it(dom_event_flag(event, "cancelable", false)) };
+    return dom_engine_dispatch_event(n, type, bubbles, cancelable);
+}
+
+// --- text controls
+// These two bodies already existed in the core; only the catalog's uniform
+// shape was missing, so each is a two-line adapter rather than an engine seam.
+// tc_set_selection carries the direction the DOM's setSelectionRange takes --
+// the radiant.* spelling had only three arguments, which is why this row could
+// not simply forward to it.
+extern "C" Item dom_text_control_set_selection_range_bridge(void* dom_elem, Item start_arg,
+                                                            Item end_arg, Item dir_arg);
+extern "C" Item dom_text_control_set_range_text_bridge(void* dom_elem, Item replacement_arg,
+                                                        Item start_arg, Item end_arg, Item mode_arg);
+
+extern "C" Item dom_core_tc_set_selection(Item n, Item start, Item end, Item dir) {
+    void* elem = dom_unwrap_element(n);
+    if (!elem) return ItemNull;
+    return dom_absent_to_null(
+        dom_text_control_set_selection_range_bridge(elem, start, end, dir));
+}
+
+extern "C" Item dom_core_tc_replace_range(Item n, Item start, Item end, Item text) {
+    void* elem = dom_unwrap_element(n);
+    if (!elem) return ItemNull;
+    // "preserve" is setRangeText's default selection mode: replacing a range
+    // must not move a caret the caller did not ask to move.
+    return dom_absent_to_null(dom_text_control_set_range_text_bridge(
+        elem, text, start, end, js_name_item("preserve")));
+}
+
 // --- match / serialize (parse_fragment: dom.cpp)
 extern "C" Item dom_core_matches(Item n, Item selector) {
     return dom_op1(n, JUBE_DOM_MATCHES, selector);
@@ -213,8 +494,8 @@ extern "C" Item dom_core_scroll_state(Item n) {
             .final();
     }
     Item out = js_new_object();
-    js_set_key_cstr(out, "x", dom_prop_get(n, "scrollLeft"));
-    js_set_key_cstr(out, "y", dom_prop_get(n, "scrollTop"));
+    dom_realm_set_cstr(out, "x", dom_prop_get(n, "scrollLeft"));
+    dom_realm_set_cstr(out, "y", dom_prop_get(n, "scrollTop"));
     return out;
 }
 extern "C" Item dom_core_set_scroll_state(Item n, Item x, Item y) {
@@ -243,18 +524,18 @@ extern "C" Item js_selection_get_focus_offset(Item self_v);
 
 extern "C" Item dom_core_range_boundaries(Item r) {
     Item out = js_new_object();
-    js_set_key_cstr(out, "start_container", js_range_get_start_container(r));
-    js_set_key_cstr(out, "start_offset", js_range_get_start_offset(r));
-    js_set_key_cstr(out, "end_container", js_range_get_end_container(r));
-    js_set_key_cstr(out, "end_offset", js_range_get_end_offset(r));
+    dom_realm_set_cstr(out, "start_container", js_range_get_start_container(r));
+    dom_realm_set_cstr(out, "start_offset", js_range_get_start_offset(r));
+    dom_realm_set_cstr(out, "end_container", js_range_get_end_container(r));
+    dom_realm_set_cstr(out, "end_offset", js_range_get_end_offset(r));
     return out;
 }
 extern "C" Item dom_core_selection_boundaries(Item s) {
     Item out = js_new_object();
-    js_set_key_cstr(out, "anchor_node", js_selection_get_anchor_node(s));
-    js_set_key_cstr(out, "anchor_offset", js_selection_get_anchor_offset(s));
-    js_set_key_cstr(out, "focus_node", js_selection_get_focus_node(s));
-    js_set_key_cstr(out, "focus_offset", js_selection_get_focus_offset(s));
+    dom_realm_set_cstr(out, "anchor_node", js_selection_get_anchor_node(s));
+    dom_realm_set_cstr(out, "anchor_offset", js_selection_get_anchor_offset(s));
+    dom_realm_set_cstr(out, "focus_node", js_selection_get_focus_node(s));
+    dom_realm_set_cstr(out, "focus_offset", js_selection_get_focus_offset(s));
     return out;
 }
 
@@ -268,14 +549,6 @@ extern "C" Item dom_core_computed_style(Item n, Item prop) {
 }
 
 // --- listeners: the void-returning core entries under the uniform shape
-extern "C" Item dom_add_event_listener_body(Item n, Item type, Item fn, Item opts) {
-    dom_add_event_listener(n, type, fn, opts);
-    return ItemNull;
-}
-extern "C" Item dom_remove_event_listener_body(Item n, Item type, Item fn, Item opts) {
-    dom_remove_event_listener(n, type, fn, opts);
-    return ItemNull;
-}
 
 // ===========================================================================
 // DERIVED fast paths — each equals its derivation in dom_api.def
@@ -297,6 +570,15 @@ extern "C" Item dom_fp_root_node(Item n) {
         cur = p;
     }
     return cur;
+}
+extern "C" Item dom_fp_document_element(Item n) {
+    // The node's OWNING document's root element, read directly -- not the first
+    // element child of a parent walk. The two agree for a connected node and
+    // differ for a detached one, where the walk stops at the subtree's top and
+    // answers the wrong element (it broke navigation and textarea handling
+    // before the UI fixtures caught it).
+    DomDocument* doc = (DomDocument*)dom_document_from_item(n);
+    return (doc && doc->root) ? dom_wrap_element(doc->root) : ItemNull;
 }
 extern "C" Item dom_fp_contains(Item a, Item b)        { return dom_op1(a, JUBE_DOM_CONTAINS, b); }
 extern "C" Item dom_fp_equal_node(Item a, Item b)      { return dom_op1(a, JUBE_DOM_IS_EQUAL_NODE, b); }
@@ -350,7 +632,10 @@ extern "C" Item dom_fp_get_element_by_id(Item root, Item id) {
     return dom_op1(root, JUBE_DOM_GET_ELEMENT_BY_ID, id);
 }
 extern "C" Item dom_fp_has_attribute(Item n, Item name) {
-    return dom_op1(n, JUBE_DOM_HAS_ATTRIBUTE, name);
+    // Its own derivation: the ordinal answers absence rather than `false` for a
+    // node kind that has no attributes, and the row's contract is bool.
+    Item value = dom_core_get_attribute(n, name);
+    return (Item){.item = b2it(get_type_id(value) != LMD_TYPE_NULL)};
 }
 extern "C" Item dom_fp_inner_html(Item n) { return dom_prop_get(n, "innerHTML"); }
 extern "C" Item dom_fp_outer_html(Item n) { return dom_prop_get(n, "outerHTML"); }

@@ -9,6 +9,8 @@
  */
 
 #include "dom.h"
+#include "realm/dom_realm.h"
+#include "dom_engine.h"
 #include "dom_realm_hooks.h"
 #include "dom_events.h"
 #include "dom_selection.h"
@@ -137,10 +139,10 @@ extern "C" Item dom_remove_event_listener_bridge(Item target_item, Item type,
                                                     Item callback, Item opts);
 extern "C" Item dom_dispatch_event_bridge(Item target_item, Item event_item);
 extern "C" void dom_after_srcdoc_set(void* dom_elem);
+#include "dom_ops.h"
 extern "C" Item radiant_dom_element_operation(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
-extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 
 extern "C" Item dom_element_prototype_operation_body(Item callee, Item this_value,
@@ -264,8 +266,8 @@ JS_FORWARD_EXPRESSION(bool, dom_is_host_driven_loop, (void), (_js_host_driven_lo
 #define _js_main_document (js_runtime_state.dom.main_document)
 
 static Item js_font_face_set_ready_then(Item callback) {
-    if (js_is_callable(callback)) {
-        js_call_function(callback, make_js_undefined(), NULL, 0);
+    if (dom_realm_is_callable(callback)) {
+        dom_realm_call(callback, make_js_undefined(), NULL, 0);
     }
     return get_type_id(js_document_fonts_value) == LMD_TYPE_MAP
         ? js_document_fonts_value : make_js_undefined();
@@ -274,9 +276,9 @@ static Item js_font_face_set_ready_then(Item callback) {
 static Item js_create_document_fonts_object(void) {
     Item fonts = js_new_object();
     Item ready = js_new_object();
-    Item then_fn = js_new_native_function(js_font_face_set_ready_then);
-    js_set_key_cstr(ready, "then", then_fn);
-    js_set_key_cstr(fonts, "ready", ready);
+    Item then_fn = dom_realm_new_function(js_font_face_set_ready_then);
+    dom_realm_set_cstr(ready, "then", then_fn);
+    dom_realm_set_cstr(fonts, "ready", ready);
     return fonts;
 }
 
@@ -608,9 +610,9 @@ static bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     // DOM mutations from the same script turn.
     if (doc->view_tree && doc->view_tree->root) {
         if (doc->js.mutation_count > 0) {
-            radiant_reconcile_dom_mutations(uicon, doc);
+            dom_engine_reconcile_dom_mutations(uicon, doc);
         }
-    } else if (doc->root && radiant_document_ensure_state(
+    } else if (doc->root && dom_engine_document_ensure_state(
                    doc, "dom_geometry_flush")) {
         layout_html_doc(uicon, doc, false);
     }
@@ -644,7 +646,7 @@ extern "C" bool dom_commit_headless_layout_checkpoint(void) {
     }
     // A one-shot DOM session has no native render loop, so task boundaries must
     // commit pending mutations; geometry getters remain snapshots.
-    radiant_reconcile_dom_mutations(uicon, doc);
+    dom_engine_reconcile_dom_mutations(uicon, doc);
     return true;
 }
 
@@ -665,7 +667,7 @@ JS_FORWARD_STATIC_EXPRESSION(DocState*, dom_current_state, (void),
 static DocState* dom_testdriver_state() {
     if (!_js_current_document) return nullptr;
     if (!_js_current_document->state) {
-        radiant_document_ensure_state(_js_current_document, "dom_testdriver_key");
+        dom_engine_document_ensure_state(_js_current_document, "dom_testdriver_key");
     }
     return _js_current_document->state;
 }
@@ -917,7 +919,7 @@ static Item dom_throw_index_size_error(const char* message) {
     Item name = js_name_item("IndexSizeError");
     Item msg = js_name_item(
         message ? message : "The index is not in the allowed range.");
-    return js_throw_value(js_new_error_with_name(name, msg));
+    return dom_realm_throw(dom_realm_new_error_named(name, msg));
 }
 
 static Item dom_replace_text_data(DomText* text_node, uint32_t offset,
@@ -1251,14 +1253,14 @@ static bool expando_get_property(DomNode* node, Item key, Item* out) {
     if (!node || !out) return false;
     Item exp_map = expando_get_map(node);
     if (!expando_map_has_key(exp_map, key)) return false;
-    *out = js_get_key_default(exp_map, key);
+    *out = dom_realm_get(exp_map, key);
     return true;
 }
 
 static void expando_set_property(DomNode* node, Item key, Item value) {
     if (!node) return;
     Item exp_map = expando_get_or_create_map(node);
-    if (exp_map.item != ITEM_NULL) js_set_key_default(exp_map, key, value);
+    if (exp_map.item != ITEM_NULL) dom_realm_set(exp_map, key, value);
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, expando_key_is_engine_internal, (const char* name, int name_len), (name && name_len >= 2 && name[0] == '_' && name[1] == '_'))
 
@@ -1274,7 +1276,7 @@ extern "C" Item dom_expando_get_own_property_descriptor(Item obj, Item key) {
     if (!node) return make_js_undefined();
     Item exp_map = expando_get_map(node);
     if (!expando_map_has_key(exp_map, key)) return make_js_undefined();
-    return js_object_get_own_property_descriptor(exp_map, key);
+    return dom_realm_own_property_descriptor(exp_map, key);
 }
 
 extern "C" Item dom_expando_delete_property(Item obj, Item key) {
@@ -1297,7 +1299,7 @@ extern "C" Item dom_expando_own_property_names(Item obj) {
     if (!node) return result;
     Item exp_map = expando_get_map(node);
     if (get_type_id(exp_map) != LMD_TYPE_MAP) return result;
-    Item names = js_object_get_own_property_names(exp_map);
+    Item names = dom_realm_own_property_names(exp_map);
     if (get_type_id(names) != LMD_TYPE_ARRAY || !names.array) return result;
     for (int i = 0; i < names.array->length; i++) {
         Item key = names.array->items[i];
@@ -1345,7 +1347,7 @@ static void dom_compile_event_attr_to_expando(DomElement* elem,
 
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item != ITEM_NULL) {
-        js_set_key_default(exp_map, js_name_item(prop_name), fn);
+        dom_realm_set(exp_map, js_name_item(prop_name), fn);
         // Inline handlers are compiled during wrapper construction; wrapping
         // the same node here recursively re-enters initialization until the
         // stack overflows, so register against its canonical native key.
@@ -1372,7 +1374,7 @@ static void dom_clear_event_attr_expando(DomElement* elem, const char* attr_name
 
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item != ITEM_NULL) {
-        js_set_key_default(exp_map, js_name_item(prop_name), ItemNull);
+        dom_realm_set(exp_map, js_name_item(prop_name), ItemNull);
         dom_event_handler_property_set_for_node(elem, prop_name,
                                                    (int)strlen(prop_name), ItemNull);
     }
@@ -1382,7 +1384,7 @@ extern "C" bool dom_set_event_handler_function(void* dom_elem,
                                                   const char* attr_name,
                                                   Item fn) {
     DomElement* elem = (DomElement*)dom_elem;
-    if (!elem || !attr_name || !js_is_callable(fn)) return false;
+    if (!elem || !attr_name || !dom_realm_is_callable(fn)) return false;
 
     char prop_name[64];
     if (!dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return false;
@@ -1390,7 +1392,7 @@ extern "C" bool dom_set_event_handler_function(void* dom_elem,
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item == ITEM_NULL) return false;
 
-    js_set_key_default(exp_map, js_name_item(prop_name), fn);
+    dom_realm_set(exp_map, js_name_item(prop_name), fn);
     dom_event_handler_property_set_for_node(elem, prop_name,
                                                (int)strlen(prop_name), fn);
     return true;
@@ -1476,7 +1478,7 @@ static bool _get_checkedness(DomElement* elem) {
 
     Item exp = expando_get_map((DomNode*)elem);
     if (exp.item != ITEM_NULL) {
-        Item v = js_get_name_key(exp, "__checked");
+        Item v = dom_realm_get_name(exp, "__checked");
         if (v.item != ITEM_NULL && !is_js_undefined(v)) return js_is_truthy(v);
     }
     // not initialised yet — derive from content attribute.
@@ -1489,13 +1491,13 @@ static void _set_checkedness(DomElement* elem, bool v) {
         form_control_set_checked(state, (View*)elem, v);
         // JS checkedness changes the live form state without passing through
         // native click dispatch, so explicitly refresh dependent :checked CSS.
-        radiant_sync_pseudo_state((View*)elem, PSEUDO_STATE_CHECKED, v);
+        dom_engine_sync_pseudo_state((View*)elem, PSEUDO_STATE_CHECKED, v);
         return;
     }
 
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return;
-    js_set_name_key(exp, "__checked", (Item){.item = b2it(v)});
+    dom_realm_set_name(exp, "__checked", (Item){.item = b2it(v)});
 }
 
 // Exposed for dom_events.cpp pre/post-click activation.
@@ -1508,7 +1510,7 @@ extern "C" void dom_after_default_checked_set(void* dom_elem, bool checked) {
     Item exp = expando_get_map((DomNode*)elem);
     bool dirty = false;
     if (exp.item != ITEM_NULL) {
-        Item v = js_get_key_cstr(exp, "__chkDirty");
+        Item v = dom_realm_get_cstr(exp, "__chkDirty");
         dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
     }
     // defaultChecked only syncs live checkedness before the user/API dirty flag.
@@ -1520,7 +1522,7 @@ extern "C" void dom_set_checked_dirty(void* dom_elem, bool checked) {
     _set_checkedness(elem, checked);
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item != ITEM_NULL) {
-        js_set_key_cstr(exp, "__chkDirty", (Item){.item = b2it(true)});
+        dom_realm_set_cstr(exp, "__chkDirty", (Item){.item = b2it(true)});
     }
 }
 JS_FORWARD_RETURN(const char*, dom_input_type_lower, (void* dom_elem), _input_type_lower, ((DomElement*)dom_elem))
@@ -1789,8 +1791,8 @@ JS_FORWARD_ITEM(dom_document_proxy_for_doc_bridge, (void* doc_v), doc_to_proxy_i
 // DOM Wrapping / Unwrapping
 // ============================================================================
 
-extern "C" void radiant_dom_reset_wrapper_cache(void);
-JS_FORWARD_STATIC_VOID( reset_dom_wrapper_cache, (), radiant_dom_reset_wrapper_cache, ())
+extern "C" void dom_engine_reset_wrapper_cache(void);
+JS_FORWARD_STATIC_VOID( reset_dom_wrapper_cache, (), dom_engine_reset_wrapper_cache, ())
 
 extern "C" void dom_initialize_node_wrapper(void* dom_elem) {
     DomNode* node = (DomNode*)dom_elem;
@@ -2320,7 +2322,7 @@ static void _select_refresh_selected_options_collection(Item collection, DomElem
 static Item _collection_named_item(Item name_arg) {
     const char* name = fn_to_cstr(name_arg);
     if (!name || !*name) return ItemNull;
-    Item self = js_get_this();
+    Item self = dom_realm_receiver();
     if (get_type_id(self) != LMD_TYPE_ARRAY || !self.array) return ItemNull;
     for (int64_t i = 0; i < self.array->length; i++) {
         Item item = js_elements_get_int(self, i);
@@ -2335,25 +2337,27 @@ static Item _collection_named_item(Item name_arg) {
 }
 
 static Item _options_collection_add(Item element_arg, Item before_arg) {
-    Item self = js_get_this();
+    Item self = dom_realm_receiver();
     int kind = 0;
     DomElement* owner = _select_options_owner(self, &kind);
     if (!owner || kind != SELECT_COLLECTION_OPTIONS || !_is_tag(owner, "select")) return ItemNull;
 
     Item args[2] = { element_arg, before_arg };
-    return radiant_dom_element_operation(dom_wrap_element(owner), JUBE_DOM_ADD, args, 2);
+    // The owner is already known to be a <select>, which is the only thing the
+    // module's executor checks before handing this operation back to the core.
+    return dom_element_operation_impl(dom_wrap_element(owner), JUBE_DOM_ADD, args, 2);
 }
 
 static void _decorate_dom_collection(Item collection, const char* ctor_name) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !ctor_name) return;
     Item named_key = js_name_item("namedItem");
-    Item existing = js_get_key_default(collection, named_key);
-    if (!js_is_callable(existing)) {
-        js_set_native_key(collection, named_key, _collection_named_item);
+    Item existing = dom_realm_get(collection, named_key);
+    if (!dom_realm_is_callable(existing)) {
+        dom_realm_set_native(collection, named_key, _collection_named_item);
     }
     Item ctor = dom_realm_constructor(ctor_name);
     if (ctor.item != ItemNull.item) {
-        js_set_key_cstr(collection, "constructor", ctor);
+        dom_realm_set_cstr(collection, "constructor", ctor);
     }
 }
 
@@ -2362,13 +2366,13 @@ static void _decorate_options_collection(Item collection) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY) return;
 
     Item add_key = js_name_item("add");
-    Item existing = js_get_key_default(collection, add_key);
-    if (js_is_callable(existing)) return;
+    Item existing = dom_realm_get(collection, add_key);
+    if (dom_realm_is_callable(existing)) return;
 
     // select.options is a live collection object, so install add() on the collection and delegate to the owning select.
-    Item add_fn = js_new_native_function(_options_collection_add);
+    Item add_fn = dom_realm_new_function(_options_collection_add);
     js_set_function_name(add_fn, add_key);
-    js_set_key_default(collection, add_key, add_fn);
+    dom_realm_set(collection, add_key, add_fn);
 }
 
 static bool _array_companion_set_int_slot(Item collection, const char* name,
@@ -2685,8 +2689,8 @@ JS_FORWARD_ITEM(dom_document_proxy_get_property, (Item prop_name),
     dom_document_get_property, (prop_name))
 
 // Dispatch property set on the document proxy object.
-// NOTE: Must use map_put directly instead of js_set_key_default to avoid
-// infinite recursion (js_set_key_default dispatches back here for DOM resources).
+// NOTE: Must use map_put directly instead of dom_realm_set to avoid
+// infinite recursion (dom_realm_set dispatches back here for DOM resources).
 extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
     if (get_type_id(prop_name) == LMD_TYPE_STRING) {
         String* s = it2s(prop_name);
@@ -2727,7 +2731,7 @@ extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
 
     Item exp_map = expando_get_or_create_map((DomNode*)stub_v);
     if (exp_map.item == ITEM_NULL) return value;
-    js_set_key_default(exp_map, prop_name, value);
+    dom_realm_set(exp_map, prop_name, value);
     return value;
 }
 
@@ -3010,6 +3014,10 @@ static Item dom_parent_element_or_null(DomNode* node) {
     return ItemNull;
 }
 
+static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name);
+static Item doc_to_proxy_item(DomDocument* doc);
+extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value);
+
 static Item dom_parent_node_or_null(DomNode* node) {
     DomNode* parent = node ? node->parent : nullptr;
     if (parent) return dom_wrap_element((void*)parent);
@@ -3020,6 +3028,20 @@ static Item dom_parent_node_or_null(DomNode* node) {
     if (node && node->is_element()) {
         DomDocument* doc = ((DomElement*)node)->doc;
         if (doc && doc->root == (DomElement*)node) {
+            // Whichever object this realm calls the Document is the one that
+            // must come back, or `documentElement.parentNode === document`
+            // fails -- it did, briefly, when this always answered the node
+            // while JS's `document` was still the proxy (ESO101). Inside a
+            // realm that is the document object; outside one, where there is
+            // no such object, it is the document node, which answers the same
+            // Document and Node properties.
+            if (dom_realm_active()) {
+                Item document_object = doc_to_proxy_item(doc);
+                if (get_type_id(document_object) != LMD_TYPE_NULL &&
+                        get_type_id(document_object) != LMD_TYPE_UNDEFINED) {
+                    return document_object;
+                }
+            }
             void* doc_node = dom_get_or_create_doc_node(doc);
             if (doc_node) return dom_wrap_element(doc_node);
         }
@@ -3234,16 +3256,16 @@ static Item dom_parser_parse_from_string(Item source_item, Item type_item) {
             strcasecmp(type, "application/xhtml+xml") == 0) {
             return dom_parser_parse_xml(source);
         }
-        return js_throw_type_error("Unsupported DOMParser MIME type");
+        return dom_realm_throw_type_error("Unsupported DOMParser MIME type");
     }
 
     Item parsed = js_create_foreign_html_doc("");
     if (parsed.item == ITEM_NULL) return ItemNull;
-    Item body = js_get_key_cstr(parsed, "body");
+    Item body = dom_realm_get_cstr(parsed, "body");
     if (body.item == ITEM_NULL || is_js_undefined(body)) return parsed;
     // Reuse the element innerHTML path so detached parsed documents preserve
     // the same node ownership and wrapper identity invariants as live DOM.
-    js_set_key_cstr(body, "innerHTML", source_item);
+    dom_realm_set_cstr(body, "innerHTML", source_item);
     return parsed;
 }
 
@@ -3621,8 +3643,8 @@ template <typename Target>
 static void dom_set_implementation_method(Item implementation,
         const char* name, Target target, int adapter_arity) {
     Item key = js_name_item(name);
-    js_set_key_default(implementation, key,
-        js_new_native_function(target, adapter_arity));
+    dom_realm_set(implementation, key,
+        dom_realm_new_function(target, adapter_arity));
     js_mark_non_enumerable(implementation, key);
 }
 
@@ -3680,7 +3702,7 @@ static Item dom_get_inline_style_wrapper(DomElement* elem) {
     if (!elem) return ItemNull;
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item != ITEM_NULL) {
-        Item cached = js_get_name_key(exp_map, "__styleWrapper");
+        Item cached = dom_realm_get_name(exp_map, "__styleWrapper");
         if (js_is_inline_style(cached)) return cached;
     }
 
@@ -3691,7 +3713,7 @@ static Item dom_get_inline_style_wrapper(DomElement* elem) {
     wrapped.vmap->host_type = radiant_dom_inline_style_host_type();
     wrapped.vmap->host_data = elem;
     if (exp_map.item != ITEM_NULL) {
-        js_set_name_key(exp_map, "__styleWrapper", wrapped);
+        dom_realm_set_name(exp_map, "__styleWrapper", wrapped);
     }
     return wrapped;
 }
@@ -3744,7 +3766,7 @@ static Item dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
     if (!elem) return ItemNull;
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     Item cache_key = js_name_item("__classListWrapper");
-    Item wrapper = exp_map.item != ITEM_NULL ? js_get_key_default(exp_map, cache_key) : ItemNull;
+    Item wrapper = exp_map.item != ITEM_NULL ? dom_realm_get(exp_map, cache_key) : ItemNull;
     JS_ROOTS(roots,
         elem_root, elem_item,
         expando_root, exp_map,
@@ -3767,7 +3789,7 @@ static Item dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
                 js_classlist_operation_body, (uint64_t)methods[i].operation,
                 methods[i].formal_length));
             method_root.set(js_bind_function(method_root.get(), elem_root.get(), NULL, 0));
-            js_set_key_default(wrapper_root.get(),
+            dom_realm_set(wrapper_root.get(),
                 js_name_item(methods[i].name),
                 method_root.get());
         }
@@ -3776,15 +3798,15 @@ static Item dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
         method_root.set(js_bind_function(method_root.get(), elem_root.get(), NULL, 0));
         // DOMTokenList is iterable; delegated UI event routers commonly spread
         // classList while resolving their target before invoking callbacks.
-        js_set_key_default(wrapper_root.get(), js_well_known_symbol_key(1), method_root.get());
+        dom_realm_set(wrapper_root.get(), js_well_known_symbol_key(1), method_root.get());
         if (expando_root.get().item != ITEM_NULL) {
             // The wrapper and owner must remain rooted while function creation
             // allocates; otherwise precise GC can publish a stale cache edge.
-            js_set_key_default(expando_root.get(), cache_key, wrapper_root.get());
+            dom_realm_set(expando_root.get(), cache_key, wrapper_root.get());
         }
     }
-    js_set_key_cstr(wrapper_root.get(), "length", (Item){.item = i2it((int64_t)elem->class_count)});
-    js_set_key_cstr(wrapper_root.get(), "value", js_classlist_value_item(elem));
+    dom_realm_set_cstr(wrapper_root.get(), "length", (Item){.item = i2it((int64_t)elem->class_count)});
+    dom_realm_set_cstr(wrapper_root.get(), "value", js_classlist_value_item(elem));
     return wrapper_root.get();
 }
 
@@ -4935,7 +4957,7 @@ extern "C" void dom_focus_if_editing_host_for_selection(void* dom_node) {
 static Item dom_throw_syntax_error(const char* message) {
     Item name = js_name_item("SyntaxError");
     Item msg = js_name_item(message ? message : "SyntaxError");
-    return js_throw_value(js_new_error_with_name(name, msg));
+    return dom_realm_throw(dom_realm_new_error_named(name, msg));
 }
 JS_FORWARD_ITEM(dom_throw_contenteditable_syntax_error, (void), dom_throw_syntax_error, ("Invalid contentEditable value"))
 
@@ -5452,7 +5474,7 @@ static Item dom_xml_serializer_serialize_to_string(Item node_item) {
         DomDocument* doc = js_document_proxy_doc_from_item(node_item);
         node = doc ? (DomNode*)doc->root : nullptr;
     }
-    if (!node) return js_throw_type_error("XMLSerializer.serializeToString requires a Node");
+    if (!node) return dom_realm_throw_type_error("XMLSerializer.serializeToString requires a Node");
 
     // ModelXmlSerializer exports MaxGraph's detached XML trees through this
     // standard DOM API; serializing the live node preserves namespaces and
@@ -5693,7 +5715,7 @@ extern "C" bool dom_exec_insert_html(DomDocument* doc, const char* html_str) {
     return true;
 }
 
-extern "C" bool radiant_dom_exec_command(void* document, const char* command,
+extern "C" bool dom_engine_exec_command(void* document, const char* command,
                                         const char* value);
 
 // F14.1/ES20: `document.execCommand` is now a thin dispatch into the dom
@@ -5718,7 +5740,7 @@ extern "C" Item dom_document_exec_command_bridge(Item command_item,
     char* stable_value = mem_strdup(value ? value : "", MEM_CAT_JS_RUNTIME);
     bool handled = false;
     if (stable_command && stable_value) {
-        handled = radiant_dom_exec_command(dom_get_document(), stable_command,
+        handled = dom_engine_exec_command(dom_get_document(), stable_command,
                                            stable_value);
     }
     mem_free(stable_command);
@@ -5866,14 +5888,14 @@ static DomNode* dom_tree_walker_next_matching(DomNode* root,
 
 static Item dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) {
     JS_ROOTS(roots, walker_root, walker_item, node_root, ItemNull, result_root, ItemNull);
-    Item root_item = js_get_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_ROOT));
-    Item current_item = js_get_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT));
+    Item root_item = dom_realm_get(walker_root.get(), js_string_key(JS_TREE_WALKER_ROOT));
+    Item current_item = dom_realm_get(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT));
     DomNode* root = (DomNode*)dom_unwrap_element(root_item);
     DomNode* current = (DomNode*)dom_unwrap_element(current_item);
     if (!root || !current) return ItemNull;
 
     uint32_t what_to_show = dom_to_u32(
-        js_get_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_WHAT_TO_SHOW)));
+        dom_realm_get(walker_root.get(), js_string_key(JS_TREE_WALKER_WHAT_TO_SHOW)));
     DomNode* next = nullptr;
     if (step == JS_TREE_WALKER_STEP_FIRST_CHILD) {
         for (DomNode* node = dom_tree_walker_first_child_raw(current);
@@ -5903,7 +5925,7 @@ static Item dom_tree_walker_advance(Item walker_item, JsDomTreeWalkerStep step) 
     // walker pointing at the pre-move wrapper during the next traversal step.
     node_root.set(dom_wrap_element(next));
     if (node_root.get().item == ItemNull.item) return ItemNull;
-    js_set_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT),
+    dom_realm_set(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT),
                     node_root.get());
     result_root.set(node_root.get());
     return result_root.get();
@@ -5929,25 +5951,25 @@ extern "C" Item dom_create_tree_walker_bridge(Item root_item, Item what_to_show_
     Rooted<Item> method_root(roots, ItemNull);
     if (walker_root.get().item == ItemNull.item) return ItemNull;
     uint32_t what_to_show = dom_to_u32(what_to_show_item);
-    js_set_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_ROOT), root_root.get());
-    js_set_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT), root_root.get());
-    js_set_key_default(walker_root.get(), js_string_key(JS_TREE_WALKER_WHAT_TO_SHOW),
+    dom_realm_set(walker_root.get(), js_string_key(JS_TREE_WALKER_ROOT), root_root.get());
+    dom_realm_set(walker_root.get(), js_string_key(JS_TREE_WALKER_CURRENT), root_root.get());
+    dom_realm_set(walker_root.get(), js_string_key(JS_TREE_WALKER_WHAT_TO_SHOW),
                     (Item){.item = i2it((int64_t)what_to_show)});
     Item bound_args[1] = {walker_root.get()};
     method_root.set(js_bind_function(
-        js_new_native_function(dom_tree_walker_next_node_method),
+        dom_realm_new_function(dom_tree_walker_next_node_method),
         make_js_undefined(), bound_args, 1));
-    js_set_key_cstr(walker_root.get(), "nextNode", method_root.get());
+    dom_realm_set_cstr(walker_root.get(), "nextNode", method_root.get());
     bound_args[0] = walker_root.get();
     method_root.set(js_bind_function(
-        js_new_native_function(dom_tree_walker_first_child_method),
+        dom_realm_new_function(dom_tree_walker_first_child_method),
         make_js_undefined(), bound_args, 1));
-    js_set_key_cstr(walker_root.get(), "firstChild", method_root.get());
+    dom_realm_set_cstr(walker_root.get(), "firstChild", method_root.get());
     bound_args[0] = walker_root.get();
     method_root.set(js_bind_function(
-        js_new_native_function(dom_tree_walker_next_sibling_method),
+        dom_realm_new_function(dom_tree_walker_next_sibling_method),
         make_js_undefined(), bound_args, 1));
-    js_set_key_cstr(walker_root.get(), "nextSibling", method_root.get());
+    dom_realm_set_cstr(walker_root.get(), "nextSibling", method_root.get());
     return walker_root.get();
 }
 
@@ -6285,9 +6307,14 @@ static JsDomPropId dom_prop_id(const char* prop) {
 }
 
 
-extern "C" Item dom_document_get_property(Item prop_name) {
-    if (!_js_current_document) {
-        log_debug("dom_document_get_property: no document set");
+// The document's own properties, resolved against a named document rather than
+// a global "current document". ESO93 made the document reachable as a node;
+// this makes that node able to answer as a Document too (ESO101), which needs
+// the query to say *which* document -- a Lambda-only document never sets the
+// global, and a node knows its own.
+static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) {
+    if (!doc_arg) {
+        log_debug("dom_document_get_property: no document");
         return ItemNull;
     }
 
@@ -6295,7 +6322,7 @@ extern "C" Item dom_document_get_property(Item prop_name) {
     JsDomPropId prop_id = dom_prop_id(prop);
     if (!prop) return ItemNull;
 
-    DomDocument* doc = _js_current_document;
+    DomDocument* doc = doc_arg;
     DomElement* root = doc->root;  // may be NULL for foreign docs created via createDocument
 
     // documentElement — the root <html> element
@@ -6401,7 +6428,7 @@ extern "C" Item dom_document_get_property(Item prop_name) {
 
     // F-1: document.forms — array of all <form> elements in the document.
     if (prop_id == JS_DOM_PROP_FORMS) {
-        DomDocument* doc = _js_current_document;
+        DomDocument* doc = doc_arg;
         return dom_live_document_forms_bridge((void*)doc);
     }
 
@@ -6424,7 +6451,7 @@ extern "C" Item dom_document_get_property(Item prop_name) {
     // (synthesized doctype + documentElement). Backed by the document stub
     // so iteration works.
     if (prop_id == JS_DOM_PROP_CHILD_NODES) {
-        DomDocument* doc = _js_current_document;
+        DomDocument* doc = doc_arg;
         if (!doc) return ItemNull;
         void* stub_v = dom_get_or_create_doc_node(doc);
         if (!stub_v) return ItemNull;
@@ -6447,6 +6474,16 @@ extern "C" Item dom_document_get_property(Item prop_name) {
         return js_name_item("#document");
     }
 
+    // A Document is the root of its tree and belongs to no other: both of these
+    // are null, not absent (DOM 4.4). Answering `undefined` made
+    // `document.parentNode` read as a missing property rather than as the
+    // spec's null (ESO101).
+    if (prop_id == JS_DOM_PROP_PARENT_NODE ||
+            prop_id == JS_DOM_PROP_PARENT_ELEMENT ||
+            prop_id == JS_DOM_PROP_OWNER_DOCUMENT) {
+        return ItemNull;
+    }
+
     // styleSheets — collection of parsed CSSStyleSheet objects
     if (prop_id == JS_DOM_PROP_STYLE_SHEETS) {
         return dom_document_stylesheets_bridge();
@@ -6462,17 +6499,17 @@ extern "C" Item dom_document_get_property(Item prop_name) {
     // Foreign documents (created via document.implementation.create*Document)
     // never have a browsing context, so defaultView must be null per HTML spec.
     if (prop_id == JS_DOM_PROP_DEFAULT_VIEW) {
-        return dom_document_default_view_bridge((void*)_js_current_document);
+        return dom_document_default_view_bridge((void*)doc_arg);
     }
 
     // For iframe content docs, expose Window-like properties on the same
     // wrapper so that contentWindow.X works (since contentWindow ===
     // contentDocument here). Also handle on the main doc proxy so existing
     // window-style access through `document` continues to function.
-    if (_js_current_document != _js_main_document &&
-        dom_doc_has_browsing_context(_js_current_document)) {
+    if (doc_arg != _js_main_document &&
+        dom_doc_has_browsing_context(doc_arg)) {
         if (prop_id == JS_DOM_PROP_DOCUMENT) {
-            Item w = lookup_foreign_doc_wrapper(_js_current_document);
+            Item w = lookup_foreign_doc_wrapper(doc_arg);
             return w.item ? w : ItemNull;
         }
         if (prop_id == JS_DOM_PROP_SELECTION || prop_id == JS_DOM_PROP_RANGE) {
@@ -6493,7 +6530,7 @@ extern "C" Item dom_document_get_property(Item prop_name) {
     // does `document.doctype` (and Range/Selection APIs that take it as a
     // node argument) work.
     if (prop_id == JS_DOM_PROP_DOCTYPE) {
-        DomDocument* doc = _js_current_document;
+        DomDocument* doc = doc_arg;
         if (!doc) return ItemNull;
         void* stub = dom_get_or_create_doc_node(doc);
         if (!stub) return ItemNull;
@@ -6505,13 +6542,13 @@ extern "C" Item dom_document_get_property(Item prop_name) {
         return ItemNull;
     }
 
-    DomDocument* expando_doc = _js_current_document ? _js_current_document : _js_main_document;
+    DomDocument* expando_doc = doc_arg ? doc_arg : _js_main_document;
     void* stub_v = dom_get_or_create_doc_node(expando_doc);
     if (stub_v) {
         Item exp_map = expando_get_map((DomNode*)stub_v);
         if (exp_map.item != ITEM_NULL) {
             if (expando_map_has_key(exp_map, prop_name)) {
-                return js_get_key_default(exp_map, prop_name);
+                return dom_realm_get(exp_map, prop_name);
             }
         }
     }
@@ -6528,19 +6565,19 @@ extern "C" Item dom_document_get_property(Item prop_name) {
         return dom_document_active_element_bridge((void*)doc);
     }
 
-    expando_doc = _js_current_document ? _js_current_document : _js_main_document;
+    expando_doc = doc_arg ? doc_arg : _js_main_document;
     stub_v = dom_get_or_create_doc_node(expando_doc);
     if (stub_v) {
         Item exp_map = expando_get_map((DomNode*)stub_v);
         if (exp_map.item != ITEM_NULL) {
             if (expando_map_has_key(exp_map, prop_name)) {
-                return js_get_key_default(exp_map, prop_name);
+                return dom_realm_get(exp_map, prop_name);
             }
         }
     }
 
-    if (_js_current_document != _js_main_document &&
-        dom_doc_has_browsing_context(_js_current_document)) {
+    if (doc_arg != _js_main_document &&
+        dom_doc_has_browsing_context(doc_arg)) {
         Item global_value = js_get_global_property(prop_name);
         if (get_type_id(global_value) == LMD_TYPE_FUNC) {
             return global_value;
@@ -6549,6 +6586,11 @@ extern "C" Item dom_document_get_property(Item prop_name) {
 
     log_debug("dom_document_get_property: unknown property '%s'", prop);
     return make_js_undefined();
+}
+
+// The global spelling: the browsing context's current document.
+extern "C" Item dom_document_get_property(Item prop_name) {
+    return dom_document_get_property_for(_js_current_document, prop_name);
 }
 
 // ============================================================================
@@ -6624,7 +6666,7 @@ static bool dom_form_named_getter_reserved_name(const char* prop) {
 }
 
 static Item js_text_control_set_selection_range(Item start_arg, Item end_arg, Item dir_arg) {
-    Item self = js_get_this();
+    Item self = dom_realm_receiver();
     DomElement* elem = (DomElement*)dom_unwrap_element(self);
     return dom_text_control_set_selection_range_bridge((void*)elem, start_arg, end_arg, dir_arg);
 }
@@ -6647,7 +6689,7 @@ extern "C" Item dom_text_control_set_selection_range_bridge(void* dom_elem,
 }
 
 static Item js_text_control_select(void) {
-    Item self = js_get_this();
+    Item self = dom_realm_receiver();
     DomElement* elem = (DomElement*)dom_unwrap_element(self);
     return dom_text_control_select_bridge((void*)elem);
 }
@@ -6675,7 +6717,7 @@ static bool js_text_control_set_raw_value(DomElement* elem, const char* new_val,
 
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (!state && elem->doc) {
-        state = radiant_document_ensure_state(elem->doc, "js_text_control_set_raw_value");
+        state = dom_engine_document_ensure_state(elem->doc, "js_text_control_set_raw_value");
     }
     uint32_t new_u16_len = tc_utf8_to_utf16_length(new_val ? new_val : "", new_len);
     if (!form_control_store_text_value(state, (View*)elem, new_val,
@@ -6805,7 +6847,7 @@ static Item js_text_control_set_range_text_for_elem(DomElement* elem,
 
 static Item js_text_control_set_range_text(Item replacement_arg, Item start_arg,
                                            Item end_arg, Item mode_arg) {
-    Item self = js_get_this();
+    Item self = dom_realm_receiver();
     DomElement* elem = (DomElement*)dom_unwrap_element(self);
     return dom_text_control_set_range_text_bridge((void*)elem, replacement_arg,
         start_arg, end_arg, mode_arg);
@@ -7048,7 +7090,7 @@ static Item js_text_data_body(Item callee, Item this_value, Item* args,
                               int argc, uint64_t* result_home) {
     (void)this_value; (void)result_home;
     JsFunction* fn = (JsFunction*)callee.function;
-    DomNode* node = (DomNode*)dom_unwrap_element(js_get_this());
+    DomNode* node = (DomNode*)dom_unwrap_element(dom_realm_receiver());
     if (!node || !node->is_text() || !fn) return make_js_undefined();
     Item arg0 = argc > 0 ? args[0] : make_js_undefined();
     Item arg1 = argc > 1 ? args[1] : make_js_undefined();
@@ -7132,11 +7174,11 @@ static const char* _elem_current_value(DomElement* elem) {
     if (!elem || !elem->tag_name) return "";
     const char* tag = elem->tag_name;
     if (strcasecmp(tag, "input") == 0) {
-        RadiantInputValueKind kind = radiant_input_value_kind(
+        RadiantInputValueKind kind = (RadiantInputValueKind)dom_engine_input_value_kind(
             elem->get_attribute("type"));
         if (kind != RADIANT_INPUT_VALUE_TEXT &&
             kind != RADIANT_INPUT_VALUE_UNSUPPORTED) {
-            return radiant_input_live_value(elem);
+            return dom_engine_input_live_value(elem);
         }
         if (tc_is_text_control(elem)) {
             tc_ensure_init(elem);
@@ -7207,7 +7249,7 @@ static bool _get_selectedness(DomElement* opt) {
     if (opt->has_option_selectedness()) return dom_option_is_selected(opt);
     Item exp = expando_get_map((DomNode*)opt);
     if (exp.item != ITEM_NULL) {
-        Item v = js_get_name_key(exp, "__selected");
+        Item v = dom_realm_get_name(exp, "__selected");
         if (v.item != ITEM_NULL && !is_js_undefined(v)) return js_is_truthy(v);
     }
     return dom_option_is_selected(opt);
@@ -7221,7 +7263,7 @@ static bool dom_expando_flag_is(DomElement* elem, const char* name) {
     if (!elem) return false;
     Item exp = expando_get_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return false;
-    Item value = js_get_key_default(exp, js_name_item(name));
+    Item value = dom_realm_get(exp, js_name_item(name));
     return value.item != ITEM_NULL && !is_js_undefined(value) && js_is_truthy(value);
 }
 
@@ -7229,7 +7271,7 @@ static void dom_expando_flag_set(DomElement* elem, const char* name, Item value)
     if (!elem) return;
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return;
-    js_set_key_default(exp, js_name_item(name), value);
+    dom_realm_set(exp, js_name_item(name), value);
 }
 JS_FORWARD_STATIC_RETURN(bool, _select_is_dirty, (DomElement* sel), dom_expando_flag_is, (sel, "__selDirty"))
 
@@ -7246,7 +7288,7 @@ static Item dom_output_default_value(DomElement* elem) {
     if (dom_output_is_value_mode(elem)) {
         Item exp = expando_get_map((DomNode*)elem);
         if (exp.item != ITEM_NULL) {
-            Item stored = js_get_name_key(exp, "__outputDefaultValue");
+            Item stored = dom_realm_get_name(exp, "__outputDefaultValue");
             if (get_type_id(stored) == LMD_TYPE_STRING) return stored;
         }
     }
@@ -7399,7 +7441,7 @@ static void _set_selectedness(DomElement* opt, bool v) {
     opt->set_option_selectedness(v);
     Item exp = expando_get_or_create_map((DomNode*)opt);
     if (exp.item == ITEM_NULL) return;
-    js_set_name_key(exp, "__selected", (Item){.item = b2it(v)});
+    dom_realm_set_name(exp, "__selected", (Item){.item = b2it(v)});
 }
 
 static int _select_index_from_item(Item value) {
@@ -7478,7 +7520,7 @@ static void _select_normalize_for_selected_options(DomElement* sel, Item options
 
 static void _select_refresh_selected_options_collection(Item collection, DomElement* sel) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !sel) return;
-    js_set_key_cstr(collection, "length", (Item){.item = i2it(0)});
+    dom_realm_set_cstr(collection, "length", (Item){.item = i2it(0)});
 
     Item arr = js_array_new(0);
     _collect_options(sel->first_child, arr);
@@ -7526,11 +7568,11 @@ static void _select_refresh_options_collection(Item collection, DomElement* sel)
     _collect_options(sel->first_child, collection);
     int64_t n = js_array_length(collection);
     int sel_idx = _select_effective_selected_index(sel, collection);
-    js_set_key_cstr(collection, "selectedIndex", (Item){.item = i2it(sel_idx)});
+    dom_realm_set_cstr(collection, "selectedIndex", (Item){.item = i2it(sel_idx)});
     if (js_array_has_props(collection.array)) {
         Map* props = js_array_props(collection.array);
         Item props_item = (Item){.map = props};
-        js_set_key_cstr(props_item, "length", (Item){.item = i2it(n)});
+        dom_realm_set_cstr(props_item, "length", (Item){.item = i2it(n)});
         _array_companion_set_int_slot(collection, "length", 6, n);
     }
 }
@@ -7548,7 +7590,7 @@ static void _select_refresh_cached_selected_options(DomElement* sel) {
     if (!sel) return;
     Item exp = expando_get_map((DomNode*)sel);
     if (exp.item == ITEM_NULL) return;
-    Item out = js_get_name_key(exp, "__selectedOptions");
+    Item out = dom_realm_get_name(exp, "__selectedOptions");
     if (get_type_id(out) == LMD_TYPE_ARRAY) {
         _select_refresh_selected_options_collection(out, sel);
     }
@@ -7607,7 +7649,7 @@ extern "C" void js_array_exotic_before_property_get(Item object, Item key) {
 
         Item prop_key = (Item){.item = s2it(heap_strcpy(sk->chars, sk->len))};
         if (matched.item != ItemNull.item) {
-            js_set_key_default(object, prop_key, matched);
+            dom_realm_set(object, prop_key, matched);
         } else if (js_array_has_props(object.array)) {
             Map* props = js_array_props(object.array);
             bool found = false;
@@ -7864,7 +7906,7 @@ extern "C" void dom_after_default_selected_set(void* dom_elem, bool selected) {
     Item exp = expando_get_map((DomNode*)elem);
     bool dirty = false;
     if (exp.item != ITEM_NULL) {
-        Item v = js_get_key_cstr(exp, "__optDirty");
+        Item v = dom_realm_get_cstr(exp, "__optDirty");
         dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
     }
     if (dirty) return;
@@ -7971,7 +8013,7 @@ static void dom_apply_option_selected(DomElement* elem, bool selected) {
     _set_selectedness(elem, selected);
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item != ITEM_NULL) {
-        js_set_key_cstr(exp, "__optDirty", (Item){.item = b2it(true)});
+        dom_realm_set_cstr(exp, "__optDirty", (Item){.item = b2it(true)});
     }
     // Explicit option.selected wins in non-multiple selects, then refreshes
     // cached selectedOptions exactly as the fallback setter did.
@@ -8085,7 +8127,7 @@ static void _reset_form_control(DomElement* elem) {
             // Clear dirty checkedness flag.
             Item exp = expando_get_map((DomNode*)elem);
             if (exp.item != ITEM_NULL) {
-                js_set_key_cstr(exp, "__chkDirty", (Item){.item = ITEM_NULL});
+                dom_realm_set_cstr(exp, "__chkDirty", (Item){.item = ITEM_NULL});
             }
             return;
         }
@@ -8096,14 +8138,14 @@ static void _reset_form_control(DomElement* elem) {
             // derived from that list and must never restore the value attribute.
             if (strcmp(itype, "file") == 0) {
                 radiant_input_set_files(elem, ItemNull);
-                radiant_input_set_live_value(elem, "");
+                dom_engine_input_set_live_value(elem, "");
             }
             return;
         }
-        RadiantInputValueKind value_kind = radiant_input_value_kind(itype);
+        RadiantInputValueKind value_kind = (RadiantInputValueKind)dom_engine_input_value_kind(itype);
         if (value_kind != RADIANT_INPUT_VALUE_TEXT &&
             value_kind != RADIANT_INPUT_VALUE_UNSUPPORTED) {
-            radiant_input_reset_live_value(elem);
+            dom_engine_input_reset_live_value(elem);
             return;
         }
         // Text-like input: value := defaultValue (= value attribute)
@@ -8143,13 +8185,13 @@ static void _reset_form_control(DomElement* elem) {
             // Clear per-option dirty selectedness flag.
             Item oexp = expando_get_map((DomNode*)opt);
             if (oexp.item != ITEM_NULL) {
-                js_set_key_cstr(oexp, "__optDirty", (Item){.item = ITEM_NULL});
+                dom_realm_set_cstr(oexp, "__optDirty", (Item){.item = ITEM_NULL});
             }
         }
         // Clear the dirty flag so default-reset rules apply again.
         Item exp = expando_get_map((DomNode*)elem);
         if (exp.item != ITEM_NULL) {
-            js_set_name_key(exp, "__selDirty", (Item){.item = ITEM_NULL});
+            dom_realm_set_name(exp, "__selDirty", (Item){.item = ITEM_NULL});
         }
         if (!elem->has_attribute("multiple")) {
             _select_ask_for_reset(elem);
@@ -8274,7 +8316,7 @@ static Item _build_validity_state(DomElement* elem) {
     Item vs = js_new_object();
     // Set Symbol.toStringTag = "ValidityState" so
     // Object.prototype.toString.call(validity) === "[object ValidityState]"
-    js_set_key_default(vs, js_well_known_symbol_key(4), js_name_item("ValidityState"));
+    dom_realm_set(vs, js_well_known_symbol_key(4), js_name_item("ValidityState"));
     bool value_missing   = false;
     bool type_mismatch   = false;
     bool pattern_mismatch = false;
@@ -8308,7 +8350,7 @@ static Item _build_validity_state(DomElement* elem) {
         // from disagreeing with the value exposed through the IDL.
         if (!val_empty && strcasecmp(tag, "input") == 0) {
             char sanitized[128];
-            radiant_input_value_sanitize(dom_input_type_lower(elem), val,
+            dom_engine_input_value_sanitize(dom_input_type_lower(elem), val,
                                           sanitized, sizeof(sanitized));
             val_empty = sanitized[0] == '\0';
         }
@@ -8419,7 +8461,7 @@ static Item _build_validity_state(DomElement* elem) {
         if (!val_empty && strcasecmp(tag, "input") == 0) {
             const char* itype = dom_input_type_lower(elem);
             RadiantInputValidity typed = {};
-            radiant_input_value_validate(itype, val,
+            dom_engine_input_value_validate(itype, val,
                 elem->get_attribute("min"),
                 elem->get_attribute("max"),
                 elem->get_attribute("step"), &typed);
@@ -8470,7 +8512,7 @@ static Item _build_validity_state(DomElement* elem) {
     M("tooShort", too_short) M("rangeOverflow", range_overflow) \
     M("rangeUnderflow", range_underflow) M("stepMismatch", step_mismatch) \
     M("badInput", bad_input) M("customError", custom_error) M("valid", valid)
-#define JS_DOM_SET_VALIDITY_FIELD(name, value) js_set_key_cstr(vs, name, _b(value));
+#define JS_DOM_SET_VALIDITY_FIELD(name, value) dom_realm_set_cstr(vs, name, _b(value));
     JS_DOM_VALIDITY_FIELDS(JS_DOM_SET_VALIDITY_FIELD)
 #undef JS_DOM_SET_VALIDITY_FIELD
 #undef JS_DOM_VALIDITY_FIELDS
@@ -8488,11 +8530,11 @@ static bool dom_is_constraint_control(DomElement* elem) {
 
 static void dom_dispatch_invalid_event(Item target_item, bool include_bubbles) {
     Item ev_obj = js_new_object();
-    js_set_key_cstr(ev_obj, "type", js_name_item("invalid"));
+    dom_realm_set_cstr(ev_obj, "type", js_name_item("invalid"));
     if (include_bubbles) {
-        js_set_key_cstr(ev_obj, "bubbles", (Item){.item = ITEM_FALSE});
+        dom_realm_set_cstr(ev_obj, "bubbles", (Item){.item = ITEM_FALSE});
     }
-    js_set_key_cstr(ev_obj, "cancelable", (Item){.item = ITEM_TRUE});
+    dom_realm_set_cstr(ev_obj, "cancelable", (Item){.item = ITEM_TRUE});
     dom_dispatch_event(target_item, ev_obj);
 }
 
@@ -8502,7 +8544,7 @@ static void dom_check_form_control_descendants(DomNode* node, bool* all_valid) {
             DomElement* elem = node->as_element();
             if (dom_is_constraint_control(elem)) {
                 Item vs = _build_validity_state(elem);
-                Item vf = js_get_key_cstr(vs, "valid");
+                Item vf = dom_realm_get_cstr(vs, "valid");
                 if (!dom_validity_item_is_valid(vf)) {
                     if (all_valid) *all_valid = false;
                     dom_dispatch_invalid_event(dom_wrap_element(elem), false);
@@ -8520,7 +8562,7 @@ extern "C" Item dom_form_reset_bridge(Item form_item) {
         return make_js_undefined();
     }
     Item ev = js_create_event("reset", /*bubbles=*/true, /*cancelable=*/true);
-    js_set_key_cstr(ev, "isTrusted", (Item){.item = ITEM_TRUE});
+    dom_realm_set_cstr(ev, "isTrusted", (Item){.item = ITEM_TRUE});
     Item dispatched = dom_dispatch_event(form_item, ev);
     if (dispatched.item == ITEM_FALSE) return make_js_undefined();
     _run_form_reset(elem);
@@ -8539,7 +8581,7 @@ static Item dom_check_or_report_validity(Item elem_item, bool report) {
 
     if (_elem_is_barred(elem)) return (Item){.item = ITEM_TRUE};
     Item vs = _build_validity_state(elem);
-    Item valid_flag = js_get_key_cstr(vs, "valid");
+    Item valid_flag = dom_realm_get_cstr(vs, "valid");
     bool is_valid = dom_validity_item_is_valid(valid_flag);
     if (!is_valid) {
         dom_dispatch_invalid_event(elem_item, !report);
@@ -8555,7 +8597,7 @@ static DomElement* dom_first_invalid_control(DomNode* node) {
         DomElement* elem = current->as_element();
         if (dom_is_constraint_control(elem)) {
             Item state = _build_validity_state(elem);
-            if (!dom_validity_item_is_valid(js_get_key_cstr(state, "valid"))) {
+            if (!dom_validity_item_is_valid(dom_realm_get_cstr(state, "valid"))) {
                 return elem;
             }
         }
@@ -9075,6 +9117,20 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // Element properties below — safe to cast
     DomElement* elem = node->as_element();
+
+    // The document node carries the Document's own properties as well as the
+    // Node's. Before ESO101 these lived only on a separate proxy object served
+    // off a global "current document", so a Lambda caller holding the document
+    // -- from parent_node(documentElement) or ownerDocument -- could read none
+    // of them, and the two doors disagreed about what a document even is.
+    // Answering here, from the node's own doc, makes one object play both roles.
+    if (elem->tag_name && strcmp(elem->tag_name, "#document") == 0) {
+        Item as_document = dom_document_get_property_for(elem->doc, prop_name);
+        if (get_type_id(as_document) != LMD_TYPE_UNDEFINED &&
+                get_type_id(as_document) != LMD_TYPE_ERROR) {
+            return as_document;
+        }
+    }
     if (!elem) {
         log_debug("dom_get_property: node is not an element for property '%s'", prop);
         return ItemNull;
@@ -9293,10 +9349,10 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             Item value_item = js_name_item(value ? value : "");
             // Attr exposes both legacy name/value and Node nodeName/nodeValue;
             // sanitizers iterate the latter aliases from element.attributes.
-            js_set_key_cstr(pair, "nodeName", name_item);
-            js_set_key_cstr(pair, "nodeValue", value_item);
-            js_set_key_cstr(pair, "name", name_item);
-            js_set_key_cstr(pair, "value", value_item);
+            dom_realm_set_cstr(pair, "nodeName", name_item);
+            dom_realm_set_cstr(pair, "nodeValue", value_item);
+            dom_realm_set_cstr(pair, "name", name_item);
+            dom_realm_set_cstr(pair, "value", value_item);
             js_array_push(arr_item, pair);
         }
         return arr_item;
@@ -9581,11 +9637,11 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (prop_id == JS_DOM_PROP_SELECTED_OPTIONS) {
             Item exp = expando_get_or_create_map((DomNode*)elem);
             Item cache_key = js_name_item("__selectedOptions");
-            Item out = (exp.item != ITEM_NULL) ? js_get_key_default(exp, cache_key) : ItemNull;
+            Item out = (exp.item != ITEM_NULL) ? dom_realm_get(exp, cache_key) : ItemNull;
             if (get_type_id(out) != LMD_TYPE_ARRAY) {
                 out = js_array_new(0);
                 _decorate_dom_collection(out, "HTMLCollection");
-                if (exp.item != ITEM_NULL) js_set_key_default(exp, cache_key, out);
+                if (exp.item != ITEM_NULL) dom_realm_set(exp, cache_key, out);
             }
             _register_select_options_owner(out, elem, SELECT_COLLECTION_SELECTED_OPTIONS);
             _select_refresh_selected_options_collection(out, elem);
@@ -9767,11 +9823,11 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = i2it((int64_t)elem->form->current_value_u16_len)};
         }
         if (prop_id == JS_DOM_PROP_SET_SELECTION_RANGE)
-            return js_new_native_function(js_text_control_set_selection_range);
+            return dom_realm_new_function(js_text_control_set_selection_range);
         if (prop_id == JS_DOM_PROP_SELECT)
-            return js_new_native_function(js_text_control_select);
+            return dom_realm_new_function(js_text_control_select);
         if (prop_id == JS_DOM_PROP_SET_RANGE_TEXT)
-            return js_new_native_function(js_text_control_set_range_text);
+            return dom_realm_new_function(js_text_control_set_range_text);
     }
 
     // ------------------------------------------------------------------
@@ -10166,7 +10222,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     if (dom_event_attr_name(prop, event_prop_name, sizeof(event_prop_name))) {
         Item exp_map = expando_get_map((DomNode*)elem);
         if (exp_map.item != ITEM_NULL) {
-            Item val = js_get_name_key(exp_map, event_prop_name);
+            Item val = dom_realm_get_name(exp_map, event_prop_name);
             if (val.item != ITEM_NULL && !is_js_undefined(val)) {
                 return val;
             }
@@ -10187,7 +10243,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (exp_map.item != ITEM_NULL) {
             Item key = js_name_item(prop);
             if (expando_map_has_key(exp_map, key)) {
-                return js_get_key_default(exp_map, key);
+                return dom_realm_get(exp_map, key);
             }
         }
     }
@@ -10199,9 +10255,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // `dom.node_value(element)`, whose property has no element case and fell
     // through to here (ESO81).
     if (dom_realm_active()) {
-        if (prop_id == JS_DOM_PROP___PROTO__) return js_get_prototype(elem_item);
+        if (prop_id == JS_DOM_PROP___PROTO__) return dom_realm_prototype_of(elem_item);
         bool proto_found = false;
-        Item proto_value = js_prototype_lookup_ex(elem_item, prop_name, &proto_found);
+        Item proto_value = dom_realm_prototype_lookup(elem_item, prop_name, &proto_found);
         if (proto_found) return proto_value;
     }
 
@@ -10285,6 +10341,13 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         return value;
     }
     DomElement* elem = node->as_element();
+
+    // Document writes (title, location, designMode, ...) land on the Document,
+    // and the document node is the Document (ESO101). Without this the node
+    // would read as a Document but not accept one's writes.
+    if (elem->tag_name && strcmp(elem->tag_name, "#document") == 0) {
+        return dom_document_proxy_set_property(prop_name, value);
+    }
 
     if (prop_id == JS_DOM_PROP_DISABLED && _is_tag(elem, "style")) {
         // HTML §4.2.6: style.disabled toggles its associated sheet, not an attribute.
@@ -10606,7 +10669,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         // attribute changes do not override the value.
         Item exp = expando_get_or_create_map((DomNode*)elem);
         if (exp.item != ITEM_NULL) {
-            js_set_key_cstr(exp, "__chkDirty", (Item){.item = b2it(true)});
+            dom_realm_set_cstr(exp, "__chkDirty", (Item){.item = b2it(true)});
         }
         return value;
     }
@@ -10621,7 +10684,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         Item exp = expando_get_map((DomNode*)elem);
         bool dirty = false;
         if (exp.item != ITEM_NULL) {
-            Item v = js_get_key_cstr(exp, "__chkDirty");
+            Item v = dom_realm_get_cstr(exp, "__chkDirty");
             dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
         }
         if (!dirty) _set_checkedness(elem, t);
@@ -10638,7 +10701,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             Rooted<Item> value_root(roots, js_name_item(raw ? raw : ""));
             Rooted<Item> exp_root(roots, expando_get_or_create_map((DomNode*)elem));
             if (exp_root.get().item == ITEM_NULL) return ItemNull;
-            js_set_key_cstr(exp_root.get(), "__outputDefaultValue", value_root.get());
+            dom_realm_set_cstr(exp_root.get(), "__outputDefaultValue", value_root.get());
             return value;
         }
         if (prop_id == JS_DOM_PROP_VALUE) {
@@ -10647,8 +10710,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
                 Rooted<Item> exp_root(roots, expando_get_or_create_map((DomNode*)elem));
                 Rooted<Item> default_root(roots, dom_text_content_item(elem));
                 if (exp_root.get().item == ITEM_NULL) return ItemNull;
-                js_set_key_cstr(exp_root.get(), "__outputDefaultValue", default_root.get());
-                js_set_key_cstr(exp_root.get(), "__outputValueMode",
+                dom_realm_set_cstr(exp_root.get(), "__outputDefaultValue", default_root.get());
+                dom_realm_set_cstr(exp_root.get(), "__outputValueMode",
                     (Item){.item = b2it(true)});
             }
             return dom_output_set_text(elem, value) ? value : ItemNull;
@@ -10691,7 +10754,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             Item exp = expando_get_map((DomNode*)elem);
             bool dirty = false;
             if (exp.item != ITEM_NULL) {
-                Item v = js_get_key_cstr(exp, "__optDirty");
+                Item v = dom_realm_get_cstr(exp, "__optDirty");
                 dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
             }
             if (!dirty) {
@@ -10910,11 +10973,11 @@ extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item valu
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) {
         // not a DOM element — fall back to normal property set on obj.style
-        Item style_obj = js_get_name_key(elem_item, "style");
+        Item style_obj = dom_realm_get_name(elem_item, "style");
         TypeId style_type = get_type_id(style_obj);
         if (style_obj.item != ITEM_NULL &&
             (style_type == LMD_TYPE_MAP || style_type == LMD_TYPE_VMAP)) {
-            return js_set_key_default(style_obj, prop_name, value);
+            return dom_realm_set(style_obj, prop_name, value);
         }
         return ItemNull;
     }
@@ -11005,11 +11068,11 @@ extern "C" Item dom_get_style_property(Item elem_item, Item prop_name) {
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) {
         // not a DOM element — fall back to normal property access on obj.style
-        Item style_obj = js_get_name_key(elem_item, "style");
+        Item style_obj = dom_realm_get_name(elem_item, "style");
         TypeId style_type = get_type_id(style_obj);
         if (style_obj.item != ITEM_NULL &&
             (style_type == LMD_TYPE_MAP || style_type == LMD_TYPE_VMAP)) {
-            return js_get_key_default(style_obj, prop_name);
+            return dom_realm_get(style_obj, prop_name);
         }
         return js_name_item("");
     }
@@ -11090,7 +11153,7 @@ extern "C" Item dom_style_css_has(Item style_item, Item prop_name) {
 
 static void dom_set_number_property(Item object, const char* name,
                                        float value) {
-    js_set_name_key(object, name, push_d((double)value));
+    dom_realm_set_name(object, name, push_d((double)value));
 }
 
 Item dom_make_rect_in(DomDocument* doc, double x, double y, double width, double height) {
@@ -11111,14 +11174,14 @@ Item dom_make_rect_in(DomDocument* doc, double x, double y, double width, double
             .final();
     }
     Item rect = js_new_object();
-    js_set_name_key(rect, "x", push_d(x));
-    js_set_name_key(rect, "y", push_d(y));
-    js_set_name_key(rect, "top", push_d(y));
-    js_set_name_key(rect, "left", push_d(x));
-    js_set_name_key(rect, "right", push_d(x + width));
-    js_set_name_key(rect, "bottom", push_d(y + height));
-    js_set_name_key(rect, "width", push_d(width));
-    js_set_name_key(rect, "height", push_d(height));
+    dom_realm_set_name(rect, "x", push_d(x));
+    dom_realm_set_name(rect, "y", push_d(y));
+    dom_realm_set_name(rect, "top", push_d(y));
+    dom_realm_set_name(rect, "left", push_d(x));
+    dom_realm_set_name(rect, "right", push_d(x + width));
+    dom_realm_set_name(rect, "bottom", push_d(y + height));
+    dom_realm_set_name(rect, "width", push_d(width));
+    dom_realm_set_name(rect, "height", push_d(height));
     return rect;
 }
 
@@ -11147,12 +11210,12 @@ static float dom_svg_number(Item value, float fallback) {
 
 static RdtMatrix dom_svg_matrix_from_item(Item item) {
     RdtMatrix matrix = rdt_matrix_identity();
-    matrix.e11 = dom_svg_number(js_get_key_cstr(item, "a"), 1.0f);
-    matrix.e21 = dom_svg_number(js_get_key_cstr(item, "b"), 0.0f);
-    matrix.e12 = dom_svg_number(js_get_key_cstr(item, "c"), 0.0f);
-    matrix.e22 = dom_svg_number(js_get_key_cstr(item, "d"), 1.0f);
-    matrix.e13 = dom_svg_number(js_get_key_cstr(item, "e"), 0.0f);
-    matrix.e23 = dom_svg_number(js_get_key_cstr(item, "f"), 0.0f);
+    matrix.e11 = dom_svg_number(dom_realm_get_cstr(item, "a"), 1.0f);
+    matrix.e21 = dom_svg_number(dom_realm_get_cstr(item, "b"), 0.0f);
+    matrix.e12 = dom_svg_number(dom_realm_get_cstr(item, "c"), 0.0f);
+    matrix.e22 = dom_svg_number(dom_realm_get_cstr(item, "d"), 1.0f);
+    matrix.e13 = dom_svg_number(dom_realm_get_cstr(item, "e"), 0.0f);
+    matrix.e23 = dom_svg_number(dom_realm_get_cstr(item, "f"), 0.0f);
     return matrix;
 }
 
@@ -11179,7 +11242,7 @@ static Item dom_svg_matrix_operation(Item callee, Item this_value, Item* args,
         ? (JsSvgMatrixOperation)fn->native_target.bits : JS_SVG_MATRIX_INVERSE;
     Item arg0 = argc > 0 ? args[0] : make_js_undefined();
     Item arg1 = argc > 1 ? args[1] : make_js_undefined();
-    RdtMatrix matrix = dom_svg_matrix_from_item(js_get_this());
+    RdtMatrix matrix = dom_svg_matrix_from_item(dom_realm_receiver());
     switch (operation) {
     case JS_SVG_MATRIX_MULTIPLY: {
         RdtMatrix right = dom_svg_matrix_from_item(arg0);
@@ -11188,7 +11251,7 @@ static Item dom_svg_matrix_operation(Item callee, Item this_value, Item* args,
     case JS_SVG_MATRIX_INVERSE: {
         float determinant = matrix.e11 * matrix.e22 - matrix.e21 * matrix.e12;
         if (fabsf(determinant) < 0.000001f)
-            return js_throw_type_error("SVGMatrix is not invertible");
+            return dom_realm_throw_type_error("SVGMatrix is not invertible");
         float reciprocal = 1.0f / determinant;
         RdtMatrix inverse = {
             matrix.e22 * reciprocal, -matrix.e12 * reciprocal,
@@ -11237,19 +11300,19 @@ static Item dom_svg_make_matrix_with_interface(RdtMatrix matrix,
     dom_set_number_property(result, "d", matrix.e22);
     dom_set_number_property(result, "e", matrix.e13);
     dom_set_number_property(result, "f", matrix.e23);
-    js_set_key_cstr(result, "multiply", js_new_native_payload_function(dom_svg_matrix_operation,
+    dom_realm_set_cstr(result, "multiply", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_MULTIPLY, 1));
-    js_set_key_cstr(result, "inverse", js_new_native_payload_function(dom_svg_matrix_operation,
+    dom_realm_set_cstr(result, "inverse", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_INVERSE, 0));
-    js_set_key_cstr(result, "translate", js_new_native_payload_function(dom_svg_matrix_operation,
+    dom_realm_set_cstr(result, "translate", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_TRANSLATE, 2));
-    js_set_key_cstr(result, "scale", js_new_native_payload_function(dom_svg_matrix_operation,
+    dom_realm_set_cstr(result, "scale", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_SCALE, 1));
-    js_set_key_cstr(result, "rotate", js_new_native_payload_function(dom_svg_matrix_operation,
+    dom_realm_set_cstr(result, "rotate", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_ROTATE, 1));
-    js_set_key_cstr(result, "flipX", js_new_native_payload_function(dom_svg_matrix_operation,
+    dom_realm_set_cstr(result, "flipX", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_FLIP_X, 0));
-    js_set_key_cstr(result, "flipY", js_new_native_payload_function(dom_svg_matrix_operation,
+    dom_realm_set_cstr(result, "flipY", js_new_native_payload_function(dom_svg_matrix_operation,
             JS_SVG_MATRIX_FLIP_Y, 0));
     dom_realm_apply_prototype(result, interface_name);
     return result;
@@ -11257,7 +11320,7 @@ static Item dom_svg_make_matrix_with_interface(RdtMatrix matrix,
 JS_FORWARD_STATIC_ITEM(dom_svg_create_matrix, (void), dom_svg_make_matrix, (rdt_matrix_identity()))
 
 static DomElement* dom_svg_owner_from_value(Item value) {
-    Item owner = js_get_key_cstr(value, "__lambda_svg_owner");
+    Item owner = dom_realm_get_cstr(value, "__lambda_svg_owner");
     return (DomElement*)dom_unwrap_element(owner);
 }
 
@@ -11274,8 +11337,8 @@ static void dom_svg_set_transform_attribute(DomElement* elem, RdtMatrix matrix) 
 }
 
 static Item dom_svg_transform_set_matrix(Item matrix_item) {
-    Item transform = js_get_this();
-    js_set_key_cstr(transform, "matrix", dom_svg_make_matrix(dom_svg_matrix_from_item(matrix_item)));
+    Item transform = dom_realm_receiver();
+    dom_realm_set_cstr(transform, "matrix", dom_svg_make_matrix(dom_svg_matrix_from_item(matrix_item)));
     return ItemNull;
 }
 
@@ -11307,12 +11370,12 @@ static Item dom_svg_transform_set_rotate(Item angle, Item cx, Item cy) {
 
 static Item dom_svg_make_transform(Item matrix) {
     Item transform = js_new_object();
-    js_set_key_cstr(transform, "matrix", dom_svg_make_matrix(dom_svg_matrix_from_item(matrix)));
-    js_set_key_cstr(transform, "type", (Item){.item = i2it(1)});
-    js_set_native_key(transform, js_string_key("setMatrix"), dom_svg_transform_set_matrix);
-    js_set_native_key(transform, js_string_key("setTranslate"), dom_svg_transform_set_translate);
-    js_set_native_key(transform, js_string_key("setScale"), dom_svg_transform_set_scale);
-    js_set_native_key(transform, js_string_key("setRotate"), dom_svg_transform_set_rotate);
+    dom_realm_set_cstr(transform, "matrix", dom_svg_make_matrix(dom_svg_matrix_from_item(matrix)));
+    dom_realm_set_cstr(transform, "type", (Item){.item = i2it(1)});
+    dom_realm_set_native(transform, js_string_key("setMatrix"), dom_svg_transform_set_matrix);
+    dom_realm_set_native(transform, js_string_key("setTranslate"), dom_svg_transform_set_translate);
+    dom_realm_set_native(transform, js_string_key("setScale"), dom_svg_transform_set_scale);
+    dom_realm_set_native(transform, js_string_key("setRotate"), dom_svg_transform_set_rotate);
     dom_realm_apply_prototype(transform, "SVGTransform");
     return transform;
 }
@@ -11320,13 +11383,13 @@ JS_FORWARD_STATIC_ITEM(dom_svg_create_transform, (void), dom_svg_make_transform,
 JS_FORWARD_STATIC_ITEM(dom_svg_create_transform_from_matrix, (Item matrix), dom_svg_make_transform, (matrix))
 
 static Item dom_svg_transform_list_count_get(void) {
-    DomElement* elem = dom_svg_owner_from_value(js_get_this());
+    DomElement* elem = dom_svg_owner_from_value(dom_realm_receiver());
     const char* value = elem ? elem->get_attribute("transform") : nullptr;
     return (Item){.item = i2it(value && value[0] ? 1 : 0)};
 }
 
 static Item dom_svg_transform_list_clear(void) {
-    DomElement* elem = dom_svg_owner_from_value(js_get_this());
+    DomElement* elem = dom_svg_owner_from_value(dom_realm_receiver());
     if (elem) {
         elem->set_attribute("transform", "");
         dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
@@ -11335,8 +11398,8 @@ static Item dom_svg_transform_list_clear(void) {
 }
 
 static Item dom_svg_transform_list_append(Item transform) {
-    DomElement* elem = dom_svg_owner_from_value(js_get_this());
-    Item matrix = js_get_key_cstr(transform, "matrix");
+    DomElement* elem = dom_svg_owner_from_value(dom_realm_receiver());
+    Item matrix = dom_realm_get_cstr(transform, "matrix");
     if (elem && matrix.item != ITEM_NULL && !is_js_undefined(matrix)) {
         dom_svg_set_transform_attribute(elem, dom_svg_matrix_from_item(matrix));
     }
@@ -11344,7 +11407,7 @@ static Item dom_svg_transform_list_append(Item transform) {
 }
 
 static Item dom_svg_transform_list_consolidate(void) {
-    DomElement* elem = dom_svg_owner_from_value(js_get_this());
+    DomElement* elem = dom_svg_owner_from_value(dom_realm_receiver());
     if (!elem || !elem->get_attribute("transform")) return ItemNull;
     return dom_svg_make_transform(
         dom_svg_make_matrix(dom_svg_transform_from_element(elem)));
@@ -11362,29 +11425,29 @@ static Item dom_svg_transform_list_initialize(Item transform) {
 
 static Item dom_svg_get_transform_list(DomElement* elem) {
     Item list = js_new_object();
-    js_set_key_cstr(list, "__lambda_svg_owner", dom_wrap_element(elem));
-    js_install_native_accessor(list, js_string_key("numberOfItems"),
-        js_new_native_function(dom_svg_transform_list_count_get), ItemNull,
+    dom_realm_set_cstr(list, "__lambda_svg_owner", dom_wrap_element(elem));
+    dom_realm_install_accessor(list, js_string_key("numberOfItems"),
+        dom_realm_new_function(dom_svg_transform_list_count_get), ItemNull,
         JSPD_NON_ENUMERABLE);
-    js_set_native_key(list, js_string_key("clear"), dom_svg_transform_list_clear);
-    js_set_native_key(list, js_string_key("appendItem"), dom_svg_transform_list_append);
-    js_set_native_key(list, js_string_key("initialize"), dom_svg_transform_list_initialize);
-    js_set_native_key(list, js_string_key("consolidate"), dom_svg_transform_list_consolidate);
-    js_set_native_key(list, js_string_key("getItem"), dom_svg_transform_list_get_item);
+    dom_realm_set_native(list, js_string_key("clear"), dom_svg_transform_list_clear);
+    dom_realm_set_native(list, js_string_key("appendItem"), dom_svg_transform_list_append);
+    dom_realm_set_native(list, js_string_key("initialize"), dom_svg_transform_list_initialize);
+    dom_realm_set_native(list, js_string_key("consolidate"), dom_svg_transform_list_consolidate);
+    dom_realm_set_native(list, js_string_key("getItem"), dom_svg_transform_list_get_item);
     Item animated = js_new_object();
-    js_set_key_cstr(animated, "baseVal", list);
-    js_set_key_cstr(animated, "animVal", list);
+    dom_realm_set_cstr(animated, "baseVal", list);
+    dom_realm_set_cstr(animated, "animVal", list);
     return animated;
 }
 
 static Item dom_svg_class_name_get_base_val(void) {
-    DomElement* elem = dom_svg_owner_from_value(js_get_this());
+    DomElement* elem = dom_svg_owner_from_value(dom_realm_receiver());
     const char* class_name = elem ? elem->get_attribute("class") : nullptr;
     return js_name_item(class_name ? class_name : "");
 }
 
 static Item dom_svg_class_name_set_base_val(Item value) {
-    DomElement* elem = dom_svg_owner_from_value(js_get_this());
+    DomElement* elem = dom_svg_owner_from_value(dom_realm_receiver());
     if (elem) {
         elem->set_attribute("class", dom_to_attr_cstr(value));
         dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
@@ -11394,13 +11457,13 @@ static Item dom_svg_class_name_set_base_val(Item value) {
 
 static Item dom_svg_get_animated_class_name(DomElement* elem) {
     Item animated = js_new_object();
-    js_set_key_cstr(animated, "__lambda_svg_owner", dom_wrap_element(elem));
-    js_install_native_accessor(animated, js_string_key("baseVal"),
-        js_new_native_function(dom_svg_class_name_get_base_val),
-        js_new_native_function(dom_svg_class_name_set_base_val),
+    dom_realm_set_cstr(animated, "__lambda_svg_owner", dom_wrap_element(elem));
+    dom_realm_install_accessor(animated, js_string_key("baseVal"),
+        dom_realm_new_function(dom_svg_class_name_get_base_val),
+        dom_realm_new_function(dom_svg_class_name_set_base_val),
         JSPD_NON_ENUMERABLE);
-    js_install_native_accessor(animated, js_string_key("animVal"),
-        js_new_native_function(dom_svg_class_name_get_base_val), ItemNull,
+    dom_realm_install_accessor(animated, js_string_key("animVal"),
+        dom_realm_new_function(dom_svg_class_name_get_base_val), ItemNull,
         JSPD_NON_ENUMERABLE);
     return animated;
 }
@@ -11408,9 +11471,9 @@ static Item dom_svg_get_animated_class_name(DomElement* elem) {
 static Item dom_svg_make_point(float x, float y, const char* interface_name);
 
 static Item dom_svg_point_matrix_transform(Item matrix_item) {
-    Item point_item = js_get_this();
-    float x = dom_svg_number(js_get_key_cstr(point_item, "x"), 0.0f);
-    float y = dom_svg_number(js_get_key_cstr(point_item, "y"), 0.0f);
+    Item point_item = dom_realm_receiver();
+    float x = dom_svg_number(dom_realm_get_cstr(point_item, "x"), 0.0f);
+    float y = dom_svg_number(dom_realm_get_cstr(point_item, "y"), 0.0f);
     RdtMatrix matrix = dom_svg_matrix_from_item(matrix_item);
     float transformed_x = 0.0f;
     float transformed_y = 0.0f;
@@ -11424,7 +11487,7 @@ static Item dom_svg_make_point(float x, float y, const char* interface_name) {
     dom_set_number_property(result, "y", y);
     dom_set_number_property(result, "z", 0.0f);
     dom_set_number_property(result, "w", 1.0f);
-    js_set_native_key(result, js_string_key("matrixTransform"), dom_svg_point_matrix_transform);
+    dom_realm_set_native(result, js_string_key("matrixTransform"), dom_svg_point_matrix_transform);
     dom_realm_apply_prototype(result, interface_name);
     return result;
 }
@@ -13157,8 +13220,8 @@ JS_FORWARD_STATIC_ITEM(dom_float_item, (float value), js_make_number, ((double)v
 static Item dom_make_plain_boundary_object(DomBoundary boundary) {
     if (!boundary.node) return ItemNull;
     Item out = js_new_object();
-    js_set_key_cstr(out, "node", dom_wrap_element(boundary.node));
-    js_set_key_cstr(out, "offset", (Item){.item = i2it((int64_t)boundary.offset)});
+    dom_realm_set_cstr(out, "node", dom_wrap_element(boundary.node));
+    dom_realm_set_cstr(out, "offset", (Item){.item = i2it((int64_t)boundary.offset)});
     return out;
 }
 
@@ -13170,15 +13233,15 @@ static Item dom_make_boundary_object(DomBoundary boundary) {
     DomBoundary all_end;
     if (dom_selection_user_select_all_range_for_node(boundary.node,
             &all_start, &all_end)) {
-        js_set_key_cstr(out, "selectAllStart", dom_make_plain_boundary_object(all_start));
-        js_set_key_cstr(out, "selectAllEnd", dom_make_plain_boundary_object(all_end));
+        dom_realm_set_cstr(out, "selectAllStart", dom_make_plain_boundary_object(all_start));
+        dom_realm_set_cstr(out, "selectAllEnd", dom_make_plain_boundary_object(all_end));
     }
     DomBoundary triple_start;
     DomBoundary triple_end;
     if (dom_selection_triple_click_range_for_node(boundary.node,
             &triple_start, &triple_end)) {
-        js_set_key_cstr(out, "tripleClickStart", dom_make_plain_boundary_object(triple_start));
-        js_set_key_cstr(out, "tripleClickEnd", dom_make_plain_boundary_object(triple_end));
+        dom_realm_set_cstr(out, "tripleClickStart", dom_make_plain_boundary_object(triple_start));
+        dom_realm_set_cstr(out, "tripleClickEnd", dom_make_plain_boundary_object(triple_end));
     }
     return out;
 }
@@ -13266,7 +13329,7 @@ static Item dom_text_control_caret_bounds(DomElement* elem) {
 
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (!state && elem->doc) {
-        state = radiant_document_ensure_state(elem->doc,
+        state = dom_engine_document_ensure_state(elem->doc,
             "dom_text_control_caret_bounds");
     }
 
@@ -13322,9 +13385,9 @@ static Item dom_text_control_boundary_from_point(DomElement* elem,
         value_len, hit.offset);
 
     Item out = js_new_object();
-    js_set_key_cstr(out, "node", dom_wrap_element(elem));
-    js_set_key_cstr(out, "offset", (Item){.item = i2it((int64_t)offset_u16)});
-    js_set_key_cstr(out, "byteOffset", (Item){.item = i2it((int64_t)hit.offset)});
+    dom_realm_set_cstr(out, "node", dom_wrap_element(elem));
+    dom_realm_set_cstr(out, "offset", (Item){.item = i2it((int64_t)offset_u16)});
+    dom_realm_set_cstr(out, "byteOffset", (Item){.item = i2it((int64_t)hit.offset)});
     return out;
 }
 JS_FORWARD_ITEM(dom_text_control_caret_bounds_bridge, (void* elem), dom_text_control_caret_bounds, ((DomElement*)elem))
@@ -13389,8 +13452,8 @@ extern "C" Item dom_scroll_operation_bridge(Item elem_item,
     float x = 0.0f;
     float y = 0.0f;
     if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
-        Item left = js_get_key_cstr(args[0], "left");
-        Item top = js_get_key_cstr(args[0], "top");
+        Item left = dom_realm_get_cstr(args[0], "left");
+        Item top = dom_realm_get_cstr(args[0], "top");
         x = dom_item_to_float(left);
         y = dom_item_to_float(top);
     } else {
@@ -14788,10 +14851,10 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         const char* mode = "open";
         bool delegates_focus = false;
         if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
-            Item mode_item = js_get_key_cstr(args[0], "mode");
+            Item mode_item = dom_realm_get_cstr(args[0], "mode");
             const char* mode_text = fn_to_cstr(mode_item);
             if (mode_text && mode_text[0]) mode = mode_text;
-            Item delegates_item = js_get_key_cstr(args[0], "delegatesFocus");
+            Item delegates_item = dom_realm_get_cstr(args[0], "delegatesFocus");
             delegates_focus = js_is_truthy(delegates_item);
         }
 
@@ -14803,15 +14866,15 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         elem->set_shadow_root_element(frag);
         Item root = dom_wrap_element(frag);
 
-        js_set_key_cstr(root, "host", elem_item);
-        js_set_key_cstr(root, "mode", js_name_item(mode));
-        js_set_key_cstr(root, "delegatesFocus", (Item){.item = b2it(delegates_focus)});
+        dom_realm_set_cstr(root, "host", elem_item);
+        dom_realm_set_cstr(root, "mode", js_name_item(mode));
+        dom_realm_set_cstr(root, "delegatesFocus", (Item){.item = b2it(delegates_focus)});
 
         Item exp_map = expando_get_or_create_map((DomNode*)elem);
         if (exp_map.item != ITEM_NULL) {
             Item visible_root = (strcasecmp(mode, "closed") == 0) ? ItemNull : root;
-            js_set_key_cstr(exp_map, "shadowRoot", visible_root);
-            js_set_key_cstr(exp_map, "__shadowRootInternal", root);
+            dom_realm_set_cstr(exp_map, "shadowRoot", visible_root);
+            dom_realm_set_cstr(exp_map, "__shadowRootInternal", root);
         }
         return root;
     }
@@ -15268,7 +15331,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         bool prevent_scroll = false;
         if (operation == JUBE_DOM_FOCUS && argc > 0 &&
             get_type_id(args[0]) == LMD_TYPE_MAP) {
-            prevent_scroll = js_is_truthy(js_get_key_cstr(args[0], "preventScroll"));
+            prevent_scroll = js_is_truthy(dom_realm_get_cstr(args[0], "preventScroll"));
         }
         return dom_focus_method(elem, operation == JUBE_DOM_FOCUS,
                                    prevent_scroll);
@@ -15420,7 +15483,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
                 Item m = js_name_item(
                     "Failed to execute 'add' on 'HTMLSelectElement': "
                     "The new child element contains the parent.");
-                return js_throw_value(js_new_error_with_name(n, m));
+                return dom_realm_throw(dom_realm_new_error_named(n, m));
             }
         }
         // before: null/undefined/missing/-1 → append; else if number → option at index;
@@ -15454,7 +15517,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
                         Item m = js_name_item(
                             "Failed to execute 'add' on 'HTMLSelectElement': "
                             "The node before which the new node is to be inserted is not a descendant.");
-                        return js_throw_value(js_new_error_with_name(n, m));
+                        return dom_realm_throw(dom_realm_new_error_named(n, m));
                     }
                     before_elem = be;
                     append_at_end = false;
@@ -15681,7 +15744,7 @@ extern "C" bool dom_dataset_set_object_property(Item dataset, Item key,
     }
     // Property lookup may collect while an async handler owns the only
     // references to this dataset view; keep the receiver and operands precise.
-    owner_root.set(js_get_key_cstr(dataset_root.get(), "__lambda_dataset_element"));
+    owner_root.set(dom_realm_get_cstr(dataset_root.get(), "__lambda_dataset_element"));
     if (!dom_unwrap_element(owner_root.get())) return false;
     dom_dataset_set_property(owner_root.get(), key_root.get(), value_root.get());
     return true;
@@ -16002,22 +16065,22 @@ static void _xpath_collect_descendants(DomNode* node, Item expression, Item matc
 }
 
 static Item _xpath_result_iterate_next(void) {
-    Item self = js_get_this();
-    Item items = js_get_key_cstr(self, "__lambda_xpath_items");
-    Item index_item = js_get_key_cstr(self, "__lambda_xpath_index");
+    Item self = dom_realm_receiver();
+    Item items = dom_realm_get_cstr(self, "__lambda_xpath_items");
+    Item index_item = dom_realm_get_cstr(self, "__lambda_xpath_index");
     int64_t index = get_type_id(index_item) == LMD_TYPE_INT ? it2i(index_item) : 0;
     if (get_type_id(items) != LMD_TYPE_ARRAY || index >= js_array_length(items)) {
         return ItemNull;
     }
     Item match = js_elements_get_int(items, index);
-    js_set_key_cstr(self, "__lambda_xpath_index", (Item){.item = i2it(index + 1)});
+    dom_realm_set_cstr(self, "__lambda_xpath_index", (Item){.item = i2it(index + 1)});
     return match;
 }
 
 static Item _xpath_expression_evaluate(Item context_node, Item /*result_type*/,
                                        Item /*existing_result*/) {
-    Item self = js_get_this();
-    Item expression = js_get_key_cstr(self, "__lambda_xpath_source");
+    Item self = dom_realm_receiver();
+    Item expression = dom_realm_get_cstr(self, "__lambda_xpath_source");
     DomElement* root = (DomElement*)dom_unwrap_element(context_node);
     Item matches = js_array_new(0);
     if (root && root->first_child) {
@@ -16027,20 +16090,20 @@ static Item _xpath_expression_evaluate(Item context_node, Item /*result_type*/,
     }
 
     Item result = js_new_object();
-    js_set_key_cstr(result, "__lambda_xpath_items", matches);
-    js_set_key_cstr(result, "__lambda_xpath_index", (Item){.item = i2it(0)});
+    dom_realm_set_cstr(result, "__lambda_xpath_items", matches);
+    dom_realm_set_cstr(result, "__lambda_xpath_index", (Item){.item = i2it(0)});
     Item iterate_next = js_new_distinct_native_function(_xpath_result_iterate_next);
     js_set_function_name(iterate_next, js_string_key("iterateNext"));
-    js_set_key_cstr(result, "iterateNext", iterate_next);
+    dom_realm_set_cstr(result, "iterateNext", iterate_next);
     return result;
 }
 
 static Item _xpath_evaluator_create_expression(Item expression, Item /*resolver*/) {
     Item compiled = js_new_object();
-    js_set_key_cstr(compiled, "__lambda_xpath_source", js_to_string(expression));
+    dom_realm_set_cstr(compiled, "__lambda_xpath_source", js_to_string(expression));
     Item evaluate = js_new_distinct_native_function(_xpath_expression_evaluate);
     js_set_function_name(evaluate, js_string_key("evaluate"));
-    js_set_key_cstr(compiled, "evaluate", evaluate);
+    dom_realm_set_cstr(compiled, "evaluate", evaluate);
     return compiled;
 }
 
@@ -16049,7 +16112,7 @@ extern "C" Item dom_xpath_evaluator_ctor(void) {
     Item create_expression = js_new_distinct_native_function(
         _xpath_evaluator_create_expression);
     js_set_function_name(create_expression, js_string_key("createExpression"));
-    js_set_key_cstr(evaluator, "createExpression", create_expression);
+    dom_realm_set_cstr(evaluator, "createExpression", create_expression);
 
     dom_realm_apply_prototype(evaluator, "XPathEvaluator");
     return evaluator;
@@ -16062,7 +16125,7 @@ static JsWebAnimationHost* js_web_animation_host(Item value) {
         return (JsWebAnimationHost*)value.vmap->host_data;
     }
     if (get_type_id(value) == LMD_TYPE_MAP) {
-        Item holder = js_get_key_cstr(value, "__lambda_web_animation_host");
+        Item holder = dom_realm_get_cstr(value, "__lambda_web_animation_host");
         if (get_type_id(holder) == LMD_TYPE_VMAP && holder.vmap &&
             holder.vmap->host_type == (const void*)&js_web_animation_vmap_marker) {
             return (JsWebAnimationHost*)holder.vmap->host_data;
@@ -16115,13 +16178,13 @@ static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
         if (get_type_id(frame) != LMD_TYPE_MAP &&
             get_type_id(frame) != LMD_TYPE_VMAP) continue;
 
-        Item offset = js_get_key_cstr(frame, "offset");
+        Item offset = dom_realm_get_cstr(frame, "offset");
         if (!is_js_undefined(offset) && offset.item != ITEM_NULL) {
             float parsed_offset = js_web_animation_number(offset, stop->offset);
             if (isfinite(parsed_offset)) stop->offset = parsed_offset;
         }
 
-        Item names = js_object_get_own_property_names(frame);
+        Item names = dom_realm_own_property_names(frame);
         if (get_type_id(names) != LMD_TYPE_ARRAY) continue;
         int name_count = (int)js_array_length(names);
         for (int j = 0; j < name_count; j++) {
@@ -16134,14 +16197,14 @@ static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
             CssPropertyCode property = css_property_code_from_name(css_name);
             if (property == CSS_PROPERTY_UNKNOWN || property == 0) continue;
 
-            const char* value = fn_to_cstr(js_get_key_default(
+            const char* value = fn_to_cstr(dom_realm_get(
                 frame, js_string_key(js_name)));
             if (!value || !value[0]) continue;
 
             CssAnimatedProp parsed;
             if (!css_animation_parse_property_value(property, value, &parsed,
                                                     pool)) continue;
-            parsed.composite = js_web_animation_composite(js_get_key_cstr(frame, "composite"));
+            parsed.composite = js_web_animation_composite(dom_realm_get_cstr(frame, "composite"));
             stop->properties = (CssAnimatedProp*)pool_calloc(
                 pool, sizeof(CssAnimatedProp));
             if (!stop->properties) return nullptr;
@@ -16161,17 +16224,17 @@ static Item js_web_animation_reverse(void) {
     // The headless layout runner samples currentTime explicitly; reversing an
     // unplayed animation changes its playback direction without changing the
     // sampled time, but must still return the Animation object.
-    return js_get_this();
+    return dom_realm_receiver();
 }
 
 static Item js_web_animation_current_time_get(void) {
-    JsWebAnimationHost* host = js_web_animation_host(js_get_this());
+    JsWebAnimationHost* host = js_web_animation_host(dom_realm_receiver());
     return host && host->state ? js_make_number(host->state->current_time_ms)
                                : ItemNull;
 }
 
 static Item js_web_animation_current_time_set(Item value) {
-    JsWebAnimationHost* host = js_web_animation_host(js_get_this());
+    JsWebAnimationHost* host = js_web_animation_host(dom_realm_receiver());
     if (host && host->state) {
         Item numeric = js_to_number(value);
         TypeId type = get_type_id(numeric);
@@ -16187,7 +16250,7 @@ static Item js_web_animation_current_time_set(Item value) {
 }
 
 extern "C" Item dom_element_animate(Item keyframes_item, Item options_item) {
-    DomElement* element = (DomElement*)dom_unwrap_element(js_get_this());
+    DomElement* element = (DomElement*)dom_unwrap_element(dom_realm_receiver());
     if (!element || !element->doc) return ItemNull;
 
     CssKeyframes* keyframes = js_web_animation_parse_keyframes(
@@ -16199,11 +16262,11 @@ extern "C" Item dom_element_animate(Item keyframes_item, Item options_item) {
     timing.type = TIMING_LINEAR;
     if (get_type_id(options_item) == LMD_TYPE_MAP ||
         get_type_id(options_item) == LMD_TYPE_VMAP) {
-        Item duration = js_get_key_cstr(options_item, "duration");
+        Item duration = dom_realm_get_cstr(options_item, "duration");
         if (!is_js_undefined(duration) && duration.item != ITEM_NULL) {
             duration_ms = js_web_animation_number(duration, 0.0f);
         }
-        Item easing = js_get_key_cstr(options_item, "easing");
+        Item easing = dom_realm_get_cstr(options_item, "easing");
         const char* easing_text = fn_to_cstr(easing);
         if (easing_text) {
             css_animation_parse_timing_function_text(easing_text, &timing);
@@ -16236,21 +16299,21 @@ extern "C" Item dom_element_animate(Item keyframes_item, Item options_item) {
     // A plain object keeps pause/reverse on the normal JS method path; the
     // private native holder supplies the DOM-owned state to accessors.
     Rooted<Item> animation_root(roots, js_new_object());
-    js_set_key_cstr(animation_root.get(), "__lambda_web_animation_host",
+    dom_realm_set_cstr(animation_root.get(), "__lambda_web_animation_host",
                     holder_root.get());
-    js_set_native_key(animation_root.get(), js_string_key("pause"),
+    dom_realm_set_native(animation_root.get(), js_string_key("pause"),
                       js_web_animation_pause);
-    js_set_native_key(animation_root.get(), js_string_key("reverse"),
+    dom_realm_set_native(animation_root.get(), js_string_key("reverse"),
                       js_web_animation_reverse);
-    js_install_native_accessor(animation_root.get(), js_string_key("currentTime"),
-        js_new_native_function(js_web_animation_current_time_get),
-        js_new_native_function(js_web_animation_current_time_set),
+    dom_realm_install_accessor(animation_root.get(), js_string_key("currentTime"),
+        dom_realm_new_function(js_web_animation_current_time_get),
+        dom_realm_new_function(js_web_animation_current_time_set),
         JSPD_NON_ENUMERABLE);
     // Animation.ready is settled at creation. Resolve with an inert value:
     // Promise.resolve(animation) would observe a page-defined Object.prototype
     // `then` getter, unlike the internal ready promise in Web Animations.
-    js_set_key_cstr(animation_root.get(), "ready",
-                    js_promise_resolve(make_js_undefined()));
+    dom_realm_set_cstr(animation_root.get(), "ready",
+                    dom_realm_promise_resolve(make_js_undefined()));
     return animation_root.get();
 }
 

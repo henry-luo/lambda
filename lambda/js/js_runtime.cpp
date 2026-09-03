@@ -299,7 +299,9 @@ static inline void js_note_event_handler_property_set(Item object,
                                                        int name_len,
                                                        Item value) {
     if (!name || name_len < 3 || name[0] != 'o' || name[1] != 'n') return;
-    dom_event_handler_property_set(object, name, name_len, value);
+    // ES45: the handler assignment crosses the API like any other DOM write.
+    jube_internal_host_api()->dom_catalog->set_event_handler(
+        object, js_name_item(name, name_len), value);
 }
 
 static inline void js_note_event_handler_property_set(Item object, Item key,
@@ -6681,6 +6683,22 @@ static Item js_set_array_core(Item object, Item key, Item value,
     return js_elements_set_mode(object, key, value, strict);
 }
 
+// ES45: the second dataset assignment path, routed the same way as the one in
+// js_globals.cpp -- unwrap the proxy here, write through the catalog's row.
+static bool js_dataset_set_via_api(Item dataset, Item key, Item value) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* key_string = it2s(key);
+    if (!key_string ||
+        (key_string->len == 24 &&
+         strncmp(key_string->chars, "__lambda_dataset_element", 24) == 0)) {
+        return false;
+    }
+    Item owner = js_get_key_cstr(dataset, "__lambda_dataset_element");
+    if (get_type_id(owner) != LMD_TYPE_VMAP) return false;
+    jube_internal_host_api()->dom_catalog->set_data(owner, key, value);
+    return true;
+}
+
 static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
                                 bool bypass_accessor_dispatch, bool strict) {
     // OffscreenCanvas / CanvasRenderingContext2D property intercept (ctx.font = "...")
@@ -6714,7 +6732,7 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
         // new String("x") must address property "x", not an unnameable slot.
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     }
-    if (!bypass_accessor_dispatch && dom_dataset_set_object_property(object, key, value)) {
+    if (!bypass_accessor_dispatch && js_dataset_set_via_api(object, key, value)) {
         return value;
     }
     bool private_internal_property_key = js_is_private_internal_property_key(key);
@@ -9659,14 +9677,6 @@ static Item js_invoke_public_by_count(void* func_ptr, const Item* args,
 #undef JS_MIR_PUBLIC_DISPATCH_CASE
 }
 
-static Item* js_root_span_items(RootSpan& span) {
-    static_assert(sizeof(Item) == sizeof(uint64_t),
-        "JS adapter Item roots must match side-root cells");
-    static_assert(alignof(Item) == alignof(uint64_t),
-        "JS adapter Item roots must match side-root alignment");
-    return (Item*)(void*)span.words();
-}
-
 // Keep source actuals separate from wrapper operands: `arguments` must retain
 // every original actual even when rest lowering replaces the final ABI operand.
 struct JsCallAdapterSpan {
@@ -9681,7 +9691,7 @@ struct JsCallAdapterSpan {
         : actual_items(actual), actual_count(actual_argc), invoke_items(actual),
           invoke_count(required_argc),
           owned_roots(needs_owned_span ? (size_t)required_argc : 0) {
-        if (needs_owned_span) invoke_items = js_root_span_items(owned_roots);
+        if (needs_owned_span) invoke_items = owned_roots.items();
     }
 };
 
@@ -9944,7 +9954,7 @@ static Item js_invoke_fn_with_source(JsFunction* fn, Item* args, int arg_count,
         ? 0 : (size_t)arg_count);
     Item* source_args = args;
     if (!args_prerooted && arg_count > 0) {
-        source_args = js_root_span_items(source_roots);
+        source_args = source_roots.items();
         if (!source_args) return ItemError;
         for (int i = 0; i < arg_count; i++) {
             source_args[i] = args ? args[i] : ItemNull;
@@ -12987,10 +12997,13 @@ JS_GENERATOR_INTRINSIC_BODY(js_intrinsic_async_generator_throw_body,
 JS_RUNTIME_THIS_BODY(js_intrinsic_iterator_identity_body, this_value)
 JS_RUNTIME_BINARY_BODY(js_intrinsic_proxy_revocable_body,
     js_proxy_revocable(arg0, arg1))
+// ES45: through the DOM API, not into a DOM body. The catalog's rows are fixed
+// arity, so CSS.supports's one-argument overload passes null for the value.
 JS_RUNTIME_ARGS_BODY(js_intrinsic_css_supports_body,
-    dom_css_supports_operation(args, argc))
+    jube_internal_host_api()->dom_catalog->css_supports(
+        argc > 0 ? args[0] : ItemNull, argc > 1 ? args[1] : ItemNull))
 JS_RUNTIME_ARGS_BODY(js_intrinsic_css_escape_body,
-    dom_css_escape_operation(args, argc))
+    jube_internal_host_api()->dom_catalog->css_escape(argc > 0 ? args[0] : ItemNull))
 
 #undef JS_RUNTIME_BINARY_BODY
 #undef JS_RUNTIME_THIS_UNARY_BODY
@@ -13851,7 +13864,7 @@ static bool js_prepare_owned_argument_span(Item*& args, int count,
     }
     if (!args_prerooted && count > 0) {
         Item* source = args;
-        Item* rooted = js_root_span_items(owned_roots);
+        Item* rooted = owned_roots.items();
         if (!rooted) return false;
         for (int i = 0; i < count; i++) rooted[i] = source ? source[i] : ItemNull;
         args = rooted;
@@ -13937,7 +13950,7 @@ Item js_construct_entry_bound(Item func_item, Item* args, int arg_count,
     }
     int total_argc = fn->bound_argc + arg_count;
     RootSpan merged_roots(total_argc > 0 ? (size_t)total_argc : 0);
-    Item* merged = total_argc > 0 ? js_root_span_items(merged_roots) : NULL;
+    Item* merged = total_argc > 0 ? merged_roots.items() : NULL;
     if (total_argc > 0 && !merged) return ItemError;
     for (int i = 0; i < fn->bound_argc; i++) merged[i] = fn->bound_args[i];
     for (int i = 0; i < arg_count; i++) {
@@ -13967,7 +13980,7 @@ Item js_call_entry_bound(Item func_item, Item this_val, Item* args,
     Rooted<Item> target_root(roots, js_bound_function_target(func_item));
     Rooted<Item> this_root(roots, js_function_get_bound_this(fn));
     RootSpan merged_roots(total_argc > 0 ? (size_t)total_argc : 0);
-    Item* merged = total_argc > 0 ? js_root_span_items(merged_roots) : NULL;
+    Item* merged = total_argc > 0 ? merged_roots.items() : NULL;
     if (!roots.valid() || (total_argc > 0 && !merged)) return ItemError;
     fn = (JsFunction*)wrapper_root.get().function;
     if (target_root.get().item == ItemNull.item) {
@@ -25605,7 +25618,7 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
         Rooted<Item> element_root(concat_roots, ItemNull);
         Rooted<Item> sub_element_root(concat_roots, ItemNull);
         RootSpan concat_arg_roots(argc > 0 ? (size_t)argc : 0);
-        Item* concat_args = argc > 0 ? js_root_span_items(concat_arg_roots) : NULL;
+        Item* concat_args = argc > 0 ? concat_arg_roots.items() : NULL;
         if ((argc > 0 && (!concat_args || !concat_arg_roots.valid())) ||
                 !concat_roots.valid()) return ItemError;
         for (int index = 0; index < argc; index++) concat_args[index] = args[index];

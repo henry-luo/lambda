@@ -13,11 +13,10 @@
 // name, not the parent of <html>, and not usable as the document argument to
 // create_node. A walk upward stopped at the document element while JS
 // getRootNode() answered the Document.
-import radiant
 import dom
 
-let doc = radiant.load("test/js/dom_identity.html")
-let root = radiant.root(doc)
+let doc = dom.load("test/js/dom_identity.html")
+let root = dom.document_element(doc)
 let intro = dom.get_element_by_id(root, "intro")
 let docnode = dom.parent_node(root)
 

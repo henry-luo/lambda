@@ -1,0 +1,8 @@
+{
+  words_checked: 15,
+  encoded_words: ["", "abc", "a+b", "a%2Bb", "a%26b%3Dc", "hello+world%21", "*-._", "%7E%2F%3F%23%5B%5D%40", "100%25", "%C3%9Cn%C3%AFc%C3%B8d%C3%A9", "%E6%97%A5%E6%9C%AC%E8%AA%9E", "emoji+%F0%9F%98%80+here", "line%0Abreak", "tab%09here", "quote%22and%27apos"],
+  ascii_codes_checked: 95,
+  encoded_sample: "a+b%26c%3Dd%2Be%2Ff%3Fg%23h",
+  utf8_sample: "%C3%9Cn%C3%AFc%C3%B8d%C3%A9",
+  utf8_multibyte: "%E6%97%A5%E6%9C%AC%E8%AA%9E"
+}

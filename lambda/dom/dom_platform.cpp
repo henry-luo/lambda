@@ -1,4 +1,5 @@
 #include "dom_platform.h"
+#include "realm/dom_realm.h"
 #include "dom_events.h"
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
@@ -59,7 +60,7 @@ static const char* platform_string(Item value) {
 }
 
 static JsStorageState* storage_from_this(void) {
-    Item receiver = js_get_this();
+    Item receiver = dom_realm_receiver();
     if (receiver.item == dom_local_storage.object.item) return &dom_local_storage;
     if (receiver.item == dom_session_storage.object.item) return &dom_session_storage;
     return nullptr;
@@ -161,20 +162,20 @@ static Item storage_object(JsStorageState* storage) {
 
     RootFrame roots(1);
     Rooted<Item> descriptor_root(roots, ItemNull);
-    js_install_native_method(object, "key", js_storage_key, 1);
-    js_install_native_method(object, "getItem", js_storage_get_item, 1);
-    js_install_native_method(object, "setItem", js_storage_set_item, 2);
-    js_install_native_method(object, "removeItem", js_storage_remove_item, 1);
-    js_install_native_method(object, "clear", js_storage_clear, 0);
+    dom_realm_install_method(object, "key", js_storage_key, 1);
+    dom_realm_install_method(object, "getItem", js_storage_get_item, 1);
+    dom_realm_install_method(object, "setItem", js_storage_set_item, 2);
+    dom_realm_install_method(object, "removeItem", js_storage_remove_item, 1);
+    dom_realm_install_method(object, "clear", js_storage_clear, 0);
 
     Item descriptor = js_new_object();
     descriptor_root.set(descriptor);
-    js_install_native_method(descriptor, "get", js_storage_length, 0);
-    js_set_key_default(descriptor, js_make_string("enumerable"),
+    dom_realm_install_method(descriptor, "get", js_storage_length, 0);
+    dom_realm_set(descriptor, js_make_string("enumerable"),
         (Item){.item = ITEM_TRUE});
-    js_set_key_default(descriptor, js_make_string("configurable"),
+    dom_realm_set(descriptor, js_make_string("configurable"),
         (Item){.item = ITEM_TRUE});
-    js_object_define_property(object, js_make_string("length"), descriptor);
+    dom_realm_define_property(object, js_make_string("length"), descriptor);
     return object;
 }
 JS_FORWARD_ITEM(dom_storage_local_object, (void), storage_object, (&dom_local_storage))
@@ -194,7 +195,7 @@ extern "C" void dom_storage_reset(void) {
 }
 
 static JsMediaQueryState* media_query_from_this(void) {
-    Item receiver = js_get_this();
+    Item receiver = dom_realm_receiver();
     for (int i = 0; i < dom_media_query_count; i++) {
         if (dom_media_queries[i].object.item == receiver.item) return &dom_media_queries[i];
     }
@@ -240,23 +241,23 @@ extern "C" Item dom_match_media(Item query_item) {
 
     RootFrame roots(1);
     Rooted<Item> descriptor_root(roots, ItemNull);
-    js_set_key_default(state->object, js_make_string("media"),
+    dom_realm_set(state->object, js_make_string("media"),
         js_make_string(state->query));
-    js_set_key_default(state->object, js_make_string("onchange"), ItemNull);
-    js_set_key_default(state->object, js_make_string("addListener"),
-        js_new_native_function(js_media_query_add_listener));
-    js_set_key_default(state->object, js_make_string("removeListener"),
-        js_new_native_function(js_media_query_remove_listener));
+    dom_realm_set(state->object, js_make_string("onchange"), ItemNull);
+    dom_realm_set(state->object, js_make_string("addListener"),
+        dom_realm_new_function(js_media_query_add_listener));
+    dom_realm_set(state->object, js_make_string("removeListener"),
+        dom_realm_new_function(js_media_query_remove_listener));
 
     Item descriptor = js_new_object();
     descriptor_root.set(descriptor);
-    js_set_key_default(descriptor, js_make_string("get"),
-        js_new_native_function(js_media_query_matches));
-    js_set_key_default(descriptor, js_make_string("enumerable"),
+    dom_realm_set(descriptor, js_make_string("get"),
+        dom_realm_new_function(js_media_query_matches));
+    dom_realm_set(descriptor, js_make_string("enumerable"),
         (Item){.item = ITEM_TRUE});
-    js_set_key_default(descriptor, js_make_string("configurable"),
+    dom_realm_set(descriptor, js_make_string("configurable"),
         (Item){.item = ITEM_TRUE});
-    js_object_define_property(state->object, js_make_string("matches"), descriptor);
+    dom_realm_define_property(state->object, js_make_string("matches"), descriptor);
     return state->object;
 }
 
@@ -267,13 +268,13 @@ extern "C" void dom_match_media_notify_resize(void) {
         if (next == state->matches) continue;
         state->matches = next;
         Item event = js_create_event("change", false, false);
-        js_set_key_default(event, js_make_string("matches"),
+        dom_realm_set(event, js_make_string("matches"),
             (Item){.item = b2it(next)});
-        js_set_key_default(event, js_make_string("media"),
+        dom_realm_set(event, js_make_string("media"),
             js_make_string(state->query));
         dom_dispatch_event(state->object, event);
-        Item onchange = js_get_key_default(state->object, js_make_string("onchange"));
-        if (js_is_callable(onchange)) js_call_function(onchange, state->object, &event, 1);
+        Item onchange = dom_realm_get(state->object, js_make_string("onchange"));
+        if (dom_realm_is_callable(onchange)) dom_realm_call(onchange, state->object, &event, 1);
     }
 }
 

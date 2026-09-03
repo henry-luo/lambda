@@ -1,0 +1,9 @@
+{
+  form_elements_checked: 38,
+  details_elements_checked: 22,
+  radio_group_sizes: [3, 3, 3],
+  details_group_sizes: [1, 1],
+  form_owners: [],
+  radios_found: 3,
+  details_found: 2
+}

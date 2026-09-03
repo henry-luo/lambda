@@ -27,6 +27,10 @@ enum DomOpFlags {
     DOM_F_SNAPSHOT = 1u << 2,
     DOM_F_ENGINE   = 1u << 3,
     DOM_F_FASTPATH = 1u << 4,
+    // No Lambda face yet: the row is in the catalog so the module can reach it,
+    // but it is not published to `dom.*`. States the policy explicitly instead
+    // of leaving it to the absence of DOM_F_NEUTRAL, which states a property.
+    DOM_F_NATIVE   = 1u << 5,
 };
 #define DOM_NO_BODY nullptr
 
@@ -51,6 +55,8 @@ Item dom_core_create_node(Item doc, Item type, Item name, Item data);
 Item dom_core_insert_before(Item parent, Item node, Item ref);
 Item dom_core_remove_child(Item parent, Item node);
 Item dom_core_set_node_value(Item n, Item data);
+Item dom_core_tc_set_selection(Item n, Item start, Item end, Item dir);
+Item dom_core_tc_replace_range(Item n, Item start, Item end, Item text);
 Item dom_core_set_text_content(Item n, Item text);
 Item dom_core_set_inner_html(Item n, Item html);
 // --- core: match / parse / serialize
@@ -70,8 +76,6 @@ Item dom_core_selection_boundaries(Item s);
 // --- core: style
 Item dom_core_computed_style(Item n, Item prop);
 // --- core: listeners (uniform 4-arg shape over dom_events)
-Item dom_add_event_listener_body(Item n, Item type, Item fn, Item opts);
-Item dom_remove_event_listener_body(Item n, Item type, Item fn, Item opts);
 
 // --- fast paths for derived operations (ES43: each equals its derivation)
 Item dom_fp_first_element_child(Item n);
@@ -83,6 +87,7 @@ Item dom_fp_children(Item n);
 Item dom_fp_child_nodes(Item n);
 Item dom_fp_contains(Item a, Item b);
 Item dom_fp_root_node(Item n);
+Item dom_fp_document_element(Item n);
 Item dom_fp_equal_node(Item a, Item b);
 Item dom_fp_append_child(Item parent, Item child);
 Item dom_fp_remove(Item n);
@@ -118,10 +123,115 @@ Item js_selection_extend(Item self_v, Item node_v, Item offset_v);
 Item js_selection_select_all_children(Item self_v, Item node_v);
 Item dom_global_get_selection(void);
 Item dom_create_range(void);
+// engine-provided document loader (seam declared in dom.h, ESO80)
+Item dom_engine_load_document(Item path);
+// engine-provided catalog rows (F32): the host implements these, the core
+// declares them, and a runtime without an engine gets the weak default.
+Item dom_engine_get_state(Item n, Item name);
+Item dom_engine_set_state(Item n, Item name, Item value);
+Item dom_engine_request_change(Item n);
+Item dom_engine_dispatch(Item n, Item event);
+Item dom_engine_focused(Item n);
+Item dom_engine_focus_set(Item n, Item from_keyboard);
+Item dom_engine_activate_popover(Item a);
+Item dom_engine_caret_operation(Item a, Item b, Item c);
+Item dom_engine_clear_ime_preedit(Item a);
+Item dom_engine_clipboard_text(void);
+Item dom_engine_context_menu_target(Item a);
+Item dom_engine_edit_insert_at_boundary(Item a, Item b);
+Item dom_engine_edit_insert_break(Item a);
+Item dom_engine_edit_replace_range(Item a, Item b, Item c, Item d);
+Item dom_engine_edit_split_block(Item a);
+Item dom_engine_key_intent(Item a, Item b);
+Item dom_engine_navigation_destination(Item a, Item b, Item c);
+Item dom_engine_open_context_menu(Item a, Item b);
+Item dom_engine_request_navigation(Item a);
+Item dom_engine_set_caret(Item a, Item b);
+Item dom_engine_set_ime_preedit(Item a, Item b, Item c);
+Item dom_engine_set_password_reveal(Item a, Item b, Item c);
+Item dom_engine_tc_value(Item a);
+Item dom_engine_ime_preedit(Item a);
+Item dom_engine_tc_selection_start(Item a);
+Item dom_engine_tc_selection_end(Item a);
+Item dom_engine_edit_node(Item a);
+Item dom_engine_edit_start(Item a);
+Item dom_engine_edit_end(Item a);
+Item dom_engine_is_focusable(Item a);
+Item dom_engine_dispatch_event(Item n, Item type, Item bubbles, Item cancelable);
+Item dom_engine_caret_surface(Item a);
+Item dom_engine_focus_candidates(Item a);
+Item dom_engine_check_validity(Item a);
+Item dom_engine_close_context_menu(Item a);
+Item dom_engine_custom_validity(Item a);
+Item dom_engine_dom_delete_dom_range(Item a);
+Item dom_engine_dom_edit_text(Item a);
+Item dom_engine_dom_insert_html(Item a, Item b);
+Item dom_engine_dom_range_format(Item a, Item b);
+Item dom_engine_dom_replace_dom_range(Item a, Item b);
+Item dom_engine_dom_replace_range(Item a, Item b, Item c, Item d);
+Item dom_engine_dom_unwrap_range(Item a, Item b, Item c, Item d);
+Item dom_engine_dom_wrap_range(Item a, Item b, Item c, Item d);
+Item dom_engine_dropdown_open(Item a);
+Item dom_engine_embedded_document_root(Item a);
+Item dom_engine_embedding_element(Item a);
+Item dom_engine_form_boundary(void);
+Item dom_engine_form_entries(Item a, Item b);
+Item dom_engine_form_url(Item a);
+Item dom_engine_hover_index(Item a);
+Item dom_engine_option_count(Item a);
+Item dom_engine_range_max(Item a);
+Item dom_engine_range_min(Item a);
+Item dom_engine_range_value(Item a);
+Item dom_engine_reset_form(Item a);
+Item dom_engine_scroll_operation(Item a, Item b);
+Item dom_engine_selected_index(Item a);
+Item dom_engine_set_dropdown_open(Item a, Item b);
+Item dom_engine_set_hover_index(Item a, Item b);
+Item dom_engine_set_selected_index(Item a, Item b);
+Item dom_engine_submit_event(Item a, Item b);
+Item dom_engine_value_at_focus(Item a);
+Item dom_core_dispatch(Item n, Item event);
+Item dom_core_get_property(Item n, Item name);
+Item dom_core_set_property(Item n, Item name, Item value);
+Item dom_core_invoke(Item n, Item op, Item args);
+Item dom_core_css_supports(Item property, Item value);
+Item dom_core_css_escape(Item text);
+Item dom_core_set_data(Item n, Item name, Item value);
+Item dom_core_set_event_handler(Item n, Item name, Item handler);
 Item dom_parser_parse_from_string(Item markup, Item mime);
 Item dom_cssom_stylesheet_get_css_rules(Item sheet_item);
 Item dom_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_arg);
 Item dom_cssom_delete_rule(Item sheet_item, Item index_arg);
+
+// Lambda has no `undefined`, so absence crossing into a Lambda-facing value is
+// null (ESO98, ESO103). This is the *Lambda face's* rule, not the core's: a row
+// body may answer `undefined` because JS shares it, and the publication boundary
+// in dom_module.cpp is what renders that as null.
+Item dom_absent_to_null(Item v);
+
+// Rows that are literally their JS-facing bridge: the bridge already has the
+// row's signature, and its `undefined` becomes null at the publication boundary,
+// so one body serves both doors (ES38) instead of a Lambda-only copy.
+Item dom_add_event_listener_bridge(Item n, Item type, Item fn, Item opts);
+Item dom_remove_event_listener_bridge(Item n, Item type, Item fn, Item opts);
+Item dom_adopt_node_bridge(Item);
+Item dom_style_css_has(Item, Item);
+Item dom_get_style_property(Item, Item);
+Item dom_set_style_property(Item, Item, Item);
+Item dom_cssom_decl_css_has(Item, Item);
+Item dom_cssom_rule_decl_get_property(Item, Item);
+Item dom_cssom_rule_decl_set_property(Item, Item, Item);
+Item dom_cssom_rule_decl_remove_property(Item, Item);
+Item dom_cssom_rule_set_selector_text(Item, Item);
+Item dom_document_stylesheets_bridge(void);
+Item dom_document_implementation_bridge(void);
+Item dom_document_fonts_bridge(void);
+Item dom_document_design_mode_bridge(void);
+Item dom_document_exec_command_bridge(Item, Item);
+Item dom_create_tree_walker_bridge(Item, Item);
+Item dom_report_validity_bridge(Item);
+Item dom_form_submit_bridge(Item);
+Item dom_form_request_submit_bridge(Item, Item);
 
 #ifdef __cplusplus
 }

@@ -6409,6 +6409,24 @@ static Item js_reflect_set_define_receiver(Item receiver, Item key, Item value, 
 
 // Reflect.set(target, key, value [, receiver]) — returns boolean.
 // ES §28.1.14 → §10.1.9.1 OrdinarySet → §10.1.9.2 OrdinarySetWithOwnDescriptor.
+// ES45: a dataset assignment crosses the DOM API. Unwrapping the dataset proxy
+// to its element is a JS-object concern and stays here, where the proxy lives;
+// the write itself is the catalog's set_data row. Returns false when the target
+// is not a dataset view, so the caller falls through to the ordinary path.
+static bool js_dataset_set_through_api(Item dataset, Item key, Item value) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* key_string = it2s(key);
+    if (!key_string ||
+        (key_string->len == 24 &&
+         strncmp(key_string->chars, "__lambda_dataset_element", 24) == 0)) {
+        return false;
+    }
+    Item owner = js_get_key_cstr(dataset, "__lambda_dataset_element");
+    if (get_type_id(owner) != LMD_TYPE_VMAP) return false;
+    jube_internal_host_api()->dom_catalog->set_data(owner, key, value);
+    return true;
+}
+
 static bool js_reflect_receiver_accepts_data(Item receiver_descriptor,
         Item set_key, Item get_key, Item writable_key) {
     if (get_type_id(receiver_descriptor) != LMD_TYPE_MAP) return true;
@@ -6555,7 +6573,7 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     value = value_root.get();
     receiver = receiver_root.get();
     if (receiver.item == target.item &&
-            dom_dataset_set_object_property(target_root.get(), key_root.get(),
+            js_dataset_set_through_api(target_root.get(), key_root.get(),
                                                value_root.get())) {
         // Dataset assignment otherwise takes the ordinary Map fast path and
         // only mutates the temporary object returned by the getter.

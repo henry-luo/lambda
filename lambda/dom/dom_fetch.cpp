@@ -6,6 +6,7 @@
  * Returns a Promise<Response> matching the web fetch() API.
  */
 #include "../js/js_runtime.h"
+#include "realm/dom_realm.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_event_loop.h"
 #include "../jube/jube_node_permission.h"
@@ -236,69 +237,69 @@ static const char* mime_from_url(const char* url) {
 }
 
 static Item js_response_text() {
-    if (!js_fetch_runtime_state_get()) return js_promise_resolve(ItemNull);
-    Item this_resp = js_get_this();
+    if (!js_fetch_runtime_state_get()) return dom_realm_promise_resolve(ItemNull);
+    Item this_resp = dom_realm_receiver();
     String* key = heap_create_name("__body_idx", 10);
-    Item idx_item = js_get_key_default(this_resp, (Item){.item = s2it(key)});
-    if (get_type_id(idx_item) != LMD_TYPE_INT) return js_promise_resolve(ItemNull);
+    Item idx_item = dom_realm_get(this_resp, (Item){.item = s2it(key)});
+    if (get_type_id(idx_item) != LMD_TYPE_INT) return dom_realm_promise_resolve(ItemNull);
 
     int idx = (int)it2i(idx_item);
     if (idx < 0 || idx >= response_body_count || !response_bodies[idx])
-        return js_promise_resolve(ItemNull);
+        return dom_realm_promise_resolve(ItemNull);
 
     Item body = make_string_item(response_bodies[idx], response_body_lens[idx]);
-    return js_promise_resolve(body);
+    return dom_realm_promise_resolve(body);
 }
 
 static Item js_response_json() {
-    if (!js_fetch_runtime_state_get()) return js_promise_resolve(ItemNull);
-    Item this_resp = js_get_this();
+    if (!js_fetch_runtime_state_get()) return dom_realm_promise_resolve(ItemNull);
+    Item this_resp = dom_realm_receiver();
     String* key = heap_create_name("__body_idx", 10);
-    Item idx_item = js_get_key_default(this_resp, (Item){.item = s2it(key)});
-    if (get_type_id(idx_item) != LMD_TYPE_INT) return js_promise_resolve(ItemNull);
+    Item idx_item = dom_realm_get(this_resp, (Item){.item = s2it(key)});
+    if (get_type_id(idx_item) != LMD_TYPE_INT) return dom_realm_promise_resolve(ItemNull);
 
     int idx = (int)it2i(idx_item);
     if (idx < 0 || idx >= response_body_count || !response_bodies[idx])
-        return js_promise_resolve(ItemNull);
+        return dom_realm_promise_resolve(ItemNull);
 
     Item body_str = make_string_item(response_bodies[idx], response_body_lens[idx]);
     Item parsed = js_json_parse(body_str);
-    return js_promise_resolve(parsed);
+    return dom_realm_promise_resolve(parsed);
 }
 
 // Synthesise a Blob-shaped JS object whose `text()` / `arrayBuffer()` / `slice()`
 // methods mirror the WPT shim's Blob polyfill closely enough for the clipboard
 // suite. Used by Response.blob().
 static Item js_response_blob_text() {
-    Item this_blob = js_get_this();
+    Item this_blob = dom_realm_receiver();
     String* tk = heap_create_name("_text", 5);
-    Item t = js_get_key_default(this_blob, (Item){.item = s2it(tk)});
-    if (get_type_id(t) != LMD_TYPE_STRING) return js_promise_resolve(make_string_item(""));
-    return js_promise_resolve(t);
+    Item t = dom_realm_get(this_blob, (Item){.item = s2it(tk)});
+    if (get_type_id(t) != LMD_TYPE_STRING) return dom_realm_promise_resolve(make_string_item(""));
+    return dom_realm_promise_resolve(t);
 }
 
 static Item make_blob_object(const char* bytes, int len, const char* type) {
     Item blob = js_new_object();
-    js_set_key_cstr(blob, "_text", make_string_item(bytes ? bytes : "", len));
-    js_set_key_cstr(blob, "size", (Item){.item = i2it(len)});
-    js_set_key_cstr(blob, "type", make_string_item(type ? type : "application/octet-stream"));
-    js_set_native_key(blob, make_string_item("text"), js_response_blob_text);
+    dom_realm_set_cstr(blob, "_text", make_string_item(bytes ? bytes : "", len));
+    dom_realm_set_cstr(blob, "size", (Item){.item = i2it(len)});
+    dom_realm_set_cstr(blob, "type", make_string_item(type ? type : "application/octet-stream"));
+    dom_realm_set_native(blob, make_string_item("text"), js_response_blob_text);
     return blob;
 }
 
 static Item js_response_blob() {
-    if (!js_fetch_runtime_state_get()) return js_promise_resolve(ItemNull);
-    Item this_resp = js_get_this();
+    if (!js_fetch_runtime_state_get()) return dom_realm_promise_resolve(ItemNull);
+    Item this_resp = dom_realm_receiver();
     String* key = heap_create_name("__body_idx", 10);
-    Item idx_item = js_get_key_default(this_resp, (Item){.item = s2it(key)});
-    if (get_type_id(idx_item) != LMD_TYPE_INT) return js_promise_resolve(ItemNull);
+    Item idx_item = dom_realm_get(this_resp, (Item){.item = s2it(key)});
+    if (get_type_id(idx_item) != LMD_TYPE_INT) return dom_realm_promise_resolve(ItemNull);
     int idx = (int)it2i(idx_item);
     if (idx < 0 || idx >= response_body_count || !response_bodies[idx])
-        return js_promise_resolve(ItemNull);
+        return dom_realm_promise_resolve(ItemNull);
     const char* type = (idx < MAX_FETCH_RESPONSES && response_types[idx]) ?
                        response_types[idx] : "application/octet-stream";
     Item blob = make_blob_object(response_bodies[idx], response_body_lens[idx], type);
-    return js_promise_resolve(blob);
+    return dom_realm_promise_resolve(blob);
 }
 
 static Item build_response_object(JsFetchWork* fw) {
@@ -306,12 +307,12 @@ static Item build_response_object(JsFetchWork* fw) {
 
     // status
     Item status_key = make_string_item("status");
-    js_set_key_default(resp, status_key, (Item){.item = i2it(fw->status_code)});
+    dom_realm_set(resp, status_key, (Item){.item = i2it(fw->status_code)});
 
     // ok (200-299)
     Item ok_key = make_string_item("ok");
     bool ok = fw->status_code >= 200 && fw->status_code <= 299;
-    js_set_key_default(resp, ok_key, (Item){.item = b2it(ok)});
+    dom_realm_set(resp, ok_key, (Item){.item = b2it(ok)});
 
     // statusText
     Item st_key = make_string_item("statusText");
@@ -327,11 +328,11 @@ static Item build_response_object(JsFetchWork* fw) {
                      (fw->status_code == 404) ? "Not Found" :
                      (fw->status_code == 500) ? "Internal Server Error" :
                      "";
-    js_set_key_default(resp, st_key, make_string_item(st));
+    dom_realm_set(resp, st_key, make_string_item(st));
 
     // url
     Item url_key = make_string_item("url");
-    js_set_key_default(resp, url_key, make_string_item(fw->url));
+    dom_realm_set(resp, url_key, make_string_item(fw->url));
 
     // store body for text()/json()/blob() methods
     int body_idx = -1;
@@ -346,20 +347,20 @@ static Item build_response_object(JsFetchWork* fw) {
     }
 
     Item body_idx_key = make_string_item("__body_idx");
-    js_set_key_default(resp, body_idx_key, (Item){.item = i2it(body_idx)});
+    dom_realm_set(resp, body_idx_key, (Item){.item = i2it(body_idx)});
 
     // text() method
     Item text_key = make_string_item("text");
-    Item text_fn = js_new_native_function(js_response_text);
-    js_set_key_default(resp, text_key, text_fn);
+    Item text_fn = dom_realm_new_function(js_response_text);
+    dom_realm_set(resp, text_key, text_fn);
 
     // json() method
     Item json_key = make_string_item("json");
-    Item json_fn = js_new_native_function(js_response_json);
-    js_set_key_default(resp, json_key, json_fn);
+    Item json_fn = dom_realm_new_function(js_response_json);
+    dom_realm_set(resp, json_key, json_fn);
 
     // blob() method — returns Promise<Blob-like object> with .type/.size/.text()
-    js_set_native_key(resp, make_string_item("blob"), js_response_blob);
+    dom_realm_set_native(resp, make_string_item("blob"), js_response_blob);
 
     return resp;
 }
@@ -374,18 +375,18 @@ static void fetch_after_work_cb(uv_work_t* req, int status) {
     if (status != 0 || fw->curl_error != 0) {
         // network error
         const char* msg = fw->error_msg[0] ? fw->error_msg : "fetch failed";
-        Item error = js_new_error_with_name(make_string_item("TypeError"), make_string_item(msg));
+        Item error = dom_realm_new_error_named(make_string_item("TypeError"), make_string_item(msg));
         Item args[1] = {error};
-        js_call_function(fw->reject_fn, ItemNull, args, 1);
+        dom_realm_call(fw->reject_fn, ItemNull, args, 1);
     } else {
         // success — build Response object and resolve
         Item response = build_response_object(fw);
         Item args[1] = {response};
-        js_call_function(fw->resolve_fn, ItemNull, args, 1);
+        dom_realm_call(fw->resolve_fn, ItemNull, args, 1);
     }
 
     // flush microtasks after resolving the promise
-    js_microtask_flush();
+    dom_realm_microtask_flush();
 
     // cleanup
     if (fw->method) mem_free(fw->method);
@@ -404,7 +405,7 @@ static void fetch_apply_options(JsFetchWork* fw, Item options) {
 
     // method
     Item method_key = make_string_item("method");
-    Item method_val = js_get_key_default(options, method_key);
+    Item method_val = dom_realm_get(options, method_key);
     if (get_type_id(method_val) == LMD_TYPE_STRING) {
         String* ms = it2s(method_val);
         fw->method = (char*)mem_alloc(ms->len + 1, MEM_CAT_JS_RUNTIME);
@@ -414,7 +415,7 @@ static void fetch_apply_options(JsFetchWork* fw, Item options) {
 
     // body
     Item body_key = make_string_item("body");
-    Item body_val = js_get_key_default(options, body_key);
+    Item body_val = dom_realm_get(options, body_key);
     if (get_type_id(body_val) == LMD_TYPE_STRING) {
         String* bs = it2s(body_val);
         fw->body = (char*)mem_alloc(bs->len + 1, MEM_CAT_JS_RUNTIME);
@@ -425,7 +426,7 @@ static void fetch_apply_options(JsFetchWork* fw, Item options) {
 
     // headers (map of key→value strings)
     Item headers_key = make_string_item("headers");
-    Item headers_val = js_get_key_default(options, headers_key);
+    Item headers_val = dom_realm_get(options, headers_key);
     if (get_type_id(headers_val) == LMD_TYPE_MAP) {
         Item keys = js_object_keys(headers_val);
         if (get_type_id(keys) == LMD_TYPE_ARRAY) {
@@ -433,7 +434,7 @@ static void fetch_apply_options(JsFetchWork* fw, Item options) {
             for (int i = 0; i < len; i++) {
                 Item idx = {.item = i2it(i)};
                 Item hkey = js_elements_get(keys, idx);
-                Item hval = js_get_key_default(headers_val, hkey);
+                Item hval = dom_realm_get(headers_val, hkey);
                 if (get_type_id(hkey) == LMD_TYPE_STRING && get_type_id(hval) == LMD_TYPE_STRING) {
                     String* ks = it2s(hkey);
                     String* vs = it2s(hval);
@@ -470,13 +471,13 @@ static Item fetch_executor(Item resolve_fn, Item reject_fn) {
 
 extern "C" Item js_fetch(Item url_item, Item options_item) {
     if (!js_fetch_runtime_state_ensure()) {
-        return js_promise_reject(js_new_error(make_string_item(
+        return dom_realm_promise_reject(dom_realm_new_error(make_string_item(
             "fetch: no active execution context")));
     }
     char url_buf[2048];
     const char* url = js_item_to_cstr(url_item, url_buf, sizeof(url_buf));
     if (!url) {
-        return js_promise_reject(js_new_error_with_name(make_string_item("TypeError"), make_string_item("fetch: invalid URL")));
+        return dom_realm_promise_reject(dom_realm_new_error_named(make_string_item("TypeError"), make_string_item("fetch: invalid URL")));
     }
 
     // ---- Local-file fast path -------------------------------------------------
@@ -533,8 +534,8 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         if (!f) {
             char msg[2200];
             snprintf(msg, sizeof(msg), "fetch failed: cannot open '%s'", path);
-            return js_promise_reject(
-                js_new_error_with_name(make_string_item("TypeError"), make_string_item(msg)));
+            return dom_realm_promise_reject(
+                dom_realm_new_error_named(make_string_item("TypeError"), make_string_item(msg)));
         }
         fseek(f, 0, SEEK_END);
         long sz = ftell(f);
@@ -561,7 +562,7 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         if (fw->body) mem_free(fw->body);
         mem_free(fw);
 
-        return js_promise_resolve(resp);
+        return dom_realm_promise_resolve(resp);
     }
     // ---------------------------------------------------------------------------
 
@@ -569,20 +570,20 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         // blocked network fetches must reject before queueing curl work, or the
         // permission fixture waits for the worker/drain timeout instead of catch().
         Item cause = js_permission_make_net_error("connect", url);
-        Item err = js_new_error_with_name(make_string_item("TypeError"), make_string_item("fetch failed"));
-        js_set_key_cstr(err, "cause", cause);
-        return js_promise_reject(err);
+        Item err = dom_realm_new_error_named(make_string_item("TypeError"), make_string_item("fetch failed"));
+        dom_realm_set_cstr(err, "cause", cause);
+        return dom_realm_promise_reject(err);
     }
 
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) {
-        return js_promise_reject(js_new_error(make_string_item("fetch: event loop not initialized")));
+        return dom_realm_promise_reject(dom_realm_new_error(make_string_item("fetch: event loop not initialized")));
     }
 
     // allocate work context
     JsFetchWork* fw = (JsFetchWork*)mem_calloc(1, sizeof(JsFetchWork), MEM_CAT_JS_RUNTIME);
     if (!fw) {
-        return js_promise_reject(js_new_error(make_string_item("fetch: allocation failed")));
+        return dom_realm_promise_reject(dom_realm_new_error(make_string_item("fetch: allocation failed")));
     }
 
     snprintf(fw->url, sizeof(fw->url), "%s", url);
@@ -595,15 +596,15 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
 
     // create promise — executor captures resolve/reject into fw
     pending_fetch_work = fw;
-    Item executor = js_new_native_function(fetch_executor);
-    Item promise = js_promise_create(executor);
+    Item executor = dom_realm_new_function(fetch_executor);
+    Item promise = dom_realm_promise_new(executor);
     pending_fetch_work = NULL;
 
     // queue work on thread pool
     int r = uv_queue_work(loop, &fw->work, fetch_work_cb, fetch_after_work_cb);
     if (r != 0) {
-        Item args[1] = {js_new_error(make_string_item("fetch: failed to queue work"))};
-        js_call_function(fw->reject_fn, ItemNull, args, 1);
+        Item args[1] = {dom_realm_new_error(make_string_item("fetch: failed to queue work"))};
+        dom_realm_call(fw->reject_fn, ItemNull, args, 1);
         // fw will be freed by after_work_cb if queued; since it wasn't, free now
         if (fw->method) mem_free(fw->method);
         if (fw->body) mem_free(fw->body);

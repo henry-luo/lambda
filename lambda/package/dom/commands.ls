@@ -11,7 +11,7 @@
 // Scope is the subset real editors invoke, not the full deprecated surface. A
 // command this module does not implement declines, and `execCommand` reports
 // false for it — the same answer `queryCommandSupported` would give.
-import radiant
+import dom
 
 // The name a page passes to execCommand, mapped to the WHATWG intent the
 // keyboard path already produces. Matching case-insensitively is not
@@ -48,20 +48,20 @@ pub fn is_format(intent) { format_tag(intent) != null }
 // format, it removes it. The state is read off the tree on every call rather
 // than cached (ES16), so a page's own DOM edits cannot leave it stale.
 pn toggle_format(host, tag) {
-    let node = radiant.dom_edit_node(host);
+    let node = dom.edit_node(host);
     if (node == null) { false }
     else {
-        let s = radiant.dom_edit_start(host);
-        let e = radiant.dom_edit_end(host);
+        let s = dom.edit_start(host);
+        let e = dom.edit_end(host);
         // A collapsed selection has no run to format. A browser remembers the
         // command and applies it to the next keystroke; that is stored state
         // with no channel through this waist, so the command declines rather
         // than reporting a change it did not make.
         if (s == e) { false }
-        else if (radiant.dom_range_format(host, tag)) {
-            radiant.dom_unwrap_range(host, s, e, tag)
+        else if (dom.dom_range_format(host, tag)) {
+            dom.dom_unwrap_range(host, s, e, tag)
         }
-        else { radiant.dom_wrap_range(host, s, e, tag) }
+        else { dom.dom_wrap_range(host, s, e, tag) }
     }
 }
 
@@ -74,7 +74,7 @@ pub pn run(host, intent, value) {
     if (tag != null) { toggle_format(host, tag) }
     else if (intent == "insertHTML") {
         let html = if (value == null) "" else value;
-        if (len(html) == 0) { false } else { radiant.dom_insert_html(host, html) }
+        if (len(html) == 0) { false } else { dom.dom_insert_html(host, html) }
     }
     // insertText is the same range replacement dom_edit.ls performs for typed
     // text, addressed by command name instead of by input type. It is here, not
@@ -83,17 +83,17 @@ pub pn run(host, intent, value) {
     // exactly what typing would have done.
     else if (intent == "insertText") {
         let data = if (value == null) "" else value;
-        radiant.dom_replace_dom_range(host, data)
+        dom.dom_replace_dom_range(host, data)
     }
     else if (intent == "deleteContentBackward" or
              intent == "deleteContentForward") {
-        radiant.dom_delete_dom_range(host)
+        dom.dom_delete_dom_range(host)
     }
     else if (intent == "insertParagraph") {
-        radiant.dom_insert_paragraph(host)
+        dom.edit_split_block(host)
     }
     else if (intent == "insertLineBreak") {
-        radiant.dom_insert_line_break(host)
+        dom.edit_insert_break(host)
     }
     else { false }
 }

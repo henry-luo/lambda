@@ -9,13 +9,13 @@
 // max and step (RAD_19 known-issue 6). `pattern` is still not covered: Lambda
 // exposes no regex system function today, so there is nothing to compile the
 // pattern with (ESO29). Native had the same gap for the same reason.
-import radiant
+import dom
 
 // --- helpers ---------------------------------------------------------------
 
 // An attribute that is absent reads as null; treat blank as absent too.
 fn attr_or_null(elem, name) {
-    let raw = radiant.attr(elem, name);
+    let raw = dom.get_attribute(elem, name);
     if (raw == null or raw == "") null else raw
 }
 
@@ -70,8 +70,8 @@ pub fn value_is_url(text) {
 // Returns true when every constraint the control declares is satisfied.
 pub fn is_valid(elem, text, input_type) {
     // A custom validity message set through the IDL overrides everything.
-    if (radiant.custom_validity(elem) != "") { false }
-    else if (radiant.get_state(elem, "required") and len(text) == 0) { false }
+    if (dom.custom_validity(elem) != "") { false }
+    else if (dom.get_state(elem, "required") and len(text) == 0) { false }
     else if (len(text) == 0) {
         // an empty, non-required control is valid regardless of the rest
         true
@@ -107,15 +107,15 @@ pub pn revalidate(elem) {
     // `view <input>` template also matches checkbox and radio, whose `value`
     // attribute is not text to length-check or parse — the retired native pass
     // gated on this same predicate.
-    if (radiant.text_control(elem)) {
-        let text = radiant.get_state(elem, "value");
-        let raw_type = radiant.attr(elem, "type");
+    if (dom.tc_value(elem)) {
+        let text = dom.get_state(elem, "value");
+        let raw_type = dom.get_attribute(elem, "type");
         // a missing or unrecognised type behaves as `text` (HTML 4.10.5.1.2);
         // `password` reaches is_valid with no content check of its own, which
         // is correct — it constrains only through required/minlength/maxlength
         let input_type = if (raw_type == null) "text" else lower(raw_type);
         let ok = is_valid(elem, text, input_type);
-        radiant.set_state(elem, "valid", ok)
-        radiant.set_state(elem, "invalid", not ok)
+        dom.set_state(elem, "valid", ok)
+        dom.set_state(elem, "invalid", not ok)
     }
 }
