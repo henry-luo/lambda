@@ -83,9 +83,14 @@ DOM_OP(CORE, parse_document,   document, 2, "fn(markup: string, mime: string) ->
 DOM_OP(CORE, get_state,        state, 2, "fn(n: any, name: string) -> any",                 dom_engine_get_state, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, set_state,        state, 3, "fn(n: any, name: string, value: any) -> bool",    dom_engine_set_state, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, request_change,   state, 1, "fn(n: any) -> bool",                              dom_engine_request_change, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
-DOM_OP(CORE, dispatch,         event, 2, "fn(n: any, event: any) -> bool",                  dom_engine_dispatch, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, dispatch,         event, 2, "fn(n: any, event: any) -> bool",                  dom_core_dispatch, DOM_F_NEUTRAL, "")
 DOM_OP(CORE, add_listener,     event, 4, "fn(n: any, type: string, fn: any, opts: any) -> null", dom_add_event_listener_body, 0, "")
 DOM_OP(CORE, remove_listener,  event, 4, "fn(n: any, type: string, fn: any, opts: any) -> null", dom_remove_event_listener_body, 0, "")
+// JS's legacy document.createEvent: it answers a JS Event object, so it needs
+// the realm and is JS-only by nature rather than by omission. Lambda does not
+// need it -- an event value is a map literal, {type: ..., bubbles: ...}, which
+// `dispatch` above accepts directly. Wiring a native factory for something the
+// language already writes would add a body to keep in step for no gain.
 DOM_OP(CORE, create_event,     event, 2, "fn(type: string, init: any) -> any",              DOM_NO_BODY, 0, "")
 
 // ---------------------------------------------------------------------------
@@ -280,4 +285,4 @@ DOM_OP(DERIVED, focus_candidates, focus, 1, "fn(root: any) -> array", DOM_NO_BOD
 DOM_OP(DERIVED, form_controls,   forms, 1, "fn(f: any) -> array", DOM_NO_BODY, DOM_F_NEUTRAL | DOM_F_SNAPSHOT,
        "[for (c in query_selector_all(root_node(f), \"input,select,textarea,button,fieldset,object,output\") where same_node(form_of(c), f)) c]")
 DOM_OP(DERIVED, click,           event, 1, "fn(n: any) -> bool", DOM_NO_BODY, DOM_F_NEUTRAL,
-       "dispatch(n, create_event(\"click\", {bubbles: true, cancelable: true, composed: true}))")
+       "dispatch(n, {type: \"click\", bubbles: true, cancelable: true})")

@@ -3061,3 +3061,18 @@ extern "C" Item dom_engine_is_focusable(Item node_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "IS_FOCUSABLE");
     return radiant_bool_item(elem && is_view_focusable((View*)elem));
 }
+
+// The flag-carrying dispatch seam (F32). radiant.dispatch keeps its name-only
+// signature; the catalog's row is the one that takes an event.
+extern "C" bool radiant_dispatch_event_with_flags_from_script(void* dom_node,
+                                                              const char* event_name,
+                                                              bool bubbles, bool cancelable);
+
+extern "C" Item dom_engine_dispatch_event(Item node_item, Item type_item,
+                                          Item bubbles_item, Item cancelable_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "DISPATCH_EVENT");
+    const char* type = fn_to_cstr(type_item);
+    if (!elem || !type || !type[0]) return radiant_bool_item(false);
+    return radiant_bool_item(radiant_dispatch_event_with_flags_from_script(
+        (void*)elem, type, is_truthy(bubbles_item), is_truthy(cancelable_item)));
+}

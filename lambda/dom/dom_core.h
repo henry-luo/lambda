@@ -155,6 +155,8 @@ Item dom_engine_edit_node(Item a);
 Item dom_engine_edit_start(Item a);
 Item dom_engine_edit_end(Item a);
 Item dom_engine_is_focusable(Item a);
+Item dom_engine_dispatch_event(Item n, Item type, Item bubbles, Item cancelable);
+Item dom_core_dispatch(Item n, Item event);
 Item dom_parser_parse_from_string(Item markup, Item mime);
 Item dom_cssom_stylesheet_get_css_rules(Item sheet_item);
 Item dom_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_arg);

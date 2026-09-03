@@ -30,8 +30,12 @@ on click(evt) {
     dom.set_state(~, "checked", not dom.get_state(~, "checked"))
     dom.set_state(~, "indeterminate", false)
     // the control's own state has settled; notify listeners (HTML 4.10.5)
-    dom.dispatch(~, "input")
-    dom.dispatch(~, "change")
+    // The event spelling, rather than the bare name: `input` and `change` both
+    // bubble and are not cancelable (HTML 4.10.5), which is exactly what the
+    // name form assumes -- so this is the same dispatch, said explicitly, and
+    // it is what gives the event-valued path its coverage in the UI fixtures.
+    dom.dispatch(~, { type: "input", bubbles: true, cancelable: false })
+    dom.dispatch(~, { type: "change", bubbles: true, cancelable: false })
 }
 
 // Radio activation (HTML 4.10.5.1.16). Selecting is one-way — clicking an

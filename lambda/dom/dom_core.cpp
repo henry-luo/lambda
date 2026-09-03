@@ -168,6 +168,7 @@ DOM_ENGINE_SEAM_1(edit_node)
 DOM_ENGINE_SEAM_1(edit_start)
 DOM_ENGINE_SEAM_1(edit_end)
 DOM_ENGINE_SEAM_1(is_focusable)
+DOM_ENGINE_SEAM_4(dispatch_event)
 
 // `dom.load`: the engine parses, the core wraps. The result is the document
 // node, which since ESO101 answers both the Document's properties and the
@@ -272,6 +273,45 @@ extern "C" Item dom_core_set_node_value(Item n, Item data) {
     Item zero = { .item = i2it(0) };
     Item all = { .item = i2it(INT_MAX) };
     return dom_op3(n, JUBE_DOM_REPLACE_DATA, zero, all, data);
+}
+
+// --- events
+// `dispatch` takes either spelling: a bare type name, which is how the engine's
+// script dispatch has always been called, or an event value carrying its own
+// flags. The catalog types the second argument as an event and the engine took
+// a name, and that gap is why `click` -- whose derivation dispatches a
+// cancelable, bubbling, composed event -- could not be expressed at all.
+//
+// An event value is an ordinary Lambda map: {type, bubbles, cancelable}. There
+// is deliberately no constructor for it. Lambda has map literals, and a native
+// factory for something the language already writes would be one more body to
+// keep in step (`create_event` remains what it has always been: JS's legacy
+// document.createEvent, which returns a JS object and so needs the realm).
+// Read a field of an event value. The event is an ordinary Lambda map, so this
+// reads it as one: js_get_key_cstr builds its key through the JS realm's
+// allocator and faults on a realm-less document, which is the whole reason the
+// map spelling exists.
+static Item dom_map_field(Item map_item, const char* key) {
+    if (get_type_id(map_item) != LMD_TYPE_MAP || !map_item.map) return ItemNull;
+    return dom_absent_to_null(map_get(map_item.map, js_name_item(key)));
+}
+
+static bool dom_event_flag(Item event, const char* key, bool fallback) {
+    Item v = dom_map_field(event, key);
+    return get_type_id(v) == LMD_TYPE_BOOL ? it2b(v) : fallback;
+}
+
+extern "C" Item dom_core_dispatch(Item n, Item event) {
+    if (get_type_id(event) == LMD_TYPE_STRING) {
+        // The historical spelling: a name, with the flags the engine fixed for
+        // the `input`/`change` notifications it was written for.
+        return dom_engine_dispatch(n, event);
+    }
+    Item type = dom_map_field(event, "type");
+    if (get_type_id(type) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    Item bubbles = { .item = b2it(dom_event_flag(event, "bubbles", true)) };
+    Item cancelable = { .item = b2it(dom_event_flag(event, "cancelable", false)) };
+    return dom_engine_dispatch_event(n, type, bubbles, cancelable);
 }
 
 // --- text controls

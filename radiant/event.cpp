@@ -3157,6 +3157,32 @@ extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* e
     return ok;
 }
 
+// The same dispatch, told what kind of event it is. The name-only entry above
+// fixes bubbles=true/cancelable=false because that is right for the `input` and
+// `change` notifications it was written for; anything else -- a cancelable
+// click, a non-bubbling event -- could not be expressed from script at all.
+// The underlying primitive already takes both flags, so exposing them is a
+// wider signature rather than new machinery (F32).
+//
+// There is still no slot for a CustomEvent `detail` payload here: carrying one
+// needs a richer event record, not a wider signature.
+extern "C" bool radiant_dispatch_event_with_flags_from_script(void* dom_node,
+                                                              const char* event_name,
+                                                              bool bubbles,
+                                                              bool cancelable) {
+    if (!dom_node || !event_name || !event_name[0]) return false;
+    EmitHandlerContext* ctx = g_emit_handler_ctx;
+    if (!ctx || !ctx->evcon) {
+        log_error("dispatch(): no active event context — only callable from a handler");
+        return false;
+    }
+    View* view = static_cast<View*>(static_cast<DomNode*>(dom_node));
+    bool ok = radiant_dispatch_simple_event(ctx->evcon, view, event_name, bubbles, cancelable);
+    log_debug("dispatch-from-script: '%s' (bubbles=%d cancelable=%d) -> %s",
+              event_name, bubbles ? 1 : 0, cancelable ? 1 : 0, ok ? "dispatched" : "no listener");
+    return ok;
+}
+
 // F4: package submission policy uses this as the cancelable event waist. The
 // package handler already runs inside the document's live JS/Lambda batch, so
 // dispatch directly into EventTarget; opening a second evaluator here would
