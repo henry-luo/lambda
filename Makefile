@@ -2011,14 +2011,17 @@ format_duration() { \
 	};
 endef
 
-# Parse the snapshot checker's summary and preserve its exit status.
+# Read the test count from the snapshot checker's summary, and take PASS/FAIL
+# from its exit status alone: it exits 0 only after printing "Snapshot check
+# passed", and non-zero on runner integrity failure, inventory drift or average
+# regression. Never re-derive the verdict by matching its summary wording -- an
+# earlier grep here looked for "No average regression", which the script never
+# prints, so every run was misreported as FAIL.
 define CLASSIFY_LAYOUT_SNAPSHOT_RESULT
 snapshot_result_output="$${$(1)}"; \
 snapshot_passed=$$(echo "$$snapshot_result_output" | grep "^Current:" | grep -oE "[0-9]+ tests" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 snapshot_passed=$${snapshot_passed:-0}; snapshot_failed=0; \
-if [ $$snapshot_exit -ne 0 ]; then \
-	snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
-elif echo "$$snapshot_result_output" | grep -q "No average regression"; then \
+if [ $$snapshot_exit -eq 0 ]; then \
 	snapshot_status="✅ PASS"; \
 else \
 	snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \

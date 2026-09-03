@@ -296,3 +296,8 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source);
 // value per D6.2.3.
 Function* interp_make_closure(Script* module, const AstFuncNode* fn_node,
                               InterpFrame* creating_frame);
+
+// Binds an AST-defined object method to a receiver (S12.3.3v2). Returns NULL
+// when the method has no AST definition or needs captures; callers then fall
+// back to the compiled-entry binding.
+Function* interp_bind_object_method(const struct TypeMethod* method, Item self);

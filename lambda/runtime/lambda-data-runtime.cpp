@@ -2582,14 +2582,19 @@ Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next) {
 }
 
 Object* object(int64_t type_index) {
-    Object *obj = (Object *)heap_calloc(sizeof(Object), LMD_TYPE_OBJECT);
-    obj->type_id = LMD_TYPE_OBJECT;
+    // D2.6.6v2 phase 2: allocate under the DECLARED structural kind. The type
+    // must be resolved first, so the allocation moves below the lookup.
     ArrayList* type_list = (ArrayList*)context->type_list;
     // type_list stores TypeType wrapper; unwrap to get TypeObject
     Type* stored = (Type*)(type_list->data[type_index]);
     TypeObject *obj_type = (stored->type_id == LMD_TYPE_TYPE)
         ? (TypeObject*)((TypeType*)stored)->type
         : (TypeObject*)stored;
+    TypeId kind = obj_type->nominal ? obj_type->nominal->struct_kind : LMD_TYPE_MAP;
+    Object *obj = (Object *)heap_calloc(sizeof(Object), kind);
+    if (!obj) return NULL;
+    obj->type_id = kind;
+    obj->nominal_reserved = obj_type->nominal ? 1 : 0;
     obj->type = obj_type;
     return obj;
 }
@@ -2604,8 +2609,13 @@ Object* object_with_data(int64_t type_index) {
         : (TypeObject*)stored;
     int64_t byte_size = obj_type->byte_size;
     size_t total_size = sizeof(Object) + (byte_size > 0 ? (size_t)byte_size : 0);
-    Object *obj = (Object *)heap_calloc(total_size, LMD_TYPE_OBJECT);
-    obj->type_id = LMD_TYPE_OBJECT;
+    // D2.6.6v2 phase 2: the value wears its declared structural kind, and the
+    // header bit caches "carries a nominal record" so hot checks need no
+    // pointer chase. The shape stays authoritative.
+    TypeId kind = obj_type->nominal ? obj_type->nominal->struct_kind : LMD_TYPE_MAP;
+    Object *obj = (Object *)heap_calloc(total_size, kind);
+    obj->type_id = kind;
+    obj->nominal_reserved = 1;
     obj->type = obj_type;
     if (byte_size > 0) {
         obj->data = (char*)obj + sizeof(Object);
@@ -2634,6 +2644,35 @@ Object* object_fill(Object* obj, ...) {
     va_start(args, obj);
     set_fields((TypeMap*)obj_type, obj->data, args);
     va_end(args);
+    return obj;
+}
+
+// S2.1.3 / D2.6.6: an object IS an element, so its content face is the object
+// itself — the same items/length/capacity an element carries. Kept as a named
+// accessor so content-face call sites read the same way for both kinds.
+List* object_content(Object* obj) {
+    return (List*)obj;
+}
+
+// Content append, mirroring element content exactly: the same list_push_spread
+// normalization (D2.6.5 — null dropped, adjacent strings merged, content lists
+// spliced). What it must NOT reuse is list_fill, whose list_end tail would run
+// the element branch's frame bookkeeping on a value the caller still owns.
+Object* object_content_fill(Object* obj, int count, ...) {
+    if (!obj) return NULL;
+    va_list args;
+    va_start(args, count);
+    for (int i = 0; i < count; i++) {
+        list_push_spread((List*)obj, (Item){.item = va_arg(args, uint64_t)});
+    }
+    va_end(args);
+    return obj;
+}
+
+// Span-taking sibling for callers holding content in a rooted Item span (T0).
+Object* object_content_fill_items(Object* obj, const Item* values, int count) {
+    if (!obj) return NULL;
+    for (int i = 0; i < count; i++) list_push_spread((List*)obj, values[i]);
     return obj;
 }
 
@@ -2706,6 +2745,8 @@ void object_type_set_constraint(int64_t type_index, fn_ptr constraint_func) {
         ? (TypeObject*)((TypeType*)stored)->type
         : (TypeObject*)stored;
     obj_type->constraint_fn = (ConstraintFn)constraint_func;
+    // keep the nominal record in step; it is what phase-2 readers consult
+    if (obj_type->nominal) obj_type->nominal->constraint_fn = (ConstraintFn)constraint_func;
     log_debug("object_type_set_constraint: registered constraint on '%.*s'",
         (int)obj_type->type_name.length, obj_type->type_name.str);
 }
@@ -2819,8 +2860,10 @@ Item item_at(Item data, int64_t index) {
         return {.item = i2it(value)};
     }
     case LMD_TYPE_ELEMENT: {
-        // treat element as list
-        return list_get(data.element, index);
+        // S8.2.1v3: an element exposes both faces — an IntKey selects a content
+        // child, a NameKey an attribute.
+        List* content = lambda_content_list(type_id, data.element);
+        return content ? list_get(content, index) : ItemNull;
     }
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
         const char* chars = data.get_chars();
@@ -2912,22 +2955,22 @@ Item item_attr(Item data, const char* key) {
         return fn_member(data, key_item);
     }
     case LMD_TYPE_MAP: {
+        // D2.6.6v2 phase 2: a nominal map has a method tier after its fields.
+        if (lambda_value_nominal(type_id, data.map)) {
+            return lambda_object_member(data, key);
+        }
         Map* map = data.map;
         bool is_found;
         return _map_get((TypeMap*)map->type, map->data, (char*)key, &is_found);
-    }
-    case LMD_TYPE_OBJECT: {
-        // Method prologues use string-key field loads. Treat objects as their
-        // shaped-map storage; returning null here reset every field snapshot.
-        Object* obj = data.object;
-        bool is_found;
-        return _map_get((TypeMap*)obj->type, obj->data, (char*)key, &is_found);
     }
     case LMD_TYPE_VMAP: {
         VMap* vm = data.vmap;
         return vmap_get_by_str(vm, key);
     }
     case LMD_TYPE_ELEMENT: {
+        if (lambda_value_nominal(type_id, data.element)) {
+            return lambda_object_member(data, key);
+        }
         Element* elmt = data.element;
         // fall through to attribute lookup
         bool is_found;
@@ -2952,7 +2995,7 @@ Item item_attr(Item data, const char* key) {
             if (path->result != 0) {
                 Item resolved = {.item = path->result};
                 TypeId resolved_type = get_type_id(resolved);
-                if (resolved_type == LMD_TYPE_MAP || resolved_type == LMD_TYPE_ELEMENT || resolved_type == LMD_TYPE_OBJECT) {
+                if (resolved_type == LMD_TYPE_MAP || resolved_type == LMD_TYPE_ELEMENT) {
                     // Access attribute from resolved content
                     return item_attr(resolved, key);
                 }
@@ -3080,6 +3123,11 @@ SymbolKeyList* item_keys(Item data) {
         }
         return NULL;
     }
+    // S8.1.2v2/S8.3.1v2: an object's attribute names are its `at` axis. There
+    // was no OBJECT arm at all, so item_keys returned NULL and `for (v in obj)`
+    // yielded nothing while `len(obj)` reported the field count — the two sides
+    // of the S8.3.1 law disagreeing. D2.6.6 puts an object on Element's layout,
+    // so it shares this walk rather than the map one.
     case LMD_TYPE_ELEMENT: {
         Element* elmt = data.element;
         TypeMap* elmt_type = (TypeMap*)elmt->type;
@@ -3105,13 +3153,15 @@ int64_t iter_len(Item data, void* keys_ptr, int key_filter) {
     if (type_id == LMD_TYPE_ERROR || type_id == LMD_TYPE_NULL) return 0;
     int64_t key_count = symbol_key_list_len(keys_ptr);
 
-    if (type_id == LMD_TYPE_ELEMENT) {
-        int64_t child_count = (int64_t)data.element->length;
+    // S8.1.2v2: elements AND objects expose both faces — `in` walks attribute
+    // values then children, `at` walks attribute names.
+    if (is_element_family_type_id(type_id)) {
+        int64_t child_count = lambda_content_count(type_id, data.element);
         if (key_filter == 1) return child_count;        // INT: children only
         if (key_filter == 2) return key_count;           // SYMBOL: attrs only
         return key_count + child_count;                  // ALL: attrs + children
     }
-    if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP || type_id == LMD_TYPE_OBJECT) {
+    if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP) {
         if (key_filter == 1) return 0;  // INT filter on map: no indexed entries
         return key_count;
     }
@@ -3126,7 +3176,7 @@ Item iter_key_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
     TypeId type_id = get_type_id(data);
     int64_t key_count = symbol_key_list_len(keys_ptr);
 
-    if (type_id == LMD_TYPE_ELEMENT) {
+    if (is_element_family_type_id(type_id)) {
         if (key_filter == 2) {
             // SYMBOL: attrs only
             if (idx < key_count) {
@@ -3146,7 +3196,7 @@ Item iter_key_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
         }
         return {.item = i2it(idx - key_count)};
     }
-    if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP || type_id == LMD_TYPE_OBJECT) {
+    if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP) {
         if (idx < key_count) {
             Symbol* key_sym = symbol_key_list_at(keys_ptr, idx);
             return {.item = y2it(key_sym)};
@@ -3162,7 +3212,8 @@ Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
     TypeId type_id = get_type_id(data);
     int64_t key_count = symbol_key_list_len(keys_ptr);
 
-    if (type_id == LMD_TYPE_ELEMENT) {
+    if (is_element_family_type_id(type_id)) {
+        List* content = lambda_content_list(type_id, data.element);
         if (key_filter == 2) {
             // SYMBOL: attrs only
             if (idx < key_count) {
@@ -3173,16 +3224,16 @@ Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
         }
         if (key_filter == 1) {
             // INT: children only
-            return list_get(data.element, idx);
+            return content ? list_get(content, idx) : ItemNull;
         }
         // ALL: attrs first, then children
         if (idx < key_count) {
             Symbol* key_sym = symbol_key_list_at(keys_ptr, idx);
             return item_attr(data, key_sym->chars);
         }
-        return list_get(data.element, idx - key_count);
+        return content ? list_get(content, idx - key_count) : ItemNull;
     }
-    if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP || type_id == LMD_TYPE_OBJECT) {
+    if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP) {
         if (idx < key_count) {
             Symbol* key_sym = symbol_key_list_at(keys_ptr, idx);
             return item_attr(data, key_sym->chars);

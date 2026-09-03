@@ -204,7 +204,7 @@ static LambdaTokenKind lexer_keyword_kind(const char* source, size_t start, size
     static const char* const base_types[] = {
         "null", "any", "bool", "int64", "int", "float", "f64", "complex",
         "decimal", "integer", "number", "datetime", "date", "time", "binary",
-        "range", "list", "array", "map", "element", "entity", "object",
+        "range", "list", "array", "map", "element", "object",
         "function", "error", "string", "symbol", "i8", "i16", "i32", "i64",
         "u8", "u16", "u32", "u64", "f16", "f32",
     };

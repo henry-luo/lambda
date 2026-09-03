@@ -765,8 +765,7 @@ extern "C" Item js_typed_array_validate_constructor_argument(Item argument,
     if (argc <= 0) return js_status_ok();
     TypeId type = get_type_id(argument);
     if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
-            type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT ||
-            type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
+            type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP) {
         return js_status_ok();
     }
     int element_length = 0;

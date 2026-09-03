@@ -24,7 +24,7 @@ static inline void js_node_alloc_cb(uv_handle_t* handle, size_t suggested_size,
 // OBJECT or VMAP depending on how it was built.
 static inline bool js_node_is_plain_object(Item item) {
     TypeId type = get_type_id(item);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP;
 }
 
 // As above, plus ELEMENT: modules that also accept DOM-ish carriers.

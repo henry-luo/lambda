@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-      "description": "D8.4.3: a MAY_SET named access contributes one ERROR-tag branch, while js_with_save_depth and the abrupt catch exit add none.",
+      "description": "The literal 25 is LMD_TYPE_ERROR (lambda/lambda.h); re-pin it if the enum shifts. D8.4.3: a MAY_SET named access contributes one ERROR-tag branch, while js_with_save_depth and the abrupt catch exit add none.",
   "checks": [
     {
       "in_func": "_js_dynamicCaught_#_body",
@@ -9,7 +9,7 @@
         "call\tjs_error_lane_payload"
       ],
       "count": {
-        "eq\t{{r}}, {{r}}, 26": 1
+        "eq\t{{r}}, {{r}}, 25": 1
       }
     }
   ]

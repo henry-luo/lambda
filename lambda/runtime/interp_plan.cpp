@@ -565,7 +565,7 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         AstIdentNode* method_ident = method_name && method_name->node_type == AST_NODE_IDENT
             ? (AstIdentNode*)method_name : NULL;
         TypeObject* receiver_type = member && member->object && member->object->type &&
-                member->object->type->type_id == LMD_TYPE_OBJECT
+                type_nominal_record(member->object->type) != NULL
             ? (TypeObject*)member->object->type : NULL;
         TypeMethod* object_method = receiver_type && method_ident
             ? ast_lookup_object_method(receiver_type, method_ident->name) : NULL;
@@ -1897,7 +1897,7 @@ bool interp_satellite_supported(const AstFuncNode* fn) {
             contract->kind != TYPE_KIND_SIMPLE;
         if (tid == LMD_TYPE_ANY || tid == LMD_TYPE_ARRAY ||
                 tid == LMD_TYPE_ARRAY_NUM || tid == LMD_TYPE_MAP ||
-                tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_OBJECT ||
+                tid == LMD_TYPE_ELEMENT ||
                 tid == LMD_TYPE_VMAP || structured_contract) {
             // Broad/aggregate parameters need the full interpreter's Item
             // contract. The satellite ABI's raw carrier specialization can

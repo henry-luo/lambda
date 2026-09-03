@@ -304,7 +304,7 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, const char* in
         path_to_string(titem->path, strbuf);
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:   {
         // For complex types, create a temporary Item and use existing print_item logic
         Item temp_item = {.item = titem->item};
         print_item(strbuf, temp_item, depth + 1, indent);
@@ -527,6 +527,13 @@ struct PrintItemVisitor {
     void operator()(lam::ItemOf<LMD_TYPE_MAP> item) const {
         Map* map = item.ptr();
         TypeMap* map_type = (TypeMap*)map->type;
+        // D2.6.6v2 phase 2 / OB8: a NOMINAL map prints as `<Type a: 1>` — its
+        // type name is its tag, and that spelling is what round-trips as an
+        // object literal. Only a structural map wears braces.
+        if (TypeNominal* record = type_nominal_record((Type*)map_type)) {
+            print_tagged(strbuf, record->type_name, map_type, map->data, nullptr);
+            return;
+        }
         strbuf_append_char(strbuf, '{');
         print_named_items(strbuf, map_type, map->data, depth + 1, indent);
         // add closing indentation if we have nested structures
@@ -557,45 +564,43 @@ struct PrintItemVisitor {
         strbuf_append_char(strbuf, '}');
     }
 
-    void operator()(lam::ItemOf<LMD_TYPE_OBJECT> item) const {
-        Object* obj = item.ptr();
-        TypeObject* obj_type = (TypeObject*)obj->type;
-        strbuf_append_char(strbuf, '{');
-        if (obj_type->type_name.str) {
-            strbuf_append_str_n(strbuf, obj_type->type_name.str, obj_type->type_name.length);
-            if (obj_type->length > 0) strbuf_append_char(strbuf, ' ');
+    // S2.1.3: an element and an object print through one body — `<tag attrs,
+    // content>` — because an object IS a nominally-typed element and its
+    // literal is the element form. The two differ only in where the tag name
+    // lives (TypeElmt::name vs TypeObject::type_name) and where the content
+    // list is (the element itself vs the object's side list).
+    void print_tagged(StrBuf* strbuf, StrView tag, TypeMap* shape, void* data,
+            List* content) const {
+        strbuf_append_format(strbuf, "<%.*s", (int)tag.length, tag.str);
+        int64_t attr_count = shape ? shape->length : 0;
+        if (attr_count) {
+            print_named_items(strbuf, shape, data, depth + 1, indent, true);
         }
-        print_named_items(strbuf, (TypeMap*)obj_type, obj->data, depth + 1, indent);
-        if (indent && obj_type->length > 0) {
-            strbuf_append_char(strbuf, '\n');
-            for (int i = 0; i < depth; i++) strbuf_append_str(strbuf, indent);
+        int64_t child_count = content ? content->length : 0;
+        if (child_count) {
+            // S16.9.3: the attribute/content boundary comma is a biconditional —
+            // emit it exactly when there are both attributes and content, in
+            // indent mode too (a bare newline is not a boundary; S16.1.1 gives line
+            // breaks no meaning). Content children then juxtapose: any separator
+            // between them would re-parse as a statement separator, not as siblings.
+            if (attr_count) strbuf_append_char(strbuf, ',');
+            strbuf_append_str(strbuf, indent ? "\n" : " ");
+            for (long i = 0; i < child_count; i++) {
+                if (i) strbuf_append_str(strbuf, indent ? "\n" : " ");
+                if (indent) { for (int j=0; j<depth+1; j++) strbuf_append_str(strbuf, indent); }
+                print_item(strbuf, content->items[i], depth + 1, indent);
+            }
         }
-        strbuf_append_char(strbuf, '}');
+        strbuf_append_char(strbuf, '>');
     }
 
     void operator()(lam::ItemOf<LMD_TYPE_ELEMENT> item) const {
         Element* element = item.ptr();
         TypeElmt* elmt_type = (TypeElmt*)element->type;
-        strbuf_append_format(strbuf, "<%.*s", (int)elmt_type->name.length, elmt_type->name.str);
-
-        if (elmt_type->length) {
-            print_named_items(strbuf, (TypeMap*)elmt_type, element->data, depth + 1, indent, true);
-        }
-        if (element->length) {
-            // S16.9.3: the attribute/content boundary comma is a biconditional —
-            // emit it exactly when the element has both attributes and content, in
-            // indent mode too (a bare newline is not a boundary; S16.1.1 gives line
-            // breaks no meaning). Content children then juxtapose: any separator
-            // between them would re-parse as a statement separator, not as siblings.
-            if (elmt_type->length) strbuf_append_char(strbuf, ',');
-            strbuf_append_str(strbuf, indent ? "\n" : " ");
-            for (long i = 0; i < element->length; i++) {
-                if (i) strbuf_append_str(strbuf, indent ? "\n" : " ");
-                if (indent) { for (int i=0; i<depth+1; i++) strbuf_append_str(strbuf, indent); }
-                print_item(strbuf, element->items[i], depth + 1, indent);
-            }
-        }
-        strbuf_append_char(strbuf, '>');
+        TypeNominal* record = type_nominal_record((Type*)elmt_type);
+        print_tagged(strbuf, record ? record->type_name : elmt_type->name,
+            (TypeMap*)elmt_type, element->data,
+            (List*)element);
     }
 
     void operator()(lam::ItemOf<LMD_TYPE_FUNC> item) const {
@@ -782,7 +787,6 @@ const char* format_type(Type *type) {
         return "ArrayNum*";
     case LMD_TYPE_MAP:
         return "Map*";
-    case LMD_TYPE_OBJECT:
         return "Object*";
     case LMD_TYPE_ELEMENT:
         return "Elmt*";

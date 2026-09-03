@@ -18,8 +18,7 @@ static const char* ts_runtime_type_name(TypeId type) {
     case LMD_TYPE_ARRAY:
     case LMD_TYPE_ARRAY_NUM: return "array";
     case LMD_TYPE_MAP:
-    case LMD_TYPE_ELEMENT:
-    case LMD_TYPE_OBJECT: return "object";
+    case LMD_TYPE_ELEMENT: return "object";
     default: return get_type_name(type);
     }
 }

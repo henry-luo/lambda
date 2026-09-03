@@ -1,0 +1,8 @@
+5 9
+true true true
+10
+2
+<P x: 5, z: 9>
+false true
+t 1 c true 3
+

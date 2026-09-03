@@ -1930,13 +1930,12 @@ static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
     // scalar case: map returns the transformed value; where returns the source
     if (type != LMD_TYPE_ARRAY &&
         type != LMD_TYPE_RANGE && type != LMD_TYPE_MAP &&
-        type != LMD_TYPE_ARRAY_NUM && type != LMD_TYPE_ELEMENT &&
-        type != LMD_TYPE_OBJECT) {
+        type != LMD_TYPE_ARRAY_NUM && type != LMD_TYPE_ELEMENT) {
         Item transformed = transform(collection, ItemNull);
         return !filter ? transformed : (is_truthy(transformed) ? collection : ItemNull);
     }
 
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) {
+    if (type == LMD_TYPE_MAP) {
         Map* mp = collection.map;
         List* result = list();
 
@@ -2482,7 +2481,7 @@ Item fn_sort2(Item item, Item dir_item) {
     } else if (dir_type == LMD_TYPE_FUNC) {
         // 2nd arg is a key extractor function
         key_fn = dir_item.function;
-    } else if (dir_type == LMD_TYPE_MAP || dir_type == LMD_TYPE_OBJECT) {
+    } else if (dir_type == LMD_TYPE_MAP) {
         // 2nd arg is an options map: {dir: 'asc|'desc, by: key_fn}
         Map* options_map = dir_item.map;
 

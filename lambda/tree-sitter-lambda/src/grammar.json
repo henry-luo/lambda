@@ -8638,10 +8638,6 @@
             },
             {
               "type": "STRING",
-              "value": "entity"
-            },
-            {
-              "type": "STRING",
               "value": "object"
             },
             {

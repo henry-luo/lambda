@@ -1762,7 +1762,7 @@ static Item js_cjs_children(Item module) {
 
 static void js_cjs_update_cached_default(Item filename, Item module) {
     Item ns = js_module_get(filename);
-    if (get_type_id(ns) != LMD_TYPE_MAP && get_type_id(ns) != LMD_TYPE_OBJECT) return;
+    if (get_type_id(ns) != LMD_TYPE_MAP) return;
     js_set_key_default(ns, js_cjs_key("default", (int)strlen("default")), js_cjs_exports(module));
 }
 
@@ -1784,7 +1784,7 @@ extern "C" Item js_cjs_enter(Item module, Item filename) {
     if (!js_root_range_ensure_registered(&js_cjs_module_stack_state.roots)) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
-    if (get_type_id(module) != LMD_TYPE_MAP && get_type_id(module) != LMD_TYPE_OBJECT) {
+    if (get_type_id(module) != LMD_TYPE_MAP) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
     js_set_key_default(module, js_cjs_key("id", (int)strlen("id")), filename);
@@ -1807,7 +1807,7 @@ extern "C" Item js_cjs_enter(Item module, Item filename) {
 }
 
 extern "C" Item js_cjs_complete(Item module) {
-    if (get_type_id(module) == LMD_TYPE_MAP || get_type_id(module) == LMD_TYPE_OBJECT) {
+    if (get_type_id(module) == LMD_TYPE_MAP) {
         js_set_key_default(module, js_cjs_key("loaded", (int)strlen("loaded")), (Item){.item = ITEM_TRUE});
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
@@ -1865,12 +1865,12 @@ static bool js_cjs_specifier_is_file_path(Item specifier) {
 
 static void js_cjs_note_child(Item child_filename, Item child_exports) {
     Item parent = js_cjs_current_module();
-    if (get_type_id(parent) != LMD_TYPE_MAP && get_type_id(parent) != LMD_TYPE_OBJECT) return;
+    if (get_type_id(parent) != LMD_TYPE_MAP) return;
     Item child = js_cjs_find_module(child_filename);
-    if (get_type_id(child) != LMD_TYPE_MAP && get_type_id(child) != LMD_TYPE_OBJECT) {
+    if (get_type_id(child) != LMD_TYPE_MAP) {
         child = js_cjs_create_module_metadata(child_filename, child_exports);
     }
-    if (get_type_id(child) != LMD_TYPE_MAP && get_type_id(child) != LMD_TYPE_OBJECT) return;
+    if (get_type_id(child) != LMD_TYPE_MAP) return;
     Item children = js_cjs_children(parent);
     int64_t len = js_array_length(children);
     for (int64_t i = 0; i < len; i++) {

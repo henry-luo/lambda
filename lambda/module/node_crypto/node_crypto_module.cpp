@@ -501,7 +501,7 @@ static void crypto_format_invalid_received(Item actual, char* out, int out_size)
         snprintf(out, out_size, " Received function ");
         return;
     }
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP) {
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP) {
         snprintf(out, out_size, " Received an instance of Object");
         return;
     }

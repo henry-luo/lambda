@@ -31,7 +31,6 @@ template<> struct ItemTagToType<LMD_TYPE_ARRAY> { typedef Array type; enum { is_
 template<> struct ItemTagToType<LMD_TYPE_MAP> { typedef Map type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_VMAP> { typedef VMap type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_ELEMENT> { typedef Element type; enum { is_pointer = true, is_direct_pointer = true }; };
-template<> struct ItemTagToType<LMD_TYPE_OBJECT> { typedef Object type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_TYPE> { typedef Type type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_FUNC> { typedef Function type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_ANY> { typedef void type; enum { is_pointer = false, is_direct_pointer = false }; };
@@ -182,7 +181,6 @@ decltype(auto) visit(Item it, F&& f) {
         case LMD_TYPE_MAP: return f(require<LMD_TYPE_MAP>(it));
         case LMD_TYPE_VMAP: return f(require<LMD_TYPE_VMAP>(it));
         case LMD_TYPE_ELEMENT: return f(require<LMD_TYPE_ELEMENT>(it));
-        case LMD_TYPE_OBJECT: return f(require<LMD_TYPE_OBJECT>(it));
         case LMD_TYPE_TYPE: return f(require<LMD_TYPE_TYPE>(it));
         case LMD_TYPE_FUNC: return f(require<LMD_TYPE_FUNC>(it));
         case LMD_TYPE_ANY: return f(require<LMD_TYPE_ANY>(it));
@@ -196,7 +194,6 @@ template<TypeId T> struct IsMapLike : FalseType {};
 template<> struct IsMapLike<LMD_TYPE_MAP> : TrueType {};
 template<> struct IsMapLike<LMD_TYPE_VMAP> : TrueType {};
 template<> struct IsMapLike<LMD_TYPE_ELEMENT> : TrueType {};
-template<> struct IsMapLike<LMD_TYPE_OBJECT> : TrueType {};
 
 template<TypeId T> struct IsArrayLike : FalseType {};
 template<> struct IsArrayLike<LMD_TYPE_ARRAY> : TrueType {};
@@ -220,9 +217,10 @@ inline Map* as_map(ItemOf<LMD_TYPE_MAP> v) {
     return v.ptr();
 }
 
-inline Map* as_map(ItemOf<LMD_TYPE_OBJECT> v) {
-    return (Map*)v.ptr();
-}
+// D2.6.6: an object shares Element's layout, so it CANNOT be viewed as a Map*
+// — `type`/`data` sit at different offsets. Read an object's attribute face
+// through MapReader (which holds the shape and buffer directly) or through the
+// object's own members; the old `(Map*)` pun is gone deliberately.
 
 inline VMap* as_vmap(ItemOf<LMD_TYPE_VMAP> v) {
     return v.ptr();

@@ -2854,7 +2854,7 @@ static Item fs_promise_wrap_result(Item result) {
 static bool fs_options_has_signal(Item options, Item* signal_out) {
     if (signal_out) *signal_out = make_js_undefined();
     TypeId opt_type = get_type_id(options);
-    if (opt_type != LMD_TYPE_MAP && opt_type != LMD_TYPE_OBJECT) return false;
+    if (opt_type != LMD_TYPE_MAP) return false;
     Item signal = js_get_key_cstr(options, "signal");
     if (get_type_id(signal) == LMD_TYPE_UNDEFINED || get_type_id(signal) == LMD_TYPE_NULL) return false;
     if (signal_out) *signal_out = signal;
@@ -2863,7 +2863,7 @@ static bool fs_options_has_signal(Item options, Item* signal_out) {
 
 static bool fs_is_abort_signal(Item signal) {
     TypeId sig_type = get_type_id(signal);
-    if (sig_type != LMD_TYPE_MAP && sig_type != LMD_TYPE_OBJECT) return false;
+    if (sig_type != LMD_TYPE_MAP) return false;
     Item aborted = js_get_key_cstr(signal, "aborted");
     Item add_event = js_get_key_cstr(signal, "addEventListener");
     return get_type_id(aborted) == LMD_TYPE_BOOL && js_is_callable(add_event);
@@ -2879,7 +2879,7 @@ static Item fs_make_abort_error(Item signal) {
     js_set_key_cstr(err, "name", make_string_item("AbortError"));
     js_set_key_cstr(err, "code", make_string_item("ABORT_ERR"));
     js_set_key_cstr(err, "message", make_string_item("The operation was aborted"));
-    if (get_type_id(signal) == LMD_TYPE_MAP || get_type_id(signal) == LMD_TYPE_OBJECT) {
+    if (get_type_id(signal) == LMD_TYPE_MAP) {
         Item reason = js_get_key_cstr(signal, "reason");
         if (get_type_id(reason) != LMD_TYPE_UNDEFINED && get_type_id(reason) != LMD_TYPE_NULL) {
             js_set_key_cstr(err, "cause", reason);

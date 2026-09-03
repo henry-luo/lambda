@@ -486,12 +486,8 @@ static bool js_array_numeric_grow(Item array_item, int64_t required_length) {
     if (!js_is_ordinary_numeric_array(array_item) || required_length < 0) return false;
     RootFrame roots(1);
     Rooted<Item> array_root(roots, array_item);
-    Item companion = ItemNull;
-    ArrayNum* initial = array_root.get().array_num;
-    if (initial->has_js_props && initial->capacity > 0) {
-        companion = ((Item*)initial->data)[initial->capacity - 1];
-    }
-    Rooted<Item> companion_root(roots, companion);
+    // D2.6.6v2: the companion lives in the array's attribute face, not in the
+    // elements buffer, so it survives this reallocation untouched.
     ArrayNum* arr = array_root.get().array_num;
     if (required_length <= container_dense_capacity((Array*)arr)) return true;
     int64_t old_capacity = arr->capacity;
@@ -518,9 +514,6 @@ static bool js_array_numeric_grow(Item array_item, int64_t required_length) {
     if (!new_data) return false;
     if (arr->data && old_capacity > 0) {
         memcpy(new_data, arr->data, (size_t)old_capacity * (size_t)elem_size);
-    }
-    if (arr->has_js_props && companion_root.get().item != ItemNull.item) {
-        ((Item*)new_data)[new_capacity - 1] = companion_root.get();
     }
     // This is a raw numeric buffer, so its owner changes only after the copy;
     // no user callback or safepoint may observe the intermediate pointer.
@@ -582,15 +575,13 @@ static bool js_array_promote_numeric_to_tagged(Item array_item) {
     Array* tagged = (Array*)numeric;
     tagged->items = new_items;
     tagged->capacity = new_capacity;
-    tagged->extra = has_props ? 1 : 0;
-    tagged->has_js_props = has_props ? 1 : 0;
+    tagged->extra = 0;  // D2.6.6v2: no reserved companion slot
     for (int64_t i = 0; i < length; i++) {
         // array_num_read_item materializes the numeric lane; array_set then
         // adopts any out-of-band scalar into the new container-owned tail.
         Item numeric_value = array_num_read_item(&numeric_source, i);
         array_set(tagged, i, numeric_value);
     }
-    if (has_props) tagged->items[new_capacity - 1] = companion_root.get();
     heap_retag_container((Container*)tagged, LMD_TYPE_ARRAY_NUM, LMD_TYPE_ARRAY);
     container_set_js_elements_kind((Container*)tagged,
                                    JS_ELEMENTS_PACKED_TAGGED);
@@ -824,7 +815,7 @@ extern "C" bool js_is_object_value(Item value) {
     // Object-valued intrinsics share this lane, including numeric arrays and host maps.
     return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
         js_is_ordinary_numeric_array(value) || type == LMD_TYPE_FUNC ||
-        type == LMD_TYPE_ELEMENT || type == LMD_TYPE_OBJECT ||
+        type == LMD_TYPE_ELEMENT ||
         type == LMD_TYPE_VMAP;
 }
 
@@ -2280,7 +2271,7 @@ static Item js_typed_array_create_with_constructor(Item constructor, int length)
 static bool js_can_host_private_slots(Item object) {
     TypeId type = get_type_id(object);
     return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC ||
-        type == LMD_TYPE_ELEMENT || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+        type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP;
 }
 
 static Item js_private_storage_object(Item object) {
@@ -7379,7 +7370,7 @@ static Item js_set_storage_mode(Item object, Item key,
             prop_name, prop_len));
         return value;
     }
-    if ((type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) && get_type_id(key) == LMD_TYPE_STRING) {
+    if ((type == LMD_TYPE_MAP) && get_type_id(key) == LMD_TYPE_STRING) {
         String* private_key = it2s(key);
         Item resolved_private_key = js_eval_initializer_resolve_private_key(object, private_key);
         if (resolved_private_key.item != ItemNull.item) {
@@ -7433,7 +7424,7 @@ static Item js_set_storage_mode(Item object, Item key,
         // fall through for non-numeric string keys (e.g. __proto__)
     }
 
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT) {
+    if (type == LMD_TYPE_MAP) {
         Item result = js_set_map_core(object, key, value,
                                           receiver_root.get(),
                                           bypass_accessor_dispatch, strict);
@@ -19570,8 +19561,7 @@ static Item js_collection_canonical_key(Item key) {
 static bool js_can_be_held_weakly(Item key) {
     TypeId kt = get_type_id(key);
     if (kt == LMD_TYPE_MAP || js_is_js_array(key) ||
-        kt == LMD_TYPE_FUNC || kt == LMD_TYPE_ELEMENT ||
-        kt == LMD_TYPE_OBJECT || kt == LMD_TYPE_VMAP) {
+        kt == LMD_TYPE_FUNC || kt == LMD_TYPE_ELEMENT || kt == LMD_TYPE_VMAP) {
         // Numeric arrays carry ARRAY_NUM, but WeakMap's CanBeHeldWeakly sees
         // their ECMAScript Array identity rather than the physical lane tag.
         // DOM host objects are VMAP-backed and follow the same object rule.
@@ -20906,8 +20896,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 auto is_set_record_object = [](Item other) -> bool {
                     TypeId other_type = get_type_id(other);
                     return other_type == LMD_TYPE_MAP || other_type == LMD_TYPE_ARRAY ||
-                        other_type == LMD_TYPE_FUNC || other_type == LMD_TYPE_ELEMENT ||
-                        other_type == LMD_TYPE_OBJECT || other_type == LMD_TYPE_VMAP;
+                        other_type == LMD_TYPE_FUNC || other_type == LMD_TYPE_ELEMENT || other_type == LMD_TYPE_VMAP;
                 };
 
                 auto get_set_record = [&](Item other, JsSetRecordLocal* rec) -> Item {
@@ -21728,7 +21717,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
 static bool js_string_protocol_arg_is_object(Item value) {
     TypeId type = get_type_id(value);
     return type == LMD_TYPE_MAP || js_is_js_array(value) || type == LMD_TYPE_ELEMENT ||
-           type == LMD_TYPE_FUNC || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+           type == LMD_TYPE_FUNC || type == LMD_TYPE_VMAP;
 }
 
 static Item js_string_to_integer_or_infinity(Item value, double default_value, double* out) {
@@ -23232,7 +23221,7 @@ static int js_format_invalid_arg_received(char* buf, int buf_size, Item value) {
         }
         return snprintf(buf, buf_size, " Received function ");
     }
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_OBJECT ||
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ELEMENT ||
         type == LMD_TYPE_VMAP) {
         return snprintf(buf, buf_size, " Received an instance of %s", js_invalid_arg_object_class(value));
     }
@@ -27212,8 +27201,7 @@ extern "C" Item js_to_object(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
         js_is_ordinary_numeric_array(value) ||
-        type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT ||
-        type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) return value;
+        type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP) return value;
     if (type == LMD_TYPE_BOOL) return js_new_boolean_wrapper(value);
     // Symbol wrapper must be checked before number (symbols are encoded as negative ints)
     if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
@@ -28835,7 +28823,7 @@ static Item js_get_iterator_impl(Item iterable, bool cache_next) {
     // Map/Set collections and ordinary objects with an own/prototype iterator
     // share the same property-based fallback; omitting OBJECT skipped custom
     // Symbol.iterator methods and converted their abrupt completion to a value.
-    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_OBJECT) {
+    if (tid == LMD_TYPE_MAP) {
         // Check for [Symbol.iterator]()
         JS_ASSIGN_OR_RETURN(iter_factory, js_get_key_default(iterable, js_well_known_symbol_key(1)));
         if (js_is_callable(iter_factory)) {
@@ -29069,8 +29057,7 @@ extern "C" Item js_iterator_step(Item iterator) {
             if (item_is_error(result_root.get())) return result_root.get();
             TypeId result_tid = get_type_id(result_root.get());
             if (result_tid != LMD_TYPE_MAP && result_tid != LMD_TYPE_ELEMENT &&
-                result_tid != LMD_TYPE_ARRAY && result_tid != LMD_TYPE_FUNC &&
-                result_tid != LMD_TYPE_OBJECT && result_tid != LMD_TYPE_VMAP) {
+                result_tid != LMD_TYPE_ARRAY && result_tid != LMD_TYPE_FUNC && result_tid != LMD_TYPE_VMAP) {
                 return js_throw_type_error("iterator result is not an object");
             }
             source_root.set(js_name_item("done", 4));
@@ -29118,7 +29105,7 @@ extern "C" Item js_iterator_close(Item iterator) {
         return make_js_undefined();
     }
 
-    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_VMAP || tid == LMD_TYPE_OBJECT) {
+    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_VMAP) {
         return_fn_root.set(js_name_item("return", 6));
         return_fn_root.set(js_get_key_default(iterator_root.get(), return_fn_root.get()));
         if (item_is_error(return_fn_root.get())) return return_fn_root.get();
@@ -29127,8 +29114,7 @@ extern "C" Item js_iterator_close(Item iterator) {
             if (item_is_error(result_root.get())) return result_root.get();
             TypeId result_tid = get_type_id(result_root.get());
             if (result_tid != LMD_TYPE_MAP && result_tid != LMD_TYPE_ELEMENT &&
-                result_tid != LMD_TYPE_ARRAY && result_tid != LMD_TYPE_FUNC &&
-                result_tid != LMD_TYPE_OBJECT && result_tid != LMD_TYPE_VMAP) {
+                result_tid != LMD_TYPE_ARRAY && result_tid != LMD_TYPE_FUNC && result_tid != LMD_TYPE_VMAP) {
                 return js_throw_type_error("Iterator result is not an object");
             }
         } else {
@@ -32303,7 +32289,7 @@ static Item js_vm_read_options(Item options, const char** names, int count, JsVm
         if (out) out->filename = options;
         return ItemNull;
     }
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return ItemNull;
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return ItemNull;
     for (int i = 0; i < count; i++) {
         JS_ASSIGN_OR_RETURN(option, js_get_key_default(options,
             js_name_item(names[i], strlen(names[i]))));
@@ -32325,7 +32311,7 @@ JS_FORWARD_STATIC_EXPRESSION(Item, js_vm_throw_invalid_option_property_type,
 
 static bool js_vm_is_options_object(Item options) {
     TypeId type = get_type_id(options);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP;
 }
 
 #define js_vm_is_undefined_item(value) \
@@ -32941,7 +32927,7 @@ static Item js_vm_Script_constructor(Item code, Item options) {
     bool cached_data_produced = false;
     bool cached_data_rejected = false;
     Item cached_data = (Item){.item = ITEM_JS_UNDEFINED};
-    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
+    if (get_type_id(options) == LMD_TYPE_MAP ||
         get_type_id(options) == LMD_TYPE_VMAP) {
         JS_ASSIGN_OR_RETURN_INTO(cached_data, js_get_name_key(options, "cachedData", 10));
         if (get_type_id(cached_data) != LMD_TYPE_UNDEFINED) {
@@ -33040,7 +33026,7 @@ static Item js_dc_channel_marker_key(void) {
 
 static bool js_dc_is_channel(Item value) {
     TypeId type = get_type_id(value);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT) return false;
+    if (type != LMD_TYPE_MAP) return false;
     Item marker = js_get_key_default(value, js_dc_channel_marker_key());
     return get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker);
 }
@@ -33159,7 +33145,7 @@ static Item js_dc_hasSubscribers(Item name) {
 static bool js_dc_named_channels_have_active_subscribers(Item owner,
         const char** names, int count) {
     TypeId owner_type = get_type_id(owner);
-    if (owner_type != LMD_TYPE_MAP && owner_type != LMD_TYPE_OBJECT) return false;
+    if (owner_type != LMD_TYPE_MAP) return false;
     for (int i = 0; i < count; i++) {
         Item key = js_dc_key(names[i]);
         Item ch = js_get_key_default(owner, key);
@@ -33302,7 +33288,7 @@ static Item js_dc_dispose_key(void) {
 static Item js_dc_scope_dispose(void) {
     Item self = js_get_this();
     Item state = js_get_key_default(self, js_dc_scope_state_key());
-    if (get_type_id(state) != LMD_TYPE_MAP && get_type_id(state) != LMD_TYPE_OBJECT) {
+    if (get_type_id(state) != LMD_TYPE_MAP) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
 
@@ -33408,7 +33394,7 @@ static Item js_dc_tracing_channel(Item nameOrChannels) {
             js_set_key_default(tc, js_dc_key(sub_names[i]), ch);
             continue;
         }
-        if (name_type == LMD_TYPE_MAP || name_type == LMD_TYPE_OBJECT) {
+        if (name_type == LMD_TYPE_MAP) {
             Item key = js_dc_key(sub_names[i]);
             Item ch = js_get_key_default(nameOrChannels, key);
             if (js_is_nullish(ch)) {
@@ -33866,7 +33852,7 @@ static Item js_dc_bounded_channel(Item nameOrChannels) {
             snprintf(buf, sizeof(buf), "tracing:%.*s:%s", (int)base->len, base->chars, sub_names[i]);
             Item sub_name = js_name_item(buf, (int)strlen(buf));
             ch = js_dc_channel_factory(sub_name);
-        } else if (name_type == LMD_TYPE_MAP || name_type == LMD_TYPE_OBJECT) {
+        } else if (name_type == LMD_TYPE_MAP) {
             ch = js_get_key_default(nameOrChannels, key);
             if (js_is_nullish(ch)) {
                 return js_throw_type_error("Cannot convert undefined or null to object");
@@ -34048,7 +34034,7 @@ extern "C" bool js_is_vm_context_error(Item value) {
 
 static bool js_cluster_is_object_item(Item item) {
     TypeId type = get_type_id(item);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP;
 }
 
 static bool js_cluster_fd_is_listening_socket(int fd) {
@@ -34194,7 +34180,6 @@ static Item js_cluster_fork(Item fork_env) {
     Item module_path = js_elements_get_int(argv, 1);
     Item fork_args = js_array_new(0);
     if (get_type_id(js_cluster_primary_options) == LMD_TYPE_MAP ||
-        get_type_id(js_cluster_primary_options) == LMD_TYPE_OBJECT ||
         get_type_id(js_cluster_primary_options) == LMD_TYPE_VMAP) {
         Item setup_args = js_get_key_default(js_cluster_primary_options, js_cluster_key("args"));
         if (get_type_id(setup_args) == LMD_TYPE_ARRAY) {
@@ -34829,7 +34814,7 @@ static Item js_als_constructor(Item options) {
     // handle options: { defaultValue, name }
     Item default_val = (Item){.item = ITEM_JS_UNDEFINED};
     Item name_val = js_name_item("", 0);
-    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT) {
+    if (get_type_id(options) == LMD_TYPE_MAP) {
         Item dv = js_get_key_default(options, js_name_item("defaultValue", 12));
         if (get_type_id(dv) != LMD_TYPE_UNDEFINED) default_val = dv;
         Item nv = js_get_key_default(options, js_name_item("name", 4));
@@ -35161,7 +35146,7 @@ static Item js_ar_constructor(Item type, Item options) {
         if (!js_async_hooks_parse_async_id(options, &trigger_id)) {
             return js_async_hooks_throw_invalid_async_id();
         }
-    } else if (options_type == LMD_TYPE_MAP || options_type == LMD_TYPE_OBJECT) {
+    } else if (options_type == LMD_TYPE_MAP) {
         Item option_trigger_id = js_get_key_default(options, js_async_hooks_key("triggerAsyncId"));
         if (!js_is_nullish(option_trigger_id) &&
             !js_async_hooks_parse_async_id(option_trigger_id, &trigger_id)) {
@@ -35317,7 +35302,7 @@ static Item js_ah_disable(void) {
 
 static Item js_ah_createHook(Item callbacks) {
     TypeId callbacks_type = get_type_id(callbacks);
-    if (callbacks_type == LMD_TYPE_MAP || callbacks_type == LMD_TYPE_OBJECT ||
+    if (callbacks_type == LMD_TYPE_MAP ||
         callbacks_type == LMD_TYPE_FUNC || callbacks_type == LMD_TYPE_ARRAY ||
         callbacks_type == LMD_TYPE_ELEMENT || callbacks_type == LMD_TYPE_VMAP) {
         static const char* names[] = {"init", "before", "after", "destroy", "promiseResolve"};
@@ -36326,7 +36311,7 @@ static Item js_internal_crypto_getOpenSSLSecLevel(void) {
 
 static bool js_cc_is_object(Item value) {
     TypeId type = get_type_id(value);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP;
 }
 
 static bool js_cc_get_string(Item value, char* out, int out_size) {

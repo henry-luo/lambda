@@ -186,14 +186,33 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
                 stringbuf_append_str_n(ctx_.output(), obj_type->type_name.str, obj_type->type_name.length);
             }
             ctx_.write_char('"');
-            // Object fields use the same packed layout as maps, so reuse MapReader.
-            MapReader mp = MapReader::fromItem(item.item());
-            auto iter = mp.entries();
-            const char* key;
-            ItemReader value;
-            while (iter.next(&key, &value)) {
+            // D2.6.6v2 phase 2: a nominal value may be map- OR element-shaped,
+            // and MapReader only admits the map form, so the attribute face is
+            // walked through the kind-aware shape accessor instead.
+            TypeId nom_tid = get_type_id(item.item());
+            TypeMap* attr_shape = lambda_attr_shape(nom_tid, obj);
+            void* attr_data = lambda_attr_data(nom_tid, obj);
+            for (ShapeEntry* fld = attr_shape ? attr_shape->shape : nullptr;
+                    fld; fld = fld->next) {
+                if (!fld->name || !attr_data) continue;
+                const char* key = fld->name->str;
+                ItemReader value(map_shape_field_to_item(attr_data, fld).to_const());
                 ctx_.emit(",%n%i\"%N\": ", indent_ + 1, key);
                 format_item_reader_with_indent(ctx_, value, indent_ + 1);
+            }
+            // S2.1.3: content children, under the same "_" key an element uses.
+            // JSON is not a markup format, so OB8's tag rule does not apply and
+            // the "@" nominal-type key stays; only the content face is new.
+            const List* content = (const List*)obj;
+            if (content->length) {
+                ctx_.emit(",%n%i\"_\": [", indent_ + 1);
+                for (int64_t i = 0; i < content->length; i++) {
+                    if (i) ctx_.write_char(',');
+                    ctx_.emit("%n%i", indent_ + 2);
+                    ItemReader child(content->items[i].to_const());
+                    format_item_reader_with_indent(ctx_, child, indent_ + 2);
+                }
+                ctx_.emit("%n%i]", indent_ + 1);
             }
             ctx_.emit("%n%i}", indent_);
         }

@@ -642,6 +642,11 @@ static inline TypeType* lambda_type_node_singleton(Type* node_type, TypeId* out_
             // 'list' never matches at runtime (LMD_TYPE_LIST no longer exists),
             // so fn_is must see the singleton rather than a base_type lookup.
             if (tt->type == &TYPE_LIST)    { if (out_tid) *out_tid = tid; return &LIT_TYPE_LIST; }
+            // D2.6.6v2 phase 2 (OB14): `object` has no TypeId of its own — it
+            // wears the map tag only to route through the container switches.
+            // Without this arm the tag fallback below would hand back the
+            // `map` singleton and `{x: 1} is object` would answer true.
+            if (tt->type == &TYPE_OBJECT)  { if (out_tid) *out_tid = tid; return &LIT_TYPE_OBJECT; }
             if (tt->type == &TYPE_NUMBER)  { if (out_tid) *out_tid = tid; return &LIT_TYPE_NUMBER; }
             if (tt->type == &TYPE_INTEGER) { if (out_tid) *out_tid = tid; return &LIT_TYPE_INTEGER; }
             if (tt->type->type_id == LMD_TYPE_NUM_SIZED) {

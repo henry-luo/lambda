@@ -1593,6 +1593,20 @@ bool lambda_type_matches(Item item, Type* expected) {
             (expected->type_id == LMD_TYPE_STRING || expected->type_id == LMD_TYPE_SYMBOL)) {
         return literal_type_matches_item(expected, item);
     }
+    // S11.3.1v2: a nominal expectation is answered by the record chain, ahead of
+    // the structural switch — since the flip, a nominal type wears a map or
+    // element tag and would otherwise be treated as a plain shape.
+    if (TypeNominal* wanted = type_nominal_record(expected)) {
+        const void* container = (const void*)(uintptr_t)item.item;
+        TypeNominal* actual = lambda_value_nominal(actual_id, container);
+        if (!actual || !lambda_nominal_derives_from(actual, wanted)) return false;
+        return !wanted->constraint_fn || wanted->constraint_fn(item.item);
+    }
+    if (expected == &TYPE_OBJECT) {
+        // `is object` asks only whether the value carries a nominal record.
+        return lambda_value_nominal(actual_id,
+            (const void*)(uintptr_t)item.item) != NULL;
+    }
     if (expected == &TYPE_MAP && actual_id == LMD_TYPE_VMAP) {
         // Host-backed VMaps implement Lambda's map interface but retain a distinct
         // physical tag; the global map contract must not reject them at a native call.
@@ -1649,20 +1663,6 @@ bool lambda_type_matches(Item item, Type* expected) {
     case LMD_TYPE_ARRAY:
         return actual_id == LMD_TYPE_RANGE || actual_id == LMD_TYPE_ARRAY ||
             actual_id == LMD_TYPE_ARRAY_NUM;
-    case LMD_TYPE_OBJECT:
-        if (expected == &TYPE_OBJECT) return actual_id == LMD_TYPE_OBJECT;
-        if (actual_id != LMD_TYPE_OBJECT) return false;
-        {
-            Object* obj = (Object*)(uintptr_t)item.item;
-            TypeObject* actual_object = obj ? (TypeObject*)obj->type : NULL;
-            TypeObject* wanted = (TypeObject*)expected;
-            for (TypeObject* walk = actual_object; walk; walk = walk->base) {
-                if (walk == wanted) {
-                    return !wanted->constraint_fn || wanted->constraint_fn(item.item);
-                }
-            }
-            return false;
-        }
     default:
         return actual_id == expected->type_id;
     }
@@ -1767,6 +1767,20 @@ Bool fn_is(Item a, Item b) {
         return range_contains_item(b.range, a) ? BOOL_TRUE : BOOL_FALSE;
     }
     if (b_type_id != LMD_TYPE_TYPE) return fn_eq(a, b);
+    {
+        // D2.6.6v2 phase 2: `object` is a TYPE with no tag of its own — it wears
+        // a container tag purely to route through the switches below, so it MUST
+        // be matched by pointer identity here, ahead of anything that compares
+        // tags. Otherwise `{x: 1} is object` would answer true simply because
+        // both sides read as MAP.
+        // `b.type` may arrive as the LIT_TYPE_OBJECT wrapper or already
+        // unwrapped to the bare singleton, so normalise before comparing —
+        // casting a bare Type to TypeType would read past its end.
+        if (runtime_boundary_unwrap_type(b.type) == &TYPE_OBJECT) {
+            return lambda_value_nominal(get_type_id(a),
+                (const void*)(uintptr_t)a.item) ? BOOL_TRUE : BOOL_FALSE;
+        }
+    }
 
     Type* b_type = b.type;
     if (b_type->kind == TYPE_KIND_PATTERN) {
@@ -1864,27 +1878,23 @@ Bool fn_is(Item a, Item b) {
     case LMD_TYPE_ARRAY:
     case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT:
-    case LMD_TYPE_OBJECT:
         if (type_b == &LIT_TYPE_ARRAY) {
             return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY ||
                 a_type_id == LMD_TYPE_ARRAY_NUM ? BOOL_TRUE : BOOL_FALSE;
         }
         if (type_b == &LIT_TYPE_LIST) return BOOL_FALSE;
-        if (type_b->type->type_id == LMD_TYPE_OBJECT && type_b->type != &TYPE_OBJECT) {
-            if (a_type_id != LMD_TYPE_OBJECT) return BOOL_FALSE;
-            Object* obj = (Object*)(uintptr_t)a.item;
-            TypeObject* walk = (TypeObject*)obj->type;
-            TypeObject* expected = (TypeObject*)type_b->type;
-            bool nominal_match = false;
-            while (walk) {
-                if (walk == expected) { nominal_match = true; break; }
-                walk = walk->base;
-            }
-            if (!nominal_match) return BOOL_FALSE;
+        if (type_nominal_record(type_b->type)) {
+            TypeNominal* actual = lambda_value_nominal(a_type_id,
+                (const void*)(uintptr_t)a.item);
+            TypeNominal* expected = type_nominal_record(type_b->type);
+            if (!actual || !expected ||
+                    !lambda_nominal_derives_from(actual, expected)) return BOOL_FALSE;
             return (!expected->constraint_fn || expected->constraint_fn(a.item)) ? BOOL_TRUE : BOOL_FALSE;
         }
         if (type_b->type == &TYPE_OBJECT) {
-            return a_type_id == LMD_TYPE_OBJECT ? BOOL_TRUE : BOOL_FALSE;
+            // `is object` asks only whether the value carries a nominal record.
+            return lambda_value_nominal(a_type_id,
+                (const void*)(uintptr_t)a.item) ? BOOL_TRUE : BOOL_FALSE;
         }
         {
             ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
@@ -2332,6 +2342,17 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
             return BOOL_FALSE;
         }
 
+        // S5.4.2v3: nominal sameness gates structural comparison. A value
+        // equals another only if BOTH carry the same nominal record, so a plain
+        // map never equals a nominal one with identical fields, and two
+        // different nominal types never equal each other.
+        {
+            TypeNominal* na = lambda_value_nominal(a_tid,
+                (const void*)(uintptr_t)a_item.item);
+            TypeNominal* nb = lambda_value_nominal(b_tid,
+                (const void*)(uintptr_t)b_item.item);
+            if (na != nb) return BOOL_FALSE;
+        }
         // list structural equality
         if (a_tid == LMD_TYPE_ARRAY) {
             return list_eq(a_item.array, b_item.array, depth);
@@ -2363,12 +2384,6 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
             return (ra->is_char == rb->is_char && ra->start == rb->start &&
                     ra->end == rb->end && ra->length == rb->length)
                 ? BOOL_TRUE : BOOL_FALSE;
-        }
-        // object structural equality (same as map, fields must match)
-        if (a_tid == LMD_TYPE_OBJECT) {
-            Object* oa = a_item.object;
-            Object* ob = b_item.object;
-            return map_eq((Map*)oa, (Map*)ob, depth);
         }
         // function reference equality
         if (a_tid == LMD_TYPE_FUNC) {
@@ -2430,11 +2445,14 @@ static int total_type_rank(Item item) {
     case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
         return 8;
     case LMD_TYPE_MAP: case LMD_TYPE_VMAP:
-        return 9;
-    case LMD_TYPE_OBJECT:
-        return 10;
+        // S6.2.1: `object` is its own ORDER BAND between map and element. Since
+        // the flip a nominal value wears a map or element tag, so the band is
+        // selected by the record rather than by the tag.
+        return lambda_value_nominal(tid, (const void*)(uintptr_t)item.item)
+            ? 10 : 9;
     case LMD_TYPE_ELEMENT:
-        return 11;
+        return lambda_value_nominal(tid, (const void*)(uintptr_t)item.item)
+            ? 10 : 11;
     case LMD_TYPE_TYPE:
         return 12;
     case LMD_TYPE_FUNC:
@@ -2612,18 +2630,43 @@ int total_cmp(Item a_item, Item b_item) {
             return (a_ptr > b_ptr) - (a_ptr < b_ptr);
         }
         if (a_tid == LMD_TYPE_VMAP || b_tid == LMD_TYPE_VMAP) {
+            // D2.6.6: the operand may be a map OR an element-shaped value, so
+            // the attribute shape must be reached by kind, never through `.map`.
             int64_t len_a = a_tid == LMD_TYPE_VMAP ? a_item.vmap->vtable->count(a_item.vmap->data)
-                                                   : ((TypeMap*)a_item.map->type)->length;
+                                                   : lambda_attr_shape(a_tid, a_item.map)->length;
             int64_t len_b = b_tid == LMD_TYPE_VMAP ? b_item.vmap->vtable->count(b_item.vmap->data)
-                                                   : ((TypeMap*)b_item.map->type)->length;
+                                                   : lambda_attr_shape(b_tid, b_item.map)->length;
             return (len_a > len_b) - (len_a < len_b);
         }
-        return map_data_total_cmp((TypeMap*)a_item.map->type, a_item.map->data,
-                                  (TypeMap*)b_item.map->type, b_item.map->data);
+        return map_data_total_cmp(lambda_attr_shape(a_tid, a_item.map),
+                                  lambda_attr_data(a_tid, a_item.map),
+                                  lambda_attr_shape(b_tid, b_item.map),
+                                  lambda_attr_data(b_tid, b_item.map));
     }
-    if (a_tid == LMD_TYPE_OBJECT) {
-        return map_data_total_cmp((TypeMap*)a_item.object->type, a_item.object->data,
-                                  (TypeMap*)b_item.object->type, b_item.object->data);
+    // S6.2.2v3: a nominal value is compared by its RECORD, whatever structural
+    // tag it wears, so this must be keyed on the record and must come before
+    // the structural arms that would otherwise claim it.
+    if (lambda_value_nominal(a_tid, (const void*)(uintptr_t)a_item.item)) {
+        // S6.2.2v3: nominal values order by type name, then attributes, then
+        // content — the name is read from the record, which is the one place it
+        // lives once nominal-ness is a descriptor property.
+        TypeMap* type_a = (TypeMap*)a_item.object->type;
+        TypeMap* type_b = (TypeMap*)b_item.object->type;
+        StrView name_a = type_a && type_a->nominal ? type_a->nominal->type_name : StrView{};
+        StrView name_b = type_b && type_b->nominal ? type_b->nominal->type_name : StrView{};
+        int name_cmp = strview_total_cmp(name_a, name_b);
+        if (name_cmp != 0) return name_cmp;
+        int attr_cmp = map_data_total_cmp(type_a, a_item.object->data,
+                                          type_b, b_item.object->data);
+        if (attr_cmp != 0) return attr_cmp;
+        int64_t len_a = a_item.object->length;
+        int64_t len_b = b_item.object->length;
+        int64_t min_len = len_a < len_b ? len_a : len_b;
+        for (int64_t i = 0; i < min_len; i++) {
+            int child_cmp = total_cmp(a_item.object->items[i], b_item.object->items[i]);
+            if (child_cmp != 0) return child_cmp;
+        }
+        return (len_a > len_b) - (len_a < len_b);
     }
     if (a_tid == LMD_TYPE_ELEMENT) {
         TypeElmt* type_a = (TypeElmt*)a_item.element->type;
@@ -2851,7 +2894,7 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
         for (int64_t i = 0; i < elmt->length; i++) {
             query_collect(elmt->items[i], type_val, true, result, depth + 1);
         }
-    } else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT) {
+    } else if (type_id == LMD_TYPE_MAP) {
         Map* map = data.map;
         TypeMap* map_type = (TypeMap*)map->type;
         FOR_EACH_MAP_FIELD(map_type, field) {
@@ -2913,7 +2956,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
                 array_push(result, child);
             }
         }
-    } else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT) {
+    } else if (type_id == LMD_TYPE_MAP) {
         Map* map = data.map;
         TypeMap* map_type = (TypeMap*)map->type;
         FOR_EACH_MAP_FIELD(map_type, field) {
@@ -3035,15 +3078,28 @@ Bool fn_in(Item a_item, Item b_item) {
         else if (b_type == LMD_TYPE_ARRAY_NUM) {
             return array_num_find_equal(b_item.array_num, a_item, false) >= 0;
         }
-        else if (b_type == LMD_TYPE_MAP || b_type == LMD_TYPE_OBJECT) {
-            // value membership: check if a matches any field value
-            Map *map = b_item.map;
-            TypeMap* map_type = (TypeMap*)map->type;
-            if (!map_type) return false;
-            FOR_EACH_MAP_FIELD(map_type, field) {
-                Item val = _map_field_value(map_type, map->data, field);
-                if (fn_eq(val, a_item) == BOOL_TRUE) {
-                    return true;
+        else if (b_type == LMD_TYPE_MAP) {
+            // value membership: check if a matches any field value.
+            // D2.6.6: an object keeps its shape and buffer at Element's
+            // offsets, so both must be reached by kind, never through `.map`.
+            TypeMap* map_type = lambda_attr_shape(b_type, b_item.map);
+            void* map_data = lambda_attr_data(b_type, b_item.map);
+            if (map_type) {
+                FOR_EACH_MAP_FIELD(map_type, field) {
+                    Item val = _map_field_value(map_type, map_data, field);
+                    if (fn_eq(val, a_item) == BOOL_TRUE) {
+                        return true;
+                    }
+                }
+            }
+            // S8.1.1/S8.1.2v2: whatever `for…in` walks, `in` tests. An object
+            // walks attribute values THEN content, so membership must reach the
+            // content too — checking fields alone made `"click" in btn` false
+            // for a child the loop plainly yields.
+            List* content = lambda_content_list(b_type, b_item.object);
+            if (content) {
+                for (int64_t i = 0; i < content->length; i++) {
+                    if (fn_eq(content->items[i], a_item) == BOOL_TRUE) return true;
                 }
             }
             return false;
@@ -3136,8 +3192,10 @@ Bool fn_at(Item a_item, Item b_item) {
         // An index bound is written explicitly: `i < len(xs)`.
         return BOOL_FALSE;
     }
-    if (b_type == LMD_TYPE_MAP || b_type == LMD_TYPE_OBJECT) {
-        return shape_has_named_key((TypeMap*)b_item.map->type, a_item) ? BOOL_TRUE : BOOL_FALSE;
+    if (b_type == LMD_TYPE_MAP) {
+        // D2.6.6: an object keeps its shape at Element's offset, not Map's.
+        return shape_has_named_key(lambda_attr_shape(b_type, b_item.map), a_item)
+            ? BOOL_TRUE : BOOL_FALSE;
     }
     if (b_type == LMD_TYPE_ELEMENT) {
         return shape_has_named_key((TypeMap*)b_item.element->type, a_item) ? BOOL_TRUE : BOOL_FALSE;
@@ -3319,7 +3377,7 @@ String* fn_string(Item itm) {
     }
     case LMD_TYPE_DECIMAL:  case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:
     case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:   {
         StrBuf* sb = strbuf_new();
         print_item(sb, itm, 1, null);  // make list print as list, instead of beaking onto multiple lines
         String* result = heap_strcpy(sb->str, sb->length);
@@ -3416,9 +3474,11 @@ Type* fn_type(Item item) {
     // narrower domain, the same convention that makes `type(1)` be `int`. Only
     // the surface answer moves -- the decoder still sees them as doubles.
     if (lambda_item_is_merged_poison(item.item)) resolved_type = LMD_TYPE_INT;
-    if (resolved_type == LMD_TYPE_OBJECT && item.object && item.object->type) {
-        // preserve nominal object metadata so name(type(obj)) can report the declared type.
-        type->type = (Type*)item.object->type;
+    // D2.6.6v2 phase 2: a nominal value reports its DECLARED type, whatever its
+    // structural kind, so `name(type(p))` is still "Point". Checked before the
+    // structural arms below, which would otherwise collapse it to map/element.
+    if (lambda_value_nominal(resolved_type, (const void*)(uintptr_t)item.item)) {
+        type->type = (Type*)item.element->type;
         return (Type*)type;
     }
     if (resolved_type == LMD_TYPE_ELEMENT && item.element && item.element->type) {
@@ -3485,15 +3545,13 @@ static Symbol* fn_name_from_type(Type* type) {
     if (!type) return nullptr;
     if (type == &TYPE_INTEGER) return fn_name_symbol_from_chars("integer", 7);
     if (type == &TYPE_NUMBER) return fn_name_symbol_from_chars("number", 6);
-    switch (type->type_id) {
-    case LMD_TYPE_OBJECT: {
-        TypeObject* obj_type = (TypeObject*)type;
-        Symbol* obj_name = fn_name_symbol_from_strview(obj_type->type_name);
-        if (obj_name) return obj_name;
-        return obj_type->struct_name
-            ? fn_name_symbol_from_chars(obj_type->struct_name, strlen(obj_type->struct_name))
-            : nullptr;
+    // D2.6.6v2 phase 2: a nominal type answers with its declared name whatever
+    // its structural kind, so `name(type(p))` stays "Point" after the flip.
+    if (TypeNominal* record = type_nominal_record(type)) {
+        Symbol* nominal_name = fn_name_symbol_from_strview(record->type_name);
+        if (nominal_name) return nominal_name;
     }
+    switch (type->type_id) {
     case LMD_TYPE_ELEMENT: {
         TypeElmt* elmt_type = (TypeElmt*)type;
         Symbol* elmt_name = fn_name_symbol_from_strview(elmt_type->name);
@@ -3526,17 +3584,19 @@ Symbol* fn_name(Item item) {
     case LMD_TYPE_NULL:
     case LMD_TYPE_ERROR:
         return nullptr;
+    case LMD_TYPE_MAP: {
+        // D2.6.6v2 phase 2: a nominal MAP answers with its declared name; a
+        // structural map still has none.
+        if (lambda_value_nominal(type_id, item.map)) {
+            return fn_name_from_type((Type*)item.map->type);
+        }
+        return nullptr;
+    }
     case LMD_TYPE_ELEMENT: {
         // name() reads intrinsic tag metadata; user attrs like name: must only affect .name.
         Element* elmt = item.element;
         if (!elmt || !elmt->type) return nullptr;
         return fn_name_from_type((Type*)elmt->type);
-    }
-    case LMD_TYPE_OBJECT: {
-        // name() reads nominal object metadata instead of the object's user field named "name".
-        Object* obj = item.object;
-        if (!obj || !obj->type) return nullptr;
-        return fn_name_from_type((Type*)obj->type);
     }
     case LMD_TYPE_FUNC: {
         // return the function's name as a symbol
@@ -3587,8 +3647,7 @@ static bool input_schema_collect_type(Type* type, NamePool* name_pool,
         return input_schema_collect_type(semantic_type, name_pool, visited);
     }
 
-    if (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT ||
-            type->type_id == LMD_TYPE_OBJECT) {
+    if (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT) {
         TypeMap* map_type = (TypeMap*)type;
         if (type->type_id == LMD_TYPE_ELEMENT) {
             TypeElmt* element_type = (TypeElmt*)type;
@@ -3603,9 +3662,11 @@ static bool input_schema_collect_type(Type* type, NamePool* name_pool,
                     field->name->str, field->name->length)) return false;
             if (!input_schema_collect_type(field->type, name_pool, visited)) return false;
         }
-        if (type->type_id == LMD_TYPE_OBJECT) {
-            if (!input_schema_collect_type(((TypeObject*)type)->base,
-                    name_pool, visited)) return false;
+        if (TypeNominal* record = type_nominal_record(type)) {
+            // walk the nominal base chain, which is where inheritance lives now
+            for (TypeNominal* base = record->base; base; base = base->base) {
+                (void)base;  // records carry no shape of their own to collect
+            }
         }
         return true;
     }
@@ -3715,7 +3776,7 @@ RetItem fn_input2(Item target_item, Item type) {
         // Legacy behavior: type is a simple string/symbol
         type_str = fn_string(type);
     }
-    else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT) {
+    else if (type_id == LMD_TYPE_MAP) {
         log_debug("input type is a map");
         // New behavior: type is a map with options
         Map* options_map = type.map;
@@ -3861,7 +3922,7 @@ RetItem fn_parse2(Item str_item, Item type) {
     else if (is_text_type_id(type_id)) {
         type_str = fn_string(type);
     }
-    else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT) {
+    else if (type_id == LMD_TYPE_MAP) {
         Map* options_map = type.map;
         bool is_found;
 
@@ -4141,7 +4202,7 @@ String* fn_format2(Item item, Item type) {
         // Legacy behavior: type is a simple string or symbol
         type_str = fn_string(type);
     }
-    else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT) {
+    else if (type_id == LMD_TYPE_MAP) {
         log_debug("format type is a map");
         // New behavior: type is a map with options
         Map* options_map = type.map;
@@ -4227,6 +4288,8 @@ Item fn_index(Item item, Item index_item) {
         case LMD_TYPE_ARRAY_NUM:
         case LMD_TYPE_RANGE:
         case LMD_TYPE_ELEMENT:
+        // S8.2.1v3: an object exposes the same two faces as an element, so an
+        // IntKey selects a content child here rather than reading as null.
         case LMD_TYPE_STRING:
         case LMD_TYPE_SYMBOL:
         case LMD_TYPE_BINARY:
@@ -4299,7 +4362,7 @@ Item fn_index_set(Item item, Item key, Item value) {
             "invalid element member write: key must be an exact integer or string/symbol");
         return ItemError;
     }
-    if (item_type == LMD_TYPE_MAP || item_type == LMD_TYPE_OBJECT ||
+    if (item_type == LMD_TYPE_MAP ||
             item_type == LMD_TYPE_VMAP) {
         if (has_name_key) return fn_map_set(item, key, value);
         set_runtime_error(ERR_TYPE_MISMATCH,
@@ -4317,7 +4380,32 @@ int64_t fn_int64_index(Item item) {
     return lambda_item_to_int64_exact(item, &value) ? value : INT64_MIN;
 }
 
-static Item lambda_bind_object_method(TypeMethod* method, Item self) {
+// S12.3.3v2: the one method walk — own methods, then the base chain. Shared by
+// the ANY lane (fn_member) and the static lane (item_attr) so a bare `obj.m`
+// cannot resolve differently depending on which lane compiled the access.
+extern "C" const TypeMethod* lambda_object_find_method(const TypeObject* type,
+        const char* key) {
+    // D2.6.6v2 phase 2: methods hang off the nominal RECORD, so the walk is the
+    // record's base chain — the shape's own kind no longer participates.
+    const TypeNominal* record = type_nominal_record((const Type*)type);
+    for (const TypeNominal* t = record; t; t = t->base) {
+        for (const TypeMethod* m = t->methods; m; m = m->next) {
+            if (m->name && m->name->str && key && strcmp(m->name->str, key) == 0) return m;
+        }
+    }
+    return NULL;
+}
+
+static Item lambda_bind_object_method(const TypeMethod* method, Item self) {
+    // A method carries a compiled entry only once it has been JIT-compiled;
+    // under T0 it has an AST definition instead. Binding used to require
+    // compiled_fn, so a bare `obj.m` read null on the interpreter tier while
+    // `obj.m()` worked — the call path builds the interpreted closure itself.
+    if (!method->compiled_fn) {
+        Function* interpreted = interp_bind_object_method(method, self);
+        if (!interpreted) return ItemNull;
+        return {.item = (uint64_t)(uintptr_t)interpreted};
+    }
     Function* bound = to_closure_named(method->compiled_fn, method->arity,
         (void*)(uintptr_t)self.item, method->compiled_name);
     // A method table keeps raw code, so reattach its TypeFunc when rebuilding
@@ -4330,6 +4418,30 @@ static Item lambda_bind_object_method(TypeMethod* method, Item self) {
         lambda_function_mark_lambda_boxed_function(bound);
     }
     return {.item = (uint64_t)(uintptr_t)bound};
+}
+
+// S12.3.3v2 / S8.2.1v3: object member access — key domain first, then the
+// type's methods. `obj.m` and its dynamic form `obj["m"]` are one operation,
+// so both lanes route here. The method-eligible builtin tier is deliberately
+// absent: it is a call-site rule (S12.3.3v2), applied in build_ast, so a bare
+// miss stays null and `m[key]` probing on plain maps keeps working (LR02-17).
+extern "C" Item lambda_object_member(Item self, const char* key) {
+    Object* obj = self.object;
+    if (!obj || !key) return ItemNull;
+    bool is_found = false;
+    Item field_val = _map_get((TypeMap*)obj->type, obj->data, (char*)key, &is_found);
+    if (is_found) return field_val;
+    const TypeMethod* method = lambda_object_find_method((TypeObject*)obj->type, key);
+    if (!method) return ItemNull;
+    // OB6 rules a bare `pn` method reference a compile error, but the rejection
+    // cannot live here: MIR lowers a `pn` method CALL by lowering its callee
+    // member expression as a value through this very lane, so refusing to bind
+    // a proc method here silently turns `c.bump()` into a no-op on the JIT tier
+    // (measured). Only build_ast can tell a bare reference from a sanctioned
+    // callee — it holds `call->function` — and that needs an AST flag plus a
+    // validation point, since the member node is built before the call node
+    // that consumes it. Tracked as LR02-18.
+    return lambda_bind_object_method(method, self);
 }
 
 // The single authority for a Path's built-in properties, shared by fn_member
@@ -4574,45 +4686,14 @@ Item fn_member(Item item, Item key) {
         return ItemNull;
     }
     case LMD_TYPE_MAP: {
+        // D2.6.6v2 phase 2: a nominal map resolves its methods after its fields
+        // (S12.3.3v2); a structural map has no method tier.
+        if (is_text_type_id(key._type_id) &&
+                lambda_value_nominal(type_id, item.map)) {
+            return lambda_object_member(item, (const char*)key.get_chars());
+        }
         Map *map = item.map;
         return map_get(map, key);
-    }
-    case LMD_TYPE_OBJECT: {
-        Object* obj = item.object;
-        // First try field access
-        bool is_found = false;
-        char* key_str = NULL;
-        if (is_text_type_id(key._type_id)) {
-            key_str = (char*)key.get_chars();
-        }
-        if (key_str) {
-            Item field_val = _map_get((TypeMap*)obj->type, obj->data, key_str, &is_found);
-            if (is_found) return field_val;
-        }
-        // Field not found — check method table
-        if (key_str) {
-            TypeObject* obj_type = (TypeObject*)obj->type;
-            TypeMethod* method = obj_type->methods;
-            while (method) {
-                if (strcmp(method->name->str, key_str) == 0 && method->compiled_fn) {
-                    return lambda_bind_object_method(method, item);
-                }
-                method = method->next;
-            }
-            // Walk inheritance chain
-            TypeObject* base = obj_type->base;
-            while (base) {
-                TypeMethod* bmethod = base->methods;
-                while (bmethod) {
-                    if (strcmp(bmethod->name->str, key_str) == 0 && bmethod->compiled_fn) {
-                        return lambda_bind_object_method(bmethod, item);
-                    }
-                    bmethod = bmethod->next;
-                }
-                base = base->base;
-            }
-        }
-        return ItemNull;
     }
     case LMD_TYPE_VMAP: {
         VMap *vm = item.vmap;
@@ -4622,6 +4703,11 @@ Item fn_member(Item item, Item key) {
         return vmap_get_by_item(vm, key);
     }
     case LMD_TYPE_ELEMENT: {
+        // a nominal element resolves methods too (D2.6.6v2 phase 2)
+        if (is_text_type_id(key._type_id) &&
+                lambda_value_nominal(type_id, item.element)) {
+            return lambda_object_member(item, (const char*)key.get_chars());
+        }
         Element *elmt = item.element;
         return elmt_get(elmt, key);
     }
@@ -4666,25 +4752,12 @@ extern "C" Item fn_member_by_id(Item item, NameId name_id) {
         }
         break;
     }
-    case LMD_TYPE_OBJECT: {
-        Object* object = item.object;
-        if (object) {
-            Item result = map_get_by_name_id((Container*)object,
-                (TypeMap*)object->type, object->data, name_id, &is_found);
-            if (is_found) return result;
-        }
-        break;
-    }
-    // Elements have content/attribute lookup rules beyond their map-shaped
-    // storage (for example a literal attribute can share an element shape
-    // identity). Keep them on fn_member's spelling-aware path until those
-    // rules are represented in the raw NameId ABI (D4.6.1v2-D4.6.2v2).
     default:
         break;
     }
 
     // Id-less input shapes and built-in properties still require spelling
-    // semantics. This is cold relative to generated map/object field hops and
+    // semantics. This is cold relative to generated map field hops and
     // preserves fn_member's path, datetime, vmap, array, and element rules.
     Item key = lambda_name_id_to_item(name_id);
     return fn_member(item, key);
@@ -4704,17 +4777,12 @@ int64_t fn_len(Item item) {
     case LMD_TYPE_ARRAY_NUM:
         size = array_num_iter_count(item.array_num);
         break;
-    case LMD_TYPE_MAP:
-    case LMD_TYPE_OBJECT: {
-        // A map is iterable in Lambda exactly like an array -- `for (v in m)`
-        // walks its entries -- so its length is that entry count. Both arms
-        // were hardcoded to 0, which made `len(m)` disagree with the loop that
-        // ranges over the same map, and made a populated map compare equal to
-        // an empty one through `len`. OBJECT extends MAP and shares the shape.
-        // `length` is that count only while every entry is a named field.
-        // A spread is one nameless link slot covering many fields, so
-        // `len({*:m, w:5})` reported 2 for a 4-field map; those shapes must
-        // count through the flattening walk iteration itself uses (S8.3.1).
+    case LMD_TYPE_MAP: {
+        // A map is iterable exactly like an array -- `for (v in m)` walks its
+        // entries -- so its length is that entry count. `length` is that count
+        // only while every entry is a named field: a spread is one nameless
+        // link slot covering many, so those shapes count through the same
+        // flattening walk iteration uses (S8.3.1).
         Map* map = item.map;
         TypeMap* map_type = map ? (TypeMap*)map->type : NULL;
         size = !map_type ? 0 : map_type->has_spread ?
@@ -4727,6 +4795,27 @@ int64_t fn_len(Item item) {
         break;
     }
     case LMD_TYPE_ELEMENT: {
+        // S8.3.1v2: a NOMINAL value is not divergent — its length is attributes
+        // plus content, so `len(<Point x: 1, "t">)` is 2. Structural elements
+        // keep the divergence documented below (LR09-8).
+        if (lambda_value_nominal(type_id, item.element)) {
+            Element* nom = item.element;
+            TypeMap* attr_type = (TypeMap*)nom->type;
+            size = !attr_type ? 0 : attr_type->has_spread
+                ? map_flat_field_count(attr_type, nom->data) : attr_type->length;
+            size += nom->length;
+            break;
+        }
+        // KNOWN DIVERGENCE from S8.3.1v2, pre-existing and deliberately left
+        // in place: the law says `len(<e a:1, b:2, "t">)` is 3 (attributes then
+        // children, what `for (x in e)` walks), but this returns the child
+        // count alone. Conforming was measured — it moves 44 corpus goldens and
+        // breaks the child-indexing idiom `for (i in 0 to len(e) - 1) e[i]`,
+        // because an IntKey subscript reaches only children (S8.2.1v3) while
+        // the conformant `len` also counts attributes. Closing it needs a
+        // companion ruling for a child-count/child-index spelling first.
+        // Fixture `len_iter_law.ls` pins the divergence; tracked as LR09-8.
+        // Objects are NOT divergent — see the OBJECT arm above.
         Element *elmt = item.element;
         size = elmt->length;
         break;
@@ -4830,6 +4919,17 @@ extern "C" int64_t fn_len_s(String* str) {
 
 extern "C" int64_t fn_len_e(Element* elmt) {
     if (!elmt) return 0;
+    // S8.3.1v2: a NOMINAL element counts attributes plus content, like every
+    // other nominal value; only a structural element keeps the content-only
+    // divergence (LR09-8). The JIT specializes `len` on a statically-element
+    // argument to this helper, so the rule has to hold here too or the two
+    // tiers disagree — which is exactly how this was found.
+    if (elmt->type && ((TypeMap*)elmt->type)->nominal) {
+        TypeMap* attr_type = (TypeMap*)elmt->type;
+        int64_t attrs = attr_type->has_spread
+            ? map_flat_field_count(attr_type, elmt->data) : attr_type->length;
+        return attrs + elmt->length;
+    }
     return elmt->length;
 }
 
@@ -5988,14 +6088,18 @@ static bool parse_find_replace_options(Item options_item, FindReplaceOptions* op
     options->ignore_case = false;
     TypeId options_type = get_type_id(options_item);
     if (options_type == LMD_TYPE_NULL) return true;
-    if (options_type != LMD_TYPE_MAP && options_type != LMD_TYPE_OBJECT) {
+    if (options_type != LMD_TYPE_MAP) {
         log_debug("parse_find_replace_options: options must be a map");
         return false;
     }
 
-    Map* options_map = (options_type == LMD_TYPE_MAP) ? options_item.map : (Map*)options_item.object;
+    // D2.6.6: an object cannot be viewed as a Map* — its shape and buffer sit
+    // at Element's offsets — so the attribute face is reached by kind.
+    TypeMap* options_shape = lambda_attr_shape(options_type, options_item.map);
+    void* options_data = lambda_attr_data(options_type, options_item.map);
+    if (!options_shape || !options_data) return false;
     bool is_found = false;
-    Item limit_item = _map_get((TypeMap*)options_map->type, options_map->data, "limit", &is_found);
+    Item limit_item = _map_get(options_shape, options_data, "limit", &is_found);
     if (is_found && get_type_id(limit_item) != LMD_TYPE_NULL) {
         int64_t limit = 0;
         if (!lambda_item_to_int64_exact(limit_item, &limit)) {
@@ -6011,7 +6115,7 @@ static bool parse_find_replace_options(Item options_item, FindReplaceOptions* op
     }
 
     is_found = false;
-    Item last_item = _map_get((TypeMap*)options_map->type, options_map->data, "last", &is_found);
+    Item last_item = _map_get(options_shape, options_data, "last", &is_found);
     if (is_found && get_type_id(last_item) != LMD_TYPE_NULL) {
         int64_t last = 0;
         if (!lambda_item_to_int64_exact(last_item, &last)) {
@@ -6031,7 +6135,7 @@ static bool parse_find_replace_options(Item options_item, FindReplaceOptions* op
     }
 
     is_found = false;
-    Item ignore_item = _map_get((TypeMap*)options_map->type, options_map->data, "ignore_case", &is_found);
+    Item ignore_item = _map_get(options_shape, options_data, "ignore_case", &is_found);
     if (is_found && get_type_id(ignore_item) != LMD_TYPE_NULL) {
         if (get_type_id(ignore_item) != LMD_TYPE_BOOL) {
             log_debug("parse_find_replace_options: ignore_case must be bool");
@@ -6783,7 +6887,7 @@ static bool array_rebuild_native_lane(Item source, const LaneStorageDesc* desc,
     TypeId source_type = get_type_id(source);
     if (source_type != LMD_TYPE_ARRAY && source_type != LMD_TYPE_ARRAY_NUM) return false;
     Array* source_array = source.array;
-    if (!source_array || source_array->has_js_props ||
+    if (!source_array || js_array_has_props(source_array) ||
             (source_type == LMD_TYPE_ARRAY_NUM &&
              (source_array->is_view || source_array->is_ndim))) {
         // A view aliases its ArrayNum backing. Replacing it would silently
@@ -7042,7 +7146,7 @@ static void map_field_decrement_ref(void* field_ptr, TypeId field_type) {
     }
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:  {
         break;
     }
     case LMD_TYPE_NULL: {
@@ -7089,7 +7193,7 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         *(Complex**)field_ptr = value.get_complex();
         break;
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_RANGE:
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:  {
         Container* c = value.container;
         *(Container**)field_ptr = c;
         break;
@@ -7141,7 +7245,7 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
             break;
         case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_RANGE:
         case LMD_TYPE_MAP: case LMD_TYPE_VMAP:
-        case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
+        case LMD_TYPE_ELEMENT: 
             titem.container = value.container;
             break;
         case LMD_TYPE_TYPE:
@@ -7246,7 +7350,6 @@ static bool mutable_clone_needs_container_path(Item value) {
     case LMD_TYPE_ARRAY:
     case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP:
-    case LMD_TYPE_OBJECT:
     case LMD_TYPE_ELEMENT:
         return true;
     default:
@@ -7257,7 +7360,6 @@ static bool mutable_clone_needs_container_path(Item value) {
 static void* mutable_clone_owner_data(Item owner) {
     switch (get_type_id(owner)) {
     case LMD_TYPE_MAP: return owner.map ? owner.map->data : NULL;
-    case LMD_TYPE_OBJECT: return owner.object ? owner.object->data : NULL;
     case LMD_TYPE_ELEMENT: return owner.element ? owner.element->data : NULL;
     default: return NULL;
     }
@@ -7437,39 +7539,6 @@ static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
     return {.map = rooted_dst.get()};
 }
 
-static Item clone_mutable_object(Item src_item, MutableCloneContext* clone_ctx) {
-    Object* src = src_item.object;
-    if (!src || !src->type) return ItemNull;
-    TypeMap* source_type = mutable_shape_type(LMD_TYPE_OBJECT, (Type*)src->type);
-    Item existing;
-    if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
-    RootFrame roots(2);
-    Rooted<Object*> rooted_src(roots, src);
-    Rooted<Object*> rooted_dst(roots, (Object*)NULL);
-    Object* dst = (Object*)heap_calloc(sizeof(Object), LMD_TYPE_OBJECT);
-    if (!dst) return ItemNull;
-    rooted_dst.set(dst);
-    src = rooted_src.get();
-    clone_mutable_container_flags((Container*)dst, (Container*)src);
-    dst->type_id = LMD_TYPE_OBJECT;
-    dst->map_kind = src->map_kind;
-    dst->type = src->type;
-    int data_cap = src->data_cap > 0 ? src->data_cap :
-        (source_type ? source_type->byte_size : 0);
-    dst->data_cap = data_cap;
-    mutable_clone_register(clone_ctx, src, {.object = rooted_dst.get()});
-    if (data_cap > 0) {
-        rooted_dst.get()->data = heap_data_calloc((size_t)data_cap);
-        if (source_type) {
-            clone_mutable_shape_data(source_type, {.object = rooted_dst.get()},
-                {.object = rooted_src.get()}, clone_ctx);
-        } else if (rooted_src.get()->data) {
-            memcpy(rooted_dst.get()->data, rooted_src.get()->data, (size_t)data_cap);
-        }
-    }
-    return {.object = rooted_dst.get()};
-}
-
 static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx) {
     Element* src = src_item.element;
     if (!src || !src->type) return ItemNull;
@@ -7515,7 +7584,6 @@ static Item clone_mutable_item(Item value, MutableCloneContext* clone_ctx) {
     case LMD_TYPE_ARRAY: return clone_mutable_array(value.array, clone_ctx);
     case LMD_TYPE_ARRAY_NUM: return clone_mutable_array_num(value.array_num, clone_ctx);
     case LMD_TYPE_MAP: return clone_mutable_map(value, clone_ctx);
-    case LMD_TYPE_OBJECT: return clone_mutable_object(value, clone_ctx);
     case LMD_TYPE_ELEMENT: return clone_mutable_element(value, clone_ctx);
     default: return value;
     }
@@ -7537,7 +7605,6 @@ bool cow_item_is_container(Item value) {
     case LMD_TYPE_ARRAY:
     case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP:
-    case LMD_TYPE_OBJECT:
     case LMD_TYPE_ELEMENT:
     case LMD_TYPE_VMAP:
         return true;
@@ -7633,7 +7700,6 @@ static uint64_t cow_one_level_copy_bytes(Item value) {
         return sizeof(ArrayNum) + (uint64_t)(elem_size > 0 ? elem_size : 0) *
             (uint64_t)array->length;
     }
-    case LMD_TYPE_OBJECT:
         return sizeof(Object) + (uint64_t)value.object->data_cap;
     case LMD_TYPE_ELEMENT:
         return sizeof(Element) + (uint64_t)value.element->data_cap +
@@ -7886,7 +7952,7 @@ static Item cow_clone_map_like_one_level(Item source_item) {
     Rooted<Item> rooted_source(roots, source_item);
     Rooted<Item> rooted_copy(roots, ItemNull);
     size_t size = type_id == LMD_TYPE_MAP ? sizeof(Map) :
-        type_id == LMD_TYPE_OBJECT ? sizeof(Object) : sizeof(Element);
+        sizeof(Element);
     Container* copy = (Container*)heap_calloc(size, type_id);
     if (!copy) return ItemError;
     rooted_copy.set({.container = copy});
@@ -7909,7 +7975,7 @@ static Item cow_clone_map_like_one_level(Item source_item) {
         copy_data = &dst->data;
         copy_cap = &dst->data_cap;
         source_cap = src->data_cap;
-    } else if (type_id == LMD_TYPE_OBJECT) {
+    } else if (false) {
         Object* src = rooted_source.get().object;
         Object* dst = rooted_copy.get().object;
         dst->type = src->type;
@@ -7918,6 +7984,20 @@ static Item cow_clone_map_like_one_level(Item source_item) {
         copy_data = &dst->data;
         copy_cap = &dst->data_cap;
         source_cap = src->data_cap;
+        // D2.6.6: content is the object's own items — same one-level copy with
+        // child marks the element branch does below. Without it the detached
+        // copy would share the source's children, and a write through either
+        // alias would be visible in both (S9.1.2).
+        for (int64_t index = 0; index < src->length; index++) {
+            src = rooted_source.get().object;
+            Object* live_dst = rooted_copy.get().object;
+            Item child = src->items[index];
+            cow_mark_shared(child);
+            array_push((Array*)live_dst, child);
+        }
+        source_data = rooted_source.get().object->data;
+        copy_data = &rooted_copy.get().object->data;
+        copy_cap = &rooted_copy.get().object->data_cap;
     } else {
         Element* src = rooted_source.get().element;
         Element* dst = rooted_copy.get().element;
@@ -7943,7 +8023,7 @@ static Item cow_clone_map_like_one_level(Item source_item) {
             source_data = rooted_source.get().map->data;
             copy_data = &rooted_copy.get().map->data;
             copy_cap = &rooted_copy.get().map->data_cap;
-        } else if (type_id == LMD_TYPE_OBJECT) {
+        } else if (false) {
             source_data = rooted_source.get().object->data;
             copy_data = &rooted_copy.get().object->data;
             copy_cap = &rooted_copy.get().object->data_cap;
@@ -7967,7 +8047,6 @@ static Item cow_clone_one_level(Item source) {
     case LMD_TYPE_ARRAY: return cow_clone_array_one_level(source.array);
     case LMD_TYPE_ARRAY_NUM: return clone_mutable_array_num(source.array_num, NULL);
     case LMD_TYPE_MAP:
-    case LMD_TYPE_OBJECT:
     case LMD_TYPE_ELEMENT: return cow_clone_map_like_one_level(source);
     default: return source;
     }
@@ -8020,7 +8099,13 @@ static ShapeEntry* runtime_named_map_field(Type* expected, Item key) {
 }
 
 static bool map_extend_open_shape(Item map_item, Item key, Item value) {
-    if (get_type_id(map_item) != LMD_TYPE_MAP) {
+    // S2.1.4 part 3: a nominal instance is OPEN — it may hold fields its type
+    // does not declare. Element-shaped values are admitted too: since D2.6.6v2
+    // every container shares Map's attribute face at the same offsets, so the
+    // upcast below is valid and only the attribute face is touched (the content
+    // items are left alone).
+    TypeId extend_tid = get_type_id(map_item);
+    if (extend_tid != LMD_TYPE_MAP && !is_element_family_type_id(extend_tid)) {
         return false;
     }
     Map* map = map_item.map;
@@ -8103,7 +8188,14 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     // the copied chain above carries old_type's entries verbatim, spread slots included
     new_type->has_spread = old_type->has_spread;
     new_type->has_named_shape = old_type->has_named_shape;
+    // A grown shape no longer proves the declared physical layout to the
+    // emitter's direct-access path (D3.2.4v2), but it is STILL an instance of
+    // its nominal type: the record travels with it, so `is T` and method
+    // resolution survive the extension (S2.1.4, OB16 — this is LR03-8's fix at
+    // the growth site, the one place that actually produces a grown shape).
     new_type->is_trusted_contract = false;
+    new_type->nominal = old_type->nominal;
+    new_type->is_nominal = old_type->is_nominal;
     new_type->struct_name = old_type->struct_name;
     new_type->is_private_clone = true;
     typemap_hash_build(new_type, context->pool);
@@ -8482,7 +8574,7 @@ Item map_set_cow(Item owner, Item key, Item value) {
     Item replacement = cow_prepare_write(owner);
     if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
     TypeId type_id = get_type_id(replacement);
-    if (type_id != LMD_TYPE_MAP && type_id != LMD_TYPE_OBJECT &&
+    if (type_id != LMD_TYPE_MAP &&
             type_id != LMD_TYPE_ELEMENT && type_id != LMD_TYPE_VMAP) {
         log_error("cow map mutation rejected non-map owner type %d", type_id);
         return ItemError;
@@ -8512,10 +8604,11 @@ Item cow_path_set_raw(Item owner, Item key, Item value) {
         }
         return rooted_owner.get();
     }
-    if (owner_type == LMD_TYPE_MAP || owner_type == LMD_TYPE_OBJECT ||
+    if (owner_type == LMD_TYPE_MAP ||
             owner_type == LMD_TYPE_ELEMENT || owner_type == LMD_TYPE_VMAP) {
         if (owner_type == LMD_TYPE_MAP &&
-                !runtime_named_map_field((Type*)rooted_owner.get().map->type,
+                !runtime_named_map_field((Type*)lambda_attr_shape(owner_type,
+                        rooted_owner.get().map),
                     rooted_key.get()) &&
                 !map_extend_open_shape(rooted_owner.get(), rooted_key.get(),
                     rooted_value.get())) {
@@ -8805,6 +8898,12 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_et->name = old_et->name;
         new_et->content_length = old_et->content_length;
         new_et->ns = old_et->ns;
+        // S2.1.4/OB16: a nominal instance is OPEN — extending it with a field is
+        // an ordinary member addition, and every shape reached that way must
+        // keep pointing at the SAME nominal record, or the value would silently
+        // stop being an instance of its type and lose its methods (LR03-8).
+        new_et->nominal = old_map_type->nominal;
+        new_et->is_nominal = old_map_type->is_nominal;
         new_et->type_index = tl->length;
 
         // Populate/grow hash table for O(1) property lookup.
@@ -8819,6 +8918,8 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_mt->last = last;
         new_mt->length = field_count;
         new_mt->byte_size = new_byte_size;
+        new_mt->nominal = old_map_type->nominal;   // S2.1.4/OB16, see above
+        new_mt->is_nominal = old_map_type->is_nominal;
         new_mt->type_index = tl->length;
         new_mt->has_named_shape = old_map_type->has_named_shape;
         new_mt->is_trusted_contract = false;
@@ -9274,7 +9375,7 @@ Item fn_map_set(Item map_item, Item key, Item value) {
         type_slot = &mp->type;
         data_slot = &mp->data;
         cap_slot = &mp->data_cap;
-    } else if (map_type_id == LMD_TYPE_OBJECT) {
+    } else if (false) {
         Object* obj = map_item.object;
         if (!obj) { log_error("fn_map_set: null object"); return ItemError; }
         if (obj->is_static) { log_error("fn_map_set: cannot mutate static object"); return ItemError; }
@@ -9403,13 +9504,13 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             {
                 bool old_is_ptr = (field_type == LMD_TYPE_NULL || field_type == LMD_TYPE_MAP ||
                     field_type == LMD_TYPE_VMAP ||
-                    field_type == LMD_TYPE_ELEMENT || field_type == LMD_TYPE_OBJECT ||
+                    field_type == LMD_TYPE_ELEMENT ||
                     field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_ARRAY_NUM ||
                     field_type == LMD_TYPE_RANGE ||
                     field_type == LMD_TYPE_UNDEFINED || field_type == LMD_TYPE_BOOL);
                 bool new_is_ptr = (value_type == LMD_TYPE_NULL || value_type == LMD_TYPE_MAP ||
                     value_type == LMD_TYPE_VMAP ||
-                    value_type == LMD_TYPE_ELEMENT || value_type == LMD_TYPE_OBJECT ||
+                    value_type == LMD_TYPE_ELEMENT ||
                     value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_NUM ||
                     value_type == LMD_TYPE_RANGE ||
                     value_type == LMD_TYPE_UNDEFINED || value_type == LMD_TYPE_BOOL);
@@ -9462,8 +9563,13 @@ Item fn_map_set(Item map_item, Item key, Item value) {
         }
         entry = entry->next;
     }
-    // A shaped map cannot grow through an unknown member write; return the
-    // hard error so callers do not mistake the old silent no-op for success.
+    // S2.1.4 part 3 / S9.1.6: a name is in a map's key domain, so an unknown
+    // member write GROWS the shape rather than failing. Growth was previously
+    // only reachable from the cow-path caller, which is why an ordinary
+    // `p.z = 9` on a declared type silently did nothing on T0 and errored on
+    // MIR. The hard error remains for anything that cannot grow — a non-name
+    // key, or a value with no attribute face.
+    if (map_extend_open_shape(map_item, key, value)) return ItemNull;
     log_error("fn_map_set: field '%s' not found", key_cstr);
     return ItemError;
 }

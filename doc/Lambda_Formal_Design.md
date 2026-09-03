@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.38.11 (2026-08-30)
+**Spec version:** 1.44.3 (2026-09-03)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -328,6 +328,86 @@ language-visible counterparts are the semantics spec's SI ledger.
   interval and leaks on any early return that forgets to restore it. Such a
   flag existed on `EvalContext`/`InputAllocationContext` and was retired once
   the append-site split made it dead.* [LR09-R3]
+- **D2.6.6v2*** **One container hierarchy — map → array → element — and
+  nominal is a descriptor property, not a kind.** Physically, containers form
+  a single-inheritance chain: `Map` is the base (header plus the attribute
+  face `type`/`data`/`data_cap`); `Array`, with `ArrayNum` beside it, extends
+  `Map` with `items`/`length`/`extra`/`capacity`; `Element` extends `Array`.
+  The attribute face therefore sits at ONE offset in every container and a
+  cast to any ancestor is valid by construction. *Why this shape:* the
+  object/element/map tension was the classic single-versus-multiple
+  inheritance problem — a type cannot extend both — so either map extends
+  array or array extends map, and the base is the one every value shares: the
+  property bag, which is what a JavaScript program calls an object (D2.6.9v3).
+  `LMD_TYPE_OBJECT` retires as a TypeId, and the `Object` alias with it: an
+  object is a map, array, or element whose type descriptor carries a
+  **nominal record** (name, base, methods, constraint, content pattern). The
+  descriptor is authoritative; a header bit `is_nominal` caches it and is
+  written only by construction and by instance alteration (S2.1.5), which
+  sealing (S2.1.4) makes safe. A shape transition from a declared shape — an
+  extra field on an open instance — yields a new shape that **points to the
+  same nominal record**, and `is T` compares that record, never the shape
+  pointer. Instance layout follows the declared structure, so an
+  attribute-only nominal type is a 32-byte map, not a 64-byte element.
+  JavaScript arrays hold their properties in their own attribute face, and
+  the reserved JS-properties slot in `extra` (D2.6.4) retires. *Accepted
+  cost:* every array header grows by the map face; array-heavy benchmarks
+  gate the change. *Sequencing:* the layout change lands first as its own
+  verified change, then the nominal-descriptor change and the TypeId
+  retirement (DO26). `TypeObject`'s `content_length` stays the DECLARED
+  content arity; per-literal counts stay on `AstObjectLiteralNode`. `entity`
+  never had a TypeId. [OB1, OB2, OB4, OB13–OB16, OB20]
+- **D2.6.7*** A bound method is an ordinary D6.2.1 function value whose
+  closure environment is the receiver, captured by value; the method's
+  compiled entry takes the receiver first and `TypeMethod.arity` excludes
+  it. No unbound `fn(self, …)` value is ever surfaced (S12.3.3v2), and a
+  `pn` method yields no value at all — the emitter rejects the bare
+  reference at compile time. [OB6]
+- **D2.6.8*** **Node identity is data the container carries, never its
+  address.** D4.3.1's non-moving heap must not be relied on as an identity:
+  a COW detach produces a new address for the same node, and an identity
+  compared by address would break under exactly the write that S5.1.4v2
+  says preserves it (the same reason D6.2.1 stamps function identity at the
+  definition site). The carrier — a header word, a side table, or an
+  attribute — and the id-preserving operation set are DO25. [OB10]
+- **D2.6.9v3*** **A JavaScript object is a nominal Lambda `Map` — and
+  therefore a Lambda object.** Under D2.6.6v2 nominal-ness is a descriptor
+  property, and a JavaScript object's descriptor always carries one: its
+  class. So every JS object is a map whose descriptor holds a nominal record,
+  which is exactly S2.1.1v3's definition of an object; `js_obj is object` is
+  true, and a JS array is likewise a nominal Lambda array. The v2 wording
+  ("never a Lambda Object") described the shipped runtime, where `object`
+  was a separate element-shaped kind; it is superseded, and the naming trap
+  it warned about dissolves, because the language's `object` and what a JS
+  program calls an object now name the same thing. What stays separate is
+  the **semantics** behind the record, per D1.3: a JS class resolves members
+  through a prototype chain, a Lambda type through its method table; the
+  nominal-record slot is the shared contract, its payload is per-language.
+  Until phase 2 lands, the shipped state is the v2 one: `js_new_object`
+  allocates `LMD_TYPE_MAP`, no guest path constructs `LMD_TYPE_OBJECT`, and
+  an inbound Lambda object is element-shaped and read through the kind-aware
+  accessors, never punned to a `Map*`. Guest-owned map machinery with no
+  Lambda analogue — the property extension table, iterator/proxy/sparse map
+  kinds, the `js_native_trace` hook — stays gated to `LMD_TYPE_MAP`. [D1.3,
+  D2.6.6v2, OB21]
+- **D2.6.10*** **Sealing at the representation level.** Because a nominal
+  type does not change during evaluation (S2.1.4), the JIT may cache its
+  method table and declared-field offsets for the program's lifetime; because
+  an instance's declared prefix never moves, D3.2.4v2 direct access stays
+  valid across extension. Instance type alteration (S2.1.5) is a
+  reconstruction — a fresh instance under the new descriptor — so it
+  invalidates neither cache. [OB15, OB18]
+- **D2.6.11*** **The `is_nominal` bit packs into the existing header.** The
+  container header is eight bytes — `type_id` at 0, the `flags` bit-field
+  byte at 1, `array_flags` at 2, `map_kind` at 3, then `cow_state`,
+  `ctor_reserved_mask_lo`, `ctor_reserved_mask_hi`, `reserved_state` — with
+  every offset and `sizeof(Container) == 8` pinned by static asserts. The
+  cache bit for nominal-ness (D2.6.6v2) must be bit-packed into that header
+  without moving any pinned field or growing it: a free bit in the `flags`
+  byte or in `reserved_state`. `has_js_props` retires with the `extra`
+  JS-properties slot (D2.6.6v2), which frees exactly one such bit. The
+  header is public ABI for MIR and the GC; the asserts are the enforcement.
+  [OB22]
 
 ### D2.7 The scalar-GC invariant
 
@@ -433,7 +513,7 @@ that carries them.
   (declaration on the binding node, inference beside it): an annotation is
   a contract (semantics S11.4.1); inference is never a binding contract
   and may never override what it proved. [TE-1, TE §8.1]
-- **D3.2.4** **A crossing into a named map contract is a reification, not
+- **D3.2.4v2** **A crossing into a named map contract is a reification, not
   merely a check.** A named contract fixes a *physical* packed layout —
   per-field `byte_offset` and storage class — and the emitter's direct
   field access indexes by that layout. So a boundary may be elided only
@@ -447,10 +527,12 @@ that carries them.
   are wrappers whose own `type_id` is `LMD_TYPE_TYPE`, and a
   self-referential record is necessarily optional, so testing the wrapper
   silently exempts precisely the recursive contracts this rule exists to
-  protect. The open `map` fixes no layout and so needs no reification.
+  protect. The open `map` fixes no layout and so needs no reification. For an
+  open **nominal** instance the contract fixes the **declared prefix**: extra
+  fields extend the shape after it and never disturb that prefix (S2.1.4).
   Violating this is a memory-safety defect, not a missed optimization: an
   unreified literal shape read through a contract's offsets returns a
-  malformed Item. [Tune19 §11.5, Tune20 §T20-6a]
+  malformed Item. [Tune19 §11.5, Tune20 §T20-6a, OB16]
 
 ### D3.3 Inference
 
@@ -1608,6 +1690,14 @@ slice; no formal semantic ruling or document semver changes.
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
 | D2.6.2 | ArrayNum `==` representation-sensitivity is a known live bug (also gates the data-processing engines). |
 | D2.6.3 | ELEM_INT i64 revert landed; SIMD kernels only partly re-enabled (C16-era gating comments remain). |
+| D2.6.9v3, D2.6.11 | **Ruled 2026-09-03 (USER), not implemented** — both belong to phase 2 of D2.6.6v2. Shipped state is the v2 description below. |
+| D2.6.9v2 (shipped state) | **Conformant as of 2026-09-03**, verified rather than assumed: `js_new_object` (`js_runtime.cpp`) allocates `LMD_TYPE_MAP`; a sweep of `lambda/js/` and `lambda/dom/` finds no construction of an `LMD_TYPE_OBJECT` value. The inbound-acceptance sites pass whole Items to shared helpers rather than punning, except `js_props_storage_map`, which returned `object.map` for a nominal object and was rewritten to return the packed buffer and capacity; the Map-only extension table is now gated to maps. JS suite 360/360, coercion 15/15, baseline 4083/4083. |
+| D2.6.6v2 (phase 1, layout) | **Implemented 2026-09-03.** `Map` is the base; `List`/`Array` and `ArrayNum` extend it; `Element` extends `List` and declares no fields of its own. The attribute face is at one offset in every container, so the kind-aware accessors and per-kind JIT offset helpers this file's v1 row describes are **retired**: `mir_container_data_offset`/`mir_container_type_offset` are gone and codegen uses `offsetof`-derived constants. The GC traces and compacts every container through named `GC_OFF_*` offsets. Sizes: `Map` 32, `List`/`ArrayNum`/`Element` 64. Layout is pinned by static asserts in **both** `lambda.hpp` **and** the C mirror in `lambda.h` — the mirror had none before, and adding them exposed a pre-existing divergence: it declared a 2-byte `flags` where `Container` uses single bytes, so the mirror never matched the real header ([LR03-9](../vibe/Lambda_Issue_Ledger.md)). Two GC gaps the new layout opened were closed: an array's and an ArrayNum's attribute buffer are now traced AND compacted (`gc_compact_attr_face`). **The reserved-tail JS-properties slot is retired**: a JS array's companion map now lives in the array's own attribute face (one tagged Item under `ArrayPropsShape`), which deletes the `extra` reservation, the tail-shift that had to rebase embedded scalars to make room, the companion carry-over in numeric growth and in tagged promotion, and the two GC tail-slot marks. The companion stays a real object — a sparse array's is a `SparseArrayMap` with its own fields — so what moved inline is the pointer. `has_js_props` is gone and its bit is reserved as `CONTAINER_FLAG_NOMINAL_RESERVED` for D2.6.11. Baseline 4083/4083, JS 360/360, GC stress 93/93, tier parity, stable under forced GC. Per USER 2026-09-03 the array-header growth needs no benchmark gate: this is the container layout. |
+| D2.6.6v2 (phase 2, nominal) | **Implemented 2026-09-03, apart from open instances.** Nominal-ness is now a property of the type descriptor: `TypeNominal` is the record, allocated once per declaration, pointed to by `TypeMap::nominal`, with `Type::is_nominal` as the base-flag discriminator — it lives on the BASE because the question must be safe to ask of a bare singleton `Type`, which shares the map tag but is not a shape. **The representation flip is done**: a nominal type and every value built from it wear the DECLARED structural kind, so `type P { x: int }` yields maps and `type B { …, string* }` yields elements, and `is object` / `is map` are independent axes exactly as S2.1.1v3 says. Nominal sameness is record identity, not name equality (S5.4.2v3), and equality gates on it, so a structural map never equals a nominal one. The object shape extends `TypeElmt`, so a nominal element's `name`/`content_length`/`ns` sit where every element path reads them. Rerouted onto the record: type matching, `fn_is`, equality, the total order, `fn_type`, `fn_name`/`fn_name_from_type`, member and method resolution in both lanes, printing (a nominal map prints `<P x: 3>`, not braces), the formatter dispatch, and `fn_len` — including the JIT's `fn_len_e` specialization, which returned content only and was the one place the two tiers disagreed. Every construction path now carries the real kind; only the `TYPE_OBJECT` singleton still mentions the tag, and the enum member is vestigial. Fixture `test/lambda/object_nominal.ls`; baseline 4083/4083, JS 360/360, GC stress 93/93, exact tier parity, stable under forced GC. **S2.1.4 part 3 now holds too**: an unknown member write GROWS the shape instead of failing. Growth already existed in `map_extend_open_shape` but was reachable only from the cow-path caller, which is why an ordinary `p.z = 9` silently did nothing on T0 and errored on MIR; it is now the shared miss path in `fn_map_set`, and it admits element-shaped values as well — valid only because D2.6.6v2 put every container's attribute face at one offset. The grown shape carries the nominal record forward, so the value stays an instance of its type with its methods intact, which closes [LR03-8](../vibe/Lambda_Issue_Ledger.md) at the one site that actually produces a grown shape. The declared prefix keeps its layout, satisfying D3.2.4v2; the grown shape drops `is_trusted_contract`, so direct access falls back to the checked path. Fixture `test/lambda/proc/object_open_instance.ls`. **The dead `LMD_TYPE_OBJECT` arms are swept**: 251 mentions down to 68, all of which are live or inert — the `object` TYPE itself (`TYPE_OBJECT`, `LIT_TYPE_OBJECT`, `type_info`, `get_type_name`), the range checks that use the tag as the upper bound of the contiguous container band, and tag-keyed template machinery (`ItemTagToType`, `IsMapLike`, `item_payload`) that no value can now reach. The enum member is documented at its declaration as type-only. **The member is now removed** (2026-09-03, on the ruling that the retirement be carried through): `object` is a TYPE, not a tag, so the `TYPE_OBJECT` singleton wears the map tag purely to route through the container arms of the type switches and is matched by POINTER identity everywhere. Removal shifted every later TypeId down by one — MAP=19, ELEMENT=21, TYPE=22, FUNC=23, ANY=24, ERROR=25 — which is an ABI change only for artifacts that pin a raw tag: the two JS error-lane MIR goldens pinned `LMD_TYPE_ERROR` as the literal 26 and were re-pinned to 25 with the constant named in their description. The shift also exposed the one real hazard of giving `object` no tag of its own, and it is worth stating because it will recur for any future tag-sharing type: `lambda_type_node_singleton` (`runtime/ast.hpp`) resolves a type node to its runtime identity and falls back to the node's TAG when no singleton arm matches, so `object` silently resolved to the `map` singleton and `{x: 1} is object` answered true on BOTH tiers. The helper already carried this arm for `date`/`time`/`list`/`number`/`integer` for exactly the same reason; `object` now has one too. `fn_is` likewise matches `&TYPE_OBJECT` by identity ahead of any tag comparison. Baseline 4085/4085, JS MIR emission 21/21. The sweep also surfaced one real regression the flip had left: `total_type_rank` selected the object ORDER BAND by container tag, which nominal values no longer wear, so they sorted with plain maps and elements instead of between them; both it and the `total_cmp` nominal arm are now keyed on the record, and `test/lambda/object_nominal.ls` pins the band. Baseline 4085/4085, JS 360/360, GC stress 93/93. |
+| D2.6.10, D3.2.4v2 | **Ruled 2026-09-03 (USER), not implemented.** Both depend on the phase-2 representation flip. |
+| D2.6.6 (v1, shipped) | **Implemented 2026-09-03; superseded by v2 above.** `Object` is a typedef of `struct Element`; the GC traces and compacts it on the element path; `TypeObject::content_length`, `lambda_content_list`/`lambda_content_count`, `lambda_attr_shape`/`lambda_attr_data`, `is_element_family_type_id`, `object_content`/`object_content_fill`/`object_content_fill_items`, the T0 and MIR literal content phases, and the content-face admissions in `fn_len`, `item_keys`, `iter_len`/`iter_key_at`/`iter_val_at`, `item_at`, `fn_index`, `fn_eq`/`object_eq`, `total_cmp`, `in`, both clone paths, the arena deep copy, `print_tagged`, and the formatters. De-punned: `as_map(ItemOf<LMD_TYPE_OBJECT>)` is deleted, `MapReader` holds shape+buffer instead of a `Map*`, `ElementReader` resolves the tag by kind, `js_props` returns the buffer instead of a `Map*`, and `mir_container_data_offset`/`mir_container_type_offset` select the JIT's packed-field offsets per kind. Fixture `test/lambda/object_content.ls`; baseline 4083/4083, exact tier parity, stable under `LAMBDA_GC_FORCE_EVERY`. Not implemented: schema-driven input producing objects, and the validator's content-arity check against `content_length`. |
+| D2.6.7 | Bound `fn` methods already build the receiver-captured closure (`to_closure_named` in `lambda-eval.cpp`; `closure_env` holds the receiver). Not verified: the compile-time rejection of a bare `pn` method reference on both tiers. |
+| D2.6.8 | No identity carrier exists; nothing to verify until DO25 is decided. |
 | D2.7.2v2 | v2 (companion-lane entries) decided 2026-08-14, not implemented — the v1 trailing-home wrapper ABI ships until Return_Value P4. Ownerless-slot GC scalar fallback active and counted; removal gated on the per-boundary inventory reaching zero. SG2 OQ audits open (dispatch-helper enumeration, resume-path slot reads, RetItem census). |
 | D2.8.2–D2.8.3 | TE-17 lane gating is designed, not built: the admission predicates exist (`lambda_type_accepts_error`, `lambda_type_lane_storage_desc`) but no lane-entry decision consults them, and the `may_defect` fixed point they need does not exist (D6.1.3) — so the current polarity is "trusted clean", the wrong direction. Known violation V1: `fn_array_set` silently despecializes a declared `int[]`, which keeps D2.8.1 true (the lane is lost, not poisoned) but makes the S7.7.2 dominance guarantee false today. |
 | D3.1.1 | `Type*` kind-discrimination is code-authoritative only — no design record owns the first-class type-value representation (DO22); the type-graph de-pointering census is deferred to its own doc (CP §6 census C). |
@@ -1658,6 +1748,13 @@ Numbered `DO#` (design-open); each links to its record.
   (confirm); absent-vs-null-valued optional field observability;
   flow-proof scope; native `pn` write-back ABI; ArrayNum re-promotion.
   [Nullable §10]
+- **DO25** Node-identity carrier and operations (S5.1.4v2, D2.6.8): where
+  the identity lives (a header word costs every container one word; a
+  side table keyed by address needs explicit copy on every COW detach; an
+  attribute is visible to formatting), the universal id form (document path
+  + node id, one scheme for local and online documents), which runtime
+  operations copy it, and whether `===` needs a scalar-id fast path.
+  Deliberately unruled on 2026-09-03; semantics side is SO39. [OB10]
 - **DO2** Scalar-home audits: result-bearing dispatch-helper enumeration;
   `start`/await resume slot reads; exception-peek rematerialization;
   RetItem-vs-Item ABI census; donated-home lifetime proofs. [SG §5]
@@ -1777,6 +1874,31 @@ Numbered `DO#` (design-open); each links to its record.
   the assumption: a wrong answer is a use-after-free, not a slowdown. The
   question is now bounded and per-loop rather than open-ended.
   [RVO11, Return_Value §4a]
+- **DO26** The D2.6.6v2 migration, **updated after phase 1 landed and phase 2
+  began, 2026-09-03**. The phase-2 flip is site-classified: ~150 sites alias
+  MAP and ~15 alias ELEMENT (both just lose their object arm once the value IS
+  a map or element); ~35 group all three; ~40 are genuinely nominal (method
+  resolution, literal construction, `type()`/`name()`, printing, formatting,
+  the MIR method prologue) and must read the record; and ~15 assume the TypeId's
+  numeric position (`total_type_rank`, `type_info`, `get_type_name`, the
+  contiguous RANGE..OBJECT band checks in `lambda-data.cpp`, `mark_editor`,
+  `transpile-mir`, and `dom_element`). The ordering band is a switch, not a
+  table: `total_type_rank` in `lambda-eval.cpp` returns 10 for object between
+  map's 9 and element's 11, and must key on the record instead. Settled: `ArrayNum` joined the hierarchy in phase 1 and shares
+  `List`'s header exactly; the raw-offset audit found sites only in the GC, the
+  JIT, and `mark_builder`'s inline-data allocations — `lambda/dom/`,
+  `radiant/`, `lambda/input/` and the JS MIR lowering use member access
+  throughout. **Closed by USER ruling 2026-09-03: the array-header growth needs no
+  benchmark gate** — *"no need to measure/benchmark, this will be our container
+  layout."* Post-change release timings kept only for the record (best of three,
+  seconds): array1 0.16, quicksort 0.12, gcbench 2.75, richards 3.80,
+  mandelbrot 3.76. The `extra` JS-properties slot and `has_js_props` are also
+  retired, so phase 1 is complete and bit 6 is free for `is_nominal`. Nothing
+  remains open in this entry; phase 2 is tracked by the D2.6.6v2 phase-2 row.
+  [OB20, OB22]
+- **DO27** Representation of instance type alteration (S2.1.5): whether
+  reconstruction reuses the old buffer when the declared prefix is a
+  compatible superset, and how extras are carried. Undesigned. [OB18]
 
 ## Appendix C — Decision-Record Index
 
@@ -1787,7 +1909,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.2 | Double_Boxing; Int_Type §5.1; Stack_API §15 | `Lambda_Type_Double_Boxing.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Design_Stack_API.md` |
 | D2.3 | Box_Unbox, Box_Unbox2 | `Lambda_Box_Unbox.md`, `Lambda_Box_Unbox2.md` |
 | D2.4 | Lane §1–§9 | `Lambda_Design_Compiling_Lane.md` |
-| D2.5–D2.6 | Nullable §1–§10; CW16; LR09-R2/R3 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Issue_Ledger.md` |
+| D2.5–D2.6 | Nullable §1–§10; CW16; LR09-R2/R3; OB1–OB2, OB4, OB6, OB10, OB13–OB22 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Issue_Ledger.md`, `Lambda_Type_Object.md` |
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
 | D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
 | D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |

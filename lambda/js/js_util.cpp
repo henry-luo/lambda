@@ -357,8 +357,7 @@ static void js_util_inspect_append_styled(StrBuf* sb, JsInspectContext* ctx,
 
 static bool js_util_inspect_is_object_like(Item value) {
     TypeId type = get_type_id(value);
-    return type == LMD_TYPE_MAP || is_array_family_type_id(type) || type == LMD_TYPE_FUNC ||
-           type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP;
+    return type == LMD_TYPE_MAP || is_array_family_type_id(type) || type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP;
 }
 
 #define js_util_inspect_is_undefined(value) (get_type_id(value) == LMD_TYPE_UNDEFINED)
@@ -1322,7 +1321,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool, js_util_is_abort_signal, (Item signal), (js_c
 
 static bool js_util_is_resource_object(Item resource) {
     TypeId type = get_type_id(resource);
-    return type == LMD_TYPE_MAP || is_array_family_type_id(type) || type == LMD_TYPE_OBJECT ||
+    return type == LMD_TYPE_MAP || is_array_family_type_id(type) ||
            type == LMD_TYPE_FUNC || type == LMD_TYPE_VMAP || type == LMD_TYPE_ELEMENT;
 }
 
@@ -1551,7 +1550,7 @@ static bool js_util_is_host_singleton_object(Item value) {
 // numeric (and a freshly built []) is stored in the LMD_TYPE_ARRAY_NUM lane,
 // so testing the generic tag alone drops such an array to the primitive path
 // and compares Item pointers — deepStrictEqual([1,2],[1,2]) was false.
-JS_FORWARD_STATIC_EXPRESSION(bool, js_util_deep_equal_is_object_like_type, (TypeId type), (type == LMD_TYPE_MAP || is_array_family_type_id(type) || type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_util_deep_equal_is_object_like_type, (TypeId type), (type == LMD_TYPE_MAP || is_array_family_type_id(type) || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP))
 
 static bool js_util_is_nan_number(Item value) {
     TypeId type = get_type_id(value);

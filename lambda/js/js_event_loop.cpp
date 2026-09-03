@@ -777,7 +777,7 @@ static int64_t extract_timer_id(Item timer_id) {
     TypeId tid = get_type_id(timer_id);
     if (tid == LMD_TYPE_INT) {
         return it2i(timer_id);
-    } else if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_OBJECT || tid == LMD_TYPE_VMAP) {
+    } else if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_VMAP) {
         // Timeout objects may be class-stamped object shapes; clearInterval
         // must still recover _timerId or the active interval survives throws.
         Item id = js_get_key_cstr(timer_id, "_timerId");
@@ -1086,7 +1086,7 @@ static Item check_timer_options(Item options, Item* reject_out, int* result_code
         return js_status_ok(); // no options
     }
     TypeId opt_type = get_type_id(options);
-    if (opt_type != LMD_TYPE_MAP && opt_type != LMD_TYPE_OBJECT) {
+    if (opt_type != LMD_TYPE_MAP) {
         // options must be an object if provided (non-nullish)
         if (result_code) *result_code = reject_reason(js_throw_type_error_code(
             "ERR_INVALID_ARG_TYPE", "The \"options\" argument must be of type object."));
@@ -1101,7 +1101,7 @@ static Item check_timer_options(Item options, Item* reject_out, int* result_code
     if (get_type_id(signal) != LMD_TYPE_UNDEFINED && get_type_id(signal) != LMD_TYPE_NULL) {
         // signal must be an AbortSignal (object with 'aborted' property)
         TypeId sig_type = get_type_id(signal);
-        if (sig_type != LMD_TYPE_MAP && sig_type != LMD_TYPE_OBJECT) {
+        if (sig_type != LMD_TYPE_MAP) {
             if (result_code) *result_code = reject_reason(js_throw_type_error_code(
                 "ERR_INVALID_ARG_TYPE", "The \"options.signal\" property must be an instance of AbortSignal."));
             return js_status_ok();
@@ -1151,8 +1151,7 @@ extern "C" void js_mock_scheduler_tick(Item delay) {
         JsMockSchedulerWait* wait = &mock_scheduler_waits[i];
         if (!wait->active || wait->due_ms > mock_scheduler_now_ms) continue;
         wait->active = false;
-        if (get_type_id(wait->signal) == LMD_TYPE_MAP ||
-            get_type_id(wait->signal) == LMD_TYPE_OBJECT) {
+        if (get_type_id(wait->signal) == LMD_TYPE_MAP) {
             Item aborted = js_get_key_cstr(wait->signal, "aborted");
             if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
                 Item err = make_abort_error(wait->signal);
@@ -1180,7 +1179,7 @@ static Item js_mock_scheduler_wait(Item delay, Item options) {
     Item reject_fn = js_get_key_cstr(resolvers, "reject");
 
     Item signal = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT) {
+    if (get_type_id(options) == LMD_TYPE_MAP) {
         signal = js_get_key_cstr(options, "signal");
     }
 
@@ -1256,9 +1255,9 @@ static Item js_set_promise_timer(Item delay, Item value, Item options,
     }
 
     // if signal present, add abort listener to reject promise and clear timer
-    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT) {
+    if (get_type_id(options) == LMD_TYPE_MAP) {
         Item signal = js_get_key_cstr(options, "signal");
-        if (get_type_id(signal) == LMD_TYPE_MAP || get_type_id(signal) == LMD_TYPE_OBJECT) {
+        if (get_type_id(signal) == LMD_TYPE_MAP) {
             // create an abort handler closure that captures timer id and reject_fn
             // we store timer_id and reject_fn in a wrapper object on the signal
             Item timer_id_item = (Item){.item = i2it(th->id)};

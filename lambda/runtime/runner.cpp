@@ -1625,9 +1625,7 @@ void resolve_sys_paths_recursive(Item item) {
     } else if (type_id == LMD_TYPE_MAP) {
         Map* map = item.map;
         if (map) resolve_sys_paths_in_shape((TypeMap*)map->type, map->data);
-    } else if (type_id == LMD_TYPE_OBJECT) {
-        Object* object = item.object;
-        if (object) resolve_sys_paths_in_shape((TypeMap*)object->type, object->data);
+
     } else if (type_id == LMD_TYPE_ELEMENT) {
         Element* element = item.element;
         if (!element) return;

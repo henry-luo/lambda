@@ -357,7 +357,6 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define LMD_TYPE_MAP_         LMD_TYPE_MAP
 #define LMD_TYPE_VMAP_        LMD_TYPE_VMAP
 #define LMD_TYPE_ELEMENT_     LMD_TYPE_ELEMENT
-#define LMD_TYPE_OBJECT_      LMD_TYPE_OBJECT
 #define LMD_TYPE_TYPE_        LMD_TYPE_TYPE
 #define LMD_TYPE_FUNC_        LMD_TYPE_FUNC
 #define GC_TYPE_JS_ENV_       GC_TYPE_JS_ENV
@@ -1607,24 +1606,41 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         break;
     }
 
+    // D2.6.6v2 container layout — ONE chain: Map -> Array/List -> Element.
+    // The attribute face is first and identical in every container; the content
+    // face follows. These names exist so a future layout change breaks loudly
+    // here instead of silently mistracing. Mirrors the static_asserts in
+    // lambda.hpp; keep the two in step.
+    #define GC_OFF_TYPE      8    /* Map::type      — every container */
+    #define GC_OFF_DATA      16   /* Map::data */
+    #define GC_OFF_DATA_CAP  24   /* Map::data_cap */
+    #define GC_OFF_ITEMS     32   /* List::items    — array/list/element */
+    #define GC_OFF_LENGTH    40   /* List::length */
+    #define GC_OFF_EXTRA     48   /* List::extra */
+    #define GC_OFF_CAPACITY  56   /* List::capacity */
+
     case LMD_TYPE_ARRAY_NUM_: {
         // Owned 1-D arrays have no outgoing pointers; views (is_view bit 5) hold
-        // a base reference via the shape side-table in `extra` (offset 24).
+        // a base reference via the shape side-table in `extra` (GC_OFF_EXTRA).
         uint8_t* p = (uint8_t*)obj;
         uint8_t flags = p[1];
         uint8_t array_flags = p[2];
-        // Tune5 P5: the ordinary numeric representation reserves its final
-        // eight-byte lane for the companion Map once named properties exist.
-        if ((array_flags & 0xe0u) == 0x20u && (flags & 0x40u)) {
-            void* items_ptr = *(void**)(p + 8);
-            int64_t capacity = *(int64_t*)(p + 32);
-            if (items_ptr && capacity > 0) {
-                uint64_t companion = ((uint64_t*)items_ptr)[capacity - 1];
-                gc_mark_possible_item(gc, companion);
+        // D2.6.6v2: the JS companion map moved to the attribute face traced
+        // below, so there is no reserved elements slot to mark here.
+        (void)flags;
+        // D2.6.6v2: ArrayNum extends Map, so it can carry attributes too.
+        {
+            void* attr_type = *(void**)(p + GC_OFF_TYPE);
+            void* attr_data = *(void**)(p + GC_OFF_DATA);
+            if (attr_type && attr_data) {
+                int64_t byte_size = gc_packed_data_allocation_size(
+                    attr_type, *(int*)(p + GC_OFF_DATA_CAP));
+                gc_trace_shape_fields(gc, attr_type, attr_data, byte_size);
+                gc_trace_data_words(gc, attr_data, byte_size);
             }
         }
         if (array_flags & 0x02) {  // Container.is_view in array_flags byte
-            void* shape_ptr = (void*)(uintptr_t)(*(int64_t*)(p + 24));
+            void* shape_ptr = (void*)(uintptr_t)(*(int64_t*)(p + GC_OFF_EXTRA));
             if (shape_ptr) {
                 // ArrayNumShape explicitly tags the backing source; semantic base
                 // remains at offset 16 and is the only GC-traced descriptor pointer.
@@ -1636,24 +1652,17 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     }
 
     case LMD_TYPE_ARRAY_: {
-        // Array: items is an Item* array
-        // struct layout: { type_id(1), flags(1), Item* items(8), length(8), extra(8), capacity(8) }
-        // We read items and length at known offsets.
-        // Container is 2 bytes, then padding to pointer alignment.
-        // Use byte offsets matching the actual struct layout:
-        //   offset 0: type_id (1 byte)
-        //   offset 1: flags (1 byte)
-        //   offset 2: padding (6 bytes on 64-bit)
-        //   offset 8: Item* items (8 bytes)
-        //   offset 16: int64_t length (8 bytes)
+        // Array extends Map (D2.6.6v2): the 8-byte Container header, then the
+        // attribute face at GC_OFF_TYPE/DATA/DATA_CAP, then the content face at
+        // GC_OFF_ITEMS/LENGTH/EXTRA/CAPACITY.
         uint8_t* p = (uint8_t*)obj;
-        void* items_ptr = *(void**)(p + 8);     // Item* items
-        int64_t length = *(int64_t*)(p + 16);   // logical length
+        void* items_ptr = *(void**)(p + GC_OFF_ITEMS);
+        int64_t length = *(int64_t*)(p + GC_OFF_LENGTH);
         uint8_t flags = *(uint8_t*)(p + 1);
         uint8_t array_flags = *(uint8_t*)(p + 2);
         uint8_t lane_kind = *(uint8_t*)(p + 3) & 0x07;
-        int64_t extra = *(int64_t*)(p + 24);    // reserved tail item count
-        int64_t capacity = *(int64_t*)(p + 32); // allocated dense capacity
+        int64_t extra = *(int64_t*)(p + GC_OFF_EXTRA);
+        int64_t capacity = *(int64_t*)(p + GC_OFF_CAPACITY);
         int64_t dense_limit = capacity >= extra ? capacity - extra : 0;
         int64_t dense_count = length < dense_limit ? length : dense_limit;
         // Numeric/bool native lanes are raw words, not tagged Items. Pointer
@@ -1670,22 +1679,30 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                 gc_mark_item(gc, items[i]);
             }
         }
-        if (items_ptr && capacity > 0 && (flags & CONTAINER_FLAG_JS_PROPS)) {
-            // Flag-gated interpretation keeps the props edge precise; `extra`
-            // is only a count and scalar payload words are never traced as Items.
-            gc_mark_item(gc, ((uint64_t*)items_ptr)[capacity - 1]);
+        // D2.6.6v2: an array now carries Map's attribute face too. It is NULL
+        // for a plain array, so this costs one branch; it is what lets array
+        // properties live in the array itself rather than a reserved tail slot.
+        {
+            void* attr_type = *(void**)(p + GC_OFF_TYPE);
+            void* attr_data = *(void**)(p + GC_OFF_DATA);
+            if (attr_type && attr_data) {
+                int64_t byte_size = gc_packed_data_allocation_size(
+                    attr_type, *(int*)(p + GC_OFF_DATA_CAP));
+                gc_trace_shape_fields(gc, attr_type, attr_data, byte_size);
+                gc_trace_data_words(gc, attr_data, byte_size);
+            }
         }
         break;
     }
 
-    case LMD_TYPE_MAP_:
-    case LMD_TYPE_OBJECT_: {
-        // Map/Object: { Container(8), type*(8@8), data*(8@16), data_cap(4@24) }
+    case LMD_TYPE_MAP_: {
+        // Map: the 8-byte Container header, then the attribute face. An object
+        // is NOT here — it is element-shaped and shares the ELEMENT case.
         uint8_t* p = (uint8_t*)obj;
         uint8_t map_kind = p[3];
-        void* type_ptr = *(void**)(p + 8);    // TypeMap*
-        void* data_ptr = *(void**)(p + 16);   // data buffer
-        int data_cap = *(int*)(p + 24);
+        void* type_ptr = *(void**)(p + GC_OFF_TYPE);
+        void* data_ptr = *(void**)(p + GC_OFF_DATA);
+        int data_cap = *(int*)(p + GC_OFF_DATA_CAP);
         if (tag == LMD_TYPE_MAP_ && gc->js_native_trace) {
             gc->js_native_trace(obj, gc);
         }
@@ -1717,15 +1734,16 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     }
 
     case LMD_TYPE_ELEMENT_: {
-        // Element extends List: { Container(2), Item*items(8@8), length(8@16),
-        //   extra(8@24), capacity(8@32), type*(8@40), data*(8@48), data_cap(4@56) }
+        // Element extends Array extends Map (D2.6.6v2): the attribute face is
+        // FIRST (GC_OFF_TYPE/DATA/DATA_CAP), the content face follows. Object
+        // is Element, hence the shared case.
         uint8_t* p = (uint8_t*)obj;
-        void* items_ptr = *(void**)(p + 8);
-        int64_t length = *(int64_t*)(p + 16);
-        int64_t capacity = *(int64_t*)(p + 32);
-        void* type_ptr = *(void**)(p + 40);
-        void* data_ptr = *(void**)(p + 48);
-        int data_cap = *(int*)(p + 56);
+        void* items_ptr = *(void**)(p + GC_OFF_ITEMS);
+        int64_t length = *(int64_t*)(p + GC_OFF_LENGTH);
+        int64_t capacity = *(int64_t*)(p + GC_OFF_CAPACITY);
+        void* type_ptr = *(void**)(p + GC_OFF_TYPE);
+        void* data_ptr = *(void**)(p + GC_OFF_DATA);
+        int data_cap = *(int*)(p + GC_OFF_DATA_CAP);
         int64_t dense_count = length < capacity ? length : capacity;
 
         // trace children items
@@ -1852,10 +1870,30 @@ static size_t gc_array_num_elem_bytes(uint8_t elem_type) {
     return elem_bytes ? elem_bytes : 8;
 }
 
+// D2.6.6v2: every container in the Map -> Array -> Element chain carries the
+// same attribute face at the same offsets, so ONE helper promotes it for all of
+// them. Returns the number of buffers moved.
+static int gc_compact_attr_face(gc_heap_t* gc, uint8_t* p) {
+    if (!gc || !p) return 0;
+    void** data_slot = (void**)(p + GC_OFF_DATA);
+    void* type_ptr = *(void**)(p + GC_OFF_TYPE);
+    if (!*data_slot || !type_ptr ||
+            !gc_data_zone_owns(gc->data_zone, *data_slot)) {
+        return 0;
+    }
+    int64_t byte_size = gc_packed_data_allocation_size(
+        type_ptr, *(int*)(p + GC_OFF_DATA_CAP));
+    if (byte_size <= 0) return 0;
+    void* moved = gc_data_zone_copy(gc->tenured_data, *data_slot, byte_size);
+    if (!moved) return 0;
+    *data_slot = moved;
+    return 1;
+}
+
 static int gc_compact_array_num_owned_data(gc_heap_t* gc, uint8_t* array) {
     if (!gc || !array || (array[2] & 0x02)) return 0;  // views borrow base storage
-    void** data_slot = (void**)(array + 8);
-    int64_t capacity = *(int64_t*)(array + 32);
+    void** data_slot = (void**)(array + GC_OFF_ITEMS);
+    int64_t capacity = *(int64_t*)(array + GC_OFF_CAPACITY);
     if (!*data_slot || capacity < 0 ||
             !gc_data_zone_owns(gc->data_zone, *data_slot)) {
         return 0;
@@ -1872,7 +1910,7 @@ static int gc_compact_array_num_owned_data(gc_heap_t* gc, uint8_t* array) {
 
 static int gc_rebind_array_num_gc_view(gc_heap_t* gc, uint8_t* view) {
     if (!gc || !view || !(view[2] & 0x02)) return 0;
-    ArrayNumShape* shape = *(ArrayNumShape**)(view + 24);
+    ArrayNumShape* shape = *(ArrayNumShape**)(view + GC_OFF_EXTRA);
     if (!shape || shape->backing_kind != ARRAY_NUM_BACKING_GC_VIEW ||
             !shape->base) {
         return 0;
@@ -1886,11 +1924,11 @@ static int gc_rebind_array_num_gc_view(gc_heap_t* gc, uint8_t* view) {
     if (shape->offset < 0 || (uint64_t)shape->offset > SIZE_MAX / elem_bytes) {
         log_error("gc-array-num-view: invalid element offset %lld",
             (long long)shape->offset);
-        *(void**)(view + 8) = NULL;
+        *(void**)(view + GC_OFF_ITEMS) = NULL;
         return compacted;
     }
-    uint8_t* base_data = *(uint8_t**)(base + 8);
-    *(void**)(view + 8) = base_data ?
+    uint8_t* base_data = *(uint8_t**)(base + GC_OFF_ITEMS);
+    *(void**)(view + GC_OFF_ITEMS) = base_data ?
         base_data + (size_t)shape->offset * elem_bytes : NULL;
     return compacted;
 }
@@ -1916,10 +1954,21 @@ static void gc_compact_data(gc_heap_t* gc) {
         switch (tag) {
         case LMD_TYPE_ARRAY_: {
             uint8_t* p = (uint8_t*)obj;
-            void** items_slot = (void**)(p + 8);
-            int64_t length = *(int64_t*)(p + 16);
-            int64_t extra = *(int64_t*)(p + 24);
-            int64_t capacity = *(int64_t*)(p + 32);
+            // D2.6.6v2: an array carries Map's attribute face, and the trace
+            // pass follows it, so compaction must promote that buffer too or a
+            // live array keeps a dangling `data` pointer after the nursery reset.
+            {
+                int attr_moved = gc_compact_attr_face(gc, p);
+#ifndef NDEBUG
+                compacted += (size_t)attr_moved;
+#else
+                (void)attr_moved;
+#endif
+            }
+            void** items_slot = (void**)(p + GC_OFF_ITEMS);
+            int64_t length = *(int64_t*)(p + GC_OFF_LENGTH);
+            int64_t extra = *(int64_t*)(p + GC_OFF_EXTRA);
+            int64_t capacity = *(int64_t*)(p + GC_OFF_CAPACITY);
             if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
                 uint64_t* old_items = (uint64_t*)*items_slot;
                 size_t size = capacity * sizeof(uint64_t); // sizeof(Item)
@@ -1943,12 +1992,20 @@ static void gc_compact_data(gc_heap_t* gc) {
         }
         case LMD_TYPE_ARRAY_NUM_: {
             uint8_t* p = (uint8_t*)obj;
+            {
+                int attr_moved = gc_compact_attr_face(gc, p);
+#ifndef NDEBUG
+                compacted += (size_t)attr_moved;
+#else
+                (void)attr_moved;
+#endif
+            }
             uint8_t array_flags = p[2];
             // N-D shape descriptors live in the nursery data zone just like
             // element buffers. Promote them before resetting that zone or a
             // live array keeps a dangling `extra` pointer after collection.
             if (array_flags & 0x01) {  // Container.is_ndim
-                void** shape_slot = (void**)(p + 24);
+                void** shape_slot = (void**)(p + GC_OFF_EXTRA);
                 if (*shape_slot && gc_data_zone_owns(gc->data_zone, *shape_slot)) {
                     ArrayNumShape* old_shape = (ArrayNumShape*)*shape_slot;
                     if (old_shape->ndim >= 1 && old_shape->ndim <= 32) {
@@ -1982,13 +2039,12 @@ static void gc_compact_data(gc_heap_t* gc) {
             (void)moved;
             break;
         }
-        case LMD_TYPE_MAP_:
-        case LMD_TYPE_OBJECT_: {
+        case LMD_TYPE_MAP_: {
             uint8_t* p = (uint8_t*)obj;
-            void** data_slot = (void**)(p + 16);   // map->data
-            void* type_ptr = *(void**)(p + 8);      // map->type
+            void** data_slot = (void**)(p + GC_OFF_DATA);
+            void* type_ptr = *(void**)(p + GC_OFF_TYPE);
             if (*data_slot && gc_data_zone_owns(gc->data_zone, *data_slot) && type_ptr) {
-                int data_cap = *(int*)(p + 24);
+                int data_cap = *(int*)(p + GC_OFF_DATA_CAP);
                 // D4.3.1: data_cap is the allocation contract. TypeMap.byte_size
                 // can be smaller than a JS constructor's reserved fixed slots;
                 // copying only byte_size left the live object pointing at a
@@ -2009,10 +2065,10 @@ static void gc_compact_data(gc_heap_t* gc) {
         case LMD_TYPE_ELEMENT_: {
             uint8_t* p = (uint8_t*)obj;
             // compact items[]
-            void** items_slot = (void**)(p + 8);
-            int64_t elmt_length = *(int64_t*)(p + 16);
-            int64_t elmt_extra = *(int64_t*)(p + 24);
-            int64_t elmt_capacity = *(int64_t*)(p + 32);
+            void** items_slot = (void**)(p + GC_OFF_ITEMS);
+            int64_t elmt_length = *(int64_t*)(p + GC_OFF_LENGTH);
+            int64_t elmt_extra = *(int64_t*)(p + GC_OFF_EXTRA);
+            int64_t elmt_capacity = *(int64_t*)(p + GC_OFF_CAPACITY);
             if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
                 uint64_t* old_elmt_items = (uint64_t*)*items_slot;
                 size_t size = elmt_capacity * sizeof(uint64_t);
@@ -2031,10 +2087,10 @@ static void gc_compact_data(gc_heap_t* gc) {
                 }
             }
             // compact data
-            void** data_slot = (void**)(p + 48);
-            void* type_ptr = *(void**)(p + 40);
+            void** data_slot = (void**)(p + GC_OFF_DATA);
+            void* type_ptr = *(void**)(p + GC_OFF_TYPE);
             if (*data_slot && gc_data_zone_owns(gc->data_zone, *data_slot) && type_ptr) {
-                int data_cap = *(int*)(p + 56);
+                int data_cap = *(int*)(p + GC_OFF_DATA_CAP);
                 int64_t byte_size = gc_packed_data_allocation_size(type_ptr, data_cap);
                 if (byte_size > 0) {
                     void* new_data = gc_data_zone_copy(gc->tenured_data, *data_slot, byte_size);
