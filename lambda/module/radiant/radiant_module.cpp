@@ -47,17 +47,23 @@ RADIANT_C_API Item radiant_dom_document_host_prototype(Item object);
 const JubeHostAPI* radiant_host_api = nullptr;
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
-extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
-extern "C" Item dom_check_validity_bridge(Item elem_item);
-extern "C" bool dom_focus_first_invalid_form_control(void* form_elem);
-extern "C" Item dom_form_reset_bridge(Item form_item);
-extern "C" bool dom_navigate_submit_target(const char* target_name, const char* url);
-extern "C" void* dom_popover_target_for_button(void* button);
-extern "C" int dom_popover_target_action(void* button);
-extern "C" bool dom_activate_popover(void* popover, int action);
 extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
                                                             void* submitter_node);
-extern "C" Item dom_scroll_into_view_bridge(void* dom_elem);
+
+// F31: the module declares no extern into a DOM body. These nine were the last
+// direct entries -- form validation and reset, the form-data collector, submit
+// navigation, the popover trio and scrollIntoView -- and each now crosses the
+// host API like everything else (ES34). The three that already had slots used
+// them; the six that did not were added to the table's additive tail.
+#define dom_check_validity_bridge radiant_host_api->dom->check_validity_bridge
+#define dom_form_reset_bridge radiant_host_api->dom->form_reset_bridge
+#define dom_scroll_into_view_bridge radiant_host_api->dom->scroll_into_view_bridge
+#define js_formdata_collect_form_entries radiant_host_api->dom->formdata_collect_form_entries
+#define dom_focus_first_invalid_form_control radiant_host_api->dom->focus_first_invalid_form_control
+#define dom_navigate_submit_target radiant_host_api->dom->navigate_submit_target
+#define dom_popover_target_for_button radiant_host_api->dom->popover_target_for_button
+#define dom_popover_target_action radiant_host_api->dom->popover_target_action
+#define dom_activate_popover radiant_host_api->dom->activate_popover
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);

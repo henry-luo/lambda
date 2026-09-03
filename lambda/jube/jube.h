@@ -895,6 +895,17 @@ struct JubeHostDomAPI {
     // direct operations; property names are resolved before invocation (D6.2.2v2).
     Item (*document_create_tree_walker_bridge)(Item root, Item what_to_show);
     Item (*document_exec_command_bridge)(Item command, Item value);
+
+    // -- F31 additive tail: the last DOM bodies the module reached by direct
+    // extern rather than through this table. Form submission and popover
+    // activation are host policy, not module policy, so they belong here; with
+    // these the module declares no extern into a DOM body at all (ES34).
+    Item (*formdata_collect_form_entries)(void* form_elem, void* submitter_elem);
+    bool (*focus_first_invalid_form_control)(void* form_elem);
+    bool (*navigate_submit_target)(const char* target_name, const char* url);
+    void* (*popover_target_for_button)(void* button);
+    int (*popover_target_action)(void* button);
+    bool (*activate_popover)(void* popover, int action);
 };
 
 // ES41 (Lambda_Design_DOM_Host_API.md): the JS *shape* of the DOM -- the

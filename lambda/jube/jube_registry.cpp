@@ -1512,6 +1512,13 @@ static const JubeHostDomCatalogAPI jube_host_dom_catalog = {
 #undef DOM_OP
 };
 
+extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
+extern "C" bool dom_focus_first_invalid_form_control(void* form_elem);
+extern "C" bool dom_navigate_submit_target(const char* target_name, const char* url);
+extern "C" void* dom_popover_target_for_button(void* button);
+extern "C" int dom_popover_target_action(void* button);
+extern "C" bool dom_activate_popover(void* popover, int action);
+
 static const JubeHostDomAPI jube_host_dom_api = {
     dom_get_document,
     dom_get_or_create_doc_node,
@@ -1686,6 +1693,12 @@ static const JubeHostDomAPI jube_host_dom_api = {
     dom_has_committed_geometry_snapshot,
     dom_create_tree_walker_bridge,
     dom_document_exec_command_bridge,
+    js_formdata_collect_form_entries,
+    dom_focus_first_invalid_form_control,
+    dom_navigate_submit_target,
+    dom_popover_target_for_button,
+    dom_popover_target_action,
+    dom_activate_popover,
 };
 
 static const JubeHostRealmAPI jube_host_realm_api = {
