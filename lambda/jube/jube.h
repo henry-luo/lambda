@@ -708,7 +708,7 @@ struct JubeHostDomCatalogAPI {
 // ES41 (Lambda_Design_DOM_Host_API.md): the JS *shape* of the DOM -- the
 // document proxy, prototype values, expandos, live collections, wrapper
 // initialisation, JS exceptions and Event construction -- is its own host
-// section. `->dom` is the DOM; a guest that is not JavaScript never touches
+// section. `->dom_catalog` is the DOM; a guest that is not JavaScript never touches
 // `->realm`.
 struct JubeHostRealmAPI {
     Item (*get_document_object_value)(void);
