@@ -167,6 +167,7 @@ DOM_ENGINE_SEAM_1(tc_selection_end)
 DOM_ENGINE_SEAM_1(edit_node)
 DOM_ENGINE_SEAM_1(edit_start)
 DOM_ENGINE_SEAM_1(edit_end)
+DOM_ENGINE_SEAM_1(is_focusable)
 
 // `dom.load`: the engine parses, the core wraps. The result is the document
 // node, which since ESO101 answers both the Document's properties and the
@@ -271,6 +272,33 @@ extern "C" Item dom_core_set_node_value(Item n, Item data) {
     Item zero = { .item = i2it(0) };
     Item all = { .item = i2it(INT_MAX) };
     return dom_op3(n, JUBE_DOM_REPLACE_DATA, zero, all, data);
+}
+
+// --- text controls
+// These two bodies already existed in the core; only the catalog's uniform
+// shape was missing, so each is a two-line adapter rather than an engine seam.
+// tc_set_selection carries the direction the DOM's setSelectionRange takes --
+// the radiant.* spelling had only three arguments, which is why this row could
+// not simply forward to it.
+extern "C" Item dom_text_control_set_selection_range_bridge(void* dom_elem, Item start_arg,
+                                                            Item end_arg, Item dir_arg);
+extern "C" Item dom_text_control_set_range_text_bridge(void* dom_elem, Item replacement_arg,
+                                                        Item start_arg, Item end_arg, Item mode_arg);
+
+extern "C" Item dom_core_tc_set_selection(Item n, Item start, Item end, Item dir) {
+    void* elem = dom_unwrap_element(n);
+    if (!elem) return ItemNull;
+    return dom_absent_to_null(
+        dom_text_control_set_selection_range_bridge(elem, start, end, dir));
+}
+
+extern "C" Item dom_core_tc_replace_range(Item n, Item start, Item end, Item text) {
+    void* elem = dom_unwrap_element(n);
+    if (!elem) return ItemNull;
+    // "preserve" is setRangeText's default selection mode: replacing a range
+    // must not move a caret the caller did not ask to move.
+    return dom_absent_to_null(dom_text_control_set_range_text_bridge(
+        elem, text, start, end, js_name_item("preserve")));
 }
 
 // --- match / serialize (parse_fragment: dom.cpp)

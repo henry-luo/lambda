@@ -101,7 +101,7 @@ DOM_OP(CORE, scroll_into_view, geometry, 1, "fn(n: any) -> bool",               
 // ---------------------------------------------------------------------------
 // CORE — focus, navigation, actions — engine-provided
 // ---------------------------------------------------------------------------
-DOM_OP(CORE, is_focusable,     focus, 1, "fn(n: any) -> bool",                              DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, is_focusable,     focus, 1, "fn(n: any) -> bool",                              dom_engine_is_focusable, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, focus_set,        focus, 2, "fn(n: any, from_keyboard: bool) -> bool",         dom_engine_focus_set, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, focused,          focus, 1, "fn(n: any) -> bool",                              dom_engine_focused, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, request_navigation, navigation, 1, "fn(request: map) -> bool",                 dom_engine_request_navigation, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
@@ -124,8 +124,8 @@ DOM_OP(DERIVED, tc_set_value,  textctl, 2, "fn(n: any, v: string) -> bool",     
        "set_state(n, \"value\", v)")
 DOM_OP(DERIVED, tc_selection,  textctl, 1, "fn(n: any) -> map",                             DOM_NO_BODY, DOM_F_NEUTRAL,
        "{ start: tc_selection_start(n), end: tc_selection_end(n) }")
-DOM_OP(CORE, tc_set_selection, textctl, 4, "fn(n: any, start: int, end: int, dir: string|null) -> bool", DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
-DOM_OP(CORE, tc_replace_range, textctl, 4, "fn(n: any, start: int, end: int, text: string) -> bool", DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
+DOM_OP(CORE, tc_set_selection, textctl, 4, "fn(n: any, start: int, end: int, dir: string|null) -> bool", dom_core_tc_set_selection, DOM_F_NEUTRAL | DOM_F_MUTATES, "")
+DOM_OP(CORE, tc_replace_range, textctl, 4, "fn(n: any, start: int, end: int, text: string) -> bool", dom_core_tc_replace_range, DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, set_caret,        editing, 2, "fn(n: any, offset: int) -> bool",               dom_engine_set_caret, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, caret_operation,  editing, 3, "fn(n: any, op: string, extend: bool) -> bool",  dom_engine_caret_operation, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(DERIVED, edit_range,    editing, 1, "fn(host: any) -> map|null",                     DOM_NO_BODY, DOM_F_NEUTRAL,

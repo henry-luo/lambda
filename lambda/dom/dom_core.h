@@ -51,6 +51,8 @@ Item dom_core_create_node(Item doc, Item type, Item name, Item data);
 Item dom_core_insert_before(Item parent, Item node, Item ref);
 Item dom_core_remove_child(Item parent, Item node);
 Item dom_core_set_node_value(Item n, Item data);
+Item dom_core_tc_set_selection(Item n, Item start, Item end, Item dir);
+Item dom_core_tc_replace_range(Item n, Item start, Item end, Item text);
 Item dom_core_set_text_content(Item n, Item text);
 Item dom_core_set_inner_html(Item n, Item html);
 // --- core: match / parse / serialize
@@ -152,6 +154,7 @@ Item dom_engine_tc_selection_end(Item a);
 Item dom_engine_edit_node(Item a);
 Item dom_engine_edit_start(Item a);
 Item dom_engine_edit_end(Item a);
+Item dom_engine_is_focusable(Item a);
 Item dom_parser_parse_from_string(Item markup, Item mime);
 Item dom_cssom_stylesheet_get_css_rules(Item sheet_item);
 Item dom_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_arg);

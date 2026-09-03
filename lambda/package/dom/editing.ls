@@ -1,5 +1,5 @@
 // Text-control value editing (F5, ES9). The template decides *which range* is
-// replaced by *what text*; radiant.replace_range performs the splice and the
+// replaced by *what text*; dom.edit_replace_range performs the splice and the
 // engine keeps the buffer, the mirrors, the caret and the `input` event that
 // follows. Every offset here is a codepoint: Lambda's len/slice/ord are all
 // codepoint-indexed, so the waist converts to the buffer's bytes and to the
@@ -244,7 +244,7 @@ pub pn apply_fn(elem, evt, multiline) {
         if (evt.history_value == null) { 'pass' }
         else {
             dom.edit_replace_range(elem, 0, len(text), evt.history_value)
-            radiant.set_selection(elem, evt.history_sel_start, evt.history_sel_end)
+            dom.tc_set_selection(elem, evt.history_sel_start, evt.history_sel_end, null)
             'prevent-default'
         }
     }

@@ -3049,3 +3049,15 @@ RADIANT_PROVIDE_ENGINE_1(tc_selection_end, fn_radiant_selection_end)
 RADIANT_PROVIDE_ENGINE_1(edit_node, fn_radiant_dom_edit_node)
 RADIANT_PROVIDE_ENGINE_1(edit_start, fn_radiant_dom_edit_start)
 RADIANT_PROVIDE_ENGINE_1(edit_end, fn_radiant_dom_edit_end)
+
+// is_focusable has no radiant.* spelling to forward to: the engine keeps the
+// predicate internal and publishes only focus_candidates, the whole list. A
+// caller asking about one element should not have to collect every focusable
+// element and search it, so the seam exposes the predicate itself. A DomElement
+// is a View in this engine, which is why the cast is a cast and not a lookup.
+extern bool is_view_focusable(View* view);
+
+extern "C" Item dom_engine_is_focusable(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "IS_FOCUSABLE");
+    return radiant_bool_item(elem && is_view_focusable((View*)elem));
+}
