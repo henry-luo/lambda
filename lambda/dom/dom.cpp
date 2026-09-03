@@ -3010,6 +3010,10 @@ static Item dom_parent_element_or_null(DomNode* node) {
     return ItemNull;
 }
 
+static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name);
+static Item doc_to_proxy_item(DomDocument* doc);
+extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value);
+
 static Item dom_parent_node_or_null(DomNode* node) {
     DomNode* parent = node ? node->parent : nullptr;
     if (parent) return dom_wrap_element((void*)parent);
@@ -3020,6 +3024,20 @@ static Item dom_parent_node_or_null(DomNode* node) {
     if (node && node->is_element()) {
         DomDocument* doc = ((DomElement*)node)->doc;
         if (doc && doc->root == (DomElement*)node) {
+            // Whichever object this realm calls the Document is the one that
+            // must come back, or `documentElement.parentNode === document`
+            // fails -- it did, briefly, when this always answered the node
+            // while JS's `document` was still the proxy (ESO101). Inside a
+            // realm that is the document object; outside one, where there is
+            // no such object, it is the document node, which answers the same
+            // Document and Node properties.
+            if (dom_realm_active()) {
+                Item document_object = doc_to_proxy_item(doc);
+                if (get_type_id(document_object) != LMD_TYPE_NULL &&
+                        get_type_id(document_object) != LMD_TYPE_UNDEFINED) {
+                    return document_object;
+                }
+            }
             void* doc_node = dom_get_or_create_doc_node(doc);
             if (doc_node) return dom_wrap_element(doc_node);
         }
@@ -6285,9 +6303,14 @@ static JsDomPropId dom_prop_id(const char* prop) {
 }
 
 
-extern "C" Item dom_document_get_property(Item prop_name) {
-    if (!_js_current_document) {
-        log_debug("dom_document_get_property: no document set");
+// The document's own properties, resolved against a named document rather than
+// a global "current document". ESO93 made the document reachable as a node;
+// this makes that node able to answer as a Document too (ESO101), which needs
+// the query to say *which* document -- a Lambda-only document never sets the
+// global, and a node knows its own.
+static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) {
+    if (!doc_arg) {
+        log_debug("dom_document_get_property: no document");
         return ItemNull;
     }
 
@@ -6295,7 +6318,7 @@ extern "C" Item dom_document_get_property(Item prop_name) {
     JsDomPropId prop_id = dom_prop_id(prop);
     if (!prop) return ItemNull;
 
-    DomDocument* doc = _js_current_document;
+    DomDocument* doc = doc_arg;
     DomElement* root = doc->root;  // may be NULL for foreign docs created via createDocument
 
     // documentElement — the root <html> element
@@ -6401,7 +6424,7 @@ extern "C" Item dom_document_get_property(Item prop_name) {
 
     // F-1: document.forms — array of all <form> elements in the document.
     if (prop_id == JS_DOM_PROP_FORMS) {
-        DomDocument* doc = _js_current_document;
+        DomDocument* doc = doc_arg;
         return dom_live_document_forms_bridge((void*)doc);
     }
 
@@ -6424,7 +6447,7 @@ extern "C" Item dom_document_get_property(Item prop_name) {
     // (synthesized doctype + documentElement). Backed by the document stub
     // so iteration works.
     if (prop_id == JS_DOM_PROP_CHILD_NODES) {
-        DomDocument* doc = _js_current_document;
+        DomDocument* doc = doc_arg;
         if (!doc) return ItemNull;
         void* stub_v = dom_get_or_create_doc_node(doc);
         if (!stub_v) return ItemNull;
@@ -6447,6 +6470,16 @@ extern "C" Item dom_document_get_property(Item prop_name) {
         return js_name_item("#document");
     }
 
+    // A Document is the root of its tree and belongs to no other: both of these
+    // are null, not absent (DOM 4.4). Answering `undefined` made
+    // `document.parentNode` read as a missing property rather than as the
+    // spec's null (ESO101).
+    if (prop_id == JS_DOM_PROP_PARENT_NODE ||
+            prop_id == JS_DOM_PROP_PARENT_ELEMENT ||
+            prop_id == JS_DOM_PROP_OWNER_DOCUMENT) {
+        return ItemNull;
+    }
+
     // styleSheets — collection of parsed CSSStyleSheet objects
     if (prop_id == JS_DOM_PROP_STYLE_SHEETS) {
         return dom_document_stylesheets_bridge();
@@ -6462,17 +6495,17 @@ extern "C" Item dom_document_get_property(Item prop_name) {
     // Foreign documents (created via document.implementation.create*Document)
     // never have a browsing context, so defaultView must be null per HTML spec.
     if (prop_id == JS_DOM_PROP_DEFAULT_VIEW) {
-        return dom_document_default_view_bridge((void*)_js_current_document);
+        return dom_document_default_view_bridge((void*)doc_arg);
     }
 
     // For iframe content docs, expose Window-like properties on the same
     // wrapper so that contentWindow.X works (since contentWindow ===
     // contentDocument here). Also handle on the main doc proxy so existing
     // window-style access through `document` continues to function.
-    if (_js_current_document != _js_main_document &&
-        dom_doc_has_browsing_context(_js_current_document)) {
+    if (doc_arg != _js_main_document &&
+        dom_doc_has_browsing_context(doc_arg)) {
         if (prop_id == JS_DOM_PROP_DOCUMENT) {
-            Item w = lookup_foreign_doc_wrapper(_js_current_document);
+            Item w = lookup_foreign_doc_wrapper(doc_arg);
             return w.item ? w : ItemNull;
         }
         if (prop_id == JS_DOM_PROP_SELECTION || prop_id == JS_DOM_PROP_RANGE) {
@@ -6493,7 +6526,7 @@ extern "C" Item dom_document_get_property(Item prop_name) {
     // does `document.doctype` (and Range/Selection APIs that take it as a
     // node argument) work.
     if (prop_id == JS_DOM_PROP_DOCTYPE) {
-        DomDocument* doc = _js_current_document;
+        DomDocument* doc = doc_arg;
         if (!doc) return ItemNull;
         void* stub = dom_get_or_create_doc_node(doc);
         if (!stub) return ItemNull;
@@ -6505,7 +6538,7 @@ extern "C" Item dom_document_get_property(Item prop_name) {
         return ItemNull;
     }
 
-    DomDocument* expando_doc = _js_current_document ? _js_current_document : _js_main_document;
+    DomDocument* expando_doc = doc_arg ? doc_arg : _js_main_document;
     void* stub_v = dom_get_or_create_doc_node(expando_doc);
     if (stub_v) {
         Item exp_map = expando_get_map((DomNode*)stub_v);
@@ -6528,7 +6561,7 @@ extern "C" Item dom_document_get_property(Item prop_name) {
         return dom_document_active_element_bridge((void*)doc);
     }
 
-    expando_doc = _js_current_document ? _js_current_document : _js_main_document;
+    expando_doc = doc_arg ? doc_arg : _js_main_document;
     stub_v = dom_get_or_create_doc_node(expando_doc);
     if (stub_v) {
         Item exp_map = expando_get_map((DomNode*)stub_v);
@@ -6539,8 +6572,8 @@ extern "C" Item dom_document_get_property(Item prop_name) {
         }
     }
 
-    if (_js_current_document != _js_main_document &&
-        dom_doc_has_browsing_context(_js_current_document)) {
+    if (doc_arg != _js_main_document &&
+        dom_doc_has_browsing_context(doc_arg)) {
         Item global_value = js_get_global_property(prop_name);
         if (get_type_id(global_value) == LMD_TYPE_FUNC) {
             return global_value;
@@ -6549,6 +6582,11 @@ extern "C" Item dom_document_get_property(Item prop_name) {
 
     log_debug("dom_document_get_property: unknown property '%s'", prop);
     return make_js_undefined();
+}
+
+// The global spelling: the browsing context's current document.
+extern "C" Item dom_document_get_property(Item prop_name) {
+    return dom_document_get_property_for(_js_current_document, prop_name);
 }
 
 // ============================================================================
@@ -9075,6 +9113,20 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // Element properties below — safe to cast
     DomElement* elem = node->as_element();
+
+    // The document node carries the Document's own properties as well as the
+    // Node's. Before ESO101 these lived only on a separate proxy object served
+    // off a global "current document", so a Lambda caller holding the document
+    // -- from parent_node(documentElement) or ownerDocument -- could read none
+    // of them, and the two doors disagreed about what a document even is.
+    // Answering here, from the node's own doc, makes one object play both roles.
+    if (elem->tag_name && strcmp(elem->tag_name, "#document") == 0) {
+        Item as_document = dom_document_get_property_for(elem->doc, prop_name);
+        if (get_type_id(as_document) != LMD_TYPE_UNDEFINED &&
+                get_type_id(as_document) != LMD_TYPE_ERROR) {
+            return as_document;
+        }
+    }
     if (!elem) {
         log_debug("dom_get_property: node is not an element for property '%s'", prop);
         return ItemNull;
@@ -10285,6 +10337,13 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         return value;
     }
     DomElement* elem = node->as_element();
+
+    // Document writes (title, location, designMode, ...) land on the Document,
+    // and the document node is the Document (ESO101). Without this the node
+    // would read as a Document but not accept one's writes.
+    if (elem->tag_name && strcmp(elem->tag_name, "#document") == 0) {
+        return dom_document_proxy_set_property(prop_name, value);
+    }
 
     if (prop_id == JS_DOM_PROP_DISABLED && _is_tag(elem, "style")) {
         // HTML §4.2.6: style.disabled toggles its associated sheet, not an attribute.

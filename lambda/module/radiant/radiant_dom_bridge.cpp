@@ -2501,10 +2501,14 @@ RADIANT_C_API int radiant_dom_member_node_type_any(Item receiver, Item* out) {
 }
 
 RADIANT_C_API int radiant_dom_member_parent_node_any(Item receiver, Item* out) {
-    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
-    if (!node || !out) return 0;
-    DomNode* parent = node->parent;
-    *out = (parent && parent->is_element()) ? radiant_dom_node_item(parent) : ItemNull;
+    if (!out) return 0;
+    if (!radiant_dom_unwrap_node(receiver)) return 0;
+    // Read node->parent here and this ordinal becomes a second implementation
+    // of parentNode that quietly disagrees with the core's: it answered null
+    // for the document element where the core answers the Document (ESO93), so
+    // `documentElement.parentNode === document` was false for JS and true for
+    // Lambda. One operation, one body -- the ESO83 fix, applied to the ordinal.
+    *out = radiant_dom_get_property(receiver, radiant_dom_string_item("parentNode"));
     return 1;
 }
 
