@@ -2,11 +2,10 @@
 // fragment parsing, node-value writes, snapshot child lists and attribute
 // enumeration. Everything here runs the same bodies the JS surface runs; the
 // point of the test is that a Lambda-only script can drive them with no realm.
-import radiant
 import dom
 
-let doc = radiant.load("test/js/dom_identity.html")
-let root = radiant.root(doc)
+let doc = dom.load("test/js/dom_identity.html")
+let root = dom.document_element(doc)
 let body = dom.query_selector(root, "body")
 let intro = dom.get_element_by_id(root, "intro")
 

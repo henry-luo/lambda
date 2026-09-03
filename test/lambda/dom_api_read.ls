@@ -4,11 +4,10 @@
 // walks the value it was handed, so mutating the tree part-way through cannot
 // change the sequence under it. getElementsByTagName-style live collections are
 // deliberately absent from this module for the same reason.
-import radiant
 import dom
 
-let doc = radiant.load("test/js/dom_identity.html")
-let root = radiant.root(doc)
+let doc = dom.load("test/js/dom_identity.html")
+let root = dom.document_element(doc)
 let body = dom.closest(dom.query_selector(root, "#intro"), "body")
 
 // take the snapshot first, then grow the tree behind it

@@ -1,6 +1,7 @@
 import radiant
+import dom
 
-let doc = radiant.load("test/js/dom_identity.html")
-let root_node = radiant.root(doc)
+let doc = dom.load("test/js/dom_identity.html")
+let root_node = dom.document_element(doc)
 let _freed = radiant.free(doc)
-radiant.attr(root_node, "id")
+dom.get_attribute(root_node, "id")

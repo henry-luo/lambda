@@ -4,7 +4,6 @@
 // text and comment nodes; the fast path reads the textContent property. They
 // must agree on every node of the document, including the text nodes
 // themselves, where the derivation's base case applies.
-import radiant
 import dom
 
 fn chain_len(c) { if (c == null) 0 else 1 + chain_len(dom.next_sibling(c)) }
@@ -19,8 +18,8 @@ fn d_text_content(n) string | error {
 
 fn descendants(n) { for (c in d_child_nodes(n)) (c, descendants(c)) }
 
-let doc = radiant.load("test/js/dom_identity.html")
-let root = radiant.root(doc)
+let doc = dom.load("test/js/dom_identity.html")
+let root = dom.document_element(doc)
 let nodes = (root, descendants(root))
 
 {

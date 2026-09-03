@@ -1,4 +1,5 @@
 import radiant
+import dom
 
 let ok = radiant.register_layout("flow_smoke", (parent, children, ctx) => {
   baseline: 12,
@@ -10,8 +11,8 @@ let ok = radiant.register_layout("flow_smoke", (parent, children, ctx) => {
   }]
 })
 
-let doc = radiant.load("test/lambda/radiant_custom_layout_flow.html")
-let root = radiant.root(doc)
+let doc = dom.load("test/lambda/radiant_custom_layout_flow.html")
+let root = dom.document_element(doc)
 let did_layout = radiant.layout(root)
 let graph = root.owner_document.query_selector("#graph")
 let a = root.owner_document.query_selector("#a")

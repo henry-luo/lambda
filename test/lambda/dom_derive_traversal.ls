@@ -13,7 +13,6 @@
 // `(node, null)` IS the node, so `for (c in ...)` would then iterate the node
 // map's values instead of yielding the node (ESO97). A chain is therefore
 // counted and indexed, which always produces a list.
-import radiant
 import dom
 
 // ---- the derivations, over core only ----
@@ -46,8 +45,8 @@ fn list_eq(xs, ys) bool | error {
 // ---- the corpus: every node in the document, in tree order ----
 fn descendants(n) { for (c in d_child_nodes(n)) (c, descendants(c)) }
 
-let doc = radiant.load("test/js/dom_identity.html")
-let root = radiant.root(doc)
+let doc = dom.load("test/js/dom_identity.html")
+let root = dom.document_element(doc)
 let nodes = (root, descendants(root))
 
 fn agrees(n) bool | error {

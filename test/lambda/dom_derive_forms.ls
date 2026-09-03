@@ -1,5 +1,10 @@
-// ES43 oracle for the §5.7 form walkers, and the F32 ruling that they belong
-// in Lambda.
+// Regression test for the §5.7 form walkers, now written in Lambda.
+//
+// This began as an oracle comparing the Lambda definitions against the native
+// radiant.* bodies, and that comparison is what proved the move faithful -- it
+// caught four contract errors the catalog's derivations had guessed wrong. The
+// native bodies are retired now, so there is nothing left to compare against
+// and the test pins the answers themselves.
 //
 // form_of, radio_group and details_group were native `radiant.*` bodies. None
 // of them is mechanism -- each is policy over ordinary DOM reads -- so each now
@@ -7,7 +12,6 @@
 // core. This fixture holds the Lambda definitions and the native bodies to the
 // same answers on every element of two real documents, which is what makes the
 // move a refactor rather than a rewrite.
-import radiant
 import dom
 import tree: lambda.package.dom.tree
 
@@ -23,11 +27,6 @@ fn list_eq(xs, ys) bool | error {
   else all([for (i in 0 to len(xs) - 1) node_eq(xs[i], ys[i])])
 }
 
-fn agrees(n) bool | error {
-  node_eq(tree.form_of(n), radiant.form_of(n)) and
-  list_eq(tree.radio_group(n), radiant.radio_group(n)) and
-  list_eq(tree.details_group(n), radiant.details_group(n))
-}
 
 let forms_doc = dom.load("test/ui/test_form_controls.html")
 let details_doc = dom.load("test/ui/details_accordion.html")
@@ -37,8 +36,9 @@ let details_nodes = [for (n in descendants(details_doc) where dom.node_type(n) =
 {
   form_elements_checked: len(form_nodes),
   details_elements_checked: len(details_nodes),
-  divergent_in_forms: [for (n in form_nodes where agrees(n) != true) dom.node_name(n)],
-  divergent_in_details: [for (n in details_nodes where agrees(n) != true) dom.node_name(n)],
+  radio_group_sizes: [for (n in form_nodes where len(tree.radio_group(n)) > 0) len(tree.radio_group(n))],
+  details_group_sizes: [for (n in details_nodes where len(tree.details_group(n)) > 0) len(tree.details_group(n))],
+  form_owners: [for (n in form_nodes where tree.form_of(n) != null) dom.node_name(tree.form_of(n))],
   radios_found: len([for (n in form_nodes where len(tree.radio_group(n)) > 0) n]),
   details_found: len([for (n in details_nodes where len(tree.details_group(n)) > 0) n])
 }

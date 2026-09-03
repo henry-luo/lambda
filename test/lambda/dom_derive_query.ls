@@ -4,7 +4,6 @@
 // compared against the native fast path, on every node of a document and over
 // several selectors. A fast path that disagrees with its derivation is a bug in
 // the fast path by definition.
-import radiant
 import dom
 
 // chain helpers: a comma sequence of one element IS that element (ESO97), so a
@@ -49,8 +48,8 @@ fn list_eq(xs, ys) bool | error {
   else all([for (i in 0 to len(xs) - 1) node_eq(xs[i], ys[i])])
 }
 
-let doc = radiant.load("test/js/dom_identity.html")
-let root = radiant.root(doc)
+let doc = dom.load("test/js/dom_identity.html")
+let root = dom.document_element(doc)
 let nodes = (root, descendants(root))
 let selectors = ["p", "li", "ul", "body", "#intro", "#list", "div p", ".missing", "em"]
 

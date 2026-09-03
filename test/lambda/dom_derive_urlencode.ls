@@ -1,4 +1,8 @@
-// Oracle for form_encode, moved out of native into Lambda (F32).
+// Regression test for form_encode, moved out of native into Lambda (F32).
+//
+// It began as an oracle against the native encoder -- which is how the
+// bytes-not-code-points bug was caught -- and pins the encodings directly now
+// that the native body is retired.
 //
 // Percent-encoding a string is pure computation: no DOM, no engine state,
 // nothing an engine is needed for. Under the rule that as little as possible
@@ -10,7 +14,6 @@
 // interesting boundaries are the unreserved set and the UTF-8 escape: encoding
 // a code point instead of its bytes produces a body the server decodes as
 // mojibake, and that is precisely what this said before it was compared.
-import radiant
 import ue: lambda.package.dom.urlencode
 
 let ascii = [for (c in 32 to 126) c]
@@ -20,9 +23,9 @@ let words = ["", "abc", "a b", "a+b", "a&b=c", "hello world!", "*-._",
 
 {
   words_checked: len(words),
-  divergent_words: [for (w in words where ue.form_encode(w) != radiant.form_encode(w)) w],
+  encoded_words: [for (w in words) ue.form_encode(w)],
   ascii_codes_checked: len(ascii),
   encoded_sample: ue.form_encode("a b&c=d+e/f?g#h"),
   utf8_sample: ue.form_encode("Ünïcødé"),
-  agrees_on_utf8: ue.form_encode("日本語") == radiant.form_encode("日本語")
+  utf8_multibyte: ue.form_encode("日本語")
 }
