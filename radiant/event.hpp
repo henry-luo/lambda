@@ -2412,6 +2412,8 @@ typedef struct DocState {
     uint64_t active_cascade_id;
     uint32_t active_cascade_depth;
     uint32_t state_batch_depth; // suppresses assertions during this document's batch mutation
+    uint32_t pseudo_state_batch_depth; // coalesces full stylesheet recascades
+    bool pseudo_state_restyle_pending;
     uint32_t text_control_history_guard; // undo/redo recursion guard for this document
     const char* text_edit_history_input_type; // ambient inputType for document history pushes
     uint32_t transition_depth;     // nonzero while state_machine.cpp applies a transition

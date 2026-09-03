@@ -166,6 +166,20 @@ TEST_F(CssEngineParserTest, ParseImportUrlWithQueryAndPlus) {
                  "http://fonts.googleapis.com/css?family=Fjalla+One");
 }
 
+TEST_F(CssEngineParserTest, ParseLayerRules) {
+    const char* css = "@layer components { .button { color: red; } }";
+    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(stylesheet, nullptr);
+    ASSERT_EQ(stylesheet->rule_count, 1);
+    CssRule* layer = stylesheet->rules[0];
+    ASSERT_NE(layer, nullptr);
+    EXPECT_EQ(layer->type, CSS_RULE_LAYER);
+    ASSERT_EQ(layer->data.conditional_rule.rule_count, 1);
+    ASSERT_NE(layer->data.conditional_rule.rules[0], nullptr);
+    EXPECT_EQ(layer->data.conditional_rule.rules[0]->type, CSS_RULE_STYLE);
+}
+
 // Regression: a nested qualified rule that itself contains another nested
 // qualified rule used to cause `css_parse_declaration_from_tokens` to stall
 // on the inner '}' (token type CSS_TOKEN_RIGHT_BRACE), spinning forever in

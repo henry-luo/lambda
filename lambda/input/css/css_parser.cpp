@@ -2574,11 +2574,14 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         // Determine rule type and parse accordingly
         if (keyword_name && (strcmp(keyword_name, "media") == 0 ||
                           strcmp(keyword_name, "supports") == 0 ||
-                          strcmp(keyword_name, "container") == 0)) {
-            // Conditional at-rules: @media, @supports, @container
+                          strcmp(keyword_name, "container") == 0 ||
+                          strcmp(keyword_name, "layer") == 0)) {
+            // Nested at-rules retain their rules for the cascade. @layer's
+            // prelude is its layer name rather than a boolean condition.
             rule->type = strcmp(keyword_name, "media") == 0 ? CSS_RULE_MEDIA :
                         strcmp(keyword_name, "supports") == 0 ? CSS_RULE_SUPPORTS :
-                        CSS_RULE_CONTAINER;            // Parse condition (everything until '{')
+                        strcmp(keyword_name, "container") == 0 ? CSS_RULE_CONTAINER :
+                        CSS_RULE_LAYER;
             int cond_start = pos;
             while (pos < token_count && tokens[pos].type != CSS_TOKEN_LEFT_BRACE) {
                 pos++;
