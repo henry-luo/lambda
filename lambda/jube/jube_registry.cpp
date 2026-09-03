@@ -1155,12 +1155,6 @@ static void jube_host_dom_notify_mutation(int kind, void* target, void* parent) 
     dom_notify_mutation((DomJsMutationKind)kind, target, parent);
 }
 
-static void jube_host_dom_notify_mutation_detail(int kind, void* target, void* parent,
-                                                  const char* attribute_name,
-                                                  const char* old_value) {
-    dom_notify_mutation_detail((DomJsMutationKind)kind, target, parent,
-                                  attribute_name, old_value);
-}
 
 static void jube_host_node_function_install_promisify_custom(Item function,
         JubeNativeFunctionSpec spec) {

@@ -130,7 +130,6 @@ Item dom_engine_load_document(Item path);
 Item dom_engine_get_state(Item n, Item name);
 Item dom_engine_set_state(Item n, Item name, Item value);
 Item dom_engine_request_change(Item n);
-Item dom_engine_dispatch(Item n, Item event);
 Item dom_engine_focused(Item n);
 Item dom_engine_focus_set(Item n, Item from_keyboard);
 Item dom_engine_activate_popover(Item a);

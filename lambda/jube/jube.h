@@ -11,7 +11,7 @@ extern "C" {
 
 #define JUBE_ABI_VERSION 4
 #define JUBE_ABI_VERSION_LEGACY 1
-#define JUBE_HOST_API_VERSION 3
+#define JUBE_HOST_API_VERSION 4
 #define JUBE_HOST_LANG_API_VERSION 1
 
 // Hosted compiler services are intentionally build-coupled while their opaque
