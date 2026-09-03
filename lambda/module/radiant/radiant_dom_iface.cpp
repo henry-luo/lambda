@@ -830,7 +830,6 @@ static const JubeMemberBind radiant_rule_decl_members[] = {
 // The residual open-name/property-object semantics are explicit binding hooks;
 // dom_node keeps them on its record-owned binding surface.
 
-extern "C" int radiant_dom_member_is_element(Item receiver);
 extern "C" int radiant_dom_member_data(Item receiver, Item* out);
 extern "C" int radiant_dom_member_node_value(Item receiver, Item* out);
 extern "C" int radiant_dom_member_text_content(Item receiver, Item* out);

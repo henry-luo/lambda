@@ -624,12 +624,3 @@ extern "C" void radiant_input_set_files(DomElement* element, Item files) {
     }
 }
 
-extern "C" void radiant_input_reset_document(DomDocument* document) {
-    RadiantInputState* state = riv_state_get(document, false);
-    if (!state) return;
-    for (int i = 0; i < state->entries->length; i++) {
-        RadiantInputStateEntry* entry =
-            (RadiantInputStateEntry*)arraylist_get(state->entries, i);
-        if (entry) radiant_input_reset_live_value(entry->element);
-    }
-}

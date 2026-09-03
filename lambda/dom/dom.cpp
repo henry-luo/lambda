@@ -557,31 +557,6 @@ JS_FORWARD_VOID( dom_notify_mutation_detail, (DomJsMutationKind kind, void* targ
 JS_FORWARD_EXPRESSION(uint64_t, dom_mutation_epoch, (DomDocument* doc),
     doc ? doc->mutation_epoch : 0)
 
-static bool dom_mutation_node_overlaps_root(DomNode* node, DomNode* root) {
-    if (!node || !root) return false;
-    for (DomNode* current = node; current; current = current->parent) {
-        if (current == root) return true;
-    }
-    for (DomNode* current = root; current; current = current->parent) {
-        if (current == node) return true;
-    }
-    return false;
-}
-
-extern "C" bool dom_mutation_since_affects_subtree(
-        DomDocument* doc, uint32_t sequence_before, void* root) {
-    if (!doc || !root) return false;
-    DomNode* root_node = (DomNode*)root;
-    for (int index = 0; index < doc->js.mutation_record_count; index++) {
-        DomJsMutationRecord* record = &doc->js.mutation_records[index];
-        if (record->sequence <= sequence_before) continue;
-        if (dom_mutation_node_overlaps_root(record->target, root_node) ||
-            dom_mutation_node_overlaps_root(record->parent, root_node)) {
-            return true;
-        }
-    }
-    return false;
-}
 
 extern "C" bool dom_has_committed_geometry_snapshot(void* dom_doc) {
     DomDocument* doc = (DomDocument*)dom_doc;
@@ -1526,10 +1501,6 @@ extern "C" void dom_set_checked_dirty(void* dom_elem, bool checked) {
     }
 }
 JS_FORWARD_RETURN(const char*, dom_input_type_lower, (void* dom_elem), _input_type_lower, ((DomElement*)dom_elem))
-extern "C" const char* dom_tag_name_raw(void* dom_elem) {
-    DomElement* e = (DomElement*)dom_elem;
-    return e ? e->tag_name : nullptr;
-}
 extern "C" bool dom_is_disabled(void* dom_elem) {
     DomElement* e = (DomElement*)dom_elem;
     return e && e->has_attribute("disabled");
@@ -1618,9 +1589,6 @@ void dom_register_named_elements(DomElement* root) {
     if (initialize_event_attrs) s_dom_event_attrs_initializing = false;
 }
 
-static void dom_install_window_frames_global(void);
-static void dom_install_window_dialog_globals(void);
-static void dom_install_window_computed_style_global(void);
 static DomDocument* js_document_proxy_doc_from_item(Item item);
 
 // ============================================================================
@@ -3188,7 +3156,7 @@ extern "C" Item js_create_foreign_html_doc(const char* title) {
 
 // native construction must retain the receiver carrying DOMParser's
 // prototype; returning another object would discard parseFromString.
-JS_FORWARD_STATIC_ITEM(dom_parser_constructor, (void), make_js_undefined, ())
+JS_FORWARD_ITEM(dom_parser_constructor, (void), make_js_undefined, ())
 
 static Element* dom_parser_xml_document_element(Input* input) {
     if (!input || get_type_id(input->root) != LMD_TYPE_ELEMENT) return nullptr;
@@ -3244,7 +3212,7 @@ static Item dom_parser_parse_xml(const char* source) {
     return wrap_foreign_doc(xml_document);
 }
 
-static Item dom_parser_parse_from_string(Item source_item, Item type_item) {
+extern "C" Item dom_parser_parse_from_string(Item source_item, Item type_item) {
     const char* source = fn_to_cstr(source_item);
     const char* type = fn_to_cstr(type_item);
     if (!source) source = "";
@@ -5466,9 +5434,9 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
     strbuf_append_str(sb, tag);
     strbuf_append_char(sb, '>');
 }
-JS_FORWARD_STATIC_ITEM(dom_xml_serializer_constructor, (void), make_js_undefined, ())
+JS_FORWARD_ITEM(dom_xml_serializer_constructor, (void), make_js_undefined, ())
 
-static Item dom_xml_serializer_serialize_to_string(Item node_item) {
+extern "C" Item dom_xml_serializer_serialize_to_string(Item node_item) {
     DomNode* node = (DomNode*)dom_unwrap_element(node_item);
     if (!node) {
         DomDocument* doc = js_document_proxy_doc_from_item(node_item);
@@ -5562,7 +5530,6 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
     if (!elem || !html_str) return false;
     elem = dom_prepare_children_for_mutation(elem);
     if (!elem) return false;
-    DomDocument* doc = elem->doc;
 
     dom_collapse_selection_before_child_replace(elem, "innerHTML");
 
@@ -15730,24 +15697,6 @@ extern "C" Item dom_dataset_set_property(Item elem_item, Item prop_name, Item va
     dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                            elem->parent, attr_name, old_value);
     return value;
-}
-
-extern "C" bool dom_dataset_set_object_property(Item dataset, Item key,
-                                                       Item value) {
-    JS_ROOTS(roots, dataset_root, dataset, key_root, key, value_root, value, owner_root, ItemNull);
-    if (get_type_id(key_root.get()) != LMD_TYPE_STRING) return false;
-    String* key_string = it2s(key_root.get());
-    if (!key_string ||
-        (key_string->len == 24 &&
-         strncmp(key_string->chars, "__lambda_dataset_element", 24) == 0)) {
-        return false;
-    }
-    // Property lookup may collect while an async handler owns the only
-    // references to this dataset view; keep the receiver and operands precise.
-    owner_root.set(dom_realm_get_cstr(dataset_root.get(), "__lambda_dataset_element"));
-    if (!dom_unwrap_element(owner_root.get())) return false;
-    dom_dataset_set_property(owner_root.get(), key_root.get(), value_root.get());
-    return true;
 }
 
 // ============================================================================

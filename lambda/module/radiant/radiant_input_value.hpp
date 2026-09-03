@@ -56,8 +56,6 @@ void radiant_input_reset_live_value(DomElement* element);
 void radiant_input_type_changed(DomElement* element);
 Item radiant_input_files(DomElement* element);
 void radiant_input_set_files(DomElement* element, Item files);
-void radiant_input_reset_document(DomDocument* document);
-
 #ifdef __cplusplus
 }
 #endif

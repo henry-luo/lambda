@@ -66,10 +66,8 @@ RADIANT_C_API Item radiant_dom_event_create(const char* type, bool bubbles,
                                             int class_id);
 RADIANT_C_API bool radiant_dom_event_is(Item item);
 RADIANT_C_API bool radiant_dom_event_type_is(Item item, const char* type);
-RADIANT_C_API bool radiant_dom_event_is_mouse_like(Item item);
 RADIANT_C_API bool radiant_dom_event_default_prevented(Item item);
 RADIANT_C_API bool radiant_dom_event_propagation_stopped(Item item);
-RADIANT_C_API bool radiant_dom_event_immediate_propagation_stopped(Item item);
 RADIANT_C_API bool radiant_dom_event_prevent_default(Item item);
 RADIANT_C_API void radiant_dom_event_set_trusted(Item item, bool trusted);
 RADIANT_C_API void radiant_dom_event_set_prototype_override(Item item,
@@ -186,5 +184,4 @@ RADIANT_C_API Item fn_radiant_velmt_margin(Item velmt_item);
 RADIANT_C_API Item fn_radiant_velmt_border(Item velmt_item);
 RADIANT_C_API Item fn_radiant_velmt_padding(Item velmt_item);
 
-RADIANT_C_API const JubeModuleDef* radiant_jube_module(void);
 RADIANT_C_API void radiant_jube_register_static(void);
