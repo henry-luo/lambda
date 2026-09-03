@@ -28,7 +28,7 @@ let box2 = {
     type: "mord", italic: 0.0, skew: 0.0
 }
 let r2 = opt.coalesce(box2)
-"5. merged child count:"; len(r2.element)
+"5. merged child count:"; len(content(r2.element))
 "6. merged text:"; r2.element[0][0]
 
 // ---- non-mergeable spans (different classes) ----
@@ -40,7 +40,7 @@ let box3 = {
     type: "mord", italic: 0.0, skew: 0.0
 }
 let r3 = opt.coalesce(box3)
-"7. no merge count:"; len(r3.element)
+"7. no merge count:"; len(content(r3.element))
 
 // ---- span with style (should not merge) ----
 let box4 = {
@@ -51,7 +51,7 @@ let box4 = {
     type: "mord", italic: 0.0, skew: 0.0
 }
 let r4 = opt.coalesce(box4)
-"8. styled no merge:"; len(r4.element)
+"8. styled no merge:"; len(content(r4.element))
 
 // ---- preserves box metrics ----
 let box5 = {
@@ -76,7 +76,7 @@ let box6 = {
     type: "mord", italic: 0.0, skew: 0.0
 }
 let r6 = opt.coalesce(box6)
-"14. triple merge count:"; len(r6.element)
+"14. triple merge count:"; len(content(r6.element))
 "15. triple merge text:"; r6.element[0][0]
 
 "===== ALL MATH OPTIMIZE TESTS DONE ====="

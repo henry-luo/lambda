@@ -13,13 +13,13 @@ let preserved = graph_style.parse(
 let class_graph = (input("test/lambda/graph/mermaid/class_metadata.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }
 let class_html = transform.to_html(class_graph)
-let class_nodes = [for (i in 0 to (len(class_html) - 1), let child = class_html[i]
+let class_nodes = [for (child in content(class_html)
   where string(name(child)) == "node") child]
 
 let metadata_graph = (input("test/lambda/graph/mermaid/metadata_styles.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }
 let metadata_html = transform.to_html(metadata_graph)
-let metadata_edges = [for (i in 0 to (len(metadata_html) - 1), let child = metadata_html[i]
+let metadata_edges = [for (child in content(metadata_html)
   where string(name(child)) == "edge") child]
 let edge = metadata_edges[0]
 let result = layout.from_velmts(
@@ -39,7 +39,8 @@ let result = layout.from_velmts(
   ], null)
 let layer = paint.layers(result)[0]
 let svg = layer.content
-let path = svg[len(svg) - 1]
+let svg_kids = content(svg)
+let path = svg_kids[len(svg_kids) - 1]
 
 {
   parsed: [parsed.fill, parsed.stroke, parsed.stroke_width, parsed.opacity,

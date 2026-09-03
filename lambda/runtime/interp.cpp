@@ -2348,7 +2348,7 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
     bool is_map = source_tid == LMD_TYPE_MAP || source_tid == LMD_TYPE_VMAP;
     SymbolKeyList* keys = is_map ? item_keys(source) : NULL;
 
-    int64_t len = fn_len(source);
+    int64_t len = fn_pipe_count(source);
     // A bare scalar pipes as a one-element stream; a genuinely empty collection
     // stays empty. Only the non-collection tags lift.
     bool is_scalar = false;

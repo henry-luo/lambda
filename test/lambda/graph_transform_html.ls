@@ -18,7 +18,7 @@ let result = transform.to_html({
   layout: result['data-radiant-layout'],
   direction: result['data-direction'],
   spacing: [result['data-node-sep'], result['data-rank-sep'], result['data-edge-sep']],
-  children: [for (i in 0 to (len(result) - 1), let child = result[i]) {
+  children: [for (child in content(result)) {
     tag: name(child),
     id: child['data-node-id'],
     from: child['data-from'],
@@ -27,7 +27,7 @@ let result = transform.to_html({
     shape: child['data-shape'],
     z: child['data-z'],
     content: if (name(child) == 'node' and len(child) > 0)
-      [for (j in 0 to (len(child) - 1)) child[j]]
+      [for (item in content(child)) item]
       else if (name(child) == 'edge-label' and len(child) > 0) [child[0]] else []
   }]
 }

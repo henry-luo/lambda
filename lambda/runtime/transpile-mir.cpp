@@ -19694,9 +19694,11 @@ static MirValue emit_pipe_value(MirTranspiler* mt, AstPipeNode* pipe_node) {
         MIR_new_reg_op(mt->ctx, map_len)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_start_loop)));
 
-    // NON-MAP path: use fn_len
+    // NON-MAP path: the traversal count, which is NOT fn_len for an element —
+    // it pipes over content only (fn_pipe_count, LR09-9).
     emit_label(mt, l_non_map);
-    MIR_reg_t arr_len = emit_machine_len(mt, boxed_left);
+    MIR_reg_t arr_len = emit_call_1(mt, "fn_pipe_count", MIR_T_I64, MIR_T_I64,
+        MIR_new_reg_op(mt->ctx, boxed_left));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
         MIR_new_reg_op(mt->ctx, arr_len)));
 

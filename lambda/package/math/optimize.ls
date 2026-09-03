@@ -2,7 +2,8 @@
 
 fn can_merge(a, b) {
     if (not (a is element) or not (b is element)) false
-    else if (len(a) != 1 or len(b) != 1) false
+    // exactly one CHILD each; len() also counts attributes (S8.3.1v2)
+    else if (len(content(a)) != 1 or len(content(b)) != 1) false
     else if (not (a[0] is string) or not (b[0] is string)) false
     else a.math_data_attrs == null and b.math_data_attrs == null and
         a.class == b.class and a.style == null and b.style == null
@@ -35,15 +36,17 @@ fn merge_list(items) {
 fn walk(c) {
     // non-span nodes such as SVG accents must keep their tag and attributes;
     // rebuilding them as spans destroys MathLive's stretchy accent markup.
-    if (c is element and len(c) > 0 and name(c) == 'span') build_merged(c)
+    if (c is element and len(content(c)) > 0 and name(c) == 'span') build_merged(c)
     else c
 }
 
 fn build_merged(el) {
-    let n = len(el)
+    // children only: len(el) also counts attributes (S8.3.1v2)
+    let kid_items = content(el)
+    let n = len(kid_items)
     if (n == 0) el
     else
-        (let kids = (for (i in 0 to (n - 1)) walk(el[i])),
+        (let kids = (for (child in kid_items) walk(child)),
          let merged = if (has_direct_merge_boundary_child(kids, 0)) kids else merge_list(kids),
          let items = (for (j in 0 to (len(merged) - 1)) merged[j]),
          <span class: el.class, style: el.style, id: el.id, math_data_attrs: el.math_data_attrs,
@@ -67,7 +70,7 @@ fn starts_with_color_style(style) {
 }
 
 fn merge_children(el) {
-    if (len(el) > 0 and name(el) == 'span') build_merged(el)
+    if (len(content(el)) > 0 and name(el) == 'span') build_merged(el)
     else el
 }
 

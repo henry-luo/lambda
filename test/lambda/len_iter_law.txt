@@ -21,8 +21,8 @@
 "-- absent --"
 0
 []
-"-- KNOWN DIVERGENCE: element len counts children, iteration adds attrs --"
-1
+"-- element: attribute values then content, len matches the walk --"
+3
 [1, 2, "text"]
 "-- count(): splicing is syntactic, not a value property (see 8.3) --"
 4

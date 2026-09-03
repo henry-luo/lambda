@@ -7,7 +7,7 @@ let source = (input("test/lambda/graph/mermaid/edge_ids_markers.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }
 let source_edges = model.edges(source)
 let html = transform.to_html(source)
-let html_edges = [for (i in 0 to (len(html) - 1), let child = html[i]
+let html_edges = [for (child in content(html)
   where string(name(child)) == "edge") child]
 let result = layout.compute({
   nodes: [for (node in model.nodes(source)) {
@@ -28,8 +28,9 @@ let layers = paint.layers(result)
     [edge.id, edge.marker_start, edge.marker_end]],
   paint: [for (layer in layers,
     let svg = layer.content,
-    let defs = svg[0],
-    let path = svg[len(svg) - 1]) [
+    let svg_kids = content(svg),
+    let defs = svg_kids[0],
+    let path = svg_kids[len(svg_kids) - 1]) [
       path["data-edge-id"], path["data-graph-role"],
       path["data-marker-start"], path["data-marker-end"],
       defs[0]["data-marker-type"], defs[1]["data-marker-type"],

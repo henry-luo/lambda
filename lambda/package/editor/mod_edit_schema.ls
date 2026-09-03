@@ -197,9 +197,10 @@ fn validate_mark_policy(schema, entry, kids, path) =>
   validate_mark_policy_at(schema, entry, kids, path, 0, len(kids), [])
 
 // Children at element node (extracted as plain array — needed for indexing
-// and len() inside recursive functional code). Element iteration includes
-// attribute values, but numeric indexing is child-only.
-fn children_array(elem) => [for (i in 0 to len(elem) - 1) elem[i]]
+// and len() inside recursive functional code). content() is the child
+// sequence; len(elem) counts attributes as well (S8.3.1v2), and plain
+// iteration yields attribute values first.
+fn children_array(elem) => [for (child in content(elem)) child]
 
 // Validate one element node and return [violations].
 fn validate_node(schema, node, path) {

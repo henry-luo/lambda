@@ -24,7 +24,7 @@ len({a: null, b: 2}); [for (i in {a: null, b: 2}) i]
 "-- absent --"
 len(null); [for (i in null) i]
 
-"-- KNOWN DIVERGENCE: element len counts children, iteration adds attrs --"
+"-- element: attribute values then content, len matches the walk --"
 len(<elmt a: 1, b: 2, "text">); [for (i in <elmt a: 1, b: 2, "text">) i]
 
 "-- count(): splicing is syntactic, not a value property (see 8.3) --"
