@@ -9,6 +9,7 @@
  */
 
 #include "dom.h"
+#include "dom_engine.h"
 #include "dom_realm_hooks.h"
 #include "dom_events.h"
 #include "dom_selection.h"
@@ -609,9 +610,9 @@ static bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     // DOM mutations from the same script turn.
     if (doc->view_tree && doc->view_tree->root) {
         if (doc->js.mutation_count > 0) {
-            radiant_reconcile_dom_mutations(uicon, doc);
+            dom_engine_reconcile_dom_mutations(uicon, doc);
         }
-    } else if (doc->root && radiant_document_ensure_state(
+    } else if (doc->root && dom_engine_document_ensure_state(
                    doc, "dom_geometry_flush")) {
         layout_html_doc(uicon, doc, false);
     }
@@ -645,7 +646,7 @@ extern "C" bool dom_commit_headless_layout_checkpoint(void) {
     }
     // A one-shot DOM session has no native render loop, so task boundaries must
     // commit pending mutations; geometry getters remain snapshots.
-    radiant_reconcile_dom_mutations(uicon, doc);
+    dom_engine_reconcile_dom_mutations(uicon, doc);
     return true;
 }
 
@@ -666,7 +667,7 @@ JS_FORWARD_STATIC_EXPRESSION(DocState*, dom_current_state, (void),
 static DocState* dom_testdriver_state() {
     if (!_js_current_document) return nullptr;
     if (!_js_current_document->state) {
-        radiant_document_ensure_state(_js_current_document, "dom_testdriver_key");
+        dom_engine_document_ensure_state(_js_current_document, "dom_testdriver_key");
     }
     return _js_current_document->state;
 }
@@ -1490,7 +1491,7 @@ static void _set_checkedness(DomElement* elem, bool v) {
         form_control_set_checked(state, (View*)elem, v);
         // JS checkedness changes the live form state without passing through
         // native click dispatch, so explicitly refresh dependent :checked CSS.
-        radiant_sync_pseudo_state((View*)elem, PSEUDO_STATE_CHECKED, v);
+        dom_engine_sync_pseudo_state((View*)elem, PSEUDO_STATE_CHECKED, v);
         return;
     }
 
@@ -1790,8 +1791,8 @@ JS_FORWARD_ITEM(dom_document_proxy_for_doc_bridge, (void* doc_v), doc_to_proxy_i
 // DOM Wrapping / Unwrapping
 // ============================================================================
 
-extern "C" void radiant_dom_reset_wrapper_cache(void);
-JS_FORWARD_STATIC_VOID( reset_dom_wrapper_cache, (), radiant_dom_reset_wrapper_cache, ())
+extern "C" void dom_engine_reset_wrapper_cache(void);
+JS_FORWARD_STATIC_VOID( reset_dom_wrapper_cache, (), dom_engine_reset_wrapper_cache, ())
 
 extern "C" void dom_initialize_node_wrapper(void* dom_elem) {
     DomNode* node = (DomNode*)dom_elem;
@@ -5714,7 +5715,7 @@ extern "C" bool dom_exec_insert_html(DomDocument* doc, const char* html_str) {
     return true;
 }
 
-extern "C" bool radiant_dom_exec_command(void* document, const char* command,
+extern "C" bool dom_engine_exec_command(void* document, const char* command,
                                         const char* value);
 
 // F14.1/ES20: `document.execCommand` is now a thin dispatch into the dom
@@ -5739,7 +5740,7 @@ extern "C" Item dom_document_exec_command_bridge(Item command_item,
     char* stable_value = mem_strdup(value ? value : "", MEM_CAT_JS_RUNTIME);
     bool handled = false;
     if (stable_command && stable_value) {
-        handled = radiant_dom_exec_command(dom_get_document(), stable_command,
+        handled = dom_engine_exec_command(dom_get_document(), stable_command,
                                            stable_value);
     }
     mem_free(stable_command);
@@ -6716,7 +6717,7 @@ static bool js_text_control_set_raw_value(DomElement* elem, const char* new_val,
 
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (!state && elem->doc) {
-        state = radiant_document_ensure_state(elem->doc, "js_text_control_set_raw_value");
+        state = dom_engine_document_ensure_state(elem->doc, "js_text_control_set_raw_value");
     }
     uint32_t new_u16_len = tc_utf8_to_utf16_length(new_val ? new_val : "", new_len);
     if (!form_control_store_text_value(state, (View*)elem, new_val,
@@ -7173,11 +7174,11 @@ static const char* _elem_current_value(DomElement* elem) {
     if (!elem || !elem->tag_name) return "";
     const char* tag = elem->tag_name;
     if (strcasecmp(tag, "input") == 0) {
-        RadiantInputValueKind kind = radiant_input_value_kind(
+        RadiantInputValueKind kind = (RadiantInputValueKind)dom_engine_input_value_kind(
             elem->get_attribute("type"));
         if (kind != RADIANT_INPUT_VALUE_TEXT &&
             kind != RADIANT_INPUT_VALUE_UNSUPPORTED) {
-            return radiant_input_live_value(elem);
+            return dom_engine_input_live_value(elem);
         }
         if (tc_is_text_control(elem)) {
             tc_ensure_init(elem);
@@ -8137,14 +8138,14 @@ static void _reset_form_control(DomElement* elem) {
             // derived from that list and must never restore the value attribute.
             if (strcmp(itype, "file") == 0) {
                 radiant_input_set_files(elem, ItemNull);
-                radiant_input_set_live_value(elem, "");
+                dom_engine_input_set_live_value(elem, "");
             }
             return;
         }
-        RadiantInputValueKind value_kind = radiant_input_value_kind(itype);
+        RadiantInputValueKind value_kind = (RadiantInputValueKind)dom_engine_input_value_kind(itype);
         if (value_kind != RADIANT_INPUT_VALUE_TEXT &&
             value_kind != RADIANT_INPUT_VALUE_UNSUPPORTED) {
-            radiant_input_reset_live_value(elem);
+            dom_engine_input_reset_live_value(elem);
             return;
         }
         // Text-like input: value := defaultValue (= value attribute)
@@ -8349,7 +8350,7 @@ static Item _build_validity_state(DomElement* elem) {
         // from disagreeing with the value exposed through the IDL.
         if (!val_empty && strcasecmp(tag, "input") == 0) {
             char sanitized[128];
-            radiant_input_value_sanitize(dom_input_type_lower(elem), val,
+            dom_engine_input_value_sanitize(dom_input_type_lower(elem), val,
                                           sanitized, sizeof(sanitized));
             val_empty = sanitized[0] == '\0';
         }
@@ -8460,7 +8461,7 @@ static Item _build_validity_state(DomElement* elem) {
         if (!val_empty && strcasecmp(tag, "input") == 0) {
             const char* itype = dom_input_type_lower(elem);
             RadiantInputValidity typed = {};
-            radiant_input_value_validate(itype, val,
+            dom_engine_input_value_validate(itype, val,
                 elem->get_attribute("min"),
                 elem->get_attribute("max"),
                 elem->get_attribute("step"), &typed);
@@ -13328,7 +13329,7 @@ static Item dom_text_control_caret_bounds(DomElement* elem) {
 
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (!state && elem->doc) {
-        state = radiant_document_ensure_state(elem->doc,
+        state = dom_engine_document_ensure_state(elem->doc,
             "dom_text_control_caret_bounds");
     }
 

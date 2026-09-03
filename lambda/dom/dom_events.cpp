@@ -9,6 +9,7 @@
  */
 
 #include "dom_events.h"
+#include "dom_engine.h"
 #include "dom.h"
 #include "dom_selection.h"
 #include "../js/js_runtime.h"
@@ -38,10 +39,10 @@ struct EventContext;
 extern "C" bool radiant_synthetic_dom_dispatch_is_reentry(Item event_item);
 extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
                                                       Item event_item);
-extern "C" bool radiant_author_template_event_live(const char* event_name);
+extern "C" bool dom_engine_author_template_event_live(const char* event_name);
 extern "C" bool radiant_author_template_dispatch_begin(Item event);
 extern "C" void radiant_author_template_dispatch_end(Item event);
-extern "C" void radiant_dispatch_author_template_participant(void* dom_node,
+extern "C" void dom_engine_dispatch_author_template_participant(void* dom_node,
                                                                Item event,
                                                                const char* event_name);
 extern "C" void radiant_dom_event_set_lambda_dispatch_position(
@@ -2158,7 +2159,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     // F18: masks are captured once for this cascade. A miss means the
     // corresponding store cannot contribute at any path node this dispatch.
     bool js_live = has_listener_type(type);
-    bool author_live = radiant_author_template_event_live(type);
+    bool author_live = dom_engine_author_template_event_live(type);
     bool author_cascade = author_live &&
         radiant_author_template_dispatch_begin(event_item);
     if (!author_cascade) author_live = false;
@@ -2188,7 +2189,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     }
     if (target_reached && author_live && path_is_dom[0] && !_STOP_IMM) {
         set_event_dispatch_position(path[0], path_is_dom[0], event_item, 3, 2);
-        radiant_dispatch_author_template_participant(path[0], event_item, type);
+        dom_engine_dispatch_author_template_participant(path[0], event_item, type);
     }
 
     // Phase 3: Bubble — from target parent up to root
@@ -2200,7 +2201,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
             }
             if (author_live && path_is_dom[i] && !_STOP_IMM) {
                 set_event_dispatch_position(path[i], path_is_dom[i], event_item, 3);
-                radiant_dispatch_author_template_participant(path[i], event_item, type);
+                dom_engine_dispatch_author_template_participant(path[i], event_item, type);
             }
         }
     }

@@ -15,6 +15,7 @@
  */
 
 #include "dom_selection.h"
+#include "dom_engine.h"
 #include "dom.h"
 #include "dom_events.h"
 #include "../js/js_props.h"
@@ -123,7 +124,7 @@ static DocState* get_or_create_state() {
     if (!doc) return nullptr;
     if (doc->state) return doc->state;
     if (!doc->document_pool) return nullptr;
-    return radiant_document_ensure_state(doc, "dom_selection");
+    return dom_engine_document_ensure_state(doc, "dom_selection");
 }
 
 // ============================================================================

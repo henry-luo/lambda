@@ -2957,3 +2957,74 @@ RADIANT_PROVIDE_ENGINE_2(set_hover_index, fn_radiant_set_hover_index)
 RADIANT_PROVIDE_ENGINE_2(set_selected_index, fn_radiant_set_selected_index)
 RADIANT_PROVIDE_ENGINE_2(submit_event, fn_radiant_submit_event)
 RADIANT_PROVIDE_ENGINE_1(value_at_focus, fn_radiant_value_at_focus)
+
+// ---------------------------------------------------------------------------
+// The strong half of the seams declared in lambda/dom/dom_engine.h.
+//
+// These live here, not in a file of their own, for a link reason worth stating:
+// a static archive contributes an object only to resolve an undefined symbol,
+// and a weak definition already resolves one. A provider object that nothing
+// else references is therefore never pulled in, and the core's weak defaults
+// win silently -- which is exactly what happened when these were their own
+// translation unit: form input and history went quiet with a clean build. This
+// object is pulled in for the module registration, so its strong definitions
+// are present at the final link.
+// ---------------------------------------------------------------------------
+#include "../../dom/dom_engine.h"
+#include "radiant_input_value.hpp"
+
+extern "C" bool radiant_author_template_event_live(const char* event_name);
+extern "C" void radiant_dispatch_author_template_participant(void* dom_node, Item event,
+                                                             const char* event_name);
+extern "C" void radiant_dom_reset_wrapper_cache(void);
+extern "C" bool radiant_dom_exec_command(void* document, const char* command, const char* value);
+struct RadiantHistoryTraversal;
+extern "C" bool radiant_history_initialize(DomDocument* document);
+extern "C" int radiant_history_length(DomDocument* document);
+extern "C" const char* radiant_history_scroll_restoration(DomDocument* document);
+extern "C" bool radiant_history_go(DomDocument* document, int delta, RadiantHistoryTraversal* t);
+extern "C" bool radiant_history_set_location(DomDocument* document, const char* url_text,
+                                             RadiantHistoryTraversal* t);
+#define PROVIDE(ret, name, params, args) \
+    extern "C" ret dom_engine_##name params { return radiant_##name args; }
+#define PROVIDE_VOID(name, params, args) \
+    extern "C" void dom_engine_##name params { radiant_##name args; }
+
+extern "C" bool dom_engine_author_template_event_live(const char* n) {
+    return radiant_author_template_event_live(n);
+}
+extern "C" void dom_engine_dispatch_author_template_participant(void* d, Item e, const char* n) {
+    radiant_dispatch_author_template_participant(d, e, n);
+}
+extern "C" DocState* dom_engine_document_ensure_state(DomDocument* d, const char* o) {
+    return radiant_document_ensure_state(d, o);
+}
+extern "C" void dom_engine_reset_wrapper_cache(void) { radiant_dom_reset_wrapper_cache(); }
+extern "C" bool dom_engine_exec_command(void* d, const char* c, const char* v) {
+    return radiant_dom_exec_command(d, c, v);
+}
+
+PROVIDE(bool, history_initialize, (DomDocument* d), (d))
+PROVIDE(int, history_length, (DomDocument* d), (d))
+PROVIDE(const char*, history_scroll_restoration, (DomDocument* d), (d))
+PROVIDE(bool, history_go, (DomDocument* d, int delta, RadiantHistoryTraversal* t), (d, delta, t))
+PROVIDE(bool, history_set_location,
+        (DomDocument* d, const char* u, RadiantHistoryTraversal* t), (d, u, t))
+
+extern "C" int dom_engine_input_value_kind(const char* type) {
+    return (int)radiant_input_value_kind(type);
+}
+PROVIDE(const char*, input_live_value, (DomElement* e), (e))
+PROVIDE(bool, input_set_live_value, (DomElement* e, const char* v), (e, v))
+PROVIDE_VOID(input_reset_live_value, (DomElement* e), (e))
+PROVIDE(bool, input_value_sanitize,
+        (const char* t, const char* v, char* out, size_t n), (t, v, out, n))
+PROVIDE_VOID(input_value_validate,
+        (const char* t, const char* v, const char* mn, const char* mx, const char* st,
+         RadiantInputValidity* out), (t, v, mn, mx, st, out))
+
+PROVIDE_VOID(reconcile_dom_mutations, (UiContext* u, DomDocument* d), (u, d))
+
+extern "C" void dom_engine_sync_pseudo_state(void* view, uint32_t flag, bool set) {
+    radiant_sync_pseudo_state((View*)view, flag, set);
+}

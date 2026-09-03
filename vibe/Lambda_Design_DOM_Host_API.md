@@ -5,7 +5,7 @@
 > **Role**: the design home for *what the DOM API is* — its deduplicated operation set, which operations are primitive, and how every other operation is defined in terms of the primitives. `Lambda_Design_DOM_API.md` owns where code lives and the core/adapter line; `DOM_Pkg` §4.2 owns *implementation language* placement (N vs L); this doc owns the **operation set and its two tiers**, which is orthogonal to both.
 > **Companion docs**: `vibe/Lambda_Design_DOM_API.md` (§7 placeholder this fills; ES34 — the host table is the dynamic ABI and stays), `vibe/Lambda_Design_DOM_Pkg.md` §4.2–§4.3 (placement tests, the narrow-waist taxonomy), `vibe/Lambda_Design_DOM_Default.md` §2.4 (ES30 — generic traversal replaces policy-specific walkers: the precedent for the secondary tier), `vibe/Lambda_Design_DOM_State.md` (ES5/ES6/ES10 — the state waist), `vibe/Lambda_Design_Native_Module.md` §5–§6 (module ABI), `vibe/Lambda_Jube_DOM3.md`/`DOM4.md`.
 > **Formal anchors**: D8 (module/runtime ownership), D7.4.1–D7.4.4 (the declared-interface records remain the JS property protocol; they bind to this API's bodies), D6.2.2v2, D4.5.1v3 (Radiant memory seam — node storage is mechanism), S9.2.2 (every collection this API returns is a snapshot), S9.1.4 (the state cluster is the view-state store), S12.1.3.
-> **Ledger series**: extends the DOM area's `ES#`/`ESO#`/`F#` per `doc/Doc_Convention.md` §4. Decisions **ES39–ES46**; open issues **ESO84–ESO107** (ESO81, ESO93, ESO101, ESO106 and ESO107 resolved) (ESO81, ESO93 and ESO101 resolved); stages **F28–F33**.
+> **Ledger series**: extends the DOM area's `ES#`/`ESO#`/`F#` per `doc/Doc_Convention.md` §4. Decisions **ES39–ES47**; open issues **ESO84–ESO107** (ESO81, ESO93, ESO101, ESO106 and ESO107 resolved) (ESO81, ESO93 and ESO101 resolved); stages **F28–F33**.
 
 ---
 
@@ -502,6 +502,47 @@ absence rule to the publication boundary, which is what makes this ruling
 implementable at all. Promoting a `DOM_RAW` row to a `DOM_OP` row is the
 per-operation contract work the A/B/C census describes — but it is now a
 promotion inside one catalog, not a migration between two sections.
+
+### ES47 (ruled by the user, 2026-09-03) — down and up are two APIs, not one
+
+> "dom API should solely be for script runtime to call to DOM/radiant. a separate
+> API is needed for DOM/radiant engine to call back to script runtime. the two
+> should not be mixed under one API."
+
+Every census in this stage looked *downward* — `->dom->`, `extern "C"` in the
+module, `#define` sweeps — and each asked how the module reaches the core. None
+asked how the core reaches back. Measuring that found 49 direct `radiant_*`
+calls out of `lambda/dom/`, and splitting them by what they traffic in gives two
+disjoint sets with nothing in common but the prefix:
+
+- **19 traffic in native types only** — a control's live value, session history,
+  view reconciliation, pseudo-state, author-template participation. Not one
+  touches a script value. This is the DOM core needing the *engine*.
+- **30 traffic in script values** — node wrapping and identity, the ten VMap
+  host-type tokens, the Event object protocol. Every one is the DOM asking the
+  *script runtime* to make or inspect a script value.
+
+They are two APIs. The first already has a mechanism — the `dom_engine_*`
+provider seam, 66 of them — and the 19 were simply seams nobody declared. The
+second has no mechanism at all: `lambda/dom/` makes **zero** host-API calls and
+**353** direct `js_*` calls, including 34 uses of `js_get_this()` inside the six
+core files the split rule governs. That is the API this ruling names, and it
+remains to be designed.
+
+A correction the split forced: one of the 19, `set_lambda_dispatch_position`,
+was classified native from a signature the grep had truncated mid-line. It takes
+`Item`s, so it is a script-value call. **Eighteen** were seams; the script-value
+set is 31.
+
+**Why the direction matters at all**, since it is not an aesthetic: `lambda/dom/`
+is compiled into `lambda-rt`, whose declared libraries do not include radiant,
+while `radiant` declares `lambda-rt`. The build states one edge and the code ran
+both ways. Nothing was broken — only `lambda-exe` and `radiant` link `lambda-rt`,
+and both have radiant present — so this was latent, not live. What it cost was
+that the build config was a false statement about the code, two conventions
+existed for one boundary with only one of them visible in the core's headers,
+and `lambda-boundary-rt` is built with `-Wl,-undefined,dynamic_lookup`, so the
+check that would have caught it is configured to allow it.
 
 ## 7. Layering: JS → Lambda → native — calls, the stack, and the heap
 
