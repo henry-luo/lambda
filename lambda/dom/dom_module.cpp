@@ -40,12 +40,50 @@ struct DomCatalogRow {
     const char* name;
     const char* signature;
     fn_ptr body;
+    fn_ptr published;   // the body behind the Lambda face's absence rule
     unsigned flags;
 };
 
+// The Lambda face renders absence as null; JS keeps `undefined` (ESO98, ESO103).
+// That rule used to live inside the row bodies, which quietly made every row
+// Lambda-only: a body could not be shared with the JS-facing bridge that names
+// the same operation, because the two disagreed on what "nothing" is. It belongs
+// here instead -- once, at the boundary that *is* the Lambda face -- so a row
+// body can answer `undefined` and still be the one body both doors call (ES38).
+// One trampoline per row, generated; nothing is written by hand per operation.
+#define DOM_PUB_0(name, body) \
+    static Item dom_pub_##name(void) { \
+        Item (*f)(void) = (Item (*)(void))(fn_ptr)(body); \
+        return f ? dom_absent_to_null(f()) : ItemNull; }
+#define DOM_PUB_1(name, body) \
+    static Item dom_pub_##name(Item a) { \
+        Item (*f)(Item) = (Item (*)(Item))(fn_ptr)(body); \
+        return f ? dom_absent_to_null(f(a)) : ItemNull; }
+#define DOM_PUB_2(name, body) \
+    static Item dom_pub_##name(Item a, Item b) { \
+        Item (*f)(Item, Item) = (Item (*)(Item, Item))(fn_ptr)(body); \
+        return f ? dom_absent_to_null(f(a, b)) : ItemNull; }
+#define DOM_PUB_3(name, body) \
+    static Item dom_pub_##name(Item a, Item b, Item c) { \
+        Item (*f)(Item, Item, Item) = (Item (*)(Item, Item, Item))(fn_ptr)(body); \
+        return f ? dom_absent_to_null(f(a, b, c)) : ItemNull; }
+#define DOM_PUB_4(name, body) \
+    static Item dom_pub_##name(Item a, Item b, Item c, Item d) { \
+        Item (*f)(Item, Item, Item, Item) = (Item (*)(Item, Item, Item, Item))(fn_ptr)(body); \
+        return f ? dom_absent_to_null(f(a, b, c, d)) : ItemNull; }
+#define DOM_PUB_5(name, body) \
+    static Item dom_pub_##name(Item a, Item b, Item c, Item d, Item e) { \
+        Item (*f)(Item, Item, Item, Item, Item) = \
+            (Item (*)(Item, Item, Item, Item, Item))(fn_ptr)(body); \
+        return f ? dom_absent_to_null(f(a, b, c, d, e)) : ItemNull; }
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
+    DOM_PUB_##argc(name, body)
+#include "dom_api.def"
+#undef DOM_OP
+
 static const DomCatalogRow dom_catalog[] = {
 #define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
-    { #name, sig, (fn_ptr)(body), (unsigned)(flags) },
+    { #name, sig, (fn_ptr)(body), (fn_ptr)dom_pub_##name, (unsigned)(flags) },
 #include "dom_api.def"
 #undef DOM_OP
 };
@@ -59,7 +97,7 @@ static void dom_build_published_table(void) {
     for (int i = 0; i < dom_catalog_count; i++) {
         const DomCatalogRow& row = dom_catalog[i];
         if (!row.body || !(row.flags & DOM_F_NEUTRAL)) continue;
-        JubeFuncDef def = { row.name, row.signature, row.body, JUBE_FN_NONE, nullptr, row.body };
+        JubeFuncDef def = { row.name, row.signature, row.published, JUBE_FN_NONE, nullptr, row.published };
         dom_functions[dom_function_count++] = def;
     }
 }

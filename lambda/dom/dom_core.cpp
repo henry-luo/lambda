@@ -32,13 +32,7 @@
 // Delegation helpers
 // ---------------------------------------------------------------------------
 
-// Absence crossing into Lambda is null, never JS `undefined` -- the same
-// boundary rule dom_prop_get applies. The ordinal executor answers `undefined`
-// for an operation that does not apply to this node kind (has_attribute on a
-// text node), and letting that through produced a value that printed as
-// `false` but was not a bool: `has_attribute(text) == false` was FALSE. Found
-// by the §5.4 oracle; ESO98 fixed only the property half of this boundary.
-static Item dom_absent_to_null(Item v) {
+extern "C" Item dom_absent_to_null(Item v) {
     return get_type_id(v) == LMD_TYPE_UNDEFINED ? ItemNull : v;
 }
 
@@ -554,14 +548,6 @@ extern "C" Item dom_core_computed_style(Item n, Item prop) {
 }
 
 // --- listeners: the void-returning core entries under the uniform shape
-extern "C" Item dom_add_event_listener_body(Item n, Item type, Item fn, Item opts) {
-    dom_add_event_listener(n, type, fn, opts);
-    return ItemNull;
-}
-extern "C" Item dom_remove_event_listener_body(Item n, Item type, Item fn, Item opts) {
-    dom_remove_event_listener(n, type, fn, opts);
-    return ItemNull;
-}
 
 // ===========================================================================
 // DERIVED fast paths — each equals its derivation in dom_api.def

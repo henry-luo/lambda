@@ -72,8 +72,6 @@ Item dom_core_selection_boundaries(Item s);
 // --- core: style
 Item dom_core_computed_style(Item n, Item prop);
 // --- core: listeners (uniform 4-arg shape over dom_events)
-Item dom_add_event_listener_body(Item n, Item type, Item fn, Item opts);
-Item dom_remove_event_listener_body(Item n, Item type, Item fn, Item opts);
 
 // --- fast paths for derived operations (ES43: each equals its derivation)
 Item dom_fp_first_element_child(Item n);
@@ -200,6 +198,18 @@ Item dom_parser_parse_from_string(Item markup, Item mime);
 Item dom_cssom_stylesheet_get_css_rules(Item sheet_item);
 Item dom_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_arg);
 Item dom_cssom_delete_rule(Item sheet_item, Item index_arg);
+
+// Lambda has no `undefined`, so absence crossing into a Lambda-facing value is
+// null (ESO98, ESO103). This is the *Lambda face's* rule, not the core's: a row
+// body may answer `undefined` because JS shares it, and the publication boundary
+// in dom_module.cpp is what renders that as null.
+Item dom_absent_to_null(Item v);
+
+// Rows that are literally their JS-facing bridge: the bridge already has the
+// row's signature, and its `undefined` becomes null at the publication boundary,
+// so one body serves both doors (ES38) instead of a Lambda-only copy.
+Item dom_add_event_listener_bridge(Item n, Item type, Item fn, Item opts);
+Item dom_remove_event_listener_bridge(Item n, Item type, Item fn, Item opts);
 
 #ifdef __cplusplus
 }

@@ -130,8 +130,8 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_form_request_submit_bridge radiant_host_api->dom->form_request_submit_bridge
 #define dom_focus_method_bridge radiant_host_api->dom->focus_method_bridge
 #define dom_click_method_bridge radiant_host_api->dom->click_method_bridge
-#define dom_add_event_listener_bridge radiant_host_api->dom->add_event_listener_bridge
-#define dom_remove_event_listener_bridge radiant_host_api->dom->remove_event_listener_bridge
+#define dom_add_event_listener_bridge radiant_host_api->dom_catalog->add_listener
+#define dom_remove_event_listener_bridge radiant_host_api->dom_catalog->remove_listener
 #define dom_dispatch_event_bridge radiant_host_api->dom->dispatch_event_bridge
 #define dom_get_bounding_client_rect_bridge radiant_host_api->dom->get_bounding_client_rect_bridge
 #define dom_get_client_rects_bridge radiant_host_api->dom->get_client_rects_bridge
