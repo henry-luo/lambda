@@ -2348,7 +2348,7 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
     bool is_map = source_tid == LMD_TYPE_MAP || source_tid == LMD_TYPE_VMAP;
     SymbolKeyList* keys = is_map ? item_keys(source) : NULL;
 
-    int64_t len = fn_pipe_count(source);
+    int64_t len = fn_seq_count(source);
     // A bare scalar pipes as a one-element stream; a genuinely empty collection
     // stays empty. Only the non-collection tags lift.
     bool is_scalar = false;
@@ -3990,7 +3990,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             log_error("interp: `last` used outside a subscript");
             return ItemError;
         }
-        return int2it_i64(fn_len((Item){.item = *f->st->last_index_item}) - 1);
+        // `last` indexes CONTENT: an IntKey subscript reaches children only.
+        return int2it_i64(fn_seq_count((Item){.item = *f->st->last_index_item}) - 1);
     case AST_NODE_CURRENT_ERROR:
         return f->st->errors
             ? (Item){.item = *f->st->errors->error} : ItemError;

@@ -491,7 +491,7 @@ Item fn_join(Item left, Item right) {
             return {.array = result};
         }
         // different types: produce generic Array, convert typed elements to Items
-        int64_t left_len = fn_len(left), right_len = fn_len(right);
+        int64_t left_len = fn_seq_count(left), right_len = fn_seq_count(right);
         int64_t total_len = left_len + right_len;
         // A typed source can expose one external scalar payload per element;
         // reserve the exact worst-case tail before copy-in discovers the mix.
@@ -530,8 +530,8 @@ static bool array_has_item(Array* arr, Item item) {
 Item fn_union(Item left, Item right) {
     GUARD_ERROR2(left, right);
     Array* result = array();
-    int64_t left_len = fn_len(left);
-    int64_t right_len = fn_len(right);
+    int64_t left_len = fn_seq_count(left);
+    int64_t right_len = fn_seq_count(right);
 
     // Phase 6 routes value-level `|` here; preserve set order while removing duplicates.
     for (int64_t i = 0; i < left_len; i++) {
@@ -553,7 +553,7 @@ Item fn_union(Item left, Item right) {
 Item fn_intersect(Item left, Item right) {
     GUARD_ERROR2(left, right);
     Array* result = array();
-    int64_t left_len = fn_len(left);
+    int64_t left_len = fn_seq_count(left);
     for (int64_t i = 0; i < left_len; i++) {
         Item item = item_at(left, i);
         if (array_has_item(result, item)) continue;
@@ -567,7 +567,7 @@ Item fn_intersect(Item left, Item right) {
 Item fn_exclude(Item left, Item right) {
     GUARD_ERROR2(left, right);
     Array* result = array();
-    int64_t left_len = fn_len(left);
+    int64_t left_len = fn_seq_count(left);
     for (int64_t i = 0; i < left_len; i++) {
         Item item = item_at(left, i);
         if (array_has_item(result, item)) continue;
@@ -4958,13 +4958,16 @@ Item fn_content(Item item) {
     return {.array = view};
 }
 
-// The number of positions a mapping pipe traverses. An element pipes over its
-// CONTENT — its attributes describe the value (a group element's attributes are
-// its key, its children are the rows), so they are not rows themselves. Both
-// tiers call this rather than fn_len: before S8.3.1v2 made element length
-// attributes-plus-content the two happened to agree, and `g |> ~["amount"]`
-// silently gained one null row per attribute, which then poisoned `sum` (LR09-9).
-extern "C" int64_t fn_pipe_count(Item item) {
+// The number of positions a POSITIONAL traversal visits — the shared notion
+// behind the mapping pipe, `last`, and the set operators, all of which pair a
+// count with an IntKey read. It is NOT fn_len for an element: an IntKey reaches
+// content only (S8.2.1v3) while len also counts attributes (S8.3.1v2), and an
+// element's attributes describe the value rather than being members of it (a
+// group element's attributes are its key, its children are the rows). Before
+// S8.3.1v2 the two happened to agree, which is why every one of these callers
+// was written against fn_len and silently gained a trailing null per attribute
+// once they diverged (LR09-9).
+extern "C" int64_t fn_seq_count(Item item) {
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_ELEMENT) return item.element ? item.element->length : 0;
     return fn_len(item);

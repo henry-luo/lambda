@@ -2319,7 +2319,7 @@ extern "C" {
     // length function
     int64_t fn_len(Item item);
     Item fn_content(Item item);   // read-only array view over an element's content
-    int64_t fn_pipe_count(Item item);  // positions a mapping pipe traverses
+    int64_t fn_seq_count(Item item);  // positions a positional traversal visits
     Item fn_int(Item a);
     int64_t fn_int64(Item a);
     Item fn_float(Item a);

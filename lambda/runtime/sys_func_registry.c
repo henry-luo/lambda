@@ -1796,7 +1796,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_pipe_where", FPTR(fn_pipe_where)},
     {"fn_pipe_call", FPTR(fn_pipe_call)},
     {"pipe_map_len", FPTR(pipe_map_len)},
-    {"fn_pipe_count", FPTR(fn_pipe_count)},
+    {"fn_seq_count", FPTR(fn_seq_count)},
     {"pipe_map_val", FPTR(pipe_map_val)},
     {"pipe_map_key", FPTR(pipe_map_key)},
     {"iter_len", FPTR(iter_len)},

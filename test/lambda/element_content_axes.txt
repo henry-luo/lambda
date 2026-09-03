@@ -1,0 +1,43 @@
+"-- len is attributes + content, and equals the iteration count --"
+4
+["a", "b", <p
+    "x">, <q
+    "y">]
+4
+"-- content() is the child sequence alone --"
+2
+[<p
+    "x">, <q
+    "y">]
+"-- an IntKey reaches children only; past the last child reads null --"
+[<p
+    "x">, <q
+    "y">, null]
+"-- `last` is the final CHILD, not the final member --"
+<q
+  "y">
+"-- the mapping pipe traverses content, so no phantom row is produced --"
+[<p
+    "x">, <q
+    "y">]
+2
+"-- set operators traverse content too --"
+[<p
+    "x">, <q
+    "y">]
+[<p
+    "x">]
+[<q
+    "y">]
+"-- degenerate shapes --"
+0
+0
+2
+0
+3
+3
+"-- a NOMINAL element obeys the same law --"
+2
+1
+"-- a group element: attributes are the KEY, members are the content --"
+[[3, 2, 4], [2, 1, 2]]

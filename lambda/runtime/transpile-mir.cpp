@@ -19697,7 +19697,7 @@ static MirValue emit_pipe_value(MirTranspiler* mt, AstPipeNode* pipe_node) {
     // NON-MAP path: the traversal count, which is NOT fn_len for an element —
     // it pipes over content only (fn_pipe_count, LR09-9).
     emit_label(mt, l_non_map);
-    MIR_reg_t arr_len = emit_call_1(mt, "fn_pipe_count", MIR_T_I64, MIR_T_I64,
+    MIR_reg_t arr_len = emit_call_1(mt, "fn_seq_count", MIR_T_I64, MIR_T_I64,
         MIR_new_reg_op(mt->ctx, boxed_left));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
         MIR_new_reg_op(mt->ctx, arr_len)));
@@ -21031,7 +21031,9 @@ static MirValue transpile_contextual_value(MirTranspiler* mt, AstNode* node) {
             break;
         }
         MIR_reg_t boxed_obj = transpile_box_item(mt, mt->last_index_object);
-        MIR_reg_t len = emit_machine_len(mt, boxed_obj);
+        // `last` indexes CONTENT, so it counts what an IntKey can reach.
+        MIR_reg_t len = emit_call_1(mt, "fn_seq_count", MIR_T_I64, MIR_T_I64,
+            MIR_new_reg_op(mt->ctx, boxed_obj));
         // C15 defines `last` as len(container) - 1; empty containers naturally produce -1.
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_SUB, MIR_new_reg_op(mt->ctx, reg),
             MIR_new_reg_op(mt->ctx, len), MIR_new_int_op(mt->ctx, 1)));
