@@ -1589,9 +1589,6 @@ void dom_register_named_elements(DomElement* root) {
     if (initialize_event_attrs) s_dom_event_attrs_initializing = false;
 }
 
-static void dom_install_window_frames_global(void);
-static void dom_install_window_dialog_globals(void);
-static void dom_install_window_computed_style_global(void);
 static DomDocument* js_document_proxy_doc_from_item(Item item);
 
 // ============================================================================
@@ -3159,7 +3156,7 @@ extern "C" Item js_create_foreign_html_doc(const char* title) {
 
 // native construction must retain the receiver carrying DOMParser's
 // prototype; returning another object would discard parseFromString.
-JS_FORWARD_STATIC_ITEM(dom_parser_constructor, (void), make_js_undefined, ())
+JS_FORWARD_ITEM(dom_parser_constructor, (void), make_js_undefined, ())
 
 static Element* dom_parser_xml_document_element(Input* input) {
     if (!input || get_type_id(input->root) != LMD_TYPE_ELEMENT) return nullptr;
@@ -3215,7 +3212,7 @@ static Item dom_parser_parse_xml(const char* source) {
     return wrap_foreign_doc(xml_document);
 }
 
-static Item dom_parser_parse_from_string(Item source_item, Item type_item) {
+extern "C" Item dom_parser_parse_from_string(Item source_item, Item type_item) {
     const char* source = fn_to_cstr(source_item);
     const char* type = fn_to_cstr(type_item);
     if (!source) source = "";
@@ -5437,9 +5434,9 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
     strbuf_append_str(sb, tag);
     strbuf_append_char(sb, '>');
 }
-JS_FORWARD_STATIC_ITEM(dom_xml_serializer_constructor, (void), make_js_undefined, ())
+JS_FORWARD_ITEM(dom_xml_serializer_constructor, (void), make_js_undefined, ())
 
-static Item dom_xml_serializer_serialize_to_string(Item node_item) {
+extern "C" Item dom_xml_serializer_serialize_to_string(Item node_item) {
     DomNode* node = (DomNode*)dom_unwrap_element(node_item);
     if (!node) {
         DomDocument* doc = js_document_proxy_doc_from_item(node_item);
@@ -5533,7 +5530,6 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
     if (!elem || !html_str) return false;
     elem = dom_prepare_children_for_mutation(elem);
     if (!elem) return false;
-    DomDocument* doc = elem->doc;
 
     dom_collapse_selection_before_child_replace(elem, "innerHTML");
 
