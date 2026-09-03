@@ -137,6 +137,7 @@ extern "C" Item dom_remove_event_listener_bridge(Item target_item, Item type,
                                                     Item callback, Item opts);
 extern "C" Item dom_dispatch_event_bridge(Item target_item, Item event_item);
 extern "C" void dom_after_srcdoc_set(void* dom_elem);
+#include "dom_ops.h"
 extern "C" Item radiant_dom_element_operation(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
@@ -2341,7 +2342,9 @@ static Item _options_collection_add(Item element_arg, Item before_arg) {
     if (!owner || kind != SELECT_COLLECTION_OPTIONS || !_is_tag(owner, "select")) return ItemNull;
 
     Item args[2] = { element_arg, before_arg };
-    return radiant_dom_element_operation(dom_wrap_element(owner), JUBE_DOM_ADD, args, 2);
+    // The owner is already known to be a <select>, which is the only thing the
+    // module's executor checks before handing this operation back to the core.
+    return dom_element_operation_impl(dom_wrap_element(owner), JUBE_DOM_ADD, args, 2);
 }
 
 static void _decorate_dom_collection(Item collection, const char* ctor_name) {

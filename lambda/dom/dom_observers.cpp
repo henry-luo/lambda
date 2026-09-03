@@ -1,4 +1,5 @@
 #include "dom_observers.h"
+#include "dom_ops.h"
 #include "dom.h"
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
@@ -14,9 +15,6 @@
 #include <string.h>
 
 extern "C" void heap_register_gc_root(uint64_t* slot);
-extern "C" Item radiant_dom_element_operation(Item elem_item,
-                                                JubeDomElementOperation operation,
-                                                Item* args, int argc);
 extern Item js_make_number(double d);
 
 #define JS_OBSERVER_CAP 64
@@ -670,7 +668,9 @@ static double observer_number_property(Item object, const char* name) {
 }
 
 static Item observer_rect(Item target_item, float* x, float* y, float* width, float* height) {
-    Item rect = radiant_dom_element_operation(target_item,
+    // The executor's own handler, not the module's: the module intercepts no
+    // geometry operation, so going out to it and back was a round trip.
+    Item rect = dom_element_operation_impl(target_item,
         JUBE_DOM_GET_BOUNDING_CLIENT_RECT, nullptr, 0);
     *x = (float)observer_number_property(rect, "x");
     *y = (float)observer_number_property(rect, "y");
