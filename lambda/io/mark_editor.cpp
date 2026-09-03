@@ -580,24 +580,6 @@ void MarkEditor::store_value_at_offset(void* field_ptr, Item value, TypeId type_
     }
 }
 
-void MarkEditor::decrement_ref_count(void* field_ptr, TypeId type_id) {
-    switch (type_id) {
-    case LMD_TYPE_STRING:
-    case LMD_TYPE_SYMBOL:
-    case LMD_TYPE_BINARY:
-        break;
-    case LMD_TYPE_ARRAY:
-    case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_RANGE:
-    case LMD_TYPE_MAP:
-    case LMD_TYPE_ELEMENT:
-        break;
-    default:
-        // Other types don't use ref counting
-        break;
-    }
-}
-
 //==============================================================================
 // MAP OPERATIONS
 //==============================================================================
@@ -625,114 +607,71 @@ Item MarkEditor::map_update(Item map, String* key, Item value) {
         log_error("map_update: not a map (type=%d)", map_type_id);
         return ItemError;
     }
-
     if (!key) {
         log_error("map_update: null key");
         return ItemError;
     }
+    return container_update_attr(map, key, value);
+}
+// ============================================================================
+// ATTRIBUTE OPERATIONS — one path for every attribute-bearing container
+// ============================================================================
+// D2.6.6v2: `Element` extends `Map`, so a map and an element carry their
+// attribute face — shape pointer, packed buffer, capacity — at the same
+// offsets. These helpers therefore take the shared `Map` base and work for
+// both; elements upcast at the call site. Only three things stay kind-aware,
+// and each is isolated in one of the three helpers directly below.
 
-    // Ensure value is in target arena (deep copy if external)
-    if (!builder_->is_in_arena(value)) {
-        log_debug("map_update: value not in arena, deep copying");
-        value = builder_->deep_copy(value);
-    }
+// A container Item is a bare pointer whose kind is read back off the header, so
+// one constructor serves maps and elements alike.
+static inline Item container_item(Map* container) { return {.map = container}; }
 
-    if (mode_ == EDIT_MODE_INLINE) {
-        return map_update_inline(map.map, key, value);
-    } else {
-        return map_update_immutable(map.map, key, value);
-    }
+// An immutable edit clones the container header. An element's header is longer
+// than a map's (it carries the content list), so cloning `sizeof(Map)` would
+// drop its children.
+static size_t container_header_size(const Map* container) {
+    return container->type_id == LMD_TYPE_ELEMENT ? sizeof(Element) : sizeof(Map);
 }
 
-Item MarkEditor::map_update_inline(Map* map, String* key, Item value) {
-    TypeMap* map_type = (TypeMap*)map->type;
-    TypeId value_type = get_type_id(value);
-
-    log_debug("map_update_inline: key='%s', value_type=%d", key->chars, value_type);
-
-    // Check if field already exists
-    TypeId existing_type;
-    int64_t existing_offset;
-    bool field_exists = find_field_in_shape(map_type->shape, key->chars,
-                                           &existing_type, &existing_offset);
-
-    if (field_exists) {
-        // Field exists - check if type matches
-        if (existing_type == value_type) {
-            // Same type - simple in-place update
-            log_debug("map_update_inline: same type, in-place update at offset %ld", existing_offset);
-
-            void* field_ptr = (char*)map->data + existing_offset;
-
-            // Decrement ref count for old value
-            decrement_ref_count(field_ptr, existing_type);
-
-            // Store new value
-            store_value_at_offset(field_ptr, value, value_type);
-
-            return {.map = map};  // Return same map
-        } else {
-            // Type changed - need to rebuild shape
-            log_debug("map_update_inline: type changed, rebuilding shape");
-
-            ShapeBuilder builder = shape_builder_init_map(shape_pool_);
-            shape_builder_import_shape(&builder, map_type->shape);
-
-            // Update the changed field's type
-            shape_builder_remove_field(&builder, key->chars);
-            shape_builder_add_field(&builder, key->chars, value_type);
-
-            Item rebuilt = map_rebuild_with_new_shape(map, &builder, true);
-
-            // Now store the new value in the rebuilt map
-            if (rebuilt.map && rebuilt.map->type_id == LMD_TYPE_MAP) {
-                TypeMap* rebuilt_type = (TypeMap*)rebuilt.map->type;
-                TypeId field_type;
-                int64_t field_offset;
-                if (find_field_in_shape(rebuilt_type->shape, key->chars, &field_type, &field_offset)) {
-                    void* field_ptr = (char*)rebuilt.map->data + field_offset;
-                    store_value_at_offset(field_ptr, value, value_type);
-                }
-            }
-
-            return rebuilt;
-        }
-    } else {
-        // New field - add to shape
-        log_debug("map_update_inline: new field, rebuilding shape");
-
-        ShapeBuilder builder = shape_builder_init_map(shape_pool_);
-        shape_builder_import_shape(&builder, map_type->shape);
-        shape_builder_add_field(&builder, key->chars, value_type);
-
-        Item rebuilt = map_rebuild_with_new_shape(map, &builder, true);
-
-        // Store the new field value
-        if (rebuilt.map && rebuilt.map->type_id == LMD_TYPE_MAP) {
-            TypeMap* rebuilt_type = (TypeMap*)rebuilt.map->type;
-            TypeId field_type;
-            int64_t field_offset;
-            if (find_field_in_shape(rebuilt_type->shape, key->chars, &field_type, &field_offset)) {
-                void* field_ptr = (char*)rebuilt.map->data + field_offset;
-                store_value_at_offset(field_ptr, value, value_type);
-            }
-        }
-
-        return rebuilt;
+// Element shapes are interned per tag name, map shapes by their fields alone,
+// so the builder has to be seeded from the right side of the shape pool.
+ShapeBuilder MarkEditor::container_shape_builder(const Map* container) {
+    if (container->type_id == LMD_TYPE_ELEMENT) {
+        return shape_builder_init_element(shape_pool_,
+            ((TypeElmt*)container->type)->name.str);
     }
+    return shape_builder_init_map(shape_pool_);
 }
 
-Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder, bool is_inline) {
-    log_debug("map_rebuild_with_new_shape: field_count=%zu", builder->field_count);
+Map* MarkEditor::container_clone_header(const Map* container) {
+    size_t size = container_header_size(container);
+    Map* copy = (Map*)arena_alloc(arena_, size);
+    if (!copy) {
+        log_error("container_clone_header: failed to allocate container");
+        return nullptr;
+    }
+    memcpy(copy, container, size);
+    return copy;
+}
 
-    // Get new deduplicated shape
+// Rebuild a container's attribute buffer against a new shape. The changed
+// field is NOT written here: it is left zeroed and the caller stores it once
+// the new offsets are known, which is what lets one rebuild serve add, retype
+// and delete alike.
+Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
+        ShapeBuilder* builder, bool is_inline) {
+    bool is_element = old_container->type_id == LMD_TYPE_ELEMENT;
+    log_debug("container_rebuild_with_new_shape: field_count=%zu, element=%d",
+        builder->field_count, (int)is_element);
+
+    // A NULL shape is the legitimate result of deleting the last field; only a
+    // NULL with fields still pending is a real failure.
     ShapeEntry* new_shape = shape_builder_finalize(builder);
     if (!new_shape && builder->field_count > 0) {
-        log_error("map_rebuild_with_new_shape: failed to finalize shape");
+        log_error("container_rebuild_with_new_shape: failed to finalize shape");
         return ItemError;
     }
 
-    // Calculate new byte size
     int64_t new_byte_size = 0;
     ShapeEntry* entry = new_shape;
     while (entry) {
@@ -740,71 +679,62 @@ Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder,
         entry = entry->next;
     }
 
-    log_debug("map_rebuild_with_new_shape: new_byte_size=%ld", new_byte_size);
-
-    // Allocate new data buffer
+    // pool_calloc(0) returns NULL, so an emptied container legitimately ends
+    // with a null buffer.
     void* new_data = pool_calloc(pool_, new_byte_size);
     if (!new_data && new_byte_size > 0) {
-        log_error("map_rebuild_with_new_shape: allocation failed");
+        log_error("container_rebuild_with_new_shape: allocation failed");
         return ItemError;
     }
 
-    // Copy matching fields from old data to new data
-    TypeMap* old_type = (TypeMap*)old_map->type;
+    // Carry across every field the new shape shares with the old one at the
+    // same type; anything added or retyped stays zero for the caller to fill.
+    TypeMap* old_type = (TypeMap*)old_container->type;
     entry = new_shape;
     while (entry) {
-        // Find matching field in old shape
         TypeId old_type_id;
         int64_t old_offset;
-        bool found = find_field_in_shape(old_type->shape, entry->name->str,
-                                        &old_type_id, &old_offset);
-
-        if (found && old_type_id == entry->type->type_id) {
-            // Copy value from old to new location
-            void* old_field = (char*)old_map->data + old_offset;
+        if (find_field_in_shape(old_type->shape, entry->name->str,
+                                &old_type_id, &old_offset) &&
+                old_type_id == entry->type->type_id) {
+            void* old_field = (char*)old_container->data + old_offset;
             void* new_field = (char*)new_data + entry->byte_offset;
-            int field_size = type_info[entry->type->type_id].byte_size;
-            memcpy(new_field, old_field, field_size);
-
-            // Update ref counts for pointer types (only in immutable mode)
-            if (!is_inline) {
-                if (entry->type->type_id == LMD_TYPE_STRING ||
-                    entry->type->type_id == LMD_TYPE_SYMBOL ||
-                    entry->type->type_id == LMD_TYPE_BINARY) {
-                }
-                else if (entry->type->type_id >= LMD_TYPE_ARRAY &&
-                         entry->type->type_id <= LMD_TYPE_ELEMENT) {
-                }
-            }
+            memcpy(new_field, old_field, type_info[entry->type->type_id].byte_size);
         }
-        // If field not found in old shape or type changed, leave as zero (default)
-
         entry = entry->next;
     }
 
-    Map* result_map = old_map;
-
+    Map* result = old_container;
     if (!is_inline) {
-        // Immutable mode - create new map structure
-        result_map = (Map*)arena_alloc(arena_, sizeof(Map));
-        if (!result_map) {
-            log_error("map_rebuild_with_new_shape: failed to allocate new map");
-            return ItemError;
-        }
-        memcpy(result_map, old_map, sizeof(Map));
+        result = container_clone_header(old_container);
+        if (!result) return ItemError;
     }
 
-    // Create or update TypeMap
-    TypeMap* new_type;
-    if (old_type->type_index == -1 || old_type == &EmptyMap || !is_inline) {
-        // Need to create new TypeMap
-        new_type = (TypeMap*)alloc_type(pool_, LMD_TYPE_MAP, sizeof(TypeMap));
+    // An inline edit on a MAP mutates the descriptor in place: allocating and
+    // interning a fresh shape on every edit is a measurable cost on this path.
+    // Three cases opt out. `type_index == -1` is a shape that was never
+    // registered and `EmptyMap` is the shared empty singleton, so neither may
+    // be written. And an ELEMENT always takes a fresh TypeElmt, as it always
+    // has: its descriptor is shared across the DOM by tag name, so mutating it
+    // leaves sibling elements reading their buffers through a layout they were
+    // never packed to. Letting elements share the map's in-place path was
+    // measured and breaks 8 DOM editing fixtures (todo_toggle, todo_delete,
+    // todo_text_input, todo_two_delete_clear, todo_perf_timing).
+    if (old_type->type_index == -1 || old_type == &EmptyMap || !is_inline || is_element) {
+        TypeMap* new_type;
+        if (is_element) {
+            TypeElmt* elmt_type = (TypeElmt*)alloc_type(pool_, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+            elmt_type->name = ((TypeElmt*)old_type)->name;
+            elmt_type->content_length = ((TypeElmt*)old_type)->content_length;
+            new_type = (TypeMap*)elmt_type;
+        } else {
+            new_type = (TypeMap*)alloc_type(pool_, LMD_TYPE_MAP, sizeof(TypeMap));
+        }
         new_type->shape = new_shape;
         new_type->length = builder->field_count;
         new_type->byte_size = new_byte_size;
         new_type->type_index = type_list_->length;
 
-        // Find last entry
         new_type->last = new_shape;
         while (new_type->last && new_type->last->next) {
             new_type->last = new_type->last->next;
@@ -812,14 +742,14 @@ Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder,
         typemap_hash_build(new_type, pool_);
 
         arraylist_append(type_list_, new_type);
-        result_map->type = new_type;
+        result->type = new_type;
     } else {
-        // Inline mode - mutate existing TypeMap
+        // In-place: an element's `name` and `content_length` are not touched by
+        // a shape change, so its descriptor carries them across unchanged.
         old_type->shape = new_shape;
         old_type->length = builder->field_count;
         old_type->byte_size = new_byte_size;
 
-        // Find last entry
         old_type->last = new_shape;
         while (old_type->last && old_type->last->next) {
             old_type->last = old_type->last->next;
@@ -828,183 +758,200 @@ Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder,
     }
 
     // Free old data (inline mode only), replace with new
-    if (is_inline && old_map->data) {
+    if (is_inline && old_container->data) {
         // In ui_mode, old data was arena-allocated during JIT execution
         // (via context->arena = result_arena). The MarkEditor's pool_ is a
         // different owner; calling pool_free here would release unrelated data.
         if (!ui_mode_) {
-            pool_free(pool_, old_map->data);
+            pool_free(pool_, old_container->data);
         }
     }
-    result_map->data = new_data;
-    result_map->data_cap = new_byte_size;
+    result->data = new_data;
+    result->data_cap = new_byte_size;
 
-    log_debug("map_rebuild_with_new_shape: success");
-    return {.map = result_map};
+    log_debug("container_rebuild_with_new_shape: success");
+    return container_item(result);
 }
 
-Item MarkEditor::map_update_immutable(Map* old_map, String* key, Item value) {
-    log_debug("map_update_immutable: key='%s'", key->chars);
+// Store one value into a rebuilt container, now that its offsets are known.
+void MarkEditor::container_store_field(Item rebuilt, const char* key, Item value,
+        TypeId value_type) {
+    Map* container = rebuilt.map;
+    if (!container || !container->type || !container->data) return;
+    TypeId field_type;
+    int64_t field_offset;
+    if (find_field_in_shape(((TypeMap*)container->type)->shape, key,
+                            &field_type, &field_offset)) {
+        store_value_at_offset((char*)container->data + field_offset, value, value_type);
+    }
+}
 
-    // Determine if we need new shape
-    TypeMap* old_type = (TypeMap*)old_map->type;
+Item MarkEditor::container_update_attr_inline(Map* container, String* key, Item value) {
+    TypeMap* type = (TypeMap*)container->type;
     TypeId value_type = get_type_id(value);
+
+    log_debug("container_update_attr_inline: key='%s', value_type=%d", key->chars, value_type);
+
     TypeId existing_type;
     int64_t existing_offset;
-    bool field_exists = find_field_in_shape(old_type->shape, key->chars,
-                                           &existing_type, &existing_offset);
+    bool exists = find_field_in_shape(type->shape, key->chars,
+                                      &existing_type, &existing_offset);
 
-    if (field_exists && existing_type == value_type) {
-        // Same shape - create new map with copied data
-        log_debug("map_update_immutable: same shape, copying data");
-
-        Map* new_map = (Map*)arena_alloc(arena_, sizeof(Map));
-        if (!new_map) return ItemError;
-
-        memcpy(new_map, old_map, sizeof(Map));
-
-        new_map->data = pool_calloc(pool_, old_type->byte_size);
-        if (!new_map->data && old_type->byte_size > 0) return ItemError;
-
-        memcpy(new_map->data, old_map->data, old_type->byte_size);
-        new_map->data_cap = old_type->byte_size;
-
-        // Update the changed field
-        void* field_ptr = (char*)new_map->data + existing_offset;
-        store_value_at_offset(field_ptr, value, value_type);
-
-        // new_map->type stays same (shared TypeMap)
-
-        return {.map = new_map};
-
-    } else {
-        // Different shape - rebuild
-        log_debug("map_update_immutable: different shape, rebuilding");
-
-        ShapeBuilder builder = shape_builder_init_map(shape_pool_);
-        shape_builder_import_shape(&builder, old_type->shape);
-
-        if (field_exists) {
-            // Update existing field's type
-            shape_builder_remove_field(&builder, key->chars);
-        }
-        shape_builder_add_field(&builder, key->chars, value_type);
-
-        // Create new map structure first
-        Map* new_map = (Map*)arena_alloc(arena_, sizeof(Map));
-        if (!new_map) return ItemError;
-
-        memcpy(new_map, old_map, sizeof(Map));
-
-        // This will create new data buffer and TypeMap
-        Item rebuilt = map_rebuild_with_new_shape(new_map, &builder, false);
-
-        // Store the new/updated field value
-        if (rebuilt.map && rebuilt.map->type_id == LMD_TYPE_MAP) {
-            TypeMap* rebuilt_type = (TypeMap*)rebuilt.map->type;
-            TypeId field_type;
-            int64_t field_offset;
-            if (find_field_in_shape(rebuilt_type->shape, key->chars, &field_type, &field_offset)) {
-                void* field_ptr = (char*)rebuilt.map->data + field_offset;
-                store_value_at_offset(field_ptr, value, value_type);
-            }
-        }
-
-        return rebuilt;
+    if (exists && existing_type == value_type) {
+        // same type — the slot is already the right width, so write in place
+        store_value_at_offset((char*)container->data + existing_offset, value, value_type);
+        return container_item(container);
     }
+
+    ShapeBuilder builder = container_shape_builder(container);
+    shape_builder_import_shape(&builder, type->shape);
+    if (exists) shape_builder_remove_field(&builder, key->chars);
+    shape_builder_add_field(&builder, key->chars, value_type);
+
+    Item rebuilt = container_rebuild_with_new_shape(container, &builder, true);
+    container_store_field(rebuilt, key->chars, value, value_type);
+    return rebuilt;
 }
 
+Item MarkEditor::container_update_attr_immutable(Map* old_container, String* key, Item value) {
+    TypeMap* old_type = (TypeMap*)old_container->type;
+    TypeId value_type = get_type_id(value);
+
+    log_debug("container_update_attr_immutable: key='%s'", key->chars);
+
+    TypeId existing_type;
+    int64_t existing_offset;
+    bool exists = find_field_in_shape(old_type->shape, key->chars,
+                                      &existing_type, &existing_offset);
+
+    Map* new_container = container_clone_header(old_container);
+    if (!new_container) return ItemError;
+
+    if (exists && existing_type == value_type) {
+        // Same shape — copy the buffer and overwrite the one slot. The shape
+        // is unchanged, so the shared descriptor is kept as is.
+        if (old_type->byte_size > 0) {
+            new_container->data = pool_calloc(pool_, old_type->byte_size);
+            if (!new_container->data) return ItemError;
+            memcpy(new_container->data, old_container->data, old_type->byte_size);
+            new_container->data_cap = old_type->byte_size;
+            store_value_at_offset((char*)new_container->data + existing_offset,
+                value, value_type);
+        }
+        return container_item(new_container);
+    }
+
+    ShapeBuilder builder = container_shape_builder(old_container);
+    shape_builder_import_shape(&builder, old_type->shape);
+    if (exists) shape_builder_remove_field(&builder, key->chars);
+    shape_builder_add_field(&builder, key->chars, value_type);
+
+    Item rebuilt = container_rebuild_with_new_shape(new_container, &builder, false);
+    container_store_field(rebuilt, key->chars, value, value_type);
+    return rebuilt;
+}
+
+Item MarkEditor::container_update_attr(Item container, String* key, Item value) {
+    // Ensure value is in target arena (deep copy if external)
+    if (!builder_->is_in_arena(value)) {
+        log_debug("container_update_attr: value not in arena, deep copying");
+        value = builder_->deep_copy(value);
+    }
+    return mode_ == EDIT_MODE_INLINE
+        ? container_update_attr_inline(container.map, key, value)
+        : container_update_attr_immutable(container.map, key, value);
+}
+
+Item MarkEditor::container_delete_attr(Item container_item_in, String* key) {
+    Map* container = container_item_in.map;
+    TypeMap* type = (TypeMap*)container->type;
+
+    log_debug("container_delete_attr: key='%s'", key->chars);
+
+    if (!find_field_in_shape(type->shape, key->chars, nullptr, nullptr)) {
+        log_warn("container_delete_attr: field '%s' not found", key->chars);
+        return container_item_in;  // unchanged
+    }
+
+    bool is_inline = mode_ == EDIT_MODE_INLINE;
+    Map* target = container;
+    if (!is_inline) {
+        target = container_clone_header(container);
+        if (!target) return ItemError;
+    }
+
+    ShapeBuilder builder = container_shape_builder(container);
+    shape_builder_import_shape(&builder, type->shape);
+    shape_builder_remove_field(&builder, key->chars);
+
+    return container_rebuild_with_new_shape(target, &builder, is_inline);
+}
+
+// Batched attribute writes: one shape rebuild for the whole set, then one
+// store pass over the new offsets.
+Item MarkEditor::container_update_attr_batch(Item container_item_in, int count, va_list args) {
+    struct AttrUpdate { const char* key; Item value; TypeId value_type; };
+
+    if (count > MAX_BATCH_UPDATES) {
+        log_error("container_update_attr_batch: count %d exceeds max %d", count, MAX_BATCH_UPDATES);
+        return ItemError;
+    }
+    AttrUpdate updates[MAX_BATCH_UPDATES];
+
+    Map* container = container_item_in.map;
+    ShapeBuilder builder = container_shape_builder(container);
+    shape_builder_import_shape(&builder, ((TypeMap*)container->type)->shape);
+
+    for (int i = 0; i < count; i++) {
+        AttrUpdate entry;
+        entry.key = va_arg(args, const char*);
+        entry.value = va_arg(args, Item);
+
+        // Ensure value is in target arena (deep copy if external)
+        if (!builder_->is_in_arena(entry.value)) {
+            log_debug("container_update_attr_batch: value for '%s' not in arena, deep copying",
+                entry.key);
+            entry.value = builder_->deep_copy(entry.value);
+        }
+        entry.value_type = get_type_id(entry.value);
+        updates[i] = entry;
+
+        if (shape_builder_has_field(&builder, entry.key)) {
+            shape_builder_remove_field(&builder, entry.key);
+        }
+        shape_builder_add_field(&builder, entry.key, entry.value_type);
+    }
+
+    bool is_inline = mode_ == EDIT_MODE_INLINE;
+    Map* target = container;
+    if (!is_inline) {
+        target = container_clone_header(container);
+        if (!target) return ItemError;
+    }
+
+    Item rebuilt = container_rebuild_with_new_shape(target, &builder, is_inline);
+    for (int i = 0; i < count; i++) {
+        container_store_field(rebuilt, updates[i].key, updates[i].value, updates[i].value_type);
+    }
+    return rebuilt;
+}
 Item MarkEditor::map_update_batch(Item map, int count, ...) {
     TypeId map_type_id = get_type_id(map);
     if (map_type_id != LMD_TYPE_MAP || !map.map) {
         log_error("map_update_batch: not a map (type=%d)", map_type_id);
         return ItemError;
     }
-
     if (count <= 0) {
         log_warn("map_update_batch: count <= 0");
         return map;
     }
-
     log_debug("map_update_batch: updating %d fields", count);
-
-    // First, collect all key-value pairs (we need them twice: for shape and for storing)
-    struct UpdateEntry {
-        const char* key;
-        Item value;
-        TypeId value_type;
-    };
-
-    // Use stack-allocated array for batch updates
-    if (count > MAX_BATCH_UPDATES) {
-        log_error("map_update_batch: count %d exceeds max %d", count, MAX_BATCH_UPDATES);
-        return ItemError;
-    }
-    UpdateEntry updates[MAX_BATCH_UPDATES];
-    int update_count = 0;
-
     va_list args;
     va_start(args, count);
-
-    for (int i = 0; i < count; i++) {
-        UpdateEntry entry;
-        entry.key = va_arg(args, const char*);
-        entry.value = va_arg(args, Item);
-
-        // Ensure value is in target arena (deep copy if external)
-        if (!builder_->is_in_arena(entry.value)) {
-            log_debug("map_update_batch: value for key '%s' not in arena, deep copying", entry.key);
-            entry.value = builder_->deep_copy(entry.value);
-        }
-
-        entry.value_type = get_type_id(entry.value);
-        updates[update_count++] = entry;
-    }
-
+    Item result = container_update_attr_batch(map, count, args);
     va_end(args);
-
-    // Build new shape with all updates
-    Map* target_map = map.map;
-    TypeMap* map_type = (TypeMap*)target_map->type;
-
-    ShapeBuilder builder = shape_builder_init_map(shape_pool_);
-    shape_builder_import_shape(&builder, map_type->shape);
-
-    for (int i = 0; i < count; i++) {
-        // Update or add field in builder
-        if (shape_builder_has_field(&builder, updates[i].key)) {
-            shape_builder_remove_field(&builder, updates[i].key);
-        }
-        shape_builder_add_field(&builder, updates[i].key, updates[i].value_type);
-    }
-
-    // Rebuild map with new shape
-    Item rebuilt;
-    if (mode_ == EDIT_MODE_INLINE) {
-        rebuilt = map_rebuild_with_new_shape(target_map, &builder, true);
-    } else {
-        Map* new_map = (Map*)arena_alloc(arena_, sizeof(Map));
-        if (!new_map) return ItemError;
-        memcpy(new_map, target_map, sizeof(Map));
-        rebuilt = map_rebuild_with_new_shape(new_map, &builder, false);
-    }
-
-    // Now store all the new values in the rebuilt map
-    if (rebuilt.map && rebuilt.map->type_id == LMD_TYPE_MAP) {
-        TypeMap* rebuilt_type = (TypeMap*)rebuilt.map->type;
-        for (int i = 0; i < count; i++) {
-            TypeId field_type;
-            int64_t field_offset;
-            if (find_field_in_shape(rebuilt_type->shape, updates[i].key, &field_type, &field_offset)) {
-                void* field_ptr = (char*)rebuilt.map->data + field_offset;
-                store_value_at_offset(field_ptr, updates[i].value, updates[i].value_type);
-            }
-        }
-    }
-
-    return rebuilt;
+    return result;
 }
-
 Item MarkEditor::map_delete(Item map, const char* key) {
     TypeId map_type_id = get_type_id(map);
     if (map_type_id != LMD_TYPE_MAP || !map.map) {
@@ -1026,63 +973,12 @@ Item MarkEditor::map_delete(Item map, String* key) {
         log_error("map_delete: not a map");
         return ItemError;
     }
-
     if (!key) {
         log_error("map_delete: null key");
         return ItemError;
     }
-
-    if (mode_ == EDIT_MODE_INLINE) {
-        return map_delete_inline(map.map, key);
-    } else {
-        return map_delete_immutable(map.map, key);
-    }
+    return container_delete_attr(map, key);
 }
-
-Item MarkEditor::map_delete_inline(Map* map, String* key) {
-    TypeMap* map_type = (TypeMap*)map->type;
-
-    log_debug("map_delete_inline: key='%s'", key->chars);
-
-    // Check if field exists
-    if (!find_field_in_shape(map_type->shape, key->chars, nullptr, nullptr)) {
-        log_warn("map_delete_inline: field '%s' not found", key->chars);
-        return {.map = map};  // Return unchanged map
-    }
-
-    // Build new shape without the deleted field
-    ShapeBuilder builder = shape_builder_init_map(shape_pool_);
-    shape_builder_import_shape(&builder, map_type->shape);
-    shape_builder_remove_field(&builder, key->chars);
-
-    return map_rebuild_with_new_shape(map, &builder, true);
-}
-
-Item MarkEditor::map_delete_immutable(Map* old_map, String* key) {
-    TypeMap* old_type = (TypeMap*)old_map->type;
-
-    log_debug("map_delete_immutable: key='%s'", key->chars);
-
-    // Check if field exists
-    if (!find_field_in_shape(old_type->shape, key->chars, nullptr, nullptr)) {
-        log_warn("map_delete_immutable: field '%s' not found", key->chars);
-        return {.map = old_map};  // Return unchanged map
-    }
-
-    // Create new map structure
-    Map* new_map = (Map*)arena_alloc(arena_, sizeof(Map));
-    if (!new_map) return ItemError;
-
-    memcpy(new_map, old_map, sizeof(Map));
-
-    // Build new shape without the deleted field
-    ShapeBuilder builder = shape_builder_init_map(shape_pool_);
-    shape_builder_import_shape(&builder, old_type->shape);
-    shape_builder_remove_field(&builder, key->chars);
-
-    return map_rebuild_with_new_shape(new_map, &builder, false);
-}
-
 Item MarkEditor::map_delete_batch(Item map, int count, const char** keys) {
     if (!map.map || map.map->type_id != LMD_TYPE_MAP) {
         log_error("map_delete_batch: not a map");
@@ -1100,21 +996,20 @@ Item MarkEditor::map_delete_batch(Item map, int count, const char** keys) {
     TypeMap* map_type = (TypeMap*)target_map->type;
 
     // Build new shape without deleted fields
-    ShapeBuilder builder = shape_builder_init_map(shape_pool_);
+    ShapeBuilder builder = container_shape_builder(target_map);
     shape_builder_import_shape(&builder, map_type->shape);
 
     for (int i = 0; i < count; i++) {
         shape_builder_remove_field(&builder, keys[i]);
     }
 
-    if (mode_ == EDIT_MODE_INLINE) {
-        return map_rebuild_with_new_shape(target_map, &builder, true);
-    } else {
-        Map* new_map = (Map*)arena_alloc(arena_, sizeof(Map));
-        if (!new_map) return ItemError;
-        memcpy(new_map, target_map, sizeof(Map));
-        return map_rebuild_with_new_shape(new_map, &builder, false);
+    bool is_inline = mode_ == EDIT_MODE_INLINE;
+    Map* target = target_map;
+    if (!is_inline) {
+        target = container_clone_header(target_map);
+        if (!target) return ItemError;
     }
+    return container_rebuild_with_new_shape(target, &builder, is_inline);
 }
 
 Item MarkEditor::map_rename(Item map, const char* old_key, const char* new_key) {
@@ -1183,236 +1078,11 @@ Item MarkEditor::elmt_update_attr(Item element, String* attr_name, Item value) {
         log_error("elmt_update_attr: not an element");
         return ItemError;
     }
-
     if (!attr_name) {
         log_error("elmt_update_attr: null attribute name");
         return ItemError;
     }
-
-    // Ensure value is in target arena (deep copy if external)
-    if (!builder_->is_in_arena(value)) {
-        log_debug("elmt_update_attr: value not in arena, deep copying");
-        value = builder_->deep_copy(value);
-    }
-
-    if (mode_ == EDIT_MODE_INLINE) {
-        return elmt_update_attr_inline(element.element, attr_name, value);
-    } else {
-        return elmt_update_attr_immutable(element.element, attr_name, value);
-    }
-}
-
-Item MarkEditor::elmt_update_attr_inline(Element* elmt, String* attr_name, Item value) {
-    TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-    TypeId value_type = get_type_id(value);
-
-    log_debug("elmt_update_attr_inline: attr='%s', value_type=%d", attr_name->chars, value_type);
-
-    // Check if attribute already exists
-    TypeId existing_type;
-    int64_t existing_offset;
-    bool attr_exists = find_field_in_shape(elmt_type->shape, attr_name->chars,
-                                          &existing_type, &existing_offset);
-
-    if (attr_exists && existing_type == value_type) {
-        // Same type - simple in-place update
-        log_debug("elmt_update_attr_inline: same type, in-place update");
-
-        void* attr_ptr = (char*)elmt->data + existing_offset;
-        decrement_ref_count(attr_ptr, existing_type);
-        store_value_at_offset(attr_ptr, value, value_type);
-
-        return {.element = elmt};
-    } else {
-        // Rebuild with new shape
-        log_debug("elmt_update_attr_inline: different type or new attr, rebuilding");
-
-        ShapeBuilder builder = shape_builder_init_element(shape_pool_, elmt_type->name.str);
-        shape_builder_import_shape(&builder, elmt_type->shape);
-
-        if (attr_exists) {
-            shape_builder_remove_field(&builder, attr_name->chars);
-        }
-        shape_builder_add_field(&builder, attr_name->chars, value_type);
-
-        return elmt_rebuild_with_new_shape(elmt, &builder, true, attr_name, value);
-    }
-}
-
-Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* builder, bool is_inline,
-                                              String* new_attr_name, Item new_attr_value) {
-    log_debug("elmt_rebuild_with_new_shape: field_count=%zu, new_attr=%s",
-              builder->field_count, new_attr_name ? new_attr_name->chars : "NULL");
-
-    // Get new deduplicated shape (NULL is valid when all fields removed)
-    ShapeEntry* new_shape = nullptr;
-    if (builder->field_count > 0) {
-        new_shape = shape_builder_finalize(builder);
-        if (!new_shape) {
-            log_error("elmt_rebuild_with_new_shape: shape_builder_finalize failed");
-            return ItemError;
-        }
-    }
-
-    // Calculate new byte size
-    int64_t new_byte_size = 0;
-    ShapeEntry* entry = new_shape;
-    while (entry) {
-        new_byte_size = entry->byte_offset + type_info[entry->type->type_id].byte_size;
-        entry = entry->next;
-    }
-
-    // Allocate new data buffer
-    void* new_data = nullptr;
-    if (new_byte_size > 0) {
-        new_data = pool_calloc(pool_, new_byte_size);
-        if (!new_data) {
-            log_error("elmt_rebuild_with_new_shape: allocation failed");
-            return ItemError;
-        }
-    }
-
-    // Copy matching attributes from old data to new data
-    TypeElmt* old_type = (TypeElmt*)old_elmt->type;
-    TypeId new_attr_type = new_attr_name ? get_type_id(new_attr_value) : LMD_TYPE_NULL;
-
-    entry = new_shape;
-    while (entry) {
-        // Check if this is the NEW attribute being added
-        if (new_attr_name && strcmp(entry->name->str, new_attr_name->chars) == 0) {
-            // Store the new attribute value
-            void* new_field = (char*)new_data + entry->byte_offset;
-            store_value_at_offset(new_field, new_attr_value, new_attr_type);
-            log_debug("elmt_rebuild_with_new_shape: stored new attr '%s' at offset %lld",
-                      new_attr_name->chars, entry->byte_offset);
-        } else {
-            // Copy from old element if it exists
-            TypeId old_type_id;
-            int64_t old_offset;
-            bool found = find_field_in_shape(old_type->shape, entry->name->str,
-                                            &old_type_id, &old_offset);
-
-            if (found && old_type_id == entry->type->type_id) {
-                void* old_field = (char*)old_elmt->data + old_offset;
-                void* new_field = (char*)new_data + entry->byte_offset;
-                int field_size = type_info[entry->type->type_id].byte_size;
-                memcpy(new_field, old_field, field_size);
-
-                // Update ref counts (immutable mode only)
-                if (!is_inline) {
-                    if (entry->type->type_id == LMD_TYPE_STRING ||
-                        entry->type->type_id == LMD_TYPE_SYMBOL ||
-                        entry->type->type_id == LMD_TYPE_BINARY) {
-                    }
-                    else if (entry->type->type_id >= LMD_TYPE_ARRAY &&
-                             entry->type->type_id <= LMD_TYPE_ELEMENT) {
-                    }
-                }
-            }
-        }
-        entry = entry->next;
-    }
-
-    Element* result_elmt = old_elmt;
-
-    if (!is_inline) {
-        // Immutable mode - create new element structure
-        result_elmt = (Element*)arena_alloc(arena_, sizeof(Element));
-        if (!result_elmt) {
-            log_error("elmt_rebuild_with_new_shape: failed to allocate new element");
-            return ItemError;
-        }
-        memcpy(result_elmt, old_elmt, sizeof(Element));
-    }
-
-    // Create or update TypeElmt
-    // Always create a new TypeElmt when shape changes, even in inline mode.
-    // The old TypeElmt may be shared by other Elements with the same original shape.
-    // Mutating it in-place would corrupt those other Elements whose data buffers
-    // still use the old layout (e.g., TypedItem 9-byte fields vs typed 8-byte fields).
-    TypeElmt* new_type;
-    new_type = (TypeElmt*)alloc_type(pool_, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    new_type->name = old_type->name;  // Keep same element name
-    new_type->shape = new_shape;
-    new_type->length = builder->field_count;
-    new_type->byte_size = new_byte_size;
-    new_type->content_length = old_type->content_length;
-    new_type->type_index = type_list_->length;
-
-    // Find last entry
-    new_type->last = new_shape;
-    while (new_type->last && new_type->last->next) {
-        new_type->last = new_type->last->next;
-    }
-    typemap_hash_build((TypeMap*)new_type, pool_);
-
-    arraylist_append(type_list_, new_type);
-    result_elmt->type = new_type;
-
-    // Free old data (inline mode only), replace with new
-    if (is_inline && old_elmt->data) {
-        // In ui_mode, old data was arena-allocated during JIT execution
-        // (via context->arena = result_arena). The MarkEditor's pool_ is a
-        // different owner; calling pool_free here would release unrelated data.
-        if (!ui_mode_) {
-            pool_free(pool_, old_elmt->data);
-        }
-    }
-    result_elmt->data = new_data;
-    result_elmt->data_cap = new_byte_size;
-
-    log_debug("elmt_rebuild_with_new_shape: success");
-    return {.element = result_elmt};
-}
-
-Item MarkEditor::elmt_update_attr_immutable(Element* old_elmt, String* attr_name, Item value) {
-    log_debug("elmt_update_attr_immutable: attr='%s'", attr_name->chars);
-
-    TypeElmt* old_type = (TypeElmt*)old_elmt->type;
-    TypeId value_type = get_type_id(value);
-    TypeId existing_type;
-    int64_t existing_offset;
-    bool attr_exists = find_field_in_shape(old_type->shape, attr_name->chars,
-                                          &existing_type, &existing_offset);
-
-    if (attr_exists && existing_type == value_type) {
-        // Same shape - create new element with copied data
-        Element* new_elmt = (Element*)arena_alloc(arena_, sizeof(Element));
-        if (!new_elmt) return ItemError;
-
-        memcpy(new_elmt, old_elmt, sizeof(Element));
-
-        if (old_type->byte_size > 0) {
-            new_elmt->data = pool_calloc(pool_, old_type->byte_size);
-            if (!new_elmt->data) return ItemError;
-
-            memcpy(new_elmt->data, old_elmt->data, old_type->byte_size);
-            new_elmt->data_cap = old_type->byte_size;
-
-            // Update the changed attribute
-            void* attr_ptr = (char*)new_elmt->data + existing_offset;
-            store_value_at_offset(attr_ptr, value, value_type);
-        }
-
-        return {.element = new_elmt};
-
-    } else {
-        // Different shape - rebuild
-        Element* new_elmt = (Element*)arena_alloc(arena_, sizeof(Element));
-        if (!new_elmt) return ItemError;
-
-        memcpy(new_elmt, old_elmt, sizeof(Element));
-
-        ShapeBuilder builder = shape_builder_init_element(shape_pool_, old_type->name.str);
-        shape_builder_import_shape(&builder, old_type->shape);
-
-        if (attr_exists) {
-            shape_builder_remove_field(&builder, attr_name->chars);
-        }
-        shape_builder_add_field(&builder, attr_name->chars, value_type);
-
-        return elmt_rebuild_with_new_shape(new_elmt, &builder, false, attr_name, value);
-    }
+    return container_update_attr(element, attr_name, value);
 }
 
 Item MarkEditor::elmt_update_attr_batch(Item element, int count, ...) {
@@ -1420,66 +1090,15 @@ Item MarkEditor::elmt_update_attr_batch(Item element, int count, ...) {
         log_error("elmt_update_attr_batch: not an element");
         return ItemError;
     }
-
     if (count <= 0) {
         log_warn("elmt_update_attr_batch: count <= 0");
         return element;
     }
-
-    Element* target_elmt = element.element;
-    TypeElmt* elmt_type = (TypeElmt*)target_elmt->type;
-
-    ShapeBuilder builder = shape_builder_init_element(shape_pool_, elmt_type->name.str);
-    shape_builder_import_shape(&builder, elmt_type->shape);
-
-    // First pass: collect and deep copy values
-    struct AttrUpdate {
-        const char* attr_name;
-        Item value;
-        TypeId value_type;
-    };
-
-    // Use stack-allocated array for batch updates
-    if (count > MAX_BATCH_UPDATES) {
-        log_error("elmt_update_attr_batch: count %d exceeds max %d", count, MAX_BATCH_UPDATES);
-        return ItemError;
-    }
-    AttrUpdate updates[MAX_BATCH_UPDATES];
-    int update_count = 0;
-
     va_list args;
     va_start(args, count);
-
-    for (int i = 0; i < count; i++) {
-        AttrUpdate update;
-        update.attr_name = va_arg(args, const char*);
-        update.value = va_arg(args, Item);
-
-        // Ensure value is in target arena (deep copy if external)
-        if (!builder_->is_in_arena(update.value)) {
-            log_debug("elmt_update_attr_batch: value for attr '%s' not in arena, deep copying", update.attr_name);
-            update.value = builder_->deep_copy(update.value);
-        }
-
-        update.value_type = get_type_id(update.value);
-        updates[update_count++] = update;
-
-        if (shape_builder_has_field(&builder, updates[update_count-1].attr_name)) {
-            shape_builder_remove_field(&builder, update.attr_name);
-        }
-        shape_builder_add_field(&builder, update.attr_name, update.value_type);
-    }
-
+    Item result = container_update_attr_batch(element, count, args);
     va_end(args);
-
-    if (mode_ == EDIT_MODE_INLINE) {
-        return elmt_rebuild_with_new_shape(target_elmt, &builder, true);
-    } else {
-        Element* new_elmt = (Element*)arena_alloc(arena_, sizeof(Element));
-        if (!new_elmt) return ItemError;
-        memcpy(new_elmt, target_elmt, sizeof(Element));
-        return elmt_rebuild_with_new_shape(new_elmt, &builder, false);
-    }
+    return result;
 }
 
 Item MarkEditor::elmt_delete_attr(Item element, const char* attr_name) {
@@ -1502,52 +1121,11 @@ Item MarkEditor::elmt_delete_attr(Item element, String* attr_name) {
         log_error("elmt_delete_attr: not an element");
         return ItemError;
     }
-
     if (!attr_name) {
         log_error("elmt_delete_attr: null attribute name");
         return ItemError;
     }
-
-    if (mode_ == EDIT_MODE_INLINE) {
-        return elmt_delete_attr_inline(element.element, attr_name);
-    } else {
-        return elmt_delete_attr_immutable(element.element, attr_name);
-    }
-}
-
-Item MarkEditor::elmt_delete_attr_inline(Element* elmt, String* attr_name) {
-    TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-
-    if (!find_field_in_shape(elmt_type->shape, attr_name->chars, nullptr, nullptr)) {
-        log_warn("elmt_delete_attr_inline: attribute '%s' not found", attr_name->chars);
-        return {.element = elmt};
-    }
-
-    ShapeBuilder builder = shape_builder_init_element(shape_pool_, elmt_type->name.str);
-    shape_builder_import_shape(&builder, elmt_type->shape);
-    shape_builder_remove_field(&builder, attr_name->chars);
-
-    return elmt_rebuild_with_new_shape(elmt, &builder, true);
-}
-
-Item MarkEditor::elmt_delete_attr_immutable(Element* old_elmt, String* attr_name) {
-    TypeElmt* old_type = (TypeElmt*)old_elmt->type;
-
-    if (!find_field_in_shape(old_type->shape, attr_name->chars, nullptr, nullptr)) {
-        log_warn("elmt_delete_attr_immutable: attribute '%s' not found", attr_name->chars);
-        return {.element = old_elmt};
-    }
-
-    Element* new_elmt = (Element*)arena_alloc(arena_, sizeof(Element));
-    if (!new_elmt) return ItemError;
-
-    memcpy(new_elmt, old_elmt, sizeof(Element));
-
-    ShapeBuilder builder = shape_builder_init_element(shape_pool_, old_type->name.str);
-    shape_builder_import_shape(&builder, old_type->shape);
-    shape_builder_remove_field(&builder, attr_name->chars);
-
-    return elmt_rebuild_with_new_shape(new_elmt, &builder, false);
+    return container_delete_attr(element, attr_name);
 }
 
 Item MarkEditor::elmt_insert_child(Item element, int index, Item child) {
@@ -1927,18 +1505,18 @@ Item MarkEditor::elmt_rename(Item element, const char* new_tag_name) {
     Element* old_elmt = element.element;
     TypeElmt* old_type = (TypeElmt*)old_elmt->type;
 
-    // Build new shape with new element name
+    // Build new shape with new element name. Note the rebuilt TypeElmt keeps
+    // the OLD name — as it always has; only the shape's pool bucket moves.
     ShapeBuilder builder = shape_builder_init_element(shape_pool_, new_tag_name);
     shape_builder_import_shape(&builder, old_type->shape);
 
-    if (mode_ == EDIT_MODE_INLINE) {
-        return elmt_rebuild_with_new_shape(old_elmt, &builder, true);
-    } else {
-        Element* new_elmt = (Element*)arena_alloc(arena_, sizeof(Element));
-        if (!new_elmt) return ItemError;
-        memcpy(new_elmt, old_elmt, sizeof(Element));
-        return elmt_rebuild_with_new_shape(new_elmt, &builder, false);
+    bool is_inline = mode_ == EDIT_MODE_INLINE;
+    Map* target = (Map*)old_elmt;
+    if (!is_inline) {
+        target = container_clone_header((Map*)old_elmt);
+        if (!target) return ItemError;
     }
+    return container_rebuild_with_new_shape(target, &builder, is_inline);
 }
 
 //==============================================================================

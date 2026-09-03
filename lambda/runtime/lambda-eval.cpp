@@ -4287,9 +4287,10 @@ Item fn_index(Item item, Item index_item) {
         case LMD_TYPE_ARRAY:
         case LMD_TYPE_ARRAY_NUM:
         case LMD_TYPE_RANGE:
+        // S8.2.1v3: a nominal value exposes the same two faces as its
+        // structural kind, so an IntKey selects a content child here rather
+        // than reading as null.
         case LMD_TYPE_ELEMENT:
-        // S8.2.1v3: an object exposes the same two faces as an element, so an
-        // IntKey selects a content child here rather than reading as null.
         case LMD_TYPE_STRING:
         case LMD_TYPE_SYMBOL:
         case LMD_TYPE_BINARY:
@@ -4685,15 +4686,19 @@ Item fn_member(Item item, Item key) {
         log_debug("fn_member: unknown datetime property '%s'", k);
         return ItemNull;
     }
-    case LMD_TYPE_MAP: {
-        // D2.6.6v2 phase 2: a nominal map resolves its methods after its fields
-        // (S12.3.3v2); a structural map has no method tier.
+    case LMD_TYPE_MAP:
+    case LMD_TYPE_ELEMENT: {
+        // D2.6.6v2 phase 2: a nominal container resolves its methods after its
+        // fields (S12.3.3v2); a structural one has no method tier. The kinds
+        // share this prologue because they share the attribute face; they part
+        // only at the fallback, where an element also answers `name` with its
+        // tag.
         if (is_text_type_id(key._type_id) &&
-                lambda_value_nominal(type_id, item.map)) {
+                lambda_value_nominal(type_id, item.container)) {
             return lambda_object_member(item, (const char*)key.get_chars());
         }
-        Map *map = item.map;
-        return map_get(map, key);
+        return type_id == LMD_TYPE_MAP ? map_get(item.map, key)
+                                       : elmt_get(item.element, key);
     }
     case LMD_TYPE_VMAP: {
         VMap *vm = item.vmap;
@@ -4701,15 +4706,6 @@ Item fn_member(Item item, Item key) {
         // properties are supplied by vmap_get_by_item's host dispatch.
         if (!vm || (!vm->host_type && !vm->vtable)) return ItemNull;
         return vmap_get_by_item(vm, key);
-    }
-    case LMD_TYPE_ELEMENT: {
-        // a nominal element resolves methods too (D2.6.6v2 phase 2)
-        if (is_text_type_id(key._type_id) &&
-                lambda_value_nominal(type_id, item.element)) {
-            return lambda_object_member(item, (const char*)key.get_chars());
-        }
-        Element *elmt = item.element;
-        return elmt_get(elmt, key);
     }
     case LMD_TYPE_ARRAY:
     case LMD_TYPE_ARRAY_NUM: {
@@ -4763,6 +4759,16 @@ extern "C" Item fn_member_by_id(Item item, NameId name_id) {
     return fn_member(item, key);
 }
 
+// The attribute half of a container's length, read through the shared Map face
+// (D2.6.6v2). `length` is the entry count only while every entry is a named
+// field: a spread is one nameless link slot covering many, so those shapes
+// count through the same flattening walk iteration uses (S8.3.1).
+static inline int64_t map_attr_count(const Map* owner) {
+    TypeMap* shape = owner ? (TypeMap*)owner->type : NULL;
+    if (!shape) return 0;
+    return shape->has_spread ? map_flat_field_count(shape, owner->data) : shape->length;
+}
+
 // length of an item's content, relates to indexed access, i.e. item[index]
 int64_t fn_len(Item item) {
     TypeId type_id = get_type_id(item);
@@ -4779,14 +4785,8 @@ int64_t fn_len(Item item) {
         break;
     case LMD_TYPE_MAP: {
         // A map is iterable exactly like an array -- `for (v in m)` walks its
-        // entries -- so its length is that entry count. `length` is that count
-        // only while every entry is a named field: a spread is one nameless
-        // link slot covering many, so those shapes count through the same
-        // flattening walk iteration uses (S8.3.1).
-        Map* map = item.map;
-        TypeMap* map_type = map ? (TypeMap*)map->type : NULL;
-        size = !map_type ? 0 : map_type->has_spread ?
-            map_flat_field_count(map_type, map->data) : map_type->length;
+        // entries -- so its length is that entry count.
+        size = map_attr_count(item.map);
         break;
     }
     case LMD_TYPE_VMAP: {
@@ -4799,11 +4799,7 @@ int64_t fn_len(Item item) {
         // plus content, so `len(<Point x: 1, "t">)` is 2. Structural elements
         // keep the divergence documented below (LR09-8).
         if (lambda_value_nominal(type_id, item.element)) {
-            Element* nom = item.element;
-            TypeMap* attr_type = (TypeMap*)nom->type;
-            size = !attr_type ? 0 : attr_type->has_spread
-                ? map_flat_field_count(attr_type, nom->data) : attr_type->length;
-            size += nom->length;
+            size = map_attr_count((Map*)item.element) + item.element->length;
             break;
         }
         // KNOWN DIVERGENCE from S8.3.1v2, pre-existing and deliberately left
@@ -4925,10 +4921,7 @@ extern "C" int64_t fn_len_e(Element* elmt) {
     // argument to this helper, so the rule has to hold here too or the two
     // tiers disagree — which is exactly how this was found.
     if (elmt->type && ((TypeMap*)elmt->type)->nominal) {
-        TypeMap* attr_type = (TypeMap*)elmt->type;
-        int64_t attrs = attr_type->has_spread
-            ? map_flat_field_count(attr_type, elmt->data) : attr_type->length;
-        return attrs + elmt->length;
+        return map_attr_count((Map*)elmt) + elmt->length;
     }
     return elmt->length;
 }
@@ -7138,29 +7131,7 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
     return ItemNull;
 }
 
-// helper: decrement ref count of the value stored at a field pointer
-static void map_field_decrement_ref(void* field_ptr, TypeId field_type) {
-    switch (field_type) {
-    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
-        break;
-    }
-    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_RANGE:
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:  {
-        break;
-    }
-    case LMD_TYPE_NULL: {
-        // a container might have been stored via a prior transition
-        void* old_ptr = *(void**)field_ptr;
-        if (old_ptr) {
-        }
-        break;
-    }
-    default: break;
-    }
-}
-
-// helper: store a value at a field pointer, incrementing ref count as needed
+// helper: store a value at a field pointer, according to its storage type
 static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     switch (value_type) {
     case LMD_TYPE_NULL:  *(void**)field_ptr = NULL; break;
@@ -7358,11 +7329,8 @@ static bool mutable_clone_needs_container_path(Item value) {
 }
 
 static void* mutable_clone_owner_data(Item owner) {
-    switch (get_type_id(owner)) {
-    case LMD_TYPE_MAP: return owner.map ? owner.map->data : NULL;
-    case LMD_TYPE_ELEMENT: return owner.element ? owner.element->data : NULL;
-    default: return NULL;
-    }
+    // D2.6.6v2: one attribute face, one accessor — no per-kind cast needed.
+    return lambda_attr_data(get_type_id(owner), owner.container);
 }
 
 static void clone_mutable_shape_data(TypeMap* map_type, Item dst_owner, Item src_owner,
@@ -8105,9 +8073,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     // upcast below is valid and only the attribute face is touched (the content
     // items are left alone).
     TypeId extend_tid = get_type_id(map_item);
-    if (extend_tid != LMD_TYPE_MAP && !is_element_family_type_id(extend_tid)) {
-        return false;
-    }
+    if (!lambda_type_id_has_attr_face(extend_tid)) return false;
     Map* map = map_item.map;
     if (!map || !map->type || !map->data || !context || !context->pool) return false;
     const char* key_chars = NULL;
@@ -8859,8 +8825,6 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         void* new_field = (char*)new_data + new_e->byte_offset;
 
         if (old_e == changed_entry) {
-            // decrement old value's ref count
-            map_field_decrement_ref(old_field, old_e->type->type_id);
             // The new ShapeEntry owns the semantic contract. In particular,
             // `int?` must encode null as its lane sentinel rather than using
             // the historical raw Item fallback selected by TypeId alone.
@@ -8874,7 +8838,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
                 shape_entry_storage_type_id(new_e));
             }
         } else {
-            // unchanged field — copy bytes (ref count unchanged, same pointers)
+            // unchanged field — copy the bytes across unchanged
             int sz = field_index < fixed_slot_count ? (int)sizeof(void*) :
                 type_info[shape_entry_storage_type_id(old_e)].byte_size;
             memcpy(new_field, old_field, sz);
@@ -9461,7 +9425,6 @@ Item fn_map_set(Item map_item, Item key, Item value) {
 
             if (field_type == value_type) {
                 // same type — fast path: in-place update
-                map_field_decrement_ref(field_ptr, field_type);
                 map_field_store(field_ptr, value, value_type);
                 return ItemNull;
             }
@@ -9524,7 +9487,6 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                     if (old_bsz != new_bsz) {
                         // fall through to map_rebuild_for_type_change
                     } else {
-                        map_field_decrement_ref(field_ptr, field_type);
                         map_field_store(field_ptr, value, value_type);
                         // Update the ShapeEntry type so GC can properly trace
                         // container pointers stored in formerly-NULL fields, and
@@ -9544,7 +9506,6 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             // Lambda map rebuild here: it packs fields by type byte size and
             // breaks the slot*8 layout used by compiled JS accessors.
             if (typemap_entry_uses_fixed_slot(map_type, entry)) {
-                map_field_decrement_ref(field_ptr, field_type);
                 map_field_store(field_ptr, value, value_type);
                 if (shape_entry_retag_is_safe(map_type, value_type)) {
                     entry->type = type_info[value_type].type;
