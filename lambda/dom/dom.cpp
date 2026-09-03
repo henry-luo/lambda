@@ -194,7 +194,6 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_is_internal_attr, (const char* name),
 // Sentinels for native style host VMaps.
 static const char js_computed_style_vmap_marker = 0;
 static const char js_inline_style_vmap_marker = 0;
-static const char js_document_proxy_vmap_marker = 0;
 static const char js_foreign_doc_vmap_marker = 0;
 static const char js_web_animation_vmap_marker = 0;
 
@@ -215,7 +214,6 @@ struct JsWebAnimationHost {
 // unit. The root range is registered while a context is bound, before any
 // allocation can publish one of these values.
 #define dom_implementation_item (js_runtime_state.dom.implementation)
-#define js_document_proxy_item (js_runtime_state.dom.document_proxy)
 #define js_document_default_view (js_runtime_state.dom.default_view)
 #define js_document_title_value (js_runtime_state.dom.title)
 #define js_document_fonts_value (js_runtime_state.dom.fonts)
@@ -971,7 +969,6 @@ extern "C" void dom_batch_reset() {
     reset_pending_iframe_loads();
     expando_reset();
     reset_dom_wrapper_cache();
-    js_document_proxy_item = (Item){.item = ITEM_NULL};
     js_document_default_view = (Item){.item = ITEM_NULL};
     js_document_title_value = (Item){.item = ITEM_NULL};
     js_document_design_mode = false;
@@ -1601,17 +1598,6 @@ extern "C" void dom_set_document(void* dom_doc) {
     if (!js_active_runtime_state) return;
     _js_current_document = (DomDocument*)dom_doc;
     _js_main_document = (DomDocument*)dom_doc;
-    // Host cleanup may clear the active EvalContext before restoring the
-    // document pointer. The pointer update is still valid, but context-owned
-    // JS wrapper storage must not be read without its owner bound.
-    if (js_active_runtime_state && js_document_proxy_item.item != ITEM_NULL) {
-        TypeId proxy_type = get_type_id(js_document_proxy_item);
-        if (proxy_type == LMD_TYPE_VMAP && js_document_proxy_item.vmap &&
-            (js_document_proxy_item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker ||
-             js_document_proxy_item.vmap->host_type == radiant_dom_document_host_type())) {
-            js_document_proxy_item.vmap->host_data = dom_doc;
-        }
-    }
     if (dom_doc) {
         // document binding creates Radiant-owned wrappers before the first JS
         // DOM property read; lazy module activation must therefore complete at
@@ -1748,10 +1734,14 @@ extern "C" void* dom_get_or_create_doc_node(void* doc_v) {
 // or ItemNull if none is registered.
 static Item doc_to_proxy_item(DomDocument* doc) {
     if (!doc) return ItemNull;
-    if (doc == _js_main_document) {
-        return js_get_document_object_value();
-    }
-    return lookup_foreign_doc_wrapper(doc);
+    // A foreign document keeps its own wrapper; every other document is its
+    // #document node's wrapper (ESO102). Asking for the foreign one first makes
+    // this independent of whether a JS realm has bound a main document, which a
+    // Lambda-only script never does.
+    Item foreign = lookup_foreign_doc_wrapper(doc);
+    if (foreign.item != ITEM_NULL) return foreign;
+    void* node = dom_get_or_create_doc_node(doc);
+    return node ? radiant_dom_wrap_node(node) : ItemNull;
 }
 JS_FORWARD_ITEM(dom_document_proxy_for_doc_bridge, (void* doc_v), doc_to_proxy_item, ((DomDocument*)doc_v))
 
@@ -2594,9 +2584,14 @@ JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION(
 static DomDocument* js_document_proxy_doc_from_item(Item item) {
     TypeId tid = get_type_id(item);
     if (tid == LMD_TYPE_VMAP && item.vmap) {
-        if (item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker ||
-            item.vmap->host_type == radiant_dom_document_host_type()) {
-            DomDocument* doc = (DomDocument*)item.vmap->host_data;
+        // ESO102: a Document-typed wrapper carries the #document *node* now.
+        // The old proxy carried the document itself, and reading the new
+        // host_data through that cast is what crashed -- the JIT recovered from
+        // it, so it surfaced as "JS execution failed" with no exception.
+        if (item.vmap->host_type == radiant_dom_document_host_type()) {
+            DomNode* n = (DomNode*)item.vmap->host_data;
+            DomElement* e = (n && n->is_element()) ? n->as_element() : nullptr;
+            DomDocument* doc = e ? e->doc : nullptr;
             return doc ? doc : (_js_main_document ? _js_main_document : _js_current_document);
         }
         if (item.vmap->host_type == (const void*)&js_foreign_doc_vmap_marker ||
@@ -2642,24 +2637,10 @@ extern "C" bool dom_is_implementation(Item item) {
 
 extern "C" Item js_get_document_object_value() {
     if (!dom_ensure_roots()) return ItemNull;
-    TypeId proxy_type = get_type_id(js_document_proxy_item);
-    if (proxy_type == LMD_TYPE_VMAP && js_document_proxy_item.vmap &&
-        (js_document_proxy_item.vmap->host_type == (const void*)&js_document_proxy_vmap_marker ||
-         js_document_proxy_item.vmap->host_type == radiant_dom_document_host_type())) {
-        // Root-range cleanup clears an expired wrapper slot to zero; only a
-        // live document VMap may be reused by the next context.
-        js_document_proxy_item.vmap->host_data = _js_main_document;
-        return js_document_proxy_item;
-    }
-    js_document_proxy_item = vmap_new();
-    if (get_type_id(js_document_proxy_item) != LMD_TYPE_VMAP || !js_document_proxy_item.vmap) {
-        return ItemNull;
-    }
-    // Document proxies are native VMaps; host_data keeps the browsing-context
-    // document current without relying on map-kind compatibility shells.
-    js_document_proxy_item.vmap->host_type = radiant_dom_document_host_type();
-    js_document_proxy_item.vmap->host_data = _js_main_document;
-    return js_document_proxy_item;
+    // ESO102: `document` IS the document node's wrapper. The proxy was a second
+    // VMap carrying a DomDocument*, so identity depended on which door you came
+    // through -- documentElement.parentNode gave one and `document` the other.
+    return doc_to_proxy_item(_js_main_document);
 }
 
 // Dispatch property access on the document proxy object.
