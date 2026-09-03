@@ -221,6 +221,17 @@ DOM_OP(CORE, value_at_focus, input, 1, "fn(n: any) -> any", dom_engine_value_at_
 // must produce exactly what the derivation produces (ES43 oracle).
 // ===========================================================================
 
+// The generic entries a binding layer needs, because `el[name]` is dynamic and
+// no fixed row can serve it. Not published to `dom.*`: a Lambda script has named
+// rows and does not need a stringly-typed accessor, and publishing them would
+// force the Lambda absence rule onto a path JS shares. Publishing them is what puts the whole of JS's DOM
+// access behind the API rather than most of it (ES45); `invoke` takes its
+// arguments as an array so the row stays fixed-arity while the executor behind
+// it stays variadic.
+DOM_OP(CORE, get_property, node, 2, "fn(n: any, name: string) -> any", dom_core_get_property, 0, "")
+DOM_OP(CORE, set_property, node, 3, "fn(n: any, name: string, value: any) -> any", dom_core_set_property, DOM_F_MUTATES, "")
+DOM_OP(CORE, invoke, node, 3, "fn(n: any, op: int, args: array) -> any", dom_core_invoke, DOM_F_MUTATES, "")
+
 // The CSS statics and the two node writes the JS runtime used to reach by
 // direct extern (ES45). set_event_handler is derived in substance -- it drives
 // the same listener store as add_listener/remove_listener -- but stating it as

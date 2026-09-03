@@ -307,6 +307,42 @@ extern "C" Item dom_core_set_node_value(Item n, Item data) {
     return dom_op3(n, JUBE_DOM_REPLACE_DATA, zero, all, data);
 }
 
+// --- the generic entries (ES45)
+//
+// A binding layer needs to reach an operation it only knows by name or ordinal:
+// `el[name]` is dynamic, so JS cannot use a fixed row per property. These three
+// are that generic path, and making them rows is what puts the *whole* of JS's
+// DOM access behind the API rather than most of it.
+//
+// get_property and set_property already have the catalog's shape. The ordinal
+// executor does not -- it takes an enum and a C array -- so the row spells the
+// arguments as a Lambda array and unpacks them here, which keeps every row
+// fixed-arity and leaves the variadic form where it belongs, behind the API.
+// These pass absence through exactly as the protocol answers it. The rest of
+// the catalog normalises JS `undefined` to null because Lambda has no undefined
+// (ESO98) -- but that rule belongs at the *Lambda face*, and these three are the
+// shared binding path both realms dispatch through. Normalising here turned
+// every absent property into null for JS as well, which is a different value,
+// and took two thirds of the DOM UI fixtures with it.
+extern "C" Item dom_core_get_property(Item n, Item name) {
+    return dom_get_property_impl(n, name);
+}
+
+extern "C" Item dom_core_set_property(Item n, Item name, Item value) {
+    return dom_set_property_impl(n, name, value);
+}
+
+extern "C" Item dom_core_invoke(Item n, Item op, Item args) {
+    if (get_type_id(op) != LMD_TYPE_INT) return ItemNull;
+    JubeDomElementOperation operation = (JubeDomElementOperation)it2i(op);
+    int64_t argc = get_type_id(args) == LMD_TYPE_ARRAY ? js_array_length(args) : 0;
+    if (argc <= 0) return dom_element_operation_impl(n, operation, nullptr, 0);
+    if (argc > 8) return ItemNull;   // no DOM operation takes more
+    Item unpacked[8];
+    for (int64_t i = 0; i < argc; i++) unpacked[i] = js_elements_get_int(args, i);
+    return dom_element_operation_impl(n, operation, unpacked, (int)argc);
+}
+
 // --- CSS statics and the two node writes JS reached for directly (ES45)
 //
 // These four were the DOM operations the JS runtime called by direct extern
