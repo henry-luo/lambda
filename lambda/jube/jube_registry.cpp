@@ -1510,6 +1510,7 @@ static const JubeHostDomCatalogAPI jube_host_dom_catalog = {
     (JubeDomFn##argc)(body),
 #include "../dom/dom_api.def"
 #undef DOM_OP
+    .invoke_raw = dom_element_operation_impl,
 };
 
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);

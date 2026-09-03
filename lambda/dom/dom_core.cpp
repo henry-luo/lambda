@@ -16,6 +16,7 @@
  */
 
 #include "../lambda-data.hpp"
+#include "../runtime/lambda-root-frame.hpp"
 #include "dom.h"
 #include "dom_ops.h"
 #include "dom_core.h"
@@ -337,9 +338,13 @@ extern "C" Item dom_core_invoke(Item n, Item op, Item args) {
     JubeDomElementOperation operation = (JubeDomElementOperation)it2i(op);
     int64_t argc = get_type_id(args) == LMD_TYPE_ARRAY ? js_array_length(args) : 0;
     if (argc <= 0) return dom_element_operation_impl(n, operation, nullptr, 0);
-    if (argc > 8) return ItemNull;   // no DOM operation takes more
-    Item unpacked[8];
-    for (int64_t i = 0; i < argc; i++) unpacked[i] = js_elements_get_int(args, i);
+    // The executor allocates while it reads this span, so the unpacked arguments
+    // live in a root region, not a native buffer (D5.2.1). The region is sized to
+    // argc and fails closed on reservation overflow, so no arity cap is needed.
+    RootSpan roots((size_t)argc);
+    Item* unpacked = roots.items();
+    if (!unpacked) return ItemError;
+    for (int64_t k = 0; k < argc; k++) unpacked[k] = js_elements_get_int(args, k);
     return dom_element_operation_impl(n, operation, unpacked, (int)argc);
 }
 

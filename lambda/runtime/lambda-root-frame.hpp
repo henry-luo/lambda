@@ -55,6 +55,17 @@ public:
     uint64_t* words() { return frame_.slots; }
     const uint64_t* words() const { return frame_.slots; }
 
+    // The span's cells are Item-shaped, so an ABI adapter can hand the callee
+    // `Item*` directly instead of copying out of a native buffer the collector
+    // cannot see.
+    Item* items() {
+        static_assert(sizeof(Item) == sizeof(uint64_t),
+            "ABI adapter Item roots must match side-root cells");
+        static_assert(alignof(Item) == alignof(uint64_t),
+            "ABI adapter Item roots must match side-root alignment");
+        return (Item*)(void*)frame_.slots;
+    }
+
     RootSpan(const RootSpan&) = delete;
     RootSpan& operator=(const RootSpan&) = delete;
 };

@@ -71,16 +71,13 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_is_stylesheet radiant_host_api->dom->is_stylesheet
 #define dom_is_css_rule radiant_host_api->dom->is_css_rule
 #define dom_is_rule_style_decl radiant_host_api->dom->is_rule_style_decl
-// The generic entries are catalog rows (ES45), but the module still reaches
-// them through ->dom. Routing the dispatchers through the catalog was tried and
-// reverted: `invoke` takes its arguments as an array, and building one per call
-// puts an allocation on the hottest path in the DOM -- every property access --
-// while the caller's `args` sit unrooted on the C stack, so a collection during
-// that allocation can free them. Crossing here needs a rooted adapter, and that
-// is its own change rather than a line in this one.
-#define dom_get_property_impl radiant_host_api->dom->dom_get_property_impl
-#define dom_set_property_impl radiant_host_api->dom->dom_set_property_impl
-#define dom_element_operation_impl radiant_host_api->dom->dom_element_operation_impl
+// ES45: the property protocol and the ordinal executor cross the API like every
+// other operation. The two property rows are already Item-uniform, so they map
+// straight onto their slots; the executor crosses through `invoke_raw`, the
+// catalog's native-shape door, so dispatch adds no per-call allocation.
+#define dom_get_property_impl radiant_host_api->dom_catalog->get_property
+#define dom_set_property_impl radiant_host_api->dom_catalog->set_property
+#define dom_element_operation_impl radiant_host_api->dom_catalog->invoke_raw
 #define dom_computed_style_get_property radiant_host_api->dom->computed_style_get_property
 #define dom_style_resource_has_property radiant_host_api->dom->style_resource_has_property
 #define dom_get_prototype_value radiant_host_api->realm->dom_get_prototype_value
