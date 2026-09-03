@@ -990,7 +990,7 @@ module.exports = grammar({
     _base_type_kw: _ => token(prec(1, choice(
       'null', 'any', 'bool', 'int64', 'int', 'float', 'f64', 'complex',
       'decimal', 'integer', 'number', 'datetime', 'date', 'time', 'binary',
-      'range', 'list', 'array', 'map', 'element', 'entity', 'object',
+      'range', 'list', 'array', 'map', 'element', 'object',
       'function', 'error', 'string', 'symbol',
       'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'f16', 'f32',
     ))),

@@ -656,7 +656,7 @@ static bool map_carries_exact_shape(ConstItem item, const TypeMap* map_type) {
     if (!map_type || !item.item) return false;
     TypeId tid = item.type_id();
     const void* actual = tid == LMD_TYPE_MAP ? (const void*)((Map*)item.map)->type
-        : tid == LMD_TYPE_OBJECT ? (const void*)((Object*)item.object)->type : NULL;
+        : NULL;
     return actual && actual == (const void*)map_type;
 }
 

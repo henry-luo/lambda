@@ -1388,6 +1388,8 @@ JitImport jit_runtime_imports[] = {
     {"object_with_data", FPTR(object_with_data)},
     {"object_with_tl", FPTR(object_with_tl)},
     {"object_fill", FPTR(object_fill)},
+    {"object_content", FPTR(object_content)},
+    {"object_content_fill", FPTR(object_content_fill)},
     {"object_get", FPTR(object_get)},
     {"object_type_set_method", FPTR(object_type_set_method)},
     {"object_type_set_constraint", FPTR(object_type_set_constraint)},

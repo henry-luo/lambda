@@ -1104,7 +1104,7 @@ static int http_append_invalid_arg_received(char* msg, int pos, int cap, Item va
     if (type == LMD_TYPE_ARRAY) {
         return pos + snprintf(msg + pos, (size_t)(cap - pos), " Received an instance of Array");
     }
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP) {
         return pos + snprintf(msg + pos, (size_t)(cap - pos), " Received an instance of Object");
     }
     if (type == LMD_TYPE_SYMBOL) {
@@ -3502,7 +3502,7 @@ extern "C" Item js_http_createServer(Item options_or_handler, Item maybe_handler
     Item incoming_ctor = make_js_undefined();
     Item response_ctor = make_js_undefined();
     TypeId options_type = get_type_id(options_or_handler);
-    if ((options_type == LMD_TYPE_MAP || options_type == LMD_TYPE_OBJECT) &&
+    if ((options_type == LMD_TYPE_MAP) &&
         js_is_callable(maybe_handler)) {
         handler = maybe_handler;
         incoming_ctor = js_get_key_cstr(options_or_handler, "IncomingMessage");
@@ -3891,7 +3891,7 @@ static Item js_http_econnreset_error(Item err) {
 
 static bool js_http_signal_is_aborted(Item signal) {
     TypeId type = get_type_id(signal);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return false;
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return false;
     Item aborted = js_get_key_cstr(signal, "aborted");
     return get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted);
 }
@@ -3969,7 +3969,7 @@ static Item js_http_client_abort_signal_event(Item env_item) {
 static bool js_http_client_configure_abort_signal(JsHttpClientReq* creq, Item signal) {
     if (!creq || !creq->js_object.item) return false;
     TypeId type = get_type_id(signal);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return false;
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return false;
 
     creq->abort_signal = signal;
     if (js_http_signal_is_aborted(signal)) {

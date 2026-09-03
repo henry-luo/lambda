@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-      "description": "Typed numeric-array loads use the guarded direct ArrayNum data lane. A proven float procedure parameter validates the physical array header before reading, while the value-parameter store keeps the checked COW setter rather than claiming borrowed-var ownership.",
+      "description": "Typed numeric-array loads use the guarded direct ArrayNum data lane. Offsets 32/40 are ArrayNum::items/length under the D2.6.6v2 container chain (Map -> Array -> Element), where every container carries Map's attribute face first; they were 8/16 before that change. A proven float procedure parameter validates the physical array header before reading, while the value-parameter store keeps the checked COW setter rather than claiming borrowed-var ownership.",
   "checks": [
     {
       "in_func": "_guarded_load_#",
@@ -9,8 +9,8 @@
       ],
       "expect_seq": [
         { "pattern": "call\tensure_typed_array_p, ensure_typed_array" },
-        { "pattern": "mov\t{{r}}, i64:8({{r}})" },
-        { "pattern": "mov\t{{r}}, i64:16({{r}})" },
+        { "pattern": "mov\t{{r}}, i64:32({{r}})" },
+        { "pattern": "mov\t{{r}}, i64:40({{r}})" },
         { "pattern": "lts\t{{r}}, %p2, 0" },
         { "pattern": "ges\t{{r}}, %p2, {{r}}" },
         { "pattern": "mul\t{{r}}, %p2, 8" },

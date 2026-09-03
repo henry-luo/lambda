@@ -335,6 +335,26 @@ stay un-shadowable (S16.10.1). Implementation: one resolution point in
 registry lookup), the shadow warning, and a regression test for the
 crash shape.
 
+<a id="lr02-17"></a>**LR02-17 · Bare `x.sum` on a map has never bound a builtin · OBSERVATION (verified 2026-09-03)**
+Load-bearing evidence for **S12.3.3v2**, which makes the method-eligible
+builtin tier a *call-site* rule: `x.name(...)` may reach a builtin, bare
+`x.name` may not. The implementation has always behaved this way, by
+construction rather than by intent — `get_sys_func_for_method`
+(`build_ast.cpp:487`) is keyed on the parenthesized argument count, and its
+only call site (`build_ast.cpp:8266`) sits inside the call-expression
+builder, after `direct_lookup_object_method`. The member-expression builder
+never consults the registry. Probe (release `lambda.exe`, commit `ababcb674`,
+`temp/probe_bare_member2.ls`): on `let m = {a: 1, b: 2}`, `m.len()` → `2`
+while bare `m.len` → `null` and `m.len == null` → `true`.
+
+Why it matters: S8.2.1v3 now makes `obj["m"]` the dynamic form of `obj.m`,
+reaching the type's methods. That is only safe because the builtin tier is
+call-only — otherwise `m[key]` probing on a plain map would return a bound
+builtin whenever `key` happened to spell one, instead of `null`. Any future
+change that lets bare member access fall through to the registry silently
+breaks that guarantee. Recorded as an observation, not a defect: nothing to
+fix, but the property must not regress. [OB5, [Type_Object §16](Lambda_Type_Object.md)]
+
 <a id="lr02-16"></a>**LR02-16 · `lambda.*` namespace not implemented · OPEN**
 Ruled 2026-08-27 as **S17.2.1/S17.2.2** (semantics v16.2.0) and **D7.2.4**
 (design v1.38.0); deliberation in `vibe/Lambda_Package.md` §1b. Work items:
@@ -645,6 +665,101 @@ on it (`:63`), so only the second hop is unprotected.
 Tail-recursive loops emit a guard raising a stack-overflow error past
 `LAMBDA_TCO_MAX_ITERATIONS` (`transpile-mir.cpp:24607`–`24611`); the interpreter
 shares the constant (`interp.hpp:59`).
+
+<a id="lr07-15"></a>**LR07-15 · Object methods read the receiver as zero on the eager JIT tier · RESOLVED 2026-09-03**
+An SI3v2 tier-divergence: the same script yields different results under
+`LAMBDA_TIER=jit` than under `interp`/`auto`. Implicit receiver-field reads
+inside an object method body evaluate to 0 on the eager whole-module MIR path.
+Probe (commit `ababcb674`, **before** any 2026-09-03 change — verified by
+stashing): `test/lambda/object.ls` with `type Counter { value: int, fn
+double() => value * 2, fn add(n: int) => value + n }` and `let c = <Counter
+value: 5>` gives `c.double()` = **10** and `c.add(3)` = **8** on `interp`, but
+**0** and **3** on `jit` — the `3` shows `value` itself reading 0, not the
+multiply failing.
+
+Companion symptom, same root: a `pn` method's mutation is lost. `pn bump() {
+value = value + 1 }` on `<Counter value: 5>` leaves `c.value` = 5 under `jit`
+and 6 under `interp` (`temp/probe_pn_call.ls`).
+
+Why it was not caught: the baseline runs the default AUTO selector, which routes
+these scripts to T0, so `object.ls` passed at 4079/4079 while the JIT path was
+wrong. Any corpus tier-parity sweep must set `LAMBDA_TIER` explicitly.
+
+**Root cause — one missing back-pointer.** `binding_node_set_entry`
+(`build_ast.cpp:2180`) wrote the `NameEntry` back onto its declaring node for
+`AST_NODE_VARIABLE_DECLARATOR` and `AST_NODE_PARAM` only. An object type's field
+scope-helper is an `AST_NODE_KEY_EXPR` (`direct_object_add_field` and the
+base-inheritance copy at `:6910`/`:6986`), so `field_ref->entry` stayed NULL and
+the `shape->binding = field_ref->entry` beside it stored NULL — even though
+`ShapeEntry::binding`'s own comment (`lambda-data.hpp:316`) says object-method
+field lowering depends on it.
+
+That NULL was invisible to T0, which resolves an object-field read by *name*
+against `method_self` (`interp_read_binding`), and fatal to MIR, which matches
+variables by *binding identity, not spelling* (`mir_var_for_ident`,
+`transpile-mir.cpp:2209`). The method prologue loaded each field from `self` and
+called `publish_var_binding(mt, field_name, se->binding)` with NULL, so the
+locals were registered under no binding; every implicit read then fell through
+`transpile_ident_value` to its "undefined variable" arm. The write half failed
+the same way: the epilogue's write-back (`:25701`) looks the local up with
+`mir_var_for_binding(field->binding)` and found nothing, so a `pn` method's
+mutation was dropped.
+
+**Fix:** admit `AST_NODE_KEY_EXPR` in `binding_node_set_entry`. One arm, both
+halves — reads and the `pn` write-back — on both tiers. Fixtures:
+`test/lambda/object_method_receiver.ls` (read, inherited fields, float
+unboxing) and `test/lambda/proc/object_method_write.ls` (write-back); both are
+byte-identical under `LAMBDA_TIER=interp` and `=jit`, as is `object.ls`.
+Baseline 4082/4082.
+
+*Measurement note:* the tier selector is the `LAMBDA_TIER` environment
+variable. `./lambda.exe jit run f.ls` is **not** tier selection — `jit` consumes
+`run` as the script name and the file never executes (`nodes=0`, prints
+`null`). Two wrong conclusions in this investigation came from that form.
+
+<a id="lr09-8"></a>**LR09-8 · `len(element)` violates the S8.3.1 length law · OPEN (measured 2026-09-03)**
+S8.3.1v2 states the law — `len(x)` is the number of iterations `for (i in x)`
+performs — and gives `len(<e a:1, b:2, "t">)` = **3** as its own example. The
+element arm of `fn_len` returns the child count alone, so that expression is
+**1** while `[for (x in e) x]` yields three members. `len_iter_law.ls` records
+it as a KNOWN DIVERGENCE rather than pinning the law.
+
+**Conforming was implemented and measured, then reverted.** It moves **44**
+corpus goldens. Most are the bare length change, but `map_element_attrs`
+exposes the real blocker: the idiom
+`[for (i in 0 to (len(rebuilt) - 1)) rebuilt[i]]` uses `len` as a *child-count*
+bound, and an IntKey subscript reaches only children (S8.2.1v3) while the
+conformant `len` also counts attributes — so the loop runs past the children and
+yields nulls. Under the old behavior it worked by accident, because `len`
+happened to equal the child count.
+
+So closing this needs a **companion ruling first**: a spelling for child count
+or child indexing (S8.4.1 gives `len(names(c))` for the `at` axis, which makes
+child count `len(e) - len(names(e))` — correct but not ergonomic). Objects are
+NOT divergent: their arm counts attributes plus content, matching the ruling's
+own `len(<Point x: 1, "t">)` = 2 example, so the two kinds disagree until this
+is closed. Anchor comment sits on the ELEMENT arm of `fn_len`.
+
+<a id="lr02-18"></a>**LR02-18 · Bare `pn` method reference is not rejected · OPEN (2026-09-03)**
+S12.3.3v2/OB6 rules that taking a `pn` method as a value is a compile error: the
+bound closure captures its receiver by value (S9.3.1), so a detached one could
+only mutate its own copy — the reason S12.3.2 already rejects dynamic calls to a
+`var` signature. Today `let b = c.bump` yields an ordinary bound function.
+
+The rejection cannot live in the runtime member lane. MIR lowers a `pn` method
+CALL by lowering its callee member expression as a value through
+`lambda_object_member`, so refusing to bind a proc method there turns
+`c.bump()` into a silent no-op on the JIT tier — measured, after LR07-15 made
+the write-back work at all. Only `build_ast` can tell a bare reference from a
+sanctioned callee, because it holds `call->function`; the call builder already
+detects the sanctioned case (`call->is_proc_method`, `build_ast.cpp:8407`).
+
+What it needs: a flag on `AstFieldNode` set when a member expression resolves to
+a `pn` method, cleared by the call builder when it consumes that node as a
+callee, plus a validation point for whatever remains — the member node is built
+*before* the call node that consumes it, so a single build-order check cannot
+work. Fixture section `=f=` of `test/lambda/object_method_value.ls` pins the
+current permissive answer and must flip when this lands.
 
 <a id="lr07-14"></a>**LR07-14 · Cross-cutting gaps · OPEN (rollup)**
 Numeric result-domain inference is duplicated across AST / MIR / runtime;
@@ -1145,6 +1260,78 @@ and `error_reporting.cpp` 6, writing to stdout with emoji rather than through
 These records are retained for provenance but are excluded from the counts
 above. The absence of source markers is not evidence that a structural defect
 is absent; active rows must be found by behavior and ownership analysis.
+
+<a id="lr03-10"></a>**LR03-10 · A type with no TypeId of its own resolves to the wrong singleton · RESOLVED 2026-09-03**
+`lambda_type_node_singleton` (`runtime/ast.hpp`) turns a type-annotation AST
+node into the runtime type value both tiers compare against. It arms a short
+list of types that need a specific singleton, then falls back to
+`base_type(node->type->type_id)` — a lookup keyed on the TAG. The arms exist
+precisely because a few types have no tag of their own: `date`/`time` share
+`LMD_TYPE_DTIME`, `list`/`number`/`integer` have no runtime tag at all, and the
+sized numerics all share `LMD_TYPE_NUM_SIZED`.
+
+Removing `LMD_TYPE_OBJECT` put `object` in exactly that class without adding
+its arm. `TYPE_OBJECT` wears the map tag to route through the container
+switches, so the fallback handed back the `map` singleton, and `{x: 1} is
+object` answered **true** on both tiers while a nominal element answered false.
+The helper is shared by T0 and MIR, so the two tiers agreed — with each other,
+and not with the ruling. Fixed by adding the `object` arm alongside the others,
+and by matching `&TYPE_OBJECT` by pointer identity in `fn_is` ahead of any tag
+comparison.
+
+Two things are worth carrying forward. The tag fallback is a **silent** wrong
+answer, not a failure: a type that stops having its own tag needs its arm added
+in the same change, and the existing arms are the checklist. And the diagnosis
+cost more than the fix, because the natural suspicion was the lookup table —
+`lookup_base_type_name` was returning the right singleton all along, and the
+rewrite happened one layer later, at evaluation. Printing what `fn_is` actually
+received, rather than what the table returned, is what closed it.
+
+<a id="lr03-9"></a>**LR03-9 · The C mirror in `lambda.h` never matched `struct Container` · RESOLVED 2026-09-03**
+`lambda.h` carries a C mirror of the container structs "for direct field access
+optimization", with the comment *"Layout must match the C++ structs in
+lambda.hpp exactly"*. It did not, and nothing checked it. The real `Container`
+uses eight single-byte fields (`type_id`, `flags`, `array_flags`, `map_kind`,
+`cow_state`, two ctor-mask bytes, `reserved_state`), each pinned by its own
+`LAMBDA_STATIC_ASSERT`. Every mirror struct instead declared `uint16_t flags`
+followed by padding, so alignment put `flags` at offset 2 and the first pointer
+field at 16 rather than 8 — a divergence on every one of `Map`, `List`,
+`ArrayNum` and `Element`.
+
+It was invisible because nothing in C actually read those members: `gc_heap.c`,
+the one C consumer, reaches fields by raw byte offset, and every other consumer
+is C++ and sees `lambda.hpp`. So the mirror was dead weight that would have
+produced wrong offsets the moment any C code used it by name.
+
+Found by the D2.6.6v2 phase-1 work: adding the first-ever layout assertions to
+the mirror failed the build immediately. Fixed by giving all four mirror structs
+the exact eight-byte header, and the assertions now stand as the guard. The
+general lesson is worth keeping: a hand-written mirror without an assertion is
+only accidentally correct, and this one had been wrong for its whole life.
+
+<a id="lr03-8"></a>**LR03-8 · A shape transition on an object drops its nominal record · RESOLVED 2026-09-03**
+The shape-transition rebuild in `lambda-eval.cpp` (the `fn_map_set` path,
+near the `LMD_TYPE_ELEMENT` branch that allocates a fresh `TypeElmt` and
+carries `name`/`content_length`/`ns` across) has no object arm: an object
+falls into the plain-`TypeMap` else-branch, which builds a shape with no
+`type_name`, no `base`, and no method table. Found by the 2026-09-03 layout
+survey as latent — no corpus script extends an object with a new field.
+
+Under S2.1.4 it is a **defect, not an error path**: Lambda objects are open by
+default (OB15 part 3), extension is an ordinary member addition, and every
+shape reached from a declared shape must share the one nominal record (OB16),
+so the value stays an instance of its type and its methods keep resolving.
+**Resolved with D2.6.6v2 phase 2.** The nominal record is now a `TypeMap`
+field, and both shape-rebuild sites copy it forward: the generic transition in
+`fn_map_set`'s rebuild path, and `map_extend_open_shape`, which is the one that
+actually produces a grown shape. The second mattered more than expected — until
+open-instance extension landed the same day, no code path could reach a grown
+nominal shape at all, so the defect was unobservable rather than absent.
+Fixture `test/lambda/proc/object_open_instance.ls` pins exactly the check this
+entry asked for: extend `<P x: 5>` with `p.z = 9` through a `var`, then confirm
+`p is P`, `p.dbl()`, `len(p)`, round-trip printing, and that a grown instance
+does NOT equal an ungrown one (S5.4.2v3 compares the full key set). Verified on
+both tiers and under forced GC.
 
 <a id="lr03-7"></a>**LR03-7 · Latent, not annotated · OBSERVATION**
 The core value-model files carry no `TODO`/`FIXME`/`HACK`/`XXX` markers; the

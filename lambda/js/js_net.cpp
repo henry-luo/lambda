@@ -196,7 +196,7 @@ struct PendingSocketWrite {
 
 static JsSocket* socket_from_object(Item self) {
     TypeId type = get_type_id(self);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return NULL;
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return NULL;
     Item handle_item = js_get_key_cstr(self, "__handle__");
     if (handle_item.item == 0 || handle_item.item == ITEM_NULL || is_undefined_item(handle_item)) return NULL;
     if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
@@ -934,7 +934,7 @@ static void socket_fail_pending_writes(JsSocket* sock, Item err) {
 
 static bool socket_signal_is_aborted(Item signal) {
     TypeId type = get_type_id(signal);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return false;
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return false;
     Item aborted = js_get_key_cstr(signal, "aborted");
     return get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted);
 }
@@ -1009,7 +1009,7 @@ static void socket_release_after_pending_connect(JsSocket* sock) {
 static bool socket_configure_abort_signal(JsSocket* sock, Item signal) {
     if (!sock || !sock->js_object.item) return false;
     TypeId type = get_type_id(signal);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return false;
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return false;
 
     sock->abort_signal = signal;
     if (socket_signal_is_aborted(signal)) {
@@ -1034,7 +1034,7 @@ static bool socket_configure_abort_signal(JsSocket* sock, Item signal) {
 static void socket_configure_onread(JsSocket* sock, Item onread) {
     if (!sock) return;
     TypeId type = get_type_id(onread);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return;
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return;
 
     Item buffer = js_get_key_cstr(onread, "buffer");
     Item callback = js_get_key_cstr(onread, "callback");
@@ -1522,7 +1522,7 @@ JS_FORWARD_STATIC_ITEM(js_socket_uncork, (void), js_get_this, ())
 
 static JsSocket* socket_from_handle_object(Item self) {
     TypeId type = get_type_id(self);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return NULL;
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return NULL;
     Item handle_item = js_get_key_cstr(self, "__socket_handle__");
     if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
     return (JsSocket*)(uintptr_t)it2i(handle_item);
@@ -2469,7 +2469,7 @@ static bool net_string_equals_ascii_ci(const char* a, const char* b) {
 
 static NetBlockList* net_block_list_from_item(Item self) {
     TypeId type = get_type_id(self);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return NULL;
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return NULL;
     Item handle_item = js_get_key_cstr(self, "__net_block_list__");
     if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
     return (NetBlockList*)(uintptr_t)it2i(handle_item);
@@ -2881,7 +2881,7 @@ static Item normalize_connect_args(Item rest_args, NetConnectOptions* out) {
     }
 
     TypeId first_type = get_type_id(first);
-    if (first_type == LMD_TYPE_MAP || first_type == LMD_TYPE_OBJECT ||
+    if (first_type == LMD_TYPE_MAP ||
         first_type == LMD_TYPE_VMAP || first_type == LMD_TYPE_ELEMENT) {
         JS_RETURN_IF_ERROR(normalize_options_object(first, out));
         if (argc > 1) {
@@ -3124,7 +3124,7 @@ static struct addrinfo* net_select_addrinfo(struct addrinfo* res, int family) {
 
 static bool net_lookup_invalid_family_value(Item value, int* out_family) {
     Item family = value;
-    if (get_type_id(value) == LMD_TYPE_MAP || get_type_id(value) == LMD_TYPE_OBJECT ||
+    if (get_type_id(value) == LMD_TYPE_MAP ||
         get_type_id(value) == LMD_TYPE_VMAP) {
         family = js_get_key_cstr(value, "family");
     }
@@ -3690,7 +3690,7 @@ static Item create_socket_for_connect(const NetConnectOptions* options) {
 
 static JsSocket* socket_reattach_for_connect(Item self) {
     TypeId self_type = get_type_id(self);
-    if (self_type != LMD_TYPE_MAP && self_type != LMD_TYPE_OBJECT && self_type != LMD_TYPE_VMAP) {
+    if (self_type != LMD_TYPE_MAP && self_type != LMD_TYPE_VMAP) {
         return NULL;
     }
 
@@ -4490,7 +4490,7 @@ extern "C" Item js_server_listen(Item port_item, Item host_item, Item callback) 
     }
 
     TypeId port_type = get_type_id(port_item);
-    if (port_type == LMD_TYPE_MAP || port_type == LMD_TYPE_OBJECT || port_type == LMD_TYPE_VMAP) {
+    if (port_type == LMD_TYPE_MAP || port_type == LMD_TYPE_VMAP) {
         bool has_port = net_object_has_key(port_item, "port");
         bool has_path = net_object_has_key(port_item, "path");
         bool has_fd = net_object_has_key(port_item, "fd");
@@ -4651,7 +4651,7 @@ static Item js_server_address(void) {
 
 static JsServer* server_from_object(Item self) {
     TypeId type = get_type_id(self);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return NULL;
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return NULL;
     Item handle_item = js_get_key_cstr(self, "__server__");
     if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
     return (JsServer*)(uintptr_t)it2i(handle_item);
@@ -4774,7 +4774,7 @@ extern "C" Item js_net_createServer(Item rest_args) {
     uv_tcp_init(loop, &srv->tcp);
     srv->tcp.data = srv;
     srv->connection_handler = handler;
-    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
+    if (get_type_id(options) == LMD_TYPE_MAP ||
         get_type_id(options) == LMD_TYPE_VMAP) {
         Item allow_half_open = js_get_key_cstr(options, "allowHalfOpen");
         srv->allow_half_open = get_type_id(allow_half_open) == LMD_TYPE_BOOL && it2b(allow_half_open);
@@ -4867,7 +4867,7 @@ extern "C" Item js_net_Socket(Item options) {
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return ItemNull;
 
-    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
+    if (get_type_id(options) == LMD_TYPE_MAP ||
         get_type_id(options) == LMD_TYPE_VMAP) {
         Item fd = js_get_key_cstr(options, "fd");
         if (!is_undefined_item(fd) && fd.item != ITEM_NULL) {
@@ -4885,7 +4885,7 @@ extern "C" Item js_net_Socket(Item options) {
 
     JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
     sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
-    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
+    if (get_type_id(options) == LMD_TYPE_MAP ||
         get_type_id(options) == LMD_TYPE_VMAP) {
         Item hwm = js_get_key_cstr(options, "highWaterMark");
         int64_t hwm_value = 0;
@@ -4898,7 +4898,7 @@ extern "C" Item js_net_Socket(Item options) {
     sock->tcp.data = sock;
 
     Item bound_handle = make_undefined_item();
-    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
+    if (get_type_id(options) == LMD_TYPE_MAP ||
         get_type_id(options) == LMD_TYPE_VMAP) {
         bound_handle = js_get_key_cstr(options, "handle");
         JsBoundSocket* bound = bound_socket_from_item(bound_handle);
@@ -4923,13 +4923,13 @@ extern "C" Item js_net_Socket(Item options) {
 
     uv_unref((uv_handle_t*)&sock->tcp);
     Item obj = make_socket_object(sock, false);
-    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT ||
+    if (get_type_id(options) == LMD_TYPE_MAP ||
         get_type_id(options) == LMD_TYPE_VMAP) {
         Item handle = js_get_key_cstr(options, "handle");
         if (sock->adopted_bound_socket) {
             js_set_key_cstr(obj, "_handle", make_socket_handle_object(sock));
             sock->handle_exposed = true;
-        } else if (get_type_id(handle) == LMD_TYPE_MAP || get_type_id(handle) == LMD_TYPE_OBJECT ||
+        } else if (get_type_id(handle) == LMD_TYPE_MAP ||
             get_type_id(handle) == LMD_TYPE_VMAP) {
             js_set_key_cstr(obj, "_handle", handle);
             Item native_handle = js_get_key_cstr(handle, "__socket_handle__");

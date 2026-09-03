@@ -16,7 +16,6 @@ template<> struct TagToType<LMD_TYPE_ARRAY> { typedef Array type; };
 template<> struct TagToType<LMD_TYPE_MAP> { typedef Map type; };
 template<> struct TagToType<LMD_TYPE_VMAP> { typedef VMap type; };
 template<> struct TagToType<LMD_TYPE_ELEMENT> { typedef Element type; };
-template<> struct TagToType<LMD_TYPE_OBJECT> { typedef Object type; };
 template<> struct TagToType<LMD_TYPE_TYPE> { typedef Type type; };
 template<> struct TagToType<LMD_TYPE_FUNC> { typedef Function type; };
 
@@ -42,7 +41,6 @@ inline VMap* item_payload<LMD_TYPE_VMAP>(Item raw) { return raw.vmap; }
 template<>
 inline Element* item_payload<LMD_TYPE_ELEMENT>(Item raw) { return raw.element; }
 template<>
-inline Object* item_payload<LMD_TYPE_OBJECT>(Item raw) { return raw.object; }
 template<>
 inline Type* item_payload<LMD_TYPE_TYPE>(Item raw) { return raw.type; }
 template<>

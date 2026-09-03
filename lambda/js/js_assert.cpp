@@ -541,7 +541,7 @@ JS_FORWARD_STATIC_RETURN(bool, js_assert_is_nan_number, (Item value), get_type_i
 static bool js_assert_is_object_like_value(Item value) {
     TypeId type = get_type_id(value);
     return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
-           type == LMD_TYPE_ELEMENT || type == LMD_TYPE_OBJECT ||
+           type == LMD_TYPE_ELEMENT ||
            type == LMD_TYPE_VMAP || type == LMD_TYPE_FUNC;
 }
 
@@ -3742,7 +3742,7 @@ JS_FORWARD_ITEM(js_assert_doesNotMatch, (Item string_val, Item regexp, Item mess
 static bool js_assert_is_partial_object_like(Item value) {
     TypeId type = get_type_id(value);
     return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
-           type == LMD_TYPE_ELEMENT || type == LMD_TYPE_OBJECT ||
+           type == LMD_TYPE_ELEMENT ||
            type == LMD_TYPE_VMAP;
 }
 
@@ -4516,8 +4516,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool, js_assert_is_native_promise, (Item value), (g
 
 static bool js_assert_is_valid_thenable(Item value) {
     TypeId type = get_type_id(value);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ELEMENT && type != LMD_TYPE_ARRAY &&
-        type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) {
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ELEMENT && type != LMD_TYPE_ARRAY && type != LMD_TYPE_VMAP) {
         return false;
     }
     Item then_fn = js_get_key_cstr(value, "then");
@@ -4566,8 +4565,7 @@ static int js_assert_append_value_type(char* buf, int buf_size, Item value) {
         return snprintf(buf, buf_size, "type string ('%.*s')", s ? (int)s->len : 0, s ? s->chars : "");
     }
     if (type == LMD_TYPE_FUNC) return snprintf(buf, buf_size, "function");
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ELEMENT ||
-        type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP) {
         char ctor_name[64];
         const char* class_name = js_assert_class_instance_name(value);
         if (strcmp(class_name, "Object") == 0 && js_get_constructor_name(value, ctor_name, sizeof(ctor_name))) {

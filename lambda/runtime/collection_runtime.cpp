@@ -76,18 +76,26 @@ void expand_list(List* list, Arena* arena) {
     list_relocate_owned_tail(list, old_items, previous_capacity, new_items, new_capacity);
 }
 
+// D2.6.6v2: a JS array's companion property map now lives in the array's OWN
+// attribute face — one tagged Item in an 8-byte buffer marked by
+// ArrayPropsShape — instead of a reserved slot at the top of the elements
+// buffer. The companion is still a real object (a sparse array's is a
+// SparseArrayMap with extra fields); what moved inline is the pointer. This
+// retires the `has_js_props` flag, the `extra` reservation, and the tail-shift
+// machinery that had to rebase embedded scalars to make room.
 bool js_array_has_props(const Array* arr) {
-    return arr && arr->has_js_props;
+    return arr && arr->type == &ArrayPropsShape && arr->data;
 }
 
 Map* js_array_props(const Array* arr) {
-    if (!js_array_has_props(arr) || !arr->items || arr->capacity <= 0) return NULL;
-    Item props_item = ((Item*)arr->items)[arr->capacity - 1];
+    if (!js_array_has_props(arr)) return NULL;
+    Item props_item = *(const Item*)arr->data;
     return get_type_id(props_item) == LMD_TYPE_MAP ? props_item.map : NULL;
 }
 
 int64_t container_tail_reserved(const Array* arr) {
-    return js_array_has_props(arr) ? 1 : 0;
+    (void)arr;
+    return 0;  // the companion no longer occupies an elements slot
 }
 
 int64_t container_dense_capacity(const Array* arr) {
@@ -96,70 +104,20 @@ int64_t container_dense_capacity(const Array* arr) {
 
 void js_elements_set_props(Array* arr, Map* props) {
     if (!arr || !props) return;
-
-    if (arr->type_id == LMD_TYPE_ARRAY_NUM) {
-        // Tune5 P5: ordinary numeric arrays reserve one raw eight-byte tail
-        // slot for the companion map; installing a named property must not
-        // reinterpret the numeric payload or force a representation promotion.
-        if (arr->extra < 1 || arr->capacity <= 0 || !arr->items) return;
-        RootFrame roots(2);
-        Rooted<ArrayNum*> rooted_arr(roots, (ArrayNum*)arr);
-        Rooted<Map*> rooted_props(roots, props);
-        arr = (Array*)rooted_arr.get();
-        props = rooted_props.get();
-        ((Item*)arr->items)[arr->capacity - 1] = {.map = props};
-        arr->has_js_props = 1;
+    if (js_array_has_props(arr)) {   // replace in place
+        *(Item*)arr->data = {.map = props};
         return;
     }
-
-    if (js_array_has_props(arr)) {
-        ((Item*)arr->items)[arr->capacity - 1] = {.map = props};
-        return;
-    }
-
     RootFrame roots(2);
     Rooted<Array*> rooted_arr(roots, arr);
     Rooted<Map*> rooted_props(roots, props);
+    void* buffer = heap_data_calloc(sizeof(Item));
+    if (!buffer) return;
     arr = rooted_arr.get();
-    int64_t dense_capacity = arr->capacity >= arr->extra ? arr->capacity - arr->extra : 0;
-    int64_t dense_required = arr->length < dense_capacity ? arr->length : dense_capacity;
-    while (!arr->items || dense_required + arr->extra + 2 > arr->capacity) {
-        int64_t old_capacity = arr->capacity;
-        expand_list((List*)arr, nullptr);
-        arr = rooted_arr.get();
-        if (arr->capacity <= old_capacity) return;
-    }
-    props = rooted_props.get();
-
-    // The props reservation is the high tail slot. Shift any existing scalar
-    // payloads down one slot and rebase only logical Items that point into them.
-    int64_t old_tail_start = arr->capacity - arr->extra;
-    if (arr->extra > 0) {
-        memmove(arr->items + old_tail_start - 1, arr->items + old_tail_start,
-            (size_t)arr->extra * sizeof(Item));
-        int64_t dense_count = arr->length < old_tail_start ? arr->length : old_tail_start;
-        for (int64_t i = 0; i < dense_count; i++) {
-            Item item = arr->items[i];
-                if (!(item._type_id == LMD_TYPE_FLOAT && item.double_ptr > 1 ||
-                        item._type_id == LMD_TYPE_INT64 || item._type_id == LMD_TYPE_UINT64)) continue;
-            Item* pointer = (Item*)item.double_ptr;
-            if (pointer < arr->items + old_tail_start ||
-                    pointer >= arr->items + arr->capacity) continue;
-            void* shifted = pointer - 1;
-            arr->items[i] = {.item = is_float_type_id(item._type_id) ? d2it(shifted) :
-                item._type_id == LMD_TYPE_INT64 ? l2it(shifted) : u2it(shifted)};
-        }
-    }
-    arr->items[arr->capacity - 1] = {.map = props};
-    arr->extra++;
-    arr->has_js_props = 1;
-    // Sparse arrays can have a spec length beyond their physical dense prefix.
-    // Promotion may allocate fresh slots after the last sparse-hole stamp;
-    // mark those slots as holes so iteration never exposes zeroed words as null.
-    int64_t promoted_dense_capacity = arr->capacity - arr->extra;
-    for (int64_t i = dense_required; i < promoted_dense_capacity; i++) {
-        arr->items[i] = {.item = ITEM_JS_DELETED_SENTINEL};
-    }
+    arr->type = &ArrayPropsShape;
+    arr->data = buffer;
+    arr->data_cap = (int)sizeof(Item);
+    *(Item*)arr->data = {.map = rooted_props.get()};
 }
 
 void array_push(Array* arr, Item item) {

@@ -406,6 +406,9 @@ typedef struct TypeMap : Type {
     // Lazily allocated only for shared JS shapes; non-JS/private shapes should
     // not pay for prototype-walk metadata they never use.
     struct JsProtoEntryCache* js_proto_entry_cache;
+    // D2.6.6v2 phase 2: the nominal record, or NULL for a structural shape.
+    // Authoritative; the container's `is_nominal` header bit only caches it.
+    struct TypeNominal* nominal;
 } TypeMap;
 
 typedef struct TypeMapTransition {
@@ -811,8 +814,34 @@ typedef uint8_t (*ConstraintFn)(uint64_t value);
 
 // TypeObject: nominally-typed map with methods
 // Extends TypeMap — inherits shape (fields), length, byte_size, type_index
-typedef struct TypeObject : TypeMap {
-    StrView type_name;          // nominal type name ("Point", "Circle")
+// D2.6.6v2 phase 2 (S2.1.4): the NOMINAL RECORD. Nominal-ness is a property of
+// the type descriptor, not a container kind — a nominal value is an ordinary
+// map or element whose shape points here. One record is shared by the declared
+// shape AND by every shape reached from it by extension, which is what lets an
+// open instance gain a field without ceasing to be an instance of its type
+// (S2.1.4 part 3, OB16); `is T` therefore compares this POINTER, never a name.
+// The record is sealed for the life of the evaluation (S2.1.4 part 2).
+typedef struct TypeNominal {
+    StrView type_name;            // "Point", "Circle"
+    struct TypeNominal* base;     // parent record, NULL if none
+    TypeMethod* methods;          // linked list head
+    TypeMethod* methods_last;     // linked list tail
+    int method_count;
+    struct AstNode* constraint;   // object-level that(...) AST, NULL if none
+    ConstraintFn constraint_fn;   // JIT-compiled constraint checker, NULL if none
+    int64_t content_length;       // declared content arity
+    TypeId struct_kind;           // the one structural kind this type declares
+} TypeNominal;
+
+// D2.6.6v2 phase 2: an object's shape extends TypeElmt, not TypeMap. A nominal
+// type declares ONE structural kind (S2.1.3v2) — map or element — and this shape
+// serves both: a nominal map simply leaves the element fields unused, while a
+// nominal element needs `name`/`content_length`/`ns` at TypeElmt's own offsets
+// so every element code path reads it correctly. Before this, an object's shape
+// was a TypeMap and element readers reached `content_length` at the wrong
+// offset, working only by accident where `type_name` happened to alias `name`.
+typedef struct TypeObject : TypeElmt {
+    StrView type_name;          // nominal type name ("Point", "Circle"); mirrors TypeElmt::name
     struct TypeObject* base;    // parent type for inheritance (NULL if no base)
     TypeMethod* methods;        // linked list of methods (head)
     TypeMethod* methods_last;   // linked list of methods (tail)
@@ -1088,7 +1117,45 @@ extern TypeType LIT_TYPE_U64;
 extern TypeType LIT_TYPE_F16;
 extern TypeType LIT_TYPE_F32;
 
+// D2.6.6v2 phase 2 (S2.1.1v3): the value's NOMINAL RECORD, or NULL when it is
+// structural. `A is object` is exactly "this returns non-NULL", and it is
+// orthogonal to the structural kind — a nominal map answers both `is map` and
+// `is object`. The record is reached through the shape, which is authoritative;
+// the container's header bit only caches the same answer.
+static inline struct TypeNominal* lambda_value_nominal(TypeId type_id,
+        const void* container) {
+    struct TypeMap* shape = lambda_attr_shape(type_id, container);
+    return shape ? shape->nominal : nullptr;
+}
+
+// The nominal record of a TYPE descriptor, or NULL if the type is structural.
+// Accepts the object tag too so it reads the same before and after the
+// representation flip retires it.
+static inline struct TypeNominal* type_nominal_record(const Type* t) {
+    // The base flag is the discriminator: only a real shape sets it, so this is
+    // safe to ask of a bare singleton Type as well.
+    if (!t || !t->is_nominal) return nullptr;
+    return ((const TypeMap*)t)->nominal;
+}
+
+// S11.3.1v2: `A is T` for a nominal T — the record chain is walked and compared
+// by POINTER, never by type name, so two modules' `Point`s stay distinct and
+// every shape extended from one declaration still answers yes (OB16, OB19).
+static inline bool lambda_nominal_derives_from(const struct TypeNominal* actual,
+        const struct TypeNominal* wanted) {
+    for (const struct TypeNominal* walk = actual; walk; walk = walk->base) {
+        if (walk == wanted) return true;
+    }
+    return false;
+}
+
 extern TypeMap EmptyMap;
+// D2.6.6v2: an array now has its own attribute face, so a JS array's companion
+// property map is held there — one tagged Item in an 8-byte buffer — instead of
+// in a reserved tail slot inside the elements buffer. This shape marks that
+// buffer. The companion stays a real object (a sparse array's companion is a
+// SparseArrayMap with its own fields), so what moved inline is the POINTER.
+extern TypeMap ArrayPropsShape;
 extern TypeElmt EmptyElmt;
 extern const Item ItemNull;
 extern const Item ItemError;

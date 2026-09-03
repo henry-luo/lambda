@@ -101,7 +101,7 @@ static int tls_append_received_suffix(char* out, int pos, int cap, Item value) {
     }
     if (type == LMD_TYPE_NULL) return tls_append_cstr(out, pos, cap, " Received null");
     if (type == LMD_TYPE_UNDEFINED) return tls_append_cstr(out, pos, cap, " Received undefined");
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP) {
         return tls_append_cstr(out, pos, cap, " Received an instance of Object");
     }
     return tls_append_cstr(out, pos, cap, " Received type object");
@@ -2171,7 +2171,7 @@ extern "C" Item js_tls_TLSSocket(Item socket_item, Item options_item) {
     Item obj = make_tls_socket_object(sock);
     js_set_key_cstr(obj, "authorized", (Item){.item = b2it(false)});
     js_set_key_cstr(obj, "alpnProtocol", make_string_item("http/1.1"));
-    if (get_type_id(socket_item) == LMD_TYPE_MAP || get_type_id(socket_item) == LMD_TYPE_OBJECT ||
+    if (get_type_id(socket_item) == LMD_TYPE_MAP ||
         get_type_id(socket_item) == LMD_TYPE_VMAP) {
         sock->borrowed_socket = socket_item;
         sock->has_borrowed_socket = true;
@@ -2210,7 +2210,7 @@ extern "C" Item js_tls_connect(Item options_item) {
     // extract port, host from options
     if (js_node_is_object_like(options_item)) {
         Item socket_item = js_get_key_cstr(options_item, "socket");
-        if (get_type_id(socket_item) == LMD_TYPE_MAP || get_type_id(socket_item) == LMD_TYPE_OBJECT ||
+        if (get_type_id(socket_item) == LMD_TYPE_MAP ||
             get_type_id(socket_item) == LMD_TYPE_VMAP) {
             use_existing_socket = true;
             existing_socket_item = socket_item;
@@ -2518,7 +2518,7 @@ static Item js_tls_server_address(void) {
 
 static JsTlsServer* tls_server_from_object(Item self) {
     TypeId type = get_type_id(self);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return NULL;
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return NULL;
     Item handle_item = js_get_key_cstr(self, "__server__");
     if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
     return (JsTlsServer*)(uintptr_t)it2i(handle_item);

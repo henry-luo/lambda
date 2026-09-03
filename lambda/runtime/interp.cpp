@@ -1432,7 +1432,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         ? (AstIdentNode*)receiver_node : NULL;
     TypeObject* static_receiver_type = method_member && method_member->object &&
             method_member->object->type &&
-            method_member->object->type->type_id == LMD_TYPE_OBJECT
+            type_nominal_record(method_member->object->type) != NULL
         ? (TypeObject*)method_member->object->type : NULL;
     TypeMethod* object_method = static_receiver_type && method_name
         ? ast_lookup_object_method(static_receiver_type, method_name->name) : NULL;
@@ -1447,7 +1447,9 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         Scratch receiver(f);
         receiver.set(eval_expr(f, method_member->object));
         if (interp_frame_pending(f)) return receiver.get();
-        if (get_type_id(receiver.get()) != LMD_TYPE_OBJECT) {
+        // D2.6.6v2 phase 2: a method receiver is any value carrying a record.
+        if (!lambda_value_nominal(get_type_id(receiver.get()),
+                (const void*)(uintptr_t)receiver.get().item)) {
             log_error("interp: object method receiver is not an object");
             return ItemError;
         }
@@ -1718,6 +1720,15 @@ static Function* interp_make_method_closure(Script* module,
     return fn.get();
 }
 
+// S12.3.3v2: bare `obj.m` is a bound value, not only a call. The runtime
+// member lanes live in lambda-eval/lambda-data-runtime and cannot reach T0's
+// receiver-boxing convention (a GC-visible env slot, not a raw self pointer),
+// so this is the seam they bind an un-JITted method through. The module falls
+// out of the method's own ast_module.
+Function* interp_bind_object_method(const TypeMethod* method, Item self) {
+    return interp_make_method_closure(NULL, method, self);
+}
+
 // ---------------------------------------------------------------------------
 // Containers
 // ---------------------------------------------------------------------------
@@ -1931,7 +1942,7 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
 
 static Item eval_object_literal(InterpFrame* f, AstObjectLiteralNode* node) {
     TypeObject* object_type = node ? (TypeObject*)node->type : NULL;
-    if (!object_type || object_type->type_id != LMD_TYPE_OBJECT) return ItemError;
+    if (!object_type || !type_nominal_record((Type*)object_type)) return ItemError;
 
     int field_count = (int)object_type->length;
     RootSpan values((size_t)(field_count > 0 ? field_count : 1));
@@ -1969,6 +1980,30 @@ static Item eval_object_literal(InterpFrame* f, AstObjectLiteralNode* node) {
     if (field_count > 0) {
         object_fill_items((Object*)(uintptr_t)object.get().item,
             (const Item*)(void*)words, field_count);
+    }
+    // S2.1.3: content children. Evaluated after the attributes so the object is
+    // already published in `object` while the content list allocates, and the
+    // receiver is re-read from the scratch slot after each item in case a
+    // nested allocation collected.
+    AstNode* content_node = node->content;
+    if (content_node) {
+        AstNode* first = ((AstListNode*)content_node)->item;
+        int content_count = 0;
+        for (AstNode* scan = first; scan; scan = scan->next) content_count++;
+        if (content_count > 0) {
+            RootSpan content_values((size_t)content_count);
+            uint64_t* content_words = content_values.words();
+            int ci = 0;
+            for (AstNode* scan = first; scan; scan = scan->next) {
+                Item value = eval_expr(f, scan);
+                // S9.3.1: insertion captures by value, as for attributes.
+                if (ast_expr_insertion_needs_capture(scan)) cow_capture_value(value);
+                content_words[ci++] = value.item;
+                if (interp_frame_pending(f)) return ItemNull;
+            }
+            object_content_fill_items((Object*)(uintptr_t)object.get().item,
+                (const Item*)(void*)content_words, ci);
+        }
     }
     return object.get();
 }
@@ -2310,8 +2345,7 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
     // Elements are maps for attribute lookup but lists for pipe traversal: a
     // group Element's attributes describe its key while its children are the
     // rows. Treating it as a map here discarded every grouped row (S10.1.3).
-    bool is_map = source_tid == LMD_TYPE_MAP || source_tid == LMD_TYPE_VMAP ||
-        source_tid == LMD_TYPE_OBJECT;
+    bool is_map = source_tid == LMD_TYPE_MAP || source_tid == LMD_TYPE_VMAP;
     SymbolKeyList* keys = is_map ? item_keys(source) : NULL;
 
     int64_t len = fn_len(source);
@@ -4708,7 +4742,8 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             return ItemError;
         }
         method_self = owned_item_slot_read((Item*)fn->closure_env, 1, 0, true);
-        if (get_type_id(method_self) != LMD_TYPE_OBJECT) {
+        if (!lambda_value_nominal(get_type_id(method_self),
+                (const void*)(uintptr_t)method_self.item)) {
             log_error("interp: bound object method receiver is invalid");
             return ItemError;
         }

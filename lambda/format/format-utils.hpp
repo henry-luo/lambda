@@ -21,7 +21,15 @@ public:
     virtual void symbol_value(const ItemReader& item, Symbol* sym) { (void)sym; unknown_value(item); }
     virtual void array_value(const ItemReader& item, ArrayReader arr) { (void)arr; unknown_value(item); }
     virtual void map_value(const ItemReader& item, MapReader map) { (void)map; unknown_value(item); }
-    virtual void object_value(const ItemReader& item, Object* obj) { (void)obj; unknown_value(item); }
+    // S2.1.3/OB8: an object IS a nominally-typed element, so by default it
+    // formats through the element handler with its type name as the tag. Every
+    // markup backend gets object output from its existing element code instead
+    // of a per-format copy; a backend with its own object convention (JSON's
+    // "@" type key) overrides this.
+    virtual void object_value(const ItemReader& item, Object* obj) {
+        if (!obj) { unknown_value(item); return; }
+        element_value(item, ElementReader(obj));
+    }
     virtual void element_value(const ItemReader& item, ElementReader elem) { (void)elem; unknown_value(item); }
     virtual void datetime_value(const ItemReader& item, DateTime* dt) { (void)dt; unknown_value(item); }
     virtual void unknown_value(const ItemReader& item) { (void)item; }
@@ -110,10 +118,13 @@ public:
             handlers.symbol_value(item, item.asSymbol());
         } else if (item.isArray() || item.isList()) {
             handlers.array_value(item, item.asArray());
+        } else if (lambda_value_nominal(item.getType(),
+                (const void*)(uintptr_t)item.item().item)) {
+            // D2.6.6v2 phase 2: nominal-ness is a descriptor property now, so a
+            // nominal value reaches the object hook whatever its structural kind.
+            handlers.object_value(item, (Object*)(uintptr_t)item.item().item);
         } else if (item.isMap()) {
             handlers.map_value(item, item.asMap());
-        } else if (auto object = item.asItem<LMD_TYPE_OBJECT>()) {
-            handlers.object_value(item, object.ptr());
         } else if (item.isElement()) {
             handlers.element_value(item, item.asElement());
         } else if (item.isDatetime()) {

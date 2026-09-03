@@ -97,8 +97,7 @@ static void append_invalid_arg_received(char* out, int out_size, Item value) {
         append_text(out, out_size, pos, " Received function ");
     } else if (type == LMD_TYPE_ARRAY) {
         append_text(out, out_size, pos, " Received an instance of Array");
-    } else if (type == LMD_TYPE_MAP || type == LMD_TYPE_ELEMENT ||
-               type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
+    } else if (type == LMD_TYPE_MAP || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP) {
         append_text(out, out_size, pos, " Received an instance of Object");
     } else {
         append_text(out, out_size, pos, " Received type object");

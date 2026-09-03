@@ -60,7 +60,11 @@ Type TYPE_RANGE = {.type_id = LMD_TYPE_RANGE};
 TypeArray TYPE_ARRAY;
 Type TYPE_MAP = {.type_id = LMD_TYPE_MAP};
 Type TYPE_ELMT = {.type_id = LMD_TYPE_ELEMENT};
-Type TYPE_OBJECT = {.type_id = LMD_TYPE_OBJECT};
+// D2.6.6v2 phase 2 (OB14): there is no object TypeId. `object` is still a TYPE
+// (S2.1.1v3) meaning "carries a nominal record", and it is always matched by
+// POINTER identity (`== &TYPE_OBJECT`), never by its tag; the tag here only
+// routes it into the container arm of the type switches.
+Type TYPE_OBJECT = {.type_id = LMD_TYPE_MAP};
 Type TYPE_TYPE = {.type_id = LMD_TYPE_TYPE};
 Type TYPE_FUNC = {.type_id = LMD_TYPE_FUNC};
 Type TYPE_ANY = {.type_id = LMD_TYPE_ANY};
@@ -114,7 +118,6 @@ extern "C" const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_MAP: return "map";
         case LMD_TYPE_VMAP: return "map";  // VMap appears as "map" to Lambda scripts
         case LMD_TYPE_ELEMENT: return "element";
-        case LMD_TYPE_OBJECT: return "object";
         case LMD_TYPE_TYPE: return "type";
         case LMD_TYPE_FUNC: return "function";
         case LMD_TYPE_ANY: return "any";
@@ -180,6 +183,7 @@ TypeType LIT_TYPE_F16;
 TypeType LIT_TYPE_F32;
 
 TypeMap EmptyMap;
+TypeMap ArrayPropsShape;
 TypeElmt EmptyElmt;
 TypeObject EmptyObject;
 
@@ -238,12 +242,20 @@ void init_typetype() {
 
     memset(&EmptyMap, 0, sizeof(TypeMap));
     EmptyMap.type_id = LMD_TYPE_MAP;  EmptyMap.type_index = -1;
+    // One pointer-width slot holding the companion as a tagged Item. `shape` is
+    // NULL, so the GC's shape walk is a no-op and the conservative data-word
+    // scan is what marks the companion — the same path a map's data takes.
+    memset(&ArrayPropsShape, 0, sizeof(TypeMap));
+    ArrayPropsShape.type_id = LMD_TYPE_MAP;  ArrayPropsShape.type_index = -1;
+    ArrayPropsShape.byte_size = sizeof(Item);
 
     memset(&EmptyElmt, 0, sizeof(TypeElmt));
     EmptyElmt.type_id = LMD_TYPE_ELEMENT;  EmptyElmt.type_index = -1;  EmptyElmt.name = {0};
 
     memset(&EmptyObject, 0, sizeof(TypeObject));
-    EmptyObject.type_id = LMD_TYPE_OBJECT;  EmptyObject.type_index = -1;
+    // D2.6.6v2 phase 2: the empty nominal shape is map-kinded like any
+    // attribute-only declaration; it carries no nominal record.
+    EmptyObject.type_id = LMD_TYPE_MAP;  EmptyObject.type_index = -1;
 }
 
 // Indexed by an Item's tag byte, so it must span the whole legal tag range
@@ -275,7 +287,6 @@ void init_type_info() {
     // zero-byte unknown fields and corrupt ordinary maps that store VMaps.
     type_info[LMD_TYPE_VMAP] = {sizeof(void*), "map", &TYPE_MAP, (Type*)&LIT_TYPE_MAP};
     type_info[LMD_TYPE_ELEMENT] = {sizeof(void*), "element", &TYPE_ELMT, (Type*)&LIT_TYPE_ELMT};
-    type_info[LMD_TYPE_OBJECT] = {sizeof(void*), "object", &TYPE_OBJECT, (Type*)&LIT_TYPE_OBJECT};
     type_info[LMD_TYPE_TYPE] = {sizeof(void*), "type", &TYPE_TYPE, (Type*)&LIT_TYPE_TYPE};
     type_info[LMD_TYPE_FUNC] = {sizeof(void*), "function", &TYPE_FUNC, (Type*)&LIT_TYPE_FUNC};
     type_info[LMD_TYPE_ANY] = {sizeof(TypedItem), "any", &TYPE_ANY, (Type*)&LIT_TYPE_ANY};
@@ -547,7 +558,7 @@ void array_set(Array* arr, int64_t index, Item itm) {
         break;
     }
     default:
-        if (LMD_TYPE_CONTAINER <= type_id && type_id <= LMD_TYPE_OBJECT) {
+        if (LMD_TYPE_CONTAINER <= type_id && type_id <= LMD_TYPE_ELEMENT) {
         }
     }
 }
@@ -792,9 +803,9 @@ void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
         }
         case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
         case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
-        case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+        case LMD_TYPE_ELEMENT:   {
             TypeId item_type = get_type_id(item);
-            if (item_type >= LMD_TYPE_RANGE && item_type <= LMD_TYPE_OBJECT) {
+            if (item_type >= LMD_TYPE_RANGE && item_type <= LMD_TYPE_ELEMENT) {
                 *(Container**)field_ptr = item.container;
             } else {
                 *(Container**)field_ptr = nullptr;
@@ -861,7 +872,7 @@ void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
                 break;
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
             case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
-            case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+            case LMD_TYPE_ELEMENT:   {
                 Container *container = item.container;
                 titem.container = container;
                 break;
@@ -983,7 +994,7 @@ Item typeditem_to_item(TypedItem *titem) {
         return ptr_val ? (Item){.item = (uint64_t)(uintptr_t)ptr_val} : ItemNull;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
-    case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
+    case LMD_TYPE_ELEMENT:  
         memcpy(&item_val, ((char*)titem) + 1, sizeof(uint64_t));
         if (item_val) {
             Container* container = (Container*)item_val;
@@ -1172,7 +1183,7 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
         break;
 
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
+    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:
         memcpy(&ptr_val, field_ptr, sizeof(void*));
         result.container = (Container*)ptr_val;

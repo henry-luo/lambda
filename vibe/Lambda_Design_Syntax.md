@@ -2885,7 +2885,9 @@ aliases — with **no quoted escape** (§7.24 rule 1).
 | Group | Words |
 |---|---|
 | Declaration & statement keywords (21) | `let` `pub` `var` `type` `fn` `pn` `view` `edit` `state` `if` `match` `for` `while` `break` `continue` `return` `raise` `import` `apply` `not` `last` |
-| Base-type names (35) | `null` `any` `bool` `int` `integer` `float` `f64` `f32` `f16` `complex` `decimal` `number` `datetime` `date` `time` `binary` `range` `list` `array` `map` `element` `entity` `object` `function` `error` `string` `symbol` `i8` `i16` `i32` `i64` `u8` `u16` `u32` `u64` |
+| Base-type names (34) | `null` `any` `bool` `int` `integer` `float` `f64` `f32` `f16` `complex` `decimal` `number` `datetime` `date` `time` `binary` `range` `list` `array` `map` `element` `object` `function` `error` `string` `symbol` `i8` `i16` `i32` `i64` `u8` `u16` `u32` `u64` |
+
+`entity` left this table on 2026-09-03 (S2.1.1v2, OB1): it never named a type, and `object` is the one nominal kind. Until the lexer, reference grammar, and `is_type_keyword` drop it, `let entity = 1` is still wrongly barred.
 | Named values (4) | `true` `false` `inf` `nan` |
 
 **`int64` is not on this list and is not a type.** `i64` is the one surface

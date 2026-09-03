@@ -1,6 +1,6 @@
 # LambdaJS — Objects, Properties & Prototypes
 
-> **Last verified against tree:** 2026-08-13 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-09-03 *(object/map representation re-verified for D2.6.9; the rest still carries its initial stamp from git history)*
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how JS objects are represented (Lambda `Map` + `TypeMap` shape), how property attributes are stored, the `[[Get]]`/`[[Set]]` dispatch pipelines, `Object.defineProperty`, the prototype chain, realm-local intrinsic properties, symbol-keyed properties, and constructor shape pre-allocation.
 >
@@ -11,7 +11,8 @@
 
 ## 1. Purpose & scope
 
-JS objects are Lambda `Map` structs (`LMD_TYPE_MAP`) carrying a `TypeMap` "shape" descriptor; functions (`LMD_TYPE_FUNC`) and arrays (`LMD_TYPE_ARRAY`) keep ordinary properties in side maps. Property semantics (attributes, accessors, prototype lookup, exotic objects) are layered on top of this representation. The shape *layout* and GC handling are shared with [JS_03 — Value Model & Memory](JS_03_Value_Model.md); this document focuses on the property/prototype machinery. Symbol *values* (the `Symbol` builtin) are in [JS_10 — Standard Built-in Library](JS_10_Builtins.md); here we cover only their use as property keys.
+JS objects are Lambda `Map` structs (`LMD_TYPE_MAP`) carrying a `TypeMap` "shape" descriptor — **never Lambda `Object`s** (`LMD_TYPE_OBJECT`), which today is a separate kind produced only by a Lambda `type T { … }` declaration and reaches guest code only inbound (**D2.6.9v2**, the shipped state). **Ruled forward as D2.6.9v3:** once nominal-ness becomes a descriptor property and the object TypeId retires (D2.6.6v2 phase 2), a JS object is a *nominal* Lambda map — its class is its nominal record — and therefore IS a Lambda object; the naming trap below then dissolves. The naming is the trap: "object" here means Lambda's nominal kind, while the thing a JS program calls an object is a map. Since D2.6.6 made `Object` an alias of `struct Element`, an inbound Lambda object is element-shaped, so any guest path that accepts `LMD_TYPE_OBJECT` must read its attribute face through `lambda_attr_shape`/`lambda_attr_data` — punning it to a `Map*` reads its `items` pointer as `type`. Map-only machinery (the property extension table, iterator/proxy/sparse map kinds, the `js_native_trace` hook) stays gated to `LMD_TYPE_MAP`.
+Functions (`LMD_TYPE_FUNC`) and arrays (`LMD_TYPE_ARRAY`) keep ordinary properties in side maps. Property semantics (attributes, accessors, prototype lookup, exotic objects) are layered on top of this representation. The shape *layout* and GC handling are shared with [JS_03 — Value Model & Memory](JS_03_Value_Model.md); this document focuses on the property/prototype machinery. Symbol *values* (the `Symbol` builtin) are in [JS_10 — Standard Built-in Library](JS_10_Builtins.md); here we cover only their use as property keys.
 
 The Tune6 object migration applies **D3.4.7**: descriptor metadata is
 `ShapeEntry::flags`, accessors are `JsAccessorPair` slots, and built-in brands

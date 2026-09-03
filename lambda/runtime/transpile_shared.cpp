@@ -149,7 +149,7 @@ bool is_direct_access_type(TypeId type_id) {
     case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
     case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
-    case LMD_TYPE_OBJECT: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
+ case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:
         return true;
     default:

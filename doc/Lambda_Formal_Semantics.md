@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 19.0.0 (2026-08-30)
+**Spec version:** 21.0.1 (2026-09-03)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -40,7 +40,8 @@ R1–R5 and the effect doctrine
 ([`Lambda_Semantics_Features.md`](../vibe/Lambda_Semantics_Features.md));
 C4/CW ([`Lambda_Design_Runtime_COW.md`](../vibe/Lambda_Design_Runtime_COW.md));
 surface syntax
-([`Lambda_Design_Syntax.md`](../vibe/Lambda_Design_Syntax.md)).
+([`Lambda_Design_Syntax.md`](../vibe/Lambda_Design_Syntax.md));
+OB1–OB22 ([`Lambda_Type_Object.md`](../vibe/Lambda_Type_Object.md)).
 PTH1v2, PTH2v2, PTH3–PTH15, PTH16v3, PTH17–PTH29
 ([`Lambda_Type_Path.md`](../vibe/Lambda_Type_Path.md)).
 Appendix C maps sections to records.
@@ -107,7 +108,8 @@ harnesses.
   arrays, decimal width, lane selection — never affect results. [S1.6]
 - **SI2 — COW unobservability.** Sharing until first mutation is
   undetectable; `let`-finality holds absolutely; reference identity is not
-  observable (no `===`, ever). [S9.1, S5.1.4]
+  observable — `===` compares node identity carried as data, never whether
+  two bindings share storage (S5.1.4v2). [S9.1, S5.1.4v2]
 - **SI3v2 — Inference evaluation-invariance** (the gradual guarantee,
   revised 2026-08-18). **A script with no type error evaluates identically
   regardless of inference**: erasing all inferred types and running boxed
@@ -178,15 +180,52 @@ harnesses.
 
 ### S2.1 Types
 
-- **S2.1.1** Scalars: `null`, `bool`, `int`, `integer`, `i64`, `u64`,
+- **S2.1.1v3** Scalars: `null`, `bool`, `int`, `integer`, `i64`, `u64`,
   sized ints `i8 i16 i32 u8 u16 u32`, `f16 f32`, `float`/`f64`,
   `decimal`, `string`, `symbol` (with `path` as a special symbol), `binary`,
   `datetime` (with `date`/`time` sub-kinds). Containers: `range`, `list`,
   `array` (transparently unboxed numeric variants), `map`, `element` (a list of
-  children *and* a map of attributes), `object` (nominally-typed map).
-  First-class: `function`, `type`, `error`.
+  children *and* a map of attributes). First-class: `function`, `type`,
+  `error`. **`object` is a nominal container, not a container kind**: a map,
+  array, or element whose type is nominal (S2.1.4). `A is object` asks whether
+  A carries a nominal type and is orthogonal to the structural test, so a
+  nominal map is both `map` and `object`. `object` remains a valid type and a
+  valid order band (S6.2.1). This is deliberately **not** the OOP sense in
+  which everything is an object: a structural value is not one. `entity` is
+  not a type — the word is retired from the keyword table. [OB1, OB2, OB13]
 - **S2.1.2** `number` is a declared union only; `type()` never returns it, an
   alias, or a storage-tier name. Aliases in, canon out. [NM §2.6]
+- **S2.1.3v2*** An object type `type T { … }` declares a structure of exactly
+  one structural kind — map, array, or element — plus methods and
+  constraints, each optional; a content pattern is legal only when that kind
+  admits content. Its literal is the element form `<T a: 1, "child">` under
+  S16.9.3's two-regime commas, whatever the kind. A derived type
+  (`type U : T`) has T's kind — **inheritance never changes the base kind** —
+  merges attributes with its base, and its content pattern **replaces** the
+  base's. When formatted to a markup format the type name is the tag. Input
+  without a schema yields structural values only; input with a schema —
+  `input(doc, schema: …)`, or a document that declares its own schema —
+  yields the same maps and elements **stamped** with the declared nominal
+  types. Structural elements never carry methods. [OB2, OB3, OB7–OB9, OB14,
+  OB17]
+- **S2.1.4*** **A nominal instance is sealed to its type and open in its
+  fields.** Three parts. (1) The instance's binding to its nominal type is
+  sealed: it changes only by instance type alteration (S2.1.5). (2) The
+  nominal type itself is sealed during evaluation: it does not change while a
+  program runs. (3) The instance's layout follows its type — declared fields
+  at their declared positions — but the instance is **open by default** and
+  may hold fields the type does not declare. Extending an instance with an
+  extra field is an ordinary S9.1.6 member addition and a shape transition,
+  and every shape so reached **shares the one nominal record**: the value
+  remains an instance of its type, its methods still resolve, and the
+  declared prefix keeps its layout. SO9's closed-shape opt-in remains the
+  reserved route to a type that forbids extras. [OB15, OB16]
+- **S2.1.5*** **Instance type alteration is reconstruction.** A future
+  operation may give an existing instance a different nominal type; it builds
+  the instance anew under the new type, and is the only way the S2.1.4(1)
+  binding changes. It acts on one instance. Altering a **type** itself —
+  which would touch every instance — is a separate matter, not ruled, and
+  would relax S2.1.4(2). Neither exists today (SO42, SO43). [OB18]
 
 ### S2.2 Empty and solid values
 
@@ -220,7 +259,7 @@ harnesses.
   dotted/indexed forms. [PTH1v2, PTH2v2, PTH3–PTH4, PTH11, PTH17]
 - **S2.4.2v4*** Every hierarchical reference is a typed root plus ordered
   operations. Ordinary keys are `NameKey` or non-negative `IntKey`; a dynamic
-  subscript is evaluated and normalized through S8.2.1v2 before lookup.
+  subscript is evaluated and normalized through S8.2.1v3 before lookup.
   A key-domain mismatch is an invalid member access: its read yields `null`
   under S7.1.1v2 and its write raises through the hard `T^` channel under
   S7.1.3v2/S7.4.2. It never implies container conversion. Root, parent, and
@@ -230,7 +269,7 @@ harnesses.
   `./`. Parent steps apply left-to-right: they remove a preceding child,
   accumulate at the relative root, and clamp at an anchored root. Equality,
   hashing, printing, target resolution, and
-  `base ++ relative_suffix` observe the same normalization. [S1.6, S8.2.1v2,
+  `base ++ relative_suffix` observe the same normalization. [S1.6, S8.2.1v3,
   PTH7–PTH9, PTH12–PTH14, PTH25, PTH28]
 - **S2.4.3v3*** Paths, names, symbols, and member expressions use this one
   reference scheme but retain distinct evaluation contracts. Paths are
@@ -251,7 +290,7 @@ harnesses.
   spelling is retired with the divider `;`.
   Static specialization and generic dynamic lookup must be semantically
   identical; the scheme introduces no mutable reference identity. [S1.6,
-  S5.1.4, S8.2.2v2, S9.1.5, S16.9.3, S16.9.4, PTH13–PTH15, PTH16v3, PTH20]
+  S5.1.4v2, S8.2.2v2, S9.1.5v2, S16.9.3, S16.9.4, PTH13–PTH15, PTH16v3, PTH20]
 - **S2.4.4*** Each evaluation's immutable resolver deterministically maps
   logical `/` prefixes, namespaces, and provider aliases to qualified roots.
   Resolution obeys lexical visibility, exports, sandboxing, and capabilities;
@@ -268,7 +307,7 @@ harnesses.
   heading a dotted chain is reserved as an absolute-path root. Rooted and
   absolute path values retain distinct root kinds even when they resolve to
   the same qualified target. All three forms use the same typed operations.
-  [S5.1.4, PTH21–PTH28]
+  [S5.1.4v2, PTH21–PTH28]
 
 ---
 
@@ -456,9 +495,17 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
 - **S5.1.3** Structural recursion is depth-limited; exceeding the limit
   **raises** a system fault (a wrong `false` would be silent; a hang worse).
   Cycles are unconstructible natively (§S9) but importable via interop. [C8.5-8]
-- **S5.1.4** `==` is the only equality. Values have no identity; no `===`,
-  `ref_eq`, or identity operator exists or ever will — reference identity is
-  not observable (S1.6). [C4, C8]
+- **S5.1.4v2*** `==` is the only **value** equality and compares content
+  alone. **Identity is data, not a reference**: a container loaded from or
+  created within an addressable document may carry a universal node
+  identity — conceptually the document path plus the node's id within it,
+  one scheme across local and online documents. `===` compares that identity
+  and never content; an operand without identity compares `===`-false,
+  never equal to anything. `==`, hashing, and the total order ignore
+  identity. No `ref_eq` or address comparison exists — reference identity
+  (sharing versus copying) remains unobservable (S1.6, S9.1.2). Which
+  operations preserve an identity and how it is carried are open (SO39).
+  [C4, C8, OB10]
 
 ### S5.2 Numbers
 
@@ -476,8 +523,16 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
 
 - **S5.4.1** Map equality is key-unordered (JSON/XML, the document standards);
   accepted consequence: `a == b` does not imply `format(a) == format(b)`. [C8.6-R]
-- **S5.4.2** Objects are a distinct nominal family; a plain map never equals
-  an object.
+- **S5.4.2v3*** A nominal value equals only a value of the **same nominal
+  type**, whatever its structural kind; a structural value never equals a
+  nominal one, even with identical fields. Sameness of type is identity of
+  the shared nominal record (S2.1.4), never equality of the type's name, so
+  two modules' `Point`s stay distinct and an imported type stays itself.
+  Given the same type, equality is structural over the **full** key set —
+  declared fields and any extras alike — as an unordered map, then content
+  ordered where the kind has content (the S5.4.3 shape). Methods belong to
+  the type and identity is not content (S5.1.4v2), so neither takes part.
+  [OB4, OB10, OB16, OB19]
 - **S5.4.3** Element equality = tag + namespace, attributes as an unordered
   map (XML InfoSet), children ordered (document order is meaning).* [C8.6-R]
 
@@ -528,11 +583,14 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
 
   *Null is less than everything (absence); nan and error are beyond
   everything (broken).* [C11.4]
-- **S6.2.2** The total order **totally refines `==`** — equal values always
+- **S6.2.2v3** The total order **totally refines `==`** — equal values always
   tie; ties resolve by stability. Numbers order by mathematical value with no
   representation ranks. Within-band: strings/symbols/binaries bytewise UTF-8
   (no locale collation); sequences lexicographic; maps via canonically sorted
-  keys; elements by tag, attributes, children. [C11.4]
+  keys; elements by tag, attributes, children; objects — nominal values of
+  ANY structural kind, the object band being orthogonal to the structural
+  kinds (S2.1.1v3) — by type name, then attributes, then content.* [C11.4,
+  OB4, OB13]
 - **S6.2.3** Sort is stable; `desc` is **full reversal** — one pure order, no
   pinning exceptions. [C11.4]
 
@@ -876,8 +934,9 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   identically in iteration and membership: `for (x in coll)` ↔ `x in coll`;
   `for (k at m)` ↔ `k at m`. Operand order: member left, container right.
   *Whatever `for…in` walks, `in` tests.* [C5.3a]
-- **S8.1.2** On elements, `in` ranges over attribute values then children;
-  `at` ranges over attribute keys — one meaning across the map/list duality.
+- **S8.1.2v2** On elements and objects, `in` ranges over attribute values
+  then children; `at` ranges over attribute keys — one meaning across the
+  map/list duality. [OB4]
 - **S8.1.3*** **Axis and arity are independent.** The axis (`in`/`at`) selects
   WHICH members are walked; the arity of the binding selects the PROJECTION
   over those same members. One name binds the axis's own element — `for (x in
@@ -892,7 +951,7 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
 
 ### S8.2 The key space
 
-- **S8.2.1v2*** Every container has a fixed key domain. The sequence face of
+- **S8.2.1v3*** Every container has a fixed key domain. The sequence face of
   arrays, lists, and ranges uses non-negative `IntKey`s. An `int`, `float`, or
   `decimal` subscript normalizes to an `IntKey` only when its value is finite,
   mathematically integral, exact in the index integer domain, and
@@ -900,11 +959,14 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   Fractional values such as `5.5`, negative integral positions, strings, and
   symbols do not name sequence members. The named face of a map accepts
   string and symbol subscripts as `NameKey`s; the empty string is a valid,
-  distinct name rather than absence. An element exposes both faces: an
-  `IntKey` selects a content child, while a `NameKey` selects an attribute.
+  distinct name rather than absence. An element or an object exposes both
+  faces: an `IntKey` selects a content child, while a `NameKey` selects an
+  attribute.
   Any subscript not admitted by the selected container face is an invalid
   member access: the read yields `null`, while the write raises a hard error
-  under S7.1.3v2/S7.4.2.
+  under S7.1.3v2/S7.4.2. On an object a `NameKey` subscript is the dynamic
+  form of dot — `obj["m"]` resolves exactly as `obj.m` does (S12.3.3v2),
+  reaching the type's methods before yielding `null`.
   `for (k, v in c)` exposes the resulting canonical key uniformly
   (`[for (k, v in [10,20]) k]` → `[0, 1]`). [C5.3b]
 - **S8.2.2v2*** A *name* is a `NameKey`: string and symbol subscripts with the
@@ -913,17 +975,28 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   `1 at [10, 20, 30]` is **false** — the narrower reading is what lets
   `for (k at e)` give an element's attributes without its children; an index
   bound is written `i < len(arr)`. [C5.3b; §8.0.1 record]
+- **S8.2.3*** **Methods are members of the type, never of the value.** An
+  object's key domain is its attributes and content; its methods live on the
+  type value `T`. Everything that walks the key domain — `in`, `at`,
+  `for … in`/`for … at`, `len`, `keys`/`values`/`names`, `==`, the total
+  order, formatting — sees attributes and content only: `"m" at obj` is
+  false even when `obj.m` resolves a method, exactly as `"sum" at {a: 1}`
+  is false today while `{a: 1}.sum()` calls the builtin. `"m" at T` may be
+  true. Member access — `obj.m` and its dynamic form `obj["m"]`, one
+  operation — resolves beyond the key domain (S12.3.3v2); membership and
+  iteration do not. [OB4, OB5]
 
 ### S8.3 `len`
 
-- **S8.3.1** The law: **`len(x)` is the number of iterations `for (i in x)`
+- **S8.3.1v2** The law: **`len(x)` is the number of iterations `for (i in x)`
   performs.** Consequences, not separate rules: `len("str")` = 3;
   `len([[1,2],[3]])` = **2** (shallow — the count indexing needs);
   `len({a: null, b: 2})` = 2; `len(null)` = 0 (absence is the empty
   sequence); `len(err)` = **error** (iterating an error yields an error, not
   nothing — collapsing it onto 0 would make a failed computation
   indistinguishable from an empty one); `len(<e a:1, b:2, "t">)` = **3**
-  (attributes + children). [§8.1 record]
+  (attributes + children); `len(<Point x: 1, "t">)` = **2** for an object
+  no matter how many methods `Point` declares (S8.2.3). [§8.1 record, OB4]
 - **S8.3.2*** Lazy sequences: a forceable stream's `len` forces and returns
   the actual size; a non-forceable/infinite stream's `len` is **`inf`** — the
   honest answer, impossible to mistake for a size. Consequently a `for` over
@@ -974,9 +1047,12 @@ construct; `let` is final; there is no global mutable state.* [C4, RG14]
   the C4 record, corrected 2026-08-28. (A non-escaping
   nested `pn` used only in call position may later be allowed direct access
   — designed, deferred.)
-- **S9.1.5** No reference cells; structural `==` is the only equality.
-  Cycles are unconstructible, so `==` is total and no cycle collector is
-  needed.
+- **S9.1.5v2** No reference cells; structural `==` is the only value
+  equality (`===` compares identity data, S5.1.4v2, and creates no
+  reference). The value model is a tree: cycles are unconstructible, so
+  `==` is total and no cycle collector is needed; a cross-reference is
+  data — an identity or a key resolved through its document, the way a
+  foreign key resolves through its table. [OB10]
 - **S9.1.6*** Member/index assignment may update or add only a member admitted
   by the container's existing key domain; it never changes the container kind.
   Thus `var a = []; a["str"] = 1` raises under S7.1.3v2 and `a` remains an array
@@ -984,7 +1060,7 @@ construct; `let` is final; there is no global mutable state.* [C4, RG14]
   whole-binding replacement with a newly constructed value, for example
   `var a = [1]; a = {value: 1}`. Such reassignment remains subject to the
   binding's declared type; an unannotated `var` may change runtime type under
-  S12.2.1. [S8.2.1v2, S9.1.2, C5.3b]
+  S12.2.1. [S8.2.1v3, S9.1.2, C5.3b]
 
 - **S9.1.7** **No global mutable state.** A mutable binding cannot be declared
   at module scope: there is no script-level global variable. Every mutable root
@@ -1103,10 +1179,12 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   `~.~~.~~.a`; it never denotes a relative path, whose form starts with `.`.
   [S10.1.2,
   S10.1.3, PTH6]
-- **S10.4.3*** Contextual parent navigation is occurrence-based and carries
-  lineage in the evaluation context as a navigation path, cursor, or zipper.
-  It never adds parent pointers or observable identity to Lambda containers or
-  document values. [S1.4, S1.6, S9.1, S9.3, PTH10]
+- **S10.4.3v2*** Contextual parent navigation is occurrence-based and
+  carries lineage in the evaluation context as a navigation path, cursor, or
+  zipper. It never adds parent pointers to Lambda containers or document
+  values; node identity (S5.1.4v2) is data a document assigns, not lineage,
+  and a document resolves a node's parent from it. [S1.4, S1.6, S9.1, S9.3,
+  PTH10, OB10]
 
 ### S10.5 Root navigation
 
@@ -1120,10 +1198,10 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   the active navigation path/zipper; a declared root-aware model supplies its
   own root; a standalone hierarchical value is its own root. Absence of a root
   relation yields `null` and chains by S7.1.1v2. [PTH26–PTH28]
-- **S10.5.3*** Dynamic root navigation is occurrence-based. Its lineage lives
-  in the evaluation context as a navigation path, cursor, or zipper; it never
-  adds root/parent pointers or observable identity to Lambda values. [S1.4,
-  S1.6, S9.1, S9.3, PTH29]
+- **S10.5.3v2*** Dynamic root navigation is occurrence-based. Its lineage
+  lives in the evaluation context as a navigation path, cursor, or zipper; it
+  never adds root/parent pointers to Lambda values, and node identity
+  (S5.1.4v2) is not lineage. [S1.4, S1.6, S9.1, S9.3, PTH29, OB10]
 
 ---
 
@@ -1175,11 +1253,14 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 
 ### S11.3 Structural `is`, nominal objects
 
-- **S11.3.1** `is` is structural for maps/arrays/elements (extra fields
-  permitted; key lookup by name) and nominal for object types. `is` is
-  type-directional: `3.0 is int` is false even though a deferred `int`
+- **S11.3.1v2** `is` is structural for maps/arrays/elements (extra fields
+  permitted; key lookup by name) and nominal for object types: `A is T` for a
+  nominal `T` holds when A's nominal record is T's or derives from it, and
+  `A is object` holds when A carries any nominal record. The two axes are
+  independent — a nominal map satisfies both `is map` and `is object`
+  (S2.1.1v3). `is` is type-directional: `3.0 is int` is false even though a deferred `int`
   boundary admits `3.0` (S11.4.5) — membership asks what a value *is*; the
-  boundary asks what it may *satisfy*. [C7, TE-6]
+  boundary asks what it may *satisfy*. [C7, TE-6, OB13]
 
 ### S11.4 Declared types are contracts
 
@@ -1272,13 +1353,27 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 - **S12.3.2** Two dynamic-call restrictions are deliberate: a dynamic call
   with named arguments is rejected, and a dynamic call to a `var`/inout
   signature is rejected (a value span carries no writable caller location).
-- **S12.3.3** **A member call resolves against the receiver first.** For map,
-  element, and object types, `x.name(...)` looks up a user-defined field or
-  method named `name` on `x` BEFORE any method-eligible builtin, so a member
-  shadows a system function of the same name — a map field or object method
-  called `sum` wins over the built-in `sum()` — without this, every builtin
-  name would be a silent latent trap in user types. The shadow-proof accessor
-  for intrinsic names remains `name(item)` (S15.4).
+- **S12.3.3v2*** **Member access is resolution, not membership.** `x.name`
+  and its dynamic form `x["name"]` are one operation: resolve the receiver's
+  key domain (an attribute by name), then the receiver's type — its own
+  methods, then the base chain — and stop at the first hit; nothing found is
+  `null` (S7.1.1v2). The **member-call form** `x.name(...)` adds one more
+  tier after those: a method-eligible builtin. So a member shadows a system
+  function of the same name — a map field or object method called `sum` wins
+  over the built-in `sum()` — without this, every builtin name would be a
+  silent latent trap in user types. The builtin tier is a call-site rule
+  only: bare `x.sum` on a map with no such field is `null`, never a bound
+  builtin, so probing a map by key stays safe. S8.2.3 keeps membership and
+  iteration on the key domain. A bare `x.m` naming an `fn` method is a
+  **bound function value**: a closure
+  whose environment is the receiver, captured by value (S9.3.1), equal to
+  another bound method iff same definition site and `==` receivers
+  (S5.5.1), and callable through `call` (S12.3.4) with the receiver already
+  supplied. A `pn` method is **call-only**: taking it as a value is a
+  compile error, for S12.3.2's reason — a value span carries no writable
+  location, so a detached `pn` could only mutate its own copy. The
+  shadow-proof accessor for intrinsic names remains `name(item)` (S15.4).
+  [OB5, OB6]
 
 - **S12.3.4*** **`call(f, args)` is the dynamic-application form.** It
   applies `f` to the members of the array `args` as individual arguments,
@@ -1330,7 +1425,7 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   maximum silent-capture protection, but it freezes the stdlib namespace;
   the warning recovers the protection (argument in Design_Syntax §7.25).
   Reaching a shadowed builtin from inside the shadowing module is
-  deliberately unspecified (SO37). [S1.11, S12.3.3, Design_Syntax §7.25]
+  deliberately unspecified (SO37). [S1.11, S12.3.3v2, Design_Syntax §7.25]
 
 ### S12.4 Resources
 
@@ -1890,7 +1985,7 @@ governs how an under-determined case here is resolved.
   shadows a system function under S12.3.7, the qualified spelling still
   reaches the builtin: `let sum = 5` leaves `lambda.sys.sum(xs)` working.
   This closes SO37 and needs no new syntax — it is an ordinary member access
-  on an imported module (S12.3.3). The **`lambda` namespace root is
+  on an imported module (S12.3.3v2). The **`lambda` namespace root is
   reserved**: it may not name a binding (S16.10.1v2), so the escape can
   never itself be captured — unlike Python's shadowable `builtins`.
   Qualification is unnecessary for the reserved core (`int`, `string`,
@@ -1907,11 +2002,17 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 
 | Ruling | Status |
 |---|---|
-| S2.4.1v2, S2.4.2v4, S2.4.3v3–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19, with the S2.4.3v3 spelling re-verified on 2026-08-28: maximal namespace-qualified element/attribute names, the undelimited relative-path element child `<svg \.rect>` (no `;`, no comma), logical `/.a`, relative `\.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. The default resolver qualifies logical roots to local `file./`; generalized immutable mount tables, remote transport, network hostname discovery, and complete S8.2.1v2 key normalization remain deferred. |
+| S2.4.1v2, S2.4.2v4, S2.4.3v3–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19, with the S2.4.3v3 spelling re-verified on 2026-08-28: maximal namespace-qualified element/attribute names, the undelimited relative-path element child `<svg \.rect>` (no `;`, no comma), logical `/.a`, relative `\.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. The default resolver qualifies logical roots to local `file./`; generalized immutable mount tables, remote transport, network hostname discovery, and complete S8.2.1v3 key normalization remain deferred. |
 | S4.8.1 | Float printer is not yet shortest-round-trip (`0.1 + 0.2` prints `0.3`). |
 | S5.3.1 | `ArrayNum ==` is representation-sensitive in known cases — ruled a bug; also gates the data-processing engines (P0/FC8). |
 | S5.4.3 | Element `==` defect (map-cast layout bug) — priority fix in the C8.5 bug list. |
 | S5.5.1 | Function self-equality defect open; normalized-AST hash awaits `compile()` (S15.3). |
+| S8.3.1v2 (element arm) | **KNOWN DIVERGENCE, pre-existing, deliberately left.** The law says `len(<e a:1, b:2, "t">)` is 3 — what `for (x in e)` walks — but the element arm returns the child count alone (1). Conforming was implemented and measured: it moves 44 corpus goldens and breaks the child-indexing idiom `for (i in 0 to len(e) - 1) e[i]`, because an IntKey subscript reaches only children (S8.2.1v3) while the conformant `len` also counts attributes. Closing it needs a companion ruling for a child-count or child-index spelling first. Objects are NOT divergent — their arm counts attributes plus content, matching this ruling's own `len(<Point x: 1, "t">)` = 2 example. Fixture `len_iter_law.ls` pins the divergence; tracked as [LR09-8](../vibe/Lambda_Issue_Ledger.md). |
+| S8.2.3, S12.3.3v2 | **Conformant as of 2026-09-03**, with one deliberate substitution. `lambda_object_member` is the single resolver for both member lanes — the ANY lane (`fn_member`) and the static lane (`item_attr`), which previously diverged: a bare `obj.m` bound on one and read `null` on the other. It resolves the key domain, then the type's own methods, then the base chain; `lambda_object_find_method` is the one walk. A bare `fn` method now yields a receiver-captured closure on both tiers (T0 binds through the new `interp_bind_object_method` seam, since an un-JITted method has no `compiled_fn`), and `obj["m"]` resolves identically to `obj.m`. `len`, `in`, `at` and the projections were already key-domain-only and are unchanged. **Gap:** S12.3.3v2 rules a bare `pn` method reference a compile error; it is not rejected at all today. The rejection cannot live in the runtime member lane — MIR lowers a `pn` method *call* by lowering its callee through that same lane, so refusing there makes the call a silent no-op on the JIT tier. It needs an AST flag plus a validation point in build_ast, which alone can tell a bare reference from a sanctioned callee. Tracked as [LR02-18](../vibe/Lambda_Issue_Ledger.md). Fixtures: `test/lambda/object_method_value.ls`, `object_method_receiver.ls`, `proc/object_method_write.ls`; baseline 4082/4082. |
+| S2.1.1v3, S2.1.3v2, S2.1.4, S2.1.5, S5.4.2v3, S6.2.2v3, S11.3.1v2 | **Conformant as of 2026-09-03.** Nominal-ness is a property of the type descriptor, carried by a `TypeNominal` record allocated once per declaration and cached by an `is_nominal` base flag (D2.6.6v2, D2.6.11). A nominal value wears its DECLARED structural kind, so an attribute-only type yields maps and a type with a content pattern yields elements, and `is object` / `is map` read as the independent axes S2.1.1v3 rules. Nominal sameness is record identity rather than name equality, so two modules' `Point`s stay distinct while every shape grown from one declaration still answers `is T` — which is also what makes S2.1.4 part 3 work: an undeclared field grows the shape and the grown shape points at the same record. The object TypeId is gone from the enum entirely; `object` survives as a TYPE matched by pointer identity. Fixtures `test/lambda/object_nominal.ls` and `proc/object_open_instance.ls`; baseline 4085/4085, exact tier parity, stable under forced GC. Still open: schema-driven input producing objects (S2.1.3v2), and the S12.3.3v2 bare-`pn` rejection tracked as [LR02-18](../vibe/Lambda_Issue_Ledger.md). |
+| S2.1.1v2, S5.4.2v2, S6.2.2v2, S8.1.2v2, S8.2.1v3, S8.3.1v2 (object arm) | **Shipped state under the superseded v2 rulings (2026-09-03).** `entity` is retired from all three keyword tables (C lexer `base_types`, `grammar.js` `_base_type_kw`, `is_type_keyword`) and the reference grammar is regenerated; `let entity = 1` is now legal, where it was `error[E201]`. Objects carry content (D2.6.6 — `Object` is an alias of `struct Element`) and conform across the whole surface: `len` is attributes + content, `in`/`at` walk attribute values then children, an IntKey subscript selects a child, equality is nominal type + unordered attributes + ordered content, ordering is type name then attributes then content, both clone paths copy content, and printing emits round-trippable `<T a: 1, "child">`. Three pre-existing defects were fixed on the way: `item_keys` had NO object arm, so `for (v in obj)` yielded nothing while `len(obj)` reported the field count; object equality compared attributes only, so two objects of DIFFERENT nominal types with matching fields compared equal; and ordering likewise ignored the type name. Fixture `test/lambda/object_content.ls`; baseline 4083/4083, exact tier parity. |
+| S2.1.3 (v1, shipped state; superseded by S2.1.3v2) | **Partially implemented 2026-09-03.** Content patterns, the `<T attrs, content>` literal on both tiers, content-pattern inheritance, and tag-name output (markup formats emit `<TypeName …>` via the shared element handler; JSON keeps its `"@"` type key and gains the element `"_"` content key) all work. **Not implemented:** schema-driven input — `input(doc, schema: …)` and a document declaring its own schema still yield structural elements, never objects — and the validator does not yet check content arity against `TypeObject::content_length`. |
+| S5.1.4v2, S9.1.5v2, S10.4.3v2, S10.5.3v2 | **Ruled 2026-09-03, not implemented.** No container carries a node identity and no `===` exists; the DOM package compares wrappers structurally (`test/lambda/dom_api_core.ls`). The carrier, the id-preserving operation set, and the universal addressing scheme are open (SO39, DO25). |
 | S6.1.1 | `fn_lt` uses `strcmp` (NUL-unsafe) and accepts symbols; two-layer invalid-comparison treatment not landed. |
 | S6.2.1 | `sort()` coerces to float (`sort(["b","a","c"])` → `[nan,nan,nan]`); total order not implemented in `sort`/`order by`. |
 | S7.1.1v2, S7.1.3v2 | Core computed array/map/element reads now return `null` for invalid keys and writes return the hard `ItemError`/`T^` channel; typed-array and mask paths share the same checked key boundary. A broader access-site audit remains for specialized editor/host surfaces. Slice-offset rules (RF3D) landed with regression tests. |
@@ -1925,14 +2026,14 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S7.8.1 | TE-17 lane gating pending (predicates exist, gate does not). Known violation V1: `fn_array_set` silently despecializes a declared `int[]` — the dominance invariant (S7.7.2) is false today. The `may_defect` effect split must land before routing or every unanalyzed call costs a native lane. |
 | S7.10.5 | RF5 audit: several vectorized ops return generic arrays where typed `ArrayNum` is required; a few error-channel violations open (`query`, `url_resolve`, invalid `push`/`splice`). |
 | S7.11.4 | Exec recovery implemented on POSIX. **Blocking hazard H1**: batch mode overwrites the stack-overflow handler, so fault capture differs between batch and standalone runs. Windows SEH never exercised. |
-| S8.2.1v2, S8.2.2v2, S9.1.6 | Core MIR Direct and AST-interpreter computed access now enforce fixed array/map/element key domains, including exact integral float/decimal normalization, empty-string names, and no array-to-map promotion. Specialized editor/host access sites still need the same audit. Empty-string map keys are now semantically valid, but their known JSON round-trip corruption remains to be fixed. `at` membership now conforms: `1 at [10,20,30]` is false, matching S8.2.2v2 (this row previously recorded it as still true). |
+| S8.2.1v3, S8.2.2v2, S9.1.6 | Core MIR Direct and AST-interpreter computed access now enforce fixed array/map/element key domains (the v3 object face is not built — see the S2.1.3v2 row), including exact integral float/decimal normalization, empty-string names, and no array-to-map promotion. Specialized editor/host access sites still need the same audit. Empty-string map keys are now semantically valid, but their known JSON round-trip corruption remains to be fixed. `at` membership now conforms: `1 at [10,20,30]` is false, matching S8.2.2v2 (this row previously recorded it as still true). |
 | S8.1.3 | **Conformant as of 2026-08-24.** The paired `at` form bound both names to the key (a silent wrong answer); fixed in `build_ast`, one fix covering both tiers. Full record: [LR02-R9](../vibe/Lambda_Issue_Ledger.md). |
 | S8.3.2 | Streams (and hence stream `len`) not implemented. |
 | S9.1.3, S9.1.4, S9.2.2–S9.2.4 | COW Stage 1 landed (`let`-finality real for Array/Map/Object/Element/VMap — **and, as of CW32v2 2026-08-29 on `nm-impl-work`, for plain ArrayNum**: binding aliases are O(1) mark-and-share, the eager bind clone is retired, marked roots' lane stores consult the shared bit once per store, and mask writes go through a preparing wrapper; fixture `cow_arraynum_alias.ls`, exact tier parity; mutable write-through views deliberately excluded — open/todo). Stage 2 pending: exclusivity checks (faces 1+3+4 landed, face 2 unreachable behind `E229`), capture-assignment compile errors, view-borrow confinement. The **module-`var` half of S9.2.4 needs no work** — it is vacuous by construction (S9.2.4v2); only the view-state half is outstanding. `var` params parse and mutate the caller's value today, but a *plain* param does so too — the snapshot half of S9.1.3 is **UNCONDITIONAL since the 2026-08-29 flip** (escape hatch retired; `is_proc_param` deleted) (CW29, COW doc §11.9; worktree `nm-impl-work`, pending merge): both tiers snapshot mutated plain params — flat, nested-path, and array writes all stay local (fixture `cow_param_snapshot.ls`); `var` is the sole write-through construct. Migration outcome: the 88-script sweep ceiling collapsed to **13 actual reliance sites** (7 ABI-pinning proc tests, 6 benchmarks — the SOM PRNG/out-param idiom), all migrated to `var` with goldens unchanged. **Mutated place-copy binds mark their value** (`var row = m.rows[i]` followed by a write through `row` is a true S9.1.2 snapshot on both tiers: the first write detaches), closing the get-modify aliasing half of C4.1; an UNMUTATED place copy stays a borrow — observationally identical to a copy (P6) — and expression-position reads still borrow, unobservable since no write occurs through an unnamed temporary. With CW32v2 landed, flagged ArrayNum-through-plain-param now snapshots too (probed both tiers); the residual write-through under the flag is only the declared typed-array *native-witness* path, whose raw pointer feeds a native body. |
 | S9.2.3 | **Implemented on both tiers (CW30, 2026-08-29; on worktree branch `nm-impl-work`, pending merge).** The decision is compile-time and tier-shared (`AstLoopNode::snapshot_collection`, computed once at for-node completion): only a loop whose source roots at a mutable binding AND whose body may write that root pays — a head share-mark plus, in MIR, an independent rooted handle the loop walks (the call's result register, which is what dissolves the earlier register-aliasing blocker: the binding's register is free to take the detached replacement). Non-mutating loops emit nothing on either tier. Fixture: `test/lambda/proc/cow_snapshot_iteration.ls` (element write, push, map field, `var`-borrow-in-body, multi-level, clean loop) — identical output on JIT and T0; pre-change behavior was live iteration (`99` observed). |
 | S9.2.4v2 (view-state half) | Not implemented — see the exclusivity row. |
 | Exclusivity (S9.2 / CW §11.3) | **Two of four faces effectively hold.** Face 1 (two `var` args naming one variable) rejects via `E211`. Face 3 (path-prefix) rejects at the *conservative whole-base* granularity the design sanctions as its Stage-2 v1 — so `f(var t, var t.a)` is caught, and `f(var t.a, var t.b)` is caught too though the ruling would permit it. **Face 2 (receiver vs `var` arg) is unreachable**: a `pn` method with a `var` parameter cannot be dispatched at all (`E229`, "dynamic dispatch of a function with `var` parameters is deferred"), so the check would be dead code until that lands. The ratified path that lifts `E229` is CW33 (COW doc §11.10, 2026-08-29) — the `var`-param address ABI, under which this check becomes a slot-address compare in the callee prologue. **Face 4 closed at whole-base granularity (CW31, 2026-08-29; worktree branch `nm-impl-work`, pending merge)**: a `subview` binding records its ultimate base (`NameEntry::view_base`, chased through view-of-view), and the call-site check conflicts two `var` args sharing an effective root — overlapping subviews and view-vs-base both reject via `E211`; views of distinct bases pass. Disjoint tiles of one base also reject: the same sanctioned false positive as face 3, with the splitter ladder unchanged. Fixture: `test/lambda/negative/semantic/var_view_overlap.ls`. |
-| S9.3.1 | **UNCONDITIONAL since 2026-08-29** — the flip landed and the escape hatch was retired the same day after the baseline soaked; `LAMBDA_COW_CAPTURE` is no longer consulted. Originally implemented behind the flag 2026-08-28. With the flag set, insertion captures by value at every point the ruling names — array element store, array literal, map field store, map/object/element literal — on both tiers: all four probes return the ruled `1`, and the two-node cycle is no longer constructible, restoring the totality S9.1.5 assumes. Capture is a *compile-time* decision, and only a NAMED value (identifier, or member/index read) is marked: a freshly produced container has no second observer at the insertion point, and marking one would make the universal builder shape `rows[i] = <fresh>` detach on first write. **Why it is opt-in:** element/field reads still borrow (the open C4.1 half), so once a slot holds a captured value the get-modify idiom `c = owner[i]` … `c[j] = v` writes a detached copy. Exactly four corpus scripts depend on that idiom (`proc_fill_gc_nested`, `awfy/{cd2_orig,deltablue,deltablue2}`); `awfy/richards3` — the sanctioned rewrite — passes with capture on. The nested-mutation design (§9.5.2, COW Appendix B.2) is what lets the flag become the default. With the flag unset, behavior is exactly the aliasing recorded below. Full record: [LR12-9](../vibe/Lambda_Issue_Ledger.md#lr12-9). |
+| S9.3.1 | **UNCONDITIONAL since 2026-08-29** — the flip landed and the escape hatch was retired the same day after the baseline soaked; `LAMBDA_COW_CAPTURE` is no longer consulted. Originally implemented behind the flag 2026-08-28. With the flag set, insertion captures by value at every point the ruling names — array element store, array literal, map field store, map/object/element literal — on both tiers: all four probes return the ruled `1`, and the two-node cycle is no longer constructible, restoring the totality S9.1.5v2 assumes. Capture is a *compile-time* decision, and only a NAMED value (identifier, or member/index read) is marked: a freshly produced container has no second observer at the insertion point, and marking one would make the universal builder shape `rows[i] = <fresh>` detach on first write. **Why it is opt-in:** element/field reads still borrow (the open C4.1 half), so once a slot holds a captured value the get-modify idiom `c = owner[i]` … `c[j] = v` writes a detached copy. Exactly four corpus scripts depend on that idiom (`proc_fill_gc_nested`, `awfy/{cd2_orig,deltablue,deltablue2}`); `awfy/richards3` — the sanctioned rewrite — passes with capture on. The nested-mutation design (§9.5.2, COW Appendix B.2) is what lets the flag become the default. With the flag unset, behavior is exactly the aliasing recorded below. Full record: [LR12-9](../vibe/Lambda_Issue_Ledger.md#lr12-9). |
 | S10.2.2, S10.2.3 | `eq ne lt le gt ge` operators and the `vec_cmp` revert not landed; mask-consumption functions deferred. |
 | S11.1.1 | Array-pattern composition unbuilt; `is [T]` inline parse crash open. |
 | S11.2.3 | Match exhaustiveness checking unverified in the implementation. |
@@ -1972,7 +2073,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO5** TE-17 transitivity: does discharging `(int | error)[]` re-narrow in place, or only by copy? Copy is the safe default. [TE-17 §Open]
 - **SO6** Lazy/streaming `for` bodies vs typed-lane destinations (boxed-until-proven presumed, undecided); where containment materializes under deferred evaluation.
 - **SO7** TE-5 R5 sticky `any`; validator schema-`any` uniformity.
-- **SO8** Should `is` become value-aware? Deliberately undecided (S11.3.1 records the intentional asymmetry).
+- **SO8** Should `is` become value-aware? Deliberately undecided (S11.3.1v2 records the intentional asymmetry).
 - **SO9** A surface spelling for `any \ error` (the `!` exclusion operator route is broken — measured 2026-08-24, `&` and `!` evaluate correctly in `is`/`match` pattern position but are rejected in `let`/parameter annotation position; LR02-9 in [`vibe/Lambda_Issue_Ledger.md`](../vibe/Lambda_Issue_Ledger.md)); closed named-map opt-in; constrained-type predicate enforcement; checked-cast surface (`as`/`as?`); generics; flow-sensitive narrowing — all out of scope or unowned.
 - **SO10** A deep "does this data contain an error anywhere?" check (`valid(item)`-shaped) — real question, future design (S7.9.3).
 - **SO11** Whether a non-null scalar iterates once (`len(5)`): `for (i in 5)` yields nothing while `5 |> ~` yields one item; the S8.3.1 law requires them to agree before `len(5)` is settled.
@@ -1985,10 +2086,31 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO16** Close-error routing (double fault): proposed — normal-exit close failure becomes the `pn`'s error; on error exit the original wins, close error attached suppressed. To confirm. [Features §3.5.2]
 - **SO17** Resource-carrying-type containment rules (when a wrapping value is itself resource-typed). [R3]
 - **SO18** Snapshot iteration (C4.2d) — **implemented 2026-08-29 (CW30, worktree branch `nm-impl-work`, pending merge)**; see the S9.2.3 conformance row. Strike this entry when the branch merges.
-- **SO19** Root and upward-parent navigation are resolved by S10.4.3,
-  S10.5.3 / PTH10, PTH29: lineage lives in a navigation path, cursor, or
+- **SO19** Root and upward-parent navigation are resolved by S10.4.3v2,
+  S10.5.3v2 / PTH10, PTH29: lineage lives in a navigation path, cursor, or
   zipper, never root/parent pointers on document values. Lateral-axis spellings
   and exact semantics remain open and must preserve that invariant.
+- **SO39** Node identity (S5.1.4v2): which operations preserve an identity
+  (a COW detach and an in-place `var` write are expected to; a constructor
+  such as `{*: m}` or `<T *: o>` is expected not to), whether formatting can
+  emit it, the concrete form of the universal id (document path + node id,
+  across local and online documents), and whether `===` on two identity-less
+  operands is `false` or a compile error. Deliberately unruled on
+  2026-09-03; the carrier is DO25. [OB10]
+- **SO40** Whether `obj is element` holds for an object (structural face)
+  as `obj is map` does today; S11.3.1v2 keeps `is` nominal for the object type
+  itself. [OB2]
+- **SO42** Instance type alteration (S2.1.5): the surface spelling, which
+  declared fields must be satisfiable from the instance, and what happens to
+  extras on reconstruction. Ruled to exist as reconstruction; otherwise
+  undesigned. [OB18]
+- **SO43** Type alteration — changing a nominal type during evaluation, and
+  so every instance of it — is explicitly NOT ruled; it would relax S2.1.4(2)
+  and is a different matter from SO42. [OB18]
+- **SO41** Cross-reference form for document graphs under S9.1.5v2: an
+  identity or key stored as data and resolved through its document, foreign-key
+  style — the resolution API, its authority (S10.5.2), and its interaction with
+  the symbol/path model are undesigned. [OB10]
 
 **Concurrency**
 - **SO20** O-D: cross-isolate lifetime for shared graph Items (promote-on-share recommended) — must precede thread-mode workers.
@@ -2037,17 +2159,17 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | Section | Records | Where argued |
 |---|---|---|
 | S1 principles | C1–C18 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
-| S2 value domain | C1, C1.6a, C2, C8.6-R; PTH1v2, PTH2v2, PTH3–PTH29 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md` |
+| S2 value domain | C1, C1.6a, C2, C8.6-R; PTH1v2, PTH2v2, PTH3–PTH29; OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
 | S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
-| S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only) |
-| S6 ordering | C11, C11.4, C11.5 | `Lambda_Semantics_Formal2.md` |
+| S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |
+| S6 ordering | C11, C11.4, C11.5; OB13 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md` |
-| S8 membership | C5.3a, C5.3b; §8.0–8.3 records | `Lambda_Semantics_Formal2.md` |
+| S8 membership | C5.3a, C5.3b; §8.0–8.3 records; OB4–OB5 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
 | S10 operators | C6, C6.2–C6.4, C10; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Path.md` |
-| S11 types | C7, C8.5c; TE-1–TE-18 | ibid.; `Lambda_Design_Type_Enforcement.md` |
-| S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19 | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md` |
+| S11 types | C7, C8.5c; TE-1–TE-18; OB13 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md` |
+| S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19; OB5–OB6 | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md`, `Lambda_Type_Object.md` |
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
 | S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |

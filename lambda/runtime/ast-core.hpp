@@ -824,7 +824,7 @@ static inline AstIdentNode* ast_compound_root_ident(AstNode* node) {
 static inline bool ast_type_needs_mutable_clone(TypeId type_id) {
     return type_id == LMD_TYPE_ANY || type_id == LMD_TYPE_ARRAY ||
            type_id == LMD_TYPE_ARRAY_NUM || type_id == LMD_TYPE_MAP ||
-           type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_OBJECT;
+           type_id == LMD_TYPE_ELEMENT;
 }
 
 // An assignment target decomposed into its root binding plus the field/index
@@ -1128,9 +1128,13 @@ typedef struct AstObjectTypeNode : AstNamedNode {
     int local_type_index;
 } AstObjectTypeNode;
 
-// Object literal node: {TypeName key: value, ...}
+// Object literal node: <TypeName key: value, content...>
 typedef struct AstObjectLiteralNode : AstMapNode {
     String* type_name;
+    // S2.1.3 content children. Unlike an element, every literal of one object
+    // type SHARES that type's TypeObject, so the per-literal content count
+    // cannot live on the type — it is read from this node.
+    AstNode* content;
 } AstObjectLiteralNode;
 
 typedef struct AstYieldNode : AstNode {

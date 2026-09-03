@@ -68,7 +68,7 @@ bool js_store_typed_value(void* field_ptr, TypeId value_type,
         break;
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:
-    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
         *(Container**)field_ptr = value.container;
         break;
     case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_DECIMAL:

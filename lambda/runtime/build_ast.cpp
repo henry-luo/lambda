@@ -903,7 +903,7 @@ static bool is_complex_component_type(TypeId type_id) {
 }
 
 static inline bool is_param_full_type_id(TypeId type_id) {
-    return type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_OBJECT ||
+    return type_id == LMD_TYPE_MAP ||
            type_id == LMD_TYPE_ELEMENT;
 }
 
@@ -2135,7 +2135,7 @@ bool is_type_keyword(StrView name) {
     static const char* type_keywords[] = {
         "null", "any", "error", "bool", "int", "int64", "float", "f64", "decimal", "integer", "number",
         "date", "time", "datetime", "symbol", "string", "binary",
-        "list", "array", "map", "element", "entity", "object", "type", "function",
+        "list", "array", "map", "element", "object", "type", "function",
         "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64"
     };
     for (size_t i = 0; i < sizeof(type_keywords) / sizeof(type_keywords[0]); i++) {
@@ -2184,7 +2184,17 @@ static void binding_node_set_entry(AstNode* node, NameEntry* entry) {
         declarator->entry = entry;
         if (declarator->id && declarator->id->node_type == AST_NODE_IDENT)
             ((AstIdentNode*)declarator->id)->entry = entry;
-    } else if (node->node_type == AST_NODE_PARAM) {
+    } else if (node->node_type == AST_NODE_PARAM ||
+            node->node_type == AST_NODE_KEY_EXPR) {
+        // KEY_EXPR is an object type's field scope-helper (direct_object_add_field
+        // and the base-inheritance copy). Without the back-pointer its
+        // `ShapeEntry::binding` stayed NULL, and MIR's method prologue — which
+        // publishes that binding for the field locals it loads from self —
+        // registered them under no binding at all. Identifier lowering matches
+        // by binding identity, not spelling, so every implicit field read in a
+        // method body fell through to "undefined variable" and evaluated as 0
+        // on the JIT tier while T0, which resolves object fields by name
+        // against `method_self`, returned the right value (LR07-15, SI3v2).
         ((AstNamedNode*)node)->entry = entry;
     }
 }
@@ -4484,7 +4494,7 @@ AstNode* build_decompose_from_parts(Transpiler* tp, SourceSpan span,
     // whose declared type is a lie (SI14), so only proven shapes are used.
     Type* source_type = ast_node->as ? ast_node->as->type : NULL;
     TypeMap* source_map = source_type && !is_global_simple_type(source_type) &&
-        (source_type->type_id == LMD_TYPE_MAP || source_type->type_id == LMD_TYPE_OBJECT)
+        (source_type->type_id == LMD_TYPE_MAP)
         ? (TypeMap*)source_type : NULL;
     Type* source_elem = NULL;
     if (source_type && !is_global_simple_type(source_type) &&
@@ -4494,8 +4504,7 @@ AstNode* build_decompose_from_parts(Transpiler* tp, SourceSpan span,
         // Container elements are boxed pointers on every path, so publishing
         // them cannot outrun the emitter the way a numeric lane would (TIG1).
         if (nested && (nested->type_id == LMD_TYPE_MAP ||
-                nested->type_id == LMD_TYPE_ELEMENT ||
-                nested->type_id == LMD_TYPE_OBJECT)) {
+                nested->type_id == LMD_TYPE_ELEMENT)) {
             source_elem = nested;
         }
     }
@@ -4513,8 +4522,7 @@ AstNode* build_decompose_from_parts(Transpiler* tp, SourceSpan span,
                             se->name->length) == 0) {
                     Type* ft = unwrap_simple_type_type(se->type);
                     if (ft && (ft->type_id == LMD_TYPE_MAP ||
-                            ft->type_id == LMD_TYPE_ELEMENT ||
-                            ft->type_id == LMD_TYPE_OBJECT)) {
+                            ft->type_id == LMD_TYPE_ELEMENT)) {
                         projected = ft;
                     }
                     break;
@@ -5000,8 +5008,9 @@ static TypeObject* lookup_object_type_for_tag(Transpiler* tp, StrView tag_name) 
     Type* resolved = entry->node->type;
     if (resolved->type_id != LMD_TYPE_TYPE) return NULL;
     Type* inner = ((TypeType*)resolved)->type;
-    return inner && inner->type_id == LMD_TYPE_OBJECT
-        ? (TypeObject*)inner : NULL;
+    // D2.6.6v2 phase 2: a nominal type now wears its structural kind, so the
+    // tag is recognised by its nominal record rather than by an object tag.
+    return type_nominal_record(inner) ? (TypeObject*)inner : NULL;
 }
 
 static AstNode* build_object_literal_from_items(Transpiler* tp,
@@ -5012,12 +5021,18 @@ static AstNode* build_object_literal_from_items(Transpiler* tp,
     object->type_name = name_pool_create_strview(tp->name_pool, tag_name);
     object->type = (Type*)object_type;
     object->item = NULL;
+    object->content = NULL;
 
     AstNode* prev = NULL;
     for (AstNode* raw = children; raw;) {
         AstNode* next = raw->next;
         raw->next = NULL;
-        if (raw->node_type != AST_NODE_CONTENT) {
+        if (raw->node_type == AST_NODE_CONTENT) {
+            // S2.1.3: an object is a nominally-typed element, so its literal
+            // carries content beside attributes. This arm used to fall through
+            // and silently discard it.
+            object->content = raw;
+        } else {
             bool spread = raw->node_type == AST_NODE_KEY_EXPR &&
                 ast_node_is_syntactic_spread_key(tp, raw);
             AstNode* item = spread ? ((AstNamedNode*)raw)->as : raw;
@@ -6241,7 +6256,7 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
                     if (dec_node->type && dec_node->type->type_id == LMD_TYPE_TYPE) {
                         TypeType* tt = (TypeType*)dec_node->type;
                         Type* inner = tt->type;
-                        if (inner && (inner->type_id == LMD_TYPE_MAP || inner->type_id == LMD_TYPE_OBJECT
+                        if (inner && (inner->type_id == LMD_TYPE_MAP
                             || inner->type_id == LMD_TYPE_ARRAY)) {
                             arraylist_append(tp->type_list, (void*)tt);
                             ((TypeMap*)inner)->type_index = tp->type_list->length - 1;
@@ -6889,6 +6904,12 @@ static void direct_object_copy_base(LambdaDirectAstSink* sink,
         return;
     }
     sink->object_type->base = base;
+    // S2.1.3v2: inheritance never changes the base kind, so the derived record
+    // links to the base RECORD and adopts its structural kind.
+    if (sink->object_type->nominal && base->nominal) {
+        sink->object_type->nominal->base = base->nominal;
+        sink->object_type->nominal->struct_kind = base->nominal->struct_kind;
+    }
     for (ShapeEntry* parent = base->shape; parent; parent = parent->next) {
         ShapeEntry* entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
         entry->name = parent->name;
@@ -6919,7 +6940,10 @@ static void direct_object_begin(LambdaDirectAstSink* sink,
         AST_NODE_OBJECT_TYPE, reduction->span, sizeof(AstObjectTypeNode));
     TypeObject* object_type = (TypeObject*)pool_calloc(tp->pool,
         sizeof(TypeObject));
-    object_type->type_id = LMD_TYPE_OBJECT;
+    // D2.6.6v2 phase 2 (S2.1.1v3): a nominal type IS a map or an element; the
+    // object tag is gone. Default to map and refine at direct_object_end, which
+    // is the first point a content pattern is known.
+    object_type->type_id = LMD_TYPE_MAP;
     TypeType* type_value = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE,
         sizeof(TypeType));
     type_value->type = (Type*)object_type;
@@ -6928,8 +6952,19 @@ static void direct_object_begin(LambdaDirectAstSink* sink,
     object->is_public = (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0;
     object->local_type_index = -1;
     object_type->type_name = (StrView){object->name->chars, object->name->len};
+    // TypeElmt::name is the tag every element path reads; a nominal type's tag
+    // IS its type name (OB8), so the two are set together and never diverge.
+    object_type->name = object_type->type_name;
     object_type->struct_name = object->name->chars;
     object_type->is_trusted_contract = true;
+    // D2.6.6v2 phase 2 (S2.1.4): the nominal record. It is what `is T` compares
+    // and what every shape extended from this one keeps pointing at, so the
+    // declared shape publishes it here, once, and never rewrites it.
+    TypeNominal* record = (TypeNominal*)pool_calloc(tp->pool, sizeof(TypeNominal));
+    record->type_name = object_type->type_name;
+    record->struct_kind = LMD_TYPE_MAP;  // refined at direct_object_end
+    object_type->nominal = record;
+    object_type->is_nominal = 1;  // base-flag discriminator (D2.6.6v2 phase 2)
 
     sink->object_node = object;
     sink->object_type = object_type;
@@ -7025,10 +7060,35 @@ static void direct_object_add_method(LambdaDirectAstSink* sink, AstNode* method)
     else sink->object_type->methods_last->next = tm;
     sink->object_type->methods_last = tm;
     sink->object_type->method_count++;
+    // the record owns the same list; both heads reference the same TypeMethods
+    TypeNominal* record = sink->object_type->nominal;
+    if (record) {
+        if (!record->methods) record->methods = tm; else record->methods_last->next = tm;
+        record->methods_last = tm;
+        record->method_count++;
+    }
 }
 
 static void direct_object_end(LambdaDirectAstSink* sink) {
     if (!sink->object_node) return;
+    // S2.1.3: the DECLARED content arity, mirroring TypeElmt::content_length.
+    // It describes the type's content pattern, not any one literal's children —
+    // every literal of this type shares this TypeObject, so per-literal counts
+    // live on AstObjectLiteralNode instead.
+    if (sink->object_node->content) {
+        AstListNode* content = (AstListNode*)sink->object_node->content;
+        sink->object_type->content_length = content->list_type
+            ? content->list_type->length : 0;
+    }
+    // S2.1.3v2: the declared structure fixes ONE structural kind. A content
+    // pattern makes it an element; otherwise it is a map.
+    if (sink->object_type->nominal) {
+        sink->object_type->nominal->content_length = sink->object_type->content_length;
+        sink->object_type->nominal->struct_kind = sink->object_type->content_length > 0
+            ? LMD_TYPE_ELEMENT : LMD_TYPE_MAP;
+        // the descriptor and every value built from it wear that same kind
+        sink->object_type->type_id = sink->object_type->nominal->struct_kind;
+    }
     sink->object_type->byte_size = sink->object_byte_offset;
     sink->object_type->last = sink->object_shape_tail;
     arraylist_append(sink->tp->type_list, sink->object_node->type);
@@ -7875,8 +7935,7 @@ static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
         }
         return set_type_any(tp, ANY_INDEX_ELEM);
     }
-    if ((object_type->type_id == LMD_TYPE_MAP ||
-            object_type->type_id == LMD_TYPE_OBJECT) &&
+    if ((object_type->type_id == LMD_TYPE_MAP) &&
             !is_global_simple_type(object_type) && field &&
             field->node_type == AST_NODE_IDENT) {
         TypeMap* map = (TypeMap*)object_type;
@@ -7911,8 +7970,7 @@ static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
                 // following member access.
                 return alloc_type(tp->pool, field_tid, sizeof(Type));
             }
-            if (field_tid == LMD_TYPE_MAP || field_tid == LMD_TYPE_ELEMENT ||
-                    field_tid == LMD_TYPE_OBJECT) {
+            if (field_tid == LMD_TYPE_MAP || field_tid == LMD_TYPE_ELEMENT) {
                 return matched;
             }
         }
@@ -8131,7 +8189,9 @@ static TypeMethod* direct_lookup_object_method(Transpiler* tp,
     Type* receiver_type = receiver->type;
     if (!is_map_family_type_id(receiver_type->type_id) ||
             is_global_simple_type(receiver_type)) return NULL;
-    if (receiver_type->type_id != LMD_TYPE_OBJECT) {
+    // D2.6.6v2 phase 2: a receiver has methods iff its shape carries a nominal
+    // record; the structural kind no longer distinguishes it.
+    if (!type_nominal_record(receiver_type)) {
         // maps, vmaps, and elements carry shape entries but no method table.
         FOR_EACH_MAP_FIELD((TypeMap*)receiver_type, field) {
             if (field->name && field->name->length == name.length &&
@@ -10165,6 +10225,9 @@ static LambdaParseValue direct_ast_reduce(void* context,
                     tail->next = child0;
                 }
                 sink->object_type->constraint = child0;
+                if (sink->object_type->nominal) {
+                    sink->object_type->nominal->constraint = child0;
+                }
             }
             return direct_ast_value(child0);
         }

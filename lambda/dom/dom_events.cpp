@@ -180,7 +180,7 @@ static double event_now_ms() {
 
 static Item event_exception_message(Item err) {
     Item msg = err;
-    if (get_type_id(err) == LMD_TYPE_MAP || get_type_id(err) == LMD_TYPE_OBJECT) {
+    if (get_type_id(err) == LMD_TYPE_MAP) {
         Item m = js_get_name_key(err, "message");
         if (get_type_id(m) == LMD_TYPE_STRING) msg = m;
         else msg = js_to_string(err);
@@ -492,7 +492,7 @@ static void* get_event_target_key(Item target) {
     // Plain JS object EventTarget — key on the object pointer itself so
     // each `new EventTarget()` instance has its own listener list.
     TypeId tid = get_type_id(target);
-    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_OBJECT || tid == LMD_TYPE_VMAP) {
+    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_VMAP) {
         return (void*)target.container;
     }
     // fallback: treat as window
@@ -506,7 +506,7 @@ static bool event_target_needs_root(Item target, void* key, DomNodeRef node_ref)
     }
     if (dom_unwrap_element(target)) return false;
     TypeId type = get_type_id(target);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP;
 }
 
 static int find_listener_entry_slot(void* key) {
@@ -800,13 +800,13 @@ static Item parse_listener_options(Item opts, bool* capture, bool* once,
     // boolean argument = useCapture. Per WebIDL, anything that is not a
     // dictionary (object/map) is converted via ToBoolean for the boolean union.
     TypeId tid = get_type_id(opts);
-    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_OBJECT) {
+    if (tid != LMD_TYPE_MAP) {
         *capture = js_is_truthy(opts);
         return ItemNull;
     }
 
     // options object: {capture, once, passive, signal}
-    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_OBJECT) {
+    if (tid == LMD_TYPE_MAP) {
         Item cap_key = js_name_item("capture");
         Item once_key = js_name_item("once");
         Item passive_key = js_name_item("passive");
@@ -835,7 +835,7 @@ static Item parse_listener_options(Item opts, bool* capture, bool* once,
                     "member signal is not of type 'AbortSignal'.");
                 return js_throw_value(js_new_error_with_name(n, m));
             }
-            if (st == LMD_TYPE_MAP || st == LMD_TYPE_OBJECT) {
+            if (st == LMD_TYPE_MAP) {
                 *signal_out = signal_val;
             }
         }
@@ -847,7 +847,7 @@ static Item parse_listener_options(Item opts, bool* capture, bool* once,
 static bool signal_is_aborted(Item signal_item) {
     if (signal_item.item == 0) return false;
     TypeId t = get_type_id(signal_item);
-    if (t != LMD_TYPE_MAP && t != LMD_TYPE_OBJECT) return false;
+    if (t != LMD_TYPE_MAP) return false;
     Item ab = js_get_key_cstr(signal_item, "aborted");
     return js_is_truthy(ab);
 }
@@ -880,8 +880,7 @@ void dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item o
     }
     // Callback must be either a function or an object with handleEvent (checked
     // lazily at dispatch time). Reject obviously-bad types like numbers/booleans.
-    if (cb_tid != LMD_TYPE_FUNC && cb_tid != LMD_TYPE_MAP &&
-        cb_tid != LMD_TYPE_OBJECT && cb_tid != LMD_TYPE_ELEMENT) {
+    if (cb_tid != LMD_TYPE_FUNC && cb_tid != LMD_TYPE_MAP && cb_tid != LMD_TYPE_ELEMENT) {
         log_debug("dom_add_event_listener: callback must be function or object (got tid=%d)", cb_tid);
         return;
     }
@@ -994,7 +993,7 @@ void dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
     bool capture = false;
     if (opts_item.item != 0) {
         TypeId opt_tid = get_type_id(opts_item);
-        if (opt_tid == LMD_TYPE_MAP || opt_tid == LMD_TYPE_OBJECT) {
+        if (opt_tid == LMD_TYPE_MAP) {
             Item cap_val = js_get_name_key(opts_item, "capture");
             if (cap_val.item != 0 && get_type_id(cap_val) != LMD_TYPE_UNDEFINED)
                 capture = js_is_truthy(cap_val);
@@ -1262,7 +1261,7 @@ Item js_create_event_target(void) {
 static Item read_init(Item init, const char* key) {
     if (init.item == 0) return ItemNull;
     TypeId t = get_type_id(init);
-    if (t != LMD_TYPE_MAP && t != LMD_TYPE_OBJECT && t != LMD_TYPE_VMAP) return ItemNull;
+    if (t != LMD_TYPE_MAP && t != LMD_TYPE_VMAP) return ItemNull;
     return js_get_name_key(init, key);
 }
 
@@ -1369,7 +1368,7 @@ static Item build_ui_event(const char* type, Item init, const char* class_name) 
     // like the global window object. Reject other types with TypeError.
     if (init_present(view)) {
         TypeId vt = get_type_id(view);
-        if (vt != LMD_TYPE_MAP && vt != LMD_TYPE_OBJECT && vt != LMD_TYPE_VMAP) {
+        if (vt != LMD_TYPE_MAP && vt != LMD_TYPE_VMAP) {
             Item n = js_name_item("TypeError");
             Item m = js_name_item(
                 "Failed to construct event: view member is not of type Window.");
@@ -1536,7 +1535,6 @@ static Item js_input_event_live_target_ranges(Item target_ranges) {
         Item range = js_elements_get_int(target_ranges, i);
         TypeId range_type = get_type_id(range);
         if (range_type != LMD_TYPE_MAP &&
-            range_type != LMD_TYPE_OBJECT &&
             range_type != LMD_TYPE_VMAP) {
             continue;
         }
@@ -1788,7 +1786,6 @@ static Item js_input_event_get_target_ranges(Item* args, int argc) {
         // wrappers so mutations adjust their boundaries. Restricting this
         // snapshot path to plain maps silently dropped every live wrapper.
         if (range_type != LMD_TYPE_MAP &&
-            range_type != LMD_TYPE_OBJECT &&
             range_type != LMD_TYPE_VMAP) {
             continue;
         }
@@ -1937,7 +1934,7 @@ static Item wrap_path_key(void* key, bool key_is_dom) {
     if (key && !key_is_dom) {
         Item it; it.item = 0; it.container = (Container*)key;
         TypeId tid = get_type_id(it);
-        if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_OBJECT || tid == LMD_TYPE_VMAP) {
+        if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_VMAP) {
             return it;
         }
     }

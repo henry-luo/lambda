@@ -61,7 +61,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool, is_undefined_item, (Item item), (item.item ==
 
 static bool is_object_item(Item item) {
     TypeId type = get_type_id(item);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP;
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, is_nullish_item, (Item item), (item.item == ITEM_NULL || get_type_id(item) == LMD_TYPE_NULL || is_undefined_item(item)))
 
@@ -831,7 +831,7 @@ static void spawn_flush_queued_ipc_messages(Item obj) {
 }
 
 static bool spawn_ipc_has_control(Item message, const char* key) {
-    if (get_type_id(message) != LMD_TYPE_MAP && get_type_id(message) != LMD_TYPE_OBJECT &&
+    if (get_type_id(message) != LMD_TYPE_MAP &&
         get_type_id(message) != LMD_TYPE_VMAP) {
         return false;
     }

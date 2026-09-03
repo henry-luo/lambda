@@ -114,8 +114,13 @@ enum EnumTypeId {
     LMD_TYPE_ARRAY,  // array of Items
     LMD_TYPE_MAP,
     LMD_TYPE_VMAP,  // virtual map with vtable dispatch (hashmap, treemap, etc.)
+    // D2.6.6v2 phase 2 (OB14): `LMD_TYPE_OBJECT` is GONE. Nominal-ness is a
+    // property of the type descriptor (TypeMap::nominal, cached by
+    // Type::is_nominal), never a container kind — a nominal value is an ordinary
+    // MAP or ELEMENT, and `object` survives only as a TYPE (`TYPE_OBJECT`),
+    // matched by pointer identity. ELEMENT is now the last container tag, so the
+    // contiguous container band ends here.
     LMD_TYPE_ELEMENT,
-    LMD_TYPE_OBJECT,  // object = map + type_name + methods (nominally-typed)
     LMD_TYPE_TYPE,
     LMD_TYPE_FUNC,
 
@@ -145,7 +150,6 @@ static inline bool lambda_type_id_has_pointer_lane(TypeId type_id) {
     case LMD_TYPE_MAP:
     case LMD_TYPE_VMAP:
     case LMD_TYPE_ELEMENT:
-    case LMD_TYPE_OBJECT:
     case LMD_TYPE_TYPE:
     case LMD_TYPE_FUNC:
         return true;
@@ -220,7 +224,6 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ARRAY), "array tag must be 
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_MAP), "map tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_VMAP), "vmap tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ELEMENT), "element tag must be non-double");
-LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_OBJECT), "object tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_TYPE), "type tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_FUNC), "function tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ANY), "any tag must be non-double");
@@ -633,6 +636,12 @@ typedef struct Type {
     uint8_t kind:4;      // TypeKind: sub-classification (SIMPLE, UNARY, BINARY, PATTERN)
     uint8_t is_literal:1;  // is a literal value
     uint8_t is_const:1;  // is a constant expr
+    // D2.6.6v2 phase 2: set only on a real TypeMap/TypeElmt that carries a
+    // nominal record. It lives on the BASE because "is this type nominal?" must
+    // be answerable of ANY Type* — the bare singletons (TYPE_MAP, TYPE_ELMT,
+    // LIT_TYPE_MAP, …) share the map/element tag but are plain `Type`s, so
+    // reaching for a TypeMap field on them would read past their end.
+    uint8_t is_nominal:1;
 } Type;
 
 typedef struct Container Container;
@@ -647,7 +656,11 @@ typedef struct Map Map;
 typedef struct SparseArrayMap SparseArrayMap;
 typedef struct VMap VMap;
 typedef struct Element Element;
-typedef struct Object Object;
+// S2.1.3 / D2.6.6: an object IS a nominally-typed element, so it shares
+// Element's layout rather than defining a fourth container shape. The two
+// differ only in their TypeId and in which type struct the `type` slot holds
+// (TypeObject* vs TypeElmt*), both of which extend TypeMap.
+typedef struct Element Object;
 typedef struct Function Function;
 struct TypeMethod;
 typedef struct Decimal Decimal;
@@ -741,7 +754,11 @@ enum MapKind {
 #define CONTAINER_FLAG_IMMORTAL (1u << 5)
 // raw masks remain part of the container ABI for code that snapshots `flags`
 // without a Container pointer (notably the moving GC).
-#define CONTAINER_FLAG_JS_PROPS (1u << 6)
+// D2.6.6v2/D2.6.11: bit 6 was `has_js_props`, retired when the JS companion map
+// moved into the array's own attribute face. It is reserved for the phase-2
+// `is_nominal` cache bit (S2.1.4) — the flags byte is otherwise full, and the
+// container header must stay eight bytes.
+#define CONTAINER_FLAG_NOMINAL_RESERVED (1u << 6)
 #define CONTAINER_FLAG_CTOR_RESERVED (1u << 7)
 
 // Lambda COW ownership state lives in the Container header padding. Raw
@@ -767,7 +784,7 @@ struct Container {
             uint8_t is_data_migrated:1;  // data buffer migrated from input pool to runtime pool (for mutated markup containers)
             uint8_t is_static:1;         // read-only const-pool/static data container
             uint8_t is_immortal:1;       // storage outlives every execution frame (input arena/const pool)
-            uint8_t has_js_props:1;      // array/list owns a reserved-tail JS property companion
+            uint8_t nominal_reserved:1;  // reserved for the D2.6.11 `is_nominal` cache bit
             uint8_t has_ctor_reserved:1; // map has constructor slots awaiting initialization
         };
     };
@@ -809,7 +826,8 @@ LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, reserved_state) == 7,
                      "Container reserved-state ABI offset changed");
 LAMBDA_STATIC_ASSERT(sizeof(Container) == 8,
                      "Container header must remain eight bytes");
-LAMBDA_STATIC_ASSERT(CONTAINER_FLAG_JS_PROPS == (1u << 6),
+
+LAMBDA_STATIC_ASSERT(CONTAINER_FLAG_NOMINAL_RESERVED == (1u << 6),
                      "Container JS-properties mask must match its bitfield");
 LAMBDA_STATIC_ASSERT(CONTAINER_FLAG_CTOR_RESERVED == (1u << 7),
                      "Container constructor-reserved mask must match its bitfield");
@@ -885,23 +903,44 @@ typedef struct LaneStorageDesc {
         int64_t length;
     };
 
+    // D2.6.6v2: List/Array extends Map — the attribute face comes FIRST in
+    // every container, so a cast to any ancestor is valid by construction.
     struct List {
+        // 8-byte Container header, byte-for-byte with `struct Container`.
         TypeId type_id;
-        uint16_t flags;
-        uint8_t padding[5];  // padding to align to 8 bytes
-        //---------------------
+        uint8_t flags;
+        uint8_t array_flags;
+        uint8_t map_kind;
+        uint8_t cow_state;
+        uint8_t ctor_reserved_mask_lo;
+        uint8_t ctor_reserved_mask_hi;
+        uint8_t reserved_state;
+        //--------------------- Map face
+        void* type;       // shape/type info (NULL for a plain array)
+        void* data;       // packed attribute data
+        int data_cap;     // capacity of the attribute buffer
+        //--------------------- list face
         Item* items;  // pointer to items
         int64_t length;  // number of items
-        int64_t extra;   // count of reserved tail items (wide scalars plus optional JS props slot)
+        int64_t extra;   // count of reserved tail items (wide scalars)
         int64_t capacity;  // allocated capacity
     };
 
     struct ArrayNum {
+        // 8-byte Container header. `elem_type` IS the map_kind byte (@3).
         TypeId type_id;
-        uint16_t flags;  // ArrayNum flags
-        uint8_t elem_type;     // ArrayNumElemType (replaces flags for typed arrays)
-        uint8_t padding[4];  // padding to align to 8 bytes
-        //---------------------
+        uint8_t flags;
+        uint8_t array_flags;
+        uint8_t elem_type;     // ArrayNumElemType, in the map_kind byte
+        uint8_t cow_state;
+        uint8_t ctor_reserved_mask_lo;
+        uint8_t ctor_reserved_mask_hi;
+        uint8_t reserved_state;
+        //--------------------- Map face (D2.6.6v2)
+        void* type;
+        void* data_shape;   // named to avoid colliding with the element union below
+        int data_cap;
+        //--------------------- numeric buffer
         union {
             int64_t* items;        // for ELEM_INT, ELEM_INT64
             double* float_items;   // for ELEM_FLOAT64
@@ -926,10 +965,15 @@ typedef struct LaneStorageDesc {
     // Map, Object, Element struct definitions for direct field access optimization
     // Layout must match the C++ structs in lambda.hpp exactly
     struct Map {
+        // 8-byte Container header, byte-for-byte with `struct Container`.
         TypeId type_id;
-        uint16_t flags;
+        uint8_t flags;
+        uint8_t array_flags;
         uint8_t map_kind;
-        uint8_t padding[4];  // padding to align to 8 bytes
+        uint8_t cow_state;
+        uint8_t ctor_reserved_mask_lo;
+        uint8_t ctor_reserved_mask_hi;
+        uint8_t reserved_state;
         //---------------------
         void* type;       // TypeMap* — shape/type info
         void* data;       // packed data struct of the map fields
@@ -942,34 +986,63 @@ typedef struct LaneStorageDesc {
         int64_t sparse_version;       // increments on numeric sparse mutations
     };
 
-    struct Object {
-        TypeId type_id;
-        uint16_t flags;
-        uint8_t map_kind;
-        uint8_t padding[4];  // padding to align to 8 bytes
-        //---------------------
-        void* type;       // TypeObject* — shape + methods + type_name
-        void* data;       // packed field data (same layout as Map)
-        int data_cap;     // data buffer capacity
-    };
 
+    // D2.6.6v2: Element extends Array extends Map. The attribute face is FIRST,
+    // at Map's own offsets; the content face follows. Object is Element.
     struct Element {
+        // 8-byte Container header, byte-for-byte with `struct Container`.
         TypeId type_id;
-        uint16_t flags;
+        uint8_t flags;
+        uint8_t array_flags;
         uint8_t map_kind;
-        uint8_t padding[4];  // padding to align to 8 bytes
-        //---------------------
+        uint8_t cow_state;
+        uint8_t ctor_reserved_mask_lo;
+        uint8_t ctor_reserved_mask_hi;
+        uint8_t reserved_state;
+        //--------------------- Map face
+        void* type;        // TypeElmt*/TypeObject* — attr type/shape
+        void* data;        // packed data struct of the attrs
+        int data_cap;      // capacity of the data buffer
+        //--------------------- list face
         Item* items;       // list content items
         int64_t length;    // number of content items
         int64_t extra;     // count of extra items
         int64_t capacity;  // allocated capacity
-        //---------------------
-        void* type;        // TypeElmt* — attr type/shape
-        void* data;        // packed data struct of the attrs
-        int data_cap;      // capacity of the data buffer
     };
 
+// D2.6.6v2: the C mirror of the container chain (Map -> List/Array -> Element)
+// must match the C++ definitions in lambda.hpp byte for byte. gc_heap.c is C and
+// compiles against THIS mirror, so the C++ static_asserts cannot reach it — a
+// silent divergence here mistraces the heap. These are that guard.
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(struct Map, type) == 8 &&
+                     __builtin_offsetof(struct Map, data) == 16 &&
+                     __builtin_offsetof(struct Map, data_cap) == 24,
+                     "C mirror: Map attribute face moved");
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(struct List, type) == 8 &&
+                     __builtin_offsetof(struct List, data) == 16 &&
+                     __builtin_offsetof(struct List, items) == 32 &&
+                     __builtin_offsetof(struct List, length) == 40 &&
+                     __builtin_offsetof(struct List, extra) == 48 &&
+                     __builtin_offsetof(struct List, capacity) == 56,
+                     "C mirror: List layout diverged from lambda.hpp");
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(struct Element, type) == 8 &&
+                     __builtin_offsetof(struct Element, data) == 16 &&
+                     __builtin_offsetof(struct Element, items) == 32 &&
+                     __builtin_offsetof(struct Element, length) == 40 &&
+                     __builtin_offsetof(struct Element, extra) == 48 &&
+                     __builtin_offsetof(struct Element, capacity) == 56,
+                     "C mirror: Element layout diverged from lambda.hpp");
+LAMBDA_STATIC_ASSERT(__builtin_offsetof(struct ArrayNum, items) == 32 &&
+                     __builtin_offsetof(struct ArrayNum, length) == 40 &&
+                     __builtin_offsetof(struct ArrayNum, extra) == 48 &&
+                     __builtin_offsetof(struct ArrayNum, capacity) == 56,
+                     "C mirror: ArrayNum must share List's content face");
+LAMBDA_STATIC_ASSERT(sizeof(struct Element) == sizeof(struct List) &&
+                     sizeof(struct List) == sizeof(struct ArrayNum),
+                     "C mirror: element/array headers must stay identical");
+
 #endif
+
 
 // ============================================================================
 // ArrayNumShape — side table for N-D arrays and views.
@@ -1419,7 +1492,15 @@ static inline bool is_array_family_type_id(TypeId type_id) {
 
 static inline bool is_map_family_type_id(TypeId type_id) {
     return type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP ||
-           type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_OBJECT;
+           type_id == LMD_TYPE_ELEMENT;
+}
+
+// The kind that carries BOTH an attribute face and a content face. Since
+// D2.6.6v2 phase 2 that is exactly ELEMENT — a nominal value with content IS an
+// element, so this is no longer a two-member family. Kept as a named predicate
+// because the content-face sites read better through it.
+static inline bool is_element_family_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_ELEMENT;
 }
 
 static inline bool is_container_type_id(TypeId type_id) {
@@ -1439,7 +1520,7 @@ static inline bool is_typed_wrapper_param_type_id(TypeId type_id) {
            type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_BINARY ||
            type_id == LMD_TYPE_SYMBOL || type_id == LMD_TYPE_DECIMAL ||
            type_id == LMD_TYPE_DTIME || type_id == LMD_TYPE_MAP ||
-           type_id == LMD_TYPE_OBJECT || type_id == LMD_TYPE_ELEMENT;
+           type_id == LMD_TYPE_ELEMENT;
 }
 
 static inline bool is_fn_call_wrapper_return_type_id(TypeId type_id) {
@@ -1460,6 +1541,7 @@ static inline bool is_fn_call_wrapper_return_type_id(TypeId type_id) {
 
 #ifndef __cplusplus
 LAMBDA_STATIC_ASSERT(sizeof(Item) == sizeof(uint64_t), "C Item must remain one word");
+
 #endif
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_NULL >> 56)), "ITEM_NULL tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(ITEM_NULL_SPREADABLE >> 56)), "ITEM_NULL_SPREADABLE tag must be non-double");
@@ -2112,6 +2194,10 @@ extern "C" {
     Object* object_with_data(int64_t type_index);
     Object* object_with_tl(int64_t type_index, void* type_list_ptr);
     Object* object_fill(Object* obj, ...);
+    // S2.1.3 object content face (lazily allocated side list)
+    struct List* object_content(Object* obj);
+    Object* object_content_fill(Object* obj, int count, ...);
+    Object* object_content_fill_items(Object* obj, const Item* values, int count);
     // Same fill from a caller-rooted Item span; the T0 walker has no varargs.
     Object* object_fill_items(Object* obj, const Item* values, int value_count);
 
@@ -2223,6 +2309,11 @@ extern "C" {
     Item fn_index_set(Item item, Item index, Item value);
     int64_t fn_int64_index(Item item);
     Item fn_member(Item item, Item key);
+    // S12.3.3v2: object member access (key domain, then the type's method
+    // chain), shared by the ANY and static member lanes.
+    Item lambda_object_member(Item self, const char* key);
+    const struct TypeMethod* lambda_object_find_method(const struct TypeObject* type,
+        const char* key);
     Item fn_member_by_id(Item item, uint32_t name_id);
     // length function
     int64_t fn_len(Item item);

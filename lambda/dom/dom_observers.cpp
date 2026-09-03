@@ -189,13 +189,13 @@ static Item observer_create(JsObserverKind kind, Item callback, JsObserverState*
 
 static bool observer_option_bool(Item options, const char* name) {
     TypeId type = get_type_id(options);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) return false;
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) return false;
     return js_is_truthy(js_get_key_default(options, observer_key(name)));
 }
 
 static Item observer_option(Item options, const char* name) {
     TypeId type = get_type_id(options);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_OBJECT && type != LMD_TYPE_VMAP) {
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_VMAP) {
         return ItemNull;
     }
     return js_get_key_default(options, observer_key(name));

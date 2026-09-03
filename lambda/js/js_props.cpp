@@ -170,11 +170,33 @@ extern Item fn_map_set(Item map_item, Item key, Item value);
 #  define JS_PROPS_ASSERT_ACCESSOR_PAIR(slot, se)    ((void)0)
 #endif
 
-static Map* js_props_storage_map(Item object) {
+static Map* js_props_storage_map_fallback(Item object);
+
+// D2.6.6: an object is element-shaped, so it has no valid Map* view. Callers
+// need only the packed buffer and its capacity, so those are returned directly;
+// returning `object.map` for an object read its `items` pointer as `type` and
+// made private-field Set miss the actual slot.
+static bool js_props_storage(Item object, void** out_data, int* out_cap) {
     TypeId t = get_type_id(object);
-    // Typed Lambda objects share Map's shape/data layout; treating them as a
-    // separate storage kind made private-field Set skip the actual slot (D4.2).
-    if (t == LMD_TYPE_MAP || t == LMD_TYPE_OBJECT) return object.map;
+    if (out_data) *out_data = NULL;
+    if (out_cap) *out_cap = 0;
+    if (t == LMD_TYPE_MAP) {
+        if (out_data) *out_data = lambda_attr_data(t, object.map);
+        if (out_cap) {
+            *out_cap = is_element_family_type_id(t)
+                ? object.element->data_cap : object.map->data_cap;
+        }
+        return lambda_attr_shape(t, object.map) != NULL;
+    }
+    Map* fallback = js_props_storage_map_fallback(object);
+    if (!fallback) return false;
+    if (out_data) *out_data = fallback->data;
+    if (out_cap) *out_cap = fallback->data_cap;
+    return true;
+}
+
+static Map* js_props_storage_map_fallback(Item object) {
+    TypeId t = get_type_id(object);
     if (t == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(object)) {
         Array* arr = object.array;
         return js_array_props(arr);
@@ -196,22 +218,22 @@ static JsShapeSlotStatus js_own_shape_slot_status_impl(Item object,
     if (out_se) *out_se = NULL;
     if (out_borrowed) *out_borrowed = false;
 
-    Map* m = js_props_storage_map(object);
-    if (!m) return JS_SHAPE_SLOT_ABSENT;
+    void* m_data = NULL; int m_cap = 0;
+    if (!js_props_storage(object, &m_data, &m_cap)) return JS_SHAPE_SLOT_ABSENT;
 
     ShapeEntry* se = name_id != NAME_ID_NONE
         ? js_find_shape_entry_name_id(object, name_id)
         : js_find_shape_entry(object, name, name_len);
     if (out_se) *out_se = se;
 
-    if (se && m->data && shape_entry_storage_fits_data(se, m->data_cap)) {
+    if (se && m_data && shape_entry_storage_fits_data(se, m_cap)) {
         if (get_type_id(object) == LMD_TYPE_MAP &&
-                map_ctor_offset_is_reserved(m, se->byte_offset)) {
+                map_ctor_offset_is_reserved(object.map, se->byte_offset)) {
             // Preallocated constructor storage is not an own property before
             // its source assignment executes.
             return JS_SHAPE_SLOT_ABSENT;
         }
-        Item slot = _map_read_field(se, m->data);
+        Item slot = _map_read_field(se, m_data);
         if (out_slot) *out_slot = slot;
         if (jspd_is_deleted(se)) return JS_SHAPE_SLOT_DELETED;
         if (js_props_is_deleted_sentinel(slot)) return JS_SHAPE_SLOT_DELETED;
@@ -221,8 +243,12 @@ static JsShapeSlotStatus js_own_shape_slot_status_impl(Item object,
     }
 
     if (!allow_ext || !name) return JS_SHAPE_SLOT_ABSENT;
+    // The extension table is a Map-only structure; a nominal Lambda object has
+    // a fixed declared shape and no JS extension slots, and is element-shaped
+    // so it has no Map* view at all (D2.6.6).
+    if (get_type_id(object) != LMD_TYPE_MAP) return JS_SHAPE_SLOT_ABSENT;
     bool found = false;
-    Item slot = js_map_shape_lookup_ext(m, name, name_len, &found);
+    Item slot = js_map_shape_lookup_ext(object.map, name, name_len, &found);
     if (out_slot) *out_slot = slot;
 
     if (se && jspd_is_deleted(se)) return JS_SHAPE_SLOT_DELETED;
@@ -1378,7 +1404,7 @@ extern "C" Item js_delete(Item target, JsPropertyLane lane,
     TypeId target_type = get_type_id(target_root.get());
     bool object_like = target_type == LMD_TYPE_MAP ||
         js_props_is_array(target_root.get()) || target_type == LMD_TYPE_FUNC ||
-        target_type == LMD_TYPE_ELEMENT || target_type == LMD_TYPE_OBJECT ||
+        target_type == LMD_TYPE_ELEMENT ||
         target_type == LMD_TYPE_VMAP || target_type == LMD_TYPE_ERROR;
     if (!object_like && target_type != LMD_TYPE_NULL &&
             target_type != LMD_TYPE_UNDEFINED) {

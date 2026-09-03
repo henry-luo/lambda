@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.4.3: call-site uncertainty has one tag test; the known ERROR producer itself has none.",
+  "description": "The literal 25 is LMD_TYPE_ERROR (lambda/lambda.h); re-pin it if the enum shifts. D8.4.3: call-site uncertainty has one tag test; the known ERROR producer itself has none.",
   "checks": [
     {
       "in_func": "_js_thrower_#_body",
@@ -8,7 +8,7 @@
         "call\tjs_throw_value"
       ],
       "forbid": [
-        "eq\t{{r}}, {{r}}, 26"
+        "eq\t{{r}}, {{r}}, 25"
       ]
     },
     {
@@ -18,7 +18,7 @@
         "call\tjs_error_lane_payload"
       ],
       "count": {
-        "eq\t{{r}}, {{r}}, 26": 1
+        "eq\t{{r}}, {{r}}, 25": 1
       }
     }
   ]

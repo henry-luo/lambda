@@ -1,0 +1,29 @@
+'=print='
+<Point x: 3, y: 4>
+<Wrap
+  "solo">
+'=len='
+2
+3
+1
+1
+'=iterate='
+["ok", "click", <b>]
+['label']
+[]
+'=index='
+["click", <b>, "ok", "ok", "solo"]
+'=method='
+"ok!"
+'=equal='
+true
+false
+false
+false
+'=normalize='
+1
+"ab"
+'=format='
+["<Btn label=\"ok\">click<b></b></Btn>", "<Btn label: \"ok\", \"click\" <b>>", "{\n  \"@\": \"Btn\",\n  \"label\": \"ok\",\n  \"_\": [\n    \"click\",\n    \n{\"$\": \"b\"\n    }\n  ]\n}"]
+'=member='
+[true, true, false]

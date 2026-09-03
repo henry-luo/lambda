@@ -455,7 +455,6 @@ static bool jm_should_gc_root_var(MIR_type_t mir_type, TypeId type_id) {
     case LMD_TYPE_MAP:
     case LMD_TYPE_VMAP:
     case LMD_TYPE_ELEMENT:
-    case LMD_TYPE_OBJECT:
     case LMD_TYPE_TYPE:
     case LMD_TYPE_FUNC:
     case LMD_TYPE_ANY:

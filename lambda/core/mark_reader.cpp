@@ -227,8 +227,6 @@ ElementReader ItemReader::asElement() const {
 MapReader ItemReader::asMap() const {
     if (auto map = asItem<LMD_TYPE_MAP>()) {
         return MapReader(*map);
-    } else if (auto object = asItem<LMD_TYPE_OBJECT>()) {
-        return MapReader(*object);
     }
     return MapReader();  // Invalid map
 }
@@ -259,16 +257,13 @@ const char* ItemReader::cstring() const {
 // ==============================================================================
 
 MapReader::MapReader()
-    : map_(nullptr), map_type_(nullptr) {
+    : container_(nullptr), map_type_(nullptr), data_(nullptr) {
 }
 
 MapReader::MapReader(Map* map)
-    : map_(map) {
-    if (map) {
-        map_type_ = (TypeMap*)map->type;
-    } else {
-        map_type_ = nullptr;
-    }
+    : container_((Container*)map)
+    , map_type_(map ? (TypeMap*)map->type : nullptr)
+    , data_(map ? map->data : nullptr) {
 }
 
 MapReader::MapReader(lam::GcPtr<Map> map)
@@ -279,27 +274,27 @@ MapReader::MapReader(lam::ItemOf<LMD_TYPE_MAP> map)
     : MapReader(map.ptr()) {
 }
 
-MapReader::MapReader(lam::ItemOf<LMD_TYPE_OBJECT> object)
-    : MapReader(lam::as_map(object)) {
-}
-
 MapReader MapReader::fromItem(Item item) {
     if (auto map = lam::as<LMD_TYPE_MAP>(item)) {
         return MapReader(*map);
-    } else if (auto object = lam::as<LMD_TYPE_OBJECT>(item)) {
-        return MapReader(*object);
     }
     return MapReader();  // Invalid
 }
 
 ItemReader MapReader::get(const char* key) const {
-    if (!map_ || !map_type_) { return ItemReader(); }
-    ConstItem value = map_->get(key);
-    return ItemReader(value);
+    if (!container_ || !map_type_ || !data_) { return ItemReader(); }
+    lam::ShapeRef field = lam::shape_borrow(map_type_->shape);
+    while (field) {
+        if (field->name && field->name->str && strcmp(field->name->str, key) == 0) {
+            return ItemReader(map_shape_field_to_item(data_, field.get()).to_const());
+        }
+        field = lam::shape_next(field);
+    }
+    return ItemReader();
 }
 
 bool MapReader::has(const char* key) const {
-    if (!map_ || !map_type_) { return false; }
+    if (!container_ || !map_type_) { return false; }
 
     lam::ShapeRef field = lam::shape_borrow(map_type_->shape);
     while (field) {
@@ -313,7 +308,7 @@ bool MapReader::has(const char* key) const {
 }
 
 int64_t MapReader::size() const {
-    if (!map_ || !map_type_) { return 0; }
+    if (!container_ || !map_type_) { return 0; }
     return map_type_->length;
 }
 
@@ -391,7 +386,7 @@ MapReader::EntryIterator::EntryIterator(const MapReader* reader)
 bool MapReader::EntryIterator::next(const char** key, ItemReader* value) {
     if (!current_field_) { return false; }
     *key = current_field_->name ? current_field_->name->str : nullptr;
-    Item result = map_shape_field_to_item(reader_->map_->data, current_field_.get());
+    Item result = map_shape_field_to_item(reader_->data_, current_field_.get());
     *value = ItemReader(result.to_const());
     current_field_ = lam::shape_next(current_field_);
     return true;
@@ -536,6 +531,15 @@ ElementReader::ElementReader()
 ElementReader::ElementReader(const Element* element)
     : element_(element)
     , element_type_(element ? (const TypeElmt*)element->type : nullptr) {
+    // S2.1.3: an object is an element, but its tag lives in
+    // TypeObject::type_name while an element's lives in TypeElmt::name — the
+    // one place the two kinds still differ, so the tag is resolved once here.
+    if (element_type_) {
+        // D2.6.6v2 phase 2: a nominal element's tag is its declared type name,
+        // read from the record; a structural element uses its own tag.
+        TypeNominal* record = type_nominal_record((const Type*)element->type);
+        tag_ = record ? record->type_name : element_type_->name;
+    }
 }
 
 ElementReader::ElementReader(lam::GcPtr<Element> element)
@@ -555,8 +559,8 @@ ElementReader::ElementReader(Item item) {
 }
 
 bool ElementReader::hasTag(const char* tag_name) const {
-    if (!element_type_ || !element_type_->name.str || !tag_name) return false;
-    return strcmp(element_type_->name.str, tag_name) == 0;
+    if (!tag_.str || !tag_name) return false;
+    return strcmp(tag_.str, tag_name) == 0;
 }
 
 bool ElementReader::isEmpty() const {

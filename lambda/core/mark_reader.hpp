@@ -208,8 +208,12 @@ public:
  */
 class MapReader {
 private:
-    Map* map_;
+    // D2.6.6: a map and an object hold their attribute buffer at different
+    // offsets, so this reader holds the shape and buffer directly rather than a
+    // Map*. That is what lets one reader serve both kinds.
+    Container* container_;
     TypeMap* map_type_;
+    void* data_;
 
 public:
     // Lifecycle (value type semantics)
@@ -217,7 +221,6 @@ public:
     explicit MapReader(Map* map);
     explicit MapReader(lam::GcPtr<Map> map);
     explicit MapReader(lam::ItemOf<LMD_TYPE_MAP> map);
-    explicit MapReader(lam::ItemOf<LMD_TYPE_OBJECT> object);
 
     // Create from Item with type validation
     static MapReader fromItem(Item item);
@@ -274,9 +277,10 @@ public:
     ValueIterator values() const;
     EntryIterator entries() const;
 
-    // Accessors
-    Map* map() const { return map_; }
-    bool isValid() const { return map_ != nullptr; }
+    // Accessors. There is deliberately no `Map*` accessor: an object read
+    // through this reader is element-shaped and has no valid Map view (D2.6.6).
+    Container* container() const { return container_; }
+    bool isValid() const { return container_ != nullptr; }
 };
 
 /**
@@ -340,6 +344,10 @@ class ElementReader {
 private:
     const Element* element_;         // Underlying element (read-only)
     const TypeElmt* element_type_;   // Cached element type info (void* cast from element_->type)
+    // S2.1.3: an object shares Element's layout and reads through this same
+    // reader; only its TAG lives elsewhere (TypeObject::type_name rather than
+    // TypeElmt::name). Caching the tag keeps one reader body for both kinds.
+    StrView tag_{nullptr, 0};
 
 public:
     // Lifecycle
@@ -358,7 +366,7 @@ public:
     ElementReader& operator=(ElementReader&&) = default;
 
     // Element properties
-    const char* tagName() const { return element_type_ ? element_type_->name.str : nullptr; }
+    const char* tagName() const { return tag_.str; }
     NameId tagId() const { return element_type_ ? element_type_->name_id : NAME_ID_NONE; }
     bool hasTag(const char* tag_name) const;
     bool hasTag(NameId tag_id) const { return tag_id != NAME_ID_NONE && tagId() == tag_id; }
@@ -429,5 +437,9 @@ public:
 
     // Accessors
     bool isValid() const { return element_ != nullptr; }
+    // Raw element pointer. NULL-safe but element-only: an object read through
+    // this reader returns its Object* reinterpreted, so callers that deref it
+    // as an Element must not be given object-backed readers.
     const Element* element() const { return element_; }
+
 };

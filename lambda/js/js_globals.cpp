@@ -995,7 +995,7 @@ static Item js_require_object_type(Item arg, const char* method_name) {
     TypeId t = get_type_id(arg);
     if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY ||
         js_is_ordinary_numeric_array(arg) || t == LMD_TYPE_FUNC ||
-        t == LMD_TYPE_ELEMENT || t == LMD_TYPE_OBJECT || t == LMD_TYPE_VMAP)
+        t == LMD_TYPE_ELEMENT || t == LMD_TYPE_VMAP)
         return js_status_ok();
     Item type_name = js_name_item("TypeError");
     char msg[128];
@@ -3333,7 +3333,7 @@ static void js_process_ipc_flush_pending(void) {
 }
 
 static bool js_process_ipc_is_disconnect_control(Item message) {
-    if (get_type_id(message) != LMD_TYPE_MAP && get_type_id(message) != LMD_TYPE_OBJECT &&
+    if (get_type_id(message) != LMD_TYPE_MAP &&
         get_type_id(message) != LMD_TYPE_VMAP) {
         return false;
     }
@@ -3343,7 +3343,6 @@ static bool js_process_ipc_is_disconnect_control(Item message) {
 
 static bool js_process_ipc_unwrap_handle_message(Item* message) {
     if (!message || (get_type_id(*message) != LMD_TYPE_MAP &&
-        get_type_id(*message) != LMD_TYPE_OBJECT &&
         get_type_id(*message) != LMD_TYPE_VMAP)) {
         return false;
     }
@@ -5430,7 +5429,7 @@ extern "C" Item js_console_assert_fn(Item cond, Item msg) {
 using JsFuncName = JsFunction;
 
 static Item js_instanceof_impl(Item left, Item right, bool skip_symbol);
-JS_FORWARD_STATIC_EXPRESSION(bool, js_instanceof_is_object_like_type, (TypeId type), (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_instanceof_is_object_like_type, (TypeId type), (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP))
 JS_FORWARD_STATIC_RETURN(bool, js_instanceof_can_walk_prototype, (Item item), js_is_js_array, (item) || js_instanceof_is_object_like_type(get_type_id(item)))
 
 static Item js_prototype_chain_contains(Item left, Item target_proto) {
@@ -8008,7 +8007,7 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
     if (obj.item == 0) return obj;
     Item props_obj = props;
     if (pt != LMD_TYPE_MAP && pt != LMD_TYPE_ARRAY && pt != LMD_TYPE_FUNC &&
-        pt != LMD_TYPE_ELEMENT && pt != LMD_TYPE_OBJECT &&
+        pt != LMD_TYPE_ELEMENT &&
         pt != LMD_TYPE_VMAP) {
         props_obj = js_to_object(props);
         properties_object_root.set(props_obj);
@@ -8016,7 +8015,7 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
         pt = get_type_id(props_obj);
     }
     if (pt != LMD_TYPE_MAP && pt != LMD_TYPE_ARRAY && pt != LMD_TYPE_FUNC &&
-        pt != LMD_TYPE_ELEMENT && pt != LMD_TYPE_OBJECT &&
+        pt != LMD_TYPE_ELEMENT &&
         pt != LMD_TYPE_VMAP) {
         return obj;
     }
@@ -13163,7 +13162,7 @@ extern "C" Item js_domexception_new(Item message, Item name_arg) {
     TypeId name_type = get_type_id(name_arg);
     if (name_type == LMD_TYPE_STRING) {
         actual_name = name_arg;
-    } else if (name_type == LMD_TYPE_MAP || name_type == LMD_TYPE_OBJECT) {
+    } else if (name_type == LMD_TYPE_MAP) {
         // options object: { name: "...", cause: ... }
         Item name_prop = js_get_key_cstr(name_arg, "name");
         if (get_type_id(name_prop) == LMD_TYPE_STRING) {
@@ -13334,15 +13333,14 @@ static bool js_message_port_event_name_matches(Item event, const char* expected)
 
 static bool js_message_port_is_object(Item value) {
     TypeId type = get_type_id(value);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+    return type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP;
 }
 
 static bool js_worker_transfer_markable(Item value) {
     TypeId type = get_type_id(value);
     // array-family: a numeric or freshly built [] is LMD_TYPE_ARRAY_NUM, which
     // the bare tag misses, so markAsUntransferable([]) silently did nothing.
-    return is_array_family_type_id(type) || type == LMD_TYPE_MAP ||
-        type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP ||
+    return is_array_family_type_id(type) || type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP ||
         type == LMD_TYPE_ELEMENT;
 }
 
@@ -14188,7 +14186,7 @@ extern "C" Item js_get_global_this() {
 extern "C" Item js_vm_swap_global_this(Item next_global) {
     Item previous = js_get_global_this();
     TypeId type = get_type_id(next_global);
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP) {
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP) {
         js_global_this_obj = next_global;
         js_global_var_define_cache_reset();
     }
@@ -14233,8 +14231,7 @@ static bool js_with_binding_key_same(Item a, Item b) {
 static bool js_with_scope_is_object(Item value) {
     TypeId type = get_type_id(value);
     return type == LMD_TYPE_MAP || js_is_js_array(value) ||
-           type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT ||
-           type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
+           type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP;
 }
 
 extern "C" void js_with_batch_reset(void) {

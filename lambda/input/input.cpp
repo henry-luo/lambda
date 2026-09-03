@@ -130,7 +130,6 @@ static bool store_common_field_value(void* field_ptr, TypeId type_id, Item value
     case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT:
-    case LMD_TYPE_OBJECT:
         *(Container**)field_ptr = value.container;
         return true;
     case LMD_TYPE_PATH:
@@ -191,7 +190,7 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
             titem.binary = item.get_safe_binary();
             break;
         case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-        case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
+        case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:   {
             Container *container = item.container;
             titem.container = container;
             break;

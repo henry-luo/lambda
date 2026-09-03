@@ -89,7 +89,6 @@ ValueRep lambda_canonical_rep(Type* contract) {
     case LMD_TYPE_MAP:
     case LMD_TYPE_VMAP:
     case LMD_TYPE_ELEMENT:
-    case LMD_TYPE_OBJECT:
     case LMD_TYPE_FUNC:
         return VALUE_REP_RAW_GC_POINTER;
     case LMD_TYPE_BOOL:
@@ -120,7 +119,6 @@ static Type* canonical_type_for_id(TypeId type_id) {
     case LMD_TYPE_MAP: return &TYPE_MAP;
     case LMD_TYPE_VMAP: return &TYPE_MAP;
     case LMD_TYPE_ELEMENT: return &TYPE_ELMT;
-    case LMD_TYPE_OBJECT: return &TYPE_OBJECT;
     case LMD_TYPE_TYPE: return &TYPE_TYPE;
     case LMD_TYPE_FUNC: return &TYPE_FUNC;
     case LMD_TYPE_ANY: return &TYPE_ANY;
@@ -268,7 +266,7 @@ static bool contract_semantics_equal(const Type* left, const Type* right) {
             contract_semantics_equal(left_binary->right, right_binary->right);
     }
     return left->type_id != LMD_TYPE_MAP && left->type_id != LMD_TYPE_ARRAY &&
-        left->type_id != LMD_TYPE_ELEMENT && left->type_id != LMD_TYPE_OBJECT;
+        left->type_id != LMD_TYPE_ELEMENT;
 }
 
 static bool contract_semantics_compatible(const Type* candidate,
@@ -450,8 +448,7 @@ static bool contract_same_atomic_type(Type* left, Type* right) {
     // Scalar TypeIds are canonical in the builder. Do not collapse map, array,
     // or extended types merely because their compact prefix happens to match.
     return left->kind == TYPE_KIND_SIMPLE && left->type_id != LMD_TYPE_MAP &&
-        left->type_id != LMD_TYPE_ARRAY && left->type_id != LMD_TYPE_ELEMENT &&
-        left->type_id != LMD_TYPE_OBJECT && left->type_id != LMD_TYPE_TYPE;
+        left->type_id != LMD_TYPE_ARRAY && left->type_id != LMD_TYPE_ELEMENT && left->type_id != LMD_TYPE_TYPE;
 }
 
 static bool contract_union_contains(Type* haystack, Type* needle) {

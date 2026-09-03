@@ -47,7 +47,7 @@ The JS language types are a projection of the Lambda `EnumTypeId` enum (`lambda.
 | string | `LMD_TYPE_STRING` | `"string"` | heap `String`. |
 | symbol | `LMD_TYPE_INT` (negative) **or** `LMD_TYPE_SYMBOL` | `"symbol"` | well-known symbols are negative ints ([§4](#4-symbol-as-property-key-encoding)). |
 | function | `LMD_TYPE_FUNC` | `"function"` | a `JsFunction` ([§6](#6-memory-model-gc-heap-side-stacks-pool)). |
-| object / array / Proxy / class ctor | `LMD_TYPE_MAP`, `LMD_TYPE_ARRAY`, `LMD_TYPE_ELEMENT` | `"object"`/`"function"` | `js_typeof` follows callable capability for Proxies and `JsFunction` class constructors; class metadata does not grant callability. |
+| object / array / Proxy / class ctor | `LMD_TYPE_MAP`, `LMD_TYPE_ARRAY`, `LMD_TYPE_ELEMENT` | `"object"`/`"function"` | `js_typeof` follows callable capability for Proxies and `JsFunction` class constructors; class metadata does not grant callability. **A JS object is a `Map`, never an `LMD_TYPE_OBJECT`** in the shipped runtime — that kind is Lambda's nominal `type T { … }` and is inbound-only (D2.6.9v2). Ruled forward (D2.6.9v3): when the object TypeId retires, a JS object becomes a *nominal* Lambda map, i.e. a Lambda object ([JS_06](JS_06_Objects_Properties_Prototypes.md)). |
 
 A value tagged `LMD_TYPE_INT` can be a Lambda safe-band integer crossing the membrane or a negative encoded JS Symbol. `js_typeof` calls the Symbol predicate to distinguish them. `js_make_number` does not participate in that ambiguity because it always emits `LMD_TYPE_FLOAT`.
 

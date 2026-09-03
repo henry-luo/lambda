@@ -1,0 +1,21 @@
+'=axes='
+[true, true, true, false]
+[true, true, true, false]
+[false, false]
+'=equal='
+[true, false, false, false]
+'=method='
+6
+'=name='
+"P"
+'=len='
+[1, 2, 1]
+'=print='
+<P x: 3>
+<B label: "t",
+  "c">
+'=order='
+[{
+    b: 1
+  }, <A2 b: 1>, <P x: 1>, <e
+    "x">]

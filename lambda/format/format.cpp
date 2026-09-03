@@ -24,7 +24,7 @@ static bool format_contains_complex(const ItemReader& item, int depth) {
         return false;
     }
 
-    if (item.getType() == LMD_TYPE_MAP || item.getType() == LMD_TYPE_OBJECT) {
+    if (item.getType() == LMD_TYPE_MAP) {
         MapReader map = MapReader::fromItem(item.item());
         auto iter = map.entries();
         const char* key;

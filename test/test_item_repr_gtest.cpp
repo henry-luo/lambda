@@ -266,15 +266,15 @@ TEST(ItemRepresentation, ContainerHeaderNamedStatePreservesRawAbi) {
     EXPECT_EQ(__builtin_offsetof(Container, reserved_state), 7u);
 
     // named access and detached raw-mask access must describe the same ABI byte.
-    container.has_js_props = 1;
-    EXPECT_EQ(container.flags, CONTAINER_FLAG_JS_PROPS);
+    container.nominal_reserved = 1;
+    EXPECT_EQ(container.flags, CONTAINER_FLAG_NOMINAL_RESERVED);
     container.has_ctor_reserved = 1;
     EXPECT_EQ(container.flags,
-              CONTAINER_FLAG_JS_PROPS | CONTAINER_FLAG_CTOR_RESERVED);
-    container.has_js_props = 0;
+              CONTAINER_FLAG_NOMINAL_RESERVED | CONTAINER_FLAG_CTOR_RESERVED);
+    container.nominal_reserved = 0;
     EXPECT_EQ(container.flags, CONTAINER_FLAG_CTOR_RESERVED);
-    container.flags = CONTAINER_FLAG_JS_PROPS;
-    EXPECT_TRUE(container.has_js_props);
+    container.flags = CONTAINER_FLAG_NOMINAL_RESERVED;
+    EXPECT_TRUE(container.nominal_reserved);
     EXPECT_FALSE(container.has_ctor_reserved);
 
     container.cow_state = 0xa5;
@@ -503,7 +503,13 @@ TEST(ItemRepresentation, OwnedTailRelocationRebasesWideScalarItems) {
     js_list.length = 2;
     js_list.extra = 1;
     js_list.capacity = 4;
-    js_list.has_js_props = 1;
+    // D2.6.6v2: "has JS properties" is now the array's attribute face.
+    Map props_map = {};
+    props_map.type_id = LMD_TYPE_MAP;
+    Item props_slot = {.map = &props_map};
+    js_list.type = &ArrayPropsShape;
+    js_list.data = &props_slot;
+    js_list.data_cap = (int)sizeof(Item);
     old_props[3] = {.item = ITEM_JS_DELETED_SENTINEL};
     memcpy(new_props, old_props, sizeof(old_props));
 
@@ -565,12 +571,12 @@ TEST_F(RuntimeShapeTransition, ObjectShapeMutationRebuildsPackedFields) {
     // The object branch shares the same packed shape machinery, but its
     // derived header must remain an OBJECT Item throughout the rebuild.
     Object object = {};
-    object.type_id = LMD_TYPE_OBJECT;
+    object.type_id = LMD_TYPE_ELEMENT;
     object.type = seed->type;
     object.data = seed->data;
     object.data_cap = seed->data_cap;
     Item object_item = {.object = &object};
-    EXPECT_EQ(get_type_id(object_item), LMD_TYPE_OBJECT);
+    EXPECT_EQ(get_type_id(object_item), LMD_TYPE_ELEMENT);
     EXPECT_EQ(object_get(&object, {.item = s2it(late_flag)}).item,
               b2it(BOOL_FALSE));
 
@@ -761,9 +767,9 @@ TEST(ItemRepresentation, ContainerPointersAreBitIdenticalItems) {
     EXPECT_EQ(it2elmt(p2it(&element))->length, 5);
 
     Object object = {};
-    object.type_id = LMD_TYPE_OBJECT;
+    object.type_id = LMD_TYPE_ELEMENT;
     object.data_cap = 6;
-    expect_raw_item_header(&object, LMD_TYPE_OBJECT);
+    expect_raw_item_header(&object, LMD_TYPE_ELEMENT);
     EXPECT_EQ(it2obj(p2it(&object))->data_cap, 6);
 
     Type type = {};
@@ -828,11 +834,11 @@ TEST_F(RuntimeItemRepresentation, HeapAllocatedHeadersAreBitIdenticalItems) {
     expect_array_like_header(element, LMD_TYPE_ELEMENT);
     EXPECT_EQ(it2elmt(p2it(element))->length, 5);
 
-    Object* object = (Object*)gc_heap_calloc(gc, sizeof(Object), LMD_TYPE_OBJECT);
+    Object* object = (Object*)gc_heap_calloc(gc, sizeof(Object), LMD_TYPE_ELEMENT);
     ASSERT_NE(object, nullptr);
-    object->type_id = LMD_TYPE_OBJECT;
+    object->type_id = LMD_TYPE_ELEMENT;
     object->data_cap = 6;
-    expect_raw_item_header(object, LMD_TYPE_OBJECT);
+    expect_raw_item_header(object, LMD_TYPE_ELEMENT);
     EXPECT_EQ(it2obj(p2it(object))->data_cap, 6);
 
     Type* type = (Type*)gc_heap_calloc(gc, sizeof(Type), LMD_TYPE_TYPE);

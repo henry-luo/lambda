@@ -386,10 +386,30 @@ struct Range : Container {
     bool is_char;    // true when bounds are Unicode codepoints materializing as strings
 };
 
-struct List : Container {
+// D2.6.6v2: containers form ONE single-inheritance chain — Map -> Array ->
+// Element. Map is the base because the attribute face is what every container
+// shares, and a property bag is what a JS program calls an object (D2.6.9v3).
+// Keeping it first puts `type`/`data`/`data_cap` at ONE offset in every
+// container, so a cast to any ancestor is valid by construction and the
+// kind-aware offset accessors the previous layout needed all retire.
+struct Map : Container {
+    void* type;  // map type/shape
+    void* data;  // packed data struct of the map
+    int data_cap;  // capacity of the data struct
+
+    ConstItem get(const Item key) const;
+    ConstItem get(const char* key_str) const;
+    bool has_field(const char* field_name) const;
+};
+
+// `Array` is a typedef of List (lambda.h). Extending Map costs every array a
+// 24-byte attribute prefix — the accepted price of the reconciliation — and
+// buys arrays their own property face, which is what retires the reserved-tail
+// JS-props companion that used to live in `extra`.
+struct List : Map {
     Item* items;
     int64_t length;
-    int64_t extra;  // count of reserved tail items (wide scalars plus optional JS props slot)
+    int64_t extra;  // count of reserved tail items (wide scalars)
     int64_t capacity;
 
     ConstItem get(int index) const;
@@ -603,7 +623,7 @@ static inline bool array_native_lane_store(Array* array, int64_t index, Item val
     }
 }
 
-struct ArrayNum : Container {
+struct ArrayNum : Map {
     // Container::map_kind byte holds the elem_type for ArrayNum.
     // Container::array_flags stores layout flags (is_ndim/is_view/is_pinned).
     union {
@@ -622,6 +642,27 @@ struct ArrayNum : Container {
 // Tune5 P5 gate: a List and ArrayNum share the same managed header and tail
 // offsets, but their element buffers still have different semantic contracts.
 // Retagging is legal only after this physical proof is true on every build.
+// D2.6.6v2: the single chain Map -> List/Array -> Element. These pin the one
+// property the whole design rests on: the attribute face sits at the SAME
+// offset in every container, so an ancestor cast is always valid.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static_assert(offsetof(Map, type) == 8 && offsetof(Map, data) == 16 &&
+              offsetof(Map, data_cap) == 24, "Map attribute face moved");
+static_assert(offsetof(List, type) == offsetof(Map, type) &&
+              offsetof(List, data) == offsetof(Map, data) &&
+              offsetof(List, data_cap) == offsetof(Map, data_cap),
+              "List must share Map's attribute face");
+static_assert(offsetof(List, items) == 32 && offsetof(List, length) == 40 &&
+              offsetof(List, extra) == 48 && offsetof(List, capacity) == 56,
+              "List content face moved");
+static_assert(offsetof(ArrayNum, items) == offsetof(List, items) &&
+              offsetof(ArrayNum, length) == offsetof(List, length) &&
+              offsetof(ArrayNum, extra) == offsetof(List, extra) &&
+              offsetof(ArrayNum, capacity) == offsetof(List, capacity),
+              "ArrayNum must share List's header and tail offsets");
+#pragma clang diagnostic pop
+
 static_assert(sizeof(List) == sizeof(ArrayNum),
               "JS numeric promotion requires identical container sizes");
 
@@ -684,15 +725,6 @@ static inline bool array_num_init_storage_view(ArrayNum* view, ArrayNumShape* sh
     return true;
 }
 
-struct Map : Container {
-    void* type;  // map type/shape
-    void* data;  // packed data struct of the map
-    int data_cap;  // capacity of the data struct
-
-    ConstItem get(const Item key) const;
-    ConstItem get(const char* key_str) const;
-    bool has_field(const char* field_name) const;
-};
 
 // Constructor shapes reserve at most 16 fixed-width slots before executing the
 // body. The named mask bytes preserve the public Map layout and keep the state
@@ -732,17 +764,30 @@ struct SparseArrayMap : Map {
     int64_t sparse_version;          // increments on numeric sparse mutations
 };
 
+// D2.6.6v2: Element adds NO fields — its attribute face is Map's, inherited
+// through List. `Object` is a typedef of Element (lambda.h).
 struct Element : List {
-    // attributes map
-    void* type;  // attr type/shape
-    void* data;  // packed data struct of the attrs
-    int data_cap;  // capacity of the data struct
     // member functions
     bool has_attr(const char* attr_name);
 
     ConstItem get_attr(const Item attr_name) const;
     ConstItem get_attr(const char* attr_name) const;
 };
+
+// D2.6.6v2: Element inherits BOTH faces and adds nothing of its own.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static_assert(offsetof(Element, type) == offsetof(Map, type) &&
+              offsetof(Element, data) == offsetof(Map, data) &&
+              offsetof(Element, data_cap) == offsetof(Map, data_cap),
+              "Element must share Map's attribute face");
+static_assert(offsetof(Element, items) == offsetof(List, items) &&
+              offsetof(Element, length) == offsetof(List, length) &&
+              offsetof(Element, extra) == offsetof(List, extra) &&
+              offsetof(Element, capacity) == offsetof(List, capacity),
+              "Element must share List's content face");
+static_assert(sizeof(Element) == sizeof(List), "Element adds no fields");
+#pragma clang diagnostic pop
 
 // VMap: Virtual map with vtable dispatch
 // Supports arbitrary key types and pluggable backends (HashMap, TreeMap, etc.)
@@ -768,15 +813,48 @@ struct VMap : Container {
 
 // Object: nominally-typed map with type name and methods
 // Same memory layout as Map for field access compatibility
-struct Object : Container {
-    void* type;         // TypeObject* — shape + methods + type_name
-    void* data;         // packed field data (same layout as Map)
-    int data_cap;       // data buffer capacity
 
-    ConstItem get(const Item key) const;
-    ConstItem get(const char* key_str) const;
-    bool has_field(const char* field_name) const;
-};
+// S2.1.3: the one content-face accessor. An object shares Element's layout, so
+// both kinds ARE Lists and the content face is the value itself. Kept as a
+// named accessor so content-face sites read the same way and the kind check
+// lives in one place. Returns NULL for anything without a content face.
+static inline List* lambda_content_list(TypeId type_id, const void* container) {
+    if (!container || !is_element_family_type_id(type_id)) return nullptr;
+    return (List*)(Element*)(void*)container;
+}
+
+// Content item count for either kind; 0 when absent.
+static inline int64_t lambda_content_count(TypeId type_id, const void* container) {
+    List* content = lambda_content_list(type_id, container);
+    return content ? content->length : 0;
+}
+
+// TypeMap is defined in lambda-data.hpp, which some translation units include
+// after this header; only the pointer is needed here.
+struct TypeMap;
+
+// D2.6.6: the packed attribute shape and buffer sit at DIFFERENT offsets in a
+// map (right after the header) than in an element or object (after the list
+// fields). These two accessors are the only correct way to reach the attribute
+// face of a value whose kind is not statically fixed — reading `.map->type` on
+// an object silently returns its `items` pointer.
+static inline struct TypeMap* lambda_attr_shape(TypeId type_id, const void* container) {
+    if (!container) return nullptr;
+    if (is_element_family_type_id(type_id)) {
+        return (struct TypeMap*)((const Element*)container)->type;
+    }
+    if (type_id == LMD_TYPE_MAP) return (struct TypeMap*)((const Map*)container)->type;
+    return nullptr;
+}
+
+static inline void* lambda_attr_data(TypeId type_id, const void* container) {
+    if (!container) return nullptr;
+    if (is_element_family_type_id(type_id)) {
+        return ((const Element*)container)->data;
+    }
+    if (type_id == LMD_TYPE_MAP) return ((const Map*)container)->data;
+    return nullptr;
+}
 
 // ============================================================================
 // C++ versions of Item-using inline helpers (Item is fully defined here)

@@ -924,7 +924,7 @@ static Type* resolve_js_member_type(JsMemberNode* member) {
         return NULL;
     }
     Type* recv = member->object->type;
-    if (recv->type_id != LMD_TYPE_MAP && recv->type_id != LMD_TYPE_OBJECT) {
+    if (recv->type_id != LMD_TYPE_MAP) {
         return NULL;
     }
     if (is_global_simple_type(recv)) return NULL;
@@ -937,8 +937,7 @@ static Type* resolve_js_member_type(JsMemberNode* member) {
                     se->name->length) == 0) {
             Type* field_type = unwrap_simple_type_type(se->type);
             if (field_type && (field_type->type_id == LMD_TYPE_MAP ||
-                    field_type->type_id == LMD_TYPE_ELEMENT ||
-                    field_type->type_id == LMD_TYPE_OBJECT)) {
+                    field_type->type_id == LMD_TYPE_ELEMENT)) {
                 return field_type;
             }
             return NULL;
