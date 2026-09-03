@@ -12,6 +12,7 @@
 // command this module does not implement declines, and `execCommand` reports
 // false for it — the same answer `queryCommandSupported` would give.
 import radiant
+import dom
 
 // The name a page passes to execCommand, mapped to the WHATWG intent the
 // keyboard path already produces. Matching case-insensitively is not
@@ -48,11 +49,11 @@ pub fn is_format(intent) { format_tag(intent) != null }
 // format, it removes it. The state is read off the tree on every call rather
 // than cached (ES16), so a page's own DOM edits cannot leave it stale.
 pn toggle_format(host, tag) {
-    let node = radiant.dom_edit_node(host);
+    let node = dom.edit_node(host);
     if (node == null) { false }
     else {
-        let s = radiant.dom_edit_start(host);
-        let e = radiant.dom_edit_end(host);
+        let s = dom.edit_start(host);
+        let e = dom.edit_end(host);
         // A collapsed selection has no run to format. A browser remembers the
         // command and applies it to the next keystroke; that is stored state
         // with no channel through this waist, so the command declines rather
@@ -90,10 +91,10 @@ pub pn run(host, intent, value) {
         radiant.dom_delete_dom_range(host)
     }
     else if (intent == "insertParagraph") {
-        radiant.dom_insert_paragraph(host)
+        dom.edit_split_block(host)
     }
     else if (intent == "insertLineBreak") {
-        radiant.dom_insert_line_break(host)
+        dom.edit_insert_break(host)
     }
     else { false }
 }

@@ -2,6 +2,7 @@
 // snapshot and performs the canonical focus/scroll writes; this module owns
 // HTML tabindex ordering and autofocus choice.
 import radiant
+import dom
 
 fn before(a, b) {
     if (a.tab_index > 0 and b.tab_index <= 0) { true }
@@ -26,7 +27,7 @@ fn extremum(candidates, i, best, forward) {
 
 fn focused_candidate(candidates, i) {
     if (i >= len(candidates)) { null }
-    else if (radiant.focused(candidates[i].node)) { candidates[i] }
+    else if (dom.focused(candidates[i].node)) { candidates[i] }
     else { focused_candidate(candidates, i + 1) }
 }
 
@@ -51,26 +52,26 @@ fn next_candidate(candidates, forward) {
 
 fn autofocus_candidate(candidates, i) {
     if (i >= len(candidates)) { null }
-    else if (radiant.has_attr(candidates[i].node, "autofocus")) { candidates[i] }
+    else if (dom.has_attribute(candidates[i].node, "autofocus")) { candidates[i] }
     else { autofocus_candidate(candidates, i + 1) }
 }
 
 pub pn navigate(root, evt) {
     let forward = not evt.shift;
-    let target = next_candidate(radiant.focus_candidates(radiant.document_root(root)), forward);
+    let target = next_candidate(radiant.focus_candidates(dom.document_element(root)), forward);
     if (target == null) { 'pass' }
     else {
-        radiant.focus_set(target.node, true)
-        radiant.scroll_into_view(target.node)
+        dom.focus_set(target.node, true)
+        dom.scroll_into_view(target.node)
     }
 }
 
 pub pn autofocus(root) {
-    let target = autofocus_candidate(radiant.focus_candidates(radiant.document_root(root)), 0);
+    let target = autofocus_candidate(radiant.focus_candidates(dom.document_element(root)), 0);
     if (target == null) { 'pass' }
     else {
-        radiant.focus_set(target.node, false)
-        radiant.scroll_into_view(target.node)
+        dom.focus_set(target.node, false)
+        dom.scroll_into_view(target.node)
     }
 }
 

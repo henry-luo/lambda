@@ -8,6 +8,7 @@
 // An intent this file does not handle returns 'pass' and the native applier
 // runs unchanged, so the flip can land one input type at a time.
 import radiant
+import dom
 
 // --- word boundaries -------------------------------------------------------
 
@@ -64,25 +65,25 @@ pub fn line_end(text, pos) {
 // paint, both of which stay native. An empty range clears, so any edit that
 // inserts nothing — every delete — re-masks.
 pn reveal_last_typed(elem, start, inserted) {
-    if (radiant.attr(elem, "type") != "password") { false }
+    if (dom.get_attribute(elem, "type") != "password") { false }
     else if (len(inserted) > 0) {
-        radiant.set_password_reveal(elem, start + len(inserted) - 1, start + len(inserted))
+        dom.set_password_reveal(elem, start + len(inserted) - 1, start + len(inserted))
     }
-    else { radiant.set_password_reveal(elem, 0, 0) }
+    else { dom.set_password_reveal(elem, 0, 0) }
 }
 
 pn delete_span(elem, s, e, target) {
     reveal_last_typed(elem, s, "")
     if (s != e) {
-        radiant.replace_range(elem, s, e, "")
+        dom.edit_replace_range(elem, s, e, "")
         'prevent-default'
     }
     else if (target < s) {
-        radiant.replace_range(elem, target, s, "")
+        dom.edit_replace_range(elem, target, s, "")
         'prevent-default'
     }
     else if (target > s) {
-        radiant.replace_range(elem, s, target, "")
+        dom.edit_replace_range(elem, s, target, "")
         'prevent-default'
     }
     else { 'pass' }
@@ -120,7 +121,7 @@ pub fn sanitize(text, multiline) {
 // so this is ground the native applier did not cover: before this, typing eight
 // characters into `maxlength="5"` produced eight.
 fn max_len(elem) {
-    let raw = radiant.attr(elem, "maxlength");
+    let raw = dom.get_attribute(elem, "maxlength");
     if (raw == null or raw == "") { null }
     else {
         let n = int(raw);
@@ -154,8 +155,8 @@ pub pn commit(elem) {
     let before = radiant.value_at_focus(elem);
     // No snapshot means this is the first blur after init, which is not a
     // commit — treating it as one would fire `change` on every focus pass.
-    if (before != null and before != radiant.get_state(elem, "value")) {
-        radiant.request_change(elem)
+    if (before != null and before != dom.get_state(elem, "value")) {
+        dom.request_change(elem)
     }
     else { false }
 }
@@ -170,9 +171,9 @@ pub pn commit(elem) {
 // pattern that selected this handler is exactly the question being asked.
 pub pn apply_fn(elem, evt, multiline) {
     let t = evt.input_type;
-    let s = radiant.selection_start(elem);
-    let e = radiant.selection_end(elem);
-    let text = radiant.get_state(elem, "value");
+    let s = dom.tc_selection_start(elem);
+    let e = dom.tc_selection_end(elem);
+    let text = dom.get_state(elem, "value");
 
     // Every intent that means "replace the range with this text" shares one
     // branch: typing, paste, an IME commit, and an autocorrect replacement all
@@ -197,7 +198,7 @@ pub pn apply_fn(elem, evt, multiline) {
         // *is*, and only then does maxlength decide how much of it fits
         let data = sanitize(if (evt.data == null) "" else evt.data, multiline);
         let fitted = fit(elem, data, len(text), e - s);
-        radiant.replace_range(elem, s, e, fitted)
+        dom.edit_replace_range(elem, s, e, fitted)
         reveal_last_typed(elem, s, fitted)
         'prevent-default'
     }
@@ -242,7 +243,7 @@ pub pn apply_fn(elem, evt, multiline) {
         // so the restore does not record itself as a new entry.
         if (evt.history_value == null) { 'pass' }
         else {
-            radiant.replace_range(elem, 0, len(text), evt.history_value)
+            dom.edit_replace_range(elem, 0, len(text), evt.history_value)
             radiant.set_selection(elem, evt.history_sel_start, evt.history_sel_end)
             'prevent-default'
         }
@@ -257,7 +258,7 @@ pub pn apply_fn(elem, evt, multiline) {
         // so this declines and leaves that decision native (F4 territory).
         if (multiline) {
             // a newline is a character like any other as far as maxlength goes
-            radiant.replace_range(elem, s, e, fit(elem, "\n", len(text), e - s))
+            dom.edit_replace_range(elem, s, e, fit(elem, "\n", len(text), e - s))
             'prevent-default'
         }
         else { 'pass' }

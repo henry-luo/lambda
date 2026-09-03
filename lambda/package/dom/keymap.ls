@@ -9,7 +9,7 @@
 // editing.apply. Only the mapping in front of them was still native. What stays
 // native is resolving the name back to a type and filling the payload — reading
 // the clipboard for a paste, and declining the paste when there is nothing on it.
-import radiant
+import dom
 
 // Cmd on macOS, Ctrl elsewhere: both are the primary accelerator, and native
 // already treated them as one.
@@ -46,5 +46,5 @@ pub fn intent_for(key, shift, alt, ctrl, meta) {
 pub pn resolve(body, evt) {
     let name = intent_for(evt.key, evt.shift, evt.alt, evt.ctrl, evt.meta);
     if (name == null) { 'pass' }
-    else { radiant.key_intent(body, name) }
+    else { dom.key_intent(body, name) }
 }

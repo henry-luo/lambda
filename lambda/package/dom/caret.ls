@@ -16,6 +16,7 @@
 // view tree for a rich surface (editing_controller_apply_caret_operation), plus
 // the extend-versus-collapse split in both.
 import radiant
+import dom
 
 // Word-wise movement takes Alt or Ctrl. Native took only Alt on text controls
 // and only Ctrl on rich surfaces, so each platform's users had it working on
@@ -71,5 +72,5 @@ pub fn operation_for(surface, key, alt, ctrl, meta) {
 pub pn navigate(body, evt) {
     let op = operation_for(radiant.caret_surface(body), evt.key, evt.alt, evt.ctrl, evt.meta);
     if (op == null) { 'pass' }
-    else { radiant.caret_operation(body, op, evt.shift) }
+    else { dom.caret_operation(body, op, evt.shift) }
 }

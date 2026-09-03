@@ -111,21 +111,32 @@ DOM_OP(CORE, activate_popover, action, 1, "fn(n: any) -> bool",                 
 // ---------------------------------------------------------------------------
 // CORE — text controls and editing — engine-provided (editing_dom_waist, tc_*)
 // ---------------------------------------------------------------------------
+// The engine reads the composites below are written over: a text control's
+// selection bounds and the resolved editing position. Each is a genuine
+// engine read; the composite that pairs them is derived (ES40).
+DOM_OP(CORE, tc_selection_start, textctl, 1, "fn(n: any) -> int", dom_engine_tc_selection_start, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, tc_selection_end, textctl, 1, "fn(n: any) -> int", dom_engine_tc_selection_end, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, edit_node, editing, 1, "fn(host: any) -> any", dom_engine_edit_node, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, edit_start, editing, 1, "fn(host: any) -> int", dom_engine_edit_start, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, edit_end, editing, 1, "fn(host: any) -> int", dom_engine_edit_end, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, tc_value,         textctl, 1, "fn(n: any) -> string",                          dom_engine_tc_value, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
-DOM_OP(CORE, tc_set_value,     textctl, 2, "fn(n: any, v: string) -> bool",                 DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
-DOM_OP(CORE, tc_selection,     textctl, 1, "fn(n: any) -> map",                             DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(DERIVED, tc_set_value,  textctl, 2, "fn(n: any, v: string) -> bool",                 DOM_NO_BODY, DOM_F_NEUTRAL | DOM_F_MUTATES,
+       "set_state(n, \"value\", v)")
+DOM_OP(DERIVED, tc_selection,  textctl, 1, "fn(n: any) -> map",                             DOM_NO_BODY, DOM_F_NEUTRAL,
+       "{ start: tc_selection_start(n), end: tc_selection_end(n) }")
 DOM_OP(CORE, tc_set_selection, textctl, 4, "fn(n: any, start: int, end: int, dir: string|null) -> bool", DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, tc_replace_range, textctl, 4, "fn(n: any, start: int, end: int, text: string) -> bool", DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, set_caret,        editing, 2, "fn(n: any, offset: int) -> bool",               dom_engine_set_caret, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, caret_operation,  editing, 3, "fn(n: any, op: string, extend: bool) -> bool",  dom_engine_caret_operation, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
-DOM_OP(CORE, edit_range,       editing, 1, "fn(host: any) -> map|null",                     DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(DERIVED, edit_range,    editing, 1, "fn(host: any) -> map|null",                     DOM_NO_BODY, DOM_F_NEUTRAL,
+       "let node = edit_node(host); if (node == null) null else { node: node, start: edit_start(host), end: edit_end(host) }")
 DOM_OP(CORE, edit_replace_range, editing, 4, "fn(host: any, start: int, end: int, text: string) -> int|null", dom_engine_edit_replace_range, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, edit_insert_at_boundary, editing, 2, "fn(host: any, text: string) -> int|null", dom_engine_edit_insert_at_boundary, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, edit_split_block, editing, 1, "fn(host: any) -> bool",                         dom_engine_edit_split_block, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, edit_insert_break, editing, 1, "fn(host: any) -> bool",                        dom_engine_edit_insert_break, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, set_password_reveal, textctl, 3, "fn(n: any, start: int, end: int) -> bool",   dom_engine_set_password_reveal, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, key_intent,       input, 2, "fn(n: any, name: string) -> bool",                dom_engine_key_intent, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
-DOM_OP(CORE, ime_preedit,      input, 1, "fn(n: any) -> any",                               DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, ime_preedit,      input, 1, "fn(n: any) -> any",                               dom_engine_ime_preedit, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, set_ime_preedit,  input, 3, "fn(n: any, text: any, caret: int) -> bool",       dom_engine_set_ime_preedit, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, clear_ime_preedit, input, 1, "fn(n: any) -> bool",                             dom_engine_clear_ime_preedit, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, clipboard_text,   input, 0, "fn() -> string|null",                             dom_engine_clipboard_text, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
@@ -188,6 +199,12 @@ DOM_OP(DERIVED, contains,        node, 2, "fn(a: any, b: any) -> bool", dom_fp_c
        "same_node(b, a) or (parent_node(b) != null and contains(a, parent_node(b)))")
 DOM_OP(DERIVED, equal_node,      node, 2, "fn(a: any, b: any) -> bool", dom_fp_equal_node, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "node_type(a) == node_type(b) and node_name(a) == node_name(b) and node_value(a) == node_value(b) and attribute_names(a) == attribute_names(b) and all([for (k in attribute_names(a)) get_attribute(a, k) == get_attribute(b, k)]) and len(child_nodes(a)) == len(child_nodes(b)) and all([for (p in zip(child_nodes(a), child_nodes(b))) equal_node(p[0], p[1])])")
+// The document ELEMENT -- <html> -- as distinct from the document itself.
+// `radiant.document_root` means this one, and mapping it to root_node during
+// the alias pass would have handed callers the Document instead: the same
+// class of near-miss as ownerDocument, caught by comparing the two bodies
+// rather than trusting the names.
+DOM_OP(CORE, document_element, node, 1, "fn(n: any) -> any", dom_fp_document_element, DOM_F_NEUTRAL, "")
 DOM_OP(DERIVED, root_node,       node, 1, "fn(n: any) -> any", dom_fp_root_node, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "if (parent_node(n) == null) n else root_node(parent_node(n))")
 

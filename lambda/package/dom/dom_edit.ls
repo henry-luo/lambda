@@ -15,6 +15,7 @@
 // Ordinary text keeps the single-node fast path below. Structural commands and
 // a range that spans nodes use the raw range waist, which owns the tree surgery.
 import radiant
+import dom
 import commands: lambda.package.dom.commands
 
 pub pn apply_fn(host, evt) {
@@ -32,7 +33,7 @@ pub pn apply_fn(host, evt) {
         if (commands.run(host, t, evt.data)) { 'prevent-default' } else { 'pass' }
     }
     else {
-    let node = radiant.dom_edit_node(host);
+    let node = dom.edit_node(host);
     // No resolved text node means there is nothing to splice — the caret sits at
     // an element boundary, which for an insertion means one has to be created.
     // That is a different operation, so it has its own primitive; for anything
@@ -50,7 +51,7 @@ pub pn apply_fn(host, evt) {
                 'prevent-default'
             }
             else if (t == "insertText" or t == "insertReplacementText") { 'pass' }
-            else if (radiant.dom_insert_at_boundary(host, data) == null) { 'pass' }
+            else if (dom.edit_insert_at_boundary(host, data) == null) { 'pass' }
             // The caret lands at the end of what was created. Composition would
             // prefer it at `composition_caret`, but there is no node to address
             // until the insertion exists; native has the same limit here.
@@ -75,8 +76,8 @@ pub pn apply_fn(host, evt) {
         else { 'pass' }
     }
     else {
-        let s = radiant.dom_edit_start(host);
-        let e = radiant.dom_edit_end(host);
+        let s = dom.edit_start(host);
+        let e = dom.edit_end(host);
         // Typing over a selection replaces it; typing at a caret inserts. Both
         // are the same range replacement, which is why they share a branch here
         // exactly as they do in editing.ls.
@@ -114,11 +115,11 @@ pub pn apply_fn(host, evt) {
             let value = radiant.dom_edit_text(host);
             let unchanged = value != null and slice(value, s, e) == data;
             if (unchanged) {
-                if (radiant.dom_set_caret(host, s + caret)) { 'prevent-default' } else { 'pass' }
+                if (dom.set_caret(host, s + caret)) { 'prevent-default' } else { 'pass' }
             }
             else if (radiant.dom_replace_range(host, s, e, data) == null) { 'pass' }
             else {
-                radiant.dom_set_caret(host, s + caret)
+                dom.set_caret(host, s + caret)
                 'prevent-default'
             }
         }

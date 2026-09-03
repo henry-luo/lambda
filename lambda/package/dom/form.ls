@@ -3,6 +3,7 @@
 // transitions and default actions that used to live in radiant/event.cpp.
 // The engine owns the storage; every write goes through the waist primitives.
 import radiant
+import dom
 import tree: lambda.package.dom.tree
 import validate: lambda.package.dom.validate
 import editing: lambda.package.dom.editing
@@ -25,12 +26,12 @@ on init(evt) { aria.reflect(~) }
 on click(evt) {
     // decline rather than claim: a disabled control has no activation
     // behavior, so the event falls through as unhandled
-    if (radiant.get_state(~, "disabled")) { return 'pass' }
-    radiant.set_state(~, "checked", not radiant.get_state(~, "checked"))
-    radiant.set_state(~, "indeterminate", false)
+    if (dom.get_state(~, "disabled")) { return 'pass' }
+    dom.set_state(~, "checked", not dom.get_state(~, "checked"))
+    dom.set_state(~, "indeterminate", false)
     // the control's own state has settled; notify listeners (HTML 4.10.5)
-    radiant.dispatch(~, "input")
-    radiant.dispatch(~, "change")
+    dom.dispatch(~, "input")
+    dom.dispatch(~, "change")
 }
 
 // Radio activation (HTML 4.10.5.1.16). Selecting is one-way — clicking an
@@ -40,14 +41,14 @@ on click(evt) {
 view <input type:'radio'> state checked {}
 on init(evt) { aria.reflect(~) }
 on click(evt) {
-    if (radiant.get_state(~, "disabled")) { return 'pass' }
-    if (radiant.get_state(~, "checked")) { return 'pass' }
+    if (dom.get_state(~, "disabled")) { return 'pass' }
+    if (dom.get_state(~, "checked")) { return 'pass' }
     for (peer in tree.radio_group(~)) {
-        radiant.set_state(peer, "checked", false)
+        dom.set_state(peer, "checked", false)
     }
-    radiant.set_state(~, "checked", true)
-    radiant.dispatch(~, "input")
-    radiant.dispatch(~, "change")
+    dom.set_state(~, "checked", true)
+    dom.dispatch(~, "input")
+    dom.dispatch(~, "change")
 }
 
 // Select activation (F2): a click toggles the dropdown. This template owns
@@ -70,7 +71,7 @@ pn commit_option(elem, index) {
 view <select> state dropdown_open {}
 on init(evt) { aria.reflect(~) }
 on click(evt) {
-    if (radiant.get_state(~, "disabled")) { return 'pass' }
+    if (dom.get_state(~, "disabled")) { return 'pass' }
     radiant.set_dropdown_open(~, not radiant.dropdown_open(~))
 }
 // F2b: the commit half. The dropdown overlay is not a DOM element, so native
@@ -146,16 +147,16 @@ view <button> state form_activation {}
 // Popover activation is a click default, so synthetic and trusted clicks use
 // this one behavior instead of the retired JS-only activation hook.
 on click(evt) {
-    if (radiant.activate_popover(~)) { true } else { 'pass' }
+    if (dom.activate_popover(~)) { true } else { 'pass' }
 }
 on submitactivation(evt) {
-    let kind = radiant.attr(~, "type");
+    let kind = dom.get_attribute(~, "type");
     let normalized = if (kind == null or kind == "") "submit" else lower(kind);
     if (normalized == "button" or normalized == "reset") { true }
     submit.run(tree.form_of(~), ~)
 }
 on resetactivation(evt) {
-    let kind = radiant.attr(~, "type");
+    let kind = dom.get_attribute(~, "type");
     if (kind != null and lower(kind) == "reset") {
         submit.reset(tree.form_of(~))
     }

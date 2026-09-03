@@ -53,3 +53,31 @@ pub fn details_group(node) {
     let peers = dom.query_selector_all(dom.root_node(node), "details[name]");
     if (group == null or group == "") [] else [for (peer in peers where dom.get_attribute(peer, "name") == group and not dom.same_node(peer, node)) peer]
 }
+
+// ---------------------------------------------------------------------------
+// Composites over the engine's own reads (F32).
+//
+// These were catalog rows flagged as engine work with no body. Each is simply a
+// pair or a triple of reads the engine already publishes, so none of them is
+// mechanism: a row that can be written over other rows is derived, not part of
+// the ABI. Writing them here rather than natively is the same rule as the
+// walkers above -- the engine keeps what only it can know, and the shape of the
+// answer is Lambda's.
+// ---------------------------------------------------------------------------
+
+// A text control's selection as one value, rather than two calls that can
+// disagree if the control changes between them.
+pub fn tc_selection(node) {
+    { start: dom.tc_selection_start(node), end: dom.tc_selection_end(node) }
+}
+
+// Setting a text control's value is a state write; there is nothing else to it.
+pub fn tc_set_value(node, value) { dom.set_state(node, "value", value) }
+
+// Where an edit would land in a contenteditable host: the resolved node and the
+// offsets within it. Null when there is no editing position at all, so callers
+// test one thing instead of three.
+pub fn edit_range(host) {
+    let node = dom.edit_node(host);
+    if (node == null) null else { node: node, start: dom.edit_start(host), end: dom.edit_end(host) }
+}

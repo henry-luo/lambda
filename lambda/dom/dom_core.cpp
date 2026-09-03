@@ -161,6 +161,12 @@ DOM_ENGINE_SEAM_2(set_caret)
 DOM_ENGINE_SEAM_3(set_ime_preedit)
 DOM_ENGINE_SEAM_3(set_password_reveal)
 DOM_ENGINE_SEAM_1(tc_value)
+DOM_ENGINE_SEAM_1(ime_preedit)
+DOM_ENGINE_SEAM_1(tc_selection_start)
+DOM_ENGINE_SEAM_1(tc_selection_end)
+DOM_ENGINE_SEAM_1(edit_node)
+DOM_ENGINE_SEAM_1(edit_start)
+DOM_ENGINE_SEAM_1(edit_end)
 
 // `dom.load`: the engine parses, the core wraps. The result is the document
 // node, which since ESO101 answers both the Document's properties and the
@@ -381,6 +387,15 @@ extern "C" Item dom_fp_root_node(Item n) {
         cur = p;
     }
     return cur;
+}
+extern "C" Item dom_fp_document_element(Item n) {
+    // The node's OWNING document's root element, read directly -- not the first
+    // element child of a parent walk. The two agree for a connected node and
+    // differ for a detached one, where the walk stops at the subtree's top and
+    // answers the wrong element (it broke navigation and textarea handling
+    // before the UI fixtures caught it).
+    DomDocument* doc = (DomDocument*)dom_document_from_item(n);
+    return (doc && doc->root) ? dom_wrap_element(doc->root) : ItemNull;
 }
 extern "C" Item dom_fp_contains(Item a, Item b)        { return dom_op1(a, JUBE_DOM_CONTAINS, b); }
 extern "C" Item dom_fp_equal_node(Item a, Item b)      { return dom_op1(a, JUBE_DOM_IS_EQUAL_NODE, b); }

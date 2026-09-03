@@ -13,26 +13,26 @@
 // Commit *content* is not handled here — it arrives at the applier as
 // `insertFromComposition` and obeys the same newline and maxlength rules as
 // typing (F6).
-import radiant
+import dom
 
 // A composition starting while another is still open means the previous one was
 // orphaned — the platform can drop a session without ending it. Begin from a
 // clean slate rather than appending to a stale preedit.
 pub pn begin(body) {
-    radiant.clear_ime_preedit(body)
+    dom.clear_ime_preedit(body)
 }
 
 pub pn update(body, evt, target) {
     let text = if (evt.data == null) "" else evt.data;
     if (len(text) == 0) {
-        radiant.clear_ime_preedit(body)
+        dom.clear_ime_preedit(body)
     }
     else {
-        radiant.set_ime_preedit(body, text, evt.composition_caret)
+        dom.set_ime_preedit(body, text, evt.composition_caret)
         // The placeholder must go while composing even though the value is
         // still empty — the user is visibly typing into the control, and a
         // placeholder drawn under the preedit reads as garbage.
-        if (target != null) { radiant.set_state(target, "placeholder_shown", false) }
+        if (target != null) { dom.set_state(target, "placeholder_shown", false) }
         else { false }
     }
 }
@@ -40,5 +40,5 @@ pub pn update(body, evt, target) {
 // End covers both commit and cancel: either way the session is over and the
 // preedit stops being drawn. A commit's text lands through the applier.
 pub pn end(body) {
-    radiant.clear_ime_preedit(body)
+    dom.clear_ime_preedit(body)
 }

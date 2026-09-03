@@ -11,6 +11,7 @@
 // the same handlers as revalidate and after it, so the verdict it mirrors is
 // the one just computed.
 import radiant
+import dom
 
 // Write only on an actual change. This matters more here than it did natively:
 // native poked the attribute table directly, while a write from the package
@@ -19,7 +20,7 @@ import radiant
 // would mean four DOM mutations per character — and it showed up immediately as
 // an extra repaint rect in the state dump.
 fn set_if_changed(elem, name, want) {
-    if (radiant.attr(elem, name) != want) { radiant.set_attr(elem, name, want) }
+    if (dom.get_attribute(elem, name) != want) { dom.set_attribute(elem, name, want) }
     else { false }
 }
 
@@ -29,15 +30,15 @@ fn flag(elem, name, present) {
 }
 
 pub pn reflect(elem) {
-    flag(elem, "aria-disabled", radiant.get_state(elem, "disabled"))
-    flag(elem, "aria-readonly", radiant.get_state(elem, "readonly"))
-    flag(elem, "aria-required", radiant.get_state(elem, "required"))
+    flag(elem, "aria-disabled", dom.get_state(elem, "disabled"))
+    flag(elem, "aria-readonly", dom.get_state(elem, "readonly"))
+    flag(elem, "aria-required", dom.get_state(elem, "required"))
 
     // aria-invalid is deliberately written "false" rather than removed:
     // assistive technology treats an explicit false as "validation has run and
     // this control is currently OK", which is not the same as saying nothing.
     set_if_changed(elem, "aria-invalid",
-        if (radiant.get_state(elem, "invalid")) "true" else "false")
+        if (dom.get_state(elem, "invalid")) "true" else "false")
 }
 
 // <input type=range> also reports its position. valuenow is the computed value,
