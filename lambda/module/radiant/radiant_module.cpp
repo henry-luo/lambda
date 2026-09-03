@@ -3000,3 +3000,25 @@ RADIANT_C_API const JubeModuleDef* radiant_jube_module(void) {
 RADIANT_C_API void radiant_jube_register_static(void) {
     jube_register_static_module(&radiant_module);
 }
+
+// The engine half of the DOM_F_ENGINE catalog rows (F32). Each forwards to the
+// same body `radiant.*` publishes, so `dom.get_state` and `radiant.get_state`
+// are one implementation -- which is what lets the behaviour package migrate to
+// `dom.*` without behaviour changing under it (ES44).
+//
+// dispatch is wired to radiant's event-name form; the catalog row types its
+// second argument as an event object, and reconciling those two spellings is
+// part of the package migration rather than of this wiring.
+#define RADIANT_PROVIDE_ENGINE_1(name, fn) \
+    extern "C" Item dom_engine_##name(Item a) { return fn(a); }
+#define RADIANT_PROVIDE_ENGINE_2(name, fn) \
+    extern "C" Item dom_engine_##name(Item a, Item b) { return fn(a, b); }
+#define RADIANT_PROVIDE_ENGINE_3(name, fn) \
+    extern "C" Item dom_engine_##name(Item a, Item b, Item c) { return fn(a, b, c); }
+
+RADIANT_PROVIDE_ENGINE_2(get_state, fn_radiant_get_state)
+RADIANT_PROVIDE_ENGINE_3(set_state, fn_radiant_set_state)
+RADIANT_PROVIDE_ENGINE_1(request_change, fn_radiant_request_change)
+RADIANT_PROVIDE_ENGINE_2(dispatch, fn_radiant_dispatch)
+RADIANT_PROVIDE_ENGINE_1(focused, fn_radiant_focused)
+RADIANT_PROVIDE_ENGINE_2(focus_set, fn_radiant_focus_set)

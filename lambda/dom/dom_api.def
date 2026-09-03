@@ -80,10 +80,10 @@ DOM_OP(CORE, parse_document,   document, 2, "fn(markup: string, mime: string) ->
 // ---------------------------------------------------------------------------
 // CORE — state and events (S9.1.4 store, the dispatch loop) — engine-provided
 // ---------------------------------------------------------------------------
-DOM_OP(CORE, get_state,        state, 2, "fn(n: any, name: string) -> any",                 DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
-DOM_OP(CORE, set_state,        state, 3, "fn(n: any, name: string, value: any) -> bool",    DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
-DOM_OP(CORE, request_change,   state, 1, "fn(n: any) -> bool",                              DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
-DOM_OP(CORE, dispatch,         event, 2, "fn(n: any, event: any) -> bool",                  DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, get_state,        state, 2, "fn(n: any, name: string) -> any",                 dom_engine_get_state, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, set_state,        state, 3, "fn(n: any, name: string, value: any) -> bool",    dom_engine_set_state, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
+DOM_OP(CORE, request_change,   state, 1, "fn(n: any) -> bool",                              dom_engine_request_change, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, dispatch,         event, 2, "fn(n: any, event: any) -> bool",                  dom_engine_dispatch, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, add_listener,     event, 4, "fn(n: any, type: string, fn: any, opts: any) -> null", dom_add_event_listener_body, 0, "")
 DOM_OP(CORE, remove_listener,  event, 4, "fn(n: any, type: string, fn: any, opts: any) -> null", dom_remove_event_listener_body, 0, "")
 DOM_OP(CORE, create_event,     event, 2, "fn(type: string, init: any) -> any",              DOM_NO_BODY, 0, "")
@@ -102,8 +102,8 @@ DOM_OP(CORE, scroll_into_view, geometry, 1, "fn(n: any) -> bool",               
 // CORE — focus, navigation, actions — engine-provided
 // ---------------------------------------------------------------------------
 DOM_OP(CORE, is_focusable,     focus, 1, "fn(n: any) -> bool",                              DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
-DOM_OP(CORE, focus_set,        focus, 2, "fn(n: any, from_keyboard: bool) -> bool",         DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
-DOM_OP(CORE, focused,          focus, 1, "fn(n: any) -> bool",                              DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, focus_set,        focus, 2, "fn(n: any, from_keyboard: bool) -> bool",         dom_engine_focus_set, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, focused,          focus, 1, "fn(n: any) -> bool",                              dom_engine_focused, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, request_navigation, navigation, 1, "fn(request: map) -> bool",                 DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, navigation_destination, navigation, 3, "fn(src: any, url: string, root: any) -> map", DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, activate_popover, action, 1, "fn(n: any) -> bool",                             DOM_NO_BODY, DOM_F_ENGINE | DOM_F_NEUTRAL, "")

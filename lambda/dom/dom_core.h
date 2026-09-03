@@ -120,6 +120,14 @@ Item dom_global_get_selection(void);
 Item dom_create_range(void);
 // engine-provided document loader (seam declared in dom.h, ESO80)
 Item dom_engine_load_document(Item path);
+// engine-provided catalog rows (F32): the host implements these, the core
+// declares them, and a runtime without an engine gets the weak default.
+Item dom_engine_get_state(Item n, Item name);
+Item dom_engine_set_state(Item n, Item name, Item value);
+Item dom_engine_request_change(Item n);
+Item dom_engine_dispatch(Item n, Item event);
+Item dom_engine_focused(Item n);
+Item dom_engine_focus_set(Item n, Item from_keyboard);
 Item dom_parser_parse_from_string(Item markup, Item mime);
 Item dom_cssom_stylesheet_get_css_rules(Item sheet_item);
 Item dom_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_arg);

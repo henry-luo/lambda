@@ -111,6 +111,35 @@ extern "C" __attribute__((weak)) void dom_engine_bind_host(const void* host_api)
     (void)host_api;
 }
 
+// ---------------------------------------------------------------------------
+// Engine-provided catalog rows (F32).
+//
+// A row flagged DOM_F_ENGINE is one the *host* must implement: state, event
+// dispatch, focus, text controls, editing. Those bodies live in the engine
+// above this link target, so each is reached through a weak provider seam --
+// the same shape as dom.load. A runtime linked without an engine gets the
+// default here and answers absence instead of failing to link.
+//
+// These are what let `dom.*` cover what `radiant.*` covers, which is the
+// prerequisite for migrating the behaviour package off `radiant.*` (ES44).
+// ---------------------------------------------------------------------------
+#define DOM_ENGINE_SEAM_1(name) \
+    extern "C" __attribute__((weak)) Item dom_engine_##name(Item a) { \
+        (void)a; return ItemNull; }
+#define DOM_ENGINE_SEAM_2(name) \
+    extern "C" __attribute__((weak)) Item dom_engine_##name(Item a, Item b) { \
+        (void)a; (void)b; return ItemNull; }
+#define DOM_ENGINE_SEAM_3(name) \
+    extern "C" __attribute__((weak)) Item dom_engine_##name(Item a, Item b, Item c) { \
+        (void)a; (void)b; (void)c; return ItemNull; }
+
+DOM_ENGINE_SEAM_2(get_state)
+DOM_ENGINE_SEAM_3(set_state)
+DOM_ENGINE_SEAM_1(request_change)
+DOM_ENGINE_SEAM_2(dispatch)
+DOM_ENGINE_SEAM_1(focused)
+DOM_ENGINE_SEAM_2(focus_set)
+
 // `dom.load`: the engine parses, the core wraps. The result is the document
 // node, which since ESO101 answers both the Document's properties and the
 // Node's -- so a script can query straight off what load returns.
