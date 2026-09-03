@@ -15,6 +15,7 @@ DOM_ENGINE_WEAK DocState* dom_engine_document_ensure_state(DomDocument* d, const
     (void)d; (void)o; return nullptr;
 }
 DOM_ENGINE_WEAK void dom_engine_reset_wrapper_cache(void) {}
+DOM_ENGINE_WEAK bool dom_engine_event_cascade_active(void) { return false; }
 DOM_ENGINE_WEAK bool dom_engine_exec_command(void* d, const char* c, const char* v) {
     (void)d; (void)c; (void)v; return false;
 }

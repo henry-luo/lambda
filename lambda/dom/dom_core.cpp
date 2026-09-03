@@ -21,6 +21,7 @@
 #include "dom.h"
 #include "dom_ops.h"
 #include "dom_core.h"
+#include "dom_engine.h"
 #include "dom_events.h"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
@@ -420,29 +421,53 @@ static bool dom_event_flag(Item event, const char* key, bool fallback) {
 // The live-event predicate is the module's: an event is a record-backed
 // wrapper, and only the module can say whether a wrapper is one of its own.
 extern "C" bool radiant_dom_event_is(Item item);
+extern "C" Item radiant_dom_event_create(const char* type, bool bubbles,
+                                         bool cancelable, bool composed, int class_id);
 
 extern "C" Item dom_core_dispatch(Item n, Item event) {
-    if (get_type_id(event) == LMD_TYPE_STRING) {
-        // The historical spelling: a name, with the flags the engine fixed for
-        // the `input`/`change` notifications it was written for.
-        return dom_engine_dispatch(n, event);
-    }
-    // A *live* event and an event *descriptor* are two different arguments, not
-    // two representations of one thing. The descriptor is keyed data --
-    // {type, bubbles, cancelable} -- saying how to build an event; the live one
-    // is a record-backed wrapper carrying propagation state a listener mutates.
-    // Ask which this is, rather than inferring it from whether "type" reads as
-    // a string: a live event answers that too, so the earlier test sent JS's
-    // dispatchEvent down the construction path, rebuilt the event and dropped
-    // identity along with preventDefault.
+    // A live event goes straight through: it already carries the propagation
+    // state a listener mutates, and dom_dispatch_event's F19/ES25 bridge enters
+    // the engine's cascade with it.
     if (radiant_dom_event_is(event)) {
         return dom_absent_to_null(dom_dispatch_event_bridge(n, event));
     }
-    Item type = dom_map_field(event, "type");
-    if (get_type_id(type) != LMD_TYPE_STRING) return ItemNull;
-    Item bubbles = { .item = b2it(dom_event_flag(event, "bubbles", true)) };
-    Item cancelable = { .item = b2it(dom_event_flag(event, "cancelable", false)) };
-    return dom_engine_dispatch_event(n, type, bubbles, cancelable);
+    // A descriptor -- a name, or {type, bubbles, cancelable} -- says how to
+    // build one. Build it, then dispatch it, so there is a single dispatch
+    // implementation rather than two that disagree.
+    //
+    // The engine's own descriptor entry is *not* that implementation: it fails
+    // closed unless an EventContext is live ("only callable from a handler")
+    // and takes a DomElement, so `dom.dispatch` answered false from a plain
+    // script and could never target a document or window (ESO109). Going
+    // through a real event instead keeps the re-entrant case working -- the
+    // bridge above joins the cascade in progress -- and makes the top-level
+    // case work for the first time. The factory is native (a VMap over a
+    // RadiantDomEventRecord), so no realm is needed to build or read one.
+    const char* type = nullptr;
+    bool bubbles = true, cancelable = false;
+    if (get_type_id(event) == LMD_TYPE_STRING) {
+        type = fn_to_cstr(event);
+    } else {
+        Item type_item = dom_map_field(event, "type");
+        if (get_type_id(type_item) != LMD_TYPE_STRING) return ItemNull;
+        type = fn_to_cstr(type_item);
+        bubbles = dom_event_flag(event, "bubbles", true);
+        cancelable = dom_event_flag(event, "cancelable", false);
+    }
+    if (!type || !type[0]) return ItemNull;
+    if (dom_engine_event_cascade_active()) {
+        // Inside a handler the engine's entry is the right implementation: it
+        // continues the cascade in progress, so an `input` raised while handling
+        // a keystroke joins that walk instead of starting a second one. Routing
+        // this case through the general path failed nine behaviour fixtures.
+        Item type_item = { .item = 0 };
+        type_item = js_make_string(type);
+        Item b = { .item = b2it(bubbles) }, c = { .item = b2it(cancelable) };
+        return dom_engine_dispatch_event(n, type_item, b, c);
+    }
+    Item built = radiant_dom_event_create(type, bubbles, cancelable, false, 0);
+    if (get_type_id(built) != LMD_TYPE_VMAP) return ItemNull;
+    return dom_absent_to_null(dom_dispatch_event_bridge(n, built));
 }
 
 // --- text controls

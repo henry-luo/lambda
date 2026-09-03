@@ -3169,6 +3169,14 @@ extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* e
 //
 // There is still no slot for a CustomEvent `detail` payload here: carrying one
 // needs a richer event record, not a wider signature.
+// ESO109: dispatch chooses its implementation by asking whether a cascade is
+// running, instead of calling the re-entrant one and reading its "false" as
+// both "no listener" and "you cannot call me here".
+extern "C" bool dom_engine_event_cascade_active(void) {
+    EmitHandlerContext* ctx = g_emit_handler_ctx;
+    return ctx && ctx->evcon;
+}
+
 extern "C" bool radiant_dispatch_event_with_flags_from_script(void* dom_node,
                                                               const char* event_name,
                                                               bool bubbles,

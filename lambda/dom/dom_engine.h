@@ -66,6 +66,12 @@ void dom_engine_input_value_validate(const char* type, const char* value,
                                      const char* step_value,
                                      RadiantInputValidity* output);
 
+// Is an event cascade in flight? The engine's descriptor dispatch continues the
+// cascade it is called from and fails closed outside one, so this is what lets
+// dispatch pick the implementation that is correct for where it was called
+// rather than answering false at the top level (ESO109).
+bool dom_engine_event_cascade_active(void);
+
 // view tree: commit pending mutations, refresh a pseudo-class flag
 void dom_engine_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
 void dom_engine_sync_pseudo_state(void* view, uint32_t pseudo_flag, bool set);
