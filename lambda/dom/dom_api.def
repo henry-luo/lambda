@@ -406,6 +406,13 @@ DOM_OP(CORE, request_submit, forms, 2, "fn(f: any, submitter: any) -> any", dom_
 // section rename at each call site and nothing else.
 // ---------------------------------------------------------------------------
 DOM_RAW(activate_popover_native, forms, bool, (void* popover, int action), dom_activate_popover, DOM_F_NATIVE)
+// The ordinal executor. A DOM_OP row is fixed-arity because a row is a Lambda
+// function, so the uniform `invoke` row has to pack its arguments into an array;
+// that packing is pure ceremony for a native caller, an allocation per method
+// call on the hottest path in the DOM. This is the shape the executor actually
+// has. Same body, two doors (ES38); `invoke` stays the door for a caller that
+// already holds an array (ESO106).
+DOM_RAW(invoke_raw, node, Item, (Item node, JubeDomElementOperation op, Item* args, int argc), dom_element_operation_impl, DOM_F_NATIVE)
 DOM_RAW(after_default_checked_set, notify, void, (void* elem, bool checked), dom_after_default_checked_set, DOM_F_NATIVE)
 DOM_RAW(after_default_selected_set, notify, void, (void* elem, bool selected), dom_after_default_selected_set, DOM_F_NATIVE)
 DOM_RAW(after_disabled_attribute_set, notify, void, (void* elem), dom_after_disabled_attribute_set, DOM_F_NATIVE)

@@ -53,14 +53,8 @@ enum DomOpId {
 #undef DOM_OP
 
 // 4. the host table's catalog section is the catalog: one slot per row, in row
-// order, followed by the fixed set of companion doors -- native-shape entries for
-// operations no fixed-arity row can express (ES38). Counting them explicitly is
-// what keeps the section from growing ad-hoc members: adding one is a deliberate
-// edit here, not a silent widening. Slot count is checked here; each slot's arity
-// is checked by the cast in jube_registry.cpp, which will not compile if a body
-// disagrees with its row.
-// Companion doors: invoke_raw (the ordinal executor's variadic shape).
-static constexpr int dom_catalog_companion_slots = 1;
+// order. Slot count is checked here; each slot's arity is checked by the cast
+// in jube_registry.cpp, which will not compile if a body disagrees with its row.
 static constexpr int dom_catalog_row_count =
 #define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) 1 +
 #define DOM_RAW(name, cluster, ret, params, body, flags) 1 +
@@ -68,10 +62,8 @@ static constexpr int dom_catalog_row_count =
 #undef DOM_OP
 #undef DOM_RAW
     0;
-static_assert(sizeof(JubeHostDomCatalogAPI) / sizeof(void*) ==
-                  dom_catalog_row_count + dom_catalog_companion_slots,
-              "JubeHostDomCatalogAPI must have one slot per dom_api.def row, "
-              "plus exactly the declared companion doors");
+static_assert(sizeof(JubeHostDomCatalogAPI) / sizeof(void*) == dom_catalog_row_count,
+              "JubeHostDomCatalogAPI must have exactly one slot per dom_api.def row");
 // Only DOM_OP rows carry an operation id: a DOM_RAW row has no Lambda face and
 // no uniform arity, so there is nothing for an id to name.
 static constexpr int dom_catalog_op_row_count =

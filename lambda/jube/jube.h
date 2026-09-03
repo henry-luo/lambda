@@ -701,14 +701,7 @@ struct JubeHostDomCatalogAPI {
 #include "../dom/dom_api.def"
 #undef DOM_OP
 #undef DOM_RAW
-    // One slot per row of either kind, plus the ordinal executor's native shape. Every row is
-    // fixed-arity because a row is a Lambda function; the executor is variadic,
-    // so the uniform `invoke` row has to pack its arguments into an array. That
-    // packing is pure ceremony for a native caller -- an allocation per method
-    // call on the hottest path in the DOM -- so the catalog publishes the shape
-    // the executor actually has. Same body, two doors (ES38); `invoke` remains
-    // the door for a caller that already holds an array.
-    Item (*invoke_raw)(Item node, JubeDomElementOperation op, Item* args, int argc);
+    // One slot per row, in row order -- nothing is written by hand here.
 };
 
 

@@ -1520,7 +1520,6 @@ static const JubeHostDomCatalogAPI jube_host_dom_catalog = {
 #include "../dom/dom_api.def"
 #undef DOM_OP
 #undef DOM_RAW
-    .invoke_raw = dom_element_operation_impl,
 };
 
 
