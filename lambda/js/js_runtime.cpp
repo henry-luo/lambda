@@ -7093,7 +7093,12 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
             js_sync_global_var_module_binding(object, key, value);
         }
     } else {
-        log_error("js_set_key_default: no js_input context for map_put");
+        // Name the key: a caller with no realm cannot tell which write it was
+        // from the message alone, and there can be several on one path.
+        const char* key_name = get_type_id(key) == LMD_TYPE_STRING || get_type_id(key) == LMD_TYPE_SYMBOL
+            ? fn_to_cstr(key) : NULL;
+        log_error("js_set_key_default: no js_input context for map_put (key=%s, object type=%d)",
+                  key_name ? key_name : "<non-string>", (int)get_type_id(object));
     }
     return value;
 }

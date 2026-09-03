@@ -1047,6 +1047,15 @@ static void nl_compact(NodeListeners* nl) {
 // representation varies, so keeping conversion outside this helper avoids
 // five copies of the same property write and its allocation ordering.
 static void event_set_value(Item event, const char* key, Item value) {
+    // A live event's fields belong to its record, so write them through the
+    // module's member protocol directly. Going through OrdinarySet made every
+    // field write realm-dependent -- js_set_key_default reaches for the realm's
+    // map_put before it consults the host -- which is why a Lambda script with
+    // no realm could not dispatch at all (ESO110).
+    if (radiant_dom_event_is(event)) {
+        Item out = ItemNull;
+        if (radiant_dom_event_named_set(event, js_name_item(key), value, &out)) return;
+    }
     dom_realm_set_name(event, key, value);
 }
 
@@ -1068,9 +1077,22 @@ static void event_mark_non_writable(Item event, const char* key) {
 
 // Get the current event flag values from per-event slots stored on the event
 // object itself (so nested dispatches don't trample each other).
+static Item event_get_item(Item event, const char* key) {
+    if (radiant_dom_event_is(event)) {
+        Item v = ItemNull;
+        if (radiant_dom_event_named_get(event, js_name_item(key), &v)) return v;
+        return ItemNull;
+    }
+    return dom_realm_get_name(event, key);
+}
+
 static bool event_flag_get(Item event, const char* key) {
-    Item v = dom_realm_get(event, js_name_item(key));
-    return js_is_truthy(v);
+    if (radiant_dom_event_is(event)) {
+        Item v = ItemNull;
+        if (radiant_dom_event_named_get(event, js_name_item(key), &v)) return js_is_truthy(v);
+        return false;
+    }
+    return js_is_truthy(dom_realm_get(event, js_name_item(key)));
 }
 
 static bool js_event_is_object(Item event) {
@@ -1945,16 +1967,34 @@ static Item wrap_path_key(void* key, bool key_is_dom) {
     return ItemNull;
 }
 
+// A path entry as the record stores it. The sentinels are this file's, so the
+// mapping to a kind lives here; the module projects a kind back to an Item on
+// read (radiant_dom_event_key_to_item), which is the same distinction
+// wrap_path_key draws when a script needs the Item now.
+static RadiantEvtKey path_key_of(void* key, bool key_is_dom) {
+    RadiantEvtKey k = { RADIANT_EVT_KEY_NONE, nullptr };
+    if (key == (void*)&_window_sentinel) { k.kind = RADIANT_EVT_KEY_WINDOW; return k; }
+    if (key == (void*)&_document_sentinel) { k.kind = RADIANT_EVT_KEY_DOCUMENT; return k; }
+    if (!key) return k;
+    if (!key_is_dom) {
+        Item it; it.item = 0; it.container = (Container*)key;
+        TypeId tid = get_type_id(it);
+        if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_VMAP) {
+            k.kind = RADIANT_EVT_KEY_CONTAINER; k.ptr = key; return k;
+        }
+    }
+    k.kind = RADIANT_EVT_KEY_NODE; k.ptr = key;
+    return k;
+}
+
 // fire listeners on a specific node for a given phase. `reported_phase`, if
 // non-zero, overrides the eventPhase value visible to listeners (used at the
 // target node so capture-then-bubble sub-passes both report AT_TARGET).
 static void set_event_dispatch_position(void* key, bool key_is_dom, Item event,
                                         int phase, int reported_phase = 0) {
     int visible_phase = reported_phase ? reported_phase : phase;
-    Item current_target = wrap_path_key(key, key_is_dom);
-    event_set_int(event, "eventPhase", visible_phase);
-    dom_realm_set_name(event, "currentTarget", current_target);
-    radiant_dom_event_set_lambda_dispatch_position(event, current_target, visible_phase);
+    // One native write: currentTarget and eventPhase both live in the record.
+    radiant_dom_event_set_position_key(event, path_key_of(key, key_is_dom), visible_phase);
 }
 
 static void fire_listeners(void* key, const char* type, Item event, int phase,
@@ -2074,7 +2114,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
         return dom_realm_throw(dom_realm_new_error_named(n, m));
     }
     // get event type
-    Item type_val = dom_realm_get_name(event_item, "type");
+    Item type_val = event_get_item(event_item, "type");
     const char* type = fn_to_cstr(type_val);
     if (!type) {
         log_error("dom_dispatch_event: event has no type");
@@ -2093,7 +2133,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     }
 
     // get bubbles flag
-    Item bubbles_val = dom_realm_get_name(event_item, "bubbles");
+    Item bubbles_val = event_get_item(event_item, "bubbles");
     bool bubbles = js_is_truthy(bubbles_val);
 
     // Spec: throw InvalidStateError DOMException if event is already being dispatched.
@@ -2106,8 +2146,9 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     }
 
     // dispatch retargets constructor null placeholders on every dispatch.
-    dom_realm_set_name(event_item, "target", elem_item);
-    dom_realm_set_name(event_item, "srcElement", elem_item);
+    // The target is native in the record (srcElement is its alias), so this
+    // needs no realm -- which is what lets a Lambda script dispatch at all.
+    radiant_dom_event_set_target(event_item, elem_item);
 
     // Mark event as dispatching.
     event_set_bool(event_item, "__dispatch_flag", true);
@@ -2126,31 +2167,33 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     int path_len = build_path(elem_item, path, path_is_dom, 128);
 
     if (path_len == 0) {
-        event_set_item(event_item, "__dispatch_path", ItemNull);
+        radiant_dom_event_clear_path(event_item);
         event_set_bool(event_item, "__dispatch_flag", false);
         return (Item){.item = ITEM_TRUE};
     }
 
-    Item dispatch_path = js_array_new(0);
-    for (int i = 0; i < path_len; i++) {
-        js_array_push(dispatch_path, wrap_path_key(path[i], path_is_dom[i]));
-    }
     // Store the exact path before invoking listeners: DOM mutations during
     // dispatch must not rewrite composedPath(), and generic targets/window
-    // cannot be reconstructed from a DOM parent chain.
-    event_set_item(event_item, "__dispatch_path", dispatch_path);
+    // cannot be reconstructed from a DOM parent chain. It is stored as native
+    // keys and projected to Items only when composedPath() is called.
+    RadiantEvtKey path_keys[128];
+    for (int i = 0; i < path_len; i++) path_keys[i] = path_key_of(path[i], path_is_dom[i]);
+    radiant_dom_event_set_path(event_item, path_keys, path_len);
 
     // Legacy IE-style `window.event`: set to the in-flight event for the
     // duration of dispatch, restored to its prior value (typically
     // `undefined`) afterwards. Per HTML, the slot must read `undefined`
     // when called inside a Shadow Tree listener (we don't model Shadow
     // DOM headlessly, so we always set it).
-    Item global = dom_realm_global();
-    global_root.set(global);
     Item event_key = js_name_item("event");
-    Item prev_global_event = dom_realm_get(global_root.get(), event_key);
-    previous_global_event_root.set(prev_global_event);
-    dom_realm_set(global_root.get(), event_key, event_root.get());
+    bool publish_global_event = dom_realm_active();
+    if (publish_global_event) {
+        Item global = dom_realm_global();
+        global_root.set(global);
+        Item prev_global_event = dom_realm_get(global_root.get(), event_key);
+        previous_global_event_root.set(prev_global_event);
+        dom_realm_set(global_root.get(), event_key, event_root.get());
+    }
 
     #define _STOP_PROP event_flag_get(event_item, "__stop_prop")
     #define _STOP_IMM event_flag_get(event_item, "__stop_imm")
@@ -2212,7 +2255,6 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     event_set_int(event_item, "eventPhase", 0);
 
     // currentTarget is reset to null after dispatch (per spec).
-    dom_realm_set_name(event_item, "currentTarget", ItemNull);
     radiant_dom_event_clear_lambda_dispatch_position(event_item);
 
     // Per DOM spec §2.10 step 26: at the end of dispatch, unset stop
@@ -2224,10 +2266,12 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
 
     // Clear dispatching flag.
     event_set_bool(event_item, "__dispatch_flag", false);
-    event_set_item(event_item, "__dispatch_path", ItemNull);
+    radiant_dom_event_clear_path(event_item);
 
     // Restore the previous `window.event` value (legacy IE-style).
-    dom_realm_set(global_root.get(), event_key, previous_global_event_root.get());
+    if (publish_global_event) {
+        dom_realm_set(global_root.get(), event_key, previous_global_event_root.get());
+    }
 
     // Compact tombstoned listeners now that dispatch is done. Walk all
     // touched nodes in the path.
@@ -2247,7 +2291,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
 
     // dispatchEvent returns false only when the event is cancelable AND
     // preventDefault was called.
-    Item cancelable = dom_realm_get_cstr(event_item, "cancelable");
+    Item cancelable = event_get_item(event_item, "cancelable");
     bool ret_false = prevented && js_is_truthy(cancelable);
     return (Item){.item = ret_false ? ITEM_FALSE : ITEM_TRUE};
 }

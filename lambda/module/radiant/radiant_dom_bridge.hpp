@@ -81,6 +81,26 @@ RADIANT_C_API int radiant_dom_event_member_set(Item receiver, const char* name,
 RADIANT_C_API int radiant_dom_event_named_get(Item receiver, Item key, Item* out);
 RADIANT_C_API int radiant_dom_event_named_set(Item receiver, Item key,
                                               Item value, Item* out);
+// An event's target, currentTarget and propagation path are native. Every entry
+// is a DOM node the tree owns (or the window / document / a plain EventTarget
+// container), so the record holds raw pointers exactly as a node wrapper's
+// host_data does, and nothing here needs the collector. The wrapper Item is
+// made on read, through the wrapper cache, so identity still holds.
+typedef enum RadiantEvtKeyKind {
+    RADIANT_EVT_KEY_NONE = 0,
+    RADIANT_EVT_KEY_NODE,        // ptr is a DomNode*
+    RADIANT_EVT_KEY_WINDOW,      // the realm global
+    RADIANT_EVT_KEY_DOCUMENT,    // the document object
+    RADIANT_EVT_KEY_CONTAINER,   // ptr is a plain EventTarget container (Map/VMap)
+} RadiantEvtKeyKind;
+typedef struct RadiantEvtKey { RadiantEvtKeyKind kind; void* ptr; } RadiantEvtKey;
+
+RADIANT_C_API void radiant_dom_event_set_target(Item event, Item target);
+RADIANT_C_API void radiant_dom_event_set_position_key(Item event, RadiantEvtKey key,
+                                                      int event_phase);
+RADIANT_C_API void radiant_dom_event_set_path(Item event, const RadiantEvtKey* keys,
+                                              int len);
+RADIANT_C_API void radiant_dom_event_clear_path(Item event);
 RADIANT_C_API void radiant_dom_event_set_lambda_dispatch_position(
     Item event, Item current_target, int event_phase);
 RADIANT_C_API void radiant_dom_event_clear_lambda_dispatch_position(Item event);

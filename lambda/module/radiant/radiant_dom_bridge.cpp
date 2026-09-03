@@ -1158,7 +1158,40 @@ typedef struct RadiantDomEventRecord {
     int event_phase;
     int class_id;
     double timestamp;
+    // Native, untraced on purpose: see RadiantEvtKey in the header.
+    RadiantEvtKey target;           // srcElement is an alias of this
+    RadiantEvtKey current_target;
+    RadiantEvtKey* path;            // composedPath(), frozen at dispatch start
+    int path_len;
 } RadiantDomEventRecord;
+
+// The one projection from a native key to the Item a script sees.
+static Item radiant_dom_event_key_to_item(RadiantEvtKey key) {
+    switch (key.kind) {
+    case RADIANT_EVT_KEY_NODE:      return radiant_dom_wrap_node(key.ptr);
+    case RADIANT_EVT_KEY_WINDOW:    return radiant_host_api->script->global_this();
+    case RADIANT_EVT_KEY_DOCUMENT:  return js_get_document_object_value();
+    case RADIANT_EVT_KEY_CONTAINER: { Item it; it.item = 0; it.container = (Container*)key.ptr; return it; }
+    default:                        return ItemNull;
+    }
+}
+
+// ...and its inverse, for the entries that are handed an Item.
+static RadiantEvtKey radiant_dom_event_item_to_key(Item value) {
+    RadiantEvtKey key = { RADIANT_EVT_KEY_NONE, nullptr };
+    TypeId tid = get_type_id(value);
+    if (value.item == 0 || tid == LMD_TYPE_NULL || tid == LMD_TYPE_UNDEFINED) return key;
+    void* node = radiant_dom_unwrap_node(value);
+    if (node) { key.kind = RADIANT_EVT_KEY_NODE; key.ptr = node; return key; }
+    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_VMAP) {
+        if (value.item == radiant_host_api->script->global_this().item) {
+            key.kind = RADIANT_EVT_KEY_WINDOW;
+        } else {
+            key.kind = RADIANT_EVT_KEY_CONTAINER; key.ptr = value.container;
+        }
+    }
+    return key;
+}
 
 static const char* const RADIANT_DOM_EVENT_PROTO_KEY =
     "__radiant_dom_event_prototype";
@@ -1198,7 +1231,7 @@ static const char* radiant_dom_event_core_name(Item key) {
     static const char* const names[] = {
         "type", "bubbles", "cancelable", "composed", "defaultPrevented",
         "eventPhase", "isTrusted", "timeStamp", "returnValue", "cancelBubble",
-        "currentTarget", "srcElement",
+        "currentTarget", "srcElement", "target",
         "__default_prevented", "__stop_prop", "__stop_imm", "__dispatch_flag",
         "__in_passive",
     };
@@ -1278,6 +1311,10 @@ static bool radiant_dom_event_set_field(Item receiver, const char* name,
         record->dispatching = radiant_dom_event_value_bool(value);
     } else if (strcmp(name, "__in_passive") == 0) {
         record->in_passive_listener = radiant_dom_event_value_bool(value);
+    } else if (strcmp(name, "target") == 0 || strcmp(name, "srcElement") == 0) {
+        record->target = radiant_dom_event_item_to_key(value);
+    } else if (strcmp(name, "currentTarget") == 0) {
+        record->current_target = radiant_dom_event_item_to_key(value);
     } else {
         if (!vmap_backing_set(receiver.vmap, js_name_item(name), value)) {
             return false;
@@ -1351,6 +1388,7 @@ RADIANT_C_API void radiant_dom_event_destroy(void* native) {
     RadiantDomEventRecord* record = (RadiantDomEventRecord*)native;
     if (!record) return;
     if (record->type) mem_free(record->type);
+    if (record->path) mem_free(record->path);
     mem_free(record);
 }
 
@@ -1383,6 +1421,10 @@ RADIANT_C_API int radiant_dom_event_member_get(Item receiver, const char* name,
         *out = (Item){.item = b2it(record->dispatching)};
     } else if (strcmp(name, "__in_passive") == 0) {
         *out = (Item){.item = b2it(record->in_passive_listener)};
+    } else if (strcmp(name, "target") == 0 || strcmp(name, "srcElement") == 0) {
+        *out = radiant_dom_event_key_to_item(record->target);
+    } else if (strcmp(name, "currentTarget") == 0) {
+        *out = radiant_dom_event_key_to_item(record->current_target);
     } else {
         Item key = js_name_item(name);
         if (!vmap_backing_has(receiver.vmap, key)) return 0;
@@ -1396,28 +1438,43 @@ RADIANT_C_API int radiant_dom_event_member_set(Item receiver, const char* name,
     return radiant_dom_event_set_field(receiver, name, value, out) ? 1 : 0;
 }
 
+RADIANT_C_API void radiant_dom_event_set_position_key(Item event, RadiantEvtKey key,
+                                                      int event_phase) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(event);
+    if (!record) return;
+    record->current_target = key;
+    record->event_phase = event_phase;
+}
+
 RADIANT_C_API void radiant_dom_event_set_lambda_dispatch_position(
         Item event, Item current_target, int event_phase) {
-    RadiantDomEventRecord* record = radiant_dom_event_record(event);
-    if (!record || !event.vmap) return;
-
-    // Dynamic Lambda templates read snake_case backing fields, while JS reads
-    // DOM spellings. Both projections describe this one in-flight record.
-    record->event_phase = event_phase;
-    vmap_backing_set(event.vmap, js_name_item("currentTarget"), current_target);
-    vmap_backing_set(event.vmap, js_name_item("current_target"), current_target);
-    vmap_backing_set(event.vmap, js_name_item("event_phase"),
-                     (Item){.item = i2it(event_phase)});
+    radiant_dom_event_set_position_key(event,
+        radiant_dom_event_item_to_key(current_target), event_phase);
 }
 
 RADIANT_C_API void radiant_dom_event_clear_lambda_dispatch_position(Item event) {
-    RadiantDomEventRecord* record = radiant_dom_event_record(event);
-    if (!record || !event.vmap) return;
+    RadiantEvtKey none = { RADIANT_EVT_KEY_NONE, nullptr };
+    radiant_dom_event_set_position_key(event, none, 0);
+}
 
-    record->event_phase = 0;
-    vmap_backing_set(event.vmap, js_name_item("currentTarget"), ItemNull);
-    vmap_backing_set(event.vmap, js_name_item("current_target"), ItemNull);
-    vmap_backing_set(event.vmap, js_name_item("event_phase"), ItemNull);
+RADIANT_C_API void radiant_dom_event_set_target(Item event, Item target) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(event);
+    if (record) record->target = radiant_dom_event_item_to_key(target);
+}
+
+RADIANT_C_API void radiant_dom_event_set_path(Item event, const RadiantEvtKey* keys, int len) {
+    RadiantDomEventRecord* record = radiant_dom_event_record(event);
+    if (!record) return;
+    if (record->path) { mem_free(record->path); record->path = nullptr; record->path_len = 0; }
+    if (!keys || len <= 0) return;
+    record->path = (RadiantEvtKey*)mem_calloc((size_t)len, sizeof(RadiantEvtKey), MEM_CAT_JS_RUNTIME);
+    if (!record->path) return;
+    memcpy(record->path, keys, sizeof(RadiantEvtKey) * (size_t)len);
+    record->path_len = len;
+}
+
+RADIANT_C_API void radiant_dom_event_clear_path(Item event) {
+    radiant_dom_event_set_path(event, nullptr, 0);
 }
 
 RADIANT_C_API int radiant_dom_event_named_get(Item receiver, Item key, Item* out) {
@@ -1492,13 +1549,9 @@ RADIANT_C_API int radiant_dom_event_call(Item receiver, const char* name,
         return 1;
     }
     if (strcmp(name, "composedPath") == 0) {
-        Item path = vmap_backing_get(receiver.vmap,
-                                     js_name_item("__dispatch_path"));
         Item copy = js_array_new(0);
-        if (get_type_id(path) == LMD_TYPE_ARRAY && path.array) {
-            for (int64_t i = 0; i < path.array->length; i++) {
-                js_array_push(copy, path.array->items[i]);
-            }
+        for (int i = 0; i < record->path_len; i++) {
+            js_array_push(copy, radiant_dom_event_key_to_item(record->path[i]));
         }
         *out = copy;
         return 1;
