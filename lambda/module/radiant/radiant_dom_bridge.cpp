@@ -1639,13 +1639,6 @@ RADIANT_C_API int radiant_dom_member_class_name(Item receiver, Item* out) {
 }
 RADIANT_MEMBER_GET(radiant_dom_member_node_type,
     radiant_dom_int_item((int64_t)elem->node_type))
-RADIANT_C_API int radiant_dom_member_parent_node(Item receiver, Item* out) {
-    DomElement* elem = radiant_dom_member_elem(receiver);
-    if (!elem || !out) return 0;
-    DomNode* parent = elem->parent;
-    *out = (parent && parent->is_element()) ? radiant_dom_node_item(parent) : ItemNull;
-    return 1;
-}
 RADIANT_MEMBER_GET(radiant_dom_member_is_connected,
     (Item){.item = b2it(radiant_dom_node_is_connected((DomNode*)elem) ? 1 : 0)})
 RADIANT_MEMBER_GET(radiant_dom_member_child_element_count,
@@ -2471,65 +2464,44 @@ RADIANT_C_API int radiant_dom_member_text_content(Item receiver, Item* out) {
     return radiant_dom_member_character_data_property(receiver, "textContent", out);
 }
 
-RADIANT_C_API int radiant_dom_member_node_name(Item receiver, Item* out) {
-    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
-    if (!node || !out) return 0;
-    if (node->is_element()) {
-        *out = (Item){.item = s2it(radiant_dom_uppercase_name(node->as_element()->tag_name))};
-        return 1;
+
+
+
+
+// ---------------------------------------------------------------------------
+// Member ordinals that are core operations (ESO94, F31).
+//
+// Each of these used to read node/element fields itself, which made it a second
+// implementation of an operation the core already owns -- and second
+// implementations drift. They had, three times: the element-child walkers saw a
+// different tree than the core (ESO83), parentNode answered null for the
+// document element where the core answers the Document (ESO93/ESO101), and
+// nodeName uppercased "#document" into "#DOCUMENT" where the core does not.
+//
+// They now call the catalog section of the host table, which is generated from
+// lambda/dom/dom_api.def -- so the ordinal is a dispatch encoding for the JS
+// long tail (ES40) and the body behind it is the one body (ES38).
+//
+// childNodes is deliberately NOT here: JS requires a live NodeList and Lambda
+// requires a snapshot (S9.2.2), so that one genuinely differs by door.
+// ---------------------------------------------------------------------------
+#define RADIANT_DOM_MEMBER_FROM_CATALOG(fn_name, catalog_op)                  \
+    RADIANT_C_API int fn_name(Item receiver, Item* out) {                     \
+        if (!out || !radiant_dom_unwrap_node(receiver)) return 0;             \
+        *out = radiant_host_api->dom_catalog->catalog_op(receiver);           \
+        return 1;                                                             \
     }
-    // Text/comment wrappers no longer fall through VMap camelization; their
-    // shared Node fields must be resolved by the record table directly.
-    return radiant_dom_member_character_data_property(receiver, "nodeName", out);
-}
 
-RADIANT_C_API int radiant_dom_member_node_type_any(Item receiver, Item* out) {
-    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
-    if (!node || !out) return 0;
-    if (node->is_element()) {
-        DomElement* elem = node->as_element();
-        // Document and DocumentFragment share element storage internally, but
-        // ancestor walks must stop at their DOM node types instead of treating
-        // the shell as another Element.
-        *out = radiant_dom_int_item(
-            radiant_dom_is_tag(elem, "#document") ? 9 :
-            radiant_dom_is_tag(elem, "#document-fragment") ? 11 :
-            (int64_t)elem->node_type);
-        return 1;
-    }
-    return radiant_dom_member_character_data_property(receiver, "nodeType", out);
-}
-
-RADIANT_C_API int radiant_dom_member_parent_node_any(Item receiver, Item* out) {
-    if (!out) return 0;
-    if (!radiant_dom_unwrap_node(receiver)) return 0;
-    // Read node->parent here and this ordinal becomes a second implementation
-    // of parentNode that quietly disagrees with the core's: it answered null
-    // for the document element where the core answers the Document (ESO93), so
-    // `documentElement.parentNode === document` was false for JS and true for
-    // Lambda. One operation, one body -- the ESO83 fix, applied to the ordinal.
-    *out = radiant_dom_get_property(receiver, radiant_dom_string_item("parentNode"));
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_member_parent_element_any(Item receiver, Item* out) {
-    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
-    if (!node || !out) return 0;
-    // parentElement is narrower than parentNode: an internal Document or
-    // DocumentFragment shell must terminate the Element ancestor walk.
-    DomNode* parent = node->parent;
-    *out = radiant_dom_node_is_dom_element(parent)
-        ? radiant_dom_node_item(parent) : ItemNull;
-    return 1;
-}
-
-RADIANT_C_API int radiant_dom_member_is_connected_any(Item receiver, Item* out) {
-    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
-    if (!node || !out) return 0;
-    *out = (Item){.item = b2it(radiant_dom_node_is_connected(node) ? 1 : 0)};
-    return 1;
-}
-
+RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_parent_node, parent_node)
+RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_parent_node_any, parent_node)
+RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_parent_element_any, parent_element)
+RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_node_name, node_name)
+RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_node_type_any, node_type)
+// ownerDocument stays module-owned: `radiant.*` hands back a radiant document
+// wrapper carrying document_element/ready_state, and the core answers the
+// Document object or node instead. Unifying those two is F32's job (the
+// radiant.* surface), not this dedup -- delegating it here silently changed
+// what the behaviour package receives.
 RADIANT_C_API int radiant_dom_member_owner_document_any(Item receiver, Item* out) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
     if (!node || !out) return 0;
@@ -2539,27 +2511,21 @@ RADIANT_C_API int radiant_dom_member_owner_document_any(Item receiver, Item* out
     }
     DomNode* parent = node->parent;
     DomDocument* doc = (parent && parent->is_element()) ? parent->as_element()->doc : nullptr;
-    *out = doc ? radiant_dom_document_item(doc) : dom_owner_document_for_node((void*)node);
+    *out = doc ? radiant_dom_document_item(doc) : ItemNull;
+    return 1;
+}
+RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_first_child_any, first_child)
+RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_last_child_any, last_child)
+
+RADIANT_C_API int radiant_dom_member_is_connected_any(Item receiver, Item* out) {
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
+    if (!node || !out) return 0;
+    *out = (Item){.item = b2it(radiant_dom_node_is_connected(node) ? 1 : 0)};
     return 1;
 }
 
-RADIANT_C_API int radiant_dom_member_first_child_any(Item receiver, Item* out) {
-    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
-    if (!node || !out) return 0;
-    *out = node->is_element()
-        ? radiant_dom_node_item(radiant_dom_first_script_visible_child(node->as_element()))
-        : ItemNull;
-    return 1;
-}
 
-RADIANT_C_API int radiant_dom_member_last_child_any(Item receiver, Item* out) {
-    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
-    if (!node || !out) return 0;
-    *out = node->is_element()
-        ? radiant_dom_node_item(radiant_dom_last_script_visible_child(node->as_element()))
-        : ItemNull;
-    return 1;
-}
+
 
 RADIANT_C_API int radiant_dom_member_next_sibling_any(Item receiver, Item* out) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);

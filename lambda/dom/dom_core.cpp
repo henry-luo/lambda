@@ -31,23 +31,33 @@
 // Delegation helpers
 // ---------------------------------------------------------------------------
 
+// Absence crossing into Lambda is null, never JS `undefined` -- the same
+// boundary rule dom_prop_get applies. The ordinal executor answers `undefined`
+// for an operation that does not apply to this node kind (has_attribute on a
+// text node), and letting that through produced a value that printed as
+// `false` but was not a bool: `has_attribute(text) == false` was FALSE. Found
+// by the §5.4 oracle; ESO98 fixed only the property half of this boundary.
+static Item dom_absent_to_null(Item v) {
+    return get_type_id(v) == LMD_TYPE_UNDEFINED ? ItemNull : v;
+}
+
 static Item dom_op0(Item node, JubeDomElementOperation op) {
-    return dom_element_operation_impl(node, op, nullptr, 0);
+    return dom_absent_to_null(dom_element_operation_impl(node, op, nullptr, 0));
 }
 
 static Item dom_op1(Item node, JubeDomElementOperation op, Item a) {
     Item args[1] = { a };
-    return dom_element_operation_impl(node, op, args, 1);
+    return dom_absent_to_null(dom_element_operation_impl(node, op, args, 1));
 }
 
 static Item dom_op2(Item node, JubeDomElementOperation op, Item a, Item b) {
     Item args[2] = { a, b };
-    return dom_element_operation_impl(node, op, args, 2);
+    return dom_absent_to_null(dom_element_operation_impl(node, op, args, 2));
 }
 
 static Item dom_op3(Item node, JubeDomElementOperation op, Item a, Item b, Item c) {
     Item args[3] = { a, b, c };
-    return dom_element_operation_impl(node, op, args, 3);
+    return dom_absent_to_null(dom_element_operation_impl(node, op, args, 3));
 }
 
 /**
@@ -350,7 +360,10 @@ extern "C" Item dom_fp_get_element_by_id(Item root, Item id) {
     return dom_op1(root, JUBE_DOM_GET_ELEMENT_BY_ID, id);
 }
 extern "C" Item dom_fp_has_attribute(Item n, Item name) {
-    return dom_op1(n, JUBE_DOM_HAS_ATTRIBUTE, name);
+    // Its own derivation: the ordinal answers absence rather than `false` for a
+    // node kind that has no attributes, and the row's contract is bool.
+    Item value = dom_core_get_attribute(n, name);
+    return (Item){.item = b2it(get_type_id(value) != LMD_TYPE_NULL)};
 }
 extern "C" Item dom_fp_inner_html(Item n) { return dom_prop_get(n, "innerHTML"); }
 extern "C" Item dom_fp_outer_html(Item n) { return dom_prop_get(n, "outerHTML"); }

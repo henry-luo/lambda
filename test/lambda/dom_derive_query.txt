@@ -1,0 +1,7 @@
+{
+  selectors_checked: 9,
+  nodes_checked: 24,
+  divergent_selectors: [],
+  divergent_nodes: [],
+  by_id_agrees: true
+}

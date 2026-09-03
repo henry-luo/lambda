@@ -217,9 +217,9 @@ DOM_OP(DERIVED, query_selector,  query, 2, "fn(root: any, selector: string) -> a
 DOM_OP(DERIVED, query_selector_all, query, 2, "fn(root: any, selector: string) -> array", dom_fp_query_selector_all, DOM_F_NEUTRAL | DOM_F_SNAPSHOT | DOM_F_FASTPATH,
        "[for (d in descendants(root) where matches(d, selector)) d]")
 DOM_OP(DERIVED, closest,         query, 2, "fn(n: any, selector: string) -> any", dom_fp_closest, DOM_F_NEUTRAL | DOM_F_FASTPATH,
-       "if (matches(n, selector)) n else if (parent_element(n) != null) closest(parent_element(n), selector) else null")
+       "if (node_type(n) != 1) null else if (matches(n, selector)) n else if (parent_element(n) != null) closest(parent_element(n), selector) else null")
 DOM_OP(DERIVED, get_element_by_id, query, 2, "fn(root: any, id: string) -> any", dom_fp_get_element_by_id, DOM_F_NEUTRAL | DOM_F_FASTPATH,
-       "query_selector(root, \"#\" + css_escape(id))")
+       "first of [for (d in descendants(root) where node_type(d) == 1 and get_attribute(d, \"id\") == id) d]")
 DOM_OP(DERIVED, has_attribute,   attr, 2, "fn(n: any, name: string) -> bool", dom_fp_has_attribute, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "get_attribute(n, name) != null")
 
