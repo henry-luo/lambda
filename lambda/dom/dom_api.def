@@ -344,3 +344,31 @@ DOM_OP(DERIVED, form_controls,   forms, 1, "fn(f: any) -> array", DOM_NO_BODY, D
        "[for (c in query_selector_all(root_node(f), \"input,select,textarea,button,fieldset,object,output\") where same_node(form_of(c), f)) c]")
 DOM_OP(DERIVED, click,           event, 1, "fn(n: any) -> bool", DOM_NO_BODY, DOM_F_NEUTRAL,
        "dispatch(n, {type: \"click\", bubbles: true, cancelable: true})")
+
+// ---------------------------------------------------------------------------
+// CORE — operations whose body is their JS-facing bridge (ESO107)
+// Each of these was a `->dom` slot with no row. The row's body is literally the
+// slot's function, so the module crossing here is a spelling change, not a
+// second implementation; the bridges answer `undefined` and the publication
+// boundary renders that as null for Lambda. None carries DOM_F_NEUTRAL: they
+// need a realm (CSSOM objects, the document wrapper), so they are catalog
+// operations the module reaches, not `dom.*` functions a script calls.
+// ---------------------------------------------------------------------------
+DOM_OP(CORE, adopt_node, node, 1, "fn(n: any) -> any", dom_adopt_node_bridge, DOM_F_MUTATES, "")
+DOM_OP(CORE, style_has_property, style, 2, "fn(n: any, prop: string) -> any", dom_style_css_has, 0, "")
+DOM_OP(CORE, style_get_property, style, 2, "fn(n: any, prop: string) -> any", dom_get_style_property, 0, "")
+DOM_OP(CORE, style_set_property, style, 3, "fn(n: any, prop: string, value: any) -> any", dom_set_style_property, DOM_F_MUTATES, "")
+DOM_OP(CORE, rule_style_has_property, style, 2, "fn(d: any, prop: string) -> any", dom_cssom_decl_css_has, 0, "")
+DOM_OP(CORE, rule_style_get_property, style, 2, "fn(d: any, prop: string) -> any", dom_cssom_rule_decl_get_property, 0, "")
+DOM_OP(CORE, rule_style_set_property, style, 3, "fn(d: any, prop: string, value: any) -> any", dom_cssom_rule_decl_set_property, DOM_F_MUTATES, "")
+DOM_OP(CORE, rule_style_remove_property, style, 2, "fn(d: any, prop: string) -> any", dom_cssom_rule_decl_remove_property, DOM_F_MUTATES, "")
+DOM_OP(CORE, set_selector_text, style, 2, "fn(rule: any, text: string) -> any", dom_cssom_rule_set_selector_text, DOM_F_MUTATES, "")
+DOM_OP(CORE, document_stylesheets, document, 0, "fn() -> any", dom_document_stylesheets_bridge, DOM_F_SNAPSHOT, "")
+DOM_OP(CORE, document_implementation, document, 0, "fn() -> any", dom_document_implementation_bridge, 0, "")
+DOM_OP(CORE, document_fonts, document, 0, "fn() -> any", dom_document_fonts_bridge, 0, "")
+DOM_OP(CORE, design_mode, document, 0, "fn() -> any", dom_document_design_mode_bridge, 0, "")
+DOM_OP(CORE, exec_command, editing, 2, "fn(command: string, value: any) -> any", dom_document_exec_command_bridge, DOM_F_MUTATES, "")
+DOM_OP(CORE, create_tree_walker, tree, 2, "fn(root: any, what: any) -> any", dom_create_tree_walker_bridge, 0, "")
+DOM_OP(CORE, report_validity, forms, 1, "fn(n: any) -> any", dom_report_validity_bridge, 0, "")
+DOM_OP(CORE, submit_form, forms, 1, "fn(f: any) -> any", dom_form_submit_bridge, DOM_F_MUTATES, "")
+DOM_OP(CORE, request_submit, forms, 2, "fn(f: any, submitter: any) -> any", dom_form_request_submit_bridge, DOM_F_MUTATES, "")

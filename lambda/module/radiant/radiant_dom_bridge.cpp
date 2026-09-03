@@ -82,8 +82,8 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_style_resource_has_property radiant_host_api->dom->style_resource_has_property
 #define dom_get_prototype_value radiant_host_api->realm->dom_get_prototype_value
 #define js_get_intrinsic_prototype_for_class radiant_host_api->script->intrinsic_prototype_for_class
-#define dom_cssom_rule_decl_get_property radiant_host_api->dom->cssom_rule_decl_get_property
-#define dom_cssom_rule_decl_set_property radiant_host_api->dom->cssom_rule_decl_set_property
+#define dom_cssom_rule_decl_get_property radiant_host_api->dom_catalog->rule_style_get_property
+#define dom_cssom_rule_decl_set_property radiant_host_api->dom_catalog->rule_style_set_property
 #define dom_get_foreign_doc radiant_host_api->dom->get_foreign_doc
 #define dom_swap_active_document radiant_host_api->dom->swap_active_document
 #define dom_restore_active_document radiant_host_api->dom->restore_active_document
@@ -125,9 +125,9 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_text_control_select_bridge radiant_host_api->dom->text_control_select_bridge
 #define dom_form_reset_bridge radiant_host_api->dom->form_reset_bridge
 #define dom_check_validity_bridge radiant_host_api->dom->check_validity_bridge
-#define dom_report_validity_bridge radiant_host_api->dom->report_validity_bridge
-#define dom_form_submit_bridge radiant_host_api->dom->form_submit_bridge
-#define dom_form_request_submit_bridge radiant_host_api->dom->form_request_submit_bridge
+#define dom_report_validity_bridge radiant_host_api->dom_catalog->report_validity
+#define dom_form_submit_bridge radiant_host_api->dom_catalog->submit_form
+#define dom_form_request_submit_bridge radiant_host_api->dom_catalog->request_submit
 #define dom_focus_method_bridge radiant_host_api->dom->focus_method_bridge
 #define dom_click_method_bridge radiant_host_api->dom->click_method_bridge
 #define dom_add_event_listener_bridge radiant_host_api->dom_catalog->add_listener
@@ -151,7 +151,7 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_remove_child_bridge radiant_host_api->dom->remove_child_bridge
 #define dom_insert_before_bridge radiant_host_api->dom->insert_before_bridge
 #define dom_remove_bridge radiant_host_api->dom->remove_bridge
-#define dom_adopt_node_bridge radiant_host_api->dom->adopt_node_bridge
+#define dom_adopt_node_bridge radiant_host_api->dom_catalog->adopt_node
 #define dom_location_navigate_bridge radiant_host_api->dom->location_navigate_bridge
 #define dom_document_open_bridge radiant_host_api->dom->document_open_bridge
 #define dom_document_write_bridge radiant_host_api->dom->document_write_bridge
@@ -160,11 +160,11 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_get_selection radiant_host_api->dom->get_selection
 #define dom_get_selection_function_for_document radiant_host_api->realm->get_selection_function_for_document
 #define dom_doc_has_browsing_context radiant_host_api->dom->doc_has_browsing_context
-#define dom_document_fonts_bridge radiant_host_api->dom->document_fonts_bridge
-#define dom_document_stylesheets_bridge radiant_host_api->dom->document_stylesheets_bridge
+#define dom_document_fonts_bridge radiant_host_api->dom_catalog->document_fonts
+#define dom_document_stylesheets_bridge radiant_host_api->dom_catalog->document_stylesheets
 #define dom_document_default_view_bridge radiant_host_api->realm->document_default_view_bridge
-#define dom_document_implementation_bridge radiant_host_api->dom->document_implementation_bridge
-#define dom_document_design_mode_bridge radiant_host_api->dom->document_design_mode_bridge
+#define dom_document_implementation_bridge radiant_host_api->dom_catalog->document_implementation
+#define dom_document_design_mode_bridge radiant_host_api->dom_catalog->design_mode
 #define dom_document_active_element_bridge radiant_host_api->dom->document_active_element_bridge
 #define dom_normalize_bridge radiant_host_api->dom->normalize_bridge
 #define dom_live_child_collection_bridge radiant_host_api->realm->live_child_collection_bridge
@@ -186,9 +186,9 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_notify_mutation_detail radiant_host_api->dom->notify_mutation_detail
 #define dom_get_ui_context radiant_host_api->dom->get_ui_context
 #define dom_has_committed_geometry_snapshot radiant_host_api->dom->has_committed_geometry_snapshot
-#define dom_create_tree_walker_bridge radiant_host_api->dom->document_create_tree_walker_bridge
+#define dom_create_tree_walker_bridge radiant_host_api->dom_catalog->create_tree_walker
 #define dom_document_create_event_bridge radiant_host_api->realm->document_create_event_bridge
-#define dom_document_exec_command_bridge radiant_host_api->dom->document_exec_command_bridge
+#define dom_document_exec_command_bridge radiant_host_api->dom_catalog->exec_command
 
 static const int RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE = 4096;
 static const char s_radiant_dom_vmap_type_marker = 0;

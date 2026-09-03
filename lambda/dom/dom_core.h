@@ -210,6 +210,24 @@ Item dom_absent_to_null(Item v);
 // so one body serves both doors (ES38) instead of a Lambda-only copy.
 Item dom_add_event_listener_bridge(Item n, Item type, Item fn, Item opts);
 Item dom_remove_event_listener_bridge(Item n, Item type, Item fn, Item opts);
+Item dom_adopt_node_bridge(Item);
+Item dom_style_css_has(Item, Item);
+Item dom_get_style_property(Item, Item);
+Item dom_set_style_property(Item, Item, Item);
+Item dom_cssom_decl_css_has(Item, Item);
+Item dom_cssom_rule_decl_get_property(Item, Item);
+Item dom_cssom_rule_decl_set_property(Item, Item, Item);
+Item dom_cssom_rule_decl_remove_property(Item, Item);
+Item dom_cssom_rule_set_selector_text(Item, Item);
+Item dom_document_stylesheets_bridge(void);
+Item dom_document_implementation_bridge(void);
+Item dom_document_fonts_bridge(void);
+Item dom_document_design_mode_bridge(void);
+Item dom_document_exec_command_bridge(Item, Item);
+Item dom_create_tree_walker_bridge(Item, Item);
+Item dom_report_validity_bridge(Item);
+Item dom_form_submit_bridge(Item);
+Item dom_form_request_submit_bridge(Item, Item);
 
 #ifdef __cplusplus
 }
