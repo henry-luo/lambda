@@ -299,7 +299,9 @@ static inline void js_note_event_handler_property_set(Item object,
                                                        int name_len,
                                                        Item value) {
     if (!name || name_len < 3 || name[0] != 'o' || name[1] != 'n') return;
-    dom_event_handler_property_set(object, name, name_len, value);
+    // ES45: the handler assignment crosses the API like any other DOM write.
+    jube_internal_host_api()->dom_catalog->set_event_handler(
+        object, js_name_item(name, name_len), value);
 }
 
 static inline void js_note_event_handler_property_set(Item object, Item key,
@@ -6690,6 +6692,22 @@ static Item js_set_array_core(Item object, Item key, Item value,
     return js_elements_set_mode(object, key, value, strict);
 }
 
+// ES45: the second dataset assignment path, routed the same way as the one in
+// js_globals.cpp -- unwrap the proxy here, write through the catalog's row.
+static bool js_dataset_set_via_api(Item dataset, Item key, Item value) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* key_string = it2s(key);
+    if (!key_string ||
+        (key_string->len == 24 &&
+         strncmp(key_string->chars, "__lambda_dataset_element", 24) == 0)) {
+        return false;
+    }
+    Item owner = js_get_key_cstr(dataset, "__lambda_dataset_element");
+    if (get_type_id(owner) != LMD_TYPE_VMAP) return false;
+    jube_internal_host_api()->dom_catalog->set_data(owner, key, value);
+    return true;
+}
+
 static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
                                 bool bypass_accessor_dispatch, bool strict) {
     // OffscreenCanvas / CanvasRenderingContext2D property intercept (ctx.font = "...")
@@ -6723,7 +6741,7 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
         // new String("x") must address property "x", not an unnameable slot.
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     }
-    if (!bypass_accessor_dispatch && dom_dataset_set_object_property(object, key, value)) {
+    if (!bypass_accessor_dispatch && js_dataset_set_via_api(object, key, value)) {
         return value;
     }
     bool private_internal_property_key = js_is_private_internal_property_key(key);
@@ -12996,10 +13014,13 @@ JS_GENERATOR_INTRINSIC_BODY(js_intrinsic_async_generator_throw_body,
 JS_RUNTIME_THIS_BODY(js_intrinsic_iterator_identity_body, this_value)
 JS_RUNTIME_BINARY_BODY(js_intrinsic_proxy_revocable_body,
     js_proxy_revocable(arg0, arg1))
+// ES45: through the DOM API, not into a DOM body. The catalog's rows are fixed
+// arity, so CSS.supports's one-argument overload passes null for the value.
 JS_RUNTIME_ARGS_BODY(js_intrinsic_css_supports_body,
-    dom_css_supports_operation(args, argc))
+    jube_internal_host_api()->dom_catalog->css_supports(
+        argc > 0 ? args[0] : ItemNull, argc > 1 ? args[1] : ItemNull))
 JS_RUNTIME_ARGS_BODY(js_intrinsic_css_escape_body,
-    dom_css_escape_operation(args, argc))
+    jube_internal_host_api()->dom_catalog->css_escape(argc > 0 ? args[0] : ItemNull))
 
 #undef JS_RUNTIME_BINARY_BODY
 #undef JS_RUNTIME_THIS_UNARY_BODY

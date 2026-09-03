@@ -307,6 +307,53 @@ extern "C" Item dom_core_set_node_value(Item n, Item data) {
     return dom_op3(n, JUBE_DOM_REPLACE_DATA, zero, all, data);
 }
 
+// --- CSS statics and the two node writes JS reached for directly (ES45)
+//
+// These four were the DOM operations the JS runtime called by direct extern
+// rather than through the API. Each gets a row in the catalog's uniform shape
+// so JS crosses the same entry point every other caller does; the bodies below
+// are adapters, not new mechanism.
+extern "C" Item dom_css_supports_operation(Item* args, int argc);
+extern "C" Item dom_css_escape_operation(Item* args, int argc);
+extern "C" Item dom_dataset_set_property(Item elem_item, Item prop_name, Item value);
+extern "C" void dom_event_handler_property_set(Item target, const char* property_name,
+                                                int property_name_len, Item value);
+
+// CSS.supports is overloaded in the spec -- supports(property, value) and
+// supports(conditionText) -- which is why the body underneath is variadic. The
+// row is fixed at two arguments and the one-argument spelling passes null,
+// keeping every row in the catalog the same shape.
+extern "C" Item dom_core_css_supports(Item property, Item value) {
+    Item args[2] = { property, value };
+    int argc = get_type_id(value) == LMD_TYPE_NULL ? 1 : 2;
+    return dom_absent_to_null(dom_css_supports_operation(args, argc));
+}
+
+extern "C" Item dom_core_css_escape(Item text) {
+    Item args[1] = { text };
+    return dom_absent_to_null(dom_css_escape_operation(args, 1));
+}
+
+// element.dataset.foo = v is a data-* attribute write. The row takes the
+// element, not the dataset proxy: unwrapping the proxy is a JS-object concern
+// and stays on the JS side, where the proxy exists.
+extern "C" Item dom_core_set_data(Item n, Item name, Item value) {
+    return dom_absent_to_null(dom_dataset_set_property(n, name, value));
+}
+
+// el.onclick = fn. This shares the listener store add_listener and
+// remove_listener use -- it finds the node's listeners, tombstones the previous
+// IDL handler and installs the new one -- so it is a derived operation in
+// substance. Stating it as a derivation needs a read for the current IDL
+// handler, which no row exposes yet; until then the row wraps the existing body
+// and the derivation string records what it would be.
+extern "C" Item dom_core_set_event_handler(Item n, Item name, Item handler) {
+    const char* prop = dom_cstr_or_null(name);
+    if (!prop) return ItemNull;
+    dom_event_handler_property_set(n, prop, (int)strlen(prop), handler);
+    return ItemNull;
+}
+
 // --- events
 // `dispatch` takes either spelling: a bare type name, which is how the engine's
 // script dispatch has always been called, or an event value carrying its own

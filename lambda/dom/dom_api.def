@@ -221,6 +221,15 @@ DOM_OP(CORE, value_at_focus, input, 1, "fn(n: any) -> any", dom_engine_value_at_
 // must produce exactly what the derivation produces (ES43 oracle).
 // ===========================================================================
 
+// The CSS statics and the two node writes the JS runtime used to reach by
+// direct extern (ES45). set_event_handler is derived in substance -- it drives
+// the same listener store as add_listener/remove_listener -- but stating it as
+// a derivation needs a read for the current IDL handler that no row exposes.
+DOM_OP(CORE, css_supports, style, 2, "fn(property: string, value: string|null) -> bool", dom_core_css_supports, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, css_escape, style, 1, "fn(text: string) -> string", dom_core_css_escape, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, set_data, attr, 3, "fn(n: any, name: string, value: any) -> any", dom_core_set_data, DOM_F_NEUTRAL | DOM_F_MUTATES, "")
+DOM_OP(CORE, set_event_handler, event, 3, "fn(n: any, name: string, handler: any) -> null", dom_core_set_event_handler, DOM_F_MUTATES, "")
+
 // --- 5.1 element-only traversal
 DOM_OP(DERIVED, first_element_child, node, 1, "fn(n: any) -> any", dom_fp_first_element_child, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "element_or_next(first_child(n))")
