@@ -19,6 +19,7 @@
  */
 
 #include "dom.h"
+#include "realm/dom_realm.h"
 #include "../js/js_runtime.h"
 #include "../js/js_class.h"
 #include "../lambda-data.hpp"
@@ -57,11 +58,11 @@ extern "C" DomElement* dom_find_form_owner(void* control_ptr);
 #define make_key make_string_item
 
 static inline Item prop_get(Item obj, const char* key) {
-    return js_get_key_default(obj, make_key(key));
+    return dom_realm_get(obj, make_key(key));
 }
 
 static inline void prop_set(Item obj, const char* key, Item val) {
-    js_set_key_default(obj, make_key(key), val);
+    dom_realm_set(obj, make_key(key), val);
 }
 
 static bool fd_input_supports_dirname(const char* itype) {
@@ -185,7 +186,7 @@ static Item fd_coerce_value(Item v) {
         int64_t iv = it2i(v);
         // symbols are encoded as large negative ints — throw TypeError
         if (iv <= -(int64_t)(1LL << 40)) {
-            return js_throw_type_error("Cannot convert a Symbol value to a string");
+            return dom_realm_throw_type_error("Cannot convert a Symbol value to a string");
         }
         char buf[32];
         snprintf(buf, sizeof(buf), "%" PRId64, iv);
@@ -224,14 +225,14 @@ static Item fd_prepare_value(Item value_item, Item filename_item) {
 }
 
 static Item js_fd_append(Item name_item, Item value_item, Item filename_item) {
-    Item this_fd = js_get_this();
+    Item this_fd = dom_realm_receiver();
     Item entries = fd_get_entries(this_fd);
     if (get_type_id(entries) != LMD_TYPE_ARRAY) return make_js_undefined();
 
     // 3-arg form append(name, blobValue, filename) is only valid when value is a Blob/File.
     // If 3rd arg is present (not undefined) but value is not a Blob/File → TypeError.
     if (get_type_id(filename_item) != LMD_TYPE_UNDEFINED && !fd_is_blob(value_item)) {
-        return js_throw_type_error("append: 3-argument form requires a Blob value");
+        return dom_realm_throw_type_error("append: 3-argument form requires a Blob value");
     }
 
     const char* name_cs = fn_to_cstr(name_item);
@@ -248,7 +249,7 @@ static Item js_fd_append(Item name_item, Item value_item, Item filename_item) {
 }
 
 static Item js_fd_delete(Item name_item) {
-    Item this_fd = js_get_this();
+    Item this_fd = dom_realm_receiver();
     Item entries = fd_get_entries(this_fd);
     if (get_type_id(entries) != LMD_TYPE_ARRAY) return make_js_undefined();
 
@@ -285,7 +286,7 @@ static int64_t js_fd_find_entry(Item entries, const char* name) {
 }
 
 static Item js_fd_get(Item name_item) {
-    Item this_fd = js_get_this();
+    Item this_fd = dom_realm_receiver();
     Item entries = fd_get_entries(this_fd);
     if (get_type_id(entries) != LMD_TYPE_ARRAY) return ItemNull;
 
@@ -298,7 +299,7 @@ static Item js_fd_get(Item name_item) {
 }
 
 static Item js_fd_getAll(Item name_item) {
-    Item this_fd = js_get_this();
+    Item this_fd = dom_realm_receiver();
     Item result = js_array_new(0);
     Item entries = fd_get_entries(this_fd);
     if (get_type_id(entries) != LMD_TYPE_ARRAY) return result;
@@ -317,7 +318,7 @@ static Item js_fd_getAll(Item name_item) {
 }
 
 static Item js_fd_has(Item name_item) {
-    Item this_fd = js_get_this();
+    Item this_fd = dom_realm_receiver();
     Item entries = fd_get_entries(this_fd);
     if (get_type_id(entries) != LMD_TYPE_ARRAY) return make_bool(false);
 
@@ -328,14 +329,14 @@ static Item js_fd_has(Item name_item) {
 }
 
 static Item js_fd_set(Item name_item, Item value_item, Item filename_item) {
-    Item this_fd = js_get_this();
+    Item this_fd = dom_realm_receiver();
     Item entries = fd_get_entries(this_fd);
     if (get_type_id(entries) != LMD_TYPE_ARRAY) return make_js_undefined();
 
     // 3-arg form set(name, blobValue, filename) is only valid when value is a Blob/File.
     // If 3rd arg is present (not undefined) but value is not a Blob/File → TypeError.
     if (get_type_id(filename_item) != LMD_TYPE_UNDEFINED && !fd_is_blob(value_item)) {
-        return js_throw_type_error("set: 3-argument form requires a Blob value");
+        return dom_realm_throw_type_error("set: 3-argument form requires a Blob value");
     }
 
     const char* name_cs = fn_to_cstr(name_item);
@@ -384,9 +385,9 @@ static Item js_fd_set(Item name_item, Item value_item, Item filename_item) {
 }
 
 static Item js_fd_forEach(Item callback, Item this_arg) {
-    if (!js_is_callable(callback)) return make_js_undefined();
+    if (!dom_realm_is_callable(callback)) return make_js_undefined();
 
-    Item this_fd = js_get_this();
+    Item this_fd = dom_realm_receiver();
     Item entries = fd_get_entries(this_fd);
     if (get_type_id(entries) != LMD_TYPE_ARRAY) return make_js_undefined();
 
@@ -398,7 +399,7 @@ static Item js_fd_forEach(Item callback, Item this_arg) {
         Item val_val  = js_elements_get_int(pair, 1);
         // forEach callback: (value, name, formData)
         Item cb_args[3] = {val_val, name_val, this_fd};
-        JS_ASSIGN_OR_RETURN(callback_result, js_call_function(callback, this_arg, cb_args, 3));
+        JS_ASSIGN_OR_RETURN(callback_result, dom_realm_call(callback, this_arg, cb_args, 3));
     }
     return make_js_undefined();
 }
@@ -413,7 +414,7 @@ static Item js_fd_forEach(Item callback, Item this_arg) {
 #define FD_ITER_MODE_VALUES  2
 
 static Item js_fd_iter_next() {
-    Item iter = js_get_this();
+    Item iter = dom_realm_receiver();
     Item entries  = prop_get(iter, "_i_entries");
     Item idx_item = prop_get(iter, "_i_idx");
     Item mode_item= prop_get(iter, "_i_mode");
@@ -455,22 +456,22 @@ static Item js_fd_iter_next() {
 }
 
 // Symbol.iterator on the iterator itself: returns `this`
-JS_FORWARD_STATIC_ITEM(js_fd_iter_self, (), js_get_this, ())
+JS_FORWARD_STATIC_ITEM(js_fd_iter_self, (), dom_realm_receiver, ())
 
 static Item fd_make_iterator(Item entries, int mode) {
     Item iter = js_new_object();
     prop_set(iter, "_i_entries", entries);
     prop_set(iter, "_i_idx",     make_int_item(0));
     prop_set(iter, "_i_mode",    make_int_item(mode));
-    prop_set(iter, "next",       js_new_native_function(js_fd_iter_next));
+    prop_set(iter, "next",       dom_realm_new_function(js_fd_iter_next));
     // Symbol.iterator on the iterator → returns self (so it's iterable)
-    js_set_key_default(iter, make_sym_iterator_key(), js_new_native_function(js_fd_iter_self));
+    dom_realm_set(iter, make_sym_iterator_key(), dom_realm_new_function(js_fd_iter_self));
     return iter;
 }
 
 #define JS_FD_ITERATOR_WRAPPER(name, mode) \
 static Item name() { \
-    return fd_make_iterator(fd_get_entries(js_get_this()), mode); \
+    return fd_make_iterator(fd_get_entries(dom_realm_receiver()), mode); \
 }
 JS_FD_ITERATOR_WRAPPER(js_fd_entries, FD_ITER_MODE_ENTRIES)
 JS_FD_ITERATOR_WRAPPER(js_fd_keys, FD_ITER_MODE_KEYS)
@@ -761,18 +762,18 @@ static void fd_collect_form_controls(Item entries, DomElement* form) {
 // ============================================================================
 
 static void fd_install_methods(Item fd_obj) {
-    prop_set(fd_obj, "append",  js_new_native_function(js_fd_append));
-    prop_set(fd_obj, "delete",  js_new_native_function(js_fd_delete));
-    prop_set(fd_obj, "get",     js_new_native_function(js_fd_get));
-    prop_set(fd_obj, "getAll",  js_new_native_function(js_fd_getAll));
-    prop_set(fd_obj, "has",     js_new_native_function(js_fd_has));
-    prop_set(fd_obj, "set",     js_new_native_function(js_fd_set));
-    prop_set(fd_obj, "entries", js_new_native_function(js_fd_entries));
-    prop_set(fd_obj, "keys",    js_new_native_function(js_fd_keys));
-    prop_set(fd_obj, "values",  js_new_native_function(js_fd_values));
-    prop_set(fd_obj, "forEach", js_new_native_function(js_fd_forEach));
+    prop_set(fd_obj, "append",  dom_realm_new_function(js_fd_append));
+    prop_set(fd_obj, "delete",  dom_realm_new_function(js_fd_delete));
+    prop_set(fd_obj, "get",     dom_realm_new_function(js_fd_get));
+    prop_set(fd_obj, "getAll",  dom_realm_new_function(js_fd_getAll));
+    prop_set(fd_obj, "has",     dom_realm_new_function(js_fd_has));
+    prop_set(fd_obj, "set",     dom_realm_new_function(js_fd_set));
+    prop_set(fd_obj, "entries", dom_realm_new_function(js_fd_entries));
+    prop_set(fd_obj, "keys",    dom_realm_new_function(js_fd_keys));
+    prop_set(fd_obj, "values",  dom_realm_new_function(js_fd_values));
+    prop_set(fd_obj, "forEach", dom_realm_new_function(js_fd_forEach));
     // Symbol.iterator → same as entries()
-    js_set_key_default(fd_obj, make_sym_iterator_key(), js_new_native_function(js_fd_entries));
+    dom_realm_set(fd_obj, make_sym_iterator_key(), dom_realm_new_function(js_fd_entries));
 }
 
 // Current epoch milliseconds.
@@ -791,7 +792,7 @@ static Item fd_blob_to_file(Item value, Item filename_item) {
     bool has_filename = (get_type_id(filename_item) != LMD_TYPE_UNDEFINED);
     bool is_file = (js_class_id(value) == JS_CLASS_FILE);
 
-    Item file = js_new_object_with_class(JS_CLASS_FILE);
+    Item file = dom_realm_new_object_of_class(JS_CLASS_FILE);
 
     Item sz = prop_get(value, "size");
     prop_set(file, "size", get_type_id(sz) == LMD_TYPE_INT ? sz : make_int_item(0));
@@ -814,19 +815,19 @@ static Item fd_blob_to_file(Item value, Item filename_item) {
     else lm = now_epoch_ms();
     prop_set(file, "lastModified", make_int_item(lm));
 
-    Item ctor = prop_get(js_get_global_this(), "File");
+    Item ctor = prop_get(dom_realm_global(), "File");
     if (get_type_id(ctor) != LMD_TYPE_UNDEFINED) prop_set(file, "constructor", ctor);
     return file;
 }
 
 // Create a File stub for an empty file input.
 static Item fd_make_file_stub() {
-    Item obj = js_new_object_with_class(JS_CLASS_FILE);
+    Item obj = dom_realm_new_object_of_class(JS_CLASS_FILE);
     prop_set(obj, "size",           make_int_item(0));
     prop_set(obj, "name",           make_str(""));
     prop_set(obj, "type",           make_str("application/octet-stream"));
     prop_set(obj, "lastModified",   make_int_item(now_epoch_ms()));
-    Item ctor = prop_get(js_get_global_this(), "File");
+    Item ctor = prop_get(dom_realm_global(), "File");
     if (get_type_id(ctor) != LMD_TYPE_UNDEFINED) prop_set(obj, "constructor", ctor);
     return obj;
 }
@@ -891,12 +892,12 @@ static Item js_formdata_construct(Item first, Item submitter) {
         }
 
         if (!is_form_elem) {
-            return js_throw_type_error("FormData argument must be an HTMLFormElement");
+            return dom_realm_throw_type_error("FormData argument must be an HTMLFormElement");
         }
     }
 
     // Create the FormData object
-    Item fd_obj = js_new_object_with_class(JS_CLASS_FORM_DATA);
+    Item fd_obj = dom_realm_new_object_of_class(JS_CLASS_FORM_DATA);
     Item entries = js_array_new(0);
     prop_set(fd_obj, FD_ENTRIES_KEY, entries);
     fd_install_methods(fd_obj);
@@ -943,7 +944,7 @@ extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitte
 // ============================================================================
 
 extern "C" void js_formdata_install_globals(void) {
-    Item global = js_get_global_this();
+    Item global = dom_realm_global();
     // D6.2.2v2: global constructor bindings carry [[Construct]] themselves;
     // no compiler name interception remains to supply it.
     Item ctor_fn = js_new_native_constructor(js_formdata_construct);

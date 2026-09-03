@@ -544,6 +544,50 @@ existed for one boundary with only one of them visible in the core's headers,
 and `lambda-boundary-rt` is built with `-Wl,-undefined,dynamic_lookup`, so the
 check that would have caught it is configured to allow it.
 
+#### ES47 implementation — `lambda/dom/realm/` (2026-09-03)
+
+The script-realm API is `lambda/dom/realm/dom_realm.h`: **34 operations, 785 call
+sites migrated**, and the invariant that `lambda/dom/realm/` is the only place
+under `lambda/dom/` that may name them. A grep for the 34 across `lambda/dom/*.cpp`
+returns zero.
+
+Finding the right 34 took three passes and each narrowed the answer. "Calls
+`radiant_*`" gave 49, but most wrapped *radiant* objects. "Traffics in `Item`"
+gave 31, but caught engine functions that merely pass one. The criterion that
+worked is the user's: **reads or writes a script object, or calls a script
+function.** By it the answer is not in `radiant_*` at all — it is in the `js_*`
+symbols that sat beside the sanctioned value helpers, indistinguishable at a
+glance.
+
+The dominant group is the surprise: **486 of the 785 are the property protocol.**
+`js_set_key_cstr` is not a map-slot write — it reaches `js_set_key_default` and
+then OrdinarySet, so prototypes, accessors and proxies are all in play. The DOM
+core builds its result objects by running ECMAScript's property protocol. The
+values that come out are realm-neutral, so ES12 is not violated, but the
+*mechanism* is JavaScript's, and that is the largest single thing between
+`lambda/dom/` and realm-neutrality in fact rather than aspiration.
+
+Second is `js_get_this`, 66 calls: the core reading the JS call frame. It is the
+hardest to abstract because there is nothing to translate it to — a Lambda caller
+has no receiver — so each one is a place the core assumes it was entered from a
+script method. The API names it `dom_realm_receiver` and says so at the
+declaration rather than hiding it.
+
+Deliberately **not** in the API: the shared value model (703 calls over
+`js_new_object`, `js_array_new`, `js_name_item`, `js_make_string`) which ES12
+sanctions as one runtime both realms read, and four DOM-specific constructors
+that happen to live in `lambda/js/`.
+
+Two implementation notes. The native-function factories are C++ overload sets
+generated per arity, so the API declares structurally identical
+`DomRealmFn0..8` typedefs and its own arity macro; a typedef is an alias, not a
+distinct type, so overload resolution still lands on the runtime's family and the
+public header does not pull in `js_runtime.h`. And the build needed the new
+directory in **two** places — `lambda-rt`'s `source_patterns` *and* the top-level
+`source_dirs`, because the monolithic `lambda` target compiles its own copy of
+the sources; adding only the first produced a link failure whose compile error
+the build wrapper had swallowed.
+
 ## 7. Layering: JS → Lambda → native — calls, the stack, and the heap
 
 This section records three things the user asked to be explicit (2026-09-02): that the derived tier is **hybrid**, how **JS calls a Lambda body**, and whether the **runtime heap** survives a call stack with JS, Lambda and native frames interleaved. Everything in §7.2–§7.4 is verified against the tree, not inferred.

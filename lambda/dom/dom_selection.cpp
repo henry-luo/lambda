@@ -7,7 +7,7 @@
  *
  * Per-Range / per-Selection state is stored in flat pools indexed by a
  * hidden "__range_id" / "__sel_id" property on the JS object. Methods
- * recover the receiver via js_get_this() and look up native state.
+ * recover the receiver via dom_realm_receiver() and look up native state.
  *
  * The selection / live-range list lives on the document's StateStore-backed
  * DocState projection. In headless JS mode that may be NULL on entry, so
@@ -15,6 +15,7 @@
  */
 
 #include "dom_selection.h"
+#include "realm/dom_realm.h"
 #include "dom_engine.h"
 #include "dom.h"
 #include "dom_events.h"
@@ -44,7 +45,6 @@
 extern __thread EvalContext* context;
 extern "C" void* dom_current_active_text_control(void);
 extern "C" bool dom_doc_has_browsing_context(void* doc);
-extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 
 
 // ============================================================================
@@ -107,7 +107,7 @@ static bool item_to_bool(Item v) {
 static Item throw_dom_exception(const char* name, const char* msg) {
     Item n = make_str(name ? name : "Error");
     Item m = make_str(msg ? msg : "");
-    return js_throw_value(js_new_error_with_name(n, m));
+    return dom_realm_throw(dom_realm_new_error_named(n, m));
 }
 
 // Translate dom_range exception strings (e.g. "InvalidNodeTypeError",
@@ -1121,7 +1121,7 @@ JS_FORWARD_RETURN(void*, dom_unwrap_selection, (Item item), selection_from, (ite
 
 // Trampoline so we can register getSelection as a global function with arity 0.
 extern "C" Item dom_global_get_selection(void) {
-    Item self = js_get_this();
+    Item self = dom_realm_receiver();
     void* foreign = dom_get_foreign_doc(self);
     if (foreign && dom_doc_has_browsing_context(foreign)) {
         void* prev = dom_swap_active_document(foreign);
@@ -1144,7 +1144,7 @@ static Item js_bound_document_get_selection(Item env_item) {
 
 extern "C" Item dom_get_selection_function_for_document(void* doc) {
     Item* env = js_alloc_env(1);
-    if (!env) return js_new_native_function(dom_global_get_selection);
+    if (!env) return dom_realm_new_function(dom_global_get_selection);
     env[0] = (Item){.item = (uint64_t)(uintptr_t)doc};
     return js_new_native_closure(js_bound_document_get_selection, 0, env, 1);
 }

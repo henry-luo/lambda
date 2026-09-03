@@ -16,6 +16,7 @@
  */
 
 #include "../lambda-data.hpp"
+#include "realm/dom_realm.h"
 #include "../runtime/lambda-root-frame.hpp"
 #include "dom.h"
 #include "dom_ops.h"
@@ -403,7 +404,7 @@ extern "C" Item dom_core_set_event_handler(Item n, Item name, Item handler) {
 // keep in step (`create_event` remains what it has always been: JS's legacy
 // document.createEvent, which returns a JS object and so needs the realm).
 // Read a field of an event value. The event is an ordinary Lambda map, so this
-// reads it as one: js_get_key_cstr builds its key through the JS realm's
+// reads it as one: dom_realm_get_cstr builds its key through the JS realm's
 // allocator and faults on a realm-less document, which is the whole reason the
 // map spelling exists.
 static Item dom_map_field(Item map_item, const char* key) {
@@ -493,8 +494,8 @@ extern "C" Item dom_core_scroll_state(Item n) {
             .final();
     }
     Item out = js_new_object();
-    js_set_key_cstr(out, "x", dom_prop_get(n, "scrollLeft"));
-    js_set_key_cstr(out, "y", dom_prop_get(n, "scrollTop"));
+    dom_realm_set_cstr(out, "x", dom_prop_get(n, "scrollLeft"));
+    dom_realm_set_cstr(out, "y", dom_prop_get(n, "scrollTop"));
     return out;
 }
 extern "C" Item dom_core_set_scroll_state(Item n, Item x, Item y) {
@@ -523,18 +524,18 @@ extern "C" Item js_selection_get_focus_offset(Item self_v);
 
 extern "C" Item dom_core_range_boundaries(Item r) {
     Item out = js_new_object();
-    js_set_key_cstr(out, "start_container", js_range_get_start_container(r));
-    js_set_key_cstr(out, "start_offset", js_range_get_start_offset(r));
-    js_set_key_cstr(out, "end_container", js_range_get_end_container(r));
-    js_set_key_cstr(out, "end_offset", js_range_get_end_offset(r));
+    dom_realm_set_cstr(out, "start_container", js_range_get_start_container(r));
+    dom_realm_set_cstr(out, "start_offset", js_range_get_start_offset(r));
+    dom_realm_set_cstr(out, "end_container", js_range_get_end_container(r));
+    dom_realm_set_cstr(out, "end_offset", js_range_get_end_offset(r));
     return out;
 }
 extern "C" Item dom_core_selection_boundaries(Item s) {
     Item out = js_new_object();
-    js_set_key_cstr(out, "anchor_node", js_selection_get_anchor_node(s));
-    js_set_key_cstr(out, "anchor_offset", js_selection_get_anchor_offset(s));
-    js_set_key_cstr(out, "focus_node", js_selection_get_focus_node(s));
-    js_set_key_cstr(out, "focus_offset", js_selection_get_focus_offset(s));
+    dom_realm_set_cstr(out, "anchor_node", js_selection_get_anchor_node(s));
+    dom_realm_set_cstr(out, "anchor_offset", js_selection_get_anchor_offset(s));
+    dom_realm_set_cstr(out, "focus_node", js_selection_get_focus_node(s));
+    dom_realm_set_cstr(out, "focus_offset", js_selection_get_focus_offset(s));
     return out;
 }
 

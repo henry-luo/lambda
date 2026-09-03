@@ -9,6 +9,7 @@
  */
 
 #include "dom_events.h"
+#include "realm/dom_realm.h"
 #include "dom_engine.h"
 #include "dom.h"
 #include "dom_selection.h"
@@ -160,7 +161,7 @@ static void event_apply_new_target_prototype(Item event) {
     Item new_target = js_get_new_target();
     TypeId nt_type = get_type_id(new_target);
     if (nt_type == LMD_TYPE_MAP || nt_type == LMD_TYPE_FUNC) {
-        Item proto = js_get_key_cstr(new_target, "prototype");
+        Item proto = dom_realm_get_cstr(new_target, "prototype");
         TypeId proto_type = get_type_id(proto);
         if (proto_type == LMD_TYPE_MAP || proto_type == LMD_TYPE_FUNC ||
             proto_type == LMD_TYPE_ARRAY || proto_type == LMD_TYPE_ELEMENT) {
@@ -182,7 +183,7 @@ static double event_now_ms() {
 static Item event_exception_message(Item err) {
     Item msg = err;
     if (get_type_id(err) == LMD_TYPE_MAP || get_type_id(err) == LMD_TYPE_OBJECT) {
-        Item m = js_get_name_key(err, "message");
+        Item m = dom_realm_get_name(err, "message");
         if (get_type_id(m) == LMD_TYPE_STRING) msg = m;
         else msg = js_to_string(err);
     } else if (get_type_id(err) != LMD_TYPE_STRING) {
@@ -214,13 +215,13 @@ static void log_event_exception_detail(const char* source, const char* type, Ite
 // `window.onerror` (HTML spec: report exception). Best-effort: if
 // onerror is not a function, just swallow.
 static void report_exception_to_window_onerror(Item err, const char* type) {
-    Item global = js_get_global_this();
+    Item global = dom_realm_global();
     if (global.item == 0) return;
-    Item onerr = js_get_name_key(global, "onerror");
-    if (!js_is_callable(onerr)) return;
+    Item onerr = dom_realm_get_name(global, "onerror");
+    if (!dom_realm_is_callable(onerr)) return;
     Item msg = event_exception_message(err);
     Item args[5] = { msg, ItemNull, (Item){.item = b2it(false)}, (Item){.item = b2it(false)}, err };
-    Item onerror_result = js_call_function(onerr, global, args, 5);
+    Item onerror_result = dom_realm_call(onerr, global, args, 5);
     if (item_is_error(onerror_result)) (void)js_error_lane_payload(onerror_result);
     (void)type;
 }
@@ -273,7 +274,7 @@ extern "C" bool dom_is_reset_button(void* elem_ptr) {
 static Item dom_throw_named_error(const char* name, const char* message) {
     Item error_name = js_name_item(name ? name : "Error");
     Item error_message = js_name_item(message ? message : "");
-    return js_throw_value(js_new_error_with_name(error_name, error_message));
+    return dom_realm_throw(dom_realm_new_error_named(error_name, error_message));
 }
 
 static Item dom_resolve_request_submitter(DomElement* form,
@@ -291,7 +292,7 @@ static Item dom_resolve_request_submitter(DomElement* form,
     DomNode* node = (DomNode*)dom_unwrap_element(submitter_item);
     DomElement* submitter = (node && node->is_element()) ? node->as_element() : nullptr;
     if (!dom_is_submit_button(submitter)) {
-        return js_throw_type_error("requestSubmit submitter must be a submit button");
+        return dom_realm_throw_type_error("requestSubmit submitter must be a submit button");
     }
 
     DomElement* owner = dom_find_form_owner(submitter);
@@ -342,8 +343,8 @@ extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter_it
 
     RootFrame roots(1);
     Rooted<Item> submit_event_root(roots, js_create_event("submit", true, true));
-    js_set_key_cstr(submit_event_root.get(), "isTrusted", (Item){.item = ITEM_TRUE});
-    js_set_key_cstr(submit_event_root.get(), "submitter", submitter ? dom_wrap_element(submitter) : ItemNull);
+    dom_realm_set_cstr(submit_event_root.get(), "isTrusted", (Item){.item = ITEM_TRUE});
+    dom_realm_set_cstr(submit_event_root.get(), "submitter", submitter ? dom_wrap_element(submitter) : ItemNull);
     Item submit_ok = dom_dispatch_event(form_item, submit_event_root.get());
     if (submit_ok.item == ITEM_FALSE) return make_js_undefined();
 
@@ -485,7 +486,7 @@ static void* get_event_target_key(Item target) {
     // If target IS the global (window) object, key on the window sentinel so
     // that addEventListener on window and dispatch through the path agree.
     {
-        Item global = js_get_global_this();
+        Item global = dom_realm_global();
         if (target.item != 0 && target.item == global.item) {
             return (void*)&_window_sentinel;
         }
@@ -693,7 +694,7 @@ static EventListener* nl_find_idl_listener(NodeListeners* nl, const char* type) 
 }
 
 static bool event_handler_target_supported(Item target) {
-    Item global = js_get_global_this();
+    Item global = dom_realm_global();
     if (target.item != 0 && target.item == global.item) return true;
     if (dom_event_is_document_target(target)) return true;
     if (dom_unwrap_element(target)) return true;
@@ -726,7 +727,7 @@ static void event_handler_property_set_for_key(void* key, Item target,
     if (!listeners) return;
 
     EventListener* handler = nl_find_idl_listener(listeners, stack_type);
-    if (!js_is_callable(value)) {
+    if (!dom_realm_is_callable(value)) {
         if (handler) tombstone_listener(handler);
         return;
     }
@@ -813,10 +814,10 @@ static Item parse_listener_options(Item opts, bool* capture, bool* once,
         Item passive_key = js_name_item("passive");
         Item signal_key = js_name_item("signal");
 
-        Item cap_val = js_get_key_default(opts, cap_key);
-        Item once_val = js_get_key_default(opts, once_key);
-        Item passive_val = js_get_key_default(opts, passive_key);
-        Item signal_val = js_get_key_default(opts, signal_key);
+        Item cap_val = dom_realm_get(opts, cap_key);
+        Item once_val = dom_realm_get(opts, once_key);
+        Item passive_val = dom_realm_get(opts, passive_key);
+        Item signal_val = dom_realm_get(opts, signal_key);
 
         if (cap_val.item != 0 && get_type_id(cap_val) != LMD_TYPE_UNDEFINED)
             *capture = js_is_truthy(cap_val);
@@ -834,7 +835,7 @@ static Item parse_listener_options(Item opts, bool* capture, bool* once,
                 Item m = js_name_item(
                     "Failed to execute 'addEventListener' on 'EventTarget': "
                     "member signal is not of type 'AbortSignal'.");
-                return js_throw_value(js_new_error_with_name(n, m));
+                return dom_realm_throw(dom_realm_new_error_named(n, m));
             }
             if (st == LMD_TYPE_MAP || st == LMD_TYPE_OBJECT) {
                 *signal_out = signal_val;
@@ -849,7 +850,7 @@ static bool signal_is_aborted(Item signal_item) {
     if (signal_item.item == 0) return false;
     TypeId t = get_type_id(signal_item);
     if (t != LMD_TYPE_MAP && t != LMD_TYPE_OBJECT) return false;
-    Item ab = js_get_key_cstr(signal_item, "aborted");
+    Item ab = dom_realm_get_cstr(signal_item, "aborted");
     return js_is_truthy(ab);
 }
 
@@ -996,7 +997,7 @@ void dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
     if (opts_item.item != 0) {
         TypeId opt_tid = get_type_id(opts_item);
         if (opt_tid == LMD_TYPE_MAP || opt_tid == LMD_TYPE_OBJECT) {
-            Item cap_val = js_get_name_key(opts_item, "capture");
+            Item cap_val = dom_realm_get_name(opts_item, "capture");
             if (cap_val.item != 0 && get_type_id(cap_val) != LMD_TYPE_UNDEFINED)
                 capture = js_is_truthy(cap_val);
         } else {
@@ -1047,7 +1048,7 @@ static void nl_compact(NodeListeners* nl) {
 // representation varies, so keeping conversion outside this helper avoids
 // five copies of the same property write and its allocation ordering.
 static void event_set_value(Item event, const char* key, Item value) {
-    js_set_name_key(event, key, value);
+    dom_realm_set_name(event, key, value);
 }
 
 #define EVENT_SET_VALUE(name, type, expression) \
@@ -1069,7 +1070,7 @@ static void event_mark_non_writable(Item event, const char* key) {
 // Get the current event flag values from per-event slots stored on the event
 // object itself (so nested dispatches don't trample each other).
 static bool event_flag_get(Item event, const char* key) {
-    Item v = js_get_key_default(event, js_name_item(key));
+    Item v = dom_realm_get(event, js_name_item(key));
     return js_is_truthy(v);
 }
 
@@ -1089,9 +1090,9 @@ extern "C" Item js_event_init_event(Item type_arg, Item b_arg, Item c_arg) {
         Item m = js_name_item(
             "Failed to execute 'initEvent' on 'Event': "
             "1 argument required, but only 0 present.");
-        return js_throw_value(js_new_error_with_name(n, m));
+        return dom_realm_throw(dom_realm_new_error_named(n, m));
     }
-    Item ev = js_get_this();
+    Item ev = dom_realm_receiver();
     if (!js_event_is_object(ev)) return make_js_undefined();
     Item args[] = {type_arg, b_arg, c_arg};
     Item result = ItemNull;
@@ -1102,7 +1103,7 @@ extern "C" Item js_event_init_event(Item type_arg, Item b_arg, Item c_arg) {
 // initCustomEvent(type, bubbles, cancelable, detail) — legacy.
 extern "C" Item js_event_init_custom_event(Item type_arg, Item b_arg, Item c_arg, Item detail_arg) {
     js_event_init_event(type_arg, b_arg, c_arg);
-    Item ev = js_get_this();
+    Item ev = dom_realm_receiver();
     if (js_event_is_object(ev)) {
         // Per spec, omitted detail defaults to null (not undefined).
         TypeId dt = get_type_id(detail_arg);
@@ -1118,7 +1119,7 @@ extern "C" Item js_event_init_text_event(Item type_arg, Item b_arg,
         Item c_arg, Item view_arg, Item data_arg, Item input_method_arg,
         Item locale_arg) {
     js_event_init_event(type_arg, b_arg, c_arg);
-    Item ev = js_get_this();
+    Item ev = dom_realm_receiver();
     if (!js_event_is_object(ev)) return make_js_undefined();
     if (event_flag_get(ev, "__dispatch_flag")) return make_js_undefined();
 
@@ -1161,7 +1162,7 @@ static Item js_create_event_init_with_class(const char* type, bool bubbles,
     // intrinsic class prototype now, so Lambda-only dispatch never causes the
     // bridge to lazily construct JS intrinsics without a JS Input.
     radiant_dom_event_set_prototype_override(event,
-        js_get_intrinsic_prototype_for_class((int)class_id));
+        dom_realm_intrinsic_prototype((int)class_id));
 
     event_set_int(event, "eventPhase", 0);  // NONE initially
     event_set_double(event, "timeStamp", event_now_ms());
@@ -1171,8 +1172,8 @@ static Item js_create_event_init_with_class(const char* type, bool bubbles,
     event_set_item(event, "srcElement", ItemNull);
     event_set_item(event, "currentTarget", ItemNull);
 
-    js_set_key_default(event, make_string_item("initEvent"),
-                       js_new_native_function(js_event_init_event));
+    dom_realm_set(event, make_string_item("initEvent"),
+                       dom_realm_new_function(js_event_init_event));
 
     // F17 projects legacy aliases directly from the native record. Per-wrapper
     // accessors would recreate a second cancellation state.
@@ -1200,8 +1201,8 @@ Item js_create_text_event_init(const char* type, bool bubbles, bool cancelable,
     event_set_int(event_root.get(), "inputMethod", 0);
     event_set_str(event_root.get(), "locale", "");
     Item ite_key = js_name_item("initTextEvent");
-    js_set_key_default(event_root.get(), ite_key,
-        js_new_native_function(js_event_init_text_event));
+    dom_realm_set(event_root.get(), ite_key,
+        dom_realm_new_function(js_event_init_text_event));
     return event_root.get();
 }
 
@@ -1213,8 +1214,8 @@ Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable
         cancelable, composed, JS_CLASS_CUSTOM_EVENT));
     event_set_item(event_root.get(), "detail", detail_root.get());
     Item ice_key = js_name_item("initCustomEvent");
-    js_set_key_default(event_root.get(), ice_key,
-        js_new_native_function(js_event_init_custom_event));
+    dom_realm_set(event_root.get(), ice_key,
+        dom_realm_new_function(js_event_init_custom_event));
     return event_root.get();
 }
 
@@ -1224,29 +1225,29 @@ Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable
 // ============================================================================
 
 extern "C" Item js_eventtarget_add_listener(Item type, Item callback, Item opts) {
-    Item self = js_get_this();
+    Item self = dom_realm_receiver();
     dom_add_event_listener(self, type, callback, opts);
     return make_js_undefined();
 }
 
 extern "C" Item js_eventtarget_remove_listener(Item type, Item callback, Item opts) {
-    Item self = js_get_this();
+    Item self = dom_realm_receiver();
     dom_remove_event_listener(self, type, callback, opts);
     return make_js_undefined();
 }
 
 extern "C" Item js_eventtarget_dispatch(Item event_item) {
-    Item self = js_get_this();
+    Item self = dom_realm_receiver();
     return dom_dispatch_event(self, event_item);
 }
 
 Item js_create_event_target(void) {
-    Item et = js_new_object_with_class(JS_CLASS_EVENT_TARGET);
+    Item et = dom_realm_new_object_of_class(JS_CLASS_EVENT_TARGET);
 #define JS_EVENT_TARGET_METHODS(M) \
     M("addEventListener", js_eventtarget_add_listener) \
     M("removeEventListener", js_eventtarget_remove_listener) M("dispatchEvent", js_eventtarget_dispatch)
 #define JS_EVENT_TARGET_INSTALL_METHOD(name, target) \
-    js_set_key_default(et, make_string_item(name), js_new_native_function(target));
+    dom_realm_set(et, make_string_item(name), dom_realm_new_function(target));
     JS_EVENT_TARGET_METHODS(JS_EVENT_TARGET_INSTALL_METHOD)
 #undef JS_EVENT_TARGET_INSTALL_METHOD
 #undef JS_EVENT_TARGET_METHODS
@@ -1264,7 +1265,7 @@ static Item read_init(Item init, const char* key) {
     if (init.item == 0) return ItemNull;
     TypeId t = get_type_id(init);
     if (t != LMD_TYPE_MAP && t != LMD_TYPE_OBJECT && t != LMD_TYPE_VMAP) return ItemNull;
-    return js_get_name_key(init, key);
+    return dom_realm_get_name(init, key);
 }
 
 static bool init_present(Item v) {
@@ -1342,7 +1343,7 @@ static void stamp_modifiers(Item ev, Item init) {
 }
 
 extern "C" Item js_event_get_modifier_state(Item key_arg) {
-    Item ev = js_get_this();
+    Item ev = dom_realm_receiver();
     if (!js_event_is_object(ev)) return (Item){.item = ITEM_FALSE};
     const char* key = fn_to_cstr(key_arg);
     if (!key) return (Item){.item = ITEM_FALSE};
@@ -1352,7 +1353,7 @@ extern "C" Item js_event_get_modifier_state(Item key_arg) {
     else if (strcmp(key, "Shift") == 0)   snprintf(buf, sizeof(buf), "shiftKey");
     else if (strcmp(key, "Meta") == 0)    snprintf(buf, sizeof(buf), "metaKey");
     else snprintf(buf, sizeof(buf), "modifier%s", key);
-    Item v = js_get_name_key(ev, buf);
+    Item v = dom_realm_get_name(ev, buf);
     return (Item){.item = (js_is_truthy(v)) ? ITEM_TRUE : ITEM_FALSE};
 }
 
@@ -1374,7 +1375,7 @@ static Item build_ui_event(const char* type, Item init, const char* class_name) 
             Item n = js_name_item("TypeError");
             Item m = js_name_item(
                 "Failed to construct event: view member is not of type Window.");
-            return js_throw_value(js_new_error_with_name(n, m));
+            return dom_realm_throw(dom_realm_new_error_named(n, m));
         }
         event_set_item(ev, "view", view);
     } else {
@@ -1415,7 +1416,7 @@ static Item js_ctor_mouse_event_with_class(Item type_arg, Item init_arg,
     event_set_int(ev, "button",  init_int(init_arg, "button", 0));
     event_set_int(ev, "buttons", init_int(init_arg, "buttons", 0));
     event_set_item(ev, "relatedTarget", init_item(init_arg, "relatedTarget"));
-    js_set_name_key(ev, "getModifierState", js_new_native_function(js_event_get_modifier_state));
+    dom_realm_set_name(ev, "getModifierState", dom_realm_new_function(js_event_get_modifier_state));
     return ev;
 }
 
@@ -1453,7 +1454,7 @@ extern "C" Item js_ctor_keyboard_event_fn(Item type_arg, Item init_arg) {
     event_set_int(ev, "DOM_KEY_LOCATION_LEFT", 1);
     event_set_int(ev, "DOM_KEY_LOCATION_RIGHT", 2);
     event_set_int(ev, "DOM_KEY_LOCATION_NUMPAD", 3);
-    js_set_name_key(ev, "getModifierState", js_new_native_function(js_event_get_modifier_state));
+    dom_realm_set_name(ev, "getModifierState", dom_realm_new_function(js_event_get_modifier_state));
     return ev;
 }
 
@@ -1490,7 +1491,7 @@ extern "C" Item js_create_native_composition_event(const char* type,
 extern "C" Item js_ctor_static_range_fn(Item init) {
     // StaticRange has a branded immutable snapshot lane; leaving it as a plain
     // map makes InputEvent treat script-created boundaries as live DOM nodes.
-    Item obj = js_new_object_with_class(JS_CLASS_STATIC_RANGE);
+    Item obj = dom_realm_new_object_of_class(JS_CLASS_STATIC_RANGE);
     Item start_container = init_item(init, "startContainer");
     Item end_container = init_item(init, "endContainer");
     int start_offset = init_int(init, "startOffset", 0);
@@ -1775,9 +1776,9 @@ extern "C" Item js_create_native_focus_event(const char* type, Item related_targ
 // events may also stash already-snapshotted StaticRange-shaped maps.
 static Item js_input_event_get_target_ranges(Item* args, int argc) {
     (void)args; (void)argc;
-    Item ev = js_get_this();
+    Item ev = dom_realm_receiver();
     if (!js_event_is_object(ev)) return js_array_new(0);
-    Item stashed = js_get_name_key(ev, "__target_ranges");
+    Item stashed = dom_realm_get_name(ev, "__target_ranges");
     Item ranges = js_array_new(0);
     if (get_type_id(stashed) != LMD_TYPE_ARRAY) return ranges;
 
@@ -1803,9 +1804,9 @@ static void js_input_event_install_target_ranges(Item ev, Item target_ranges) {
     if (get_type_id(ranges) != LMD_TYPE_ARRAY) {
         ranges = js_array_new(0);
     }
-    js_set_name_key(ev, "__target_ranges", ranges);
+    dom_realm_set_name(ev, "__target_ranges", ranges);
     Item gtr_key = js_name_item("getTargetRanges");
-    js_set_key_default(ev, gtr_key,
+    dom_realm_set(ev, gtr_key,
         js_new_native_span_function(js_input_event_get_target_ranges));
 }
 
@@ -1862,16 +1863,16 @@ extern "C" Item js_create_native_wheel_event(const char* type,
 // can restore it after invoking the handler).
 // ============================================================================
 extern "C" Item js_set_window_event_for_legacy(Item event) {
-    Item global = js_get_global_this();
+    Item global = dom_realm_global();
     Item event_key = js_name_item("event");
-    Item prev = js_get_key_default(global, event_key);
-    js_set_key_default(global, event_key, event);
+    Item prev = dom_realm_get(global, event_key);
+    dom_realm_set(global, event_key, event);
     return prev;
 }
 
 extern "C" void js_restore_window_event_for_legacy(Item prev) {
-    Item global = js_get_global_this();
-    js_set_name_key(global, "event", prev);
+    Item global = dom_realm_global();
+    dom_realm_set_name(global, "event", prev);
 }
 
 // ============================================================================
@@ -1926,7 +1927,7 @@ static int build_path(Item target, void** path, bool* path_is_dom, int max_path)
 static Item wrap_path_key(void* key, bool key_is_dom) {
     if (key == (void*)&_window_sentinel) {
         // window currentTarget is globalThis (the window object).
-        return js_get_global_this();
+        return dom_realm_global();
     }
     if (key == (void*)&_document_sentinel) {
         return js_get_document_object_value();
@@ -1955,7 +1956,7 @@ static void set_event_dispatch_position(void* key, bool key_is_dom, Item event,
     int visible_phase = reported_phase ? reported_phase : phase;
     Item current_target = wrap_path_key(key, key_is_dom);
     event_set_int(event, "eventPhase", visible_phase);
-    js_set_name_key(event, "currentTarget", current_target);
+    dom_realm_set_name(event, "currentTarget", current_target);
     radiant_dom_event_set_lambda_dispatch_position(event, current_target, visible_phase);
 }
 
@@ -2012,10 +2013,10 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         // listeners disappear from the same dispatch.
         Item callback = event_listener_root_item(live->callback_root);
         Item this_for_call = wrap_path_key(key, key_is_dom);
-        if (!live->is_idl_handler && !js_is_callable(callback)) {
+        if (!live->is_idl_handler && !dom_realm_is_callable(callback)) {
             // EventListener WebIDL: if value is an object, call handleEvent on it
-            Item he = js_get_name_key(callback, "handleEvent");
-            if (!js_is_callable(he)) continue;
+            Item he = dom_realm_get_name(callback, "handleEvent");
+            if (!dom_realm_is_callable(he)) continue;
             // per spec, `this` is the EventListener object itself
             this_for_call = callback;
             callback = he;
@@ -2036,7 +2037,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         Item args[1] = { event_root.get() };
         // Callback allocation can collect the unhandled error lane before the
         // native dispatcher reports it, so retain its return in this frame.
-        result_root.set(js_call_function_into(callback_root.get(), this_root.get(),
+        result_root.set(dom_realm_call_into(callback_root.get(), this_root.get(),
             args, 1, result_root.home()));
         if (item_is_error(result_root.get())) {
             err_root.set(js_error_lane_payload(result_root.get()));
@@ -2073,10 +2074,10 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
         Item m = js_name_item(
             "Failed to execute 'dispatchEvent' on 'EventTarget': "
             "parameter 1 is not of type 'Event'.");
-        return js_throw_value(js_new_error_with_name(n, m));
+        return dom_realm_throw(dom_realm_new_error_named(n, m));
     }
     // get event type
-    Item type_val = js_get_name_key(event_item, "type");
+    Item type_val = dom_realm_get_name(event_item, "type");
     const char* type = fn_to_cstr(type_val);
     if (!type) {
         log_error("dom_dispatch_event: event has no type");
@@ -2095,7 +2096,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     }
 
     // get bubbles flag
-    Item bubbles_val = js_get_name_key(event_item, "bubbles");
+    Item bubbles_val = dom_realm_get_name(event_item, "bubbles");
     bool bubbles = js_is_truthy(bubbles_val);
 
     // Spec: throw InvalidStateError DOMException if event is already being dispatched.
@@ -2104,12 +2105,12 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
         Item m = js_name_item(
             "Failed to execute 'dispatchEvent' on 'EventTarget': "
             "The event is already being dispatched.");
-        return js_throw_value(js_new_error_with_name(n, m));
+        return dom_realm_throw(dom_realm_new_error_named(n, m));
     }
 
     // dispatch retargets constructor null placeholders on every dispatch.
-    js_set_name_key(event_item, "target", elem_item);
-    js_set_name_key(event_item, "srcElement", elem_item);
+    dom_realm_set_name(event_item, "target", elem_item);
+    dom_realm_set_name(event_item, "srcElement", elem_item);
 
     // Mark event as dispatching.
     event_set_bool(event_item, "__dispatch_flag", true);
@@ -2147,12 +2148,12 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     // `undefined`) afterwards. Per HTML, the slot must read `undefined`
     // when called inside a Shadow Tree listener (we don't model Shadow
     // DOM headlessly, so we always set it).
-    Item global = js_get_global_this();
+    Item global = dom_realm_global();
     global_root.set(global);
     Item event_key = js_name_item("event");
-    Item prev_global_event = js_get_key_default(global_root.get(), event_key);
+    Item prev_global_event = dom_realm_get(global_root.get(), event_key);
     previous_global_event_root.set(prev_global_event);
-    js_set_key_default(global_root.get(), event_key, event_root.get());
+    dom_realm_set(global_root.get(), event_key, event_root.get());
 
     #define _STOP_PROP event_flag_get(event_item, "__stop_prop")
     #define _STOP_IMM event_flag_get(event_item, "__stop_imm")
@@ -2214,7 +2215,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     event_set_int(event_item, "eventPhase", 0);
 
     // currentTarget is reset to null after dispatch (per spec).
-    js_set_name_key(event_item, "currentTarget", ItemNull);
+    dom_realm_set_name(event_item, "currentTarget", ItemNull);
     radiant_dom_event_clear_lambda_dispatch_position(event_item);
 
     // Per DOM spec §2.10 step 26: at the end of dispatch, unset stop
@@ -2229,7 +2230,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     event_set_item(event_item, "__dispatch_path", ItemNull);
 
     // Restore the previous `window.event` value (legacy IE-style).
-    js_set_key_default(global_root.get(), event_key, previous_global_event_root.get());
+    dom_realm_set(global_root.get(), event_key, previous_global_event_root.get());
 
     // Compact tombstoned listeners now that dispatch is done. Walk all
     // touched nodes in the path.
@@ -2249,7 +2250,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
 
     // dispatchEvent returns false only when the event is cancelable AND
     // preventDefault was called.
-    Item cancelable = js_get_key_cstr(event_item, "cancelable");
+    Item cancelable = dom_realm_get_cstr(event_item, "cancelable");
     bool ret_false = prevented && js_is_truthy(cancelable);
     return (Item){.item = ret_false ? ITEM_FALSE : ITEM_TRUE};
 }
