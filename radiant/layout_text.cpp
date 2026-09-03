@@ -26,7 +26,6 @@ static void record_inline_box_decoration_fragment(LayoutContext* lycon, DomNode*
 static CssEnum inline_box_decoration_break_value(DomElement* parent);
 static inline float text_letter_spacing(FontProp* font, uint32_t cp,
                                         bool collapse_spaces);
-static inline bool is_typographic_letter_unit(uint32_t cp);
 
 // CSS layout comparisons use subpixel coordinates; keep a run on the line
 // when its measured edge differs only by the 1/64px layout-unit quantization.
@@ -452,26 +451,19 @@ CssEnum get_text_transform_from_node(DomNode* node) {
 static int count_justify_opportunities_impl(const char* str, int len,
                                             bool collapse_spaces,
                                             bool collapse_newlines,
-                                            bool trim_trailing_space,
-                                            CssEnum text_justify) {
+                                            bool trim_trailing_space) {
     if (!str || len <= 0) return 0;
 
     int count = 0;
     const char* end = str + len;
     bool prev_was_id = false;
-    bool prev_was_inter_character_unit = false;
     bool in_collapsible_space = false;
     bool ends_in_collapsible_space = false;
 
     while (str < end) {
         uint32_t cp;
         int bytes = str_utf8_decode(str, (size_t)(end - str), &cp);
-        if (bytes <= 0) {
-            str++;
-            prev_was_id = false;
-            prev_was_inter_character_unit = false;
-            continue;
-        }
+        if (bytes <= 0) { str++; prev_was_id = false; continue; }
 
         bool ascii_space = cp <= 0x7F && is_space((char)cp);
         if (collapse_spaces && ascii_space) {
@@ -486,35 +478,22 @@ static int count_justify_opportunities_impl(const char* str, int len,
                 ends_in_collapsible_space = true;
             }
             prev_was_id = false;
-            prev_was_inter_character_unit = false;
         } else if (cp == ' ') {
             count++;
             in_collapsible_space = false;
             ends_in_collapsible_space = false;
             prev_was_id = false;
-            prev_was_inter_character_unit = false;
         } else if (has_id_line_break_class(cp)) {
-            if (text_justify != CSS_VALUE_INTER_CHARACTER && prev_was_id) {
-                count++;
-            }
-            if (text_justify == CSS_VALUE_INTER_CHARACTER &&
-                prev_was_inter_character_unit) {
+            if (prev_was_id) {
                 count++;
             }
             in_collapsible_space = false;
             ends_in_collapsible_space = false;
             prev_was_id = true;
-            prev_was_inter_character_unit = true;
         } else {
-            bool inter_character_unit = is_typographic_letter_unit(cp);
-            if (text_justify == CSS_VALUE_INTER_CHARACTER &&
-                inter_character_unit && prev_was_inter_character_unit) {
-                count++;
-            }
             in_collapsible_space = false;
             ends_in_collapsible_space = false;
             prev_was_id = false;
-            prev_was_inter_character_unit = inter_character_unit;
         }
 
         str += bytes;
@@ -525,8 +504,7 @@ static int count_justify_opportunities_impl(const char* str, int len,
 }
 
 int count_justify_opportunities(const char* str, int len) {
-    return count_justify_opportunities_impl(str, len, false, false, false,
-                                            CSS_VALUE_AUTO);
+    return count_justify_opportunities_impl(str, len, false, false, false);
 }
 
 static inline CssEnum get_text_spacing_trim(LayoutContext* lycon, DomNode* text_node) {
@@ -1758,22 +1736,6 @@ CssEnum get_text_wrap_mode_value(DomNode* node) {
     return CSS_VALUE_WRAP;
 }
 
-CssEnum layout_text_justify_method(DomNode* node) {
-    for (DomNode* current = node; current; current = current->parent) {
-        DomElement* element = current->as_element();
-        if (!element || !element->specified_style) continue;
-        CssDeclaration* declaration = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_TEXT_JUSTIFY);
-        if (!declaration || !declaration->value ||
-            declaration->value->type != CSS_VALUE_TYPE_KEYWORD) {
-            continue;
-        }
-        CssEnum value = declaration->value->data.keyword;
-        if (value != CSS_VALUE_INHERIT && value != CSS_VALUE_UNSET) return value;
-    }
-    return CSS_VALUE_AUTO;
-}
-
 int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
                                          bool trim_trailing_space,
                                          bool* out_suppressed) {
@@ -1782,10 +1744,22 @@ int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
     const char* text_data = (const char*)text->text_data();
     if (!text_data) return 0;
 
-    CssEnum text_justify = layout_text_justify_method(static_cast<DomNode*>(text));
-    if (text_justify == CSS_VALUE_NONE) {
-        if (out_suppressed) *out_suppressed = true;
-        return 0;
+    for (DomNode* node = static_cast<DomNode*>(text)->parent; node; node = node->parent) {
+        DomElement* element = node->as_element();
+        if (!element || !element->specified_style) continue;
+        CssDeclaration* declaration = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_TEXT_JUSTIFY);
+        if (!declaration || !declaration->value ||
+            declaration->value->type != CSS_VALUE_TYPE_KEYWORD) {
+            continue;
+        }
+        CssEnum value = declaration->value->data.keyword;
+        if (value == CSS_VALUE_INHERIT || value == CSS_VALUE_UNSET) continue;
+        if (value == CSS_VALUE_NONE) {
+            if (out_suppressed) *out_suppressed = true;
+            return 0;
+        }
+        break;
     }
 
     CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
@@ -1794,7 +1768,7 @@ int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
     return count_justify_opportunities_impl(
         text_data + rect->start_index, rect->length,
         collapse_spaces, collapse_newlines,
-        collapse_spaces && trim_trailing_space, text_justify);
+        collapse_spaces && trim_trailing_space);
 }
 
 /**
@@ -2544,6 +2518,7 @@ void line_break(LayoutContext* lycon) {
     align_forced_break_rect_to_line_baseline(lycon);
 
     line_align(lycon);
+    layout_trim_isolated_inline_text_edges(lycon, lycon->line.start_view);
     place_rtl_initial_letter_line(lycon);
     // CSS Text 3 §4.1.3: RTL hanging space text rect adjustment.
     if (lycon->line.rtl_hanging_space > 0 && lycon->line.last_text_rect) {
@@ -3900,28 +3875,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         layout_is_inline_math_box(text_node->prev_sibling) &&
         layout_is_inline_math_box(text_node->next_sibling);
     bool at_collapsible_text_edge = line_is_at_collapsible_text_edge(lycon);
-    bool current_text_is_all_collapsible_space = *text_start != '\0';
-    for (const unsigned char* cursor = text_start; *cursor; cursor++) {
-        if (!is_space(*cursor) ||
-            (!collapse_newlines && (*cursor == '\n' || *cursor == '\r'))) {
-            current_text_is_all_collapsible_space = false;
-            break;
-        }
-    }
-    bool transfer_prior_collapsed_space = collapse_spaces &&
-        lycon->line.has_space && lycon->line.last_text_rect &&
-        lycon->line.last_text_view &&
-        static_cast<DomNode*>(lycon->line.last_text_view)->parent != text_node->parent &&
-        current_text_is_all_collapsible_space &&
-        is_space(*str);
-    if (transfer_prior_collapsed_space) {
-        // CSS Text 3 §4.1.1: a collapsed run crosses inline boundaries, but
-        // its range belongs to the text node that supplies the final space.
-        line_consume_trailing_collapsible_space(lycon, true, true);
-        lycon->line.has_space = false;
-    }
-    bool follows_boundary_collapsed_space = lycon->line.last_text_rect &&
-        lycon->line.last_text_rect->is_boundary_collapsed_space;
     if (collapse_spaces && !preserve_leading_collapsible_space &&
         (at_collapsible_text_edge || lycon->line.has_space) && is_space(*str)) {
         skip_collapsible_space_sequence(&str, collapse_newlines);
@@ -4051,7 +4004,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     }
 
     TextRect* rect = lycon->doc->view_tree->alloc_text_rect();
-    rect->is_boundary_collapsed_space = transfer_prior_collapsed_space;
     if (!text_view->rect) {
         text_view->rect = rect;
     } else {
@@ -4551,12 +4503,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                            lycon->line.effective_right : lycon->line.right;
         float terminal_trim = line_terminal_letter_spacing_trim(
             lycon->line.trailing_letter_spacing);
-        bool boundary_separator_fills_line = follows_boundary_collapsed_space &&
-            !is_space(*str) && rect->x + rect->width - terminal_trim >=
-                line_right - kTextLayoutSubpixelEpsilon;
-        if (wrap_lines && (rect->x + rect->width - terminal_trim >
-                line_right + kTextLayoutSubpixelEpsilon ||
-                boundary_separator_fills_line)) { // line filled up and wrapping enabled
+        if (wrap_lines && rect->x + rect->width - terminal_trim >
+                line_right + kTextLayoutSubpixelEpsilon) { // line filled up and wrapping enabled
             if (codepoint == 0x3000 && white_space != CSS_VALUE_BREAK_SPACES) {
                 // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE hangs at end of line.
             }
@@ -4736,11 +4684,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             discard_uncommitted_text_rect(text_view, rect);
             line_break(lycon);
             goto LAYOUT_TEXT;
-        }
-        if (follows_boundary_collapsed_space && !is_space(*str)) {
-            // Blink resolves an inter-element collapsed separator before its
-            // following word, including an exactly full line boundary.
-            follows_boundary_collapsed_space = false;
         }
         if (is_space(*str)) {
             if (collapse_spaces) {
