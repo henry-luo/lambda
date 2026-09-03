@@ -3009,6 +3009,10 @@ RADIANT_C_API void radiant_jube_register_static(void) {
 // dispatch is wired to radiant's event-name form; the catalog row types its
 // second argument as an event object, and reconciling those two spellings is
 // part of the package migration rather than of this wiring.
+#define RADIANT_PROVIDE_ENGINE_0(name, fn) \
+    extern "C" Item dom_engine_##name(void) { return fn(); }
+#define RADIANT_PROVIDE_ENGINE_4(name, fn) \
+    extern "C" Item dom_engine_##name(Item a, Item b, Item c, Item d) { return fn(a, b, c, d); }
 #define RADIANT_PROVIDE_ENGINE_1(name, fn) \
     extern "C" Item dom_engine_##name(Item a) { return fn(a); }
 #define RADIANT_PROVIDE_ENGINE_2(name, fn) \
@@ -3022,3 +3026,20 @@ RADIANT_PROVIDE_ENGINE_1(request_change, fn_radiant_request_change)
 RADIANT_PROVIDE_ENGINE_2(dispatch, fn_radiant_dispatch)
 RADIANT_PROVIDE_ENGINE_1(focused, fn_radiant_focused)
 RADIANT_PROVIDE_ENGINE_2(focus_set, fn_radiant_focus_set)
+RADIANT_PROVIDE_ENGINE_1(activate_popover, fn_radiant_activate_popover)
+RADIANT_PROVIDE_ENGINE_3(caret_operation, fn_radiant_caret_operation)
+RADIANT_PROVIDE_ENGINE_1(clear_ime_preedit, fn_radiant_clear_ime_preedit)
+RADIANT_PROVIDE_ENGINE_0(clipboard_text, fn_radiant_clipboard_text)
+RADIANT_PROVIDE_ENGINE_1(context_menu_target, fn_radiant_context_menu_target)
+RADIANT_PROVIDE_ENGINE_2(edit_insert_at_boundary, fn_radiant_dom_insert_at_boundary)
+RADIANT_PROVIDE_ENGINE_1(edit_insert_break, fn_radiant_dom_insert_line_break)
+RADIANT_PROVIDE_ENGINE_4(edit_replace_range, fn_radiant_replace_range)
+RADIANT_PROVIDE_ENGINE_1(edit_split_block, fn_radiant_dom_insert_paragraph)
+RADIANT_PROVIDE_ENGINE_2(key_intent, fn_radiant_key_intent)
+RADIANT_PROVIDE_ENGINE_3(navigation_destination, fn_radiant_navigation_destination)
+RADIANT_PROVIDE_ENGINE_2(open_context_menu, fn_radiant_open_context_menu)
+RADIANT_PROVIDE_ENGINE_1(request_navigation, fn_radiant_request_navigation)
+RADIANT_PROVIDE_ENGINE_2(set_caret, fn_radiant_dom_set_caret)
+RADIANT_PROVIDE_ENGINE_3(set_ime_preedit, fn_radiant_set_ime_preedit)
+RADIANT_PROVIDE_ENGINE_3(set_password_reveal, fn_radiant_set_password_reveal)
+RADIANT_PROVIDE_ENGINE_1(tc_value, fn_radiant_text_control)

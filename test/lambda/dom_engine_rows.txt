@@ -3,5 +3,6 @@
   seeded_value: "seeded",
   focused_initially: false,
   request_change: true,
-  set_then_get: "written by lambda"
+  set_then_get: "written by lambda",
+  agrees_with_radiant: [true, true, true, true, true, true, true]
 }

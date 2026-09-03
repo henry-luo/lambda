@@ -123,6 +123,11 @@ extern "C" __attribute__((weak)) void dom_engine_bind_host(const void* host_api)
 // These are what let `dom.*` cover what `radiant.*` covers, which is the
 // prerequisite for migrating the behaviour package off `radiant.*` (ES44).
 // ---------------------------------------------------------------------------
+#define DOM_ENGINE_SEAM_0(name) \
+    extern "C" __attribute__((weak)) Item dom_engine_##name(void) { return ItemNull; }
+#define DOM_ENGINE_SEAM_4(name) \
+    extern "C" __attribute__((weak)) Item dom_engine_##name(Item a, Item b, Item c, Item d) { \
+        (void)a; (void)b; (void)c; (void)d; return ItemNull; }
 #define DOM_ENGINE_SEAM_1(name) \
     extern "C" __attribute__((weak)) Item dom_engine_##name(Item a) { \
         (void)a; return ItemNull; }
@@ -139,6 +144,23 @@ DOM_ENGINE_SEAM_1(request_change)
 DOM_ENGINE_SEAM_2(dispatch)
 DOM_ENGINE_SEAM_1(focused)
 DOM_ENGINE_SEAM_2(focus_set)
+DOM_ENGINE_SEAM_1(activate_popover)
+DOM_ENGINE_SEAM_3(caret_operation)
+DOM_ENGINE_SEAM_1(clear_ime_preedit)
+DOM_ENGINE_SEAM_0(clipboard_text)
+DOM_ENGINE_SEAM_1(context_menu_target)
+DOM_ENGINE_SEAM_2(edit_insert_at_boundary)
+DOM_ENGINE_SEAM_1(edit_insert_break)
+DOM_ENGINE_SEAM_4(edit_replace_range)
+DOM_ENGINE_SEAM_1(edit_split_block)
+DOM_ENGINE_SEAM_2(key_intent)
+DOM_ENGINE_SEAM_3(navigation_destination)
+DOM_ENGINE_SEAM_2(open_context_menu)
+DOM_ENGINE_SEAM_1(request_navigation)
+DOM_ENGINE_SEAM_2(set_caret)
+DOM_ENGINE_SEAM_3(set_ime_preedit)
+DOM_ENGINE_SEAM_3(set_password_reveal)
+DOM_ENGINE_SEAM_1(tc_value)
 
 // `dom.load`: the engine parses, the core wraps. The result is the document
 // node, which since ESO101 answers both the Document's properties and the
