@@ -118,6 +118,8 @@ Item js_selection_extend(Item self_v, Item node_v, Item offset_v);
 Item js_selection_select_all_children(Item self_v, Item node_v);
 Item dom_global_get_selection(void);
 Item dom_create_range(void);
+// engine-provided document loader (seam declared in dom.h, ESO80)
+Item dom_engine_load_document(Item path);
 Item dom_parser_parse_from_string(Item markup, Item mime);
 Item dom_cssom_stylesheet_get_css_rules(Item sheet_item);
 Item dom_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_arg);

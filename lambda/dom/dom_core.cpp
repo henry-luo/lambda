@@ -100,6 +100,29 @@ static double dom_number_of(Item v) {
 // spec constant is the catalog's contract, not the struct's.
 enum { DOM_CORE_KIND_DOCUMENT_FRAGMENT = 11 };
 
+// The weak half of the document-loading seam declared in dom.h: a runtime with
+// no engine linked has nowhere to load a document from, and says so.
+extern "C" __attribute__((weak)) void* dom_engine_load_document_native(const char* path) {
+    (void)path;
+    return nullptr;
+}
+
+extern "C" __attribute__((weak)) void dom_engine_bind_host(const void* host_api) {
+    (void)host_api;
+}
+
+// `dom.load`: the engine parses, the core wraps. The result is the document
+// node, which since ESO101 answers both the Document's properties and the
+// Node's -- so a script can query straight off what load returns.
+extern "C" Item dom_engine_load_document(Item path) {
+    const char* p = dom_cstr_or_null(path);
+    if (!p) return ItemNull;
+    void* doc = dom_engine_load_document_native(p);
+    if (!doc) return ItemNull;
+    void* doc_node = dom_get_or_create_doc_node(doc);
+    return doc_node ? dom_wrap_element(doc_node) : ItemNull;
+}
+
 // ===========================================================================
 // CORE
 // ===========================================================================

@@ -1066,6 +1066,23 @@ RADIANT_C_API Item fn_radiant_load(Item path_item) {
     return radiant_dom_wrap_node(doc->root);
 }
 
+// The strong half of the document-loading seam (dom.h, ESO80). It answers a
+// document pointer and nothing more: no wrapping, no host API, so it works
+// under `import dom` alone, before any radiant module init has run.
+// The engine half of the binding seam (dom.h): make the module's host API
+// usable even when only `dom` was imported. Idempotent, and never overrides a
+// binding the radiant module's own init already made.
+extern "C" void dom_engine_bind_host(const void* host_api) {
+    if (!radiant_host_api && host_api) {
+        radiant_host_api = (const JubeHostAPI*)host_api;
+    }
+}
+
+extern "C" void* dom_engine_load_document_native(const char* path) {
+    DomDocument* doc = radiant_load_html_document(path, "DOM_LOAD");
+    return (doc && doc->root) ? (void*)doc : nullptr;
+}
+
 RADIANT_C_API Item fn_radiant_root(Item doc_item) {
     DomNode* node = radiant_dom_node_from_item(doc_item, "ROOT");
     if (!node) return ItemNull;

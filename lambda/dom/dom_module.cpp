@@ -72,6 +72,9 @@ static int dom_module_init(const JubeHostAPI* host) {
         log_error("JUBE_DOM: missing or mismatched host API during module init");
         return -1;
     }
+    // Node wrapping is engine-side, so `import dom` needs the engine module's
+    // host API bound even when `radiant` was never imported (ESO80).
+    dom_engine_bind_host((const void*)host);
     return 0;
 }
 

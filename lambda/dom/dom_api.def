@@ -74,7 +74,7 @@ DOM_OP(CORE, serialize,        parse, 2, "fn(n: any, outer: bool) -> string",   
 // ---------------------------------------------------------------------------
 // CORE — documents (engine-provided until F30; ESO80)
 // ---------------------------------------------------------------------------
-DOM_OP(CORE, load,             document, 1, "fn(path: string) -> any",                     DOM_NO_BODY,               DOM_F_ENGINE, "")
+DOM_OP(CORE, load,             document, 1, "fn(path: string) -> any",                     dom_engine_load_document,  DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, parse_document,   document, 2, "fn(markup: string, mime: string) -> any",     dom_parser_parse_from_string, 0, "")
 
 // ---------------------------------------------------------------------------
