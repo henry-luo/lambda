@@ -721,6 +721,7 @@ Functions for working with arrays and other collections.
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
 | `len(x)` | Length of collection | `len([1, 2, 3])` | `3` |
+| `content(e)` | An element's content items, as a read-only view | `content(<p a: 1, "x" >)` | `["x"]` |
 | `contains(vec, val)` | Check if element exists | `contains([1, 2, 3], 2)` | `true` |
 | `index_of(vec, val)` | Index of first match (`null` if none) | `index_of([1, 2, 3], 2)` | `1` |
 | `last_index_of(vec, val)` | Index of last match (`null` if none) | `last_index_of([1, 2, 1], 1)` | `2` |
@@ -1400,6 +1401,7 @@ if (result is error) {
 | Function | Args | Description |
 |----------|------|-------------|
 | `len` | 1 | Get length |
+| `content` | 1 | Element content items (read-only view) |
 | `type` | 1 | Get type |
 | `int` | 1 | Convert to int |
 | `int64` | 1 | Convert to int64 |

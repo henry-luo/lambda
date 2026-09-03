@@ -619,6 +619,7 @@ typedef enum SysFunc {
     SYSPROC_SET_SELECTION,   // set_selection(sel) - push editor selection back to DomSelection (Phase R4 §7.4)
     SYSFUNC_PDF_PARSE_CONTENT_STREAM,  // pdf_parse_content_stream(bytes) - fast PDF content tokenizer
     SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER,  // pdf_register_svg_image_resolver(svg, pdf) - bind PDF image handles to SVG root
+    SYSFUNC_CONTENT,          // content(e) - read-only array view over an element's content (LR09-9)
     SYSPROC_PUSH,            // push(arr, val) - append val to a growable array in place (procedural)
     SYSPROC_SPLICE,          // splice(arr, start, count) - remove count elements at start, in place (procedural)
     SYSPROC_START,           // start(pn, args?, options?) - launch a scoped child task
@@ -2317,6 +2318,8 @@ extern "C" {
     Item fn_member_by_id(Item item, uint32_t name_id);
     // length function
     int64_t fn_len(Item item);
+    Item fn_content(Item item);   // read-only array view over an element's content
+    int64_t fn_seq_count(Item item);  // positions a positional traversal visits
     Item fn_int(Item a);
     int64_t fn_int64(Item a);
     Item fn_float(Item a);

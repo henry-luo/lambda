@@ -23,7 +23,7 @@ let nodes = model.nodes(once.graph)
 let edges = model.edges(once.graph)
 let groups = model.subgraphs(once.graph)
 let html = transform.to_html(once.graph)
-let html_nodes = [for (i in 0 to (len(html) - 1), let child = html[i]
+let html_nodes = [for (child in content(html)
   where child is element and string(name(child)) == "node") child]
 
 let authored = <graph direction: "LR",
@@ -49,7 +49,7 @@ let authored_result = normalize.normalize(authored)
     model.label_format(edges[0]), content_kinds(edges[0])],
   html_node_content: [for (node in html_nodes) [
     node["data-node-id"],
-    [for (i in 0 to (len(node) - 1)) item_kind(node[i])]
+    [for (item in content(node)) item_kind(item)]
   ]],
   authored_unchanged: authored_result.graph == authored,
   authored_custom: model.nodes(authored_result.graph)[0].custom

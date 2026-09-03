@@ -11,7 +11,8 @@ let result = graph_layout.compute({
 let layers = paint.layers(result)
 let layer = layers[0]
 let svg = layer.content
-let path = svg[len(svg) - 1]
+let svg_kids = content(svg)
+let path = svg_kids[len(svg_kids) - 1]
 
 {
   count: len(layers),

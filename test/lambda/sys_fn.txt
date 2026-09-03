@@ -19,6 +19,6 @@
 "len of map:"
 2
 "len of element:"
-1
+2
 "len of element:"
 0

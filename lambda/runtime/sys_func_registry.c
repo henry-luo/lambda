@@ -264,6 +264,12 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_LEN, "len", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
      C_RET_INT64, C_ARG_ITEM, "fn_len", FPTR(fn_len), NULL, NULL, false, 0},
 
+    // content(e) returns a read-only VIEW over the element's content items, so
+    // `len(content(e))` is the child count and `content(e)[i]` the child index
+    // walk that `len(e)`-based indexing can no longer provide (LR09-9).
+    {SYSFUNC_CONTENT, "content", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_content", FPTR(fn_content), NULL, NULL, false, 0},
+
     {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false, true, LMD_TYPE_ANY, false,
      C_RET_TYPE_PTR, C_ARG_ITEM, "fn_type", FPTR(fn_type), NULL, NULL, false, 0},
 
@@ -1790,6 +1796,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_pipe_where", FPTR(fn_pipe_where)},
     {"fn_pipe_call", FPTR(fn_pipe_call)},
     {"pipe_map_len", FPTR(pipe_map_len)},
+    {"fn_seq_count", FPTR(fn_seq_count)},
     {"pipe_map_val", FPTR(pipe_map_val)},
     {"pipe_map_key", FPTR(pipe_map_key)},
     {"iter_len", FPTR(iter_len)},

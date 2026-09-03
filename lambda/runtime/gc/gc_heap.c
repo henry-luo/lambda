@@ -1668,6 +1668,14 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         // Numeric/bool native lanes are raw words, not tagged Items. Pointer
         // lanes are also raw, but their non-null words are exact GC edges.
         bool native_lane = (array_flags & 0x10) != 0;
+        if (array_flags & 0x02) {
+            // Borrowing view (content(e), LR09-9): the items belong to the base
+            // and are traced through it, so this only has to keep the base
+            // alive. Tracing them here as well would be correct but wasteful.
+            ArrayNumShape* shape = *(ArrayNumShape**)(p + GC_OFF_EXTRA);
+            if (shape && shape->base) gc_mark_object_ptr(gc, shape->base);
+            break;
+        }
         if (items_ptr && dense_count > 0 && native_lane && lane_kind == 6) {
             uint64_t* items = (uint64_t*)items_ptr;
             for (int64_t i = 0; i < dense_count; i++) {
@@ -1908,6 +1916,60 @@ static int gc_compact_array_num_owned_data(gc_heap_t* gc, uint8_t* array) {
     return 1;
 }
 
+// Compact the content buffer of a container that owns one (element or list).
+// Idempotent: once the buffer has been promoted it is no longer owned by the
+// nursery zone, so a second call is a no-op. That is what lets a borrowing view
+// force its base to move first, regardless of the order the sweep walks them.
+static int gc_compact_content_items(gc_heap_t* gc, uint8_t* p) {
+    if (!gc || !p) return 0;
+    void** items_slot = (void**)(p + GC_OFF_ITEMS);
+    int64_t length = *(int64_t*)(p + GC_OFF_LENGTH);
+    int64_t extra = *(int64_t*)(p + GC_OFF_EXTRA);
+    int64_t capacity = *(int64_t*)(p + GC_OFF_CAPACITY);
+    if (!*items_slot || !gc_data_zone_owns(gc->data_zone, *items_slot)) return 0;
+    uint64_t* old_items = (uint64_t*)*items_slot;
+    void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot,
+        (size_t)capacity * sizeof(uint64_t));
+    if (!new_items) return 0;
+    *items_slot = new_items;
+    // Fix embedded float/int64/datetime pointers into the old buffer's tail.
+    if (extra > 0) {
+        int64_t dense_count = length < capacity ? length : capacity;
+        gc_fixup_embedded_pointers(old_items, (uint64_t*)new_items, dense_count, capacity);
+    }
+    return 1;
+}
+
+// Re-point a borrowing ARRAY view (content(e), LR09-9) at its base's content
+// buffer, promoting the base first so the alias never survives a reset as a
+// pointer into the discarded nursery zone.
+static int gc_rebind_list_gc_view(gc_heap_t* gc, uint8_t* view) {
+    if (!gc || !view || !(view[2] & 0x02)) return 0;
+    void** shape_slot = (void**)(view + GC_OFF_EXTRA);
+    // The descriptor itself is nursery data. Promote it before the zone reset
+    // or `extra` dangles and the rebind below reads a recycled block — which
+    // is exactly how this was caught, with a view silently aliasing an
+    // unrelated array allocated after it.
+    if (*shape_slot && gc_data_zone_owns(gc->data_zone, *shape_slot)) {
+        void* promoted = gc_data_zone_copy(gc->tenured_data, *shape_slot,
+            sizeof(ArrayNumShape));
+        if (!promoted) return 0;
+        *shape_slot = promoted;
+    }
+    ArrayNumShape* shape = (ArrayNumShape*)*shape_slot;
+    if (!shape || !shape->base) return 0;
+    uint8_t* base = (uint8_t*)shape->base;
+    int moved = gc_compact_content_items(gc, base);
+    *(void**)(view + GC_OFF_ITEMS) = *(void**)(base + GC_OFF_ITEMS);
+    // Length is shadow-copied, so a base that shrank must not leave the view
+    // reading past the live prefix.
+    int64_t base_len = *(int64_t*)(base + GC_OFF_LENGTH);
+    if (*(int64_t*)(view + GC_OFF_LENGTH) > base_len) {
+        *(int64_t*)(view + GC_OFF_LENGTH) = base_len;
+    }
+    return moved;
+}
+
 static int gc_rebind_array_num_gc_view(gc_heap_t* gc, uint8_t* view) {
     if (!gc || !view || !(view[2] & 0x02)) return 0;
     ArrayNumShape* shape = *(ArrayNumShape**)(view + GC_OFF_EXTRA);
@@ -1964,6 +2026,18 @@ static void gc_compact_data(gc_heap_t* gc) {
 #else
                 (void)attr_moved;
 #endif
+            }
+            if (p[2] & 0x02) {
+                // A borrowing view owns nothing: compacting it here would copy
+                // `capacity` (0) bytes and leave `items` pointing at a fresh
+                // empty block instead of the base's buffer. Rebind instead.
+                int moved = gc_rebind_list_gc_view(gc, p);
+#ifndef NDEBUG
+                compacted += (size_t)moved;
+#else
+                (void)moved;
+#endif
+                break;
             }
             void** items_slot = (void**)(p + GC_OFF_ITEMS);
             int64_t length = *(int64_t*)(p + GC_OFF_LENGTH);

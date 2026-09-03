@@ -717,28 +717,35 @@ variable. `./lambda.exe jit run f.ls` is **not** tier selection — `jit` consum
 `run` as the script name and the file never executes (`nodes=0`, prints
 `null`). Two wrong conclusions in this investigation came from that form.
 
-<a id="lr09-8"></a>**LR09-8 · `len(element)` violates the S8.3.1 length law · OPEN (measured 2026-09-03)**
-S8.3.1v2 states the law — `len(x)` is the number of iterations `for (i in x)`
-performs — and gives `len(<e a:1, b:2, "t">)` = **3** as its own example. The
-element arm of `fn_len` returns the child count alone, so that expression is
-**1** while `[for (x in e) x]` yields three members. `len_iter_law.ls` records
-it as a KNOWN DIVERGENCE rather than pinning the law.
+<a id="lr09-8"></a>**LR09-8 · `len(element)` violated the S8.3.1 length law · RESOLVED 2026-09-03 (USER ruling)**
 
-**Conforming was implemented and measured, then reverted.** It moves **44**
-corpus goldens. Most are the bare length change, but `map_element_attrs`
-exposes the real blocker: the idiom
-`[for (i in 0 to (len(rebuilt) - 1)) rebuilt[i]]` uses `len` as a *child-count*
-bound, and an IntKey subscript reaches only children (S8.2.1v3) while the
-conformant `len` also counts attributes — so the loop runs past the children and
-yields nulls. Under the old behavior it worked by accident, because `len`
-happened to equal the child count.
+S8.3.1v2 states the law — `len(x)` is the number of iterations `for (i in x)` performs — and gives `len(<e a:1, b:2, "t">)` = **3** as its own example. The element arm of `fn_len` returned the child count alone, so that expression answered **1** while `[for (x in e) x]` yielded three members. Ruled closed by the user: element length is attribute count plus content-item count, for structural and nominal elements alike.
 
-So closing this needs a **companion ruling first**: a spelling for child count
-or child indexing (S8.4.1 gives `len(names(c))` for the `at` axis, which makes
-child count `len(e) - len(names(e))` — correct but not ergonomic). Objects are
-NOT divergent: their arm counts attributes plus content, matching the ruling's
-own `len(<Point x: 1, "t">)` = 2 example, so the two kinds disagree until this
-is closed. Anchor comment sits on the ELEMENT arm of `fn_len`.
+Fixed in the ELEMENT arm of `fn_len` and in `fn_len_e`, the JIT's specialization for a statically-element argument — both now `map_attr_count((Map*)elmt) + elmt->length`, so the two tiers cannot drift apart. `len_iter_law.ls` no longer records a divergence; it pins the law. The verified walk order is attribute VALUES first, then content items: `for (x in <div id:"a", cls:"b", <p "x"> <q "y">>)` yields `["a", "b", <p "x">, <q "y">]` and `len` is 4.
+
+The fallout is real and is tracked separately as [LR09-9](#lr09-9): the change moves 44 corpus goldens, of which only 6 are the bare length number.
+
+<a id="lr09-9"></a>**LR09-9 · The `len(e)`-bound child walk, and the `content(e)` accessor that replaces it · RESOLVED 2026-09-04 (USER ruling)**
+
+Closing LR09-8 removed the accident that made `for (i in 0 to len(e) - 1) e[i]` a correct child walk. An IntKey subscript reaches only children (S8.2.1v3) while `len` now also counts attributes, so the loop overran and `e[i]` read `null` past the last child. It was **not** merely inefficient: the phantom nulls are indistinguishable from real children, and three shapes of silent corruption showed up — a schema validator reporting each null as *"Scalar content is not permitted directly under \<graph>"*, a rebuilt content list gaining trailing nulls, and a `group by` aggregate turning `total: 15` into `null`.
+
+**Ruled: `content(e)`**, a system function returning the element's content sequence. `len(content(e))` is the child count and `content(e)[i]` the child index walk, so the arithmetic disappears rather than being re-spelled. Rejected alternatives: `e.content` (dot resolves the key domain first under S8.2.2v2, so it would silently return a user attribute named `content` — and `content` is a live child/attr name across the graph schema) and `size(e)` (a second length-ish name, reintroducing exactly the confusion LR09-8 removed, and no way to index).
+
+**It is a read-only VIEW, not a copy** (USER): the returned Array shadow-copies the element's content meta fields — items pointer and length — and never copies the item slots, so a per-node walk stays allocation-free. Borrowing reuses the container view contract ArrayNum already had: `is_view` set, `is_mutable_view` clear, and `extra` holding an `ArrayNumShape` whose `base` is the owning element. Write-through is deliberately deferred; `fn_array_set` refuses a read-only view.
+
+**Three defects the view surfaced, each worth remembering.** (1) The view must be **rooted across the descriptor allocation** — that allocation can collect, and with conservative stack scanning retired a view held only in the C frame is invisible, so it was reclaimed mid-construction and its slot handed to the next array; `content(e)` then returned an unrelated later array. (2) The descriptor is nursery data and must be **promoted** in the compact pass, or `extra` dangles after the zone reset. (3) An element's items buffer **moves**, so the view is excluded from owned-data compaction and instead rebound from its base — forcing the base's promotion first, since the sweep order is arbitrary. All three only appear under `LAMBDA_GC_FORCE_EVERY`.
+
+**Four runtime consumers were real bugs, not migrations** — every place that pairs a count with an IntKey read, since an IntKey reaches content only (S8.2.1v3) while `len` now also counts attributes. Found by test failure: the **mapping pipe**, which sized its traversal with `fn_len`, so `g |> ~["amount"]` gained a null row per attribute and poisoned `sum` — its own comment already said elements pipe over content. Found afterwards by audit, with NO test covering them: **`last`** (`e[last]` read `null` instead of the final child, on both tiers) and the **set operators** `fn_union`/`fn_intersect`/`fn_exclude` plus the mixed-type array concat (`e | f` leaked a trailing `null`).
+
+All five now call one shared `extern "C" int64_t fn_seq_count(Item)` — the count of positions a positional traversal visits, which is content length for an element and `fn_len` otherwise — so the rule has exactly one definition and cannot drift between the tiers. `slice`/`drop`/`take_last` need no change: `vector_length` returns -1 for an element, so those refused elements before this ruling and still do.
+
+*The audit is the lesson.* The pipe surfaced as a golden diff; `last` and the set operators did not, because no fixture exercised them on an element. Grepping for `fn_len` callers that feed an index was what found them, and that is the check to repeat if the length law ever moves again.
+
+That gap is now closed by `test/lambda/element_content_axes.ls`, which pins both axes together — `len` as attributes-plus-content equal to the iteration count, `content()` as the child sequence, an IntKey reading `null` past the last child, `last`, the mapping pipe, the three set operators, the degenerate shapes (bare, attributes-only, content-only), a nominal element, and a `group by` element where the key attribute is counted by `len` but not by `len(content(g))`. It was verified to FAIL, not merely to pass: reverting `fn_seq_count` to `fn_len` makes `e[last]` collapse to null and the pipe grow two phantom rows, which is exactly the silent breakage that shipped unnoticed.
+
+**Migrated call sites** (`content()` everywhere): `graph/model.ls` `element_children`/`child_items`, `graph/transform/content.ls`, `graph/transform/html.ls`, `editor/mod_edit_schema.ls` `children_array`, and `math/optimize.ls` — where `can_merge` tested `len(a) != 1` meaning *exactly one child*, so a single class attribute silently disabled all span merging. Fixtures using the idiom to express a child walk were migrated the same way rather than re-baselined; only 6 goldens changed, all bare length numbers.
+
+**Still open, and worth a ruling of its own:** a `group by … into g` binds an element whose attributes are the group key, so `len(g)` now counts the key alongside the members and member count must be spelled `len(content(g))`. That is correct under S8.3.1v2 but is an ergonomic wart on the group-by surface.
 
 <a id="lr02-18"></a>**LR02-18 · Bare `pn` method reference is not rejected · OPEN (2026-09-03)**
 S12.3.3v2/OB6 rules that taking a `pn` method as a value is a compile error: the
@@ -1260,6 +1267,18 @@ and `error_reporting.cpp` 6, writing to stdout with emoji rather than through
 These records are retained for provenance but are excluded from the counts
 above. The absence of source markers is not evidence that a structural defect
 is absent; active rows must be found by behavior and ownership analysis.
+
+<a id="lr12-1"></a>**LR12-1 · The whole validator test surface cannot run, and no baseline covers it · OPEN (found 2026-09-03)**
+
+Every validator test binary builds and then aborts at startup on a flat-namespace symbol lookup: `test_validator_gtest` and `test_validator_input_gtest` on `_ItemNull`, `test_validator_features_gtest` and `test_ast_validator_gtest` on `_g_lambda_home`. Both are ordinary core globals — `ItemNull` is defined at `lambda/core/lambda-data.cpp:190` and `g_lambda_home` at `lambda/runtime/runner.cpp:191` — and both are present in `lambda.exe`, so this is a link-composition problem in those four targets rather than a missing definition.
+
+The `validate` CLI is separately unusable: it resolves no root type at all, failing with `REFERENCE_ERROR: Type not found or circular reference detected: Document` even on the shipped pair `test/lambda/validator/schema_comprehensive.ls` + `test_data_valid.json`. The root name is chosen by a textual scan for the last `type ` in the schema file (`validator/ast_validate.cpp:270`–`312`), so the name reaching `resolve_type_reference` looks right and the schema's type table is what comes up empty.
+
+**Why it went unnoticed:** the validator gate runs from `test-lambda-full` (`Makefile:1624`), not `test-lambda-baseline`, so both baselines stay green over a completely dead test surface. That is the finding worth keeping — a gate outside the baseline is a gate nobody runs.
+
+Not attributed. The `elmt code clean up` commit (2cdcc1ea1) touches none of the files involved — not `build_lambda_config.json`, not `lambda-data.cpp`, not `runner.cpp`, not any validator or test source. The two remaining candidates are the object-redesign commit (da7a97b13), which reshaped `lambda.h`/`lambda-data.cpp` heavily, and the merged upstream `DOM: seven linkage lies and a dead local` (dbe7b7dba). Confirming which needs a from-scratch build of an older tree; a worktree attempt stalled on re-fetching vendored `re2`.
+
+**Consequence for the specs:** the D2.6.6v2 content-arity claim can only be read from the code, not run. `validate_against_element_type` does enforce `content_length`, and an element-kinded nominal type reaches that arm by tag, so the old "not implemented" note is wrong — but "conformant" cannot be asserted until this is fixed. Both conformance rows now say exactly that.
 
 <a id="lr03-10"></a>**LR03-10 · A type with no TypeId of its own resolves to the wrong singleton · RESOLVED 2026-09-03**
 `lambda_type_node_singleton` (`runtime/ast.hpp`) turns a type-annotation AST

@@ -1,9 +1,10 @@
 // Recursive queries shared by source-stage and canonical Mark Graph IR.
 
 pub fn element_children(value) {
-  if (value is element and len(value) > 0) {
-    [for (i in 0 to (len(value) - 1), let child = value[i]
-      where child is element) child]
+  // content(value) is the child sequence; len(value) counts attributes too
+  // (S8.3.1v2), so bounding an index walk with it overruns into nulls.
+  if (value is element) {
+    [for (child in content(value) where child is element) child]
   } else []
 }
 
@@ -21,9 +22,7 @@ fn first_direct_child(value, wanted_tag) {
 }
 
 pub fn child_items(value) {
-  if (value is element and len(value) > 0) {
-    [for (i in 0 to (len(value) - 1)) value[i]]
-  } else []
+  if (value is element) { [for (child in content(value)) child] } else []
 }
 
 pub fn label_element(value) => first_direct_child(value, "label")

@@ -35,11 +35,8 @@ fn canonical_content(value) {
 
 fn source_children(graph, tag) {
   if (graph is element) {
-    if (len(graph) == 0) { [] }
-    else {
-      [for (i in 0 to (len(graph) - 1), let child = graph[i]
-        where child is element and string(name(child)) == tag) child]
-    }
+    [for (child in content(graph)
+      where child is element and string(name(child)) == tag) child]
   }
   else if (tag == "node" and graph.nodes != null) graph.nodes
   else if (tag == "edge" and graph.edges != null) graph.edges

@@ -491,7 +491,7 @@ Item fn_join(Item left, Item right) {
             return {.array = result};
         }
         // different types: produce generic Array, convert typed elements to Items
-        int64_t left_len = fn_len(left), right_len = fn_len(right);
+        int64_t left_len = fn_seq_count(left), right_len = fn_seq_count(right);
         int64_t total_len = left_len + right_len;
         // A typed source can expose one external scalar payload per element;
         // reserve the exact worst-case tail before copy-in discovers the mix.
@@ -530,8 +530,8 @@ static bool array_has_item(Array* arr, Item item) {
 Item fn_union(Item left, Item right) {
     GUARD_ERROR2(left, right);
     Array* result = array();
-    int64_t left_len = fn_len(left);
-    int64_t right_len = fn_len(right);
+    int64_t left_len = fn_seq_count(left);
+    int64_t right_len = fn_seq_count(right);
 
     // Phase 6 routes value-level `|` here; preserve set order while removing duplicates.
     for (int64_t i = 0; i < left_len; i++) {
@@ -553,7 +553,7 @@ Item fn_union(Item left, Item right) {
 Item fn_intersect(Item left, Item right) {
     GUARD_ERROR2(left, right);
     Array* result = array();
-    int64_t left_len = fn_len(left);
+    int64_t left_len = fn_seq_count(left);
     for (int64_t i = 0; i < left_len; i++) {
         Item item = item_at(left, i);
         if (array_has_item(result, item)) continue;
@@ -567,7 +567,7 @@ Item fn_intersect(Item left, Item right) {
 Item fn_exclude(Item left, Item right) {
     GUARD_ERROR2(left, right);
     Array* result = array();
-    int64_t left_len = fn_len(left);
+    int64_t left_len = fn_seq_count(left);
     for (int64_t i = 0; i < left_len; i++) {
         Item item = item_at(left, i);
         if (array_has_item(result, item)) continue;
@@ -4795,25 +4795,11 @@ int64_t fn_len(Item item) {
         break;
     }
     case LMD_TYPE_ELEMENT: {
-        // S8.3.1v2: a NOMINAL value is not divergent — its length is attributes
-        // plus content, so `len(<Point x: 1, "t">)` is 2. Structural elements
-        // keep the divergence documented below (LR09-8).
-        if (lambda_value_nominal(type_id, item.element)) {
-            size = map_attr_count((Map*)item.element) + item.element->length;
-            break;
-        }
-        // KNOWN DIVERGENCE from S8.3.1v2, pre-existing and deliberately left
-        // in place: the law says `len(<e a:1, b:2, "t">)` is 3 (attributes then
-        // children, what `for (x in e)` walks), but this returns the child
-        // count alone. Conforming was measured — it moves 44 corpus goldens and
-        // breaks the child-indexing idiom `for (i in 0 to len(e) - 1) e[i]`,
-        // because an IntKey subscript reaches only children (S8.2.1v3) while
-        // the conformant `len` also counts attributes. Closing it needs a
-        // companion ruling for a child-count/child-index spelling first.
-        // Fixture `len_iter_law.ls` pins the divergence; tracked as LR09-8.
-        // Objects are NOT divergent — see the OBJECT arm above.
-        Element *elmt = item.element;
-        size = elmt->length;
+        // S8.3.1v2: length IS the for-iterable length, and `for (x in e)` walks
+        // the attribute values and then the content items, so an element's
+        // length is attributes plus content — `len(<e a:1, b:2, "t">)` is 3.
+        // Nominal and structural elements answer alike (LR09-8 closed).
+        size = map_attr_count((Map*)item.element) + item.element->length;
         break;
     }
     case LMD_TYPE_BINARY:
@@ -4913,17 +4899,87 @@ extern "C" int64_t fn_len_s(String* str) {
     return str->is_ascii ? (int64_t)str->len : (int64_t)str_utf8_count(str->chars, str->len);
 }
 
+// content(e) — the element's content items as a read-only ARRAY VIEW.
+//
+// The view shadow-copies the element's content meta fields (items pointer and
+// length) and does NOT copy the item slots, so `content(e)[i]` costs nothing
+// over `e[i]` and the graph package's per-node walks stay allocation-free.
+// Borrowing is expressed with the container view contract that ArrayNum
+// already uses (LR09-9): `is_view` set, and `extra` holding an ArrayNumShape
+// whose `base` is the owning element. That descriptor is what keeps the base
+// alive through a collection and what lets the GC re-point `items` after the
+// base's buffer is compacted — a plain aliased pointer would dangle, because
+// element content buffers do move (`gc_compact_data`).
+//
+// Read-only for now: `is_mutable_view` stays 0 and every write path refuses a
+// view, so aliasing can never be observed as a second writable handle. Whether
+// writes should pass through to the element is deliberately left open.
+Item fn_content(Item item) {
+    TypeId type_id = get_type_id(item);
+    if (type_id != LMD_TYPE_ELEMENT) {
+        return lambda_type_error(item, &TYPE_ELMT, "content");
+    }
+    Element* elmt = item.element;
+    if (!elmt) return ItemNull;
+
+    // The view must be ROOTED across the descriptor allocation: that allocation
+    // can collect, and with conservative stack scanning retired (D-rule) a view
+    // held only in this frame is invisible to the collector. Without this the
+    // view was reclaimed mid-construction and its slot handed to the next
+    // array, so `content(e)` silently returned a later, unrelated array.
+    RootFrame roots(2);
+    Rooted<Element*> rooted_base(roots, elmt);
+    Rooted<Array*> rooted_view(roots,
+        (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY));
+    Array* view = rooted_view.get();
+    if (!view) return ItemError;
+    view->type_id = LMD_TYPE_ARRAY;
+
+    ArrayNumShape* shape = (ArrayNumShape*)heap_data_alloc(sizeof(ArrayNumShape));
+    if (!shape) return ItemError;
+    memset(shape, 0, sizeof(ArrayNumShape));
+    view = rooted_view.get();     // reload: the allocation above may have moved nothing,
+    elmt = rooted_base.get();     // but the rooted handles are the authoritative pointers
+    shape->ndim = 1;
+    shape->is_c_contig = 1;
+    shape->is_f_contig = 1;
+    shape->backing_kind = ARRAY_NUM_BACKING_GC_VIEW;
+    shape->offset = 0;
+    shape->base = (void*)elmt;
+
+    view->is_view = 1;
+    view->is_mutable_view = 0;
+    view->items = elmt->items;
+    view->length = elmt->length;
+    // A view never owns storage, so it must not look growable: capacity 0 keeps
+    // every push/realloc path away from the borrowed buffer.
+    view->capacity = 0;
+    view->extra = (int64_t)(uintptr_t)shape;
+    return {.array = view};
+}
+
+// The number of positions a POSITIONAL traversal visits — the shared notion
+// behind the mapping pipe, `last`, and the set operators, all of which pair a
+// count with an IntKey read. It is NOT fn_len for an element: an IntKey reaches
+// content only (S8.2.1v3) while len also counts attributes (S8.3.1v2), and an
+// element's attributes describe the value rather than being members of it (a
+// group element's attributes are its key, its children are the rows). Before
+// S8.3.1v2 the two happened to agree, which is why every one of these callers
+// was written against fn_len and silently gained a trailing null per attribute
+// once they diverged (LR09-9).
+extern "C" int64_t fn_seq_count(Item item) {
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_ELEMENT) return item.element ? item.element->length : 0;
+    return fn_len(item);
+}
+
 extern "C" int64_t fn_len_e(Element* elmt) {
     if (!elmt) return 0;
-    // S8.3.1v2: a NOMINAL element counts attributes plus content, like every
-    // other nominal value; only a structural element keeps the content-only
-    // divergence (LR09-8). The JIT specializes `len` on a statically-element
-    // argument to this helper, so the rule has to hold here too or the two
-    // tiers disagree — which is exactly how this was found.
-    if (elmt->type && ((TypeMap*)elmt->type)->nominal) {
-        return map_attr_count((Map*)elmt) + elmt->length;
-    }
-    return elmt->length;
+    // The JIT specializes `len` on a statically-element argument to this
+    // helper, so it must apply the same S8.3.1v2 rule as fn_len's element arm
+    // or the two tiers disagree — which is exactly how the nominal half of
+    // LR09-8 was originally found.
+    return map_attr_count((Map*)elmt) + elmt->length;
 }
 
 // substring system function - extracts a substring from start to end (exclusive)
@@ -7009,6 +7065,13 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
     TypeId arr_type = arr->type_id;
     if (arr->is_static) {
         log_error("fn_array_set: cannot mutate static array");
+        return ItemError;
+    }
+    // A borrowing view aliases someone else's buffer. `content(e)` is read-only
+    // for now (LR09-9), so refuse rather than write through — the ARRAY_NUM arm
+    // below makes the same check for its own views.
+    if (arr->is_view && !arr->is_mutable_view && arr_type != LMD_TYPE_ARRAY_NUM) {
+        log_error("fn_array_set: cannot mutate a read-only view; copy() first");
         return ItemError;
     }
 

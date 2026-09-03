@@ -3,9 +3,8 @@
 import model: lambda.package.graph.model
 import graph_style: lambda.package.graph.style
 
-fn sanitized_children(value) => if (len(value) > 0) [
-  for (i in 0 to (len(value) - 1), child in sanitize_value(value[i])) child
-] else []
+fn sanitized_children(value) =>
+  [for (item in content(value), child in sanitize_value(item)) child]
 
 fn safe_enum(value, allowed) {
   // this module also exports lower(), so method syntax must select string.lower().

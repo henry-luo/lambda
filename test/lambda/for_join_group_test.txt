@@ -1,9 +1,9 @@
 "=== For Join Group Clauses ==="
 [{
     name: "Ada",
-    n: 2
+    n: 3
   }, {
     name: "Ben",
-    n: 1
+    n: 2
   }]
 "All for join group clause tests completed!"
