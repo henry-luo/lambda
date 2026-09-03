@@ -3,6 +3,7 @@
 // transitions and default actions that used to live in radiant/event.cpp.
 // The engine owns the storage; every write goes through the waist primitives.
 import radiant
+import tree: lambda.package.dom.tree
 import validate: lambda.package.dom.validate
 import editing: lambda.package.dom.editing
 import aria: lambda.package.dom.aria
@@ -41,7 +42,7 @@ on init(evt) { aria.reflect(~) }
 on click(evt) {
     if (radiant.get_state(~, "disabled")) { return 'pass' }
     if (radiant.get_state(~, "checked")) { return 'pass' }
-    for (peer in radiant.radio_group(~)) {
+    for (peer in tree.radio_group(~)) {
         radiant.set_state(peer, "checked", false)
     }
     radiant.set_state(~, "checked", true)
@@ -151,24 +152,24 @@ on submitactivation(evt) {
     let kind = radiant.attr(~, "type");
     let normalized = if (kind == null or kind == "") "submit" else lower(kind);
     if (normalized == "button" or normalized == "reset") { true }
-    submit.run(radiant.form_of(~), ~)
+    submit.run(tree.form_of(~), ~)
 }
 on resetactivation(evt) {
     let kind = radiant.attr(~, "type");
     if (kind != null and lower(kind) == "reset") {
-        submit.reset(radiant.form_of(~))
+        submit.reset(tree.form_of(~))
     }
     else { true }
 }
 
 view <input type:'submit'> state form_activation {}
-on submitactivation(evt) { submit.run(radiant.form_of(~), ~) }
+on submitactivation(evt) { submit.run(tree.form_of(~), ~) }
 
 view <input type:'image'> state form_activation {}
-on submitactivation(evt) { submit.run(radiant.form_of(~), ~) }
+on submitactivation(evt) { submit.run(tree.form_of(~), ~) }
 
 view <input type:'reset'> state form_activation {}
-on resetactivation(evt) { submit.reset(radiant.form_of(~)) }
+on resetactivation(evt) { submit.reset(tree.form_of(~)) }
 
 // The composition session, bound to the page rather than to a control (ES18).
 // Composition events bubble from the focused control, so the ancestor walk

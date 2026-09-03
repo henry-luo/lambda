@@ -1,0 +1,8 @@
+{
+  form_elements_checked: 38,
+  details_elements_checked: 22,
+  divergent_in_forms: [],
+  divergent_in_details: [],
+  radios_found: 3,
+  details_found: 2
+}

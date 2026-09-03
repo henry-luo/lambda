@@ -9,6 +9,7 @@
 // layout_block.cpp, plus the disclosure marker in resolve_htm_style.cpp).
 // The reflow follows from the mutation notice `set_attr` carries.
 import radiant
+import tree: lambda.package.dom.tree
 
 // HTML 4.11.1 exclusive accordion: details sharing a non-empty `name` in one
 // node tree may have at most one member open, so opening one closes the rest.
@@ -28,7 +29,7 @@ import radiant
 // avoid closing the very element being opened, and it answers with an empty
 // group for an unnamed details, which makes this a no-op rather than a case.
 pn close_group_peers(details) {
-    for (peer in radiant.details_group(details)) {
+    for (peer in tree.details_group(details)) {
         if (radiant.has_attr(peer, "open")) {
             radiant.set_attr(peer, "open", null)
             // every element whose openness changed reports its own toggle

@@ -255,9 +255,9 @@ DOM_OP(DERIVED, selection_select_all_children, selection, 2, "fn(s: any, n: any)
 DOM_OP(DERIVED, form_of,         forms, 1, "fn(n: any) -> any", DOM_NO_BODY, DOM_F_NEUTRAL,
        "if (has_attribute(n, \"form\")) get_element_by_id(root_node(n), get_attribute(n, \"form\")) else closest(n, \"form\")")
 DOM_OP(DERIVED, radio_group,     forms, 1, "fn(n: any) -> array", DOM_NO_BODY, DOM_F_NEUTRAL | DOM_F_SNAPSHOT,
-       "let scope = if (form_of(n) != null) form_of(n) else root_node(n); [for (c in query_selector_all(scope, \"input[type=radio]\") where get_attribute(c, \"name\") == get_attribute(n, \"name\") and same_node(form_of(c), form_of(n))) c]")
+       "let scope = if (form_of(n) != null) form_of(n) else root_node(n); [for (c in query_selector_all(scope, \"input[type=radio]\") where get_attribute(c, \"name\") == get_attribute(n, \"name\") and same_owner(form_of(c), form_of(n))) c]")
 DOM_OP(DERIVED, details_group,   forms, 1, "fn(n: any) -> array", DOM_NO_BODY, DOM_F_NEUTRAL | DOM_F_SNAPSHOT,
-       "[for (d in query_selector_all(root_node(n), \"details[name]\") where get_attribute(d, \"name\") == get_attribute(n, \"name\")) d]")
+       "let g = get_attribute(n, \"name\"); if (g == null or g == \"\") [] else [for (d in query_selector_all(root_node(n), \"details[name]\") where get_attribute(d, \"name\") == g and not same_node(d, n)) d]")
 DOM_OP(DERIVED, focus_candidates, focus, 1, "fn(root: any) -> array", DOM_NO_BODY, DOM_F_NEUTRAL | DOM_F_SNAPSHOT,
        "[for (d in descendants(root) where is_focusable(d)) d]")
 DOM_OP(DERIVED, form_controls,   forms, 1, "fn(f: any) -> array", DOM_NO_BODY, DOM_F_NEUTRAL | DOM_F_SNAPSHOT,
