@@ -345,7 +345,6 @@ struct JsClipboardState : JsRootedState {
 // is owned by Radiant; this range owns only JS heap values that reference it.
 struct JsDomState : JsRootedState {
     Item implementation = {};
-    Item document_proxy = {};
     Item default_view = {};
     Item title = {};
     Item fonts = {};

@@ -316,7 +316,7 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     M(&state->net.roots, &state->net.socket_prototype, 5, "net namespace and prototypes") \
     M(&state->fs.roots, &state->fs.internal_binding_namespace, 7, "fs namespaces and prototypes") \
     M(&state->clipboard.roots, &state->clipboard.blob_prototype, 7, "clipboard prototypes and drag session") \
-    M(&state->dom.roots, &state->dom.implementation, 5, "DOM singleton wrappers") \
+    M(&state->dom.roots, &state->dom.implementation, 4, "DOM singleton wrappers") \
     M(&state->string_concat.roots, &state->string_concat.last_four_byte_escape, 273, "string concatenation fast caches") \
     M(&state->global_var_module_bindings.roots, &state->global_var_module_bindings.global, 1 + JS_GLOBAL_VAR_MODULE_BINDING_CAP, "global var module bindings") \
     M(&state->runtime_core_cache.roots, &state->runtime_core_cache.proto_key, 1, "runtime prototype key cache") \

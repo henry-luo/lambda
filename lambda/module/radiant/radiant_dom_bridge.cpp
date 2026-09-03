@@ -262,7 +262,9 @@ static void radiant_dom_cache_check_owner(const char* op) {
 }
 
 static bool radiant_dom_is_node_host_type(const void* host_type) {
+    // ESO102: unwrapping `document` must yield the #document stub, not null.
     return host_type == (const void*)&s_radiant_dom_vmap_type_marker ||
+        host_type == radiant_dom_document_host_type() ||
         host_type == radiant_dom_node_host_type() ||
         host_type == radiant_dom_html_element_host_type() ||
         host_type == radiant_dom_character_data_host_type() ||
@@ -275,6 +277,15 @@ static bool radiant_dom_is_node_host_type(const void* host_type) {
 
 static const void* radiant_dom_host_type_for_node(DomNode* node) {
     if (!node) return radiant_dom_node_host_type();
+    // ESO102: the #document stub is a DomElement, so the element mapping below
+    // would hand it the Element interface and `document.createRange` would not
+    // exist. It is a Document, and `document` is this wrapper now.
+    if (node->is_element()) {
+        DomElement* de = node->as_element();
+        if (de->doc && de->doc->js.doc_node == (void*)de) {
+            return radiant_dom_document_host_type();
+        }
+    }
     if (node->is_text() || node->is_comment()) {
         return radiant_dom_character_data_host_type();
     }
@@ -343,13 +354,9 @@ static Item radiant_dom_node_item(DomNode* node) {
 
 static Item radiant_dom_document_item(DomDocument* doc) {
     if (!doc) return ItemNull;
-    Item wrapper = radiant_host_api->value->vmap_new();
-    if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
-        wrapper.vmap->host_type = radiant_dom_document_host_type();
-        wrapper.vmap->host_data = (void*)doc;
-        return wrapper;
-    }
-    return ItemNull;
+    // ESO102: which object a document *is* differs per document -- a foreign one
+    // keeps its own wrapper -- so the core decides, not this factory.
+    return dom_document_proxy_for_doc_bridge((void*)doc);
 }
 
 static Item radiant_dom_array_item() {
@@ -1071,13 +1078,6 @@ RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem) {
     if (!dom_elem) return ItemNull;
 
     DomNode* node = (DomNode*)dom_elem;
-    if (node->is_element()) {
-        DomElement* e = node->as_element();
-        if (e->doc && e->doc->js.doc_node == (void*)e) {
-            Item proxy = dom_document_proxy_for_doc_bridge(e->doc);
-            if (proxy.item != ITEM_NULL) return proxy;
-        }
-    }
 
     Item cached = radiant_dom_lookup_wrapper(node);
     if (cached.item != ITEM_NULL) return cached;
@@ -2975,13 +2975,29 @@ RADIANT_C_API int radiant_dom_foreign_document_set_property(Item object,
     return 1;
 }
 
+// ESO102: a Document wrapper's host_data is the #document node. Passing it raw
+// to dom_swap_active_document made the active document a DomNode* -- the crash
+// that took down every script, reported only as a recovered JIT fault.
+static void* radiant_dom_doc_from_wrapper(Item object) {
+    if (get_type_id(object) != LMD_TYPE_VMAP || !object.vmap || !object.vmap->host_data) {
+        return nullptr;
+    }
+    if (object.vmap->host_type == radiant_dom_document_host_type()) {
+        DomNode* n = (DomNode*)object.vmap->host_data;
+        DomElement* e = (n && n->is_element()) ? n->as_element() : nullptr;
+        return e ? (void*)e->doc : nullptr;
+    }
+    return object.vmap->host_data;
+}
+
 RADIANT_C_API int radiant_dom_document_host_get_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     if (dom_get_foreign_doc(object)) {
         return radiant_dom_foreign_document_get_property(object, key, out);
     }
-    if (get_type_id(object) == LMD_TYPE_VMAP && object.vmap && object.vmap->host_data) {
-        void* prev = dom_swap_active_document(object.vmap->host_data);
+    void* doc_for_get = radiant_dom_doc_from_wrapper(object);
+    if (doc_for_get) {
+        void* prev = dom_swap_active_document(doc_for_get);
         *out = dom_document_proxy_get_property(key);
         dom_restore_active_document(prev);
         return 1;
@@ -2998,8 +3014,9 @@ RADIANT_C_API int radiant_dom_document_host_set_property(Item object,
     if (dom_get_foreign_doc(object)) {
         return radiant_dom_foreign_document_set_property(object, key, value, out);
     }
-    if (get_type_id(object) == LMD_TYPE_VMAP && object.vmap && object.vmap->host_data) {
-        void* prev = dom_swap_active_document(object.vmap->host_data);
+    void* doc_for_set = radiant_dom_doc_from_wrapper(object);
+    if (doc_for_set) {
+        void* prev = dom_swap_active_document(doc_for_set);
         *out = dom_document_proxy_set_property(key, value);
         dom_restore_active_document(prev);
         return 1;
@@ -3438,9 +3455,7 @@ RADIANT_C_API int radiant_dom_document_operation(Item object,
                                                   RadiantDocumentOperation operation,
                                                   Item* args, int argc, Item* out) {
     void* target_doc = dom_get_foreign_doc(object);
-    if (!target_doc && get_type_id(object) == LMD_TYPE_VMAP && object.vmap) {
-        target_doc = object.vmap->host_data;
-    }
+    if (!target_doc) target_doc = radiant_dom_doc_from_wrapper(object);
     void* previous_doc = target_doc ? dom_swap_active_document(target_doc) : nullptr;
     int handled = radiant_dom_document_operation_active(operation, args, argc, out);
     if (target_doc) dom_restore_active_document(previous_doc);
