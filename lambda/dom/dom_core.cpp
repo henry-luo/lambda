@@ -313,6 +313,7 @@ extern "C" Item dom_core_set_node_value(Item n, Item data) {
 // rather than through the API. Each gets a row in the catalog's uniform shape
 // so JS crosses the same entry point every other caller does; the bodies below
 // are adapters, not new mechanism.
+extern "C" Item dom_dispatch_event_bridge(Item target, Item event);
 extern "C" Item dom_css_supports_operation(Item* args, int argc);
 extern "C" Item dom_css_escape_operation(Item* args, int argc);
 extern "C" Item dom_dataset_set_property(Item elem_item, Item prop_name, Item value);
@@ -387,7 +388,14 @@ extern "C" Item dom_core_dispatch(Item n, Item event) {
         return dom_engine_dispatch(n, event);
     }
     Item type = dom_map_field(event, "type");
-    if (get_type_id(type) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    if (get_type_id(type) != LMD_TYPE_STRING) {
+        // Not a name and not a Lambda event map: it is a JS Event object, which
+        // is class-stamped rather than keyed data, so its own dispatch path
+        // handles it. One row serves both realms; without this, routing JS's
+        // dispatchEvent here silently dropped every event -- the handler,
+        // lifecycle and jQuery suites all failed at once.
+        return dom_absent_to_null(dom_dispatch_event_bridge(n, event));
+    }
     Item bubbles = { .item = b2it(dom_event_flag(event, "bubbles", true)) };
     Item cancelable = { .item = b2it(dom_event_flag(event, "cancelable", false)) };
     return dom_engine_dispatch_event(n, type, bubbles, cancelable);

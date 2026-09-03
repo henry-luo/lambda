@@ -729,13 +729,13 @@ static int sh_indexed_get(Item receiver, int64_t index, Item* out) {
 }
 
 static int sh_insert_rule(Item receiver, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom->stylesheet_insert_rule(receiver,
+    *out = radiant_host_api->dom_catalog->stylesheet_insert_rule(receiver,
         radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1));
     return 1;
 }
 
 static int sh_delete_rule(Item receiver, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom->stylesheet_delete_rule(receiver,
+    *out = radiant_host_api->dom_catalog->stylesheet_delete_rule(receiver,
         radiant_iface_arg(args, argc, 0));
     return 1;
 }

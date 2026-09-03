@@ -152,7 +152,7 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_document_open_bridge radiant_host_api->dom->document_open_bridge
 #define dom_document_write_bridge radiant_host_api->dom->document_write_bridge
 #define dom_document_element_from_point_bridge radiant_host_api->dom->document_element_from_point_bridge
-#define dom_create_range radiant_host_api->dom->create_range
+#define dom_create_range radiant_host_api->dom_catalog->create_range
 #define dom_get_selection radiant_host_api->dom->get_selection
 #define dom_get_selection_function_for_document radiant_host_api->realm->get_selection_function_for_document
 #define dom_doc_has_browsing_context radiant_host_api->dom->doc_has_browsing_context
