@@ -55,15 +55,15 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
 // navigation, the popover trio and scrollIntoView -- and each now crosses the
 // host API like everything else (ES34). The three that already had slots used
 // them; the six that did not were added to the table's additive tail.
-#define dom_check_validity_bridge radiant_host_api->dom->check_validity_bridge
-#define dom_form_reset_bridge radiant_host_api->dom->form_reset_bridge
-#define dom_scroll_into_view_bridge radiant_host_api->dom->scroll_into_view_bridge
-#define js_formdata_collect_form_entries radiant_host_api->dom->formdata_collect_form_entries
-#define dom_focus_first_invalid_form_control radiant_host_api->dom->focus_first_invalid_form_control
-#define dom_navigate_submit_target radiant_host_api->dom->navigate_submit_target
-#define dom_popover_target_for_button radiant_host_api->dom->popover_target_for_button
-#define dom_popover_target_action radiant_host_api->dom->popover_target_action
-#define dom_activate_popover radiant_host_api->dom->activate_popover
+#define dom_check_validity_bridge radiant_host_api->dom_catalog->check_validity_bridge
+#define dom_form_reset_bridge radiant_host_api->dom_catalog->form_reset_bridge
+#define dom_scroll_into_view_bridge radiant_host_api->dom_catalog->scroll_into_view_bridge
+#define js_formdata_collect_form_entries radiant_host_api->dom_catalog->formdata_collect_form_entries
+#define dom_focus_first_invalid_form_control radiant_host_api->dom_catalog->focus_first_invalid_form_control
+#define dom_navigate_submit_target radiant_host_api->dom_catalog->navigate_submit_target
+#define dom_popover_target_for_button radiant_host_api->dom_catalog->popover_target_for_button
+#define dom_popover_target_action radiant_host_api->dom_catalog->popover_target_action
+#define dom_activate_popover radiant_host_api->dom_catalog->activate_popover_native
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -2622,7 +2622,7 @@ RADIANT_C_API Item fn_radiant_velmt_padding(Item velmt_item) {
 
 static int radiant_module_init(const JubeHostAPI* host) {
     if (!host || host->api_version != JUBE_HOST_API_VERSION ||
-        !host->gc || !host->value || !host->script || !host->dom || !host->realm) {
+        !host->gc || !host->value || !host->script || !host->dom_catalog || !host->realm) {
         log_error("JUBE_RADIANT: missing host API during module init");
         return -1;
     }

@@ -315,34 +315,34 @@ static Item radiant_iface_arg(Item* args, int argc, int i) {
 
 #define RADIANT_GETTER(name, entry)                                          \
     static int name(Item receiver, Item* out) {                              \
-        *out = radiant_host_api->dom->entry(receiver);                       \
+        *out = radiant_host_api->dom_catalog->entry(receiver);                       \
         return 1;                                                            \
     }
 
 #define RADIANT_METHOD_0(name, entry)                                        \
     static int name(Item receiver, Item* args, int argc, Item* out) {        \
         (void)args; (void)argc;                                              \
-        *out = radiant_host_api->dom->entry(receiver);                       \
+        *out = radiant_host_api->dom_catalog->entry(receiver);                       \
         return 1;                                                            \
     }
 
 #define RADIANT_METHOD_1(name, entry)                                        \
     static int name(Item receiver, Item* args, int argc, Item* out) {        \
-        *out = radiant_host_api->dom->entry(receiver,                        \
+        *out = radiant_host_api->dom_catalog->entry(receiver,                        \
             radiant_iface_arg(args, argc, 0));                               \
         return 1;                                                            \
     }
 
 #define RADIANT_METHOD_2(name, entry)                                        \
     static int name(Item receiver, Item* args, int argc, Item* out) {        \
-        *out = radiant_host_api->dom->entry(receiver,                        \
+        *out = radiant_host_api->dom_catalog->entry(receiver,                        \
             radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1)); \
         return 1;                                                            \
     }
 
 #define RADIANT_METHOD_3(name, entry)                                        \
     static int name(Item receiver, Item* args, int argc, Item* out) {        \
-        *out = radiant_host_api->dom->entry(receiver,                        \
+        *out = radiant_host_api->dom_catalog->entry(receiver,                        \
             radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1), \
             radiant_iface_arg(args, argc, 2));                               \
         return 1;                                                            \
@@ -350,7 +350,7 @@ static Item radiant_iface_arg(Item* args, int argc, int i) {
 
 #define RADIANT_METHOD_4(name, entry)                                        \
     static int name(Item receiver, Item* args, int argc, Item* out) {        \
-        *out = radiant_host_api->dom->entry(receiver,                        \
+        *out = radiant_host_api->dom_catalog->entry(receiver,                        \
             radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1), \
             radiant_iface_arg(args, argc, 2), radiant_iface_arg(args, argc, 3)); \
         return 1;                                                            \
@@ -623,21 +623,21 @@ static int st_get_property_value(Item r, Item* args, int argc, Item* out) {
 }
 
 static int st_set_property(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom->style_set_property_bridge(r.vmap->host_data,
+    *out = radiant_host_api->dom_catalog->style_set_property_bridge(r.vmap->host_data,
         radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1),
         radiant_iface_arg(args, argc, 2), argc >= 3);
     return 1;
 }
 
 static int st_remove_property(Item r, Item* args, int argc, Item* out) {
-    *out = radiant_host_api->dom->style_remove_property_bridge(r.vmap->host_data,
+    *out = radiant_host_api->dom_catalog->style_remove_property_bridge(r.vmap->host_data,
         radiant_iface_arg(args, argc, 0));
     return 1;
 }
 
 // computed style: read-only; the resolver entry takes the style item itself
 static int cs_get(Item r, Item key, Item* out) {
-    *out = radiant_host_api->dom->computed_style_get_property(r, key);
+    *out = radiant_host_api->dom_catalog->computed_style_get_property(r, key);
     return 1;
 }
 
@@ -697,7 +697,7 @@ static const JubeMemberBind radiant_computed_style_members[] = {
 
 #define RADIANT_GETTER_D(name, entry)                                        \
     static int name(Item receiver, Item* out) {                              \
-        *out = radiant_host_api->dom->entry(receiver);                       \
+        *out = radiant_host_api->dom_catalog->entry(receiver);                       \
         return 1;                                                            \
     }
 
@@ -724,7 +724,7 @@ static int cssom_swallow_set(Item receiver, Item key, Item value, Item* out) {
 }
 
 static int sh_indexed_get(Item receiver, int64_t index, Item* out) {
-    *out = radiant_host_api->dom->stylesheet_index(receiver, index);
+    *out = radiant_host_api->dom_catalog->stylesheet_index(receiver, index);
     return 1;
 }
 

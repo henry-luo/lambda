@@ -11,7 +11,7 @@ extern "C" {
 
 #define JUBE_ABI_VERSION 4
 #define JUBE_ABI_VERSION_LEGACY 1
-#define JUBE_HOST_API_VERSION 2
+#define JUBE_HOST_API_VERSION 3
 #define JUBE_HOST_LANG_API_VERSION 1
 
 // Hosted compiler services are intentionally build-coupled while their opaque
@@ -33,7 +33,6 @@ typedef struct JubeHostRootAPI JubeHostRootAPI;
 typedef struct JubeHostDataAPI JubeHostDataAPI;
 typedef struct JubeHostValueAPI JubeHostValueAPI;
 typedef struct JubeHostScriptAPI JubeHostScriptAPI;
-typedef struct JubeHostDomAPI JubeHostDomAPI;
 typedef struct JubeHostRealmAPI JubeHostRealmAPI;
 typedef struct JubeHostDomCatalogAPI JubeHostDomCatalogAPI;
 typedef struct JubeHostLangAPI JubeHostLangAPI;
@@ -697,9 +696,12 @@ typedef Item (*JubeDomFn5)(Item, Item, Item, Item, Item);
 struct JubeHostDomCatalogAPI {
 #define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
     JubeDomFn##argc name;
+#define DOM_RAW(name, cluster, ret, params, body, flags) \
+    ret (*name)params;
 #include "../dom/dom_api.def"
 #undef DOM_OP
-    // One slot per row, plus the ordinal executor's *native* shape. Every row is
+#undef DOM_RAW
+    // One slot per row of either kind, plus the ordinal executor's native shape. Every row is
     // fixed-arity because a row is a Lambda function; the executor is variadic,
     // so the uniform `invoke` row has to pack its arguments into an array. That
     // packing is pure ceremony for a native caller -- an allocation per method
@@ -709,212 +711,6 @@ struct JubeHostDomCatalogAPI {
     Item (*invoke_raw)(Item node, JubeDomElementOperation op, Item* args, int argc);
 };
 
-struct JubeHostDomAPI {
-    void* (*get_document)(void);
-    void* (*get_or_create_doc_node)(void* doc);
-    void* (*unwrap_element_impl)(Item item);
-    bool (*is_inline_style_item)(Item item);
-    bool (*is_computed_style_item)(Item item);
-    bool (*is_stylesheet)(Item item);
-    bool (*is_css_rule)(Item item);
-    bool (*is_rule_style_decl)(Item item);
-    Item (*dom_get_property_impl)(Item elem_item, Item prop_name);
-    Item (*dom_set_property_impl)(Item elem_item, Item prop_name, Item value);
-    Item (*dom_element_operation_impl)(Item elem_item,
-                                       JubeDomElementOperation operation,
-                                       Item* args, int argc);
-    Item (*computed_style_get_property)(Item style_item, Item prop_name);
-    bool (*style_resource_has_property)(Item style_item, Item prop_name);
-    Item (*cssom_rule_decl_get_property)(Item decl_item, Item prop_name);
-    Item (*cssom_rule_decl_set_property)(Item decl_item, Item prop_name, Item value);
-    void* (*get_foreign_doc)(Item item);
-    void* (*swap_active_document)(void* new_doc);
-    void (*restore_active_document)(void* prev_doc);
-    Item (*owner_document_for_node)(void* node);
-    const char* (*to_attribute_cstr)(Item value);
-    void (*after_set_attribute)(void* elem, const char* attr_name, const char* attr_value);
-    void (*after_remove_attribute)(void* elem, const char* attr_name);
-    void (*after_toggle_attribute_remove)(void* elem, const char* attr_name);
-    void (*after_disabled_attribute_set)(void* elem);
-    void (*after_default_checked_set)(void* elem, bool checked);
-    void (*after_default_selected_set)(void* elem, bool selected);
-    void (*after_select_multiple_removed)(void* elem);
-    void (*set_checked_dirty)(void* elem, bool checked);
-    void (*select_set_value_bridge)(void* elem, const char* value);
-    void (*select_set_selected_index_bridge)(void* elem, Item value);
-    void (*select_set_length_bridge)(void* elem, Item value);
-    void (*set_option_selected_dirty)(void* elem, bool selected);
-    void (*set_option_text_bridge)(void* elem, const char* value);
-    void (*after_srcdoc_set)(void* elem);
-    Item (*set_text_data_property)(void* text, Item value);
-    Item (*text_control_set_value_bridge)(void* elem, Item value);
-    Item (*text_control_set_selection_start_bridge)(void* elem, Item value);
-    Item (*text_control_set_selection_end_bridge)(void* elem, Item value);
-    Item (*text_control_set_selection_direction_bridge)(void* elem, Item value);
-    Item (*text_control_set_default_value_bridge)(void* elem, Item value);
-    Item (*text_control_set_selection_range_bridge)(void* elem, Item start, Item end, Item dir);
-    Item (*text_control_set_range_text_bridge)(void* elem, Item replacement, Item start,
-                                               Item end, Item mode);
-    Item (*text_control_select_bridge)(void* elem);
-    Item (*form_reset_bridge)(Item form_item);
-    Item (*check_validity_bridge)(Item elem_item);
-    Item (*report_validity_bridge)(Item elem_item);
-    Item (*form_submit_bridge)(Item form_item);
-    Item (*form_request_submit_bridge)(Item form_item, Item submitter);
-    Item (*focus_method_bridge)(void* elem, bool focus);
-    Item (*click_method_bridge)(Item elem_item);
-    Item (*add_event_listener_bridge)(Item target_item, Item type, Item callback, Item opts);
-    Item (*remove_event_listener_bridge)(Item target_item, Item type, Item callback, Item opts);
-    Item (*dispatch_event_bridge)(Item target_item, Item event_item);
-    Item (*get_bounding_client_rect_bridge)(void* elem);
-    Item (*get_client_rects_bridge)(void* elem);
-    Item (*scroll_into_view_bridge)(void* elem);
-    Item (*scroll_operation_bridge)(Item elem_item,
-                                    JubeDomElementOperation operation,
-                                    Item* args, int argc);
-    Item (*text_control_caret_bounds_bridge)(void* elem);
-    Item (*text_control_boundary_from_point_bridge)(void* elem, Item x, Item y);
-    Item (*boundary_from_point_bridge)(void* elem, Item x, Item y, Item behavior);
-    Item (*style_set_property_bridge)(void* elem, Item prop, Item value,
-                                      Item priority, bool has_priority);
-    Item (*style_remove_property_bridge)(void* elem, Item prop);
-    Item (*text_replace_data_bridge)(void* text, Item offset, Item count, Item data);
-    Item (*text_insert_data_bridge)(void* text, Item offset, Item data);
-    Item (*text_append_data_bridge)(void* text, Item data);
-    Item (*text_delete_data_bridge)(void* text, Item offset, Item count);
-    Item (*text_substring_data_bridge)(void* text, Item offset, Item count);
-    Item (*append_child_bridge)(void* parent, Item child);
-    Item (*remove_child_bridge)(void* parent, Item child);
-    Item (*insert_before_bridge)(void* parent, Item new_child, Item ref_child);
-    Item (*remove_bridge)(void* node);
-    Item (*adopt_node_bridge)(Item node);
-    Item (*location_navigate_bridge)(void* doc, Item next_url, bool replace);
-    Item (*document_open_bridge)(void* doc);
-    Item (*document_write_bridge)(void* doc, Item text);
-    Item (*document_element_from_point_bridge)(void* doc, Item x, Item y);
-    Item (*create_range)(void);
-    Item (*get_selection)(void);
-    bool (*doc_has_browsing_context)(void* doc);
-    Item (*document_fonts_bridge)(void);
-    Item (*document_stylesheets_bridge)(void);
-    Item (*document_implementation_bridge)(void);
-    Item (*document_design_mode_bridge)(void);
-    Item (*document_active_element_bridge)(void* doc);
-    Item (*normalize_bridge)(void* elem);
-    Item (*clone_node_bridge)(void* elem, Item deep, bool has_deep);
-    Item (*replace_child_bridge)(void* parent, Item new_child, Item old_child);
-    Item (*replace_with_bridge)(void* node, Item* args, int argc);
-    Item (*insert_adjacent_element_bridge)(void* elem, Item position, Item new_node);
-    Item (*insert_adjacent_html_bridge)(void* elem, Item position, Item html);
-    Item (*append_variadic_bridge)(void* elem, Item* args, int argc);
-    Item (*prepend_variadic_bridge)(void* elem, Item* args, int argc);
-    void (*notify_mutation)(int kind, void* target, void* parent);
-    void (*notify_mutation_detail)(int kind, void* target, void* parent,
-                                   const char* attribute_name, const char* old_value);
-    // -- DOM3 Phase 1 additive tail: receiver-explicit Range/Selection behavior.
-    // These carry the behavior the deleted strcmp chains used to reach through
-    // cached method objects; the radiant module's declared-interface bindings
-    // are their only callers.
-    Item (*range_get_start_container)(Item self);
-    Item (*range_get_start_offset)(Item self);
-    Item (*range_get_end_container)(Item self);
-    Item (*range_get_end_offset)(Item self);
-    Item (*range_get_collapsed)(Item self);
-    Item (*range_get_common_ancestor)(Item self);
-    Item (*range_set_start)(Item self, Item node, Item offset);
-    Item (*range_set_end)(Item self, Item node, Item offset);
-    Item (*range_set_start_before)(Item self, Item node);
-    Item (*range_set_start_after)(Item self, Item node);
-    Item (*range_set_end_before)(Item self, Item node);
-    Item (*range_set_end_after)(Item self, Item node);
-    Item (*range_collapse)(Item self, Item to_start);
-    Item (*range_select_node)(Item self, Item node);
-    Item (*range_select_node_contents)(Item self, Item node);
-    Item (*range_clone_range)(Item self);
-    Item (*range_compare_boundary_points)(Item self, Item how, Item other);
-    Item (*range_compare_point)(Item self, Item node, Item offset);
-    Item (*range_is_point_in_range)(Item self, Item node, Item offset);
-    Item (*range_intersects_node)(Item self, Item node);
-    Item (*range_detach)(Item self);
-    Item (*range_to_string)(Item self);
-    Item (*range_get_client_rects)(Item self);
-    Item (*range_get_bounding_client_rect)(Item self);
-    Item (*range_delete_contents)(Item self);
-    Item (*range_extract_contents)(Item self);
-    Item (*range_clone_contents)(Item self);
-    Item (*range_insert_node)(Item self, Item node);
-    Item (*range_surround_contents)(Item self, Item node);
-    Item (*selection_get_anchor_node)(Item self);
-    Item (*selection_get_anchor_offset)(Item self);
-    Item (*selection_get_focus_node)(Item self);
-    Item (*selection_get_focus_offset)(Item self);
-    Item (*selection_get_is_collapsed)(Item self);
-    Item (*selection_get_range_count)(Item self);
-    Item (*selection_get_type)(Item self);
-    Item (*selection_get_direction)(Item self);
-    Item (*selection_get_range_at)(Item self, Item index);
-    Item (*selection_add_range)(Item self, Item range);
-    Item (*selection_remove_range)(Item self, Item range);
-    Item (*selection_remove_all_ranges)(Item self);
-    Item (*selection_empty)(Item self);
-    Item (*selection_collapse)(Item self, Item node, Item offset);
-    Item (*selection_set_position)(Item self, Item node, Item offset);
-    Item (*selection_collapse_to_start)(Item self);
-    Item (*selection_collapse_to_end)(Item self);
-    Item (*selection_extend)(Item self, Item node, Item offset);
-    Item (*selection_set_base_and_extent)(Item self, Item anchor_node, Item anchor_offset,
-                                          Item focus_node, Item focus_offset);
-    Item (*selection_select_all_children)(Item self, Item node);
-    Item (*selection_contains_node)(Item self, Item node, Item allow_partial);
-    Item (*selection_delete_from_document)(Item self);
-    Item (*selection_to_string)(Item self);
-    Item (*selection_modify)(Item self, Item alter, Item direction, Item granularity);
-    Item (*selection_force_direction)(Item self, Item direction);
-    // -- DOM3 Phase 3 additive tail: style-host behavior.
-    // style_get/set_property take the OWNER ELEMENT item (inline-style wrappers
-    // carry the owner as host_data; adapters wrap it before calling).
-    Item (*style_get_property)(Item owner_elem, Item prop);
-    Item (*style_set_property)(Item owner_elem, Item prop, Item value);
-    Item (*style_css_has)(Item style, Item prop);
-    // -- DOM3 Phase 2 additive tail: CSSOM behavior.
-    Item (*stylesheet_get_css_rules)(Item sheet);
-    Item (*stylesheet_get_length)(Item sheet);
-    Item (*stylesheet_get_disabled)(Item sheet);
-    Item (*stylesheet_get_type)(Item sheet);
-    Item (*stylesheet_get_href)(Item sheet);
-    Item (*stylesheet_get_title)(Item sheet);
-    Item (*stylesheet_index)(Item sheet, int64_t index);
-    Item (*stylesheet_insert_rule)(Item sheet, Item text, Item index);
-    Item (*stylesheet_delete_rule)(Item sheet, Item index);
-    Item (*rule_get_selector_text)(Item rule);
-    Item (*rule_set_selector_text)(Item rule, Item value);
-    Item (*rule_get_style)(Item rule);
-    Item (*rule_get_css_rules)(Item rule);
-    Item (*rule_get_css_text)(Item rule);
-    Item (*rule_get_type)(Item rule);
-    Item (*rule_get_parent_rule)(Item rule);
-    Item (*rule_decl_remove_property)(Item decl, Item prop);
-    Item (*rule_decl_css_has)(Item decl, Item prop);
-    // -- Radiant browser-global state. Kept behind the host boundary so the
-    // module owns DOM-facing window semantics without reaching into dom.cpp.
-    void* (*get_ui_context)(void);
-    bool (*has_committed_geometry_snapshot)(void* doc);
-    // -- Tune4 additive tail: document callables cross the host boundary as
-    // direct operations; property names are resolved before invocation (D6.2.2v2).
-    Item (*document_create_tree_walker_bridge)(Item root, Item what_to_show);
-    Item (*document_exec_command_bridge)(Item command, Item value);
-
-    // -- F31 additive tail: the last DOM bodies the module reached by direct
-    // extern rather than through this table. Form submission and popover
-    // activation are host policy, not module policy, so they belong here; with
-    // these the module declares no extern into a DOM body at all (ES34).
-    Item (*formdata_collect_form_entries)(void* form_elem, void* submitter_elem);
-    bool (*focus_first_invalid_form_control)(void* form_elem);
-    bool (*navigate_submit_target)(const char* target_name, const char* url);
-    void* (*popover_target_for_button)(void* button);
-    int (*popover_target_action)(void* button);
-    bool (*activate_popover)(void* popover, int action);
-};
 
 // ES41 (Lambda_Design_DOM_Host_API.md): the JS *shape* of the DOM -- the
 // document proxy, prototype values, expandos, live collections, wrapper
@@ -1684,7 +1480,6 @@ struct JubeHostAPI {
     const JubeHostGcAPI* gc;
     const JubeHostValueAPI* value;
     const JubeHostScriptAPI* script;
-    const JubeHostDomAPI* dom;
     const JubeHostRealmAPI* realm;   // ES41: the JS shape of the DOM (v2)
     const JubeHostDomCatalogAPI* dom_catalog;  // ES40: the catalog, core + derived (v2)
     const JubeRuntimeCatalogAPI* runtime_catalog;

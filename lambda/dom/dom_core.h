@@ -27,6 +27,10 @@ enum DomOpFlags {
     DOM_F_SNAPSHOT = 1u << 2,
     DOM_F_ENGINE   = 1u << 3,
     DOM_F_FASTPATH = 1u << 4,
+    // No Lambda face yet: the row is in the catalog so the module can reach it,
+    // but it is not published to `dom.*`. States the policy explicitly instead
+    // of leaving it to the absence of DOM_F_NEUTRAL, which states a property.
+    DOM_F_NATIVE   = 1u << 5,
 };
 #define DOM_NO_BODY nullptr
 
