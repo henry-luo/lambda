@@ -119,7 +119,8 @@ static void annotate_css_rule_source_file(CssRule* rule, const char* source_file
             annotate_css_rule_source_file(rule->data.style_rule.nested_rules[i], source_file);
         }
     } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
-               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_SCOPE) {
+               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_SCOPE ||
+               rule->type == CSS_RULE_LAYER) {
         for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
             annotate_css_rule_source_file(rule->data.conditional_rule.rules[i], source_file);
         }

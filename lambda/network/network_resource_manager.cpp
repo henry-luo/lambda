@@ -785,6 +785,29 @@ bool resource_manager_is_fully_loaded(const NetworkResourceManager* mgr) {
     return loaded;
 }
 
+bool network_resource_blocks_first_paint(const NetworkResource* res) {
+    return res && res->type == RESOURCE_CSS &&
+        (res->state == STATE_PENDING || res->state == STATE_DOWNLOADING);
+}
+
+bool resource_manager_are_render_blocking_resources_loaded(const NetworkResourceManager* mgr) {
+    if (!mgr) return true;
+
+    pthread_mutex_lock((pthread_mutex_t*)&mgr->mutex);
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter((struct hashmap*)mgr->resources, &iter, &item)) {
+        ResourceEntry* entry = (ResourceEntry*)item;
+        NetworkResource* res = entry ? entry->res : NULL;
+        if (network_resource_blocks_first_paint(res)) {
+            pthread_mutex_unlock((pthread_mutex_t*)&mgr->mutex);
+            return false;
+        }
+    }
+    pthread_mutex_unlock((pthread_mutex_t*)&mgr->mutex);
+    return true;
+}
+
 // get load statistics
 void resource_manager_get_stats(NetworkResourceManager* mgr, int* total, int* completed, int* failed) {
     if (!mgr) return;

@@ -75,6 +75,8 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 struct SelectorMatcher* selector_matcher_create(Pool* pool);
 static void clear_cascaded_styles_recursive(DomNode* node);
 static void mark_layout_dirty_recursive(DomNode* node);
+static void pseudo_state_batch_begin(DocState* state);
+static void pseudo_state_batch_end(DomDocument* doc, DocState* state);
 static bool radiant_dispatch_simple_event(EventContext* evcon, View* target,
                                           const char* type,
                                           bool bubbles, bool cancelable);
@@ -1360,6 +1362,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 }
 
 void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
+    if (!evcon || !view_tree) return;
     View* root_view = view_tree->root;
     if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
         log_debug("target root view");
@@ -3408,7 +3411,11 @@ void radiant_run_behavior_init(DomDocument* doc) {
     DocState* state = (DocState*)doc->state;
     if (!state || !doc->root) return;
     int count = 0;
+    // Initial handlers commonly seed both :valid and :invalid. Apply their
+    // final pseudo-state together; nothing can paint between init turns.
+    pseudo_state_batch_begin(state);
     behavior_init_visit(static_cast<DomNode*>(doc->root), state, &count);
+    pseudo_state_batch_end(doc, state);
     if (count > 0) log_debug("behavior-init: inited %d control(s)", count);
 }
 
@@ -7296,7 +7303,7 @@ static bool css_rule_uses_hover(CssRule* rule) {
             }
         }
     } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
-               rule->type == CSS_RULE_CONTAINER) {
+               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
         for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
             if (css_rule_uses_hover(rule->data.conditional_rule.rules ? rule->data.conditional_rule.rules[i] : NULL)) {
                 return true;
@@ -7340,6 +7347,38 @@ static void recascade_document_for_pseudo_state(DomDocument* doc, DocState* stat
     }
 }
 
+static void apply_pseudo_state_restyle(DomDocument* doc, DocState* state) {
+    if (!doc || !state || !doc->root) return;
+
+    recascade_document_for_pseudo_state(doc, state);
+
+    // Selector combinators can make a pseudo-state change affect siblings
+    // and ancestors, so a subtree-only request leaves `:checked + label`
+    // with stale computed style after a JS IDL write.
+    // The mutation reconciler may run an incremental layout before the
+    // queued reflow. Marking the retained tree prevents its clean subtree
+    // fast path from reusing styles resolved before this state transition.
+    mark_layout_dirty_recursive(static_cast<DomNode*>(doc->root));
+    reflow_schedule(state, doc->root, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
+
+    // Always mark for repaint.
+    dirty_mark_element(state, doc->root);
+    doc_state_mark_dirty(state);
+}
+
+static void pseudo_state_batch_begin(DocState* state) {
+    if (state) state->pseudo_state_batch_depth++;
+}
+
+static void pseudo_state_batch_end(DomDocument* doc, DocState* state) {
+    if (!state || state->pseudo_state_batch_depth == 0) return;
+    state->pseudo_state_batch_depth--;
+    if (state->pseudo_state_batch_depth == 0 && state->pseudo_state_restyle_pending) {
+        state->pseudo_state_restyle_pending = false;
+        apply_pseudo_state_restyle(doc, state);
+    }
+}
+
 /**
  * Schedule style/layout work after StateStore pseudo-state changes.
  */
@@ -7356,20 +7395,11 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
             return;
         }
 
-        recascade_document_for_pseudo_state(doc, state);
-
-        // Selector combinators can make a pseudo-state change affect siblings
-        // and ancestors, so a subtree-only request leaves `:checked + label`
-        // with stale computed style after a JS IDL write.
-        // The mutation reconciler may run an incremental layout before the
-        // queued reflow. Marking the retained tree prevents its clean subtree
-        // fast path from reusing styles resolved before this state transition.
-        mark_layout_dirty_recursive(static_cast<DomNode*>(doc->root));
-        reflow_schedule(state, doc->root, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
-
-        // Always mark for repaint
-        dirty_mark_element(state, doc->root);
-        doc_state_mark_dirty(state);
+        if (state->pseudo_state_batch_depth > 0) {
+            state->pseudo_state_restyle_pending = true;
+            return;
+        }
+        apply_pseudo_state_restyle(doc, state);
     }
 }
 
@@ -9533,6 +9563,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     // For PDFs, we can still handle basic events using the view_tree
     if (!doc) {
         log_error("No document to handle event");
+        return;
+    }
+    // Native input can arrive while the document loader owns the main thread;
+    // HTML parsing has published html_root, but layout has not yet published
+    // the ViewTree required for hit testing.
+    if (!doc->view_tree) {
+        log_debug("event: ignoring input before initial layout");
         return;
     }
     // Controls that initialized during the last layout get their `init` turn

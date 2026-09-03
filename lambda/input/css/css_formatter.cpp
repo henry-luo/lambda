@@ -813,10 +813,11 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
         stringbuf_append_str(formatter->output, "}");
 
     } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
-               rule->type == CSS_RULE_CONTAINER) {
-        // Format conditional at-rules (@media, @supports, @container, etc.)
+               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
+        // Format nested at-rules (@media, @supports, @container, @layer).
         const char* rule_name = (rule->type == CSS_RULE_MEDIA) ? "media" :
-                               (rule->type == CSS_RULE_SUPPORTS) ? "supports" : "container";
+                               (rule->type == CSS_RULE_SUPPORTS) ? "supports" :
+                               (rule->type == CSS_RULE_CONTAINER) ? "container" : "layer";
 
         stringbuf_append_str(formatter->output, "@");
         stringbuf_append_str(formatter->output, rule_name);

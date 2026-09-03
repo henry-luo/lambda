@@ -137,20 +137,36 @@ static bool ascii_case_ext_equals(const char* ext, const char* end, const char* 
 static bool lambda_view_http_url_is_likely_html_document(const char* url) {
     if (!url || (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0)) return false;
 
-    const char* end = url;
+    Url* parsed_url = url_parse(url);
+    if (!parsed_url || !url_is_valid(parsed_url)) {
+        if (parsed_url) url_destroy(parsed_url);
+        return false;
+    }
+
+    // Only the pathname can name a document type; hostname dots such as the
+    // one in github.com must not force a duplicate top-level fetch.
+    const char* pathname = url_get_pathname(parsed_url);
+    if (!pathname) {
+        url_destroy(parsed_url);
+        return true;
+    }
+
+    const char* end = pathname;
     while (*end && *end != '?' && *end != '#') end++;
 
     const char* last_slash = nullptr;
     const char* last_dot = nullptr;
-    for (const char* p = url; p < end; p++) {
+    for (const char* p = pathname; p < end; p++) {
         if (*p == '/') last_slash = p;
         else if (*p == '.') last_dot = p;
     }
 
-    if (last_slash && last_slash + 1 == end) return true;
-    if (!last_dot || (last_slash && last_dot < last_slash)) return true;
-    return ascii_case_ext_equals(last_dot, end, ".html") ||
-           ascii_case_ext_equals(last_dot, end, ".htm");
+    bool is_likely_html = (last_slash && last_slash + 1 == end) ||
+        !last_dot || (last_slash && last_dot < last_slash) ||
+        ascii_case_ext_equals(last_dot, end, ".html") ||
+        ascii_case_ext_equals(last_dot, end, ".htm");
+    url_destroy(parsed_url);
+    return is_likely_html;
 }
 
 struct JsDocumentSession {

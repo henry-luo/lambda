@@ -163,6 +163,8 @@ void resource_manager_cancel_all(NetworkResourceManager* mgr);
 
 // Status queries
 bool resource_manager_is_fully_loaded(const NetworkResourceManager* mgr);
+bool network_resource_blocks_first_paint(const NetworkResource* res);
+bool resource_manager_are_render_blocking_resources_loaded(const NetworkResourceManager* mgr);
 int resource_manager_get_pending_count(const NetworkResourceManager* mgr);
 float resource_manager_get_load_progress(const NetworkResourceManager* mgr);
 void resource_manager_get_stats(NetworkResourceManager* mgr, int* total, int* completed, int* failed);

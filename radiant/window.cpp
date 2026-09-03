@@ -874,26 +874,30 @@ void render(GLFWwindow* window) {
         log_debug("Incremental reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
 
-    // ES19: init before the repaint test, not inside it — a control added by a
-    // reflow that produced no dirty region still owes its `init` turn.
-    radiant_run_behavior_init(ui_context.document);
-    radiant_run_autofocus(ui_context.document);
-    // rerender if the document is dirty or needs repaint (e.g., caret changed)
-    if (ui_context.document && ui_context.document->state &&
-        (ui_context.document->state->is_dirty ||
-         (ui_context.document->state->needs_repaint &&
-          dirty_has_regions(&ui_context.document->state->dirty_tracker)))) {
-        render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
-        // Phase 19: clear dirty tracker after render (for caret-only repaints)
-        doc_state_clear_render_flags(ui_context.document->state);
-    } else if (ui_context.document && ui_context.document->state) {
-        // Clear stale needs_repaint when there are no dirty regions to render
-        doc_state_clear_repaint(ui_context.document->state);
+    if (ui_context.document && ui_context.document->view_tree) {
+        // Cocoa can request a refresh while document scripts run, before the
+        // initial layout has published a view tree.
+        // ES19: init before the repaint test, not inside it — a control added by a
+        // reflow that produced no dirty region still owes its `init` turn.
+        radiant_run_behavior_init(ui_context.document);
+        radiant_run_autofocus(ui_context.document);
+        // rerender if the document is dirty or needs repaint (e.g., caret changed)
+        if (ui_context.document->state &&
+            (ui_context.document->state->is_dirty ||
+             (ui_context.document->state->needs_repaint &&
+              dirty_has_regions(&ui_context.document->state->dirty_tracker)))) {
+            render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
+            // Phase 19: clear dirty tracker after render (for caret-only repaints)
+            doc_state_clear_render_flags(ui_context.document->state);
+        } else if (ui_context.document->state) {
+            // Clear stale needs_repaint when there are no dirty regions to render
+            doc_state_clear_repaint(ui_context.document->state);
 
-        // Video-only dirty path: skip full DL rebuild, just blit new video frames
-        if (ui_context.document->state->has_active_video &&
-            ui_context.document->state->video_placement_count > 0) {
-            render_video_frames_cached(ui_context.document->state, ui_context.surface, &ui_context);
+            // Video-only dirty path: skip full DL rebuild, just blit new video frames
+            if (ui_context.document->state->has_active_video &&
+                ui_context.document->state->video_placement_count > 0) {
+                render_video_frames_cached(ui_context.document->state, ui_context.surface, &ui_context);
+            }
         }
     }
 
@@ -1206,11 +1210,11 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             radiant_discover_document_resources(doc);
             log_info("view: network resource discovery complete");
 
-            // Wait for render-blocking CSS (up to 5 seconds)
-            // CSS in <head> must be loaded before first meaningful layout
+            // Wait only for render-blocking CSS (up to 5 seconds); images,
+            // fonts, and scripts continue asynchronously after first paint.
             double wait_start = glfwGetTime();
             const double CSS_TIMEOUT = 5.0;
-            while (!resource_manager_is_fully_loaded(doc->resource_manager)) {
+            while (!resource_manager_are_render_blocking_resources_loaded(doc->resource_manager)) {
                 double elapsed = glfwGetTime() - wait_start;
                 if (elapsed >= CSS_TIMEOUT) {
                     log_warn("view: CSS load timeout after %.1fs, proceeding with layout", elapsed);
@@ -1223,7 +1227,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             }
             double wait_time = glfwGetTime() - wait_start;
             if (wait_time > 0.01) {
-                log_info("view: waited %.2fs for network resources before layout", wait_time);
+                log_info("view: waited %.2fs for render-blocking stylesheets before layout", wait_time);
             }
             int total_resources = 0;
             int completed_resources = 0;
