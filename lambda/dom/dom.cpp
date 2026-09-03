@@ -557,31 +557,6 @@ JS_FORWARD_VOID( dom_notify_mutation_detail, (DomJsMutationKind kind, void* targ
 JS_FORWARD_EXPRESSION(uint64_t, dom_mutation_epoch, (DomDocument* doc),
     doc ? doc->mutation_epoch : 0)
 
-static bool dom_mutation_node_overlaps_root(DomNode* node, DomNode* root) {
-    if (!node || !root) return false;
-    for (DomNode* current = node; current; current = current->parent) {
-        if (current == root) return true;
-    }
-    for (DomNode* current = root; current; current = current->parent) {
-        if (current == node) return true;
-    }
-    return false;
-}
-
-extern "C" bool dom_mutation_since_affects_subtree(
-        DomDocument* doc, uint32_t sequence_before, void* root) {
-    if (!doc || !root) return false;
-    DomNode* root_node = (DomNode*)root;
-    for (int index = 0; index < doc->js.mutation_record_count; index++) {
-        DomJsMutationRecord* record = &doc->js.mutation_records[index];
-        if (record->sequence <= sequence_before) continue;
-        if (dom_mutation_node_overlaps_root(record->target, root_node) ||
-            dom_mutation_node_overlaps_root(record->parent, root_node)) {
-            return true;
-        }
-    }
-    return false;
-}
 
 extern "C" bool dom_has_committed_geometry_snapshot(void* dom_doc) {
     DomDocument* doc = (DomDocument*)dom_doc;
@@ -1526,10 +1501,6 @@ extern "C" void dom_set_checked_dirty(void* dom_elem, bool checked) {
     }
 }
 JS_FORWARD_RETURN(const char*, dom_input_type_lower, (void* dom_elem), _input_type_lower, ((DomElement*)dom_elem))
-extern "C" const char* dom_tag_name_raw(void* dom_elem) {
-    DomElement* e = (DomElement*)dom_elem;
-    return e ? e->tag_name : nullptr;
-}
 extern "C" bool dom_is_disabled(void* dom_elem) {
     DomElement* e = (DomElement*)dom_elem;
     return e && e->has_attribute("disabled");
@@ -15730,24 +15701,6 @@ extern "C" Item dom_dataset_set_property(Item elem_item, Item prop_name, Item va
     dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                            elem->parent, attr_name, old_value);
     return value;
-}
-
-extern "C" bool dom_dataset_set_object_property(Item dataset, Item key,
-                                                       Item value) {
-    JS_ROOTS(roots, dataset_root, dataset, key_root, key, value_root, value, owner_root, ItemNull);
-    if (get_type_id(key_root.get()) != LMD_TYPE_STRING) return false;
-    String* key_string = it2s(key_root.get());
-    if (!key_string ||
-        (key_string->len == 24 &&
-         strncmp(key_string->chars, "__lambda_dataset_element", 24) == 0)) {
-        return false;
-    }
-    // Property lookup may collect while an async handler owns the only
-    // references to this dataset view; keep the receiver and operands precise.
-    owner_root.set(dom_realm_get_cstr(dataset_root.get(), "__lambda_dataset_element"));
-    if (!dom_unwrap_element(owner_root.get())) return false;
-    dom_dataset_set_property(owner_root.get(), key_root.get(), value_root.get());
-    return true;
 }
 
 // ============================================================================

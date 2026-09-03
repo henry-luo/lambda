@@ -405,8 +405,6 @@ Item dom_scroll_into_view_bridge(void* dom_elem);
 void dom_select_set_selected_index_bridge(void* dom_elem, Item value);
 
 /** dataset expando write, routed from the JS property-set path. */
-bool dom_dataset_set_object_property(Item dataset, Item key, Item value);
-
 // -----------------------------------------------------------------------------
 // Scheduling seam (F25/ES33)
 //
@@ -483,8 +481,6 @@ bool dom_exec_insert_html(DomDocument* doc, const char* html);
 
 /** Mutation-sequence reads for incremental reconciliation. */
 uint64_t dom_mutation_epoch(DomDocument* doc);
-bool dom_mutation_since_affects_subtree(
-        DomDocument* doc, uint32_t sequence_before, void* root);
 #endif
 
 #ifdef __cplusplus

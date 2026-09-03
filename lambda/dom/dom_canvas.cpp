@@ -98,11 +98,6 @@ static int canvas_store_font_handle(FontHandle* handle) {
     return id;
 }
 
-static FontHandle* canvas_get_font_handle(int id) {
-    JsCanvasRuntimeState* state = canvas_runtime_state();
-    if (!state || id < 0 || id >= state->font_handle_count) return nullptr;
-    return state->font_handles[id];
-}
 
 // ============================================================================
 // CSS font shorthand parser
@@ -225,32 +220,7 @@ static FontHandle* parse_css_font_shorthand(const char* font_str, int len) {
     return font_resolve(ctx, &style);
 }
 
-static float canvas_font_size_px(Item ctx_obj) {
-    Item font_str = dom_realm_get_name(ctx_obj, "font");
-    if (get_type_id(font_str) != LMD_TYPE_STRING) return 16.0f;
-    String* s = it2s(font_str);
-    if (!s || s->len <= 0) return 16.0f;
-    char buf[512];
-    int len = s->len >= (int)sizeof(buf) ? (int)sizeof(buf) - 1 : (int)s->len;
-    memcpy(buf, s->chars, len);
-    buf[len] = '\0';
-    char* p = buf;
-    while (*p) {
-        if (isdigit((unsigned char)*p) || *p == '.') {
-            char* end;
-            float size_px = strtof(p, &end);
-            if (end > p && strncmp(end, "px", 2) == 0) return size_px;
-        }
-        p++;
-    }
-    return 16.0f;
-}
 
-static float canvas_fallback_text_width(Item ctx_obj, String* s) {
-    if (!s || s->len <= 0) return 0.0f;
-    float size_px = canvas_font_size_px(ctx_obj);
-    return (float)s->len * size_px * 0.5f;
-}
 
 // ============================================================================
 // OffscreenCanvas constructor
@@ -273,23 +243,6 @@ extern "C" Item js_offscreen_canvas_new(Item width_arg, Item height_arg) {
 // ============================================================================
 // CanvasRenderingContext2D — getContext("2d") result
 // ============================================================================
-
-extern "C" Item js_canvas_get_context(Item canvas) {
-    Item obj = dom_realm_new_object_of_class(JS_CLASS_CANVAS_RENDERING_CONTEXT_2D);
-
-    // store canvas reference
-    dom_realm_set_name(obj, "canvas", canvas);
-
-    // initial font property (CSS default)
-    Item font_key = js_name_item("font");
-    Item font_val = js_name_item("10px sans-serif");
-    dom_realm_set(obj, font_key, font_val);
-
-    // no font handle yet — will be resolved on first measureText or when font is set
-    dom_realm_set_name(obj, "__font_handle_id", (Item){.item = i2it(-1)});
-
-    return obj;
-}
 
 // ============================================================================
 // ctx.font setter — resolve font handle when font property changes
@@ -314,54 +267,6 @@ extern "C" void js_canvas_ctx_set_font(Item ctx_obj, Item font_val) {
 // ============================================================================
 // ctx.measureText(text) → { width }
 // ============================================================================
-
-extern "C" Item js_canvas_measure_text(Item ctx_obj, Item text_arg) {
-    // get font handle ID
-    Item fh_key = js_name_item("__font_handle_id");
-    Item fh_val = dom_realm_get(ctx_obj, fh_key);
-    int fh_id = -1;
-    if (get_type_id(fh_val) == LMD_TYPE_INT) {
-        fh_id = (int)it2i(fh_val);
-    }
-
-    // if no font handle, try to resolve from current font string
-    if (fh_id < 0) {
-        Item font_str = dom_realm_get_name(ctx_obj, "font");
-        if (get_type_id(font_str) == LMD_TYPE_STRING) {
-            String* s = it2s(font_str);
-            if (s && s->len > 0) {
-                FontHandle* handle = parse_css_font_shorthand(s->chars, s->len);
-                if (handle) {
-                    fh_id = canvas_store_font_handle(handle);
-                    dom_realm_set(ctx_obj, fh_key, (Item){.item = i2it(fh_id)});
-                }
-            }
-        }
-    }
-
-    FontHandle* handle = canvas_get_font_handle(fh_id);
-
-    // get text string
-    float width = 0.0f;
-    if (get_type_id(text_arg) == LMD_TYPE_STRING && handle) {
-        String* s = it2s(text_arg);
-        if (s && s->len > 0) {
-            TextExtents ext = font_measure_text(handle, s->chars, s->len);
-            width = ext.width;
-            if (width <= 0.0f) width = canvas_fallback_text_width(ctx_obj, s);
-        }
-    } else if (get_type_id(text_arg) == LMD_TYPE_STRING) {
-        String* s = it2s(text_arg);
-        width = canvas_fallback_text_width(ctx_obj, s);
-    }
-
-    // return TextMetrics object: { width }
-    Item result = js_new_object();
-    Item wk = js_name_item("width");
-    Item wv = push_d((double)width);
-    dom_realm_set(result, wk, wv);
-    return result;
-}
 
 // ============================================================================
 // Property set interception — for ctx.font = "..."

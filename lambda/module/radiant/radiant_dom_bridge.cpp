@@ -1310,14 +1310,6 @@ RADIANT_C_API bool radiant_dom_event_type_is(Item item, const char* type) {
     return record && type && record->type && strcmp(record->type, type) == 0;
 }
 
-RADIANT_C_API bool radiant_dom_event_is_mouse_like(Item item) {
-    RadiantDomEventRecord* record = radiant_dom_event_record(item);
-    if (!record) return false;
-    return record->class_id == JS_CLASS_MOUSE_EVENT ||
-        record->class_id == JS_CLASS_WHEEL_EVENT ||
-        record->class_id == JS_CLASS_POINTER_EVENT;
-}
-
 RADIANT_C_API bool radiant_dom_event_default_prevented(Item item) {
     RadiantDomEventRecord* record = radiant_dom_event_record(item);
     return record && record->default_prevented;
@@ -1326,11 +1318,6 @@ RADIANT_C_API bool radiant_dom_event_default_prevented(Item item) {
 RADIANT_C_API bool radiant_dom_event_propagation_stopped(Item item) {
     RadiantDomEventRecord* record = radiant_dom_event_record(item);
     return record && record->stop_propagation;
-}
-
-RADIANT_C_API bool radiant_dom_event_immediate_propagation_stopped(Item item) {
-    RadiantDomEventRecord* record = radiant_dom_event_record(item);
-    return record && record->stop_immediate;
 }
 
 RADIANT_C_API bool radiant_dom_event_prevent_default(Item item) {
@@ -1597,11 +1584,6 @@ static bool radiant_dom_get_character_data_property(DomNode* node,
 // ---- DOM3 Phase 4a: record-driven member getters (identity/navigation) ----
 // JubeMemberBind handler shapes; the strcmp arms these replace are deleted
 // from radiant_dom_get_element_property.
-
-RADIANT_C_API int radiant_dom_member_is_element(Item receiver) {
-    DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
-    return node && node->is_element();
-}
 
 static DomElement* radiant_dom_member_elem(Item receiver) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);

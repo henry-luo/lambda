@@ -201,14 +201,6 @@ extern "C" const char* radiant_history_scroll_restoration(DomDocument* document)
     return history && history->manual_scroll_restoration ? "manual" : "auto";
 }
 
-extern "C" void radiant_history_set_scroll_restoration(
-    DomDocument* document, const char* value) {
-    RadiantHistoryState* history = history_get(document);
-    if (!history || !value) return;
-    if (strcmp(value, "manual") == 0) history->manual_scroll_restoration = true;
-    else if (strcmp(value, "auto") == 0) history->manual_scroll_restoration = false;
-}
-
 extern "C" bool radiant_history_push_state(
     DomDocument* document, Item cloned_state, const char* url_text) {
     RadiantHistoryState* history = history_get(document);

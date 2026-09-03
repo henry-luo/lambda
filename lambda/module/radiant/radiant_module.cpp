@@ -2839,10 +2839,6 @@ static const JubeModuleDef radiant_module = {
     radiant_custom_layout_heap_cleanup,
 };
 
-RADIANT_C_API const JubeModuleDef* radiant_jube_module(void) {
-    return &radiant_module;
-}
-
 RADIANT_C_API void radiant_jube_register_static(void) {
     jube_register_static_module(&radiant_module);
 }

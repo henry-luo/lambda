@@ -44,7 +44,6 @@
 // Helpers from dom.cpp used for form control inspection
 extern "C" bool dom_get_checkedness(void* dom_elem);
 extern "C" const char* dom_input_type_lower(void* dom_elem);
-extern "C" const char* dom_tag_name_raw(void* dom_elem);
 extern "C" bool dom_is_disabled(void* dom_elem);
 extern "C" DomElement* dom_find_form_owner(void* control_ptr);
 
