@@ -417,21 +417,29 @@ static bool dom_event_flag(Item event, const char* key, bool fallback) {
     return get_type_id(v) == LMD_TYPE_BOOL ? it2b(v) : fallback;
 }
 
+// The live-event predicate is the module's: an event is a record-backed
+// wrapper, and only the module can say whether a wrapper is one of its own.
+extern "C" bool radiant_dom_event_is(Item item);
+
 extern "C" Item dom_core_dispatch(Item n, Item event) {
     if (get_type_id(event) == LMD_TYPE_STRING) {
         // The historical spelling: a name, with the flags the engine fixed for
         // the `input`/`change` notifications it was written for.
         return dom_engine_dispatch(n, event);
     }
-    Item type = dom_map_field(event, "type");
-    if (get_type_id(type) != LMD_TYPE_STRING) {
-        // Not a name and not a Lambda event map: it is a JS Event object, which
-        // is class-stamped rather than keyed data, so its own dispatch path
-        // handles it. One row serves both realms; without this, routing JS's
-        // dispatchEvent here silently dropped every event -- the handler,
-        // lifecycle and jQuery suites all failed at once.
+    // A *live* event and an event *descriptor* are two different arguments, not
+    // two representations of one thing. The descriptor is keyed data --
+    // {type, bubbles, cancelable} -- saying how to build an event; the live one
+    // is a record-backed wrapper carrying propagation state a listener mutates.
+    // Ask which this is, rather than inferring it from whether "type" reads as
+    // a string: a live event answers that too, so the earlier test sent JS's
+    // dispatchEvent down the construction path, rebuilt the event and dropped
+    // identity along with preventDefault.
+    if (radiant_dom_event_is(event)) {
         return dom_absent_to_null(dom_dispatch_event_bridge(n, event));
     }
+    Item type = dom_map_field(event, "type");
+    if (get_type_id(type) != LMD_TYPE_STRING) return ItemNull;
     Item bubbles = { .item = b2it(dom_event_flag(event, "bubbles", true)) };
     Item cancelable = { .item = b2it(dom_event_flag(event, "cancelable", false)) };
     return dom_engine_dispatch_event(n, type, bubbles, cancelable);

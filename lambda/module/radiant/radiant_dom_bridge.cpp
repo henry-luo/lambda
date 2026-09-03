@@ -132,6 +132,15 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_click_method_bridge radiant_host_api->dom_catalog->click_method_bridge
 #define dom_add_event_listener_bridge radiant_host_api->dom_catalog->add_listener
 #define dom_remove_event_listener_bridge radiant_host_api->dom_catalog->remove_listener
+// dispatchEvent keeps its own entry, and the reason is not the one recorded at
+// F34. The live event is already one object across both realms (F17-F21), so
+// there is no representation to unify. What differs is the *argument*: JS's
+// dispatchEvent takes a live Event or a plain descriptor object and, for the
+// descriptor, builds a **JS** Event and runs the JS listener path; the row's
+// descriptor path builds an engine event. Routing here sent
+// `button.dispatchEvent({type: "custom"})` down the engine path and four
+// listener counts in dom_module_props went from 1 to 0. Two operations, one
+// name -- the same shape as click and check_validity.
 #define dom_dispatch_event_bridge radiant_host_api->dom_catalog->dispatch_event_bridge
 #define dom_get_bounding_client_rect_bridge radiant_host_api->dom_catalog->get_bounding_client_rect_bridge
 #define dom_get_client_rects_bridge radiant_host_api->dom_catalog->get_client_rects_bridge
