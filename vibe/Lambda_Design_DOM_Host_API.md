@@ -544,6 +544,43 @@ existed for one boundary with only one of them visible in the core's headers,
 and `lambda-boundary-rt` is built with `-Wl,-undefined,dynamic_lookup`, so the
 check that would have caught it is configured to allow it.
 
+#### Class A's last eight are not defects — they are one name over two operations (2026-09-03)
+
+Asked to refactor the eight and migrate them, the investigation says there is
+nothing to fix. Every one is two genuinely different operations that happen to
+share a name, and the earlier framing of them as "contract questions" implied
+they would eventually converge. They will not.
+
+| name | the row is | the slot is |
+|---|---|---|
+| `dispatch` | a Lambda event map | a class-stamped JS Event (ESO102) |
+| `check_validity` | the **form submission gate** — focus side-effect, and a realm-free constraint pass when the document has no JS realm | the IDL method on any control |
+| `reset_form` | the same shape | the same shape |
+| `computed_style` | node → property | **style object** → property |
+| `click` | `dispatch(n, {type:"click", bubbles:true, cancelable:true})` | a synthesised **MouseEvent**, plus a disabled-form-control guard |
+| `selection` | the `this`-sensitive global entry, which swaps the active document for a foreign one | the plain document selection |
+| `scroll_operation` | an engine seam `(Item, Item)` | the variadic executor |
+| `stylesheet_index` | — | `(Item, int64_t)`: not Item-uniform |
+
+`click` is the clearest: wiring the bridge in as the derived row's fast path
+would have looked like a one-line win and would have made `dom.click()` skip
+disabled controls and produce a MouseEvent, diverging from the derivation the
+§5 oracle checks it against.
+
+So the remaining work is **naming both halves**, which grows the published
+surface and is a design decision rather than a refactor. And it buys less than
+it appears: six of the eight wrap or dispatch through the module's Jube type
+registry, so a promoted row could not carry `DOM_F_NEUTRAL` and would gain the
+compile-time arity check without gaining a Lambda face. They stay `DOM_RAW`
+until something actually needs them from Lambda.
+
+Also settled: **the 38 dead slots are already gone.** They were deleted with
+`JubeHostDomAPI` at ES46, and every function behind them is alive as a catalog
+row body — the four whose names did not match a `dom_<slot>` guess are
+`dom_create_tree_walker_bridge`, `dom_cssom_decl_css_has`,
+`dom_cssom_rule_decl_remove_property` and `dom_cssom_rule_set_selector_text`,
+each of which now backs a row added in slice 5.
+
 #### ES47 implementation — `lambda/dom/realm/` (2026-09-03)
 
 The script-realm API is `lambda/dom/realm/dom_realm.h`: **34 operations, 785 call
