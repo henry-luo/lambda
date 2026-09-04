@@ -1,6 +1,7 @@
 // Link navigation policy (ES31). This module resolves DOM-visible browsing
 // context targets and fragment elements; native executes the validated request.
 import dom
+import keyboard: lambda.package.dom.keyboard
 
 fn is_iframe(node) {
     node != null and dom.closest(node, "iframe") == node
@@ -116,3 +117,8 @@ pub pn activate(anchor) {
 // event; native calls this only after cancellation is settled.
 view <a> {}
 on linkactivation(evt) { activate(~) }
+on keydown(evt) {
+    if (dom.get_attribute(~, "href") != null and
+        keyboard.action(evt, true, null) == "click") { keyboard.click(~) }
+    else { 'pass' }
+}

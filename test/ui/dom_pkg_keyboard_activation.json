@@ -1,0 +1,68 @@
+{
+  "name": "S12.1.3: DOM package owns keyboard activation and select routing",
+  "html": "test/ui/dom_pkg_keyboard_activation.html",
+  "viewport": {"width": 520, "height": 520},
+  "events": [
+    {"type": "focus", "target": {"selector": "#start"}},
+
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#button"}},
+    {"type": "key_press", "key": "Enter", "mods_str": "ctrl"},
+    {"type": "assert_text", "target": {"selector": "#button-clicks"}, "equals": "0"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_text", "target": {"selector": "#button-clicks"}, "equals": "1"},
+    {"type": "key_down", "key": "Space"},
+    {"type": "assert_text", "target": {"selector": "#button-clicks"}, "equals": "1"},
+    {"type": "key_up", "key": "Space"},
+    {"type": "assert_text", "target": {"selector": "#button-clicks"}, "equals": "2"},
+
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#submit"}},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_text", "target": {"selector": "#submits"}, "equals": "1"},
+
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#reset"}},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_text", "target": {"selector": "#resets"}, "equals": "1"},
+
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#checkbox"}},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_checked", "target": {"selector": "#checkbox"}, "checked": false},
+    {"type": "key_down", "key": "Space"},
+    {"type": "assert_checked", "target": {"selector": "#checkbox"}, "checked": false},
+    {"type": "key_up", "key": "Space"},
+    {"type": "assert_checked", "target": {"selector": "#checkbox"}, "checked": true},
+
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#radio"}},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_checked", "target": {"selector": "#radio"}, "checked": false},
+    {"type": "key_press", "key": "Space"},
+    {"type": "assert_checked", "target": {"selector": "#radio"}, "checked": true},
+
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#select"}},
+    {"type": "key_press", "key": "Space"},
+    {"type": "assert_state_store", "target": {"selector": "#select"}, "open_dropdown": true},
+    {"type": "key_press", "key": "ArrowDown"},
+    {"type": "assert_state_store", "target": {"selector": "#select"}, "open_dropdown": true},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_value", "target": {"selector": "#select"}, "equals": "first"},
+    {"type": "assert_state_store", "target": {"selector": "#select"}, "open_dropdown": false},
+
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#link"}},
+    {"type": "key_press", "key": "Enter", "mods_str": "ctrl"},
+    {"type": "assert_state", "target": {"selector": "#target"}, "state": ":target", "value": false},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_state", "target": {"selector": "#target"}, "state": ":target", "value": true},
+
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#blocked"}},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "key_press", "key": "Space"},
+    {"type": "assert_text", "target": {"selector": "#blocked-clicks"}, "equals": "0"}
+  ]
+}

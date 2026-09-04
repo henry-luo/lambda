@@ -1424,29 +1424,7 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
     if (span->in_line && span->inl()->cursor) {
         evcon->new_cursor = span->inl()->cursor;
     }
-    uintptr_t name = span->tag();
     log_debug("fired at view %s", span->node_name());
-    if (name == MARKUP_NAME_A) {
-        log_debug("fired at anchor tag");
-        if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
-            log_debug("mouse down at anchor tag");
-            // ES31: once the package claims linkactivation, click (not
-            // mousedown) is the cancelable policy point. Keep the legacy
-            // fields only for package-off documents while evaluator ownership
-            // remains staged for every static embedded format.
-            bool package_claims = radiant_behavior_claims_event(
-                evcon, static_cast<View*>(span), "linkactivation");
-            if (!evcon->default_prevented && !package_claims) {
-                const char* href = span->get_attribute("href");
-                if (href) {
-                    log_debug("legacy anchor href: %s", href);
-                    evcon->new_url = (char*)href;
-                    const char* target = span->get_attribute("target");
-                    if (target) evcon->new_target = (char*)target;
-                }
-            }
-        }
-    }
 }
 
 void fire_block_event(EventContext* evcon, ViewBlock* block) {
@@ -2027,11 +2005,18 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         }
     }
 
-    // for "keydown" events: add key name string
-    if (evcon && strcmp(event_name, "keydown") == 0) {
+    // Lambda-only documents build their KeyboardEvent record here. Publish the
+    // DOM key spelling and modifier surface that JS-backed records already
+    // carry so package policy is realm-neutral.
+    if (evcon && (strcmp(event_name, "keydown") == 0 ||
+                  strcmp(event_name, "keyup") == 0)) {
         int key = evcon->event.key.key;
-        const char* key_name = key_code_to_name(key);
+        const char* key_name = key_code_to_dom_key(key, evcon->event.key.mods);
         mb.put("key", key_name);
+        mb.put("shiftKey", (evcon->event.key.mods & RDT_MOD_SHIFT) != 0);
+        mb.put("ctrlKey",  (evcon->event.key.mods & RDT_MOD_CTRL) != 0);
+        mb.put("altKey",   (evcon->event.key.mods & RDT_MOD_ALT) != 0);
+        mb.put("metaKey",  (evcon->event.key.mods & RDT_MOD_SUPER) != 0);
     }
 
     // add caret position (as character index) for input, keydown, paste, and cut events
@@ -3072,15 +3057,15 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     // Never *change* an existing binding. The thread's evaluator is also what
     // js_active_runtime_state is derived from, so rebinding it here strands JS
     // state for whatever owns the thread — which crashed an iframe page inside
-    // js_observer_runtime_state. If another evaluator owns the thread, this
-    // document simply keeps its native default actions.
+    // js_observer_runtime_state. If another evaluator owns the thread, package
+    // behavior remains unavailable for this document.
     EvalContext* ctx = runtime_get_eval_context(rt);
     if (!ctx) {
         log_error("dom-package: runtime has no eval context");
         return false;
     }
     if (context && context != ctx) {
-        log_debug("dom-package: another evaluator owns this thread; keeping native behavior");
+        log_debug("dom-package: another evaluator owns this thread; package unavailable");
         return false;
     }
     if (!eval_context_init(ctx)) {
@@ -3133,7 +3118,7 @@ extern "C" bool radiant_select_set_dropdown_open(void* dom_node, bool open) {
         if (state->open_dropdown == view) doc_state_close_dropdown(state, view);
         return true;
     }
-    // one dropdown at a time, matching the native activation path
+    // canonical popup state permits one open dropdown at a time
     if (state->open_dropdown && state->open_dropdown != view) {
         doc_state_close_dropdown(state, state->open_dropdown);
     }
@@ -3224,14 +3209,9 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
     return dispatched.item != ITEM_FALSE;
 }
 
-// Does a behavior template own the default action for this event on this
-// target? The engine keeps its native default action as the fallback until the
-// package registers a replacement (ES5), so each native activation path asks
-// this before running, and exactly one of the two acts.
 // Nearest non-synthetic element ancestor governed by a behavior template that
-// declares `event_name`. Third user of this walk (claim check, passive probe,
-// dispatch), so the shape lives in one place. `out_elem` receives the matched
-// element so dispatch can bind `~` and continue past a declined match.
+// declares `event_name`. `out_elem` receives the matched element so dispatch
+// can bind `~` and continue past a declined match.
 static TemplateEntry* behavior_match_walk(View* target, const char* event_name,
                                           DomElement** out_elem, Item* out_item) {
     for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
@@ -3249,27 +3229,6 @@ static TemplateEntry* behavior_match_walk(View* target, const char* event_name,
         }
     }
     return nullptr;
-}
-
-bool radiant_behavior_claims_event(EventContext* evcon, View* target,
-                                   const char* event_name) {
-    if (!target || !event_name) return false;
-    if (event_is_hot_path(event_name)) return false;
-    // Callers outside dispatch (native validation, for one) have no
-    // EventContext; fall back to the element's own document.
-    DomDocument* doc = evcon ? event_context_target_document(evcon) : nullptr;
-    if (!doc && target->is_element()) {
-        DomElement* te = target->as_element();
-        doc = te ? te->doc : nullptr;
-    }
-    // ensure() binds (and if needed creates) the document's evaluator, so a
-    // script-less page must not be rejected for having no context yet
-    if (!radiant_dom_package_ensure(doc, target)) return false;
-    if (!template_registry_may_have_behavior_handler(g_template_registry,
-                                                     event_name)) {
-        return false;
-    }
-    return behavior_match_walk(target, event_name, nullptr, nullptr) != nullptr;
 }
 
 // UA default behavior: after no author template claimed the event, find the
@@ -3325,8 +3284,8 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
                     tmpl, h, model, tmpl->template_ref, out_model_reconciled)) {
                 return true;
             }
-            // declined with 'pass': keep looking above the matched element,
-            // and if nothing else claims it the native default stays in charge
+            // declined with 'pass': keep looking above the matched element;
+            // package-only callers perform no action if no handler accepts
         }
         cursor = static_cast<View*>(static_cast<DomNode*>(dom_elem)->parent);
     }
@@ -3456,15 +3415,6 @@ extern "C" bool radiant_dispatch_behavior_commit(EventContext* evcon, View* targ
 // is not a DOM element, so no DOM event has fired for the option and there are
 // no JS listeners to preempt. Native resolves which option the pointer landed on
 // (geometry is mechanism) and the template performs the commit.
-// F11: keys an open <select> dropdown responds to. Behavior-only like the
-// others here — the dropdown overlay is not a DOM element, so no DOM key event
-// has fired for it.
-extern "C" bool radiant_dispatch_behavior_dropdown_key(EventContext* evcon,
-                                                       View* target,
-                                                       const InputIntent* intent) {
-    return dispatch_behavior_handler(evcon, target, "dropdownkey", intent, nullptr);
-}
-
 extern "C" bool radiant_dispatch_behavior_option_commit(EventContext* evcon,
                                                         View* target,
                                                         const InputIntent* intent) {
@@ -7723,9 +7673,8 @@ static View* find_first_form_submitter(DomElement* form) {
         connected ? (DomNode*)doc->root : form->first_child, form);
 }
 
-// Run the package policy for a submitter or an implicit form target. A direct
-// bridge remains only for package-off documents, preserving script-less HTML
-// behavior while the migrated class is still being staged.
+// Run the package policy for a submitter or an implicit form target. Native
+// validates the resolved nodes, but only the DOM package may perform submission.
 static bool run_form_submit_activation(EventContext* evcon, View* target) {
     if (!target || !target->is_element()) return false;
     DomElement* elem = lam::dom_require_element(target);
@@ -7741,16 +7690,7 @@ static bool run_form_submit_activation(EventContext* evcon, View* target) {
     }
     if (!owner) return false;
 
-    bool claimed = radiant_behavior_claims_event(
-        evcon, target, "submitactivation");
-    if (claimed) {
-        radiant_dispatch_behavior_submit_activation(evcon, target);
-    } else {
-        Item submitter = has_submitter ? dom_wrap_element(elem)
-                                       : make_js_undefined();
-        dom_form_request_submit_bridge(dom_wrap_element(owner), submitter);
-    }
-    return true;
+    return radiant_dispatch_behavior_submit_activation(evcon, target);
 }
 
 static bool run_form_reset_activation(EventContext* evcon, View* target) {
@@ -7763,15 +7703,7 @@ static bool run_form_reset_activation(EventContext* evcon, View* target) {
     DomElement* owner = dom_find_form_owner((void*)elem);
     if (!owner) return false;
 
-    bool claimed = radiant_behavior_claims_event(
-        evcon, target, "resetactivation");
-    if (claimed) {
-        radiant_dispatch_behavior_reset_activation(evcon, target);
-    } else {
-        radiant_dom_element_operation(dom_wrap_element(owner), JUBE_DOM_RESET,
-                                      nullptr, 0);
-    }
-    return true;
+    return radiant_dispatch_behavior_reset_activation(evcon, target);
 }
 
 static View* find_link_activation_target(View* target) {
@@ -7792,9 +7724,6 @@ static bool run_link_activation(EventContext* evcon, View* target) {
     if (!evcon || !evcon->ui_context || evcon->default_prevented) return false;
     View* anchor = find_link_activation_target(target);
     if (!anchor) return false;
-    if (!radiant_behavior_claims_event(evcon, anchor, "linkactivation")) {
-        return false;
-    }
     if (!dispatch_behavior_handler(evcon, anchor, "linkactivation", nullptr, nullptr)) {
         return false;
     }
@@ -7843,9 +7772,10 @@ static bool dispatch_click_default_actions(EventContext* evcon, View* target) {
     return handled;
 }
 
-// Keyboard activation must complete the same author and UA tiers as a pointer
-// click; dispatching only the JS event would leave the package default action out.
-static bool run_keyboard_click_default(EventContext* evcon, View* target) {
+// The package chooses whether a key activates its target. Native supplies only
+// the click dispatch mechanism so keyboard and pointer activation enter the
+// same author/UA pipeline.
+static bool dispatch_package_keyboard_click(EventContext* evcon, View* target) {
     bool prevented = radiant_dispatch_mouse_event(evcon, target, "click",
         0, 0, 0, 0, false, false, false, false, 1);
     if (prevented) evcon->default_prevented = true;
@@ -7853,6 +7783,17 @@ static bool run_keyboard_click_default(EventContext* evcon, View* target) {
         dispatch_click_default_actions(evcon, target);
     }
     return true;
+}
+
+extern "C" bool radiant_keyboard_click_from_package(void* dom_node) {
+    EmitHandlerContext* ctx = g_emit_handler_ctx;
+    if (!ctx || !ctx->evcon || !dom_node) return false;
+    DomNode* node = static_cast<DomNode*>(dom_node);
+    if (!node->is_element() || !dom_is_connected(dom_node)) return false;
+    DomElement* elem = node->as_element();
+    DomDocument* document = event_context_target_document(ctx->evcon);
+    if (!elem || elem->doc != document) return false;
+    return dispatch_package_keyboard_click(ctx->evcon, static_cast<View*>(elem));
 }
 
 // Only the exact bridge re-entry bypasses the wrapper below. A synthetic event
@@ -7923,105 +7864,6 @@ extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
     return result;
 }
 
-static void space_activation_clear(DocState* state, DomDocument* document) {
-    if (!state || !state->pending_space_activation.address) return;
-    if (document) {
-        dom_node_unpin(document, state->pending_space_activation,
-                       DOM_NODE_PIN_STATE);
-    }
-    state->pending_space_activation = {nullptr, 0};
-}
-
-static bool space_activation_arm(EventContext* evcon, DocState* state,
-                                 View* target) {
-    DomDocument* document = event_context_target_document(evcon);
-    if (!state || !document || !target || !target->is_element()) return false;
-    space_activation_clear(state, document);
-    DomNodeRef ref = dom_node_ref(static_cast<DomNode*>(target));
-    if (!dom_node_ref_validate(document, ref) ||
-        !dom_node_pin(document, ref, DOM_NODE_PIN_STATE)) {
-        return false;
-    }
-    state->pending_space_activation = ref;
-    return true;
-}
-
-static View* space_activation_take(EventContext* evcon, DocState* state,
-                                   DomNodeRef* out_ref) {
-    DomDocument* document = event_context_target_document(evcon);
-    if (out_ref) *out_ref = {nullptr, 0};
-    if (!state || !document || !state->pending_space_activation.address) return nullptr;
-    DomNodeRef ref = state->pending_space_activation;
-    state->pending_space_activation = {nullptr, 0};
-    DomNode* node = dom_node_ref_validate(document, ref);
-    if (out_ref) *out_ref = ref;
-    return node && node->is_element() ? static_cast<View*>(node) : nullptr;
-}
-
-static void space_activation_release(EventContext* evcon, DomNodeRef ref) {
-    DomDocument* document = event_context_target_document(evcon);
-    if (document && ref.address) {
-        dom_node_unpin(document, ref, DOM_NODE_PIN_STATE);
-    }
-}
-
-static bool keyboard_space_activation_target(DocState* state, View* target) {
-    if (!state || !target || !target->is_element()) return false;
-    if (is_checkbox(target) || is_radio(target)) {
-        return !dom_is_disabled((void*)lam::dom_require_element(target));
-    }
-    ViewElement* element = lam::view_require_element(target);
-    if (element->tag() != MARKUP_NAME_BUTTON) return false;
-    DomElement* dom_element = lam::dom_require_element(target);
-    return !dom_element->form_control() ||
-        !form_control_is_disabled(state, static_cast<View*>(dom_element));
-}
-
-static bool run_keyboard_activation(EventContext* evcon, DocState* state,
-                                    View* focused, int key) {
-    if (!evcon || !state || !focused || !focused->is_element() ||
-        evcon->default_prevented || !dom_is_connected((void*)focused)) {
-        return false;
-    }
-    ViewElement* element = lam::view_require_element(focused);
-    uint32_t tag = element->tag();
-    if (tag == MARKUP_NAME_INPUT && key == RDT_KEY_SPACE &&
-        (is_checkbox(focused) || is_radio(focused))) {
-        return run_keyboard_click_default(evcon, focused);
-    }
-    if (tag == MARKUP_NAME_BUTTON &&
-        (key == RDT_KEY_SPACE || key == RDT_KEY_ENTER)) {
-        DomElement* dom_element = lam::dom_require_element(focused);
-        bool disabled = dom_element->form_control() &&
-            form_control_is_disabled(state, static_cast<View*>(dom_element));
-        if (disabled) return false;
-        return run_keyboard_click_default(evcon, focused);
-    }
-    if (tag == MARKUP_NAME_INPUT && key == RDT_KEY_ENTER &&
-        (dom_is_submit_button((void*)focused) ||
-         dom_is_reset_button((void*)focused))) {
-        DomElement* dom_element = lam::dom_require_element(focused);
-        bool disabled = dom_element->form_control() &&
-            form_control_is_disabled(state, static_cast<View*>(dom_element));
-        if (disabled) return false;
-        return run_keyboard_click_default(evcon, focused);
-    }
-    if (tag == MARKUP_NAME_A && key == RDT_KEY_ENTER) {
-        DomElement* anchor = lam::dom_require_element(focused);
-        if (!anchor->get_attribute("href")) return false;
-        return run_keyboard_click_default(evcon, focused);
-    }
-    if (tag == MARKUP_NAME_SELECT &&
-        (key == RDT_KEY_SPACE || key == RDT_KEY_ENTER)) {
-        DomElement* dom_element = lam::dom_require_element(focused);
-        bool disabled = dom_element->form_control() &&
-            form_control_is_disabled(state, static_cast<View*>(dom_element));
-        return !disabled && run_keyboard_click_default(evcon, focused);
-    }
-    return false;
-}
-
-
 static bool click_target_is_disabled_control(DocState* state, View* target) {
     for (View* current = target; current; current = current->parent) {
         if (!current->is_element()) continue;
@@ -8066,8 +7908,8 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state,
  * Handle click on select to toggle dropdown
  */
 // Opening a dropdown is mechanism: overlay placement and sizing come from
-// layout geometry. Both the native activation path and the dom package's
-// `open_dropdown` primitive go through here so the geometry is computed once.
+// layout geometry. Every package-selected open goes through this one geometry
+// path.
 static void select_open_dropdown(UiContext* uicon, DocState* state,
                                  View* select_view) {
     if (!uicon || !state || !select_view) return;
@@ -8176,9 +8018,7 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     }
 }
 
-/**
- * Handle keyboard navigation in dropdown
- */
+// Classify physical keys that can be followed by a text-input callback.
 static bool editing_key_may_emit_text(const KeyEvent* key_event) {
     if (!key_event) return false;
     if (key_event->mods & (RDT_MOD_CTRL | RDT_MOD_SUPER | RDT_MOD_ALT)) {
@@ -8204,21 +8044,6 @@ static bool editing_key_may_emit_text(const KeyEvent* key_event) {
         // committed Unicode callback, which still has keydown cancellation.
         return true;
     }
-}
-
-// F11: every key an open dropdown responds to now goes to the template. Enter
-// already committed through `optioncommit`, but Up/Down and Escape did not —
-// one interaction split by key, which is the third time this shape has appeared
-// in this function (mouse commit, then Enter, now its siblings).
-static bool handle_dropdown_key(EventContext* evcon, int key, int mods) {
-    DocState* state = nullptr;
-    ViewBlock* select = event_open_dropdown_select(evcon, &state);
-    if (!select) return false;
-    InputIntent intent;
-    intent.key = key;
-    intent.mods = mods;
-    return radiant_dispatch_behavior_dropdown_key(evcon, static_cast<View*>(select),
-                                                  &intent);
 }
 
 /**
@@ -8495,24 +8320,6 @@ void update_drag_state(EventContext* evcon, View* target, bool is_dragging) {
     drag_transition(state, DRAG_TRANSITION_SET_STATE, &drag_args);
 
     log_debug("update_drag_state: dragging=%d, target=%p", is_dragging, target);
-}
-
-// The legacy package-off target path only needs a named iframe lookup; parsing
-// a one-use CSS selector made the fallback depend on tokenizer and matcher state.
-static DomElement* find_iframe_by_name(DomNode* node, const char* target_name) {
-    if (!node || !target_name) return nullptr;
-    if (node->is_element()) {
-        DomElement* elem = node->as_element();
-        const char* name = elem->get_attribute("name");
-        if (elem->tag() == MARKUP_NAME_IFRAME && name && strcmp(name, target_name) == 0) {
-            return elem;
-        }
-        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-            DomElement* found = find_iframe_by_name(child, target_name);
-            if (found) return found;
-        }
-    }
-    return nullptr;
 }
 
 // find the sub-view that matches the given node
@@ -10983,61 +10790,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             update_drag_state(&evcon, NULL, false);
         }
 
-        if (evcon.new_url) {
-            log_debug("opening_url:%s", evcon.new_url);
-            const char* new_url = evcon.new_url;
-
-            // -- Fragment-only navigation: scroll to #id without loading a new page --
-            if (new_url[0] == '#' && doc->root) {
-                const char* fragment_id = new_url + 1;  // skip '#'
-                log_info("browse_nav: fragment navigation to #%s", fragment_id);
-                DomElement* target_elem = dom_find_element_by_id(doc->root, fragment_id);
-                if (target_elem) {
-                    View* target_view = find_view(doc->view_tree->root, static_cast<DomNode*>(target_elem));
-                    if (target_view) {
-                        // get root scroller and scroll to element's y position
-                        ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
-                        if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
-                            ScrollPane* pane = root_block->scroll()->pane;
-                            float target_y = target_view->y;
-                            DocState* scroll_state = (DocState*)uicon->document->state;
-                            float scroll_x = 0.0f, scroll_y = 0.0f;
-                            scroll_state_get_position_for_view(scroll_state, static_cast<View*>(root_block), pane,
-                                                               &scroll_x, &scroll_y, NULL, NULL);
-                            scroll_state_set_position_for_view(scroll_state, static_cast<View*>(root_block),
-                                                               pane, scroll_x, target_y, true);
-                            scroll_state_get_position_for_view(scroll_state, static_cast<View*>(root_block), pane,
-                                                               NULL, &scroll_y, NULL, NULL);
-                            log_info("browse_nav: scrolled to #%s at y=%.0f", fragment_id,
-                                     scroll_y);
-                            doc_state_mark_dirty(uicon->document->state);
-                        }
-                    } else {
-                        log_warn("browse_nav: element #%s found but no view for it", fragment_id);
-                    }
-                } else {
-                    log_warn("browse_nav: element #%s not found in document", fragment_id);
-                }
-                to_repaint();
-                break;
-            }
-
-            if (evcon.new_target) {
-                log_debug("setting new src to target: %s", evcon.new_target);
-                // Legacy package-off navigation resolves the target by name;
-                // execution stays shared with the package-pinned path.
-                DomElement* iframe = find_iframe_by_name(doc->root, evcon.new_target);
-                if (!iframe || !navigation_execute_iframe_target(evcon.ui_context, iframe, new_url)) {
-                    log_debug("failed to find iframe view");
-                }
-            }
-            else {
-                // Legacy package-off navigation uses the same native executor
-                // after its mousedown policy determines the current document.
-                navigation_execute_top_target(evcon.ui_context, doc, new_url);
-            }
-            to_repaint();
-        }
         // Phase 6E: sync canonical selection/projection caches into
         // form->selection_* after mouse-driven focus / hit-test / drag ops.
         {
@@ -11115,14 +10867,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             context_menu_close(state);
             evcon.need_repaint = true;
             break;
-        }
-
-        // Handle dropdown keyboard navigation first (if dropdown is open)
-        if (state->open_dropdown) {
-            if (handle_dropdown_key(&evcon, key_event->key, key_event->mods)) {
-                evcon.need_repaint = true;
-                break;
-            }
         }
 
         View* focused = focus_get(state);
@@ -11226,7 +10970,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 focused = focus_get(state);
             }
             if (!tab_prevented) {
-                bool forward = !(key_event->mods & RDT_MOD_SHIFT);
                 DomDocument* focus_doc = evcon.target_document ? evcon.target_document : doc;
                 if (focus_doc && focus_doc->view_tree && focus_doc->view_tree->root) {
                     View* previous_focus = focus_get(state);
@@ -11235,13 +10978,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     InputIntent focus_key_intent = {};
                     focus_key_intent.key = key_event->key;
                     focus_key_intent.mods = key_event->mods;
-                    // The package owns target ordering. Package-off documents
-                    // retain the historical native move as the compatibility
-                    // fallback while the behavior registry remains optional.
-                    if (!dispatch_behavior_handler(&evcon, static_cast<View*>(focus_root),
-                                                   "focuskey", &focus_key_intent, nullptr)) {
-                        focus_move(state, focus_doc->view_tree->root, forward);
-                    }
+                    // S12.1.3/ES30: sequential-focus policy is package-only;
+                    // an unclaimed hook performs no default action.
+                    dispatch_behavior_handler(&evcon, static_cast<View*>(focus_root),
+                                              "focuskey", &focus_key_intent, nullptr);
                     View* next_focus = focus_get(state);
                     if (next_focus && next_focus != previous_focus) {
                         // Sequential focus navigation must emit focusin so
@@ -11340,22 +11080,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (prevented) evcon.default_prevented = true;
             focused = focus_get(state);
         }
-        // Enter activates immediately, but Space only arms a pending click.
-        // The identity pin lets a cancelable keydown reconcile the DOM without
-        // turning keyup into a dangling View* access (D4.5.1v3).
-        if (focused && !evcon.default_prevented &&
-            !(key_event->mods & (RDT_MOD_CTRL | RDT_MOD_SUPER | RDT_MOD_ALT))) {
-            if (key_event->key == RDT_KEY_SPACE &&
-                keyboard_space_activation_target(state, focused) &&
-                space_activation_arm(&evcon, state, focused)) {
-                break;
-            }
-            if (run_keyboard_activation(&evcon, state, focused, key_event->key)) {
-                evcon.need_repaint = true;
-                break;
-            }
-        }
-
         // F4: a single-line text control's Enter is implicit submission, not
         // text insertion. JS keydown cancellation remains authoritative; the
         // package then chooses the first enabled submitter or the form itself.
@@ -11590,29 +11314,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     state->editing.pending_text_input_prevented = false;
                     state->editing.pending_text_input_key = RDT_KEY_UNKNOWN;
                 }
-                DomNodeRef space_activation_ref = {nullptr, 0};
-                View* space_activation_target = event->key.key == RDT_KEY_SPACE
-                    ? space_activation_take(&evcon, state, &space_activation_ref) : nullptr;
                 View* focused = focus_get(state);
                 event_log_focused_target(cascade_log, cascade_id, focused);
                 WebViewHandle* focused_webview = focused_layer_webview_handle(focused);
                 if (focused_webview) {
                     webview_layer_platform_inject_key(
                         focused_webview, 1, event->key.key, event->key.mods);
-                    space_activation_release(&evcon, space_activation_ref);
                     break;
                 }
-                bool keyup_prevented = false;
                 if (focused) {
-                    keyup_prevented = radiant_dispatch_keyboard_event(&evcon, focused,
-                        "keyup", event->key.key, event->key.mods, false);
+                    radiant_dispatch_keyboard_event(&evcon, focused, "keyup",
+                                                    event->key.key, event->key.mods,
+                                                    false);
                 }
-                if (space_activation_target && !keyup_prevented &&
-                    run_keyboard_activation(&evcon, state,
-                                            space_activation_target, RDT_KEY_SPACE)) {
-                    evcon.need_repaint = true;
-                }
-                space_activation_release(&evcon, space_activation_ref);
             }
         }
         break;

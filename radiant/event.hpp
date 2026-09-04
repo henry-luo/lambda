@@ -66,14 +66,6 @@ struct DomNode;
 // state changes outside the native pointer dispatcher (for example JS .checked).
 void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set);
 
-// True when a dom-package behavior template owns the default action for this
-// event on this target. Native default actions consult it and stand down
-// (ES5, fallback-until-registered). `evcon` may be null for callers outside
-// event dispatch; the document is then taken from the target element.
-struct EventContext;
-bool radiant_behavior_claims_event(struct EventContext* evcon, View* target,
-                                   const char* event_name);
-
 // F8/ES19: the behavior init phase. Runs between layout and rendering, and is
 // positioned rather than gated on paint — a headless run that never renders
 // still inits its controls, while `lambda.exe layout` stops before the phase
@@ -871,6 +863,9 @@ bool radiant_dispatch_behavior_dom_edit(View* target, const InputIntent* intent)
 // submit or reset twice.
 bool radiant_dispatch_behavior_submit_activation(EventContext* evcon, View* target);
 bool radiant_dispatch_behavior_reset_activation(EventContext* evcon, View* target);
+// The package selects the activation key/timing; native only dispatches the
+// resulting click through the shared author/default-action pipeline.
+bool radiant_keyboard_click_from_package(void* dom_node);
 // F14.1: `document.execCommand` reaches the package's command set through here.
 bool radiant_dom_exec_command(void* document, const char* command,
                               const char* value);
@@ -2466,9 +2461,6 @@ typedef struct DocState {
     DomElement*          last_focused_text_control;
     EditingBehavior      editing_behavior;
     FocusState* focus;             // focus state with navigation info
-    // A Space keydown arms its keyup click against this identity. Pinning is
-    // required because author keydown handlers may reconcile before keyup.
-    DomNodeRef pending_space_activation;
     CursorState* cursor;           // mouse cursor state
     View* hover_target;            // currently hovered element
     View* active_target;           // currently active (pressed) element
@@ -4232,8 +4224,6 @@ typedef struct EventContext {
 
     // effects fields
     CssEnum new_cursor;
-    char* new_url;
-    char* new_target;
     bool need_repaint;
 
     // §7 unification (U-2): set by JS bridge dispatch when a listener calls

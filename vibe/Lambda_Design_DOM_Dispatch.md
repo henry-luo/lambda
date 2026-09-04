@@ -1,6 +1,6 @@
 # Lambda DOM Event Dispatch — three flows, one engine
 
-> **Status**: **RATIFIED — implementation complete** (2026-09-01). §2–§3 are **descriptive** — the current state of the three dispatch flows, verified against the tree at 2026-09-01. §4.1's rulings **ES22–ES29 are ratified in full (2026-09-01, user)**, §4.3's resolution design is endorsed, and ESO63/ESO67/ESO69 are resolved (ESO68 narrowed to measurement). F17–F21 are implemented; only the separately tracked deferred/measurement ledger items remain.
+> **Status**: **RATIFIED — implementation complete** (2026-09-01). §2–§3 are **descriptive** — the current state of the three dispatch flows, verified against the tree at 2026-09-04. §4.1's rulings **ES22–ES29 are ratified in full (2026-09-01, user)**, §4.3's resolution design is endorsed, and ESO63/ESO67/ESO69 are resolved (ESO68 narrowed to measurement). F17–F21 are implemented; only the separately tracked deferred/measurement ledger items remain.
 > **Role**: the design home for the event **dispatch mechanism** — how an event reaches handlers across the three flows, what object the handlers receive, and how cancellation composes. Complements `vibe/Lambda_Design_DOM_Default.md`, which owns default-action **placement** (what runs after dispatch); the boundary between the two docs is the boundary between *delivering* an event and *acting* on it.
 > **Scope**: propagation, handler registration and addressing, the event object, cancellation/verdict semantics, synthetic dispatch, and the unification design. **Out of scope**: which default actions exist and their status (the DOM_Default ledger), state storage and the waist (DOM_State ES-series), and the JS property/binding architecture (Jube DOM3/DOM4).
 > **Companion docs**: `vibe/Lambda_Design_DOM_State.md` (ES5 pipeline, ES10 peers-over-one-state, ES15 verdicts), `vibe/Lambda_Design_DOM_Default.md` (§5.2 single-sourced activation, resolved ESO49), `vibe/Lambda_Design_DOM_Pkg.md` (placement policy), `vibe/Lambda_Jube_DOM3.md`/`DOM4.md` (declared interfaces, ordinal dispatch), `doc/dev/radiant/RAD_15_Events_Input.md`, `doc/dev/js/JS_13_Web_DOM.md` §5.
@@ -17,9 +17,9 @@ Radiant delivers events to handlers through **three coexisting flows**:
 2. **JS DOM event handlers** — `addEventListener` listeners and `on<type>` IDL handlers, dispatched by the JS realm's own 3-phase dispatcher.
 3. **Lambda author template handlers** — a `.ls` page's `view`/`edit` templates that *generate* the DOM through the render map and handle events on the elements they produced.
 
-They already share the runtime (ES12), the canonical state store (ES10), the template registry and verdict protocol (flows 1+3), and — for submit/reset — one activation claim protocol (F4). What they do **not** share is the dispatch machinery itself: three propagation walks, two event representations, two cancellation states, and one activation behavior implemented twice. §2 documents each flow as built; §3 analyzes exactly where they diverge; §4 proposes the unified design: **one propagation engine, two tiers, three addressing modes, one event object**.
+They already share the runtime (ES12), the canonical state store (ES10), the template registry and verdict protocol (flows 1+3), and — for submit/reset — one package activation path (F4). What they do **not** share is the dispatch machinery itself: three propagation walks, two event representations, two cancellation states, and one activation behavior implemented twice. §2 documents each flow as built; §3 analyzes exactly where they diverge; §4 proposes the unified design: **one propagation engine, two tiers, three addressing modes, one event object**.
 
-Naming note: this doc says **author tier** for the spec's "author event handling" (flows 2 and 3 — they are the same spec concept in two realms) and **UA tier** for default-action handling (flow 1 plus the surviving native fallbacks).
+Naming note: this doc says **author tier** for the spec's "author event handling" (flows 2 and 3 — they are the same spec concept in two realms) and **UA tier** for default-action handling (flow 1 plus action classes that remain native).
 
 ---
 
@@ -32,7 +32,7 @@ Facts the unification builds on, all landed:
 - **One script runtime per document** (ES12, F0a; user direction 2026-08-25). `js.runtime` *is* a Lambda `Runtime*`; the dom package loads onto `dom_document_script_runtime(doc)`. The module-state-id collision that made JS pages defer the package was ESO34, **fixed 2026-08-26** — a JS page's package-driven state dump regenerates byte-identical to the native golden.
 - **One canonical state** (ES10). Both realms write through the same waist writers; state storage stays in C++ so views link to it during rendering.
 - **One receiver vocabulary.** Behavior handlers bind `~` to the same Jube `dom_node` branded VMap that JS holds (`radiant_dom_wrap_node`), so an element is *the same value* in both realms.
-- **One claim protocol for submit/reset** (F4). Both the native pointer path and the JS `dispatchEvent` path consult `radiant_behavior_claims_event` and route to the same package policy.
+- **One package path for submit/reset** (F4). Both the native pointer path and the JS `dispatchEvent` path route through `dispatch_click_default_actions` to the same package policy; there is no native submission/reset branch.
 
 ### 2.2 Flow 1 — behavior templates (UA default actions)
 
@@ -42,8 +42,8 @@ Facts the unification builds on, all landed:
 
 - **One-call ceiling** — at most one Lambda call per discrete event; a `'pass'` verdict continues the walk above the matched element.
 - **Hot-path guard** — `mousemove`/`pointermove`/`scroll`/`wheel`/`dragmove`/`dragover` never trigger a package load and enter dispatch only when an already-loaded template declares such a handler (`event_is_hot_path`, `:2506`).
-- **Verdicts are return values** (ES15): `'pass'` declines (native fallback stays in charge); `'prevent-default'` claims and sets `evcon->default_prevented`; any other return claims.
-- **Fallback-until-claimed → retirement** (ES5/ES7): each surviving native default-action block asks `radiant_behavior_claims_event` first; once a class is proven migrated its native half is *deleted* (F1b checkbox/radio, F2b select-open, F3 validation), after which `'pass'` means nothing happens (DOM_Default §5.6).
+- **Verdicts are return values** (ES15): `'pass'` declines and continues the ancestor walk; if no package handler accepts, no package default action occurs. `'prevent-default'` claims and sets `evcon->default_prevented`; any other return claims.
+- **Fallback-until-claimed → retirement** (ES5/ES7): once a class is proven migrated its native half is *deleted*. The last `radiant_behavior_claims_event` caller was removed on 2026-09-04 with the link, submit/reset and sequential-focus fallback cuts, so the guard itself is gone. On every migrated class, `'pass'` means nothing happens (DOM_Default §5.6).
 - **Effects through the waist only**: `radiant.get_state`/`set_state`/`radio_group`/`dispatch`/… — `radiant.dispatch(~, "input")` re-enters the pipeline as a fresh event (`radiant_dispatch_event_from_script`, `:2783`), and the submit path dispatches its cancelable `submit` through the **JS EventTarget** (`radiant_dispatch_submit_event_from_script`, `:2802`) so JS listeners can cancel it.
 - **`init` phase** (F8/ES19): a document-order walk when controls become live seeds derived state (validity, aria mirrors) with no paint dependency.
 
@@ -70,8 +70,8 @@ live DOM element enters `radiant_dispatch_synthetic_dom_event` with the same
 native event record and `is_trusted = false`. The guarded recursive call runs
 the shared author cascade exactly once; its uncancelled click then reaches the
 same `dispatch_click_default_actions` UA stage as a trusted pointer click.
-Checkbox/radio, submit/reset, link, and popover activation therefore consult
-the package claim protocol once. This keeps handler-owned policy in S12.1.3
+Checkbox/radio, submit/reset, link, and popover activation therefore reach
+package dispatch once. This keeps handler-owned policy in S12.1.3
 while canonical state stays at the S9.1.4/D4.5.1v3 native seam. The old embedded activation pass is deleted;
 re-dispatch of the exact in-flight record remains a raw JS recursion boundary,
 not a second entry into native dispatch (ES25/ES26).
