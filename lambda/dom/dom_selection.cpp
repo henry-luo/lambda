@@ -15,6 +15,7 @@
  */
 
 #include "dom_selection.h"
+#include "dom_core.h"
 #include "realm/dom_realm.h"
 #include "dom_engine.h"
 #include "dom.h"
@@ -105,9 +106,7 @@ static bool item_to_bool(Item v) {
 }
 
 static Item throw_dom_exception(const char* name, const char* msg) {
-    Item n = make_str(name ? name : "Error");
-    Item m = make_str(msg ? msg : "");
-    return dom_realm_throw(dom_realm_new_error_named(n, m));
+    return dom_raise_named(name, msg);   // realm-aware: throws, or answers ItemError
 }
 
 // Translate dom_range exception strings (e.g. "InvalidNodeTypeError",

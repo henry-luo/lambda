@@ -208,6 +208,15 @@ Item dom_cssom_delete_rule(Item sheet_item, Item index_arg);
 // in dom_module.cpp is what renders that as null.
 Item dom_absent_to_null(Item v);
 
+// Raising from a row body. In a realm this is a JS DOMException-shaped throw,
+// as it always was; with no realm there is nothing to throw *into* -- building
+// the Error object allocates in the realm's pool -- so the row answers
+// ItemError, which is Lambda's error value and what `^` consumes. The name and
+// message still reach the log so a Lambda caller's failure is not silent.
+Item dom_raise(Item name, Item message);
+Item dom_raise_named(const char* name, const char* message);
+Item dom_raise_type_error(const char* message);
+
 // Rows that are literally their JS-facing bridge: the bridge already has the
 // row's signature, and its `undefined` becomes null at the publication boundary,
 // so one body serves both doors (ES38) instead of a Lambda-only copy.

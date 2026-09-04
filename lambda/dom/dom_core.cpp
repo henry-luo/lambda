@@ -34,6 +34,21 @@
 // Delegation helpers
 // ---------------------------------------------------------------------------
 
+extern "C" bool dom_realm_active(void);
+extern "C" Item dom_raise(Item name, Item message) {
+    if (dom_realm_active()) return dom_realm_throw(dom_realm_new_error_named(name, message));
+    const char* n = get_type_id(name) == LMD_TYPE_STRING ? fn_to_cstr(name) : "Error";
+    const char* m = get_type_id(message) == LMD_TYPE_STRING ? fn_to_cstr(message) : "";
+    log_error("dom: %s: %s (no realm; answering error)", n ? n : "Error", m ? m : "");
+    return ItemError;
+}
+extern "C" Item dom_raise_named(const char* name, const char* message) {
+    return dom_raise(js_name_item(name ? name : "Error"), js_name_item(message ? message : ""));
+}
+extern "C" Item dom_raise_type_error(const char* message) {
+    return dom_raise_named("TypeError", message);
+}
+
 extern "C" Item dom_absent_to_null(Item v) {
     return get_type_id(v) == LMD_TYPE_UNDEFINED ? ItemNull : v;
 }
