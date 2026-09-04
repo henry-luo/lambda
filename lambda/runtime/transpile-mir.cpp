@@ -17733,102 +17733,36 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             RETURN_CALL_VALUE(result);
         }
 
-        // For 1-arg system functions
-        if (arg_count == 1) {
-            arg = call_node->argument;
-            MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
-            if (sysfunc_params_reject_error(info)) {
-                emit_return_if_item_error(mt, boxed_a1);
+        // Fixed-arity system functions (declared arg_count >= 1) call a fixed C ABI, so every
+        // operand must occupy a fixed proto slot; only descriptors declared variadic
+        // (arg_count == -1) may take the vararg proto below. On Darwin arm64 varargs travel
+        // on the stack, so routing a fixed-arity callee through it shifts every argument
+        // (Jube rows such as dom.set_base_and_extent declare five).
+        if (info->arg_count != -1) {
+            MIR_type_t arg_types[LAMBDA_MAX_FUNCTION_ARGS];
+            MIR_op_t arg_ops[LAMBDA_MAX_FUNCTION_ARGS];
+            MIR_reg_t boxed_args[LAMBDA_MAX_FUNCTION_ARGS];
+            int ai = 0;
+            for (arg = call_node->argument; arg && ai < LAMBDA_MAX_FUNCTION_ARGS; arg = arg->next) {
+                boxed_args[ai] = transpile_box_item(mt, arg);
+                arg_types[ai] = MIR_T_I64;
+                arg_ops[ai] = MIR_new_reg_op(mt->ctx, boxed_args[ai]);
+                ai++;
             }
-            async_track_pending_reg(mt, boxed_a1);
-            async_emit_invoke_resume_point(mt, call_node);
-            MIR_reg_t result = emit_call_1(mt, sys_fn_name, mir_ret_type, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
-            POST_PROCESS_DTIME(result);
-            POST_PROCESS_BOOL(result);
-            POST_PROCESS_UNBOX(result);
-            RETURN_CALL_VALUE(result);
-        }
-
-        // For 2-arg system functions
-        if (arg_count == 2) {
-            arg = call_node->argument;
-            MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
-
-            arg = arg->next;
-            MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
-
             if (sysfunc_params_reject_error(info)) {
-                emit_return_if_item_error(mt, boxed_a1);
-                emit_return_if_item_error(mt, boxed_a2);
+                for (int i = 0; i < ai; i++) emit_return_if_item_error(mt, boxed_args[i]);
             }
-            async_track_pending_reg(mt, boxed_a1);
-            async_track_pending_reg(mt, boxed_a2);
+            for (int i = 0; i < ai; i++) async_track_pending_reg(mt, boxed_args[i]);
             async_emit_invoke_resume_point(mt, call_node);
-            MIR_reg_t result = emit_call_2(mt, sys_fn_name, mir_ret_type,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2));
+            MIR_reg_t result = em_call_with_args(&mt->em, sys_fn_name, mir_ret_type,
+                ai, arg_types, arg_ops, false);
             POST_PROCESS_DTIME(result);
             POST_PROCESS_BOOL(result);
             POST_PROCESS_UNBOX(result);
             RETURN_CALL_VALUE(result);
         }
 
-        // 3-arg system functions
-        if (arg_count == 3) {
-            arg = call_node->argument;
-            MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
-
-            arg = arg->next;
-            MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
-
-            arg = arg->next;
-            MIR_reg_t boxed_a3 = transpile_box_item(mt, arg);
-
-            async_track_pending_reg(mt, boxed_a1);
-            async_track_pending_reg(mt, boxed_a2);
-            async_track_pending_reg(mt, boxed_a3);
-            async_emit_invoke_resume_point(mt, call_node);
-            MIR_reg_t result = emit_call_3(mt, sys_fn_name, mir_ret_type,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3));
-            POST_PROCESS_DTIME(result);
-            POST_PROCESS_BOOL(result);
-            POST_PROCESS_UNBOX(result);
-            RETURN_CALL_VALUE(result);
-        }
-
-        // 4-arg system functions use fixed C ABIs; routing them through the vararg fallback shifts arguments.
-        if (arg_count == 4) {
-            arg = call_node->argument;
-            MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
-
-            arg = arg->next;
-            MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
-
-            arg = arg->next;
-            MIR_reg_t boxed_a3 = transpile_box_item(mt, arg);
-
-            arg = arg->next;
-            MIR_reg_t boxed_a4 = transpile_box_item(mt, arg);
-
-            async_track_pending_reg(mt, boxed_a1);
-            async_track_pending_reg(mt, boxed_a2);
-            async_track_pending_reg(mt, boxed_a3);
-            async_track_pending_reg(mt, boxed_a4);
-            async_emit_invoke_resume_point(mt, call_node);
-            MIR_reg_t result = emit_call_4(mt, sys_fn_name, mir_ret_type,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a4));
-            POST_PROCESS_DTIME(result);
-            POST_PROCESS_BOOL(result);
-            POST_PROCESS_UNBOX(result);
-            RETURN_CALL_VALUE(result);
-        }
-
-        // Fallback for more args: use vararg call
+        // Variadic system functions (arg_count == -1): first arg mandatory, rest varargs.
         {
             arg = call_node->argument;
             MIR_op_t arg_ops[LAMBDA_MAX_FUNCTION_ARGS];

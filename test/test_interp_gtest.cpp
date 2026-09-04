@@ -649,6 +649,24 @@ TEST(InterpWalker, GenericUint64ArrayReadsKeepTheirLane) {
     EXPECT_EQ(jit.exit_code, interp.exit_code);
 }
 
+TEST(InterpWalker, FixedArityCallsBeyondFourUseFixedAbi) {
+    // Every declared-arity system function calls a fixed C ABI, however many
+    // arguments it takes. The JIT used to hand five-plus-argument calls to its
+    // vararg prototype, and on Darwin arm64 varargs travel on the stack, so a
+    // fixed-arity callee read its trailing operands from unset registers. The
+    // dom catalog's five-argument set_base_and_extent row exposes it: the
+    // golden is the oracle, the interpreter the cross-check.
+    const char* script = "test/lambda/dom_range_selection_ops.ls";
+    RunResult jit = run_script(script, "jit");
+    RunResult interp = run_script(script, "interp");
+    EXPECT_EQ(summary_field(interp.stderr_text, "executed="), 1);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text),
+              trim_trailing(read_file("test/lambda/dom_range_selection_ops.txt")));
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
 TEST(InterpFallback, CharacterRangeIndexRemainsPinned) {
     // `to` can also make a character range, so it cannot use the integer COW
     // bridge merely because the loop's conservative AST type is `any`.
