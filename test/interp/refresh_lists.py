@@ -45,6 +45,13 @@ EXCLUDED_HEADER = """# T0 interpreter — exclusion list (LAMBDA_TIER=interp)
 # `node:none` means the pre-scan never ran: the script does not compile on
 # either tier, or its whole import cone was rejected before it was reached.
 #
+# `node:AST_NODE_PROC` is usually the task-backed boundary rather than the `pn`
+# spelling: a procedure the concurrency analysis marks await-capable runs its
+# body through the boxed MIR satellite, and that membrane fails closed on local
+# `var`/assignment statements and on indirect Lambda calls (D8.1.1v4, D3.3.1).
+# A `pn main` that starts or waits on a task and also keeps mutable locals is
+# therefore expected here, not a walker defect.
+#
 # format: <script>\tnode:<first unsupported kind>
 """
 

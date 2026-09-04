@@ -42,6 +42,24 @@ void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx
         VLIST(((AstElementNode*)node)->item);
         VLIST(((AstElementNode*)node)->content);
         break;
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM:
+        // build_assignment_statement_from_parts keeps the parsed LHS in the
+        // shared `left` alias while the Lambda statement's real operands are
+        // the decomposed place: object + key chain + value. The core layout
+        // visits `left`/`right`, so delegating here would scan the LHS as an
+        // ordinary *read* -- and `m[i, j] = v` would then be rejected by the
+        // N-D INDEX_EXPR read guard, even though T0 never evaluates that node
+        // (interp.cpp AST_NODE_INDEX_ASSIGN_STAM uses object/key/value).
+        V(((AstCompoundAssignNode*)node)->object);
+        VLIST(((AstCompoundAssignNode*)node)->key);
+        V(((AstCompoundAssignNode*)node)->value);
+        break;
+    case AST_NODE_ASSIGN_STAM:
+        // Same dual representation: the target is a resolved binding, not an
+        // evaluated child, so only the assigned value is an expression edge.
+        V(((AstAssignStamNode*)node)->value);
+        break;
     case AST_NODE_FOR_EXPR: {
         AstForNode* fr = (AstForNode*)node;
         VLIST(fr->loop);
@@ -628,7 +646,14 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             ? (TypeFunc*)((AstNode*)direct)->type : NULL;
         if (ast_type_func_has_var_parameter(signature)) {
             NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-            if (!ast_direct_call_var_parameter_entries(call, signature, borrowed)) {
+            // CW25: pass the argument-node array. It is what tells the shared
+            // helper that this caller implements place borrows (`f(var m[1])`),
+            // and eval_call in interp.cpp passes it -- admitting less here than
+            // the walker executes pinned whole files to the JIT for a shape T0
+            // already runs.
+            AstNode* borrow_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+            if (!ast_direct_call_var_parameter_entries(call, signature, borrowed,
+                    borrow_args)) {
                 // A `var` argument is a caller-owned writable binding. T0 can
                 // publish a replacement only for an exact direct identifier;
                 // a dynamic, optional, variadic, aliased, or expression

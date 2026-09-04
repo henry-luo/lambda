@@ -3738,11 +3738,7 @@ static MirValue lambda_convert_rep(void* owner, MirValue value,
             ? ast_unwrap_primary(((AstCallNode*)source)->function) : NULL;
         SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC
             ? ((AstSysFuncNode*)callee)->fn_info : NULL;
-        if (conversion_type == LMD_TYPE_DTIME && value.rep == VALUE_REP_I64) {
-            // DateTime literals carry their immutable source value, not a
-            // pointer. The Item boundary owns the one-way GC materialization.
-            reg = emit_box_dtime_value(mt, value.reg);
-        } else if (conversion_type == LMD_TYPE_INT64 && sys &&
+        if (conversion_type == LMD_TYPE_INT64 && sys &&
                 sys->fn == SYSFUNC_INT64) {
             // int64() returns a raw result-or-error pair collapsed into its
             // raw ABI lane; its first Item consumer owns the discriminating
@@ -5571,15 +5567,23 @@ static MirValue transpile_primary_value(MirTranspiler* mt,
                 VALUE_REP_RAW_GC_POINTER, node->type);
         }
         case LMD_TYPE_DTIME: {
-            // A parser-built DateTime is a stable source value, not a
-            // pointer-backed literal. Its first Item consumer materializes a
-            // GC home through the emitter-owned conversion path.
+            // A parser-built DateTime is a packed source value, so it stays a
+            // scalar immediate rather than a const-pool load (Tune18 E2.a).
+            // It must still be PUBLISHED as an Item: `datetime`'s canonical
+            // carrier is a DateTime* (lambda_canonical_rep), so a raw value
+            // register labelled with a datetime contract is re-read as a
+            // pointer by every carrier-from-type consumer -- the var slot rep
+            // in mir_value_from_var_entry, emit_box_impl's emit_box_dtime, and
+            // lambda_convert_rep's I64 normalization. Leaking the raw value
+            // past this point printed the payload as an int64 and dereferenced
+            // it on `let x = t'...'` (D2.4.1-D2.4.3).
             TypeDateTime* value = (TypeDateTime*)node->type;
             MIR_reg_t raw = new_reg(mt, "dtime_const", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, raw),
                 MIR_new_int_op(mt->ctx, (int64_t)value->datetime.int64_val)));
-            return mir_value_from_reg(mt, node, raw, VALUE_REP_I64, node->type);
+            return mir_value_from_reg(mt, node, emit_box_dtime_value(mt, raw),
+                VALUE_REP_ITEM, node->type);
         }
         case LMD_TYPE_INT64: {
             TypeConst* tc = (TypeConst*)node->type;

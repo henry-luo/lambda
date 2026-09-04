@@ -494,17 +494,21 @@ TEST(InterpWalker, ImmutableProcAliasStaysSynchronous) {
     EXPECT_EQ(jit.exit_code, interp.exit_code);
 }
 
-TEST(InterpWalker, ImmutableProcAliasWithTaskUsesSatellite) {
-    // The T0 module owns the alias, while the task-backed target runs through
-    // its resumable MIR satellite; this is the mixed-tier boundary required by
-    // D8.1.1v2 rather than a whole-module fallback.
+TEST(InterpWalker, ImmutableProcAliasWithTaskStaysPinned) {
+    // The companion of the test above: when the aliased target really does
+    // await, the caller cannot stay in T0, and delegating it needs the boxed
+    // MIR satellite. Since the AUTO landing that membrane fails closed on
+    // indirect Lambda calls -- the boxed dispatcher has no caller-root
+    // write-back channel for a target it cannot name (D8.1.1v4, D3.3.1). The
+    // module is therefore a counted whole-module fallback, which is what R4
+    // requires: never a silently half-interpreted run.
     const std::string path = "temp/interp_case_proc_alias_task.ls";
     write_script(path,
         "pn worker() { sleep(1) }\n"
         "pn main() { let run = worker\n run() }\n");
     RunResult interp = run_script(path, "interp", /*procedural=*/true);
-    EXPECT_EQ(summary_field(interp.stderr_text, "executed="), 1);
-    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(summary_field(interp.stderr_text, "executed="), 0);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 1);
 }
 
 //==============================================================================

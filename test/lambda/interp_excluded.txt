@@ -10,4 +10,25 @@
 # `node:none` means the pre-scan never ran: the script does not compile on
 # either tier, or its whole import cone was rejected before it was reached.
 #
+# `node:AST_NODE_PROC` is usually the task-backed boundary rather than the `pn`
+# spelling: a procedure the concurrency analysis marks await-capable runs its
+# body through the boxed MIR satellite, and that membrane fails closed on local
+# `var`/assignment statements and on indirect Lambda calls (D8.1.1v4, D3.3.1).
+# A `pn main` that starts or waits on a task and also keeps mutable locals is
+# therefore expected here, not a walker defect.
+#
 # format: <script>	node:<first unsupported kind>
+test/lambda/proc/proc_stack_frame.ls	node:AST_NODE_PROC
+test/lambda/conc/cancel_before_run.ls	node:AST_NODE_PROC
+test/lambda/conc/cancel_nested_cleanup.ls	node:AST_NODE_PROC
+test/lambda/conc/cancel_parked.ls	node:AST_NODE_PROC
+test/lambda/conc/io_read_error.ls	node:AST_NODE_PROC
+test/lambda/conc/js_promise_wait.ls	node:AST_NODE_PROC
+test/lambda/conc/mailbox_full.ls	node:AST_NODE_PROC
+test/lambda/conc/proc_handler_after_wait.ls	node:AST_NODE_PROC
+test/lambda/conc/proc_handler_fault_after_wait.ls	node:AST_NODE_PROC
+test/lambda/conc/scope_error_cancel.ls	node:AST_NODE_PROC
+test/lambda/conc/scope_loop_exit.ls	node:AST_NODE_PROC
+test/lambda/conc/select_basic.ls	node:AST_NODE_PROC
+test/lambda/conc/task_system_fault.ls	node:AST_NODE_PROC
+test/lambda/conc/timeout_no_cancel.ls	node:AST_NODE_PROC
