@@ -3738,11 +3738,7 @@ static MirValue lambda_convert_rep(void* owner, MirValue value,
             ? ast_unwrap_primary(((AstCallNode*)source)->function) : NULL;
         SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC
             ? ((AstSysFuncNode*)callee)->fn_info : NULL;
-        if (conversion_type == LMD_TYPE_DTIME && value.rep == VALUE_REP_I64) {
-            // DateTime literals carry their immutable source value, not a
-            // pointer. The Item boundary owns the one-way GC materialization.
-            reg = emit_box_dtime_value(mt, value.reg);
-        } else if (conversion_type == LMD_TYPE_INT64 && sys &&
+        if (conversion_type == LMD_TYPE_INT64 && sys &&
                 sys->fn == SYSFUNC_INT64) {
             // int64() returns a raw result-or-error pair collapsed into its
             // raw ABI lane; its first Item consumer owns the discriminating
@@ -5571,15 +5567,23 @@ static MirValue transpile_primary_value(MirTranspiler* mt,
                 VALUE_REP_RAW_GC_POINTER, node->type);
         }
         case LMD_TYPE_DTIME: {
-            // A parser-built DateTime is a stable source value, not a
-            // pointer-backed literal. Its first Item consumer materializes a
-            // GC home through the emitter-owned conversion path.
+            // A parser-built DateTime is a packed source value, so it stays a
+            // scalar immediate rather than a const-pool load (Tune18 E2.a).
+            // It must still be PUBLISHED as an Item: `datetime`'s canonical
+            // carrier is a DateTime* (lambda_canonical_rep), so a raw value
+            // register labelled with a datetime contract is re-read as a
+            // pointer by every carrier-from-type consumer -- the var slot rep
+            // in mir_value_from_var_entry, emit_box_impl's emit_box_dtime, and
+            // lambda_convert_rep's I64 normalization. Leaking the raw value
+            // past this point printed the payload as an int64 and dereferenced
+            // it on `let x = t'...'` (D2.4.1-D2.4.3).
             TypeDateTime* value = (TypeDateTime*)node->type;
             MIR_reg_t raw = new_reg(mt, "dtime_const", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, raw),
                 MIR_new_int_op(mt->ctx, (int64_t)value->datetime.int64_val)));
-            return mir_value_from_reg(mt, node, raw, VALUE_REP_I64, node->type);
+            return mir_value_from_reg(mt, node, emit_box_dtime_value(mt, raw),
+                VALUE_REP_ITEM, node->type);
         }
         case LMD_TYPE_INT64: {
             TypeConst* tc = (TypeConst*)node->type;
@@ -17733,102 +17737,36 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             RETURN_CALL_VALUE(result);
         }
 
-        // For 1-arg system functions
-        if (arg_count == 1) {
-            arg = call_node->argument;
-            MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
-            if (sysfunc_params_reject_error(info)) {
-                emit_return_if_item_error(mt, boxed_a1);
+        // Fixed-arity system functions (declared arg_count >= 1) call a fixed C ABI, so every
+        // operand must occupy a fixed proto slot; only descriptors declared variadic
+        // (arg_count == -1) may take the vararg proto below. On Darwin arm64 varargs travel
+        // on the stack, so routing a fixed-arity callee through it shifts every argument
+        // (Jube rows such as dom.set_base_and_extent declare five).
+        if (info->arg_count != -1) {
+            MIR_type_t arg_types[LAMBDA_MAX_FUNCTION_ARGS];
+            MIR_op_t arg_ops[LAMBDA_MAX_FUNCTION_ARGS];
+            MIR_reg_t boxed_args[LAMBDA_MAX_FUNCTION_ARGS];
+            int ai = 0;
+            for (arg = call_node->argument; arg && ai < LAMBDA_MAX_FUNCTION_ARGS; arg = arg->next) {
+                boxed_args[ai] = transpile_box_item(mt, arg);
+                arg_types[ai] = MIR_T_I64;
+                arg_ops[ai] = MIR_new_reg_op(mt->ctx, boxed_args[ai]);
+                ai++;
             }
-            async_track_pending_reg(mt, boxed_a1);
-            async_emit_invoke_resume_point(mt, call_node);
-            MIR_reg_t result = emit_call_1(mt, sys_fn_name, mir_ret_type, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
-            POST_PROCESS_DTIME(result);
-            POST_PROCESS_BOOL(result);
-            POST_PROCESS_UNBOX(result);
-            RETURN_CALL_VALUE(result);
-        }
-
-        // For 2-arg system functions
-        if (arg_count == 2) {
-            arg = call_node->argument;
-            MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
-
-            arg = arg->next;
-            MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
-
             if (sysfunc_params_reject_error(info)) {
-                emit_return_if_item_error(mt, boxed_a1);
-                emit_return_if_item_error(mt, boxed_a2);
+                for (int i = 0; i < ai; i++) emit_return_if_item_error(mt, boxed_args[i]);
             }
-            async_track_pending_reg(mt, boxed_a1);
-            async_track_pending_reg(mt, boxed_a2);
+            for (int i = 0; i < ai; i++) async_track_pending_reg(mt, boxed_args[i]);
             async_emit_invoke_resume_point(mt, call_node);
-            MIR_reg_t result = emit_call_2(mt, sys_fn_name, mir_ret_type,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2));
+            MIR_reg_t result = em_call_with_args(&mt->em, sys_fn_name, mir_ret_type,
+                ai, arg_types, arg_ops, false);
             POST_PROCESS_DTIME(result);
             POST_PROCESS_BOOL(result);
             POST_PROCESS_UNBOX(result);
             RETURN_CALL_VALUE(result);
         }
 
-        // 3-arg system functions
-        if (arg_count == 3) {
-            arg = call_node->argument;
-            MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
-
-            arg = arg->next;
-            MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
-
-            arg = arg->next;
-            MIR_reg_t boxed_a3 = transpile_box_item(mt, arg);
-
-            async_track_pending_reg(mt, boxed_a1);
-            async_track_pending_reg(mt, boxed_a2);
-            async_track_pending_reg(mt, boxed_a3);
-            async_emit_invoke_resume_point(mt, call_node);
-            MIR_reg_t result = emit_call_3(mt, sys_fn_name, mir_ret_type,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3));
-            POST_PROCESS_DTIME(result);
-            POST_PROCESS_BOOL(result);
-            POST_PROCESS_UNBOX(result);
-            RETURN_CALL_VALUE(result);
-        }
-
-        // 4-arg system functions use fixed C ABIs; routing them through the vararg fallback shifts arguments.
-        if (arg_count == 4) {
-            arg = call_node->argument;
-            MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
-
-            arg = arg->next;
-            MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
-
-            arg = arg->next;
-            MIR_reg_t boxed_a3 = transpile_box_item(mt, arg);
-
-            arg = arg->next;
-            MIR_reg_t boxed_a4 = transpile_box_item(mt, arg);
-
-            async_track_pending_reg(mt, boxed_a1);
-            async_track_pending_reg(mt, boxed_a2);
-            async_track_pending_reg(mt, boxed_a3);
-            async_track_pending_reg(mt, boxed_a4);
-            async_emit_invoke_resume_point(mt, call_node);
-            MIR_reg_t result = emit_call_4(mt, sys_fn_name, mir_ret_type,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a4));
-            POST_PROCESS_DTIME(result);
-            POST_PROCESS_BOOL(result);
-            POST_PROCESS_UNBOX(result);
-            RETURN_CALL_VALUE(result);
-        }
-
-        // Fallback for more args: use vararg call
+        // Variadic system functions (arg_count == -1): first arg mandatory, rest varargs.
         {
             arg = call_node->argument;
             MIR_op_t arg_ops[LAMBDA_MAX_FUNCTION_ARGS];
