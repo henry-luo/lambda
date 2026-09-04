@@ -527,23 +527,32 @@ extern "C" Item dom_core_bounding_box(Item n) {
 extern "C" Item dom_core_client_rects(Item n) {
     return dom_op0(n, JUBE_DOM_GET_CLIENT_RECTS);
 }
-extern "C" Item dom_core_scroll_state(Item n) {
-    // Same reasoning as dom_make_rect: a keyed result object needs an
-    // allocator, and a Lambda-only document has no JS realm to borrow one
-    // from, so build the pair out of the node's own document (ESO81).
-    DomNode* node = (DomNode*)dom_unwrap_element(n);
-    DomDocument* doc = (node && node->is_element()) ? ((DomElement*)node)->doc : nullptr;
-    if (!dom_realm_active() && doc && doc->input) {
+
+// A row that answers a *result map* -- geometry, boundaries -- must not build it
+// through the JS object model when there is no realm: OrdinarySet probes the
+// window hook, which creates the global out of the realm's pool, and a
+// Lambda-only script segfaults (ESO113, the same mechanism as ESO110). With no
+// realm the same fields are built as a plain Lambda map out of the document's
+// own Input, as dom_make_rect_in does for rects; a JS caller still gets the JS
+// object. One helper, so the three rows that need it do not each carry a copy.
+static Item dom_result_map(DomDocument* doc, const char* const* keys, const Item* vals, int n) {
+    if (!dom_realm_active()) {
+        if (!doc || !doc->input) return ItemNull;   // nothing to build it from
         MarkBuilder builder(doc->input);
-        return builder.map()
-            .put("x", dom_prop_get(n, "scrollLeft"))
-            .put("y", dom_prop_get(n, "scrollTop"))
-            .final();
+        auto m = builder.map();
+        for (int i = 0; i < n; i++) m.put(keys[i], vals[i]);
+        return m.final();
     }
     Item out = js_new_object();
-    dom_realm_set_cstr(out, "x", dom_prop_get(n, "scrollLeft"));
-    dom_realm_set_cstr(out, "y", dom_prop_get(n, "scrollTop"));
+    for (int i = 0; i < n; i++) dom_realm_set_cstr(out, keys[i], vals[i]);
     return out;
+}
+
+extern "C" Item dom_core_scroll_state(Item n) {
+    DomDocument* doc = (DomDocument*)dom_document_from_item(n);
+    static const char* const keys[] = { "x", "y" };
+    Item vals[] = { dom_prop_get(n, "scrollLeft"), dom_prop_get(n, "scrollTop") };
+    return dom_result_map(doc, keys, vals, 2);
 }
 extern "C" Item dom_core_set_scroll_state(Item n, Item x, Item y) {
     return dom_op2(n, JUBE_DOM_SCROLL_TO, x, y);
@@ -570,20 +579,19 @@ extern "C" Item js_selection_get_focus_node(Item self_v);
 extern "C" Item js_selection_get_focus_offset(Item self_v);
 
 extern "C" Item dom_core_range_boundaries(Item r) {
-    Item out = js_new_object();
-    dom_realm_set_cstr(out, "start_container", js_range_get_start_container(r));
-    dom_realm_set_cstr(out, "start_offset", js_range_get_start_offset(r));
-    dom_realm_set_cstr(out, "end_container", js_range_get_end_container(r));
-    dom_realm_set_cstr(out, "end_offset", js_range_get_end_offset(r));
-    return out;
+    Item sc = js_range_get_start_container(r);
+    static const char* const keys[] = { "start_container", "start_offset", "end_container", "end_offset" };
+    Item vals[] = { sc, js_range_get_start_offset(r), js_range_get_end_container(r), js_range_get_end_offset(r) };
+    return dom_result_map((DomDocument*)dom_document_from_item(sc), keys, vals, 4);
 }
 extern "C" Item dom_core_selection_boundaries(Item s) {
-    Item out = js_new_object();
-    dom_realm_set_cstr(out, "anchor_node", js_selection_get_anchor_node(s));
-    dom_realm_set_cstr(out, "anchor_offset", js_selection_get_anchor_offset(s));
-    dom_realm_set_cstr(out, "focus_node", js_selection_get_focus_node(s));
-    dom_realm_set_cstr(out, "focus_offset", js_selection_get_focus_offset(s));
-    return out;
+    Item an = js_selection_get_anchor_node(s), fn = js_selection_get_focus_node(s);
+    static const char* const keys[] = { "anchor_node", "anchor_offset", "focus_node", "focus_offset" };
+    Item vals[] = { an, js_selection_get_anchor_offset(s), fn, js_selection_get_focus_offset(s) };
+    // an empty selection has no anchor; try the focus before giving up on a document
+    DomDocument* doc = (DomDocument*)dom_document_from_item(an);
+    if (!doc) doc = (DomDocument*)dom_document_from_item(fn);
+    return dom_result_map(doc, keys, vals, 4);
 }
 
 // --- style
