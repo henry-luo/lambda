@@ -55,11 +55,6 @@ void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx
         VLIST(((AstCompoundAssignNode*)node)->key);
         V(((AstCompoundAssignNode*)node)->value);
         break;
-    case AST_NODE_ASSIGN_STAM:
-        // Same dual representation: the target is a resolved binding, not an
-        // evaluated child, so only the assigned value is an expression edge.
-        V(((AstAssignStamNode*)node)->value);
-        break;
     case AST_NODE_FOR_EXPR: {
         AstForNode* fr = (AstForNode*)node;
         VLIST(fr->loop);
@@ -1852,25 +1847,20 @@ static void interp_scan_satellite_node(AstNode* node, void* opaque) {
         if (callee && callee->node_type != AST_NODE_SYS_FUNC && !direct) {
             // A satellite cannot prove the target ABI for an indirect Lambda
             // call. An `any` callee may resolve to a `var` procedure after
-            // promotion, but the boxed dispatcher has no caller-root
-            // write-back channel (D3.3.1 / D5.2).
+            // promotion, and the boxed dispatcher has no caller-root
+            // write-back channel to defer that edge to (D3.3.1 / D5.2). This
+            // is the only gate a task-backed body gets: interp_scan_visit
+            // returns as soon as it hands the body to its satellite, so it
+            // never descends here.
+            //
+            // Deliberately broader than "local dynamic binding". A named
+            // `fn`/`pn` callee never reaches this point at all -- for those
+            // ast_direct_call_function resolves the target and `direct` is
+            // non-NULL -- so restricting the reject to non-function local
+            // bindings would leave imported indirect callees and computed or
+            // member callees admitted on an ABI nothing can prove.
             sc->ok = false;
             return;
-        }
-        if (callee && callee->node_type == AST_NODE_IDENT && !direct) {
-            NameEntry* entry = ((AstIdentNode*)callee)->entry;
-            AstNode* binding = entry ? entry->node : NULL;
-            bool local_dynamic = entry && !entry->import && binding &&
-                binding->node_type != AST_NODE_FUNC &&
-                binding->node_type != AST_NODE_FUNC_EXPR &&
-                binding->node_type != AST_NODE_PROC;
-            if (local_dynamic) {
-                // The boxed dispatcher deliberately has no mutable-borrow
-                // channel for an indirect local target. Pin this caller so a
-                // var-parameter edge cannot be deferred at runtime (D3.3.1).
-                sc->ok = false;
-                return;
-            }
         }
         break;
     }

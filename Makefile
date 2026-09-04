@@ -1582,8 +1582,10 @@ check-error-recovery:
 # ---------------------------------------------------------------------------
 
 # Differential gate: every script in the committed P0 subset must match its
-# golden under the interpreter with zero fallbacks. Regenerate the subset with
-# `python3 test/interp/tier_sweep.py` after any walker change.
+# golden under the interpreter with zero fallbacks. Regenerate with
+# `make interp-sweep` after any walker change -- never tier_sweep.py alone: the
+# subset and exclusion lists are one partition, and refreshing half of it is how
+# they drift (a narrowed planner then leaves stale rows asserting fallback=0).
 test-lambda-interp:
 	@echo "Running T0 interpreter differential over the committed subset..."
 	@./test/test_interp_gtest.exe
