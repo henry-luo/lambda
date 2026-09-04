@@ -66,14 +66,6 @@ struct DomNode;
 // state changes outside the native pointer dispatcher (for example JS .checked).
 void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set);
 
-// True when a dom-package behavior template owns the default action for this
-// event on this target. Native default actions consult it and stand down
-// (ES5, fallback-until-registered). `evcon` may be null for callers outside
-// event dispatch; the document is then taken from the target element.
-struct EventContext;
-bool radiant_behavior_claims_event(struct EventContext* evcon, View* target,
-                                   const char* event_name);
-
 // F8/ES19: the behavior init phase. Runs between layout and rendering, and is
 // positioned rather than gated on paint — a headless run that never renders
 // still inits its controls, while `lambda.exe layout` stops before the phase
@@ -4232,8 +4224,6 @@ typedef struct EventContext {
 
     // effects fields
     CssEnum new_cursor;
-    char* new_url;
-    char* new_target;
     bool need_repaint;
 
     // §7 unification (U-2): set by JS bridge dispatch when a listener calls
