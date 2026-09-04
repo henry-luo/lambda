@@ -158,6 +158,7 @@ Item dom_engine_edit_end(Item a);
 Item dom_engine_is_focusable(Item a);
 Item dom_engine_dispatch_event(Item n, Item type, Item bubbles, Item cancelable);
 Item dom_engine_keyboard_click(Item n);
+Item dom_engine_keyboard_command(Item n, Item name);
 Item dom_engine_caret_surface(Item a);
 Item dom_engine_focus_candidates(Item a);
 Item dom_engine_check_validity(Item a);

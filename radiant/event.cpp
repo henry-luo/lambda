@@ -4399,23 +4399,24 @@ static bool dispatch_form_caret_collapse(EventContext* evcon, DomElement* elem,
     return true;
 }
 
-static void dispatch_form_keyboard_paste(EventContext* evcon, DocState* state,
+static bool dispatch_form_keyboard_paste(EventContext* evcon, DocState* state,
                                          View* focused) {
     const char* clip = clipboard_get_text();
-    if (clip && *clip) {
-        evcon->paste_text = clip;
-        dispatch_lambda_handler(evcon, focused, "paste");
-        evcon->paste_text = nullptr;
-        focused = focus_get(state);
-        if (focused && focused->is_element()) {
-            DomElement* elem = lam::dom_require_element(focused);
-            if (tc_is_text_control(elem)) {
-                dispatch_form_text_paste(evcon, elem, state, focused,
-                                         clip, (uint32_t)strlen(clip));
-            }
+    if (!clip || !*clip) return false;
+
+    evcon->paste_text = clip;
+    dispatch_lambda_handler(evcon, focused, "paste");
+    evcon->paste_text = nullptr;
+    focused = focus_get(state);
+    if (focused && focused->is_element()) {
+        DomElement* elem = lam::dom_require_element(focused);
+        if (tc_is_text_control(elem)) {
+            dispatch_form_text_paste(evcon, elem, state, focused,
+                                     clip, (uint32_t)strlen(clip));
         }
     }
     evcon->need_repaint = true;
+    return true;
 }
 
 static bool dispatch_form_selection_extend(EventContext* evcon, DomElement* elem,
@@ -4714,10 +4715,9 @@ static bool dispatch_form_history_via_controller(EventContext* evcon,
     return dispatch_form_history(evcon, elem, state, target, input_type);
 }
 
-// F11: translate the package-owned key intent into the one native mechanism
-// that performs it. The package chooses every command; this helper retains
-// canonical selection, buffer ownership, beforeinput/input emission, history,
-// and clipboard access in the engine.
+// F11: apply the remaining package-owned edit intents. Clipboard/select-all
+// commands enter through dom.keyboard_command during ordinary keydown instead,
+// so native no longer has a second shortcut route here.
 static bool dispatch_form_key_intent(EventContext* evcon, DomElement* elem,
                                      DocState* state, View* target,
                                      const KeyEvent* key_event, int caret) {
@@ -4726,18 +4726,6 @@ static bool dispatch_form_key_intent(EventContext* evcon, DomElement* elem,
 
     bool handled = true;
     switch (intent.type) {
-        case INPUT_INTENT_COPY:
-            dispatch_form_copy_selection(evcon, elem, state, target, "form input copy");
-            break;
-        case INPUT_INTENT_SELECT_ALL:
-            dispatch_form_select_all(evcon, elem, state, target);
-            break;
-        case INPUT_INTENT_DELETE_BY_CUT:
-            dispatch_form_cut_selection(evcon, elem, state, target);
-            break;
-        case INPUT_INTENT_INSERT_FROM_PASTE:
-            dispatch_form_keyboard_paste(evcon, state, target);
-            break;
         case INPUT_INTENT_HISTORY_UNDO:
         case INPUT_INTENT_HISTORY_REDO:
             dispatch_form_history_via_controller(evcon, elem, state, target,
@@ -6799,6 +6787,32 @@ static bool radiant_dispatch_keyboard_event(EventContext* evcon, View* target,
         &args, true, nullptr, true, type);
 }
 
+static View* live_keyboard_event_target(DocState* state, DomDocument* doc,
+                                        View* preferred) {
+    EventTargetPath path = {};
+    EditingSurface preferred_surface;
+    bool preferred_is_editing_surface = preferred &&
+        editing_surface_from_target(preferred, &preferred_surface);
+    // A static text caret does not own keyboard focus. Target its document body
+    // so package-owned document shortcuts load and bubble exactly as they do in
+    // a browser; focused controls and rich editing selections keep their target.
+    if (preferred &&
+        (preferred == focus_get(state) || preferred_is_editing_surface) &&
+        capture_event_target_path(doc, preferred, &path)) {
+        return preferred;
+    }
+    View* selection_target = canonical_selection_focus_target(state);
+    EditingSurface selection_surface;
+    if (selection_target &&
+        editing_surface_from_target(selection_target, &selection_surface) &&
+        capture_event_target_path(doc, selection_target, &path)) {
+        return selection_target;
+    }
+    DomElement* body = radiant_document_body_element(doc);
+    return body ? static_cast<View*>(body)
+        : (doc ? static_cast<View*>(doc->root) : nullptr);
+}
+
 // Build a JS StaticRange-shaped Map for one EditingTargetRange. Matches the
 // shape produced by js_ctor_static_range_fn so that JS code consuming
 // `getTargetRanges()` sees the same property surface as `new StaticRange(...)`.
@@ -7794,6 +7808,106 @@ extern "C" bool radiant_keyboard_click_from_package(void* dom_node) {
     DomDocument* document = event_context_target_document(ctx->evcon);
     if (!elem || elem->doc != document) return false;
     return dispatch_package_keyboard_click(ctx->evcon, static_cast<View*>(elem));
+}
+
+static bool dispatch_package_keyboard_command(EventContext* evcon,
+                                              View* target,
+                                              const char* name) {
+    if (!evcon || !target || !name || !name[0]) return false;
+    DocState* state = event_context_target_state(evcon);
+    if (!state) return false;
+
+    InputIntentType type = input_intent_type_from_name(name);
+    if (type != INPUT_INTENT_INSERT_FROM_PASTE &&
+        type != INPUT_INTENT_DELETE_BY_CUT &&
+        type != INPUT_INTENT_COPY &&
+        type != INPUT_INTENT_SELECT_ALL) {
+        return false;
+    }
+
+    EditingSurface surface;
+    if (editing_surface_from_target(target, &surface) &&
+        editing_surface_is_text_control(&surface) && surface.owner) {
+        DomElement* elem = surface.owner;
+        View* control = surface.view
+            ? surface.view : static_cast<View*>(elem);
+        bool handled = false;
+        switch (type) {
+            case INPUT_INTENT_COPY:
+                handled = dispatch_form_copy_selection(
+                    evcon, elem, state, control, "form input copy");
+                break;
+            case INPUT_INTENT_SELECT_ALL:
+                handled = dispatch_form_select_all(evcon, elem, state, control);
+                break;
+            case INPUT_INTENT_DELETE_BY_CUT:
+                handled = dispatch_form_cut_selection(evcon, elem, state, control);
+                break;
+            case INPUT_INTENT_INSERT_FROM_PASTE:
+                handled = dispatch_form_keyboard_paste(evcon, state, control);
+                break;
+            default:
+                return false;
+        }
+        if (handled) evcon->need_repaint = true;
+        return handled;
+    }
+
+    View* rich_target = rich_keyboard_target_from_selection(state, target,
+                                                            &surface);
+    if (rich_target) {
+        if (type != INPUT_INTENT_SELECT_ALL) {
+            const char* event_name = type == INPUT_INTENT_INSERT_FROM_PASTE
+                ? "paste" : (type == INPUT_INTENT_DELETE_BY_CUT ? "cut" : "copy");
+            if (radiant_dispatch_clipboard_event(evcon, rich_target, event_name)) {
+                evcon->need_repaint = true;
+                return true;
+            }
+        }
+
+        InputIntent intent;
+        if (!input_intent_from_name(name, &intent)) return false;
+        bool handled = false;
+        if (type == INPUT_INTENT_SELECT_ALL) {
+            handled = dispatch_contenteditable_select_all(
+                evcon, state, rich_target, &intent);
+        } else if (type == INPUT_INTENT_COPY) {
+            handled = copy_current_selection_to_clipboard(state, "rich copy");
+        } else {
+            if (type == INPUT_INTENT_DELETE_BY_CUT) {
+                if (!copy_current_selection_to_clipboard(state, "rich cut")) {
+                    return false;
+                }
+            }
+            handled = dispatch_contenteditable_event(evcon, rich_target, &intent);
+        }
+        if (handled) evcon->need_repaint = true;
+        return handled;
+    }
+
+    // A static document has selection defaults but no editable cut/paste
+    // target. The package chose the command; this branch only applies it.
+    if (type == INPUT_INTENT_SELECT_ALL) {
+        state_store_selection_select_all(state);
+        evcon->need_repaint = true;
+        return true;
+    }
+    if (type == INPUT_INTENT_COPY) {
+        return copy_current_selection_to_clipboard(state, "document copy");
+    }
+    return false;
+}
+
+extern "C" bool radiant_keyboard_command_from_package(void* dom_node,
+                                                       const char* name) {
+    EmitHandlerContext* ctx = g_emit_handler_ctx;
+    if (!ctx || !ctx->evcon || !ctx->target || !dom_node) return false;
+    DomNode* scope = static_cast<DomNode*>(dom_node);
+    if (!scope->is_element() || !dom_is_connected(dom_node)) return false;
+    DomElement* elem = scope->as_element();
+    DomDocument* document = event_context_target_document(ctx->evcon);
+    if (!elem || elem->doc != document) return false;
+    return dispatch_package_keyboard_command(ctx->evcon, ctx->target, name);
 }
 
 // Only the exact bridge re-entry bypasses the wrapper below. A synthetic event
@@ -10910,17 +11024,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         bool rich_keydown_dispatched = intent_target &&
             editing_surface_from_target(intent_target, &rich_keyboard_surface) &&
             editing_surface_is_rich(&rich_keyboard_surface);
-        bool rich_clipboard_shortcut = (key_event->mods &
-            (RDT_MOD_SUPER | RDT_MOD_CTRL)) &&
-            (key_event->key == RDT_KEY_V || key_event->key == RDT_KEY_C ||
-             key_event->key == RDT_KEY_X);
         if (rich_keydown_dispatched && key_event->key != RDT_KEY_TAB) {
             // Selection can still identify the rich surface after a template
             // rebuild clears focus; do not drop its beforeinput edit.
             // Contenteditable keymaps own structural commands. Dispatch the
             // public keydown first so preventDefault suppresses this key's
             // mapped beforeinput edit instead of racing it afterward.
-            bool prevented = radiant_dispatch_keyboard_event(&evcon, intent_target,
+            DomDocument* key_doc = event_context_target_document(&evcon);
+            View* keydown_target = live_keyboard_event_target(
+                state, key_doc, intent_target);
+            bool prevented = keydown_target && radiant_dispatch_keyboard_event(
+                &evcon, keydown_target,
                 "keydown", key_event->key, key_event->mods, false);
             if (editing_key_may_emit_text(key_event)) {
                 state->editing.pending_text_input = true;
@@ -10931,23 +11045,21 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 evcon.default_prevented = true;
                 break;
             }
-            if (!rich_clipboard_shortcut) {
-                InputIntent intent;
-                if (input_intent_from_key_event(state, key_event, &intent)) {
-                    if (intent.type == INPUT_INTENT_SELECT_ALL) {
-                        View* select_target = rich_keyboard_target_from_selection(
-                            state, intent_target, nullptr);
-                        if (select_target) {
-                            dispatch_contenteditable_select_all(&evcon, state,
-                                select_target, &intent);
-                        }
-                    } else {
-                        dispatch_contenteditable_event(&evcon, intent_target,
-                            &intent);
+            InputIntent intent;
+            if (input_intent_from_key_event(state, key_event, &intent)) {
+                if (intent.type == INPUT_INTENT_SELECT_ALL) {
+                    View* select_target = rich_keyboard_target_from_selection(
+                        state, intent_target, nullptr);
+                    if (select_target) {
+                        dispatch_contenteditable_select_all(&evcon, state,
+                            select_target, &intent);
                     }
-                    evcon.need_repaint = true;
-                    break;
+                } else {
+                    dispatch_contenteditable_event(&evcon, intent_target,
+                        &intent);
                 }
+                evcon.need_repaint = true;
+                break;
             }
         }
 
@@ -10998,49 +11110,23 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             break;
         }
 
-        // Clipboard on a rich/contenteditable surface: fire the JS
-        // paste/copy/cut ClipboardEvent with store-backed clipboardData so a
-        // script-owned editor receives the same shortcut notification as a
-        // browser. Cut must reach this branch before its deleteByCut intent:
-        // CodeMirror claims cut in its ClipboardEvent listener and mutates its
-        // own model, while the DOM fallback deliberately stays unsupported.
-        if ((key_event->mods & (RDT_MOD_SUPER | RDT_MOD_CTRL)) &&
-            (key_event->key == RDT_KEY_V || key_event->key == RDT_KEY_C ||
-             key_event->key == RDT_KEY_X)) {
-            EditingSurface clip_surface;
-            if (intent_target &&
-                editing_surface_from_target(intent_target, &clip_surface) &&
-                editing_surface_is_rich(&clip_surface)) {
-                const char* clip_type = key_event->key == RDT_KEY_V ? "paste" :
-                    (key_event->key == RDT_KEY_X ? "cut" : "copy");
-                if (radiant_dispatch_clipboard_event(&evcon, intent_target, clip_type)) {
-                    evcon.default_prevented = true;
-                    evcon.need_repaint = true;
-                    break;
-                }
-                if (key_event->key == RDT_KEY_V) {
-                    InputIntent paste_intent;
-                    if (input_intent_from_key_event(state, key_event, &paste_intent)) {
-                        dispatch_contenteditable_event(&evcon, intent_target,
-                            &paste_intent);
-                        evcon.need_repaint = true;
-                        break;
-                    }
-                } else if (key_event->key == RDT_KEY_X) {
-                    copy_current_selection_to_clipboard(state, "rich cut");
-                    InputIntent cut_intent;
-                    if (input_intent_from_key_event(state, key_event, &cut_intent)) {
-                        dispatch_contenteditable_event(&evcon, intent_target,
-                            &cut_intent);
-                        evcon.need_repaint = true;
-                        break;
-                    }
-                } else {
-                    copy_current_selection_to_clipboard(state, "rich copy");
-                    evcon.need_repaint = true;
-                    break;
-                }
+        // Every non-Tab key reaches the ordinary cancelable keydown before a
+        // package-selected edit intent is applied. When focus is absent, a
+        // live rich selection is the event target; otherwise document policy
+        // starts at <body> (including static text selection shortcuts).
+        if (!rich_keydown_dispatched) {
+            DomDocument* key_doc = event_context_target_document(&evcon);
+            View* preferred_target = focused ? focused : intent_target;
+            View* keydown_target = live_keyboard_event_target(
+                state, key_doc, preferred_target);
+            bool prevented = keydown_target && radiant_dispatch_keyboard_event(
+                &evcon, keydown_target, "keydown",
+                key_event->key, key_event->mods, false);
+            if (prevented) {
+                evcon.default_prevented = true;
+                break;
             }
+            focused = focus_get(state);
         }
 
         // Rich-text editing path (Phase R4): translate platform key events
@@ -11072,14 +11158,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        // Dispatch keydown through JS EventTarget for inline, IDL, and
-        // addEventListener handlers.
-        if (focused && !rich_keydown_dispatched) {
-            bool prevented = radiant_dispatch_keyboard_event(&evcon, focused,
-                "keydown", key_event->key, key_event->mods, false);
-            if (prevented) evcon.default_prevented = true;
-            focused = focus_get(state);
-        }
         // F4: a single-line text control's Enter is implicit submission, not
         // text insertion. JS keydown cancellation remains authoritative; the
         // package then chooses the first enabled submitter or the form itself.
@@ -11141,9 +11219,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         View* caret_view = NULL;
         int caret_offset = 0;
         if (caret_get_position(state, &caret_view, &caret_offset)) {
-            bool ctrl = (key_event->mods & RDT_MOD_CTRL) != 0;
-            bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
-
             EditingControllerHooks controller_hooks = editing_controller_hooks();
             EditingSurface caret_surface;
             bool caret_in_rich_surface =
@@ -11186,73 +11261,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         radiant_caret_operation_extend());
                 }
             }
-            if (!rich_nav_handled && !caret_in_rich_surface) {
-                // Non-rich compatibility branch only. Rich/editable mutation
-                // and selection ownership belongs to the intent edit
-                // path above plus the caretkey template dispatch.
-                //
-                // F11b: deliberately NOT migrated to the <body> template, unlike
-                // every other key table. Reaching a template here would require
-                // the document to own an evaluator, and the only condition that
-                // covers "an ordinary document selection" is "this page has a
-                // caret" — which is nearly every page. The thread holds one
-                // Runtime, so that gate would let a PDF viewer claim it: the
-                // pdf_text_selection_copy fixture drags a selection and presses
-                // Ctrl+C, so it would qualify. EO4 exists to stop exactly that.
-                // These five cases stay native because the cost of reaching
-                // policy is a correctness risk, not because they are mechanism.
-                switch (key_event->key) {
-                    case RDT_KEY_A:
-                        // Select all (Ctrl+A / Cmd+A)
-                        if (ctrl || cmd) {
-                            state_store_selection_select_all(state);
-                            evcon.need_repaint = true;
-                        }
-                        break;
-
-                    case RDT_KEY_C:
-                        // Copy selection (Ctrl+C / Cmd+C)
-                        if (ctrl || cmd) {
-                            copy_current_selection_to_clipboard(state, "legacy copy");
-                        }
-                        break;
-
-                    case RDT_KEY_X:
-                        // Cut over non-editable text does nothing at all, which
-                        // is what a browser does: cut is a *mutation*, and there
-                        // is nothing here to mutate. Ctrl+C above is the one
-                        // that copies.
-                        //
-                        // This used to write the selection to the clipboard and
-                        // then drop the highlight, so a cut on a static page
-                        // both claimed to have removed the text and quietly
-                        // overwrote whatever the user had copied earlier —
-                        // losing their clipboard to a keystroke that changed
-                        // nothing on the page.
-                        break;
-
-                    // Backspace and Delete do nothing here, and that is the
-                    // finished behaviour rather than a gap. The only content
-                    // that reaches this branch is non-editable document text: a
-                    // caret inside a text control is consumed by the
-                    // text-control block above, which breaks out of the keydown
-                    // entirely, and a caret inside an editing host is excluded
-                    // by `!caret_in_rich_surface`. There is nothing to delete,
-                    // which is also what a browser does with Backspace on a
-                    // static page.
-                    //
-                    // They stay listed rather than falling into `default:` so
-                    // the next reader does not re-add the TODO that stood here.
-                    // What that TODO did do was request a repaint on every
-                    // press — work for a keystroke that changes nothing.
-                    case RDT_KEY_BACKSPACE:
-                    case RDT_KEY_DELETE:
-                        break;
-
-                    default:
-                        break;
-                }
-            } else if (caret_in_rich_surface) {
+            if (!rich_nav_handled && caret_in_rich_surface) {
                 log_debug("event: rich key fallback fenced; key=%d", key_event->key);
             }
         }

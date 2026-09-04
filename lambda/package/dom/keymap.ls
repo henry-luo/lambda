@@ -48,3 +48,21 @@ pub pn resolve(body, evt) {
     if (name == null) { 'pass' }
     else { dom.key_intent(body, name) }
 }
+
+// Clipboard and selection accelerators are ordinary cancelable keydown
+// defaults. The package chooses the command; native only executes it against
+// the live selection/editing surface and accesses the platform clipboard.
+fn shortcut_name(evt) {
+    let command_name = intent_for(evt.key, evt.shiftKey, evt.altKey,
+                                  evt.ctrlKey, evt.metaKey);
+    if (command_name == "insertFromPaste" or command_name == "deleteByCut" or
+        command_name == "copy" or command_name == "selectAll") { command_name }
+    else { null }
+}
+
+pub pn run_shortcut(scope, evt) {
+    let command_name = shortcut_name(evt);
+    if (command_name == null) { 'pass' }
+    else if (dom.keyboard_command(scope, command_name)) { 'prevent-default' }
+    else { 'pass' }
+}

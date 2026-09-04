@@ -171,6 +171,31 @@ InputIntentType input_intent_type_from_name(const char* name) {
     return INPUT_INTENT_NONE;
 }
 
+bool input_intent_from_name(const char* name, InputIntent* out) {
+    if (!out) return false;
+    input_intent_reset(out);
+
+    InputIntentType type = input_intent_type_from_name(name);
+    if (type == INPUT_INTENT_NONE) return false;
+
+    // Clipboard snapshots belong to the execution waist, not to key policy.
+    if (type == INPUT_INTENT_INSERT_FROM_PASTE) {
+        const char* html = clipboard_store_read_mime("text/html");
+        if (html && html[0]) {
+            out->owned_html_data = mem_strdup(html, MEM_CAT_TEMP);
+            out->html_data = out->owned_html_data;
+        }
+        const char* clip = clipboard_get_text();
+        if ((!clip || !clip[0]) && (!html || !html[0])) return false;
+        out->owned_data = mem_strdup(clip ? clip : "", MEM_CAT_TEMP);
+        out->data = out->owned_data;
+        out->data_mime = (out->html_data && out->html_data[0])
+            ? "text/html" : "text/plain";
+    }
+    out->type = type;
+    return true;
+}
+
 extern "C" bool radiant_dispatch_behavior_key_intent(View* target, const InputIntent* intent);
 extern "C" uint64_t radiant_key_intent_epoch(void);
 extern "C" const char* radiant_key_intent_name(void);
@@ -217,23 +242,7 @@ bool input_intent_from_key_event(DocState* state, const KeyEvent* key_event,
     radiant_dispatch_behavior_key_intent(dispatch_target, &key_carrier);
     if (radiant_key_intent_epoch() == epoch_before) return false;
 
-    InputIntentType type = input_intent_type_from_name(radiant_key_intent_name());
-    if (type == INPUT_INTENT_NONE) return false;
-
-    if (type == INPUT_INTENT_INSERT_FROM_PASTE) {
-        const char* html = clipboard_store_read_mime("text/html");
-        if (html && html[0]) {
-            out->owned_html_data = mem_strdup(html, MEM_CAT_TEMP);
-            out->html_data = out->owned_html_data;
-        }
-        const char* clip = clipboard_get_text();
-        if ((!clip || !clip[0]) && (!html || !html[0])) return false;
-        out->owned_data = mem_strdup(clip ? clip : "", MEM_CAT_TEMP);
-        out->data = out->owned_data;
-        out->data_mime = (out->html_data && out->html_data[0]) ? "text/html" : "text/plain";
-    }
-    out->type = type;
-    return true;
+    return input_intent_from_name(radiant_key_intent_name(), out);
 }
 
 bool input_intent_from_text_input(uint32_t codepoint, InputIntent* out,
