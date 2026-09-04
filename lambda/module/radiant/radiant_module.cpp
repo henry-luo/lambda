@@ -1782,6 +1782,13 @@ RADIANT_C_API Item fn_radiant_keyboard_click(Item node_item) {
     return radiant_bool_item(elem && radiant_keyboard_click_from_package((void*)elem));
 }
 
+RADIANT_C_API Item fn_radiant_keyboard_command(Item node_item, Item name_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "KEYBOARD_COMMAND");
+    const char* name = fn_to_cstr(name_item);
+    return radiant_bool_item(elem && name && name[0] &&
+        radiant_keyboard_command_from_package((void*)elem, name));
+}
+
 // Option count for a <select>; the option list itself is layout-owned.
 RADIANT_C_API Item fn_radiant_option_count(Item node_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "OPTION_COUNT");
@@ -2874,6 +2881,7 @@ RADIANT_PROVIDE_ENGINE_1(focused, fn_radiant_focused)
 RADIANT_PROVIDE_ENGINE_2(focus_set, fn_radiant_focus_set)
 RADIANT_PROVIDE_ENGINE_1(activate_popover, fn_radiant_activate_popover)
 RADIANT_PROVIDE_ENGINE_1(keyboard_click, fn_radiant_keyboard_click)
+RADIANT_PROVIDE_ENGINE_2(keyboard_command, fn_radiant_keyboard_command)
 RADIANT_PROVIDE_ENGINE_3(caret_operation, fn_radiant_caret_operation)
 RADIANT_PROVIDE_ENGINE_1(clear_ime_preedit, fn_radiant_clear_ime_preedit)
 RADIANT_PROVIDE_ENGINE_0(clipboard_text, fn_radiant_clipboard_text)

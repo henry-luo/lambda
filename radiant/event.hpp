@@ -480,6 +480,9 @@ const char* input_intent_type_name(InputIntentType type);
 InputIntentType input_intent_type_from_name(const char* name);
 bool input_intent_is_dispatchable(InputIntentType type);
 
+// Resolve a package-selected intent name and attach any engine-owned payload.
+bool input_intent_from_name(const char* name, InputIntent* out);
+
 // F11: the key->intent decision belongs to the <body> template, dispatched from
 // the live caret view. Returns false when no intent applies.
 bool input_intent_from_key_event(DocState* state, const KeyEvent* key_event,
@@ -866,6 +869,7 @@ bool radiant_dispatch_behavior_reset_activation(EventContext* evcon, View* targe
 // The package selects the activation key/timing; native only dispatches the
 // resulting click through the shared author/default-action pipeline.
 bool radiant_keyboard_click_from_package(void* dom_node);
+bool radiant_keyboard_command_from_package(void* dom_node, const char* name);
 // F14.1: `document.execCommand` reaches the package's command set through here.
 bool radiant_dom_exec_command(void* document, const char* command,
                               const char* value);

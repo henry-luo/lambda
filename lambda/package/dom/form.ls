@@ -223,6 +223,9 @@ on resetactivation(evt) { submit.reset(tree.form_of(~)) }
 // Composition events bubble from the focused control, so the ancestor walk
 // reaches <body> and this template claims them there.
 view <body> state ime_composing, context_menu_open {}
+// S12.1.3: clipboard/select-all key policy is a cancelable package default;
+// the native waist owns only event, selection/edit, and clipboard mechanism.
+on keydown(evt) { keymap.run_shortcut(~, evt) }
 // F10: the context menu is document-scoped state, the same cardinality argument
 // ES18 made for the IME session — one menu per document, not one per control.
 on contextmenu(evt) { menu.open_for(~) }

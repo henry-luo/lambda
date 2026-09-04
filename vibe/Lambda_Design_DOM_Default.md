@@ -75,7 +75,7 @@ Three properties hold it together:
 
 - **One-call ceiling and hot-path guard.** A native per-event-type bitmask keeps `mousemove` / `pointermove` / `scroll` / `wheel` out of behavior dispatch unless a loaded template declares such a handler.
 - **Handler verdicts are tier-specific return values** (ES15/ES29): at the author tier only `preventDefault()` / `'prevent-default'` suppresses the UA tier; participation and `'pass'` do not. At the UA tier, `'pass'` declines so a still-staged native fallback remains eligible; after that fallback is retired, it means no default action. `'prevent-default'` suppresses any remaining default actions; any other return claims.
-- **Fallback until claimed was a migration rule** (ES5/ES7), not a permanent second implementation. Once a class is proven state-equivalent, its native half is deleted. Checkbox/radio/select activation, editing, link navigation, submit/reset activation, and sequential focus now have no package-off fallback; `RADIANT_DOM_PKG=0` makes those defaults unavailable rather than selecting a native copy. A declined package handler likewise means **nothing happens** — see §5.6.
+- **Fallback until claimed was a migration rule** (ES5/ES7), not a permanent second implementation. Once a class is proven state-equivalent, its native half is deleted. Checkbox/radio/select activation, editing, link navigation, submit/reset activation, sequential focus, and keyboard clipboard/selection commands now have no package-off fallback; `RADIANT_DOM_PKG=0` makes those defaults unavailable rather than selecting a native copy. A declined package handler likewise means **nothing happens** — see §5.6.
 
 ### 2.2 Two realms, one canonical state
 
@@ -106,11 +106,16 @@ template instance, as required by S9.1.4, rather than a native pinned target.
 The package then calls the mechanism-only `dom.keyboard_click(node)` waist,
 which emits a browser-shaped `click` through the shared author/default-action
 pipeline. Native contains no element/key policy and no package-off activation
-path. `keyintent` remains a separate context-free translation: it has no side
+path. Clipboard/select-all accelerators likewise run as the ordinary `<body>`
+`keydown` default in `keymap.ls`; it calls `dom.keyboard_command(node, name)`
+only after author cancellation has settled. That waist validates the live
+editing surface/selection and retains clipboard I/O, range mutation, event
+emission, and repaint, but contains no key/modifier table. `keyintent` remains
+a separate context-free translation for other edit intents: it has no side
 effect and must still reach the package when author code prevents the
 `keydown`. Thus policy can choose a named action without reclassifying a
-translation as a default action. **ES30's activation and open-select migration
-completed 2026-09-04.**
+translation as a default action. **ES30's activation, open-select, and
+clipboard-command migrations completed 2026-09-04.**
 
 The package needs a bounded, element-only snapshot navigation surface. It
 builds a Lambda array while it traverses, before it mutates the tree; no live
@@ -132,6 +137,7 @@ and generation validation.
 | `radiant.scroll_into_view(node)` | Perform the geometry-dependent scroll after package policy chooses that it is required. |
 | `radiant.selection_operation(node, operation, extend)` | Generalize `caret_operation` to apply a named selection operation — character, word, line, document, page, or select-all — while native resolves the live range, updates canonical selection, emits `selectionchange`, and repaints. |
 | `dom.keyboard_click(node)` | Dispatch the package-selected activation as a browser-shaped `click`, then enter the shared click-default pipeline. It decides neither eligible elements nor keys nor keydown/keyup timing. |
+| `dom.keyboard_command(node, name)` | Execute a package-selected `copy`, `deleteByCut`, `insertFromPaste`, or `selectAll` command against the live event target/canonical selection. It performs clipboard, selection, edit-event, and repaint mechanism only; it does not inspect the physical key or modifiers. |
 
 `focus.ls` uses `focus_candidates` plus `attr`/`has_attr` to order positive
 `tabindex` candidates ascending before the tree-order `tabindex=0` set, then
@@ -145,7 +151,10 @@ table for text controls and rich editing. `caret.ls` is the one key-to-named
 caret-operation table. The native key path consumes only those named results:
 it applies the live text-control range/buffer edit, canonical selection,
 history, clipboard, `beforeinput`/`input`, and repaint. The text-control
-native path contains no second accelerator or delete-policy table.
+native path contains no second accelerator or delete-policy table. As of
+2026-09-04, the `copy`/`cut`/`paste`/`selectAll` subset enters the execution
+waist directly from the ordinary package `keydown`; the former native rich
+shortcut interception and static-document Ctrl/Cmd+A/C switch are deleted.
 `PageUp`/`PageDown` are named by native,
 selected by `caret.ls` only for a `<textarea>`, and resolved there as native
 live-buffer line geometry; `scroll.ls` receives them for document movement
@@ -311,6 +320,7 @@ Verified against the tree at 2026-09-04 (`event.cpp`, `lambda/package/dom/*.ls`,
 | ↳ **open `<select>`** | — | UA handling of an open popup | ordinary `on keydown` in `form.ls` owns Up / Down / Enter / Escape after author cancellation; there is no native pre-dispatch interception or `dropdownkey` hook. **No typeahead** | 🟡 |
 | ↳ **document scrolling** | — | Space / PageUp / PageDown / Home / End / arrows scroll the nearest scrollport | after an uncancelled keydown and a declined `caretkey`, `scrollkey` reaches `scroll.ls`; native resolves/clamps the nearest live scrollport, emits `scroll`, updates the viewport mirror/observers, and repaints. Textarea PageUp/PageDown remain caret movement | ✅ (ESO48 / ES30) |
 | ↳ **Space/Enter activation** | — | activate the focused element | `keyboard.ls` plus element handlers own the complete table: Enter activates buttons, submit/reset inputs, links, and selects on keydown; Space activates selects on keydown and arms checkbox/radio/button template state for keyup. Ctrl/Alt/Meta combinations decline. `dom.keyboard_click` supplies only click dispatch | ✅ (ES30; §5.4) |
+| ↳ **clipboard/select-all command** | — | copy, cut, paste, or select all according to target editability | the ordinary `<body>` `on keydown` calls `keymap.ls`; author cancellation suppresses it. `dom.keyboard_command` executes the named command against the live canonical surface. Static text accepts only copy/select-all; cut/paste decline. No native key/modifier branch remains | ✅ (ES30; §5.5.1) |
 | `keyup` | UI Events; cancelable | Space completes activation for applicable controls | author dispatch precedes the package handler; `form.ls` consumes only a Space armed by its own uncancelled keydown and otherwise declines | ✅ |
 | `keypress` | legacy, deprecated | — | not dispatched, deliberately; `onkeypress` is not registered | — |
 
@@ -343,9 +353,9 @@ Verified against the tree at 2026-09-04 (`event.cpp`, `lambda/package/dom/*.ls`,
 
 | Event | Spec, cancelable | Default action per spec | Radiant | Status |
 | --- | --- | --- | --- | --- |
-| `copy` | Clipboard APIs; cancelable | place selection on clipboard | native — copy has no `beforeinput` intent (nothing is input), so it never enters the package | ✅ |
-| `cut` | Clipboard APIs; cancelable | copy + delete selection | copy remains native; the deletion arrives as `deleteByCut`, and both `editing.ls` and `dom_edit.ls` claim the prepared range. On non-editable text: full no-op, matching browsers | ✅ |
-| `paste` | Clipboard APIs; cancelable | insert clipboard content | payload fill native (clipboard read is mechanism); `editing.ls` applies control policy and `dom_edit.ls` applies the plain-text payload through the raw DOM-range waist. HTML remains an author `DataTransfer` concern, not a second package parser | ✅ plain text |
+| `copy` | Clipboard APIs; cancelable | place selection on clipboard | `keymap.ls` chooses Ctrl/Cmd+C during ordinary `keydown`; native dispatches a rich `copy` event and writes the canonical selection through `dom.keyboard_command`. Static document selection uses the same waist | ✅ |
+| `cut` | Clipboard APIs; cancelable | copy + delete selection | `keymap.ls` chooses Ctrl/Cmd+X; the waist dispatches rich `cut`, copies, then sends `deleteByCut` to `editing.ls` / `dom_edit.ls`. On non-editable text the waist declines, so the selection and clipboard remain untouched | ✅ |
+| `paste` | Clipboard APIs; cancelable | insert clipboard content | `keymap.ls` chooses Ctrl/Cmd+V; the waist dispatches rich `paste` and fills the native clipboard snapshot, while `editing.ls` / `dom_edit.ls` apply it. HTML remains an author `DataTransfer` concern, not a second package parser | ✅ plain text |
 | `dragstart` / `dragover` / `drop` / `dragend` | HTML DnD; cancelable (`dragover`'s default is *rejecting* the drop — `preventDefault` enables it) | move/copy the dragged content | drag geometry and range tracking native; `<img>` and `<a href>` are draggable by default; text edits arrive as `deleteByDrag` + `insertFromDrop`, claimed by `editing.ls` / `dom_edit.ls` through their current range. Text drag-and-drop is reachable from real mouse input since F16/ES21; element DnD still requires the author `dropzone` attribute, which is not HTML5 DnD | ✅ plain text |
 
 ### 3.6 Composition (IME)
@@ -533,9 +543,26 @@ than only the first input. Native commits the result and emits `focus` plus
 `focusin`; no package code owns mutable focus state. **ESO60 landed
 2026-09-01 (ES30).**
 
+#### 5.5.1 Clipboard and document-selection shortcuts — resolved
+
+`keymap.ls` now receives the ordinary cancelable `keydown` and alone maps
+Ctrl/Cmd+V/C/X/A to the four command names. `dom.keyboard_command` is the
+S12.1.3 execution waist: it uses S9.1.4's canonical focus/selection state,
+dispatches rich ClipboardEvents, reads/writes the platform clipboard, invokes
+the package edit applier, and repaints. It never sees the physical key or
+modifier bits. The native rich-shortcut branch, its sequencing exception, the
+clipboard cases in `dispatch_form_key_intent`, and the static-selection A/C
+switch are deleted. A keydown whose rendered caret was replaced during Lambda
+reconciliation is rebound through the live canonical selection before the
+package dispatch, while an unfocused static-text caret targets `<body>` because
+it does not own keyboard focus. Thus policy cannot be bypassed by either a
+detached view or a package-loader miss. Covered by the paired form/rich
+clipboard fixtures, `rte_ctrl_x_cuts_*`, `dom_pkg_noneditable_cut`, and
+`pdf_text_selection_copy`. **Completed 2026-09-04 (ES30).**
+
 ### 5.6 After a native applier is deleted, `'pass'` means "nothing happens"
 
-Not a bug — a contract consequence worth stating once, because it changes how §3 should be read. ES5's fallback-until-claimed made `'pass'` safe during migration: the native default action stayed in charge. F1b/F2b/F3/ES17 deleted the first migrated halves; the 2026-09-04 cut also deleted native link navigation, submit/reset activation, and sequential-focus fallbacks. On a migrated class, a handler that declines now produces **no default action at all**, and the same is true for a document where the package failed to load. This is why §4's `❌` rows are total absences rather than degraded fallbacks, and why "the package declines" and "the feature is missing" are the same observation on a migrated class.
+Not a bug — a contract consequence worth stating once, because it changes how §3 should be read. ES5's fallback-until-claimed made `'pass'` safe during migration: the native default action stayed in charge. F1b/F2b/F3/ES17 deleted the first migrated halves; the 2026-09-04 cut also deleted native link navigation, submit/reset activation, sequential-focus, and keyboard clipboard/selection fallbacks. On a migrated class, a handler that declines now produces **no default action at all**, and the same is true for a document where the package failed to load. This is why §4's `❌` rows are total absences rather than degraded fallbacks, and why "the package declines" and "the feature is missing" are the same observation on a migrated class.
 
 ---
 
