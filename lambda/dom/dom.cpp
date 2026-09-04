@@ -9,6 +9,7 @@
  */
 
 #include "dom.h"
+#include "dom_core.h"
 #include "realm/dom_realm.h"
 #include "dom_engine.h"
 #include "dom_realm_hooks.h"
@@ -140,6 +141,11 @@ extern "C" Item dom_remove_event_listener_bridge(Item target_item, Item type,
 extern "C" Item dom_dispatch_event_bridge(Item target_item, Item event_item);
 extern "C" void dom_after_srcdoc_set(void* dom_elem);
 #include "dom_ops.h"
+
+// Per-control dirty flags are element bits (ESO112); these two are the only
+// door to them and are used well before their definitions.
+static bool dom_expando_flag_is(DomElement* elem, const char* name);
+static void dom_expando_flag_set(DomElement* elem, const char* name, Item value);
 extern "C" Item radiant_dom_element_operation(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
@@ -892,7 +898,7 @@ static Item dom_throw_index_size_error(const char* message) {
     Item name = js_name_item("IndexSizeError");
     Item msg = js_name_item(
         message ? message : "The index is not in the allowed range.");
-    return dom_realm_throw(dom_realm_new_error_named(name, msg));
+    return dom_raise(name, msg);
 }
 
 static Item dom_replace_text_data(DomText* text_node, uint32_t offset,
@@ -1479,12 +1485,7 @@ JS_FORWARD_VOID( dom_set_checkedness, (void* dom_elem, bool v), _set_checkedness
 extern "C" void dom_after_default_checked_set(void* dom_elem, bool checked) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return;
-    Item exp = expando_get_map((DomNode*)elem);
-    bool dirty = false;
-    if (exp.item != ITEM_NULL) {
-        Item v = dom_realm_get_cstr(exp, "__chkDirty");
-        dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
-    }
+    bool dirty = dom_expando_flag_is(elem, "__chkDirty");
     // defaultChecked only syncs live checkedness before the user/API dirty flag.
     if (!dirty) _set_checkedness(elem, checked);
 }
@@ -1492,10 +1493,7 @@ extern "C" void dom_set_checked_dirty(void* dom_elem, bool checked) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return;
     _set_checkedness(elem, checked);
-    Item exp = expando_get_or_create_map((DomNode*)elem);
-    if (exp.item != ITEM_NULL) {
-        dom_realm_set_cstr(exp, "__chkDirty", (Item){.item = b2it(true)});
-    }
+    dom_expando_flag_set(elem, "__chkDirty", (Item){.item = b2it(true)});
 }
 JS_FORWARD_RETURN(const char*, dom_input_type_lower, (void* dom_elem), _input_type_lower, ((DomElement*)dom_elem))
 extern "C" bool dom_is_disabled(void* dom_elem) {
@@ -3215,7 +3213,7 @@ extern "C" Item dom_parser_parse_from_string(Item source_item, Item type_item) {
             strcasecmp(type, "application/xhtml+xml") == 0) {
             return dom_parser_parse_xml(source);
         }
-        return dom_realm_throw_type_error("Unsupported DOMParser MIME type");
+        return dom_raise_type_error("Unsupported DOMParser MIME type");
     }
 
     Item parsed = js_create_foreign_html_doc("");
@@ -4916,7 +4914,7 @@ extern "C" void dom_focus_if_editing_host_for_selection(void* dom_node) {
 static Item dom_throw_syntax_error(const char* message) {
     Item name = js_name_item("SyntaxError");
     Item msg = js_name_item(message ? message : "SyntaxError");
-    return dom_realm_throw(dom_realm_new_error_named(name, msg));
+    return dom_raise(name, msg);
 }
 JS_FORWARD_ITEM(dom_throw_contenteditable_syntax_error, (void), dom_throw_syntax_error, ("Invalid contentEditable value"))
 
@@ -5433,7 +5431,7 @@ extern "C" Item dom_xml_serializer_serialize_to_string(Item node_item) {
         DomDocument* doc = js_document_proxy_doc_from_item(node_item);
         node = doc ? (DomNode*)doc->root : nullptr;
     }
-    if (!node) return dom_realm_throw_type_error("XMLSerializer.serializeToString requires a Node");
+    if (!node) return dom_raise_type_error("XMLSerializer.serializeToString requires a Node");
 
     // ModelXmlSerializer exports MaxGraph's detached XML trees through this
     // standard DOM API; serializing the live node preserves namespaces and
@@ -7217,8 +7215,26 @@ JS_FORWARD_RETURN(bool, dom_option_selectedness, (void* dom_elem), _get_selected
 // Returns true if the select's selectedness has been explicitly modified
 // (via selectedIndex/value/option.selected setter), so default-reset
 // behavior should NOT be applied.
+// The dirty flags are element bits now (ESO112); other flags stay expandos.
+static bool dom_native_dirty_get(DomElement* elem, const char* name, bool* out) {
+    if (strcmp(name, "__chkDirty") == 0)   { *out = elem->checked_dirty(); return true; }
+    if (strcmp(name, "__valueDirty") == 0) { *out = elem->value_dirty();   return true; }
+    if (strcmp(name, "__optDirty") == 0)   { *out = elem->option_dirty();  return true; }
+    if (strcmp(name, "__selDirty") == 0)   { *out = elem->select_dirty();  return true; }
+    return false;
+}
+static bool dom_native_dirty_set(DomElement* elem, const char* name, bool v) {
+    if (strcmp(name, "__chkDirty") == 0)   { elem->set_checked_dirty(v); return true; }
+    if (strcmp(name, "__valueDirty") == 0) { elem->set_value_dirty(v);   return true; }
+    if (strcmp(name, "__optDirty") == 0)   { elem->set_option_dirty(v);  return true; }
+    if (strcmp(name, "__selDirty") == 0)   { elem->set_select_dirty(v);  return true; }
+    return false;
+}
+
 static bool dom_expando_flag_is(DomElement* elem, const char* name) {
     if (!elem) return false;
+    bool native = false;
+    if (dom_native_dirty_get(elem, name, &native)) return native;
     Item exp = expando_get_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return false;
     Item value = dom_realm_get(exp, js_name_item(name));
@@ -7227,6 +7243,8 @@ static bool dom_expando_flag_is(DomElement* elem, const char* name) {
 
 static void dom_expando_flag_set(DomElement* elem, const char* name, Item value) {
     if (!elem) return;
+    bool truthy = value.item != ITEM_NULL && !is_js_undefined(value) && js_is_truthy(value);
+    if (dom_native_dirty_set(elem, name, truthy)) return;
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return;
     dom_realm_set(exp, js_name_item(name), value);
@@ -7861,12 +7879,7 @@ static void _select_ask_for_reset(DomElement* sel) {
 extern "C" void dom_after_default_selected_set(void* dom_elem, bool selected) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return;
-    Item exp = expando_get_map((DomNode*)elem);
-    bool dirty = false;
-    if (exp.item != ITEM_NULL) {
-        Item v = dom_realm_get_cstr(exp, "__optDirty");
-        dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
-    }
+    bool dirty = dom_expando_flag_is(elem, "__optDirty");
     if (dirty) return;
     // defaultSelected only drives live selectedness while the option is clean.
     _set_selectedness(elem, selected);
@@ -7969,10 +7982,7 @@ extern "C" void dom_select_set_length_bridge(void* dom_elem, Item value) {
 
 static void dom_apply_option_selected(DomElement* elem, bool selected) {
     _set_selectedness(elem, selected);
-    Item exp = expando_get_or_create_map((DomNode*)elem);
-    if (exp.item != ITEM_NULL) {
-        dom_realm_set_cstr(exp, "__optDirty", (Item){.item = b2it(true)});
-    }
+    dom_expando_flag_set(elem, "__optDirty", (Item){.item = b2it(true)});
     // Explicit option.selected wins in non-multiple selects, then refreshes
     // cached selectedOptions exactly as the fallback setter did.
     DomElement* sel = _option_owner_select(elem);
@@ -8083,10 +8093,7 @@ static void _reset_form_control(DomElement* elem) {
             bool default_checked = elem->has_attribute("checked");
             _set_checkedness(elem, default_checked);
             // Clear dirty checkedness flag.
-            Item exp = expando_get_map((DomNode*)elem);
-            if (exp.item != ITEM_NULL) {
-                dom_realm_set_cstr(exp, "__chkDirty", (Item){.item = ITEM_NULL});
-            }
+            dom_expando_flag_set(elem, "__chkDirty", (Item){.item = ITEM_NULL});
             return;
         }
         if (strcmp(itype, "submit") == 0 || strcmp(itype, "reset") == 0 ||
@@ -8141,16 +8148,10 @@ static void _reset_form_control(DomElement* elem) {
             // Default selectedness = presence of "selected" content attribute
             _set_selectedness(opt, opt->has_attribute("selected"));
             // Clear per-option dirty selectedness flag.
-            Item oexp = expando_get_map((DomNode*)opt);
-            if (oexp.item != ITEM_NULL) {
-                dom_realm_set_cstr(oexp, "__optDirty", (Item){.item = ITEM_NULL});
-            }
+            dom_expando_flag_set(opt, "__optDirty", (Item){.item = ITEM_NULL});
         }
         // Clear the dirty flag so default-reset rules apply again.
-        Item exp = expando_get_map((DomNode*)elem);
-        if (exp.item != ITEM_NULL) {
-            dom_realm_set_name(exp, "__selDirty", (Item){.item = ITEM_NULL});
-        }
+        dom_expando_flag_set(elem, "__selDirty", (Item){.item = ITEM_NULL});
         if (!elem->has_attribute("multiple")) {
             _select_ask_for_reset(elem);
         }
@@ -10625,10 +10626,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         _set_checkedness(elem, js_is_truthy(value));
         // Mark the dirty checkedness flag so subsequent `checked` content
         // attribute changes do not override the value.
-        Item exp = expando_get_or_create_map((DomNode*)elem);
-        if (exp.item != ITEM_NULL) {
-            dom_realm_set_cstr(exp, "__chkDirty", (Item){.item = b2it(true)});
-        }
+        dom_expando_flag_set(elem, "__chkDirty", (Item){.item = b2it(true)});
         return value;
     }
 
@@ -10639,12 +10637,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         bool t = js_is_truthy(value);
         if (t) elem->set_attribute("checked", "");
         else   elem->remove_attribute("checked");
-        Item exp = expando_get_map((DomNode*)elem);
-        bool dirty = false;
-        if (exp.item != ITEM_NULL) {
-            Item v = dom_realm_get_cstr(exp, "__chkDirty");
-            dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
-        }
+        bool dirty = dom_expando_flag_is(elem, "__chkDirty");
         if (!dirty) _set_checkedness(elem, t);
         return value;
     }
@@ -10709,12 +10702,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             bool t = js_is_truthy(value);
             if (t) elem->set_attribute("selected", "");
             else   elem->remove_attribute("selected");
-            Item exp = expando_get_map((DomNode*)elem);
-            bool dirty = false;
-            if (exp.item != ITEM_NULL) {
-                Item v = dom_realm_get_cstr(exp, "__optDirty");
-                dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
-            }
+            bool dirty = dom_expando_flag_is(elem, "__optDirty");
             if (!dirty) {
                 _set_selectedness(elem, t);
                 DomElement* sel = _option_owner_select(elem);
@@ -11209,7 +11197,7 @@ static Item dom_svg_matrix_operation(Item callee, Item this_value, Item* args,
     case JS_SVG_MATRIX_INVERSE: {
         float determinant = matrix.e11 * matrix.e22 - matrix.e21 * matrix.e12;
         if (fabsf(determinant) < 0.000001f)
-            return dom_realm_throw_type_error("SVGMatrix is not invertible");
+            return dom_raise_type_error("SVGMatrix is not invertible");
         float reciprocal = 1.0f / determinant;
         RdtMatrix inverse = {
             matrix.e22 * reciprocal, -matrix.e12 * reciprocal,
@@ -15441,7 +15429,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
                 Item m = js_name_item(
                     "Failed to execute 'add' on 'HTMLSelectElement': "
                     "The new child element contains the parent.");
-                return dom_realm_throw(dom_realm_new_error_named(n, m));
+                return dom_raise(n, m);
             }
         }
         // before: null/undefined/missing/-1 → append; else if number → option at index;
@@ -15475,7 +15463,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
                         Item m = js_name_item(
                             "Failed to execute 'add' on 'HTMLSelectElement': "
                             "The node before which the new node is to be inserted is not a descendant.");
-                        return dom_realm_throw(dom_realm_new_error_named(n, m));
+                        return dom_raise(n, m);
                     }
                     before_elem = be;
                     append_at_end = false;

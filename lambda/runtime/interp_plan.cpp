@@ -871,8 +871,12 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             interp_visit_children(node, interp_scan_visit, ctx);
             return;
         }
+        // The boxed caller in interp.cpp handles up to five Item arguments; the
+        // cap here was one short of it and excluded any script touching a
+        // five-argument row (set_base_and_extent), sending the whole file to
+        // the JIT (ESO113).
         if (!info || !info->func_ptr || info->c_arg_conv != C_ARG_ITEM ||
-                info->arg_count < 0 || info->arg_count > 4) {
+                info->arg_count < 0 || info->arg_count > 5) {
             log_debug("interp: sys func '%s' unsupported (arity=%d conv=%d ptr=%p)",
                 info && info->name ? info->name : "<null>",
                 info ? info->arg_count : -99, info ? (int)info->c_arg_conv : -1,

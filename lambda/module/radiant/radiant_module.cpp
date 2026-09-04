@@ -2865,7 +2865,6 @@ RADIANT_C_API void radiant_jube_register_static(void) {
 RADIANT_PROVIDE_ENGINE_2(get_state, fn_radiant_get_state)
 RADIANT_PROVIDE_ENGINE_3(set_state, fn_radiant_set_state)
 RADIANT_PROVIDE_ENGINE_1(request_change, fn_radiant_request_change)
-RADIANT_PROVIDE_ENGINE_2(dispatch, fn_radiant_dispatch)
 RADIANT_PROVIDE_ENGINE_1(focused, fn_radiant_focused)
 RADIANT_PROVIDE_ENGINE_2(focus_set, fn_radiant_focus_set)
 RADIANT_PROVIDE_ENGINE_1(activate_popover, fn_radiant_activate_popover)

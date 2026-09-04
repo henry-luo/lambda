@@ -9,6 +9,7 @@
  */
 
 #include "dom_events.h"
+#include "dom_core.h"
 #include "realm/dom_realm.h"
 #include "dom_engine.h"
 #include "dom.h"
@@ -274,7 +275,7 @@ extern "C" bool dom_is_reset_button(void* elem_ptr) {
 static Item dom_throw_named_error(const char* name, const char* message) {
     Item error_name = js_name_item(name ? name : "Error");
     Item error_message = js_name_item(message ? message : "");
-    return dom_realm_throw(dom_realm_new_error_named(error_name, error_message));
+    return dom_raise(error_name, error_message);
 }
 
 static Item dom_resolve_request_submitter(DomElement* form,
@@ -292,7 +293,7 @@ static Item dom_resolve_request_submitter(DomElement* form,
     DomNode* node = (DomNode*)dom_unwrap_element(submitter_item);
     DomElement* submitter = (node && node->is_element()) ? node->as_element() : nullptr;
     if (!dom_is_submit_button(submitter)) {
-        return dom_realm_throw_type_error("requestSubmit submitter must be a submit button");
+        return dom_raise_type_error("requestSubmit submitter must be a submit button");
     }
 
     DomElement* owner = dom_find_form_owner(submitter);
@@ -835,7 +836,7 @@ static Item parse_listener_options(Item opts, bool* capture, bool* once,
                 Item m = js_name_item(
                     "Failed to execute 'addEventListener' on 'EventTarget': "
                     "member signal is not of type 'AbortSignal'.");
-                return dom_realm_throw(dom_realm_new_error_named(n, m));
+                return dom_raise(n, m);
             }
             if (st == LMD_TYPE_MAP) {
                 *signal_out = signal_val;
@@ -1111,7 +1112,7 @@ extern "C" Item js_event_init_event(Item type_arg, Item b_arg, Item c_arg) {
         Item m = js_name_item(
             "Failed to execute 'initEvent' on 'Event': "
             "1 argument required, but only 0 present.");
-        return dom_realm_throw(dom_realm_new_error_named(n, m));
+        return dom_raise(n, m);
     }
     Item ev = dom_realm_receiver();
     if (!js_event_is_object(ev)) return make_js_undefined();
@@ -1396,7 +1397,7 @@ static Item build_ui_event(const char* type, Item init, const char* class_name) 
             Item n = js_name_item("TypeError");
             Item m = js_name_item(
                 "Failed to construct event: view member is not of type Window.");
-            return dom_realm_throw(dom_realm_new_error_named(n, m));
+            return dom_raise(n, m);
         }
         event_set_item(ev, "view", view);
     } else {
@@ -2111,7 +2112,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
         Item m = js_name_item(
             "Failed to execute 'dispatchEvent' on 'EventTarget': "
             "parameter 1 is not of type 'Event'.");
-        return dom_realm_throw(dom_realm_new_error_named(n, m));
+        return dom_raise(n, m);
     }
     // get event type
     Item type_val = event_get_item(event_item, "type");
@@ -2142,7 +2143,7 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
         Item m = js_name_item(
             "Failed to execute 'dispatchEvent' on 'EventTarget': "
             "The event is already being dispatched.");
-        return dom_realm_throw(dom_realm_new_error_named(n, m));
+        return dom_raise(n, m);
     }
 
     // dispatch retargets constructor null placeholders on every dispatch.

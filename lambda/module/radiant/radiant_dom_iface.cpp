@@ -701,7 +701,7 @@ static const JubeMemberBind radiant_computed_style_members[] = {
         return 1;                                                            \
     }
 
-RADIANT_GETTER_D(sh_css_rules, stylesheet_get_css_rules)
+RADIANT_GETTER_D(sh_css_rules, stylesheet_rules)
 RADIANT_GETTER_D(sh_length, stylesheet_get_length)
 RADIANT_GETTER_D(sh_disabled, stylesheet_get_disabled)
 RADIANT_GETTER_D(sh_type, stylesheet_get_type)

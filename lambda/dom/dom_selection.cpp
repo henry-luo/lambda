@@ -15,6 +15,7 @@
  */
 
 #include "dom_selection.h"
+#include "dom_core.h"
 #include "realm/dom_realm.h"
 #include "dom_engine.h"
 #include "dom.h"
@@ -105,9 +106,7 @@ static bool item_to_bool(Item v) {
 }
 
 static Item throw_dom_exception(const char* name, const char* msg) {
-    Item n = make_str(name ? name : "Error");
-    Item m = make_str(msg ? msg : "");
-    return dom_realm_throw(dom_realm_new_error_named(n, m));
+    return dom_raise_named(name, msg);   // realm-aware: throws, or answers ItemError
 }
 
 // Translate dom_range exception strings (e.g. "InvalidNodeTypeError",
@@ -1041,6 +1040,35 @@ extern "C" Item js_selection_get_direction(Item self_v) {
 // ============================================================================
 // Public entry points
 // ============================================================================
+
+
+// ESO113: explicit-document twins of the ambient entries. `dom.load` hands a
+// script its document, and nothing makes that document "current" without a JS
+// realm (dom_get_document is gated on js_active_runtime_state, and the storage
+// is the realm's own state struct). A Lambda script names the document it means.
+static DocState* state_for_document_item(Item doc_item, const char* owner) {
+    DomDocument* doc = (DomDocument*)dom_document_from_item(doc_item);
+    if (!doc) return nullptr;
+    if (doc->state) return doc->state;
+    if (!doc->document_pool) return nullptr;
+    return dom_engine_document_ensure_state(doc, owner);
+}
+
+extern "C" Item dom_create_range_for(Item doc_item) {
+    DocState* state = state_for_document_item(doc_item, "dom_selection");
+    if (!state) return ItemNull;
+    DomRange* r = dom_range_create(state);
+    if (!r) return ItemNull;
+    dom_range_link_into_state(state, r);
+    return build_range_object(r);
+}
+
+extern "C" Item dom_get_selection_for(Item doc_item) {
+    DocState* state = state_for_document_item(doc_item, "dom_selection");
+    if (!state) return ItemNull;
+    if (!state->dom_selection) state->dom_selection = dom_selection_create(state);
+    return js_object_for_selection(state->dom_selection);
+}
 
 extern "C" Item dom_create_range(void) {
     DocState* state = get_or_create_state();

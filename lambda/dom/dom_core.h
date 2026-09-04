@@ -130,7 +130,6 @@ Item dom_engine_load_document(Item path);
 Item dom_engine_get_state(Item n, Item name);
 Item dom_engine_set_state(Item n, Item name, Item value);
 Item dom_engine_request_change(Item n);
-Item dom_engine_dispatch(Item n, Item event);
 Item dom_engine_focused(Item n);
 Item dom_engine_focus_set(Item n, Item from_keyboard);
 Item dom_engine_activate_popover(Item a);
@@ -209,10 +208,79 @@ Item dom_cssom_delete_rule(Item sheet_item, Item index_arg);
 // in dom_module.cpp is what renders that as null.
 Item dom_absent_to_null(Item v);
 
+// Raising from a row body. In a realm this is a JS DOMException-shaped throw,
+// as it always was; with no realm there is nothing to throw *into* -- building
+// the Error object allocates in the realm's pool -- so the row answers
+// ItemError, which is Lambda's error value and what `^` consumes. The name and
+// message still reach the log so a Lambda caller's failure is not silent.
+Item dom_raise(Item name, Item message);
+Item dom_raise_named(const char* name, const char* message);
+Item dom_raise_type_error(const char* message);
+
 // Rows that are literally their JS-facing bridge: the bridge already has the
 // row's signature, and its `undefined` becomes null at the publication boundary,
 // so one body serves both doors (ES38) instead of a Lambda-only copy.
 Item dom_add_event_listener_bridge(Item n, Item type, Item fn, Item opts);
+Item dom_create_range_for(Item doc);
+// CSSOM rows published at ESO114.
+Item dom_cssom_rule_get_css_rules(Item);
+Item dom_cssom_rule_get_css_text(Item);
+Item dom_cssom_rule_get_parent_rule(Item);
+Item dom_cssom_rule_get_selector_text(Item);
+Item dom_cssom_rule_get_style(Item);
+Item dom_cssom_rule_get_type(Item);
+Item dom_cssom_stylesheet_get_disabled(Item);
+Item dom_cssom_stylesheet_get_href(Item);
+Item dom_cssom_stylesheet_get_length(Item);
+Item dom_cssom_stylesheet_get_title(Item);
+Item dom_cssom_stylesheet_get_type(Item);
+Item dom_cssom_get_document_stylesheets_for(Item);
+Item dom_cssom_stylesheet_rule_at(Item, Item);
+// Bodies of the published range/selection rows (ESO113); a DOM_OP body is
+// expanded by the publication trampolines and the arity check, so it must be
+// visible wherever dom_api.def is.
+Item js_range_clone_contents(Item);
+Item js_range_clone_range(Item);
+Item js_range_compare_boundary_points(Item, Item, Item);
+Item js_range_compare_point(Item, Item, Item);
+Item js_range_detach(Item);
+Item js_range_extract_contents(Item);
+Item js_range_get_bounding_client_rect(Item);
+Item js_range_get_client_rects(Item);
+Item js_range_get_common_ancestor(Item);
+Item js_range_get_end_container(Item);
+Item js_range_get_end_offset(Item);
+Item js_range_get_start_container(Item);
+Item js_range_get_start_offset(Item);
+Item js_range_insert_node(Item, Item);
+Item js_range_intersects_node(Item, Item);
+Item js_range_is_point_in_range(Item, Item, Item);
+Item js_range_set_end_after(Item, Item);
+Item js_range_set_end_before(Item, Item);
+Item js_range_set_start_after(Item, Item);
+Item js_range_set_start_before(Item, Item);
+Item js_range_surround_contents(Item, Item);
+Item js_selection_add_range(Item, Item);
+Item js_selection_collapse_to_end(Item);
+Item js_selection_collapse_to_start(Item);
+Item js_selection_contains_node(Item, Item, Item);
+Item js_selection_delete_from_document(Item);
+Item js_selection_empty(Item);
+Item js_selection_force_direction(Item, Item);
+Item js_selection_get_anchor_node(Item);
+Item js_selection_get_anchor_offset(Item);
+Item js_selection_get_direction(Item);
+Item js_selection_get_focus_node(Item);
+Item js_selection_get_focus_offset(Item);
+Item js_selection_get_is_collapsed(Item);
+Item js_selection_get_range_at(Item, Item);
+Item js_selection_get_range_count(Item);
+Item js_selection_get_type(Item);
+Item js_selection_remove_all_ranges(Item);
+Item js_selection_remove_range(Item, Item);
+Item js_selection_set_position(Item, Item, Item);
+Item js_selection_to_string(Item);
+Item dom_get_selection_for(Item doc);
 Item dom_remove_event_listener_bridge(Item n, Item type, Item fn, Item opts);
 Item dom_adopt_node_bridge(Item);
 Item dom_style_css_has(Item, Item);

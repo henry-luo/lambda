@@ -1,0 +1,18 @@
+{
+  b1: {
+    start_container: {},
+    start_offset: 0,
+    end_container: {},
+    end_offset: 1
+  },
+  c1: true,
+  sb: {
+    anchor_node: {},
+    anchor_offset: 2,
+    focus_node: {},
+    focus_offset: 2
+  },
+  cnt: 1,
+  focus_off: 1,
+  anchor_is_text: false
+}

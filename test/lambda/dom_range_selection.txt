@@ -1,0 +1,10 @@
+{
+  collapsed: false,
+  start_offset: 1,
+  end_offset: 4,
+  text: "lph",
+  same_start: true,
+  sel_count: 1,
+  anchor_offset: 1,
+  sel_type: "Range"
+}

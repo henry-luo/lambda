@@ -481,6 +481,14 @@ enum DomElementFlag : uint32_t {
     // execution context or an expando-map lookup.
     ELMT_FLAG_OPTION_SELECTEDNESS_SET = 1u << 19,
     ELMT_FLAG_OPTION_SELECTEDNESS_VALUE = 1u << 20,
+    // The spec's per-control "dirty" flags (dirty checkedness, dirty value,
+    // option dirty selectedness, select dirtiness). They lived as JS expandos
+    // on the wrapper, which made reading them a realm operation; they are
+    // control state, so they live on the node like selectedness does.
+    ELMT_FLAG_CHECKED_DIRTY  = 1u << 23,
+    ELMT_FLAG_VALUE_DIRTY    = 1u << 24,
+    ELMT_FLAG_OPTION_DIRTY   = 1u << 25,
+    ELMT_FLAG_SELECT_DIRTY   = 1u << 26,
     // Generated pseudo boxes read their originating element's pseudo tree.
     // Borrowing is distinct from epoch sharing because it has no epoch refcount.
     ELMT_FLAG_SPECIFIED_STYLE_BORROWED = 1u << 21,
@@ -731,6 +739,14 @@ struct DomElement : DomNode {
     void set_has_pending_element_scroll_x(bool value) { set_flag(ELMT_FLAG_HAS_PENDING_SCROLL_X, value); }
     bool has_pending_element_scroll_y() const { return flag(ELMT_FLAG_HAS_PENDING_SCROLL_Y); }
     void set_has_pending_element_scroll_y(bool value) { set_flag(ELMT_FLAG_HAS_PENDING_SCROLL_Y, value); }
+    bool checked_dirty() const { return flag(ELMT_FLAG_CHECKED_DIRTY); }
+    void set_checked_dirty(bool v) { set_flag(ELMT_FLAG_CHECKED_DIRTY, v); }
+    bool value_dirty() const { return flag(ELMT_FLAG_VALUE_DIRTY); }
+    void set_value_dirty(bool v) { set_flag(ELMT_FLAG_VALUE_DIRTY, v); }
+    bool option_dirty() const { return flag(ELMT_FLAG_OPTION_DIRTY); }
+    void set_option_dirty(bool v) { set_flag(ELMT_FLAG_OPTION_DIRTY, v); }
+    bool select_dirty() const { return flag(ELMT_FLAG_SELECT_DIRTY); }
+    void set_select_dirty(bool v) { set_flag(ELMT_FLAG_SELECT_DIRTY, v); }
     bool has_option_selectedness() const { return flag(ELMT_FLAG_OPTION_SELECTEDNESS_SET); }
     bool option_selectedness() const { return flag(ELMT_FLAG_OPTION_SELECTEDNESS_VALUE); }
     void set_option_selectedness(bool value) {
