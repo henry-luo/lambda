@@ -863,6 +863,9 @@ bool radiant_dispatch_behavior_dom_edit(View* target, const InputIntent* intent)
 // submit or reset twice.
 bool radiant_dispatch_behavior_submit_activation(EventContext* evcon, View* target);
 bool radiant_dispatch_behavior_reset_activation(EventContext* evcon, View* target);
+// The package selects the activation key/timing; native only dispatches the
+// resulting click through the shared author/default-action pipeline.
+bool radiant_keyboard_click_from_package(void* dom_node);
 // F14.1: `document.execCommand` reaches the package's command set through here.
 bool radiant_dom_exec_command(void* document, const char* command,
                               const char* value);
@@ -2458,9 +2461,6 @@ typedef struct DocState {
     DomElement*          last_focused_text_control;
     EditingBehavior      editing_behavior;
     FocusState* focus;             // focus state with navigation info
-    // A Space keydown arms its keyup click against this identity. Pinning is
-    // required because author keydown handlers may reconcile before keyup.
-    DomNodeRef pending_space_activation;
     CursorState* cursor;           // mouse cursor state
     View* hover_target;            // currently hovered element
     View* active_target;           // currently active (pressed) element

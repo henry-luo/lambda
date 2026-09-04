@@ -17,6 +17,7 @@ import dom_edit: lambda.package.dom.dom_edit
 import commands: lambda.package.dom.commands
 import submit: lambda.package.dom.submit
 import details: lambda.package.dom.details
+import keyboard: lambda.package.dom.keyboard
 
 // Checkbox activation: a click flips checkedness unless the control is
 // disabled, and clears the indeterminate bit (HTML 4.10.5.1.15).
@@ -71,6 +72,21 @@ pn commit_option(elem, index) {
     dom.set_dropdown_open(elem, false)
 }
 
+// Open-dropdown routing is an ordinary keydown default: author listeners see
+// and may cancel the event first, then this helper owns the whole key policy.
+pn dropdown_key(elem, evt) {
+    let count = dom.option_count(elem);
+    let hover = dom.hover_index(elem);
+    if (evt.key == "ArrowUp") { if (hover > 0) dom.set_hover_index(elem, hover - 1) else true; "handled" }
+    else if (evt.key == "ArrowDown") { if (hover < count - 1) dom.set_hover_index(elem, hover + 1) else true; "handled" }
+    else if (evt.key == "Enter") {
+        if (hover >= 0 and hover < count) { commit_option(elem, hover) } else { true }
+        "handled"
+    }
+    else if (evt.key == "Escape") { dom.set_dropdown_open(elem, false); "handled" }
+    else { "pass" }
+}
+
 view <select> state dropdown_open {}
 on init(evt) { aria.reflect(~) }
 on click(evt) {
@@ -85,19 +101,14 @@ on optioncommit(evt) {
     if (evt.option_index == null) { return 'pass' }
     commit_option(~, evt.option_index)
 }
-// F11: the keys an open dropdown responds to. Enter reaches the same commit the
-// pointer does — not a second copy of it — which is the point of moving the
-// other three keys here rather than leaving them native alongside it.
-on dropdownkey(evt) {
-    let count = dom.option_count(~);
-    let hover = dom.hover_index(~);
-    if (evt.key == "ArrowUp") { if (hover > 0) dom.set_hover_index(~, hover - 1) else true }
-    else if (evt.key == "ArrowDown") { if (hover < count - 1) dom.set_hover_index(~, hover + 1) else true }
-    else if (evt.key == "Enter") {
-        if (hover >= 0 and hover < count) { commit_option(~, hover) } else { true }
+on keydown(evt) {
+    if (dom.get_state(~, "disabled")) { 'pass' }
+    else {
+        let dropdown_action = if (dom.dropdown_open(~)) dropdown_key(~, evt) else "pass";
+        if (dropdown_action == "handled") { 'prevent-default' }
+        else if (keyboard.action(evt, true, "down") == "click") { keyboard.click(~) }
+        else { 'pass' }
     }
-    else if (evt.key == "Escape") { dom.set_dropdown_open(~, false) }
-    else { 'pass' }
 }
 
 // Constraint validation (F3). There is no native validator behind this any
@@ -121,12 +132,30 @@ on dropdownkey(evt) {
 // contract where an app template owns the text — is deliberately not visible to
 // behavior templates: it fires before the value exists, and claiming it would
 // suppress the engine's own insert.
-view <input> state valid, invalid {}
+view <input> state valid, invalid, keyboard_activation_armed: false {}
 on init(evt)  { validate.revalidate(~) aria.reflect(~) }
 on input(evt) { validate.revalidate(~) aria.reflect(~) }
-on blur(evt)  { validate.revalidate(~) aria.reflect(~) }
+on blur(evt)  { keyboard_activation_armed = false; validate.revalidate(~) aria.reflect(~) }
 on commit(evt) { editing.commit(~) }
 on beforeinput(evt) { editing.apply_fn(~, evt, false) }
+on keydown(evt) {
+    keyboard_activation_armed = false
+    let kind = dom.get_attribute(~, "type");
+    let normalized = if (kind == null or kind == "") "text" else lower(kind);
+    let enter_activates = normalized == "submit" or normalized == "image" or normalized == "reset";
+    let space_timing = if (normalized == "checkbox" or normalized == "radio") "up" else null;
+    let action = if (dom.get_state(~, "disabled")) "pass"
+                 else keyboard.action(evt, enter_activates, space_timing);
+    if (action == "arm") { keyboard_activation_armed = true; 'prevent-default' }
+    else if (action == "click") { keyboard.click(~) }
+    else { 'pass' }
+}
+on keyup(evt) {
+    let armed = keyboard_activation_armed;
+    keyboard_activation_armed = false
+    if (armed and evt.key == " " and not dom.get_state(~, "disabled")) { keyboard.click(~) }
+    else { 'pass' }
+}
 
 view <textarea> state valid, invalid {}
 on init(evt)  { validate.revalidate(~) aria.reflect(~) }
@@ -146,12 +175,27 @@ on input(evt) { aria.reflect_range(~) }
 view <form> state form_activation {}
 on submitactivation(evt) { submit.run(~, null) }
 
-view <button> state form_activation {}
+view <button> state form_activation, keyboard_activation_armed: false {}
 // Popover activation is a click default, so synthetic and trusted clicks use
 // this one behavior instead of the retired JS-only activation hook.
 on click(evt) {
     if (dom.activate_popover(~)) { true } else { 'pass' }
 }
+on keydown(evt) {
+    keyboard_activation_armed = false
+    let action = if (dom.get_state(~, "disabled")) "pass"
+                 else keyboard.action(evt, true, "up");
+    if (action == "arm") { keyboard_activation_armed = true; 'prevent-default' }
+    else if (action == "click") { keyboard.click(~) }
+    else { 'pass' }
+}
+on keyup(evt) {
+    let armed = keyboard_activation_armed;
+    keyboard_activation_armed = false
+    if (armed and evt.key == " " and not dom.get_state(~, "disabled")) { keyboard.click(~) }
+    else { 'pass' }
+}
+on blur(evt) { keyboard_activation_armed = false }
 on submitactivation(evt) {
     let kind = dom.get_attribute(~, "type");
     let normalized = if (kind == null or kind == "") "submit" else lower(kind);

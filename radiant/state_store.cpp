@@ -1053,16 +1053,6 @@ static void state_store_detach_selection_for_unload(DocState* state) {
     selection_finish_active_gesture(state);
 }
 
-static void state_store_clear_pending_space_activation(DocState* state,
-                                                       DomDocument* document) {
-    if (!state || !state->pending_space_activation.address) return;
-    if (document) {
-        dom_node_unpin(document, state->pending_space_activation,
-                       DOM_NODE_PIN_STATE);
-    }
-    state->pending_space_activation = {nullptr, 0};
-}
-
 void StateStore::destroy() {
     DomDocument* owner_document = document;
     DocState* state = doc_state;
@@ -1078,7 +1068,6 @@ void StateStore::destroy() {
     if (state) {
         state_begin_batch(state);
         state_store_detach_selection_for_unload(state);
-        state_store_clear_pending_space_activation(state, owner_document);
         doc_state_set_hover_target(state, NULL);
         doc_state_set_active_target(state, NULL);
         focus_clear(state);

@@ -11,11 +11,11 @@
     dirty: true,
     repaint: true,
     rects: 1
-  }
-  <html flags: ['hover', 'focus-within']
-    <body index: 2, flags: ['hover', 'focus-within']
-      <div index: 7, flags: ['hover', 'focus-within']
-        <div index: 5, flags: ['hover', 'focus-within']
+  },
+  <html flags: ['hover', 'focus-within'],
+    <body index: 2, flags: ['hover', 'focus-within'],
+      <div index: 7, flags: ['hover', 'focus-within'],
+        <div index: 5, flags: ['hover', 'focus-within'],
           <select index: 3, id: "country", flags: ['hover', 'focus', 'focus-within'], form: {
               dropdown_open: true,
               hover_index: 0

@@ -2005,11 +2005,18 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         }
     }
 
-    // for "keydown" events: add key name string
-    if (evcon && strcmp(event_name, "keydown") == 0) {
+    // Lambda-only documents build their KeyboardEvent record here. Publish the
+    // DOM key spelling and modifier surface that JS-backed records already
+    // carry so package policy is realm-neutral.
+    if (evcon && (strcmp(event_name, "keydown") == 0 ||
+                  strcmp(event_name, "keyup") == 0)) {
         int key = evcon->event.key.key;
-        const char* key_name = key_code_to_name(key);
+        const char* key_name = key_code_to_dom_key(key, evcon->event.key.mods);
         mb.put("key", key_name);
+        mb.put("shiftKey", (evcon->event.key.mods & RDT_MOD_SHIFT) != 0);
+        mb.put("ctrlKey",  (evcon->event.key.mods & RDT_MOD_CTRL) != 0);
+        mb.put("altKey",   (evcon->event.key.mods & RDT_MOD_ALT) != 0);
+        mb.put("metaKey",  (evcon->event.key.mods & RDT_MOD_SUPER) != 0);
     }
 
     // add caret position (as character index) for input, keydown, paste, and cut events
@@ -3111,7 +3118,7 @@ extern "C" bool radiant_select_set_dropdown_open(void* dom_node, bool open) {
         if (state->open_dropdown == view) doc_state_close_dropdown(state, view);
         return true;
     }
-    // one dropdown at a time, matching the native activation path
+    // canonical popup state permits one open dropdown at a time
     if (state->open_dropdown && state->open_dropdown != view) {
         doc_state_close_dropdown(state, state->open_dropdown);
     }
@@ -3408,15 +3415,6 @@ extern "C" bool radiant_dispatch_behavior_commit(EventContext* evcon, View* targ
 // is not a DOM element, so no DOM event has fired for the option and there are
 // no JS listeners to preempt. Native resolves which option the pointer landed on
 // (geometry is mechanism) and the template performs the commit.
-// F11: keys an open <select> dropdown responds to. Behavior-only like the
-// others here — the dropdown overlay is not a DOM element, so no DOM key event
-// has fired for it.
-extern "C" bool radiant_dispatch_behavior_dropdown_key(EventContext* evcon,
-                                                       View* target,
-                                                       const InputIntent* intent) {
-    return dispatch_behavior_handler(evcon, target, "dropdownkey", intent, nullptr);
-}
-
 extern "C" bool radiant_dispatch_behavior_option_commit(EventContext* evcon,
                                                         View* target,
                                                         const InputIntent* intent) {
@@ -7774,9 +7772,10 @@ static bool dispatch_click_default_actions(EventContext* evcon, View* target) {
     return handled;
 }
 
-// Keyboard activation must complete the same author and UA tiers as a pointer
-// click; dispatching only the JS event would leave the package default action out.
-static bool run_keyboard_click_default(EventContext* evcon, View* target) {
+// The package chooses whether a key activates its target. Native supplies only
+// the click dispatch mechanism so keyboard and pointer activation enter the
+// same author/UA pipeline.
+static bool dispatch_package_keyboard_click(EventContext* evcon, View* target) {
     bool prevented = radiant_dispatch_mouse_event(evcon, target, "click",
         0, 0, 0, 0, false, false, false, false, 1);
     if (prevented) evcon->default_prevented = true;
@@ -7784,6 +7783,17 @@ static bool run_keyboard_click_default(EventContext* evcon, View* target) {
         dispatch_click_default_actions(evcon, target);
     }
     return true;
+}
+
+extern "C" bool radiant_keyboard_click_from_package(void* dom_node) {
+    EmitHandlerContext* ctx = g_emit_handler_ctx;
+    if (!ctx || !ctx->evcon || !dom_node) return false;
+    DomNode* node = static_cast<DomNode*>(dom_node);
+    if (!node->is_element() || !dom_is_connected(dom_node)) return false;
+    DomElement* elem = node->as_element();
+    DomDocument* document = event_context_target_document(ctx->evcon);
+    if (!elem || elem->doc != document) return false;
+    return dispatch_package_keyboard_click(ctx->evcon, static_cast<View*>(elem));
 }
 
 // Only the exact bridge re-entry bypasses the wrapper below. A synthetic event
@@ -7854,105 +7864,6 @@ extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
     return result;
 }
 
-static void space_activation_clear(DocState* state, DomDocument* document) {
-    if (!state || !state->pending_space_activation.address) return;
-    if (document) {
-        dom_node_unpin(document, state->pending_space_activation,
-                       DOM_NODE_PIN_STATE);
-    }
-    state->pending_space_activation = {nullptr, 0};
-}
-
-static bool space_activation_arm(EventContext* evcon, DocState* state,
-                                 View* target) {
-    DomDocument* document = event_context_target_document(evcon);
-    if (!state || !document || !target || !target->is_element()) return false;
-    space_activation_clear(state, document);
-    DomNodeRef ref = dom_node_ref(static_cast<DomNode*>(target));
-    if (!dom_node_ref_validate(document, ref) ||
-        !dom_node_pin(document, ref, DOM_NODE_PIN_STATE)) {
-        return false;
-    }
-    state->pending_space_activation = ref;
-    return true;
-}
-
-static View* space_activation_take(EventContext* evcon, DocState* state,
-                                   DomNodeRef* out_ref) {
-    DomDocument* document = event_context_target_document(evcon);
-    if (out_ref) *out_ref = {nullptr, 0};
-    if (!state || !document || !state->pending_space_activation.address) return nullptr;
-    DomNodeRef ref = state->pending_space_activation;
-    state->pending_space_activation = {nullptr, 0};
-    DomNode* node = dom_node_ref_validate(document, ref);
-    if (out_ref) *out_ref = ref;
-    return node && node->is_element() ? static_cast<View*>(node) : nullptr;
-}
-
-static void space_activation_release(EventContext* evcon, DomNodeRef ref) {
-    DomDocument* document = event_context_target_document(evcon);
-    if (document && ref.address) {
-        dom_node_unpin(document, ref, DOM_NODE_PIN_STATE);
-    }
-}
-
-static bool keyboard_space_activation_target(DocState* state, View* target) {
-    if (!state || !target || !target->is_element()) return false;
-    if (is_checkbox(target) || is_radio(target)) {
-        return !dom_is_disabled((void*)lam::dom_require_element(target));
-    }
-    ViewElement* element = lam::view_require_element(target);
-    if (element->tag() != MARKUP_NAME_BUTTON) return false;
-    DomElement* dom_element = lam::dom_require_element(target);
-    return !dom_element->form_control() ||
-        !form_control_is_disabled(state, static_cast<View*>(dom_element));
-}
-
-static bool run_keyboard_activation(EventContext* evcon, DocState* state,
-                                    View* focused, int key) {
-    if (!evcon || !state || !focused || !focused->is_element() ||
-        evcon->default_prevented || !dom_is_connected((void*)focused)) {
-        return false;
-    }
-    ViewElement* element = lam::view_require_element(focused);
-    uint32_t tag = element->tag();
-    if (tag == MARKUP_NAME_INPUT && key == RDT_KEY_SPACE &&
-        (is_checkbox(focused) || is_radio(focused))) {
-        return run_keyboard_click_default(evcon, focused);
-    }
-    if (tag == MARKUP_NAME_BUTTON &&
-        (key == RDT_KEY_SPACE || key == RDT_KEY_ENTER)) {
-        DomElement* dom_element = lam::dom_require_element(focused);
-        bool disabled = dom_element->form_control() &&
-            form_control_is_disabled(state, static_cast<View*>(dom_element));
-        if (disabled) return false;
-        return run_keyboard_click_default(evcon, focused);
-    }
-    if (tag == MARKUP_NAME_INPUT && key == RDT_KEY_ENTER &&
-        (dom_is_submit_button((void*)focused) ||
-         dom_is_reset_button((void*)focused))) {
-        DomElement* dom_element = lam::dom_require_element(focused);
-        bool disabled = dom_element->form_control() &&
-            form_control_is_disabled(state, static_cast<View*>(dom_element));
-        if (disabled) return false;
-        return run_keyboard_click_default(evcon, focused);
-    }
-    if (tag == MARKUP_NAME_A && key == RDT_KEY_ENTER) {
-        DomElement* anchor = lam::dom_require_element(focused);
-        if (!anchor->get_attribute("href")) return false;
-        return run_keyboard_click_default(evcon, focused);
-    }
-    if (tag == MARKUP_NAME_SELECT &&
-        (key == RDT_KEY_SPACE || key == RDT_KEY_ENTER)) {
-        DomElement* dom_element = lam::dom_require_element(focused);
-        bool disabled = dom_element->form_control() &&
-            form_control_is_disabled(state, static_cast<View*>(dom_element));
-        return !disabled && run_keyboard_click_default(evcon, focused);
-    }
-    return false;
-}
-
-
 static bool click_target_is_disabled_control(DocState* state, View* target) {
     for (View* current = target; current; current = current->parent) {
         if (!current->is_element()) continue;
@@ -7997,8 +7908,8 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state,
  * Handle click on select to toggle dropdown
  */
 // Opening a dropdown is mechanism: overlay placement and sizing come from
-// layout geometry. Both the native activation path and the dom package's
-// `open_dropdown` primitive go through here so the geometry is computed once.
+// layout geometry. Every package-selected open goes through this one geometry
+// path.
 static void select_open_dropdown(UiContext* uicon, DocState* state,
                                  View* select_view) {
     if (!uicon || !state || !select_view) return;
@@ -8107,9 +8018,7 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     }
 }
 
-/**
- * Handle keyboard navigation in dropdown
- */
+// Classify physical keys that can be followed by a text-input callback.
 static bool editing_key_may_emit_text(const KeyEvent* key_event) {
     if (!key_event) return false;
     if (key_event->mods & (RDT_MOD_CTRL | RDT_MOD_SUPER | RDT_MOD_ALT)) {
@@ -8135,21 +8044,6 @@ static bool editing_key_may_emit_text(const KeyEvent* key_event) {
         // committed Unicode callback, which still has keydown cancellation.
         return true;
     }
-}
-
-// F11: every key an open dropdown responds to now goes to the template. Enter
-// already committed through `optioncommit`, but Up/Down and Escape did not —
-// one interaction split by key, which is the third time this shape has appeared
-// in this function (mouse commit, then Enter, now its siblings).
-static bool handle_dropdown_key(EventContext* evcon, int key, int mods) {
-    DocState* state = nullptr;
-    ViewBlock* select = event_open_dropdown_select(evcon, &state);
-    if (!select) return false;
-    InputIntent intent;
-    intent.key = key;
-    intent.mods = mods;
-    return radiant_dispatch_behavior_dropdown_key(evcon, static_cast<View*>(select),
-                                                  &intent);
 }
 
 /**
@@ -10975,14 +10869,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             break;
         }
 
-        // Handle dropdown keyboard navigation first (if dropdown is open)
-        if (state->open_dropdown) {
-            if (handle_dropdown_key(&evcon, key_event->key, key_event->mods)) {
-                evcon.need_repaint = true;
-                break;
-            }
-        }
-
         View* focused = focus_get(state);
         event_log_focused_target(cascade_log, cascade_id, focused);
         log_debug("Key down: key=%d, mods=0x%x, focused=%p", key_event->key, key_event->mods, focused);
@@ -11194,22 +11080,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (prevented) evcon.default_prevented = true;
             focused = focus_get(state);
         }
-        // Enter activates immediately, but Space only arms a pending click.
-        // The identity pin lets a cancelable keydown reconcile the DOM without
-        // turning keyup into a dangling View* access (D4.5.1v3).
-        if (focused && !evcon.default_prevented &&
-            !(key_event->mods & (RDT_MOD_CTRL | RDT_MOD_SUPER | RDT_MOD_ALT))) {
-            if (key_event->key == RDT_KEY_SPACE &&
-                keyboard_space_activation_target(state, focused) &&
-                space_activation_arm(&evcon, state, focused)) {
-                break;
-            }
-            if (run_keyboard_activation(&evcon, state, focused, key_event->key)) {
-                evcon.need_repaint = true;
-                break;
-            }
-        }
-
         // F4: a single-line text control's Enter is implicit submission, not
         // text insertion. JS keydown cancellation remains authoritative; the
         // package then chooses the first enabled submitter or the form itself.
@@ -11444,29 +11314,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     state->editing.pending_text_input_prevented = false;
                     state->editing.pending_text_input_key = RDT_KEY_UNKNOWN;
                 }
-                DomNodeRef space_activation_ref = {nullptr, 0};
-                View* space_activation_target = event->key.key == RDT_KEY_SPACE
-                    ? space_activation_take(&evcon, state, &space_activation_ref) : nullptr;
                 View* focused = focus_get(state);
                 event_log_focused_target(cascade_log, cascade_id, focused);
                 WebViewHandle* focused_webview = focused_layer_webview_handle(focused);
                 if (focused_webview) {
                     webview_layer_platform_inject_key(
                         focused_webview, 1, event->key.key, event->key.mods);
-                    space_activation_release(&evcon, space_activation_ref);
                     break;
                 }
-                bool keyup_prevented = false;
                 if (focused) {
-                    keyup_prevented = radiant_dispatch_keyboard_event(&evcon, focused,
-                        "keyup", event->key.key, event->key.mods, false);
+                    radiant_dispatch_keyboard_event(&evcon, focused, "keyup",
+                                                    event->key.key, event->key.mods,
+                                                    false);
                 }
-                if (space_activation_target && !keyup_prevented &&
-                    run_keyboard_activation(&evcon, state,
-                                            space_activation_target, RDT_KEY_SPACE)) {
-                    evcon.need_repaint = true;
-                }
-                space_activation_release(&evcon, space_activation_ref);
             }
         }
         break;

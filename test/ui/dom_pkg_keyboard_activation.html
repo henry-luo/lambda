@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>DOM package keyboard activation</title>
+  <style>
+    body { font: 16px sans-serif; }
+    form, label, select, a, button { display: block; margin: 4px; }
+  </style>
+</head>
+<body>
+  <form id="form" action="#submitted">
+    <input id="start" name="value" value="seed">
+    <button id="button" type="button">Button</button>
+    <input id="submit" type="submit" value="Submit">
+    <input id="reset" type="reset" value="Reset">
+    <label><input id="checkbox" type="checkbox"> Checkbox</label>
+    <label><input id="radio" type="radio" name="choice" value="yes"> Radio</label>
+    <select id="select">
+      <option value="first" selected>First</option>
+      <option value="second">Second</option>
+    </select>
+    <a id="link" href="#target">Link</a>
+    <button id="blocked" type="button">Canceled button</button>
+  </form>
+  <div id="target">Target</div>
+  <output id="button-clicks">0</output>
+  <output id="submits">0</output>
+  <output id="resets">0</output>
+  <output id="blocked-clicks">0</output>
+  <script>
+    let buttonClicks = 0;
+    let submits = 0;
+    let resets = 0;
+    let blockedClicks = 0;
+
+    const button = document.getElementById('button');
+    const form = document.getElementById('form');
+    const select = document.getElementById('select');
+    const blocked = document.getElementById('blocked');
+
+    button.addEventListener('click', () => {
+      document.getElementById('button-clicks').textContent = String(++buttonClicks);
+    });
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      document.getElementById('submits').textContent = String(++submits);
+    });
+    form.addEventListener('reset', () => {
+      document.getElementById('resets').textContent = String(++resets);
+    });
+    select.addEventListener('keydown', event => {
+      if (event.key === 'ArrowDown') event.preventDefault();
+    });
+    blocked.addEventListener('keydown', event => event.preventDefault());
+    blocked.addEventListener('click', () => {
+      document.getElementById('blocked-clicks').textContent = String(++blockedClicks);
+    });
+  </script>
+</body>
+</html>

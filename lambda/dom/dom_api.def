@@ -105,6 +105,9 @@ DOM_OP(CORE, get_state,        state, 2, "fn(n: any, name: string) -> any",     
 DOM_OP(CORE, set_state,        state, 3, "fn(n: any, name: string, value: any) -> bool",    dom_engine_set_state, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 DOM_OP(CORE, request_change,   state, 1, "fn(n: any) -> bool",                              dom_engine_request_change, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, dispatch,         event, 2, "fn(n: any, event: any) -> bool",                  dom_core_dispatch, DOM_F_NEUTRAL, "")
+// Keyboard policy chooses the target and timing; this engine seam only emits
+// the browser-shaped click and runs its shared default-action pipeline.
+DOM_OP(CORE, keyboard_click,   event, 1, "fn(n: any) -> bool",                              dom_engine_keyboard_click, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, add_listener,     event, 4, "fn(n: any, type: string, fn: any, opts: any) -> null", dom_add_event_listener_bridge, 0, "")
 DOM_OP(CORE, remove_listener,  event, 4, "fn(n: any, type: string, fn: any, opts: any) -> null", dom_remove_event_listener_bridge, 0, "")
 // JS's legacy document.createEvent: it answers a JS Event object, so it needs

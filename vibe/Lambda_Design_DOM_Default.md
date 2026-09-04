@@ -41,7 +41,7 @@ Per ES5 and the DOM_Pkg placement rules, the seam runs between *resolving* and *
 | --- | --- | --- |
 | **Mechanism** — hit-testing, geometry, storage, buffers, paint, association lookup | **native (N)** | transform-aware hit test; `for="id"` label association; dropdown overlay geometry; the UTF-8 splice; caret geometry; clipboard read; the undo ring's storage |
 | **Policy** — which key means what, what a click does to a control, what an `inputType` does to the document | **dom package (L)** | `form.ls` activation, `caret.ls` key→operation, `keymap.ls` key→intent, `scroll.ls` key→scroll operation, `editing.ls` / `dom_edit.ls` appliers, `commands.ls` command set, `menu.ls`, `ime.ls`, `validate.ls`, `aria.ls` |
-| **Waist primitives** — the named, ≤4-argument operations policy drives mechanism through | **`radiant` module (M)** | `set_state`, `dispatch`, `radio_group`, `replace_range`, `dom_replace_range`, `dom_wrap_range`, `caret_operation`, `scroll_operation` |
+| **Waist primitives** — the named, ≤4-argument operations policy drives mechanism through | **`radiant` module (M)** | `set_state`, `dispatch`, `keyboard_click`, `radio_group`, `replace_range`, `dom_replace_range`, `dom_wrap_range`, `caret_operation`, `scroll_operation` |
 
 The recurring failure mode was a default action in a **fourth** home — the JS
 dispatch layer (`lambda/dom/dom_events.cpp`) implementing activation only for
@@ -97,13 +97,20 @@ as the existing editing package: S12.1.3 puts the decision in an `on` handler;
 S9.1.4 keeps the mutable state in the view state; native owns the coupled
 geometry and paint substrate.
 
-The default-action half is one `keydefault` behavior hook after an uncanceled
-`keydown`, not a collection of native per-key branches. It has the existing UA
-tier one-call ceiling and may return `'pass'` or `'prevent-default'` under
-ES15. `keyintent` remains a separate context-free translation: it has no
-side effect and must still reach the package when author code prevents the
+Keyboard activation and open-select routing use the ordinary `keydown`/
+`keyup` UA tier, not a behavior-only interception before dispatch. Author
+listeners therefore observe and may cancel the same event first. `keyboard.ls`
+maps modifiers, keys, and activation timing; `form.ls` and `navigation.ls`
+choose the eligible element kinds. Space arming is a Boolean on the target's
+template instance, as required by S9.1.4, rather than a native pinned target.
+The package then calls the mechanism-only `dom.keyboard_click(node)` waist,
+which emits a browser-shaped `click` through the shared author/default-action
+pipeline. Native contains no element/key policy and no package-off activation
+path. `keyintent` remains a separate context-free translation: it has no side
+effect and must still reach the package when author code prevents the
 `keydown`. Thus policy can choose a named action without reclassifying a
-translation as a default action.
+translation as a default action. **ES30's activation and open-select migration
+completed 2026-09-04.**
 
 The package needs a bounded, element-only snapshot navigation surface. It
 builds a Lambda array while it traverses, before it mutates the tree; no live
@@ -124,6 +131,7 @@ and generation validation.
 | `radiant.focus_set(node, from_keyboard)` | Commit the selected focus target atomically: canonical state, pseudo-state, iframe ownership, and text-control focus capture remain native mechanism; native emits the public focus transition at the originating event boundary. |
 | `radiant.scroll_into_view(node)` | Perform the geometry-dependent scroll after package policy chooses that it is required. |
 | `radiant.selection_operation(node, operation, extend)` | Generalize `caret_operation` to apply a named selection operation — character, word, line, document, page, or select-all — while native resolves the live range, updates canonical selection, emits `selectionchange`, and repaints. |
+| `dom.keyboard_click(node)` | Dispatch the package-selected activation as a browser-shaped `click`, then enter the shared click-default pipeline. It decides neither eligible elements nor keys nor keydown/keyup timing. |
 
 `focus.ls` uses `focus_candidates` plus `attr`/`has_attr` to order positive
 `tabindex` candidates ascending before the tree-order `tabindex=0` set, then
@@ -297,13 +305,13 @@ Verified against the tree at 2026-09-04 (`event.cpp`, `lambda/package/dom/*.ls`,
 
 | Event | Spec, cancelable | Default action per spec | Radiant | Status |
 | --- | --- | --- | --- | --- |
-| `keydown` | UI Events; cancelable | text input, caret movement, scrolling, activation via Space/Enter — "the key processing model" | dispatched to JS first, then split by kind (below) | 🟡 — see the four rows |
+| `keydown` | UI Events; cancelable | text input, caret movement, scrolling, activation via Space/Enter — "the key processing model" | one author cascade followed by the matching package `on keydown`; a canceled author event never reaches package default policy | 🟡 — see the four rows |
 | ↳ **`caretkey`** (default action) | — | caret movement | dispatched *with* context, so a prevented keydown suppresses it → `caret.ls`, both surfaces. Arrow / Home / End apply to both; `PageUp` / `PageDown` are package-selected for `<textarea>` and use native live-buffer line geometry | 🟡 |
 | ↳ **`keyintent`** (translation) | — | key → `inputType` | dispatched context-free, deliberately (F11) → `keymap.ls` | ✅ |
-| ↳ **`dropdownkey`** | — | UA handling of an open `<select>` popup | Up / Down / Enter / Escape → `form.ls`. **No typeahead** | 🟡 |
+| ↳ **open `<select>`** | — | UA handling of an open popup | ordinary `on keydown` in `form.ls` owns Up / Down / Enter / Escape after author cancellation; there is no native pre-dispatch interception or `dropdownkey` hook. **No typeahead** | 🟡 |
 | ↳ **document scrolling** | — | Space / PageUp / PageDown / Home / End / arrows scroll the nearest scrollport | after an uncancelled keydown and a declined `caretkey`, `scrollkey` reaches `scroll.ls`; native resolves/clamps the nearest live scrollport, emits `scroll`, updates the viewport mirror/observers, and repaints. Textarea PageUp/PageDown remain caret movement | ✅ (ESO48 / ES30) |
-| ↳ **Space/Enter activation** | — | activate the focused element | Enter follows the keydown click/activation path. Space arms an identity-pinned target only after uncancelled `keydown`, then dispatches its click on `keyup`; checkbox/radio and button policy remains in `form.ls`, while a declined Space reaches `scroll.ls`. `navigation.ls` claims an uncancelled link click and requests native execution | ✅ (ES30; §5.4) |
-| `keyup` | UI Events; cancelable | none meaningful | dispatched; no package involvement | ✅ |
+| ↳ **Space/Enter activation** | — | activate the focused element | `keyboard.ls` plus element handlers own the complete table: Enter activates buttons, submit/reset inputs, links, and selects on keydown; Space activates selects on keydown and arms checkbox/radio/button template state for keyup. Ctrl/Alt/Meta combinations decline. `dom.keyboard_click` supplies only click dispatch | ✅ (ES30; §5.4) |
+| `keyup` | UI Events; cancelable | Space completes activation for applicable controls | author dispatch precedes the package handler; `form.ls` consumes only a Space armed by its own uncancelled keydown and otherwise declines | ✅ |
 | `keypress` | legacy, deprecated | — | not dispatched, deliberately; `onkeypress` is not registered | — |
 
 ### 3.3 Pointer & activation
@@ -352,9 +360,9 @@ Verified against the tree at 2026-09-04 (`event.cpp`, `lambda/package/dom/*.ls`,
 
 | Concept | Spec, cancelable | Default action per spec | Radiant | Status |
 | --- | --- | --- | --- | --- |
-| **Form submission from user interaction** | HTML §4.10.21; `submit` cancelable | submit-button activation, or implicit submission (Enter in a text field), runs the submission algorithm | native pointer/keyboard routing reaches `form.ls` → `submit.ls`; only the package may perform the default. It checks validity, fires cancelable `submit`, builds the native entry list (including `form="..."` associations), serializes GET/urlencoded/multipart data, and calls `request_navigation`. The browsing waist currently accepts URL/target only, so POST body delivery remains open | 🟡 (F4; ESO71) |
+| **Form submission from user interaction** | HTML §4.10.21; `submit` cancelable | submit-button activation, or implicit submission (Enter in a text field), runs the submission algorithm | package click/keydown policy reaches `form.ls` → `submit.ls`; only the package may perform the default. It checks validity, fires cancelable `submit`, builds the native entry list (including `form="..."` associations), serializes GET/urlencoded/multipart data, and calls `request_navigation`. The browsing waist currently accepts URL/target only, so POST body delivery remains open | 🟡 (F4; ESO71) |
 | `form.submit()` / `requestSubmit()` | HTML | as above | implemented, including `novalidate` / `formnovalidate`, the cancelable `submit` event with `submitter`, and the disconnected-form rule | ✅ |
-| **Reset from user interaction** | HTML; `reset` cancelable | reset-button activation resets the form | native pointer/keyboard routing and script-created clicks reach the same package-only handler; `form.ls` calls the existing cancelable reset waist, including associated controls | ✅ |
+| **Reset from user interaction** | HTML; `reset` cancelable | reset-button activation resets the form | package click/keydown policy and script-created clicks reach the same package-only handler; `form.ls` calls the existing cancelable reset waist, including associated controls | ✅ |
 | `form.reset()` | HTML | as above | implemented incl. `form=`-associated controls outside the subtree (`dom.cpp:8088`) | ✅ |
 | **Interactive constraint validation** | HTML | block submission, fire `invalid`, show the validation bubble | `validate.ls` owns `:valid`/`:invalid` on `init`/`input`/`blur`; F4 calls the existing validity bridge before `submit`, fires `invalid`, and focuses the first invalid control. There is still no validation bubble | 🟡 |
 | `invalid` | HTML; cancelable | suppress the UA validation message | dispatched from the JS validity bridges only | 🟡 |
@@ -406,7 +414,6 @@ Radiant-internal seams. No JS listener can observe them; each exists because the
 | `init` | steady-state constraint validation + ARIA reflection at control creation (ESO31) | n/a — runs as a pipeline phase between layout and render (ES19), not in event dispatch |
 | `commit` | HTML's "when the value is committed" decision behind `change` | n/a — pre-event, no JS has run yet (ESO42) |
 | `optioncommit` | activation of a `<select>` option — the popup overlay is not DOM, so no event exists | follows the click that carried it |
-| `dropdownkey` | UA keyboard handling of an open popup | follows its keydown |
 | `caretkey` | keydown's caret-movement **default action** | **yes** — dispatched with context |
 | `scrollkey` | keydown's document-scroll **default action** after caret/activation decline | **yes** — dispatched with context |
 | `linkactivation` | HTML hyperlink activation and package navigation policy (ES31) | **yes** — runs only after an uncancelled `click` |
@@ -502,15 +509,20 @@ landed 2026-09-01 (ES30).**
 
 ### 5.4 Space activation on keyup — resolved
 
-After author `keydown` dispatch has declined, Space on a checkbox, radio, or
-button arms a `DOM_NODE_PIN_STATE` identity. Native keeps that identity valid
-across a handler-triggered reconciliation, dispatches `keyup`, and only then
-runs the ordinary click path; the package still owns the click policy.
-Cancellation on either key event suppresses the click, while an unarmed Space
-continues to `scroll.ls`. This honors S12.1.3's policy/mechanism seam and
-D4.5.1v3's lifetime rule without giving Lambda a raw pointer or scroll
-geometry. `test/ui/dom_pkg_space_keyup.json` proves state changes only on
-keyup. **Landed 2026-09-01 (ES30).**
+After author `keydown` has declined, `form.ls` stores
+`keyboard_activation_armed` on the checkbox, radio, or button template
+instance and prevents the keydown default. Its ordinary `on keyup` clears that
+Boolean and, only for Space on the same live template instance, calls
+`dom.keyboard_click`. Author cancellation, focus/reconciliation replacement,
+disabled state, or an unarmed keyup therefore produces no click. Native owns
+only KeyboardEvent construction/dispatch and the click-dispatch waist; the
+retired `pending_space_activation`, `keyboard_space_activation_target()`, and
+`run_keyboard_activation()` policy paths no longer exist. This is S12.1.3's
+handler doctrine with S9.1.4 state placement and no raw pointer exposed to
+Lambda. `test/ui/dom_pkg_space_keyup.json` pins keyup timing;
+`test/ui/dom_pkg_keyboard_activation.json` covers the full element/key table,
+modifiers, author cancellation, and ordinary open-select routing. **Completed
+2026-09-04 (ES30).**
 
 ### 5.5 `autofocus` tree-order processing — resolved
 
@@ -533,7 +545,7 @@ New rows start at ESO48; ESO1–ESO47 remain in DOM_State §7. Rows here are def
 
 | # | Issue | Direction |
 | --- | --- | --- |
-| ESO48 | ~~**No keyboard scrolling for HTML documents.**~~ **landed 2026-09-01 (ES30)** — `scroll.ls` selects line/page/boundary operations after author keydown, activation, and caret policy decline; an armed Space keyup click counts as claimed, while unarmed Space scrolls. Native applies the named operation to the focused element's nearest live scrollport or the viewport, preserves canonical state/notifications, and repaints. Root and nested-scrollport event simulations cover the two target cases | — |
+| ESO48 | ~~**No keyboard scrolling for HTML documents.**~~ **landed 2026-09-01 (ES30)** — `scroll.ls` selects line/page/boundary operations after author keydown, package activation, and caret policy decline; a Space keydown armed by `form.ls` counts as claimed, while an unarmed Space scrolls. Native applies the named operation to the focused element's nearest live scrollport or the viewport, preserves canonical state/notifications, and repaints. Root and nested-scrollport event simulations cover the two target cases | — |
 | ESO49 | ~~**Activation behavior has two implementations; popover activation still lives only in the JS one.**~~ **Resolved — F19 / ES25–ES26.** Direct DOM clicks and trusted clicks share one package-owned activation stage; popover policy moved to `form.ls` and the JS activation/reconciliation copy is deleted | verified by `test/ui/dom_synthetic_activation.json` (6/6), `dom_pkg_prevent_default.json` (4/4), and `dom_pkg_radio.json` (7/7) |
 | ESO50 | **Pointer Events are partial** — `pointerdown`/`up`/`move` dispatch, but no `pointerover`/`out`/`enter`/`leave`/`cancel` and no `setPointerCapture` | boundary events follow the existing mouse boundary logic; capture needs a target-override in the dispatch path |
 | ESO51 | ~~**Link activation is on `mousedown`, and has no keyboard path.**~~ **landed 2026-09-01 (ES31)** | `navigation.ls` claims `linkactivation` after an uncancelled click; Enter dispatches that same click. It resolves fragments and existing root/iframe targets through the ES30/ES31 snapshot surface, and native executes only the pinned request |
@@ -547,7 +559,7 @@ New rows start at ESO48; ESO1–ESO47 remain in DOM_State §7. Rows here are def
 | ESO71 | **Form POST transport is incomplete.** The package constructs form data and selects the request method, but the browsing waist currently accepts only URL/target | extend the native request/execution seam with method, headers, and body ownership; this is transport work, not a second activation policy |
 | ESO57 | **`<dialog>` is entirely absent**, and the popover implementation fires no `beforetoggle`/`toggle` and has no light dismiss | both need a top-layer concept in the view tree and an Esc/outside-click policy; the Esc path can follow the context-menu and dropdown precedent (`event.cpp:9561`) |
 | ESO58 | **Non-text `<input>` types have no interaction**: `range` (no thumb drag, no keys — `form.ls:130` says so), `number` (no spinner, no arrow-key step), and `file`/`color`/`date`-family, which `input_type_to_control()` degrades to `FORM_CONTROL_TEXT` (`view.hpp:2727`) | `range` and `number` are template-shaped and cheap; the picker types need host UI and are a separate decision |
-| ESO59 | **Composite-widget keyboard policy is missing**: `<select multiple>` / listbox has no click or key handling at all, `<select>` has no typeahead, and radio groups have no arrow-key navigation | all three belong in `form.ls` next to the existing `dropdownkey` handler; the listbox additionally needs its option rows to be hit-testable |
+| ESO59 | **Composite-widget keyboard policy is missing**: `<select multiple>` / listbox has no click or key handling at all, `<select>` has no typeahead, and radio groups have no arrow-key navigation | all three belong in `form.ls` next to the existing ordinary select `keydown` handler; the listbox additionally needs its option rows to be hit-testable |
 | ESO60 | ~~**`autofocus` only inspects the first `<input>`.**~~ **landed 2026-09-01 (ES30)** — `focusinit` runs package tree-order policy over the same focus snapshot | — |
 | ESO61 | **Small residue**: `accesskey` unimplemented; `beforeunload` unimplemented; `<img>` `load`/`error` not dispatched; `<area>` image-map activation absent; Ctrl+wheel zoom absent | individually cheap, none load-bearing; listed so they stop being rediscovered |
 
