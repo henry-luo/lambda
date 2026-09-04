@@ -188,7 +188,7 @@ DOM_OP(CORE, selection_modify, selection, 4, "fn(s: any, alter: string, dir: str
 // CORE — style and CSSOM
 // ---------------------------------------------------------------------------
 DOM_OP(CORE, computed_style,   style, 2, "fn(n: any, prop: string) -> string",              dom_core_computed_style,   0, "")
-DOM_OP(CORE, stylesheet_rules, style, 1, "fn(sheet: any) -> array",                         dom_cssom_stylesheet_get_css_rules, DOM_F_SNAPSHOT, "")
+DOM_OP(CORE, stylesheet_rules, style, 1, "fn(sheet: any) -> array",                         dom_cssom_stylesheet_get_css_rules, DOM_F_SNAPSHOT | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, stylesheet_insert_rule, style, 3, "fn(sheet: any, rule: string, index: int) -> int", dom_cssom_insert_rule, DOM_F_MUTATES, "")
 DOM_OP(CORE, stylesheet_delete_rule, style, 2, "fn(sheet: any, index: int) -> null",        dom_cssom_delete_rule,     DOM_F_MUTATES, "")
 
@@ -382,11 +382,11 @@ DOM_OP(CORE, adopt_node, node, 1, "fn(n: any) -> any", dom_adopt_node_bridge, DO
 DOM_OP(CORE, style_has_property, style, 2, "fn(n: any, prop: string) -> any", dom_style_css_has, 0, "")
 DOM_OP(CORE, style_get_property, style, 2, "fn(n: any, prop: string) -> any", dom_get_style_property, 0, "")
 DOM_OP(CORE, style_set_property, style, 3, "fn(n: any, prop: string, value: any) -> any", dom_set_style_property, DOM_F_MUTATES, "")
-DOM_OP(CORE, rule_style_has_property, style, 2, "fn(d: any, prop: string) -> any", dom_cssom_decl_css_has, 0, "")
-DOM_OP(CORE, rule_style_get_property, style, 2, "fn(d: any, prop: string) -> any", dom_cssom_rule_decl_get_property, 0, "")
-DOM_OP(CORE, rule_style_set_property, style, 3, "fn(d: any, prop: string, value: any) -> any", dom_cssom_rule_decl_set_property, DOM_F_MUTATES, "")
-DOM_OP(CORE, rule_style_remove_property, style, 2, "fn(d: any, prop: string) -> any", dom_cssom_rule_decl_remove_property, DOM_F_MUTATES, "")
-DOM_OP(CORE, set_selector_text, style, 2, "fn(rule: any, text: string) -> any", dom_cssom_rule_set_selector_text, DOM_F_MUTATES, "")
+DOM_OP(CORE, rule_style_has_property, style, 2, "fn(d: any, prop: string) -> any", dom_cssom_decl_css_has, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, rule_style_get_property, style, 2, "fn(d: any, prop: string) -> any", dom_cssom_rule_decl_get_property, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, rule_style_set_property, style, 3, "fn(d: any, prop: string, value: any) -> any", dom_cssom_rule_decl_set_property, DOM_F_MUTATES | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, rule_style_remove_property, style, 2, "fn(d: any, prop: string) -> any", dom_cssom_rule_decl_remove_property, DOM_F_MUTATES | DOM_F_NEUTRAL, "")
+DOM_OP(CORE, set_selector_text, style, 2, "fn(rule: any, text: string) -> any", dom_cssom_rule_set_selector_text, DOM_F_MUTATES | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, document_stylesheets, document, 0, "fn() -> any", dom_document_stylesheets_bridge, DOM_F_SNAPSHOT, "")
 DOM_OP(CORE, document_implementation, document, 0, "fn() -> any", dom_document_implementation_bridge, 0, "")
 DOM_OP(CORE, document_fonts, document, 0, "fn() -> any", dom_document_fonts_bridge, 0, "")
@@ -465,18 +465,6 @@ DOM_RAW(text_control_set_value_bridge, textctl, Item, (void* elem, Item value), 
 DOM_RAW(to_attribute_cstr, host, const char*, (Item value), dom_to_attribute_cstr, DOM_F_NATIVE)
 DOM_RAW(unwrap_element_impl, host, void*, (Item item), dom_unwrap_element_impl, DOM_F_NATIVE)
 
-DOM_RAW(rule_get_css_rules, style, Item, (Item rule), dom_cssom_rule_get_css_rules, DOM_F_NATIVE)
-DOM_RAW(rule_get_css_text, style, Item, (Item rule), dom_cssom_rule_get_css_text, DOM_F_NATIVE)
-DOM_RAW(rule_get_parent_rule, style, Item, (Item rule), dom_cssom_rule_get_parent_rule, DOM_F_NATIVE)
-DOM_RAW(rule_get_selector_text, style, Item, (Item rule), dom_cssom_rule_get_selector_text, DOM_F_NATIVE)
-DOM_RAW(rule_get_style, style, Item, (Item rule), dom_cssom_rule_get_style, DOM_F_NATIVE)
-DOM_RAW(rule_get_type, style, Item, (Item rule), dom_cssom_rule_get_type, DOM_F_NATIVE)
-DOM_RAW(stylesheet_get_css_rules, style, Item, (Item sheet), dom_cssom_stylesheet_get_css_rules, DOM_F_NATIVE)
-DOM_RAW(stylesheet_get_disabled, style, Item, (Item sheet), dom_cssom_stylesheet_get_disabled, DOM_F_NATIVE)
-DOM_RAW(stylesheet_get_href, style, Item, (Item sheet), dom_cssom_stylesheet_get_href, DOM_F_NATIVE)
-DOM_RAW(stylesheet_get_length, style, Item, (Item sheet), dom_cssom_stylesheet_get_length, DOM_F_NATIVE)
-DOM_RAW(stylesheet_get_title, style, Item, (Item sheet), dom_cssom_stylesheet_get_title, DOM_F_NATIVE)
-DOM_RAW(stylesheet_get_type, style, Item, (Item sheet), dom_cssom_stylesheet_get_type, DOM_F_NATIVE)
 
 
 // ---------------------------------------------------------------------------
@@ -529,6 +517,26 @@ DOM_OP(CORE, selection_remove_range, selection, 2, "fn(s: any, range: any) -> nu
 DOM_OP(CORE, selection_set_base_and_extent, selection, 5, "fn(s: any, an: any, ao: int, fn_: any, fo: int) -> null", js_selection_set_base_and_extent, DOM_F_MUTATES | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, selection_set_position, selection, 3, "fn(s: any, n: any, offset: int) -> null", js_selection_set_position, DOM_F_MUTATES | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, selection_to_string, selection, 1, "fn(s: any) -> string", js_selection_to_string, DOM_F_NEUTRAL, "")
+
+// ---------------------------------------------------------------------------
+// CORE — stylesheets and rules, published (ESO114)
+// Native records behind a host brand, projected on read; the one realm
+// dependency was the ambient document's pool, which now comes from the sheet.
+// stylesheets(doc) is the explicit-document door a Lambda script uses.
+// ---------------------------------------------------------------------------
+DOM_OP(CORE, stylesheets,        document, 1, "fn(doc: any) -> array",   dom_cssom_get_document_stylesheets_for, DOM_F_NEUTRAL | DOM_F_SNAPSHOT, "")
+DOM_OP(CORE, stylesheet_rule_at, style,    2, "fn(sheet: any, index: int) -> any", dom_cssom_stylesheet_rule_at, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, rule_get_css_rules, style, 1, "fn(rule: any) -> array", dom_cssom_rule_get_css_rules, DOM_F_NEUTRAL | DOM_F_SNAPSHOT, "")
+DOM_OP(CORE, rule_get_css_text, style, 1, "fn(rule: any) -> string", dom_cssom_rule_get_css_text, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, rule_get_parent_rule, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_parent_rule, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, rule_get_selector_text, style, 1, "fn(rule: any) -> string|null", dom_cssom_rule_get_selector_text, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, rule_get_style, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_style, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, rule_get_type, style, 1, "fn(rule: any) -> int", dom_cssom_rule_get_type, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, stylesheet_get_disabled, style, 1, "fn(sheet: any) -> bool", dom_cssom_stylesheet_get_disabled, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, stylesheet_get_href, style, 1, "fn(sheet: any) -> string|null", dom_cssom_stylesheet_get_href, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, stylesheet_get_length, style, 1, "fn(sheet: any) -> int", dom_cssom_stylesheet_get_length, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, stylesheet_get_title, style, 1, "fn(sheet: any) -> string|null", dom_cssom_stylesheet_get_title, DOM_F_NEUTRAL, "")
+DOM_OP(CORE, stylesheet_get_type, style, 1, "fn(sheet: any) -> string", dom_cssom_stylesheet_get_type, DOM_F_NEUTRAL, "")
 
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP

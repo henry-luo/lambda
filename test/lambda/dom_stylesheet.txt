@@ -1,0 +1,13 @@
+{
+  sheet_count: 1,
+  rule_count: 2,
+  rules_len: 2,
+  href: null,
+  type: "text/css",
+  disabled: false,
+  r0_selector: "p",
+  r0_type: 1,
+  r0_text: "p{color: green;}",
+  r1_selector: ".lead",
+  r1_has_weight: true
+}

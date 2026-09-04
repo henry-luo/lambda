@@ -222,6 +222,20 @@ Item dom_raise_type_error(const char* message);
 // so one body serves both doors (ES38) instead of a Lambda-only copy.
 Item dom_add_event_listener_bridge(Item n, Item type, Item fn, Item opts);
 Item dom_create_range_for(Item doc);
+// CSSOM rows published at ESO114.
+Item dom_cssom_rule_get_css_rules(Item);
+Item dom_cssom_rule_get_css_text(Item);
+Item dom_cssom_rule_get_parent_rule(Item);
+Item dom_cssom_rule_get_selector_text(Item);
+Item dom_cssom_rule_get_style(Item);
+Item dom_cssom_rule_get_type(Item);
+Item dom_cssom_stylesheet_get_disabled(Item);
+Item dom_cssom_stylesheet_get_href(Item);
+Item dom_cssom_stylesheet_get_length(Item);
+Item dom_cssom_stylesheet_get_title(Item);
+Item dom_cssom_stylesheet_get_type(Item);
+Item dom_cssom_get_document_stylesheets_for(Item);
+Item dom_cssom_stylesheet_rule_at(Item, Item);
 // Bodies of the published range/selection rows (ESO113); a DOM_OP body is
 // expanded by the publication trampolines and the arity check, so it must be
 // visible wherever dom_api.def is.

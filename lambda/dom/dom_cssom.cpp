@@ -36,7 +36,12 @@ extern "C" const void* radiant_dom_css_rule_host_type(void);
 extern "C" const void* radiant_dom_rule_style_decl_host_type(void);
 
 // Forward declaration
+extern "C" void* dom_document_from_item(Item item);
 static Pool* get_document_pool();
+// A sheet knows its own pool, or its owner element's document; the ambient
+// document (realm state, absent for a Lambda-only script) is the last resort
+// rather than the first (ESO114).
+static Pool* sheet_pool(CssStylesheet* sheet);
 extern "C" void dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
 
 static void js_cssom_notify_stylesheet_mutation(CssStylesheet* stylesheet = nullptr) {
@@ -242,6 +247,16 @@ static Pool* unwrap_rule_decl_pool(Item item) {
 // Helper: Get the Pool from current document
 // =============================================================================
 
+static Pool* sheet_pool(CssStylesheet* sheet) {
+    if (!sheet) return get_document_pool();
+    if (sheet->pool) return sheet->pool;
+    if (sheet->owner_style_element && sheet->owner_style_element->doc &&
+        sheet->owner_style_element->doc->document_pool) {
+        return sheet->owner_style_element->doc->document_pool;
+    }
+    return get_document_pool();
+}
+
 static Pool* get_document_pool() {
     DomDocument* doc = (DomDocument*)dom_get_document();
     return doc ? doc->document_pool : nullptr;
@@ -330,7 +345,7 @@ static const char* serialize_style_rule_css_text(CssRule* rule, Pool* pool) {
 extern "C" Item dom_cssom_stylesheet_get_css_rules(Item sheet_item) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return ItemNull;
-    Pool* pool = get_document_pool();
+    Pool* pool = sheet_pool(sheet);
     // array of wrapped CSSRule objects (excluding @charset per CSSOM spec)
     Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
     arr->type_id = LMD_TYPE_ARRAY;
@@ -389,7 +404,7 @@ extern "C" Item dom_cssom_stylesheet_index(Item sheet_item, int64_t index) {
     // raw index into the rules array (charset rules included), matching the
     // legacy bracket-access path
     if (index < 0 || (size_t)index >= sheet->rule_count) return ItemNull;
-    return dom_cssom_wrap_rule(sheet->rules[index], get_document_pool());
+    return dom_cssom_wrap_rule(sheet->rules[index], sheet_pool(sheet));
 }
 
 // =============================================================================
@@ -881,28 +896,35 @@ extern "C" Item dom_cssom_decl_css_has(Item decl_item, Item prop_name) {
 // document.styleSheets
 // =============================================================================
 
-extern "C" Item dom_cssom_get_document_stylesheets(void) {
-    DomDocument* doc = (DomDocument*)dom_get_document();
-    if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) {
-        // return empty array
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        return (Item){.array = arr};
-    }
-
+static Item stylesheets_array_for(DomDocument* doc) {
     Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
     arr->type_id = LMD_TYPE_ARRAY;
     arr->items = nullptr;
     arr->length = 0;
     arr->capacity = 0;
-    for (int i = 0; i < doc->stylesheet_count; i++) {
-        array_push(arr, dom_cssom_wrap_stylesheet(doc->stylesheets[i]));
+    if (doc && doc->stylesheets) {
+        for (int i = 0; i < doc->stylesheet_count; i++) {
+            array_push(arr, dom_cssom_wrap_stylesheet(doc->stylesheets[i]));
+        }
     }
-
     return (Item){.array = arr};
+}
+
+// JS's door: the ambient document, which is realm state.
+extern "C" Item dom_cssom_get_document_stylesheets(void) {
+    return stylesheets_array_for((DomDocument*)dom_get_document());
+}
+
+// Lambda's door: the script names its document (ESO113 pattern, ESO114).
+extern "C" Item dom_cssom_get_document_stylesheets_for(Item doc_item) {
+    return stylesheets_array_for((DomDocument*)dom_document_from_item(doc_item));
+}
+
+// Item-uniform twin of stylesheet_index for the Lambda face; the native
+// (Item, int64_t) door stays for the module.
+extern "C" Item dom_cssom_stylesheet_rule_at(Item sheet_item, Item index_item) {
+    if (get_type_id(index_item) != LMD_TYPE_INT) return ItemNull;
+    return dom_cssom_stylesheet_index(sheet_item, it2i(index_item));
 }
 
 // =============================================================================
