@@ -98,6 +98,9 @@ typedef bool (*LambdaAstVisitor)(AstNode* node, void* data);
 static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
                             bool descend_functions);
 
+static TypeMethod* direct_lookup_object_method(Transpiler* tp,
+        AstNode* receiver, StrView name, bool* out_has_user_member);
+
 // System function definitions — single source of truth in sys_func_registry.cpp
 // See lambda/sys_func_registry.cpp for the complete table.
 extern SysFuncInfo sys_func_defs[];
@@ -6863,8 +6866,26 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
     arraylist_free(functions);
 }
 
+static bool reject_proc_method_value(AstNode* node, void* data) {
+    if (!node || node->node_type != AST_NODE_MEMBER_EXPR) return true;
+    AstFieldNode* member = (AstFieldNode*)node;
+    if (!member->is_proc_method_reference) return true;
+    Transpiler* tp = (Transpiler*)data;
+    AstIdentNode* field = (AstIdentNode*)ast_unwrap_primary(member->field);
+    record_semantic_error_span(tp, member->source_span, ERR_PROC_IN_FN,
+        "procedure method '%.*s' cannot be used as a value; call it directly",
+        field && field->name ? (int)field->name->len : 0,
+        field && field->name ? field->name->chars : "");
+    member->type = &TYPE_ERROR;
+    return false;
+}
+
 bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script) {
     if (!tp || !script || tp->error_count != 0) return false;
+    // A pn member is bound by the runtime member lane so calls can lower it,
+    // but S12.3.3v2/D2.6.7 forbid retaining that bound closure as a value.
+    walk_lambda_ast((AstNode*)script, reject_proc_method_value, tp, true);
+    if (tp->error_count != 0) return false;
     for (AstNode* item = script->child; item; item = item->next) {
         validate_top_level_enforcing_calls(tp, item);
         validate_top_level_cross_frame_binding_reads(tp, item);
@@ -8125,6 +8146,17 @@ AstNode* build_field_node_from_parts(Transpiler* tp, SourceSpan span,
     node->object = object;
     node->field = field;
     node->computed = node_type == AST_NODE_INDEX_EXPR;
+    node->is_proc_method_reference = false;
+    if (node_type == AST_NODE_MEMBER_EXPR) {
+        AstNode* receiver = ast_unwrap_primary(object);
+        AstNode* method_name = ast_unwrap_primary(field);
+        if (receiver && method_name && method_name->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident = (AstIdentNode*)method_name;
+            StrView name = strview_init(ident->name->chars, ident->name->len);
+            TypeMethod* method = direct_lookup_object_method(tp, receiver, name, NULL);
+            node->is_proc_method_reference = method && method->is_proc;
+        }
+    }
     if (node_type == AST_NODE_INDEX_EXPR) {
         Type* declared = declared_compound_destination_type(tp,
             (AstNode*)node, NULL);
@@ -8379,6 +8411,9 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
                 user_method_is_proc = user_method->is_proc;
                 user_method_receiver = receiver;
                 user_method_name = field_name;
+                // This member is consumed as a call callee. Keep the mark on
+                // every other pn member so final validation can reject values.
+                if (user_method_is_proc) member->is_proc_method_reference = false;
             } else if (!receiver_has_member) {
                 info = get_sys_func_for_method(&field_name, arg_count, object_type);
                 if (info) {

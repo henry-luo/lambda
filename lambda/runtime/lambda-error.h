@@ -192,6 +192,8 @@ typedef struct RawStackTrace {
     int max_frames;
 } RawStackTrace;
 
+enum { LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES = 64 };
+
 // ============================================================================
 // Lambda Error Structure
 // ============================================================================

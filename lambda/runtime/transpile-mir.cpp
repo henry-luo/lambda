@@ -64,8 +64,12 @@ extern __thread Context* input_context;
 // well-defined in practice. Suppress -Winvalid-offsetof for this file's offsetof uses.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
-static_assert(offsetof(EvalContext, heap) == sizeof(Context),
+static constexpr int MIR_EVAL_CONTEXT_HEAP_OFFSET = (int)offsetof(EvalContext, heap);
+static constexpr int MIR_HEAP_GC_OFFSET = (int)offsetof(Heap, gc);
+static_assert(MIR_EVAL_CONTEXT_HEAP_OFFSET == (int)sizeof(Context),
     "EvalContext.heap offset changed — update MIR inline bump allocation code");
+static_assert(MIR_HEAP_GC_OFFSET == (int)sizeof(void*),
+    "Heap.gc offset changed — update MIR inline bump allocation code");
 #pragma clang diagnostic pop
 
 #pragma clang diagnostic push
@@ -25139,11 +25143,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, heap_reg_fn),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(EvalContext, heap), runtime_fn, 0, 1)));  // context->heap
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_EVAL_CONTEXT_HEAP_OFFSET, runtime_fn, 0, 1)));  // context->heap
 #pragma clang diagnostic pop
     mt->gc_reg = new_reg(mt, "gc_ptr", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->gc_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, heap_reg_fn, 0, 1)));  // heap->gc
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_HEAP_GC_OFFSET, heap_reg_fn, 0, 1)));  // heap->gc
 
     mt->em.frame.runtime = runtime_fn;
     mt->em.frame.return_type = ret_type;
@@ -27125,10 +27129,10 @@ static void emit_view_function_runtime_state(MirTranspiler* mt, MIR_reg_t runtim
 
     MIR_reg_t heap_reg = new_reg(mt, "heap_ptr", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, heap_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 64, runtime_reg, 0, 1)));
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_EVAL_CONTEXT_HEAP_OFFSET, runtime_reg, 0, 1)));
     mt->gc_reg = new_reg(mt, "gc_ptr", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->gc_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, heap_reg, 0, 1)));
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_HEAP_GC_OFFSET, heap_reg, 0, 1)));
 
     mt->em.frame.runtime = runtime_reg;
     mt->em.frame.return_type = ret_type;
@@ -27675,17 +27679,17 @@ static void transpile_mir_ast_lower(MirModuleBuild* build) {
         MIR_new_mem_op(ctx, MIR_T_I64, 0, mod_tl_bss_addr, 0, 1)));
 
     // Load gc_heap_t* for inline bump allocation: context->heap->gc
-    // EvalContext.heap is at offsetof(EvalContext, heap), Heap.gc is at offset 8
+    // Keep both hops tied to their declarations; JIT code must not inherit struct offsets.
     MIR_reg_t heap_reg = new_reg(&mt, "heap_ptr", MIR_T_I64);
     mt.heap_ptr_reg = heap_reg;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
     emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, heap_reg),
-        MIR_new_mem_op(ctx, MIR_T_I64, offsetof(EvalContext, heap), runtime_reg, 0, 1)));  // context->heap
+        MIR_new_mem_op(ctx, MIR_T_I64, MIR_EVAL_CONTEXT_HEAP_OFFSET, runtime_reg, 0, 1)));  // context->heap
 #pragma clang diagnostic pop
     mt.gc_reg = new_reg(&mt, "gc_ptr", MIR_T_I64);
     emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, mt.gc_reg),
-        MIR_new_mem_op(ctx, MIR_T_I64, 8, heap_reg, 0, 1)));  // heap->gc
+        MIR_new_mem_op(ctx, MIR_T_I64, MIR_HEAP_GC_OFFSET, heap_reg, 0, 1)));  // heap->gc
 
     mt.em.frame.runtime = runtime_reg;
     mt.em.frame.return_type = main_ret;

@@ -1,0 +1,1 @@
+procedure method 'increment' cannot be used as a value; call it directly

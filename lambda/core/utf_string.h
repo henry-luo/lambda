@@ -19,13 +19,6 @@ typedef enum {
 void init_utf8proc_support(void);
 void cleanup_utf8proc_support(void);
 
-// string comparison functions using utf8proc normalization
-Bool equal_comp_unicode(Item a_item, Item b_item);
-Bool less_comp_unicode(Item a_item, Item b_item);
-Bool greater_comp_unicode(Item a_item, Item b_item);
-Bool less_equal_comp_unicode(Item a_item, Item b_item);
-Bool greater_equal_comp_unicode(Item a_item, Item b_item);
-
 UnicodeCompareResult string_compare_unicode(const char* str1, int len1, 
                                            const char* str2, int len2);
 bool string_equal_unicode(const char* str1, int len1, const char* str2, int len2);

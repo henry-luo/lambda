@@ -532,6 +532,8 @@ typedef struct AstFieldNode : AstNode {
     };
     bool computed;
     bool optional;
+    // S12.3.3v2: a resolved pn method may only appear as a direct call callee.
+    bool is_proc_method_reference;
 } AstFieldNode;
 
 typedef struct AstCallNode : AstNode {

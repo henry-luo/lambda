@@ -1297,22 +1297,3 @@ void check_memory_leak() {
     log_debug("gc objects at shutdown: %zu (all freed by pool_destroy)", gc->object_count);
 #endif
 }
-
-// free_item / free_container / free_map_item are no longer called.
-// All memory is freed at context end via gc_finalize_all_objects + pool_destroy.
-// These stubs remain for API compatibility with any external callers.
-void free_item(Item item, bool clear_entry) {
-    (void)item; (void)clear_entry;
-}
-
-void free_container(Container* cont, bool clear_entry) {
-    (void)cont; (void)clear_entry;
-}
-
-void frame_start() {
-    // no-op: frame management removed (GC Phase 4)
-}
-
-void frame_end() {
-    // no-op: frame management removed (GC Phase 4)
-}
