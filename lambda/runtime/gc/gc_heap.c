@@ -2062,7 +2062,7 @@ static void gc_compact_data(gc_heap_t* gc) {
                 void** shape_slot = (void**)(p + LAMBDA_GC_OFF_LIST_EXTRA);
                 if (*shape_slot && gc_data_zone_owns(gc->data_zone, *shape_slot)) {
                     ArrayNumShape* old_shape = (ArrayNumShape*)*shape_slot;
-                    if (old_shape->ndim >= 1 && old_shape->ndim <= 32) {
+                    if (old_shape->ndim >= 1 && old_shape->ndim <= LAMBDA_ARRAY_NUM_MAX_NDIM) {
                         size_t shape_size = sizeof(ArrayNumShape) +
                             2 * (size_t)old_shape->ndim * sizeof(int64_t);
                         void* new_shape = gc_data_zone_copy(

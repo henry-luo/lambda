@@ -1185,8 +1185,10 @@ typedef enum ArrayNumBackingKind {
     ARRAY_NUM_BACKING_BYTE_STORAGE = 4,
 } ArrayNumBackingKind;
 
+#define LAMBDA_ARRAY_NUM_MAX_NDIM 32
+
 typedef struct ArrayNumShape {
-    uint8_t  ndim;            // number of dimensions (1..32)
+    uint8_t  ndim;            // number of dimensions (1..LAMBDA_ARRAY_NUM_MAX_NDIM)
     uint8_t  is_c_contig:1;   // contiguous in row-major
     uint8_t  is_f_contig:1;   // contiguous in column-major
     uint8_t  reserved:6;

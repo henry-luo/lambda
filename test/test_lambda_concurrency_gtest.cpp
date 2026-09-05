@@ -35,6 +35,28 @@ extern const int32_t radiant_dom_type_binding_count;
 extern __thread Context* input_context;
 #endif
 
+TEST(LambdaArrayNumShape, RejectsOutOfRangeRankBeforeStackDecode) {
+    ArrayNum array = {};
+    array.type_id = LMD_TYPE_ARRAY_NUM;
+    array.set_elem_type(ELEM_INT64);
+    array.is_ndim = 1;
+    array.length = 1;
+    array.capacity = 1;
+    int64_t data[1] = {0};
+    array.data = data;
+
+    // Deliberately allocate a 1-D descriptor then corrupt its rank. The decoder
+    // must reject it before it reads or writes past this descriptor or a 32-slot stack buffer.
+    uint8_t shape_storage[sizeof(ArrayNumShape) + 2 * sizeof(int64_t)] = {};
+    ArrayNumShape* shape = (ArrayNumShape*)shape_storage;
+    shape->ndim = LAMBDA_ARRAY_NUM_MAX_NDIM + 1;
+    array.extra = (int64_t)(uintptr_t)shape;
+    Item item = {.array_num = &array};
+
+    EXPECT_EQ(get_type_id(fn_shape(item)), LMD_TYPE_ERROR);
+    EXPECT_EQ(get_type_id(fn_matmul(item, item)), LMD_TYPE_ERROR);
+}
+
 struct CallableRealmSnapshot {
     Item math_abs = ItemNull;
     Item array_constructor = ItemNull;

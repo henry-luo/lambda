@@ -1955,13 +1955,13 @@ static Bool list_eq(List* a, List* b, int depth) {
 
 static bool array_num_shape_eq(ArrayNum* a, ArrayNum* b) {
     int a_ndim = 1, b_ndim = 1;
-    int64_t a_dims_stack[32], b_dims_stack[32];
+    int64_t a_dims_stack[LAMBDA_ARRAY_NUM_MAX_NDIM], b_dims_stack[LAMBDA_ARRAY_NUM_MAX_NDIM];
     a_dims_stack[0] = a ? a->length : 0;
     b_dims_stack[0] = b ? b->length : 0;
 
     if (a && a->is_ndim && a->extra) {
         ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)a->extra;
-        if (s && s->ndim >= 1 && s->ndim <= 32) {
+        if (s && s->ndim >= 1 && s->ndim <= LAMBDA_ARRAY_NUM_MAX_NDIM) {
             a_ndim = s->ndim;
             int64_t* dims = array_num_shape_dims(s);
             for (int i = 0; i < a_ndim; i++) a_dims_stack[i] = dims[i];
@@ -1969,7 +1969,7 @@ static bool array_num_shape_eq(ArrayNum* a, ArrayNum* b) {
     }
     if (b && b->is_ndim && b->extra) {
         ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)b->extra;
-        if (s && s->ndim >= 1 && s->ndim <= 32) {
+        if (s && s->ndim >= 1 && s->ndim <= LAMBDA_ARRAY_NUM_MAX_NDIM) {
             b_ndim = s->ndim;
             int64_t* dims = array_num_shape_dims(s);
             for (int i = 0; i < b_ndim; i++) b_dims_stack[i] = dims[i];

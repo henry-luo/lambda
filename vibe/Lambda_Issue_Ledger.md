@@ -507,15 +507,15 @@ are the finest precision. Out-of-range construction yields
 
 ## 5. Strings, symbols & vectors (LR_05)
 
-<a id="lr05-1"></a>**LR05-1 · `ndim` cap of 32 is unchecked in the helpers · PARTIAL**
-*Fixed at construction:* `lambda/runtime/lambda-data-runtime.cpp:465` now
-rejects `ndim < 1 || ndim > 32`, and `gc_heap.c:1925` / `lambda-eval.cpp:1825`,
-`:1833` re-check before use.
-*Residue:* the broadcast/stride helpers in
-`lambda/runtime/lambda-vector.cpp` still declare fixed `int64_t shp[32],
-str[32]` stack buffers with **no bound re-check** (`:696`, `:794`, `:3123`,
-`:3271`, `:3357`, `:3391`, `:3463`, `:3581`, `:3663`, `:3680`). Any path that
-reaches them with an unvalidated shape overruns the stack.
+<a id="lr05-1"></a>**LR05-1 · `ndim` cap of 32 is unchecked in the helpers · RESOLVED (D1.9)**
+`LAMBDA_ARRAY_NUM_MAX_NDIM` is the single rank cap. Construction, GC promotion,
+and equality use it; `lambda/runtime/lambda-vector.cpp` now validates descriptor
+rank at the shared shape/stride decode boundary before writing a caller's
+fixed-rank buffer. Every vector, structural, reduction, mask, and image caller
+converts a rejected descriptor to `ItemError`; direct native reduction returns
+`NaN` after logging because its ABI is `double`. The regression injects an
+out-of-range descriptor and verifies shape and matrix operations fail without
+decoding it. This implements D1.9's malformed-input fail-closed rule.
 
 <a id="lr05-2"></a>**LR05-2 · Not full UCA collation · RESOLVED (not a defect; ruled by S6.2.2)**
 The former expectation was wrong: Lambda's normative total order is bytewise

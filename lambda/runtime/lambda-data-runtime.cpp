@@ -464,11 +464,11 @@ void* array_num_resolve_data(ArrayNum* array, bool write) {
 // Used by both the C transpiler and the MIR transpiler to materialize nested
 // numeric literals like [[1,2],[3,4]] as a single tensor.
 ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim, int64_t* dims) {
-    if (ndim < 1 || ndim > 32) return NULL;
+    if (ndim < 1 || ndim > LAMBDA_ARRAY_NUM_MAX_NDIM) return NULL;
     // MIR currently passes literal dimensions through nursery scratch memory.
     // Snapshot it before the first allocation because that safepoint may reset
     // the nursery even though the raw scratch pointer is not a GC object.
-    int64_t dims_stack[32];
+    int64_t dims_stack[LAMBDA_ARRAY_NUM_MAX_NDIM];
     for (int i = 0; i < ndim; i++) dims_stack[i] = dims[i];
     ArrayNum* arr = array_num_new(elem_type, total);
     if (!arr) return NULL;
@@ -1408,14 +1408,15 @@ static ArrayNum* try_promote_to_ndim(Array* arr) {
     // For now we only fold 1-D rows.  If the first row is N-D ArrayNum we require
     // all rows to share the same multi-dim shape; this catches the common
     // [tensor1, tensor2] → (N+1)-D case but stays conservative.
-    int64_t shape_stack[32];
+    int64_t shape_stack[LAMBDA_ARRAY_NUM_MAX_NDIM];
     int out_ndim;
     shape_stack[0] = arr->length;
 
     if (first_is_arr_num && arr->items[0].array_num->is_ndim && arr->items[0].array_num->extra) {
         ArrayNum* fa = arr->items[0].array_num;
         ArrayNumShape* fs = (ArrayNumShape*)(uintptr_t)fa->extra;
-        if (!fs || fs->ndim < 1 || fs->ndim > 30) return NULL;
+        // Keep one rank available for a subsequent parent promotion.
+        if (!fs || fs->ndim < 1 || fs->ndim > LAMBDA_ARRAY_NUM_MAX_NDIM - 2) return NULL;
         int64_t* fd = array_num_shape_dims(fs);
         for (int i = 0; i < fs->ndim; i++) shape_stack[1 + i] = fd[i];
         out_ndim = 1 + fs->ndim;
