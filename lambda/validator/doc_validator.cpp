@@ -138,6 +138,8 @@ SchemaValidator* SchemaValidator::create(Pool* pool) {
     validator->options.allow_unknown_fields = true;
     validator->options.allow_empty_elements = true;
     validator->options.max_depth = 1024;
+    validator->options.show_suggestions = true;
+    validator->options.show_context = true;
 
     return validator;
 }
@@ -530,7 +532,17 @@ ValidationResult* SchemaValidator::validate_type(ConstItem item, Type* type) {
         this->validation_start_time = clock();
     }
 
-    return validate_against_type(this, item, type);
+    ValidationResult* result = validate_against_type(this, item, type);
+    if (!result || this->fast_mode) return result;
+
+    for (ValidationError* error = result->errors; error; error = error->next) {
+        if (this->options.show_suggestions && !error->suggestions) {
+            error->suggestions = suggest_corrections(error, this->pool);
+        }
+        // Preserve an explicit disabled choice when the error is formatted later.
+        error->suggestions_processed = true;
+    }
+    return result;
 }
 
 // ==================== Validation Options Functions ====================

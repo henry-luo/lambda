@@ -520,6 +520,19 @@ Path* path_new(Pool* pool, int scheme) {
     return root;
 }
 
+Path* path_clone(Pool* pool, Path* source) {
+    if (!pool || !source || source->root_scheme >= PATH_SCHEME_COUNT) return NULL;
+
+    Path* root = source->authority_kind == PATH_AUTHORITY_NAMED && source->authority_name
+        ? path_new_authority(pool, source->root_scheme, source->authority_name)
+        : path_new(pool, source->root_scheme);
+    if (!root) return NULL;
+
+    // Replaying the spine gives the destination its own names and deliberately
+    // omits resolved content and metadata cached by the source path.
+    return path_concat(pool, root, source);
+}
+
 /**
  * Extend an existing path with a new normal segment.
  * Returns a new path with the segment appended.

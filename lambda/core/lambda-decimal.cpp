@@ -692,8 +692,14 @@ mpd_t* decimal_item_to_mpd(Item item, mpd_context_t* ctx) {
 }
 
 int64_t decimal_mpd_to_int64(mpd_t* dec, mpd_context_t* ctx) {
-    if (!dec) return 0;
-    return mpd_get_ssize(dec, ctx);
+    (void)ctx;
+    if (!dec) return INT64_ERROR;
+
+    // mpd_get_ssize raises SIGFPE when a value exceeds the host-sized range.
+    // This boundary must report the legacy native error sentinel instead.
+    uint32_t status = 0;
+    mpd_ssize_t result = mpd_qget_ssize(dec, &status);
+    return (status & MPD_Invalid_operation) ? INT64_ERROR : (int64_t)result;
 }
 
 double decimal_mpd_to_double(mpd_t* dec, mpd_context_t* ctx) {
@@ -1042,36 +1048,41 @@ Item decimal_abs(Item a) {
 // Comparison
 // ─────────────────────────────────────────────────────────────────────
 
-int decimal_cmp(Item a, Item b, mpd_context_t* ctx) {
+static bool decimal_cmp(Item a, Item b, mpd_context_t* ctx, int* result) {
+    if (!result) return false;
     bool a_is_dec = decimal_is_any(a);
     bool b_is_dec = decimal_is_any(b);
-    
-    mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, ctx);
-    mpd_t* b_dec = b_is_dec ? b.get_decimal()->dec_val : decimal_item_to_mpd(b, ctx);
+
+    Decimal* a_decimal = a_is_dec ? a.get_decimal() : NULL;
+    Decimal* b_decimal = b_is_dec ? b.get_decimal() : NULL;
+    mpd_t* a_dec = a_is_dec ? (a_decimal ? a_decimal->dec_val : NULL) :
+        decimal_item_to_mpd(a, ctx);
+    mpd_t* b_dec = b_is_dec ? (b_decimal ? b_decimal->dec_val : NULL) :
+        decimal_item_to_mpd(b, ctx);
     
     if (!a_dec || !b_dec) {
         if (!a_is_dec && a_dec) mpd_del(a_dec);
         if (!b_is_dec && b_dec) mpd_del(b_dec);
-        return 0;  // error case, treat as equal
+        return false;
     }
-    
-    int result = mpd_cmp(a_dec, b_dec, ctx);
+
+    *result = mpd_cmp(a_dec, b_dec, ctx);
     
     if (!a_is_dec) mpd_del(a_dec);
     if (!b_is_dec) mpd_del(b_dec);
     
-    return result;
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // Item-level Comparison (no mpd_context_t* in signature)
 // ─────────────────────────────────────────────────────────────────────
 
-int decimal_cmp_items(Item a, Item b) {
+bool decimal_cmp_items(Item a, Item b, int* result) {
     mpd_context_t* ctx = decimal_is_unlimited(a) || decimal_is_unlimited(b) 
         ? decimal_unlimited_context() 
         : decimal_fixed_context();
-    return decimal_cmp(a, b, ctx);
+    return decimal_cmp(a, b, ctx, result);
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1211,7 +1222,7 @@ int64_t decimal_to_int64(Item item) {
     if (!truncated) return 0;
     mpd_trunc(truncated, dec_ptr->dec_val, dec_ctx);
     
-    int64_t result = mpd_get_ssize(truncated, dec_ctx);
+    int64_t result = decimal_mpd_to_int64(truncated, dec_ctx);
     mpd_del(truncated);
     return result;
 }

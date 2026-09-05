@@ -738,8 +738,8 @@ typedef struct AstMapNode : AstNode {
         AstNode *item;
         AstNode *properties;
     };
-    // Computed keys force run-time shape construction; static literals retain
-    // their precomputed ShapeEntry chain.
+    // Computed keys and spreads force run-time shape construction; static
+    // literals retain their precomputed ShapeEntry chain.
     bool has_computed_key;
 } AstMapNode;
 

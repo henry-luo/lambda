@@ -4965,9 +4965,11 @@ static bool ast_node_is_computed_key(AstNode* item) {
         ((AstNamedNode*)item)->key;
 }
 
-static bool ast_map_items_have_computed_key(AstNode* items) {
+static bool ast_map_items_require_runtime_shape(Transpiler* tp, AstNode* items) {
     for (AstNode* item = items; item; item = item->next) {
-        if (ast_node_is_computed_key(item)) return true;
+        if (ast_node_is_computed_key(item) || ast_node_is_syntactic_spread_key(tp, item)) {
+            return true;
+        }
     }
     return false;
 }
@@ -4979,15 +4981,22 @@ AstNode* build_map_from_items(Transpiler* tp, SourceSpan span,
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
     TypeMap* type = (TypeMap*)ast_node->type;
 
-    if (ast_map_items_have_computed_key(items)) {
+    if (ast_map_items_require_runtime_shape(tp, items)) {
         // S16.8.9: source order, including spreads, reaches the runtime
-        // builder intact because it owns computed-name replacement.
+        // builder intact because it owns computed-name replacement. A spread
+        // can be a VMap, whose fields have no static raw-Map storage shape.
         ast_node->has_computed_key = true;
         type->has_spread = true;
         AstNode* previous = NULL;
         for (AstNode* item = items; item;) {
             AstNode* next = item->next;
             item->next = NULL;
+            if (ast_node_is_syntactic_spread_key(tp, item)) {
+                // The runtime builder retains KeyExpr nodes, so carry the
+                // syntactic spread marker that static shape construction
+                // otherwise consumes while creating a nameless slot.
+                ((AstNamedNode*)item)->is_spread = true;
+            }
             if (previous) previous->next = item;
             else ast_node->item = item;
             previous = item;
@@ -8664,7 +8673,7 @@ AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
     String* name = name_pool_create_strview(tp->name_pool, tag);
     type->name = (StrView){name->chars, name->len};
     node->type = (Type*)type;
-    bool has_computed_key = ast_map_items_have_computed_key(children);
+    bool has_computed_key = ast_map_items_require_runtime_shape(tp, children);
 
     AstNode* prev = NULL;
     ShapeEntry* prev_shape = NULL;
@@ -8715,6 +8724,7 @@ AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
             if (has_computed_key) {
                 // Preserve the normalized syntax node: the runtime builder
                 // needs static names and spreads beside the computed entries.
+                if (spread) ((AstNamedNode*)candidate)->is_spread = true;
                 candidate->next = NULL;
                 if (!node->item) node->item = candidate;
                 else prev->next = candidate;

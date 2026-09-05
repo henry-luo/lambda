@@ -1399,6 +1399,7 @@ typedef struct PathMeta PathMeta;
 // Path construction API (called by JIT-generated code)
 Path* path_new(Pool* pool, int scheme);                           // Create new path with scheme
 Path* path_new_authority(Pool* pool, int scheme, const char* authority);
+Path* path_clone(Pool* pool, Path* source);                       // Clone immutable path spine into pool
 Path* path_extend(Pool* pool, Path* base, const char* segment);   // Extend path with segment
 Path* path_extend_int(Pool* pool, Path* base, int64_t value);
 Path* path_select_parent(Pool* pool, Path* base);

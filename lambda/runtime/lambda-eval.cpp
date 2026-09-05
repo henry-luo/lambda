@@ -82,7 +82,6 @@ extern "C" void lambda_recovery_publish_fault(
         prior_error_code);
 }
 
-Item vmap_get_by_item(VMap* vm, Item key);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
 
 // create_match_map helper for find() (implemented in re2_wrapper.cpp)
@@ -9657,9 +9656,10 @@ Item map_literal_put(Item owner, Item key, Item value) {
 
 Item map_literal_spread(Item owner, Item source) {
     TypeId source_type = get_type_id(source);
-    if (source_type != LMD_TYPE_MAP && source_type != LMD_TYPE_ELEMENT) {
+    if (source_type != LMD_TYPE_MAP && source_type != LMD_TYPE_VMAP &&
+            source_type != LMD_TYPE_ELEMENT) {
         set_runtime_error(ERR_TYPE_MISMATCH,
-            "map literal spread requires a map or element");
+            "map literal spread requires a map-like value or element");
         return ItemError;
     }
 
@@ -9673,7 +9673,14 @@ Item map_literal_spread(Item owner, Item source) {
     for (int64_t index = 0; index < key_count; index++) {
         Symbol* symbol = symbol_key_list_at(keys, index);
         rooted_key.set((Item){.item = y2it(symbol)});
-        rooted_value.set(fn_index(rooted_source.get(), rooted_key.get()));
+        if (source_type == LMD_TYPE_VMAP) {
+            // item_keys reifies VMap text keys as Symbols, while HashMap VMaps
+            // retain String keys. Re-enter through the VMap name seam so a
+            // spread does not turn every reified field into null.
+            rooted_value.set(vmap_get_by_str(rooted_source.get().vmap, symbol->chars));
+        } else {
+            rooted_value.set(fn_index(rooted_source.get(), rooted_key.get()));
+        }
         // A spread contributes each selected field to the fresh literal.
         cow_capture_value(rooted_value.get());
         if (get_type_id(rooted_value.get()) == LMD_TYPE_ERROR ||

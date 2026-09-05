@@ -473,17 +473,21 @@ the decimal baseline passes.
 100000 bits (`:1773`, `:1803`); string ingest rejects above 100000 (`:1310`).
 Implementation guardrails, not mathematical limits in the surface model.
 
-<a id="lr04-3"></a>**LR04-3 · Trapping `mpd_get_ssize` can SIGFPE · OPEN**
-`decimal_to_int64` (`lambda-decimal.cpp:1163`) and `decimal_mpd_to_int64`
-(`:661`) use the **trapping** `mpd_get_ssize`, which can SIGFPE on overflow.
-BigInt shift/pow paths use quiet extraction before narrowing; the decimal
-conversion helpers remain an unhandled-crash risk on out-of-range magnitudes.
+<a id="lr04-3"></a>**LR04-3 · Trapping `mpd_get_ssize` can SIGFPE · RESOLVED 2026-09-05**
+Decimal narrowing now uses `mpd_qget_ssize` and maps an invalid conversion to
+the existing `INT64_ERROR` sentinel. Thus an out-of-range decimal cannot enter
+libmpdec's trapping path; the native boundary remains total as required by
+**S4.1.2**. Regression:
+`LambdaDecimal.QuietInt64ExtractionRejectsOverflowAndInvalidComparison` covers
+`9223372036854775808` without a signal.
 
-<a id="lr04-4"></a>**LR04-4 · `decimal_cmp` swallows conversion failure as equality · OPEN**
-On a failed operand conversion, `decimal_cmp` returns `0` with the comment
-`// error case, treat as equal` (`lambda-decimal.cpp:1004`), so a malformed
-comparand compares **equal** rather than raising — a silent-wrong-answer path
-feeding `decimal_cmp_items` (`:1023`). Also tracked under **[OI-1](#15-design-gaps-inherited-from-the-retired-outstanding-rollup-oi)**.
+<a id="lr04-4"></a>**LR04-4 · `decimal_cmp` swallows conversion failure as equality · RESOLVED 2026-09-05**
+`decimal_cmp_items` now returns success separately from its order result. A
+failed operand conversion is invalid ordering (and false for JS strict
+equality), never equality; validator pattern matching also rejects it. This
+preserves the poison/non-equality rule in **S4.2.3**. Regression:
+`LambdaDecimal.QuietInt64ExtractionRejectsOverflowAndInvalidComparison` covers
+an invalid Decimal operand.
 
 <a id="lr04-5"></a>**LR04-5 · Float↔decimal round-trip via text is lossy and hot · OPEN**
 `decimal_mpd_to_double` reverses through `mpd_to_sci` + `strtod`
@@ -873,13 +877,13 @@ verifies the full 1514-byte formatted message. The focused error suite passes
 
 ## 10. Error handling (LR_10)
 
-<a id="lr10-2"></a>**LR10-2 · Hard-coded 64 KB last-function span · OPEN**
-`build_debug_info_table` computes each function's end address as the next
-function's start; the *last* function has no successor and is given a fixed
-64 KB span (`info->native_addr_end = native_addr_start + 65536`,
-`lambda/runtime/mir.c:646`). A JIT function larger than 64 KB placed last in
-address order mis-attributes return addresses past that boundary, silently
-dropping or mislabeling the deepest frame.
+<a id="lr10-2"></a>**LR10-2 · Hard-coded 64 KB last-function span · RESOLVED 2026-09-05**
+`build_debug_info_table` now gets MIR's actual next allocation address for the
+final function's exclusive end, instead of inventing a 64 KiB bound. A missing
+frontier falls back to an empty range rather than labeling unrelated native
+code. Regression:
+`LambdaJitDebugInfo.FinalFunctionRangeUsesJitAllocationFrontier` emits a final
+function larger than 64 KiB and resolves an address beyond the old boundary.
 
 ---
 
@@ -921,12 +925,13 @@ All four caps survive, and so does the inconsistency in how they fail:
 Truncate vs. error vs. clamp vs. fail, for four caps in one subsystem, is itself
 the hazard.
 
-<a id="lr11-5"></a>**LR11-5 · `deep_copy` of `PATH` is shallow · OPEN**
-For non-`sys` `LMD_TYPE_PATH` values `deep_copy_typed` returns the item as-is;
-`sys://` paths are copied only if already resolved
-(`lambda/io/mark_builder.cpp:1081`ff). The code comment warns the result "may
-reference external memory" — a latent dangling reference if the source `Input`
-is torn down first.
+<a id="lr11-5"></a>**LR11-5 · `deep_copy` of `PATH` is shallow · RESOLVED 2026-09-05**
+`path_clone` replays the immutable path spine into the destination pool, giving
+every copied non-`sys` path independent names and links. Resolution and metadata
+caches are deliberately not copied, so no source-owned payload survives. This
+keeps the ownership chain precise under **D4.4.3**. Regression:
+`MarkBuilderDeepCopyTest.CopyPathRehomesSpineAndDropsSourceCaches` destroys the
+source pool before reading the copied path.
 
 <a id="lr11-6"></a>**LR11-6 · Conservative safety analysis (adjacent) · OPEN**
 `function_needs_stack_check` is hard-`true` and `function_is_tail_recursive` is
@@ -1163,12 +1168,15 @@ registry row.
 
 ## 13. Schema validator (LR_13)
 
-<a id="lr13-1"></a>**LR13-1 · Suggestions are built but never surfaced · OPEN**
-`generate_field_suggestions` (`lambda/validator/suggestions.cpp:135`, declared
-`validator.hpp:448`) is complete but has **no callers**;
-`suggest_similar_names` and `suggest_corrections`
-(`error_reporting.cpp:28`–`41`) both `return nullptr` with
-`// suggestions not implemented`. Wiring it in remains a small, high-value fix.
+<a id="lr13-1"></a>**LR13-1 · Suggestions are built but never surfaced · RESOLVED 2026-09-05**
+Validation now populates the existing correction generator before errors are
+reported when `show_suggestions` is enabled; errors constructed outside a
+`SchemaValidator` lazily take the same reporting path. Missing/unexpected
+schema-field errors can now call the existing field-ranking helper when the
+containing map type is available. The option explicitly suppresses both
+population and reporting. Regression:
+`LambdaValidator.TypeMismatchSuggestionsAreAttachedAndReported` verifies the
+hint appears and that disabling the option omits it.
 
 <a id="lr13-2"></a>**LR13-2 · Inconsistent `max_depth` defaults · OPEN**
 `SchemaValidator::create()` sets 1024 (`doc_validator.cpp:139`),
@@ -1626,30 +1634,21 @@ boundary-comma check and is untouched. `lambda_parser.c` `parse_element`;
 covered by `test/std/negative/element_semicolon_opens_content.ls` +
 `NegativeScriptTest.ElementSemicolonCannotOpenContent`.
 
-<a id="i8-dynspread"></a>**Issues8 · Spreading a dynamically-constructed map yields a null-key nested map · OPEN**
-Map spread flattens a statically shaped map but not one built at runtime, even
-though both are `type() == map`:
+<a id="i8-dynspread"></a>**Issues8 · Spreading a dynamically-constructed map yields a null-key nested map · RESOLVED 2026-09-05**
+Any spread-bearing map now retains its keyed AST items for runtime construction;
+the builder enumerates both shaped maps and VMaps in source order. VMap symbols
+are re-entered through the name lookup seam, matching their String-key backing
+store, rather than inserting null values. This follows **S16.8.9**'s runtime
+shape rule and later-entry-wins ordering. Regression:
+`test/lambda/map_spread_len.ls` spreads `map(["shape", "box"])` and produces
+`["box", "a", 2]`.
 
-```
-let stat    = {shape: "box"}
-let dynamic = map(["shape", "box"])
-{*: stat,    id: "a"}   ->  {shape: "box", id: "a"}       correct
-{*: dynamic, id: "a"}   ->  {[null nested map], id: "a"}  wrong
-```
-
-`dynamic` itself is sound (`type` is `map`, prints as `{shape: "box"}`), so the
-defect is in the spread's handling of a runtime-built shape, not in the map. The
-same operand also loses its fields across an element-attribute spread, which is
-[the entry below](#i8-attrspread) — likely one root cause for both.
-
-<a id="i8-attrspread"></a>**Issues8 / Issues5 §23 · Element attribute spread lands the map as a child · OPEN**
-`<path *attrs>` does not error, but the spread map becomes a *child* rather than
-attributes: `<path {a: 1, b: 2}>` instead of `<path a: 1, b: 2>`. Recorded twice
-— `impl/Lambda_Issues8 (retired).md` ("Runtime map attribute spread creates a nested element
-child") and `impl/Lambda_Issues5 (retired).md` §23 — as one issue. The sibling half of the
-Issues5 entry (an inline `if` as an attribute value) is **fixed**:
-`<path d: "M0", 'stroke-dasharray': if (has_dash) dash else "none">` now
-evaluates to `<path d: "M0", stroke-dasharray: "4 2">`.
+<a id="i8-attrspread"></a>**Issues8 / Issues5 §23 · Element attribute spread lands the map as a child · RESOLVED 2026-09-05**
+Elements use the same runtime keyed-literal path for attribute spreads, so a
+dynamic map's fields are installed as attributes and its ordinary content stays
+on the content face. This is the same **S16.8.9** source-order construction as
+map spread. Regression: `test/lambda/map_spread_len.ls` produces
+`["box", "a", ["new"]]` for the dynamic attribute-spread element.
 
 ---
 

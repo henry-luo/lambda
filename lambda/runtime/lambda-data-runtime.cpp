@@ -63,11 +63,6 @@ static uint8_t array_num_clamp_uint8_even(double value) {
     return (uint8_t)rounded;
 }
 
-// VMap access helpers (implemented in vmap.cpp)
-Item vmap_get_by_str(VMap* vm, const char* key);
-Item vmap_get_by_item(VMap* vm, Item key);
-SymbolKeyList* vmap_keys_for_item(Item vmap_item);
-
 struct LambdaSymbolKeyList {
     lam::ArrayList<LambdaRootFrame*> root_chunks;
     size_t count;

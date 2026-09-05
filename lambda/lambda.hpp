@@ -820,6 +820,13 @@ struct VMap : Container {
     void* host_data;        // optional native payload for host-object adapters
 };
 
+// VMap access helpers implemented by the runtime's C++ VMap backends.
+extern "C++" {
+Item vmap_get_by_str(VMap* vm, const char* key);
+Item vmap_get_by_item(VMap* vm, Item key);
+SymbolKeyList* vmap_keys_for_item(Item vmap_item);
+}
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
 static_assert(offsetof(VMap, data) == LAMBDA_GC_OFF_VMAP_DATA &&
