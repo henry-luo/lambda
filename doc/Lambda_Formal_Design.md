@@ -1548,7 +1548,8 @@ is retained by `JsTranspiler` and resumes at appended `analyze-plan` →
 `mir-lower` → `mir-finalize-load` → `prelink` passes, rather than re-seeding
 front-end facts in a second manager. The AST owner is also the MIR pass root.
 Static property-key prelink is manager-owned; runtime module-state linking
-remains an execution-boundary operation. Lambda's active `Transpiler` starts that same compiler
+is a manager-owned execution-boundary `runtime-link` pass appended after
+module-state activation. Lambda's active `Transpiler` starts that same compiler
 unit with `parse-build-bind` → `validate` → `index`, then carries it through
 const-fold, planning, MIR lowering, finalization/load, and entry link;
 retained-AST fallback starts a fresh manager from its already indexed unit.
@@ -1556,8 +1557,10 @@ Direct Lambda source reduction and lexical binding remain one synchronous
 operation because reduction constructs the scopes and declarations consumed by
 later syntax, but post-reduction semantic validation is now a manager-owned
 operation. A rejected validation cannot publish `INDEXED`. This is an
-implementation-only **D8.2.5** status update; JS runtime linking and
-separation of Lambda parse/build/bind remain open.
+implementation-only **D8.2.5** status update; a physical Lambda
+parse/build/bind separation remains open. Renaming the current combined pass
+would not satisfy **D8.2.5**, because the reducer itself publishes
+declarations and resolves later uses.
 
 The post-P6 **D8.2.4** follow-up makes the direct lexical parent of every
 source function an `AstIndex` fact keyed by `FunctionId`. The relation follows
@@ -1686,7 +1689,7 @@ slice; no formal semantic ruling or document semver changes.
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |
 | D2.6.5 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S16.7 does not run. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
-| D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering. The 2026-08-31 P5 follow-up makes `transpile_primary_value()` publish literal/primary `MirValue` descriptors directly and retires its raw dispatcher arm; identifier, call, control, extension, and JS raw producers plus the final legacy-shim ratchet stay open. |
+| D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering. The 2026-08-31 P5 follow-up makes `transpile_primary_value()` publish literal/primary `MirValue` descriptors directly and retires its raw dispatcher arm. **Implemented boundary audit 2026-09-05:** `transpile_expr_value_core()`/`transpile_expr_value()` and `jm_transpile_expression_direct()`/`jm_transpile_expression_value()` now form the respective core demand-driven `MirValue` boundaries; no core `transpile_expr*` or `jm_transpile_expression*` function returns `MIR_reg_t`. Internal physical-register helpers remain below the boundary. |
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
 | D2.6.2 | ArrayNum `==` representation-sensitivity is a known live bug (also gates the data-processing engines). |
 | D2.6.3 | ELEM_INT i64 revert landed; SIMD kernels only partly re-enabled (C16-era gating comments remain). |

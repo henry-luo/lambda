@@ -142,7 +142,8 @@ static bool js_compiled_name_table_inherits_preamble(
     return g_jm_preamble_in && mt && !mt->is_module;
 }
 
-bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
+int js_mir_runtime_link_pass(void* opaque) {
+    const JsMirTranspiler* mt = (const JsMirTranspiler*)opaque;
     if (!context || !context->active_module_state) return false;
     bool inherits_preamble = js_compiled_name_table_inherits_preamble(mt);
     const PropertyKeySpec* inherited_specs = inherits_preamble
@@ -189,7 +190,7 @@ bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
 
 // every consumer gets a fresh state whose prefix is the immutable preamble;
 // using a prior consumer's appended count shifts this unit's names past the
-// prefix that js_link_compiled_name_table actually installs.
+// prefix that js_mir_runtime_link_pass actually installs.
 JS_FORWARD_STATIC_EXPRESSION(uint32_t, js_preamble_consumer_name_base,
     (const JsPreambleState* preamble), preamble ? preamble->module_property_count : 0)
 
@@ -957,7 +958,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             return (Item){.item = ITEM_ERROR};
         }
     }
-    if (!g_jm_preamble_compile_only && !js_link_compiled_name_table(mt)) {
+    if (!g_jm_preamble_compile_only && !js_mir_link_runtime_state(mt)) {
         log_error("js-mir: failed to link compiled property-name table");
         return (Item){.item = ITEM_ERROR};
     }

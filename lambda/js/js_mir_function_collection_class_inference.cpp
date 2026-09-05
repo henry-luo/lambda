@@ -85,16 +85,13 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
 // TCO: Tail-call detection
 // ============================================================================
 
-// Check if a JS call expression is a recursive call to the given function
+// Tail recursion is a binding relation: same-spelled local shadows must retain
+// their ordinary Call semantics instead of targeting the enclosing function.
 bool jm_is_recursive_call(JsCallNode* call, JsFuncCollected* fc) {
-    if (!call || !call->callee || !fc || !fc->node || !fc->node->name) return false;
+    if (!call || !call->callee || !fc || !fc->node || !fc->node->entry) return false;
     if (call->callee->node_type != JS_AST_NODE_IDENTIFIER) return false;
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
-    if (!id->name) return false;
-    // Compare callee name against the original function name (before mangling)
-    String* fn_name = fc->node->name;
-    return (id->name->len == fn_name->len &&
-            memcmp(id->name->chars, fn_name->chars, fn_name->len) == 0);
+    return id->entry && id->entry == fc->node->entry;
 }
 
 bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc) {

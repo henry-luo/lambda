@@ -1405,11 +1405,10 @@ static int js_mir_analyze_and_plan(void* opaque) {
         for (int fi = 0; fi < mt->func_count; fi++) {
             JsFunctionNode* fn = mt->func_entries[fi].node;
             if (!fn || !fn->name || !fn->body) continue;
-            const char* name = jm_var_name(fn->name);
             struct hashmap* self_assigned = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                jm_name_hash, jm_name_cmp, NULL, NULL);
+                jm_name_hash, jm_binding_cmp, NULL, NULL);
             jm_collect_indexed_func_assignments(mt, fn->body, self_assigned);
-            if (jm_name_set_has(self_assigned, name)) {
+            if (jm_binding_set_has(self_assigned, fn->entry)) {
                 JM_JS_FACT(&mt->func_entries[fi], is_reassigned) = true;
                 log_debug("js-mir: function '%.*s' is self-reassigned — skipping direct call optimization",
                     (int)fn->name->len, fn->name->chars);
@@ -1480,11 +1479,10 @@ static int js_mir_analyze_and_plan(void* opaque) {
             if (!iife_fn || !iife_fn->body || iife_fn->is_async || iife_fn->is_generator) return NULL;
             if (!iife_fn->name) return iife_fn;
 
-            const char* self_name = jm_var_name(iife_fn->name);
             struct hashmap* refs = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                jm_name_hash, jm_name_cmp, NULL, NULL);
+                jm_name_hash, jm_binding_cmp, NULL, NULL);
             jm_collect_indexed_body_refs(mt, iife_fn, refs);
-            bool self_referencing = jm_name_set_has(refs, self_name);
+            bool self_referencing = jm_binding_set_has(refs, iife_fn->entry);
             hashmap_free(refs);
             return self_referencing ? NULL : iife_fn;
         };
@@ -3685,6 +3683,20 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt) {
         compiler_pass_manager_run(pass_manager, NULL);
 }
 
+bool js_mir_link_runtime_state(JsMirTranspiler* mt) {
+    if (!mt || !mt->tp) return false;
+    CompilerPassManager* pass_manager = &mt->tp->pass_manager;
+    if (pass_manager->facts & COMPILER_FACT_LINKED) return true;
+    // The active module slab is runtime-owned; append its link after activation.
+    CompilerPassSpec link_pass = {"runtime-link", COMPILER_FACT_PRELINKED,
+        COMPILER_FACT_LINKED, js_mir_runtime_link_pass, mt};
+    return (pass_manager->facts & COMPILER_FACT_PRELINKED) &&
+        pass_manager->next_pass == pass_manager->pass_count &&
+        compiler_pass_manager_add(pass_manager, &link_pass) &&
+        compiler_pass_manager_run(pass_manager, NULL) &&
+        (pass_manager->facts & COMPILER_FACT_LINKED);
+}
+
 // Pre-link validation: scan all MIR instructions for NULL label operands.
 // Returns true if safe to link, false if NULL labels found (would crash MIR_link).
 bool jm_validate_mir_labels(MIR_context_t ctx) {
@@ -3933,10 +3945,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // resolution; the batch entry's previous filename would resolve against
     // the worker instead of the module directory (D7.2.3, D8.5.1).
     JsModuleNamespaceScope module_namespace(namespace_obj, true);
-    if (!lambda_module_state_reserve_and_activate((uint32_t)mt->module_var_count)) {
-        return ItemNull;
-    }
-    if (!js_link_compiled_name_table(mt)) {
+    if (!lambda_module_state_reserve_and_activate((uint32_t)mt->module_var_count) ||
+            !js_mir_link_runtime_state(mt)) {
         return ItemNull;
     }
     if (execution_scope.is_outermost() &&

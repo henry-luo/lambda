@@ -490,8 +490,8 @@ struct JsMirTranspiler {
     int tdz_closure_capture_count;
     bool force_closure_env_copy;    // class field initializers need a stable lexical this cell
 
-    // Assignment target hint for closure self-capture detection in copy-env path
-    const char* assign_target_vname;  // set before RHS eval, NULL otherwise
+    // Assignment target identity for closure self-capture detection in copy-env path.
+    NameEntry* assign_target_binding;
 
     // Scope env: shared closure environment for all child closures in current function
     MIR_reg_t scope_env_reg;         // register holding current func's scope env (0 if none)
