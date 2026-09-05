@@ -3876,7 +3876,12 @@ static JsInterpCompletion js_interp_initialize_function_declarations(
             continue;
         }
         RootFrame roots(1);
-        Rooted<Item> function_root(roots, js_interp_make_function(frame, function));
+        bool native_build_string = frame->script->test262_native_build_string &&
+            scope == frame->script->global_scope &&
+            js_interp_name_equals(entry->name, "buildString");
+        Rooted<Item> function_root(roots, native_build_string
+            ? js_new_native_function(js_test262_build_string)
+            : js_interp_make_function(frame, function));
         if (item_is_error(function_root.get())) return js_interp_throw(function_root.get());
         Item stored = js_interp_write_binding(frame, entry, NULL, function_root.get(), true);
         if (item_is_error(stored)) return js_interp_throw(stored);

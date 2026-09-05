@@ -879,6 +879,10 @@ typedef struct Transpiler : Script {
     int max_errors;            // threshold (default: 10)
     ArrayList* errors;         // list of LambdaError* (structured errors)
 
+    // A replay allocation failure cannot leave a partially assembled AST
+    // available to validation or lowering (D8.2.5).
+    bool build_allocation_failed;
+
     // relaxed mode (--static-warning): semantic (E2xx) type errors are
     // recorded here as warnings instead of errors, and compilation proceeds.
     // Parse/syntax errors are never downgraded. [SI3v2/TI6 per-surface policy]

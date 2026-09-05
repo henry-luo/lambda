@@ -29,6 +29,8 @@ pn main() {
     print(arr[49])
 
     // ===== Map field additions =====
+    // S2.1.4(3)/S9.1.6: named writes grow an open map, including through a
+    // mutable parameter; the handlers therefore observe no error.
     var obj = {}
     var first_map_error = null
     write_empty_map(obj, "a", 1) ^ { first_map_error = ^ }

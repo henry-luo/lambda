@@ -295,10 +295,17 @@ static void ast_index_visit(AstNode* child, AstNode* parent, void* opaque) {
         sibling_edge = true;
         AstNodeId parent_id = ast_index_find(walk->index, parent);
         if (parent_id != AST_NODE_ID_INVALID) {
+            AstFunctionId sibling_owner = walk->index->owner_functions[parent_id];
             parent = walk->index->parents[parent_id];
             // A sibling inherits the structural parent's function owner, not
-            // the preceding sibling's owner retained by the list visitor.
+            // the preceding sibling's function. A shared fragment can be
+            // projected into a synthetic callable, however; retain that
+            // projection after its first sibling has adopted the walk owner.
             owner = ast_index_parent_function(walk->index, parent);
+            if (sibling_owner == walk->owner_function &&
+                    sibling_owner != AST_FUNCTION_ID_INVALID) {
+                owner = sibling_owner;
+            }
         }
     }
     // Shared AST fragments can be retained by a synthetic callable (for

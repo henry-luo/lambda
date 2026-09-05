@@ -805,15 +805,15 @@ typedef struct LambdaDirectFrontendPassContext {
     Transpiler* tp;
     const char* script_path;
     LambdaParseError parse_error;
+    LambdaReductionTape* reductions;
 } LambdaDirectFrontendPassContext;
 
-static int lambda_parse_build_bind_compiler_pass(void* opaque) {
+static int lambda_parse_compiler_pass(void* opaque) {
     LambdaDirectFrontendPassContext* pass =
         (LambdaDirectFrontendPassContext*)opaque;
-    AstScript* root = NULL;
-    if (!pass || !pass->tp || lambda_rd_reduce_ast(pass->tp, pass->tp->source,
-                strlen(pass->tp->source), &root, &pass->parse_error) !=
-                LAMBDA_PARSE_OK || !root) {
+    if (!pass || !pass->tp || lambda_rd_parse_reductions(pass->tp->source,
+                strlen(pass->tp->source), &pass->reductions, &pass->parse_error) !=
+                LAMBDA_PARSE_OK) {
         if (pass && pass->tp) {
             record_direct_parse_diagnostics(pass->tp, pass->script_path,
                 &pass->parse_error);
@@ -823,7 +823,46 @@ static int lambda_parse_build_bind_compiler_pass(void* opaque) {
         }
         return 0;
     }
+    return 1;
+}
+
+static int lambda_build_compiler_pass(void* opaque) {
+    LambdaDirectFrontendPassContext* pass =
+        (LambdaDirectFrontendPassContext*)opaque;
+    AstScript* root = NULL;
+    if (!pass || !pass->tp || lambda_rd_build_reductions(pass->tp,
+                pass->tp->source, strlen(pass->tp->source), pass->reductions,
+                &root, &pass->parse_error) != LAMBDA_PARSE_OK || !root) {
+        if (pass && pass->tp) {
+            record_direct_parse_diagnostics(pass->tp, pass->script_path,
+                &pass->parse_error);
+            log_error("C AST build rejected %s: %s", pass->script_path,
+                pass->parse_error.message ? pass->parse_error.message :
+                "direct AST construction failed");
+        }
+        if (pass) {
+            lambda_rd_destroy_reductions(pass->reductions);
+            pass->reductions = NULL;
+        }
+        return 0;
+    }
+    lambda_rd_destroy_reductions(pass->reductions);
+    pass->reductions = NULL;
     pass->tp->ast_root = (AstNode*)root;
+    return 1;
+}
+
+static int lambda_bind_compiler_pass(void* opaque) {
+    LambdaDirectFrontendPassContext* pass =
+        (LambdaDirectFrontendPassContext*)opaque;
+    if (!pass || !pass->tp || !pass->tp->ast_root ||
+            !lambda_ast_rebind_direct_scope_graph(pass->tp,
+                (AstScript*)pass->tp->ast_root)) {
+        if (pass && pass->tp) {
+            log_error("Lambda AST binding rejected %s", pass->script_path);
+        }
+        return 0;
+    }
     return 1;
 }
 
@@ -846,24 +885,44 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     bool profiling = is_profile_enabled();
     bool compiler_timing = lambda_compiler_timing_enabled();
     if (compiler_timing) lambda_compiler_timing_reset();
-    profile_time_t p0, p1, p2, p3;
+    profile_time_t p0, p1, p2, p3, p4, p5;
     if (profiling || compiler_timing) profile_get_time(&p0);
 
     get_time(&start);
     tp->source = script->source;
     LambdaDirectFrontendPassContext front_end = {tp, script_path, {}};
     compiler_pass_manager_init(&tp->pass_manager, COMPILER_FACT_NONE);
-    CompilerPassSpec build_bind_pass = {"parse-build-bind", COMPILER_FACT_NONE,
-        COMPILER_FACT_AST | COMPILER_FACT_BOUND,
-        lambda_parse_build_bind_compiler_pass, &front_end};
-    if (!compiler_pass_manager_add(&tp->pass_manager, &build_bind_pass) ||
+    CompilerPassSpec parse_pass = {"parse", COMPILER_FACT_NONE,
+        COMPILER_FACT_PARSED, lambda_parse_compiler_pass, &front_end};
+    CompilerPassSpec build_pass = {"build", COMPILER_FACT_PARSED,
+        COMPILER_FACT_AST, lambda_build_compiler_pass, &front_end};
+    CompilerPassSpec bind_pass = {"bind", COMPILER_FACT_AST,
+        COMPILER_FACT_BOUND, lambda_bind_compiler_pass, &front_end};
+    if (!compiler_pass_manager_add(&tp->pass_manager, &parse_pass) ||
             !compiler_pass_manager_run(&tp->pass_manager, NULL)) {
+        lambda_rd_destroy_reductions(front_end.reductions);
         return;
     }
+    if (profiling || compiler_timing) profile_get_time(&p1);
     get_time(&end);
     print_elapsed_time("parsing", start, end);
 
-    if (profiling || compiler_timing) profile_get_time(&p1);
+    if (!compiler_pass_manager_add(&tp->pass_manager, &build_pass) ||
+            !compiler_pass_manager_run(&tp->pass_manager, NULL)) {
+        lambda_rd_destroy_reductions(front_end.reductions);
+        return;
+    }
+    if (profiling || compiler_timing) profile_get_time(&p2);
+    get_time(&end);
+    print_elapsed_time("building AST", start, end);
+
+    if (!compiler_pass_manager_add(&tp->pass_manager, &bind_pass) ||
+            !compiler_pass_manager_run(&tp->pass_manager, NULL)) {
+        return;
+    }
+    if (profiling || compiler_timing) profile_get_time(&p3);
+    get_time(&end);
+    print_elapsed_time("binding AST", start, end);
 
     CompilerPassSpec validate_pass = {"validate", COMPILER_FACT_AST |
         COMPILER_FACT_BOUND, COMPILER_FACT_VALIDATED,
@@ -873,7 +932,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         log_error("compiler validation rejected '%s'", script_path);
         return;
     }
-    if (profiling || compiler_timing) profile_get_time(&p2);
+    if (profiling || compiler_timing) profile_get_time(&p4);
 
     AstIndexPassContext index_context = {
         &tp->ast_index, tp->ast_root, tp->profile};
@@ -885,7 +944,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         log_error("failed to run indexed AST pass for '%s'", script_path);
         return;
     }
-    if (profiling || compiler_timing) profile_get_time(&p3);
+    if (profiling || compiler_timing) profile_get_time(&p5);
     get_time(&end);
     print_elapsed_time("building AST", start, end);
 
@@ -940,10 +999,13 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                 LambdaCompilerTiming* timing = &g_last_lambda_compiler_timing;
                 timing->parse_us = (uint64_t)(elapsed_ms_val(p0, p1) * 1000.0);
                 timing->ast_build_us = (uint64_t)(elapsed_ms_val(p1, p2) * 1000.0);
-                timing->index_us = (uint64_t)(elapsed_ms_val(p2, p3) * 1000.0);
+                timing->bind_us = (uint64_t)(elapsed_ms_val(p2, p3) * 1000.0);
+                timing->validate_us = (uint64_t)(elapsed_ms_val(p3, p4) * 1000.0);
+                timing->index_us = (uint64_t)(elapsed_ms_val(p4, p5) * 1000.0);
                 timing->plan_us = (uint64_t)(elapsed_ms_val(plan0, plan1) * 1000.0);
                 timing->build_transpile_us = timing->parse_us + timing->ast_build_us +
-                    timing->index_us + timing->plan_us;
+                    timing->bind_us + timing->validate_us + timing->index_us +
+                    timing->plan_us;
                 timing->valid = 1;
             }
             if (profiling) {
@@ -951,7 +1013,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                 memset(&prof, 0, sizeof(prof));
                 profile_set_script_path(&prof, script_path);
                 prof.parse_ms = elapsed_ms_val(p0, p1);
-                prof.ast_ms = elapsed_ms_val(p1, p2) + elapsed_ms_val(p2, p3);
+                prof.ast_ms = elapsed_ms_val(p1, p2) + elapsed_ms_val(p2, p3) +
+                    elapsed_ms_val(p3, p4) + elapsed_ms_val(p4, p5);
                 prof.plan_ms = elapsed_ms_val(plan0, plan1);
                 prof.worker_thread = 0;
                 prof.thread_id = profile_current_thread_id();
@@ -985,11 +1048,14 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
             LambdaCompilerTiming* timing = &g_last_lambda_compiler_timing;
             timing->parse_us = (uint64_t)(elapsed_ms_val(p0, p1) * 1000.0);
             timing->ast_build_us = (uint64_t)(elapsed_ms_val(p1, p2) * 1000.0);
-            timing->index_us = (uint64_t)(elapsed_ms_val(p2, p3) * 1000.0);
+            timing->bind_us = (uint64_t)(elapsed_ms_val(p2, p3) * 1000.0);
+            timing->validate_us = (uint64_t)(elapsed_ms_val(p3, p4) * 1000.0);
+            timing->index_us = (uint64_t)(elapsed_ms_val(p4, p5) * 1000.0);
             timing->module_finalize_us = (uint64_t)(mir_jit_init_ms * 1000.0);
             timing->mir_lower_us = (uint64_t)(mir_transpile_ms * 1000.0);
             timing->link_us = (uint64_t)(mir_gen_ms * 1000.0);
-            timing->build_transpile_us = timing->parse_us + timing->ast_build_us + timing->index_us +
+            timing->build_transpile_us = timing->parse_us + timing->ast_build_us +
+                timing->bind_us + timing->validate_us + timing->index_us +
                 timing->module_finalize_us + timing->mir_lower_us + timing->link_us;
             timing->mir_module_count = mir_module_count;
             timing->mir_function_count = mir_function_count;
@@ -999,9 +1065,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         if (profiling) {
             PhaseProfile prof;
             memset(&prof, 0, sizeof(prof));
-            profile_set_script_path(&prof, script_path);
-            prof.parse_ms = elapsed_ms_val(p0, p1);
-            prof.ast_ms = elapsed_ms_val(p1, p2);
+                profile_set_script_path(&prof, script_path);
+                prof.parse_ms = elapsed_ms_val(p0, p1);
+                prof.ast_ms = elapsed_ms_val(p1, p2) + elapsed_ms_val(p2, p3) +
+                    elapsed_ms_val(p3, p4) + elapsed_ms_val(p4, p5);
             prof.transpile_ms = mir_transpile_ms;
             prof.jit_init_ms = mir_jit_init_ms;
             prof.mir_gen_ms = mir_gen_ms;

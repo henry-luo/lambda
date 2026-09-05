@@ -1493,7 +1493,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-31.
+Status of `*`-marked rulings as of 2026-09-05.
 
 The D8.2.4–D8.2.6 implementation record now includes P3j, P4l, and the
 post-P6 binding/identity schedule work (2026-08-31):
@@ -1502,15 +1502,15 @@ post-P6 binding/identity schedule work (2026-08-31):
 LambdaJS. The JS driver has discrete manager-owned `analyze-plan`,
 `mir-lower`, `mir-finalize-load`, and static `prelink` operations; Lambda MIR Direct has matching
 plan, lower, and finalization/load operations before its established entry
-link. Builder-published `NameEntry` links and collection-time
-`FnAnalysis::js_mir_backend` replace lowering-time name and callable recovery;
+link. Builder-published `NameEntry` links and FunctionId-keyed
+`func_entries_by_id` replace lowering-time name and callable recovery;
 direct class-entry consumers map the common nearest `AstClassId` to their
 index-ordered backend entries, while nested/private class resolution, subtree
 membership, descendant capture writes, and subtree visitors use indexed
 structural ancestry/adjacency rather than source ranges or backend order recovery; module declaration caching consumes the same
 binding-definition edge. Function backend relationships now carry their sealed
 `AstFunctionId`: parent lookup follows that ID through the published
-`FnAnalysis::js_mir_backend` link, and the active lowering function is its
+`func_entries_by_id` table, and the active lowering function is its
 published backend record rather than a post-order table position. JS source, eval, module, and cached-AST execution use one
 recovery-aware entry helper. The Lambda driver conditionally schedules the
 indexed prerequisite when a retained AST has not already published it, so
@@ -1549,18 +1549,32 @@ is retained by `JsTranspiler` and resumes at appended `analyze-plan` →
 front-end facts in a second manager. The AST owner is also the MIR pass root.
 Static property-key prelink is manager-owned; runtime module-state linking
 is a manager-owned execution-boundary `runtime-link` pass appended after
-module-state activation. Lambda's active `Transpiler` starts that same compiler
-unit with `parse-build-bind` → `validate` → `index`, then carries it through
-const-fold, planning, MIR lowering, finalization/load, and entry link;
-retained-AST fallback starts a fresh manager from its already indexed unit.
-Direct Lambda source reduction and lexical binding remain one synchronous
-operation because reduction constructs the scopes and declarations consumed by
-later syntax, but post-reduction semantic validation is now a manager-owned
-operation. A rejected validation cannot publish `INDEXED`. This is an
-implementation-only **D8.2.5** status update; a physical Lambda
-parse/build/bind separation remains open. Renaming the current combined pass
-would not satisfy **D8.2.5**, because the reducer itself publishes
-declarations and resolves later uses.
+module-state activation. Lambda's active `Transpiler` now starts that same
+compiler unit with `parse` → `build` → `bind` → `validate` → `index`, then
+carries it through const-fold, planning, MIR lowering, finalization/load, and
+entry link; retained-AST fallback starts a fresh manager from its already
+indexed unit. The `parse` pass emits a reduction tape with no AST-node
+allocation or scope mutation. `build` replays it into a retained AST and its
+private construction scopes; `bind` rebuilds the canonical scope/`NameEntry`
+graph from those retained AST-facing facts, rewrites declaration/use and
+capture edges to that graph, and only then publishes `BOUND`. Post-reduction
+semantic validation remains manager-owned and a rejected validation cannot
+publish `INDEXED`. The compiler-time record now measures physical parse,
+build, bind, validate, and index stages; `bind_us` is no longer fabricated as
+zero. Construction scopes and their declaration lookup are private build-time
+support for bottom-up type assembly: the physical binder replaces every
+published scope, declaration, use, and capture edge with the canonical graph
+before `BOUND`; allocation failure rejects the replay without publishing a
+partial root. They are not a second binding schedule or lowering authority, so
+the **D8.2.5** pass-manager requirement is complete. This is an
+implementation-only status update; merely renaming a pass would not satisfy
+**D8.2.5**.
+
+Current end-to-end evidence for this status slice is `make test-lambda-baseline`
+at `4,098/4,098`, including MIR emission/ratchet and forced-GC suites, and the
+release Test262 target invocation at `40,261/40,261`, with zero
+non-fully-passing, failed, regressed, or retried entries. Those gates verify
+the physical Lambda binder and the unified schedule.
 
 The post-P6 **D8.2.4** follow-up makes the direct lexical parent of every
 source function an `AstIndex` fact keyed by `FunctionId`. The relation follows
@@ -1734,13 +1748,13 @@ slice; no formal semantic ruling or document semver changes.
 | D8.1.2v2 | Decided 2026-08-24 with D8.1.1v4. `grammar-lambda.js` remains the complete Tree-sitter syntax oracle/editor/bindings grammar; `grammar.js` and generated `parser.c` are reference artifacts regenerated by the normal grammar target and are never hand-edited. The production Lambda parser is maintained in `lambda/runtime/parser/` and is built through the generated build configuration. |
 | D8.1.3v10 | Revised 2026-08-29: normal JavaScript and TypeScript source admission uses the first-party C lexer and hybrid recursive-descent/Pratt parser, reducing directly to the retained `JsAstNode` graph. The vendored JS/TS Tree-sitter grammar archives remain unchanged but link only into `lambda-cst` for differential acceptance checks; normal Lambda, runtime, test, and release targets do not link either archive. The LambdaJS AST tier includes the synchronous ES-module slice under the same Runtime/EvalContext/heap/event loop/module registry as Lambda. Registry-owned namespace placeholders, hoisted function declaration instantiation before dependency traversal, strict private slabs, live import reads, and registry propagation preserve the admitted default/named/namespace imports, default/named/namespace/non-ambiguous-star exports, named/star re-exports, `import.meta.url`, dynamic `import()`, and circular function imports without a JS-private module cache. Lambda `.ls` imports use that descriptor and their public boxed function values cross the common JS call kernel through the existing Lambda boxed dynamic-call ABI with retained `TypeFunc` metadata. The two languages retain their own semantic walkers and activation records; no second runtime, EvalContext, stack owner, heap, or module registry is created. Top-level await/async module evaluation, generators/async functions, ambiguous star exports, shared T0/T1 environments, continuations, and AUTO policy remain pending. `JS_EXECUTION_BACKEND=ast` remains explicit and fail-closed, and the default remains MIR. Status and focused gates: `vibe/jube/JS_Grammar_Parser.md`, `vibe/Lambda_Design_JS_Interpreter.md`, and `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
 | D8.2.1–D8.2.3 | The physical Lambda/JS foundation is substantially shared (`AstNodeType`, many layouts/aliases, `FnAnalysis`, and `MirEmitter`), but structural convergence is incomplete. P1a (2026-08-28) moved Lambda iterator `for` to `AST_NODE_FOR_EXPR`/`AstForNode`; P1b moved Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode`; P1c folded assignment/declaration-wrapper storage; P1d (2026-08-28) promotes condition loops to one `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` and retires the old while/do/C-style tags, while iterator clauses use `AST_NODE_FOR_CLAUSE`. P1e (2026-08-29) retires the duplicated JavaScript core-child rows and leaves only extension layouts in `js_ast_children.cpp`; Python remains the later guest acceptance test. |
-| D8.2.4–D8.2.6 | P1–P4 establish the shared indexed compiler substrate described above. P5 (2026-08-30) completes the planned structural semantic-family consolidation: `MirValue` demand/profile lowering now owns shared sequence, condition, module-slot, destination, call/result, return/completion, function-publication, and module-finalization boundaries in Lambda and JS, while profile callbacks retain language semantics and boxed fallback. P6 moves shared context/owner binding, result publication, execution/current-file/module-state scopes, and active-module handles into `runtime-state`; the semantic walkers and their frames remain distinct under **D8.1.3v10**. P5/P6 verification is complete: 4,061 Lambda/Input and 40,261 Test262 baseline cases pass, while matched P4 release captures report Lambda 0.769 and JS 0.386 compiler-time ratios. This is an implementation status for **D2.4.1–D2.4.3**, **D5.2.1v3**, **D5.3.4**, and **D8.2.6**, not a new ruling. Focused gates: `vibe/Lambda_Design_JS_Unified.md` P5–P6. |
+| D8.2.4–D8.2.6 | P1–P4 establish the shared indexed compiler substrate described above. P5 (2026-08-30) completes the planned structural semantic-family consolidation: `MirValue` demand/profile lowering now owns shared sequence, condition, module-slot, destination, call/result, return/completion, function-publication, and module-finalization boundaries in Lambda and JS, while profile callbacks retain language semantics and boxed fallback. P6 moves shared context/owner binding, result publication, execution/current-file/module-state scopes, and active-module handles into `runtime-state`; the semantic walkers and their frames remain distinct under **D8.1.3v10**. The 2026-09-05 FunctionId follow-up retires `FnAnalysis::js_mir_backend`: JS MIR artifacts are reached only through the `func_entries_by_id` table keyed by the shared `FunctionId`; post-order storage remains a backend detail. The same closeout publishes the physical Lambda parse→build→bind graph and the full `MirValue` producer boundaries. Current verification is 4,098 Lambda/Input and 40,261 Test262 baseline cases, with Lambda 0.512534 and JS 0.690065 release compiler-time ratios. This is an implementation status for **D2.4.1–D2.4.3**, **D5.2.1v3**, **D5.3.4**, and **D8.2.6**, not a new ruling. Focused gates: `vibe/Lambda_Design_JS_Unified.md` P5–P6. |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
 | D8.4.2v3 | Lambda and LambdaJS direct calls pass `Context*` and source operands only; internal shape-2 results use two MIR results and C-reachable entries use the context companion slot. The trailing scalar-home operand is deleted from generated call ABI. |
 | D8.4.3v2 | Landed 2026-08-17 for Lambda, LambdaJS, Jube, and hosted execution boundaries: ordinary failures use explicit returned completions through each frame, while `LambdaRecoveryFrame` is restricted by the recovery-boundary gate to native-fault/test containment sites. The catalog and adapter audits retain the explicit Item/companion-lane contracts; see `vibe/Lambda_Design_Runtime_Error_Handling.md` §10–§12. |
 | D8.5.1 | MIR cache L1 landed; L2 lazy codegen approved but `mir.c` still eager. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
-| D8.6.4v2 | Timing/MIR instrumentation is landed. At commit `44b98dcebd19a548a14bbb75785091b545445f00`, the governed tree is 310,711 lines and passes the older 317,606 LOC cap. P5/P6's independently capped 326,064-line review slice has accepted identical-manifest release captures, but proposal-wide closeout remains open: `vibe/Lambda_Design_JS_Unified.md` still freezes the older tree as a stricter project anchor requiring ≤308,711; large-library and complete-corpus MIR counts remain required diagnostics, not exit gates. |
+| D8.6.4v2 | Timing/MIR instrumentation is landed. At commit `44b98dcebd19a548a14bbb75785091b545445f00`, the governed tree is 310,711 lines. The audited atomic direct-frontend retirement `9f3f05e1ff65a2c42acf14776da7361ea1961c0c` is `+1,366/-8,450 = -7,084` in `lambda/runtime` + `lambda/js`; its named deleted files alone credit `-6,204`, excluding the out-of-scope TypeScript deletion. The current checker reports 287,618 against the stricter ≤308,711 cap. The 2026-09-05 prescribed captures (one warm-up, five release samples, identical manifests) compare the pre-bind base with the same two semantic repairs applied to both trees: Lambda compiler median ratio `0.512534` and JS ratio `0.690065`, satisfying the ≤0.90 and ≤0.80 ratchets. Finalized JS MIR diagnostics are complete `1.000181` and library `0.999995`; the complete-corpus change is below 0.02% and the library decreased. Large-library and complete-corpus MIR counts remain required diagnostics, not exit gates. |
 
 ## Appendix B — Open Design Issues (DO#)
 

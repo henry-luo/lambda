@@ -60,6 +60,9 @@ static char* ast_copy_source_text(Transpiler* tp, StrView source,
     if (!copy) {
         record_semantic_error_span(tp, diagnostic_span, ERR_OUT_OF_MEMORY,
             "out of memory while reading literal source");
+        // Literal construction may have already linked earlier reductions;
+        // make the replay reject that incomplete graph rather than publish it.
+        tp->build_allocation_failed = true;
         return NULL;
     }
     memcpy(copy, source.str, source.length);
@@ -2264,8 +2267,14 @@ void push_name(Transpiler* tp, AstNode* node, AstImportNode* import) {
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
     if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
     tp->current_scope->last = entry;
-    binding_node_set_entry(node, entry);
-    function_binding_set_entry(tp, node, entry);
+    // An import publishes a local view of a declaration owned by another
+    // script. The source AST is shared with that provider, so never rewrite
+    // its declaration edge: doing so would redirect both its closure identity
+    // and an exported value's module-slot store into the importing scope.
+    if (!import) {
+        binding_node_set_entry(node, entry);
+        function_binding_set_entry(tp, node, entry);
+    }
 }
 
 NameScope* lambda_ast_enter_scope_with_parent(Transpiler* tp,
@@ -6527,6 +6536,476 @@ static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
     }
 }
 
+// The direct reducer needs provisional scopes while it assembles bottom-up
+// type facts. Do not let those construction-time entries escape as the
+// compiler's published graph: clone the retained scope tree and rewrite every
+// AST edge after the complete tree is available. This makes binding a real
+// post-build phase while keeping construction diagnostics in their existing
+// source-order home.
+typedef struct DirectBindScopeMap {
+    NameScope* source;
+    NameScope* rebound;
+} DirectBindScopeMap;
+
+typedef struct DirectBindEntryMap {
+    NameEntry* source;
+    NameEntry* rebound;
+} DirectBindEntryMap;
+
+typedef struct DirectBindNodeMap {
+    AstNode* node;
+} DirectBindNodeMap;
+
+typedef struct DirectBindContext {
+    Transpiler* tp;
+    HashMap* scopes;
+    HashMap* entries;
+    HashMap* visited;
+    bool failed;
+} DirectBindContext;
+
+static uint64_t direct_bind_pointer_hash(const void* item, uint64_t seed0,
+        uint64_t seed1) {
+    const void* pointer = *(const void* const*)item;
+    return hashmap_xxhash3(&pointer, sizeof(pointer), seed0, seed1);
+}
+
+static int direct_bind_pointer_compare(const void* a, const void* b,
+        void* udata) {
+    (void)udata;
+    const void* left = *(const void* const*)a;
+    const void* right = *(const void* const*)b;
+    return left == right ? 0 : (uintptr_t)left < (uintptr_t)right ? -1 : 1;
+}
+
+static DirectBindScopeMap* direct_bind_find_scope(DirectBindContext* bind,
+        NameScope* source) {
+    DirectBindScopeMap key = {.source = source};
+    return bind && bind->scopes ? (DirectBindScopeMap*)hashmap_get(
+        bind->scopes, &key) : NULL;
+}
+
+static DirectBindEntryMap* direct_bind_find_entry(DirectBindContext* bind,
+        NameEntry* source) {
+    DirectBindEntryMap key = {.source = source};
+    return bind && bind->entries ? (DirectBindEntryMap*)hashmap_get(
+        bind->entries, &key) : NULL;
+}
+
+static bool direct_bind_init(DirectBindContext* bind, Transpiler* tp) {
+    if (!bind || !tp) return false;
+    *bind = (DirectBindContext){.tp = tp};
+    bind->scopes = hashmap_new(sizeof(DirectBindScopeMap), 64, 0, 0,
+        direct_bind_pointer_hash, direct_bind_pointer_compare, NULL, NULL);
+    bind->entries = hashmap_new(sizeof(DirectBindEntryMap), 128, 0, 0,
+        direct_bind_pointer_hash, direct_bind_pointer_compare, NULL, NULL);
+    bind->visited = hashmap_new(sizeof(DirectBindNodeMap), 256, 0, 0,
+        direct_bind_pointer_hash, direct_bind_pointer_compare, NULL, NULL);
+    if (bind->scopes && bind->entries && bind->visited) return true;
+    hashmap_free(bind->scopes);
+    hashmap_free(bind->entries);
+    hashmap_free(bind->visited);
+    *bind = {};
+    return false;
+}
+
+static void direct_bind_destroy(DirectBindContext* bind) {
+    if (!bind) return;
+    hashmap_free(bind->scopes);
+    hashmap_free(bind->entries);
+    hashmap_free(bind->visited);
+    *bind = {};
+}
+
+static NameScope* direct_bind_clone_scope(DirectBindContext* bind,
+        NameScope* source);
+
+static NameEntry* direct_bind_clone_entry(DirectBindContext* bind,
+        NameEntry* source) {
+    if (!source) return NULL;
+    DirectBindEntryMap* known = direct_bind_find_entry(bind, source);
+    if (known) return known->rebound;
+    if (!direct_bind_clone_scope(bind, source->scope)) return NULL;
+    known = direct_bind_find_entry(bind, source);
+    return known ? known->rebound : NULL;
+}
+
+static NameScope* direct_bind_clone_scope(DirectBindContext* bind,
+        NameScope* source) {
+    if (!source || !bind || !bind->tp) return NULL;
+    DirectBindScopeMap* known = direct_bind_find_scope(bind, source);
+    if (known) return known->rebound;
+
+    NameScope* rebound = (NameScope*)pool_calloc(bind->tp->pool,
+        sizeof(NameScope));
+    if (!rebound) {
+        bind->failed = true;
+        return NULL;
+    }
+    *rebound = *source;
+    rebound->first = NULL;
+    rebound->last = NULL;
+    DirectBindScopeMap map = {.source = source, .rebound = rebound};
+    hashmap_set(bind->scopes, &map);
+    if (hashmap_oom(bind->scopes)) {
+        bind->failed = true;
+        return NULL;
+    }
+    rebound->parent = direct_bind_clone_scope(bind, source->parent);
+    if (source->parent && !rebound->parent) return NULL;
+
+    for (NameEntry* entry = source->first; entry; entry = entry->next) {
+        NameEntry* copy = (NameEntry*)pool_calloc(bind->tp->pool,
+            sizeof(NameEntry));
+        if (!copy) {
+            bind->failed = true;
+            return NULL;
+        }
+        *copy = *entry;
+        copy->scope = rebound;
+        copy->next = NULL;
+        DirectBindEntryMap entry_map = {.source = entry, .rebound = copy};
+        hashmap_set(bind->entries, &entry_map);
+        if (hashmap_oom(bind->entries)) {
+            bind->failed = true;
+            return NULL;
+        }
+        if (rebound->last) rebound->last->next = copy;
+        else rebound->first = copy;
+        rebound->last = copy;
+    }
+    return rebound;
+}
+
+static NameScope* direct_bind_scope(DirectBindContext* bind,
+        NameScope* source) {
+    if (!source) return NULL;
+    return direct_bind_clone_scope(bind, source);
+}
+
+static NameEntry* direct_bind_entry(DirectBindContext* bind,
+        NameEntry* source) {
+    return source ? direct_bind_clone_entry(bind, source) : NULL;
+}
+
+static bool direct_bind_rewrite_entry_link(const void* item, void* opaque) {
+    DirectBindContext* bind = (DirectBindContext*)opaque;
+    const DirectBindEntryMap* map = (const DirectBindEntryMap*)item;
+    NameEntry* entry = map ? map->rebound : NULL;
+    if (!entry) return true;
+    entry->view_base = direct_bind_entry(bind, entry->view_base);
+    entry->annex_b_outer_binding = direct_bind_entry(bind,
+        entry->annex_b_outer_binding);
+    return !bind->failed;
+}
+
+static void direct_bind_rewrite_entry_links(DirectBindContext* bind) {
+    if (bind && bind->entries) hashmap_scan(bind->entries,
+        direct_bind_rewrite_entry_link, bind);
+}
+
+static bool direct_bind_mark_visited(DirectBindContext* bind, AstNode* node) {
+    if (!bind || !node) return false;
+    DirectBindNodeMap item = {.node = node};
+    if (hashmap_get(bind->visited, &item)) return false;
+    hashmap_set(bind->visited, &item);
+    if (hashmap_oom(bind->visited)) {
+        bind->failed = true;
+        return false;
+    }
+    return true;
+}
+
+static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node);
+
+static void direct_bind_rewrite_child(AstNode* child, AstNode* parent,
+        void* opaque) {
+    (void)parent;
+    direct_bind_rewrite_node((DirectBindContext*)opaque, child);
+}
+
+static void direct_bind_rewrite_function_captures(DirectBindContext* bind,
+        AstFuncNode* function) {
+    if (!function) return;
+    function->entry = direct_bind_entry(bind, function->entry);
+    if (function->analysis) function->analysis->decl_entry =
+        direct_bind_entry(bind, function->analysis->decl_entry);
+    for (FnCapture* capture = function->captures; capture;
+            capture = capture->next) {
+        capture->entry = direct_bind_entry(bind, capture->entry);
+    }
+}
+
+static void direct_bind_rewrite_object_shape(DirectBindContext* bind,
+        AstObjectTypeNode* object) {
+    if (!object || !object->type || object->type->type_id != LMD_TYPE_TYPE) return;
+    Type* value = ((TypeType*)object->type)->type;
+    if (!value || (value->type_id != LMD_TYPE_MAP &&
+            value->type_id != LMD_TYPE_ELEMENT)) return;
+    TypeObject* object_type = (TypeObject*)value;
+    for (ShapeEntry* field = object_type->shape; field; field = field->next) {
+        field->binding = direct_bind_entry(bind, field->binding);
+    }
+}
+
+static void direct_bind_rewrite_extension_children(DirectBindContext* bind,
+        AstNode* node) {
+    switch (node->node_type) {
+    case AST_NODE_LIST:
+        ((AstListNode*)node)->vars = direct_bind_scope(bind,
+            ((AstListNode*)node)->vars);
+        // Parenthesized let groups retain declarations beside their result
+        // item; the shared child visitor only sees the latter.
+        direct_bind_rewrite_node(bind, ((AstListNode*)node)->declare);
+        direct_bind_rewrite_node(bind, ((AstArrayNode*)node)->item);
+        break;
+    case AST_NODE_ELEMENT:
+        direct_bind_rewrite_node(bind, ((AstMapNode*)node)->item);
+        if (node->node_type == AST_NODE_ELEMENT) {
+            direct_bind_rewrite_node(bind, ((AstElementNode*)node)->content);
+        }
+        break;
+    case AST_NODE_CONTENT:
+        // The shared child walker owns CONTENT's items; retain the scope edge.
+        ((AstListNode*)node)->vars = direct_bind_scope(bind,
+            ((AstListNode*)node)->vars);
+        direct_bind_rewrite_node(bind, ((AstListNode*)node)->declare);
+        break;
+    case AST_NODE_FOR_EXPR: {
+        AstForNode* loop = (AstForNode*)node;
+        loop->vars = direct_bind_scope(bind, loop->vars);
+        direct_bind_rewrite_node(bind, loop->loop);
+        direct_bind_rewrite_node(bind, loop->let_clause);
+        direct_bind_rewrite_node(bind, loop->where);
+        if (loop->group) {
+            loop->group->entry = direct_bind_entry(bind, loop->group->entry);
+            direct_bind_rewrite_node(bind, (AstNode*)loop->group->keys);
+        }
+        direct_bind_rewrite_node(bind, loop->order);
+        direct_bind_rewrite_node(bind, loop->limit);
+        direct_bind_rewrite_node(bind, loop->offset);
+        direct_bind_rewrite_node(bind, loop->then);
+        break;
+    }
+    case AST_NODE_FOR_CLAUSE: {
+        AstLoopNode* loop = (AstLoopNode*)node;
+        loop->entry = direct_bind_entry(bind, loop->entry);
+        loop->index_entry = direct_bind_entry(bind, loop->index_entry);
+        direct_bind_rewrite_node(bind, loop->as);
+        direct_bind_rewrite_node(bind, loop->on);
+        direct_bind_rewrite_node(bind, (AstNode*)loop->join_keys);
+        break;
+    }
+    case AST_NODE_GROUP_KEY:
+        direct_bind_rewrite_node(bind, ((AstGroupKey*)node)->expr);
+        break;
+    case AST_NODE_JOIN_KEY: {
+        AstJoinKey* key = (AstJoinKey*)node;
+        direct_bind_rewrite_node(bind, key->prior_expr);
+        direct_bind_rewrite_node(bind, key->new_expr);
+        break;
+    }
+    case AST_NODE_ORDER_SPEC:
+        direct_bind_rewrite_node(bind, ((AstOrderSpec*)node)->expr);
+        break;
+    case AST_NODE_VIEW: {
+        AstViewNode* view = (AstViewNode*)node;
+        view->vars = direct_bind_scope(bind, view->vars);
+        direct_bind_rewrite_node(bind, view->pattern);
+        direct_bind_rewrite_node(bind, (AstNode*)view->param);
+        direct_bind_rewrite_node(bind, view->body);
+        for (AstStateEntry* state = view->state; state; state = state->next_state) {
+            state->entry = direct_bind_entry(bind, state->entry);
+            direct_bind_rewrite_node(bind, state->value);
+        }
+        for (AstEventHandler* handler = view->handler; handler;
+                handler = handler->next_handler) {
+            direct_bind_rewrite_node(bind, (AstNode*)handler);
+        }
+        break;
+    }
+    case AST_NODE_EVENT_HANDLER: {
+        AstEventHandler* handler = (AstEventHandler*)node;
+        handler->vars = direct_bind_scope(bind, handler->vars);
+        direct_bind_rewrite_node(bind, (AstNode*)handler->param);
+        direct_bind_rewrite_node(bind, handler->body);
+        break;
+    }
+    case AST_NODE_OBJECT_TYPE: {
+        AstObjectTypeNode* object = (AstObjectTypeNode*)node;
+        object->entry = direct_bind_entry(bind, object->entry);
+        direct_bind_rewrite_object_shape(bind, object);
+        direct_bind_rewrite_node(bind, object->item);
+        direct_bind_rewrite_node(bind, object->base_type);
+        direct_bind_rewrite_node(bind, object->content);
+        direct_bind_rewrite_node(bind, object->methods);
+        direct_bind_rewrite_node(bind, object->constraints);
+        break;
+    }
+    case AST_NODE_OBJECT_LITERAL:
+        direct_bind_rewrite_node(bind, ((AstObjectLiteralNode*)node)->content);
+        break;
+    case AST_NODE_CONSTRAINED_TYPE: {
+        AstConstrainedTypeNode* constrained = (AstConstrainedTypeNode*)node;
+        direct_bind_rewrite_node(bind, constrained->base);
+        direct_bind_rewrite_node(bind, constrained->constraint);
+        break;
+    }
+    case AST_NODE_PATTERN_ISLAND:
+        direct_bind_rewrite_node(bind, ((AstPatternIslandNode*)node)->pattern);
+        break;
+    case AST_NODE_PATTERN_RANGE: {
+        AstPatternRangeNode* range = (AstPatternRangeNode*)node;
+        direct_bind_rewrite_node(bind, range->start);
+        direct_bind_rewrite_node(bind, range->end);
+        break;
+    }
+    case AST_NODE_PATTERN_SEQ:
+        direct_bind_rewrite_node(bind, ((AstPatternSeqNode*)node)->first);
+        break;
+    case AST_NODE_PATH_INDEX_EXPR: {
+        AstPathIndexNode* index = (AstPathIndexNode*)node;
+        direct_bind_rewrite_node(bind, index->base_path);
+        direct_bind_rewrite_node(bind, index->segment_expr);
+        break;
+    }
+    case AST_NODE_NAVIGATION_EXPR:
+        direct_bind_rewrite_node(bind, ((AstNavigationNode*)node)->object);
+        break;
+    case AST_NODE_QUERY_EXPR: {
+        AstQueryNode* query = (AstQueryNode*)node;
+        direct_bind_rewrite_node(bind, query->object);
+        direct_bind_rewrite_node(bind, query->query);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node) {
+    if (!node || !bind || bind->failed || !direct_bind_mark_visited(bind, node)) return;
+    switch (node->node_type) {
+    case AST_SCRIPT:
+        ((AstScript*)node)->global_vars = direct_bind_scope(bind,
+            ((AstScript*)node)->global_vars);
+        break;
+    case AST_NODE_IDENT:
+        ((AstIdentNode*)node)->entry = direct_bind_entry(bind,
+            ((AstIdentNode*)node)->entry);
+        break;
+    case AST_NODE_VARIABLE_DECLARATOR: {
+        AstDeclaratorNode* declaration = (AstDeclaratorNode*)node;
+        declaration->entry = direct_bind_entry(bind, declaration->entry);
+        break;
+    }
+    case AST_NODE_PARAM:
+    case AST_NODE_KEY_EXPR:
+        ((AstNamedNode*)node)->entry = direct_bind_entry(bind,
+            ((AstNamedNode*)node)->entry);
+        break;
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_PROC:
+    case AST_NODE_METHOD: {
+        AstFuncNode* function = (AstFuncNode*)node;
+        function->vars = direct_bind_scope(bind, function->vars);
+        direct_bind_rewrite_function_captures(bind, function);
+        break;
+    }
+    case AST_NODE_LOOP:
+        ((AstLoopControlNode*)node)->vars = direct_bind_scope(bind,
+            ((AstLoopControlNode*)node)->vars);
+        break;
+    case AST_NODE_BLOCK:
+        ((AstBlockNode*)node)->vars = direct_bind_scope(bind,
+            ((AstBlockNode*)node)->vars);
+        break;
+    case AST_NODE_START:
+        ((AstStartNode*)node)->owner_scope = direct_bind_scope(bind,
+            ((AstStartNode*)node)->owner_scope);
+        break;
+    case AST_NODE_ASSIGN:
+    case AST_NODE_ASSIGN_STAM:
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM:
+    case AST_NODE_ASSIGN_PATTERN:
+        ((AstAssignNode*)node)->target_entry = direct_bind_entry(bind,
+            ((AstAssignNode*)node)->target_entry);
+        break;
+    case AST_NODE_DECOMPOSE: {
+        AstDecomposeNode* decompose = (AstDecomposeNode*)node;
+        for (int i = 0; i < decompose->name_count; i++) {
+            decompose->entries[i] = direct_bind_entry(bind,
+                decompose->entries[i]);
+        }
+        break;
+    }
+    case AST_NODE_IMPORT: {
+        AstImportNode* import_node = (AstImportNode*)node;
+        import_node->default_entry = direct_bind_entry(bind,
+            import_node->default_entry);
+        import_node->namespace_entry = direct_bind_entry(bind,
+            import_node->namespace_entry);
+        break;
+    }
+    case AST_NODE_IMPORT_SPECIFIER:
+        ((AstImportSpecifierNode*)node)->local_entry = direct_bind_entry(bind,
+            ((AstImportSpecifierNode*)node)->local_entry);
+        break;
+    case AST_NODE_EXPORT_SPECIFIER:
+        ((AstExportSpecifierNode*)node)->local_entry = direct_bind_entry(bind,
+            ((AstExportSpecifierNode*)node)->local_entry);
+        break;
+    default:
+        break;
+    }
+    ast_visit_core_children(node, direct_bind_rewrite_child, bind);
+    direct_bind_rewrite_extension_children(bind, node);
+}
+
+static bool direct_bind_collect_function(AstNode* node, void* opaque) {
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) {
+        arraylist_append((ArrayList*)opaque, node);
+    }
+    return true;
+}
+
+bool lambda_ast_rebind_direct_scope_graph(Transpiler* tp, AstScript* script) {
+    if (!tp || !script || !script->global_vars) return false;
+    DirectBindContext bind = {};
+    if (!direct_bind_init(&bind, tp)) return false;
+    direct_bind_rewrite_node(&bind, (AstNode*)script);
+    if (bind.failed || !script->global_vars) {
+        direct_bind_destroy(&bind);
+        return false;
+    }
+    direct_bind_rewrite_entry_links(&bind);
+    // Captures name declaration identities, so recompute them only after all
+    // identifier and declaration edges point at the rebuilt graph. Process
+    // inner functions first: an outer closure's transitive capture proof reads
+    // its completed nested closure facts.
+    ArrayList* functions = arraylist_new(8);
+    if (!functions) {
+        direct_bind_destroy(&bind);
+        return false;
+    }
+    walk_lambda_ast((AstNode*)script, direct_bind_collect_function, functions, true);
+    for (int i = functions->length - 1; i >= 0; i--) {
+        AstFuncNode* function = (AstFuncNode*)functions->data[i];
+        analyze_captures(tp, function, find_global_scope(function->vars));
+    }
+    arraylist_free(functions);
+    if (bind.failed) {
+        direct_bind_destroy(&bind);
+        return false;
+    }
+    tp->current_scope = script->global_vars;
+    direct_bind_destroy(&bind);
+    return true;
+}
+
 static bool shift_source_span(AstNode* node, void* data) {
     uint32_t offset = *(uint32_t*)data;
     node->source_span.start_byte += offset;
@@ -6923,7 +7402,28 @@ struct LambdaDirectAstSink {
     int object_byte_offset;
     AstObjectTypeNode* completed_object;
     AstDeclaratorNode* pending_type_alias;
+    HashMap* append_tails;
 };
+
+typedef struct DirectAppendTail {
+    AstNode* head;
+    AstNode* tail;
+} DirectAppendTail;
+
+static uint64_t direct_append_tail_hash(const void* item, uint64_t seed0,
+        uint64_t seed1) {
+    const DirectAppendTail* entry = (const DirectAppendTail*)item;
+    return hashmap_xxhash3(&entry->head, sizeof(entry->head), seed0, seed1);
+}
+
+static int direct_append_tail_compare(const void* a, const void* b,
+        void* udata) {
+    (void)udata;
+    const DirectAppendTail* left = (const DirectAppendTail*)a;
+    const DirectAppendTail* right = (const DirectAppendTail*)b;
+    return left->head == right->head ? 0 :
+        (uintptr_t)left->head < (uintptr_t)right->head ? -1 : 1;
+}
 
 static LambdaParseValue direct_ast_value(AstNode* node) {
     return (LambdaParseValue)(uintptr_t)node;
@@ -6931,6 +7431,68 @@ static LambdaParseValue direct_ast_value(AstNode* node) {
 
 static AstNode* direct_ast_node(LambdaParseValue value) {
     return (AstNode*)(uintptr_t)value;
+}
+
+struct LambdaReductionRecord {
+    LambdaParseReduction reduction;
+    LambdaParseValue* children;
+    LambdaToken* name_tokens;
+};
+
+struct LambdaReductionTape {
+    LambdaReductionRecord* records;
+    uint32_t count;
+    uint32_t capacity;
+    bool failed;
+};
+
+static LambdaParseValue direct_tape_reduce(void* context,
+        const LambdaParseReduction* reduction) {
+    LambdaReductionTape* tape = (LambdaReductionTape*)context;
+    if (!tape || !reduction || tape->failed) return 0;
+    if (tape->count == tape->capacity) {
+        uint32_t capacity = tape->capacity ? tape->capacity * 2 : 256;
+        LambdaReductionRecord* records = (LambdaReductionRecord*)mem_realloc(
+            tape->records, (size_t)capacity * sizeof(LambdaReductionRecord),
+            MEM_CAT_TEMP);
+        if (!records) {
+            tape->failed = true;
+            return 0;
+        }
+        tape->records = records;
+        tape->capacity = capacity;
+    }
+    LambdaReductionRecord* record = &tape->records[tape->count];
+    memset(record, 0, sizeof(*record));
+    record->reduction = *reduction;
+    if (reduction->child_count) {
+        record->children = (LambdaParseValue*)mem_alloc(
+            (size_t)reduction->child_count * sizeof(LambdaParseValue), MEM_CAT_TEMP);
+        if (!record->children) {
+            tape->failed = true;
+            return 0;
+        }
+        memcpy(record->children, reduction->children,
+            (size_t)reduction->child_count * sizeof(LambdaParseValue));
+        record->reduction.children = record->children;
+    }
+    if (reduction->name_count) {
+        record->name_tokens = (LambdaToken*)mem_alloc(
+            (size_t)reduction->name_count * sizeof(LambdaToken), MEM_CAT_TEMP);
+        if (!record->name_tokens) {
+            mem_free(record->children);
+            record->children = NULL;
+            tape->failed = true;
+            return 0;
+        }
+        memcpy(record->name_tokens, reduction->name_tokens,
+            (size_t)reduction->name_count * sizeof(LambdaToken));
+        record->reduction.name_tokens = record->name_tokens;
+    }
+    tape->count++;
+    // Parser values are stable one-based tape IDs; zero remains the grammar's
+    // no-value sentinel and cannot be mistaken for the first reduction.
+    return tape->count;
 }
 
 static StrView direct_token_text(Transpiler* tp, LambdaToken token) {
@@ -7297,6 +7859,39 @@ static AstNode* direct_append(AstNode* first, AstNode* item) {
     return first;
 }
 
+// The grammar's left-recursive list production keeps the same head through
+// every append. Cache that one stable builder list; other callers can detach
+// and reparent their children, so they deliberately retain the simple walk.
+static AstNode* direct_append_reduction_list(LambdaDirectAstSink* sink,
+        AstNode* first, AstNode* item) {
+    if (!item) return first;
+    item->next = NULL;
+    if (!first) return item;
+    if (!sink->append_tails) {
+        sink->append_tails = hashmap_new(sizeof(DirectAppendTail), 128, 0, 0,
+            direct_append_tail_hash, direct_append_tail_compare, NULL, NULL);
+        if (!sink->append_tails) {
+            sink->failed = true;
+            return first;
+        }
+    }
+    DirectAppendTail key = {.head = first};
+    const DirectAppendTail* cached = (const DirectAppendTail*)hashmap_get(
+        sink->append_tails, &key);
+    AstNode* tail = cached ? cached->tail : NULL;
+    // The cache may be absent on the first left-recursive reduction. A tail
+    // that was extended outside this production is repaired by one walk.
+    if (!tail || tail->next) {
+        tail = first;
+        while (tail->next) tail = tail->next;
+    }
+    tail->next = item;
+    DirectAppendTail updated = {.head = first, .tail = item};
+    hashmap_set(sink->append_tails, &updated);
+    if (hashmap_oom(sink->append_tails)) sink->failed = true;
+    return first;
+}
+
 static AstViewNode* direct_active_view(LambdaDirectAstSink* sink) {
     return sink->view_depth ? sink->view_nodes[sink->view_depth - 1] : NULL;
 }
@@ -7445,16 +8040,20 @@ static AstNode* direct_list_node(Transpiler* tp, SourceSpan span,
     return (AstNode*)list;
 }
 
-static AstNode* direct_content_node(Transpiler* tp, SourceSpan span,
-        AstNode* items) {
+static AstNode* direct_content_node(LambdaDirectAstSink* sink,
+        SourceSpan span, AstNode* items) {
+    Transpiler* tp = sink->tp;
     AstListNode* content = (AstListNode*)alloc_ast_node_from_span(tp,
         AST_NODE_CONTENT, span, sizeof(AstListNode));
     AstNode* filtered = NULL;
+    AstNode* filtered_tail = NULL;
     for (AstNode* item = items; item;) {
         AstNode* next = item->next;
         item->next = NULL;
         if (item->node_type != AST_NODE_NULL) {
-            filtered = direct_append(filtered, item);
+            if (filtered_tail) filtered_tail->next = item;
+            else filtered = item;
+            filtered_tail = item;
         }
         item = next;
     }
@@ -9864,11 +10463,12 @@ static LambdaParseValue direct_ast_reduce(void* context,
         }
         AstNode* item = reduction->child_count > 1
             ? direct_ast_node(reduction->children[1]) : child0;
-        if (reduction->child_count > 1) return direct_ast_value(direct_append(child0, item));
+        if (reduction->child_count > 1) return direct_ast_value(
+            direct_append_reduction_list(sink, child0, item));
         return direct_ast_value(item);
     }
     case LAMBDA_REDUCE_CONTENT: {
-        AstNode* content = direct_content_node(tp, reduction->span, child0);
+        AstNode* content = direct_content_node(sink, reduction->span, child0);
         if (content && sink->branch_scope_depth) {
             ((AstListNode*)content)->vars = sink->branch_scopes[
                 sink->branch_scope_depth - 1];
@@ -10523,7 +11123,9 @@ static LambdaParseValue direct_ast_reduce(void* context,
         // contract here so module registration sees every dependency before it
         // scans the single content list for public declarations.
         AstNode* imports = NULL;
+        AstNode* imports_tail = NULL;
         AstNode* content_items = NULL;
+        AstNode* content_tail = NULL;
         AstListNode* content = child0 && child0->node_type == AST_NODE_CONTENT
             ? (AstListNode*)child0 : NULL;
         if (content) {
@@ -10531,9 +11133,13 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 AstNode* next = item->next;
                 item->next = NULL;
                 if (item->node_type == AST_NODE_IMPORT) {
-                    imports = direct_append(imports, item);
+                    if (imports_tail) imports_tail->next = item;
+                    else imports = item;
+                    imports_tail = item;
                 } else {
-                    content_items = direct_append(content_items, item);
+                    if (content_tail) content_tail->next = item;
+                    else content_items = item;
+                    content_tail = item;
                 }
                 item = next;
             }
@@ -10574,10 +11180,41 @@ static LambdaParseValue direct_ast_reduce(void* context,
     return 0;
 }
 
-LambdaParseStatus lambda_rd_reduce_ast(Transpiler* tp, const char* source,
-        size_t length, AstScript** root_out, LambdaParseError* error) {
+void lambda_rd_destroy_reductions(LambdaReductionTape* tape) {
+    if (!tape) return;
+    for (uint32_t i = 0; i < tape->count; i++) {
+        mem_free(tape->records[i].children);
+        mem_free(tape->records[i].name_tokens);
+    }
+    mem_free(tape->records);
+    mem_free(tape);
+}
+
+LambdaParseStatus lambda_rd_parse_reductions(const char* source, size_t length,
+        LambdaReductionTape** tape_out, LambdaParseError* error) {
+    if (tape_out) *tape_out = NULL;
+    if (!source) return LAMBDA_PARSE_ERROR;
+    LambdaReductionTape* tape = (LambdaReductionTape*)mem_calloc(1,
+        sizeof(LambdaReductionTape), MEM_CAT_TEMP);
+    if (!tape) return LAMBDA_PARSE_ERROR;
+    LambdaParseSink sink = {direct_tape_reduce};
+    LambdaParseStatus status = lambda_rd_parse_source(source, length, &sink,
+        tape, NULL, error);
+    if (status != LAMBDA_PARSE_OK || tape->failed || !tape->count) {
+        lambda_rd_destroy_reductions(tape);
+        return status == LAMBDA_PARSE_OK ? LAMBDA_PARSE_ERROR : status;
+    }
+    if (tape_out) *tape_out = tape;
+    else lambda_rd_destroy_reductions(tape);
+    return LAMBDA_PARSE_OK;
+}
+
+LambdaParseStatus lambda_rd_build_reductions(Transpiler* tp, const char* source,
+        size_t length, const LambdaReductionTape* tape, AstScript** root_out,
+        LambdaParseError* error) {
     if (root_out) *root_out = NULL;
-    if (!tp || !source) return LAMBDA_PARSE_ERROR;
+    if (!tp || !source || !tape || !tape->count) return LAMBDA_PARSE_ERROR;
+    tp->build_allocation_failed = false;
     tp->source = source;
     if (!tp->pool) {
         Input* input = Input::create(mem_pool_create(NULL, MEM_ROLE_AST, "direct-parser.pool"), nullptr);
@@ -10601,18 +11238,59 @@ LambdaParseStatus lambda_rd_reduce_ast(Transpiler* tp, const char* source,
     // for a same-spelled system function (for example `gamma`).
     direct_predeclare_top_level_functions(tp, source, length);
 
+    LambdaParseValue* values = (LambdaParseValue*)mem_calloc(tape->count,
+        sizeof(LambdaParseValue), MEM_CAT_TEMP);
+    if (!values) return LAMBDA_PARSE_ERROR;
     LambdaDirectAstSink sink = {.tp = tp, .root = NULL, .failed = false};
-    LambdaParseSink parse_sink = {direct_ast_reduce};
-    LambdaParseStatus status = lambda_rd_parse_source(source, length, &parse_sink,
-        &sink, NULL, error);
-    if (status != LAMBDA_PARSE_OK || sink.failed || !sink.root) {
-        log_error("direct parser failure status=%d sink=%d at=%u message=%s",
-            (int)status, sink.failed ? 1 : 0,
+    for (uint32_t i = 0; i < tape->count && !sink.failed; i++) {
+        const LambdaReductionRecord* record = &tape->records[i];
+        LambdaParseReduction reduction = record->reduction;
+        // The parser's largest committed production has one Pratt left child
+        // plus 64 arguments. Replaying one record needs those resolved AST
+        // values only for this callback, so a fixed local avoids an alloc/free
+        // pair for every reduction in the physical build phase.
+        LambdaParseValue children[65];
+        if (reduction.child_count) {
+            if (reduction.child_count > sizeof(children) / sizeof(children[0])) {
+                log_error("direct builder child count %u exceeds replay limit",
+                    (unsigned)reduction.child_count);
+                sink.failed = true;
+                break;
+            }
+            for (uint32_t child = 0; child < reduction.child_count; child++) {
+                LambdaParseValue id = record->children[child];
+                if (id > i) {
+                    log_error("direct builder received forward reduction child %u", (unsigned)id);
+                    sink.failed = true;
+                    break;
+                }
+                children[child] = id ? values[id - 1] : 0;
+            }
+            reduction.children = children;
+        }
+        if (!sink.failed) values[i] = direct_ast_reduce(&sink, &reduction);
+        if (tp->build_allocation_failed) sink.failed = true;
+    }
+    mem_free(values);
+    hashmap_free(sink.append_tails);
+    if (sink.failed || !sink.root) {
+        log_error("direct AST build failure sink=%d at=%u message=%s",
+            sink.failed ? 1 : 0,
             error ? error->span.start_byte : 0,
             error && error->message ? error->message : "<none>");
         if (error && !error->message) error->message = "direct AST reduction failed";
-        return status == LAMBDA_PARSE_OK ? LAMBDA_PARSE_ERROR : status;
+        return LAMBDA_PARSE_ERROR;
     }
     if (root_out) *root_out = sink.root;
     return LAMBDA_PARSE_OK;
+}
+
+LambdaParseStatus lambda_rd_reduce_ast(Transpiler* tp, const char* source,
+        size_t length, AstScript** root_out, LambdaParseError* error) {
+    LambdaReductionTape* tape = NULL;
+    LambdaParseStatus status = lambda_rd_parse_reductions(source, length, &tape, error);
+    if (status == LAMBDA_PARSE_OK) status = lambda_rd_build_reductions(tp, source,
+        length, tape, root_out, error);
+    lambda_rd_destroy_reductions(tape);
+    return status;
 }

@@ -52,6 +52,17 @@ static void jm_install_scope_env_binding(JsMirTranspiler* mt, const char* name,
     jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
 }
 
+static MIR_reg_t jm_scope_env_lexical_this_value(JsMirTranspiler* mt,
+        JsFunctionNode* fn) {
+    // An arrow with nested closures creates a scope env after its capture env
+    // has already materialized `_js_this`. Re-seeding from the dynamic slot
+    // loses that lexical receiver because arrow invocation intentionally does
+    // not install a call-time `this`.
+    JsMirVarEntry* captured = (fn && fn->is_arrow) ? jm_find_var(mt, "_js_this") : NULL;
+    if (captured && captured->from_env) return captured->reg;
+    return jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
+}
+
 static MIR_reg_t jm_emit_module_const_or_null(JsMirTranspiler* mt,
         NameEntry* binding) {
     if (!mt->module_consts) return jm_emit_null(mt);
@@ -258,7 +269,7 @@ static void jm_initialize_resumable_scope_env(JsMirTranspiler* mt,
             svar->scope_env_slot = target_slot;
             svar->scope_env_reg = mt->scope_env_reg;
         } else if (strcmp(sname, "_js_this") == 0) {
-            val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
+            val = jm_scope_env_lexical_this_value(mt, fc->node);
             jm_install_scope_env_binding(mt, "_js_this", val, target_slot);
         } else if (strcmp(sname, "_js_new.target") == 0) {
             val = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
@@ -2549,7 +2560,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     svar->scope_env_slot = s;
                     svar->scope_env_reg = mt->scope_env_reg;
                 } else if (strcmp(sname, "_js_this") == 0) {
-                    val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
+                    val = jm_scope_env_lexical_this_value(mt, fn);
                     jm_install_scope_env_binding(mt, "_js_this", val, s);
                 } else if (strcmp(sname, "_js_new.target") == 0) {
                     // Normal functions seed shared env slots for child arrows;

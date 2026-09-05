@@ -295,10 +295,21 @@ JsClassEntry* jm_find_class_for_binding(JsMirTranspiler* mt,
     return jm_find_class_for_binding_impl(mt, binding, 0);
 }
 
-static bool jm_publish_collected_backend(JsMirTranspiler* mt,
+static bool jm_publish_collected_artifact(JsMirTranspiler* mt,
         JsFuncCollected* collected) {
-    // Parent/class collection needs this identity before backend lowering (D8.2.4).
-    if (!collected || !collected->node) return false;
+    // FunctionId is the only source-to-backend edge (D8.2.4); the post-order
+    // collection array is not a node-owned identity cache.
+    if (!mt || !collected || !collected->node ||
+            collected->function_id == AST_FUNCTION_ID_INVALID ||
+            collected->function_id >= (AstFunctionId)mt->func_capacity ||
+            !mt->func_entries_by_id) return false;
+    if (mt->func_entries_by_id[collected->function_id] &&
+            mt->func_entries_by_id[collected->function_id] != collected) {
+        log_error("js-mir: duplicate FunctionId artifact %u",
+            collected->function_id);
+        return false;
+    }
+    mt->func_entries_by_id[collected->function_id] = collected;
     if (!collected->node->analysis) collected->node->analysis =
         (FnAnalysis*)pool_calloc(mt->tp->pool, sizeof(FnAnalysis));
     if (!collected->node->analysis) {
@@ -307,7 +318,6 @@ static bool jm_publish_collected_backend(JsMirTranspiler* mt,
         return false;
     }
     memset(collected->node->analysis, 0, sizeof(FnAnalysis));
-    collected->node->analysis->js_mir_backend = collected;
     return true;
 }
 
@@ -368,7 +378,11 @@ static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
     collected->node = function;
     collected->name = jm_format_name("class_field_initializer_%d_%u",
         function_index, field->source_span.start_byte);
-    if (!jm_publish_collected_backend(mt, collected)) return NULL;
+    if (!jm_publish_collected_artifact(mt, collected)) {
+        log_error("js-mir: failed to publish synthetic FunctionId artifact");
+        mt->collection_failed = true;
+        return NULL;
+    }
     JM_JS_FACT(collected, is_class_field_initializer) = true;
     JM_JS_FACT(collected, is_strict) = true;
     mt->func_count++;
@@ -669,7 +683,11 @@ void jm_collect_indexed_functions(JsMirTranspiler* mt) {
     }
     for (int function_index = 0; function_index < mt->func_count; function_index++) {
         JsFuncCollected* function = &mt->func_entries[function_index];
-        if (!jm_publish_collected_backend(mt, function)) return;
+        if (!jm_publish_collected_artifact(mt, function)) {
+            log_error("js-mir: failed to publish FunctionId artifact");
+            mt->collection_failed = true;
+            return;
+        }
         JM_JS_FACT(function, is_strict) = jm_indexed_function_is_strict(mt,
             function->node);
     }
@@ -700,9 +718,8 @@ void jm_collect_indexed_functions(JsMirTranspiler* mt) {
 // Find collected function entry through the shared AST identity index.
 // ============================================================================
 
-JsFuncCollected* jm_find_collected_func(JsMirTranspiler*, JsFunctionNode* fn) {
-    return fn && fn->analysis
-        ? (JsFuncCollected*)fn->analysis->js_mir_backend : NULL;
+JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn) {
+    return jm_collected_func_by_id(mt, jm_function_id_for_node(mt, fn));
 }
 
 // Annex B §B.3.3.1: Check if enclosing function has a parameter whose name

@@ -463,18 +463,24 @@ struct BatchResult {
 
 inline bool parse_lambda_timing_line(const char* line, LambdaCompilerTiming* out) {
     if (!line || !out) return false;
-    unsigned long long parse_us = 0, ast_build_us = 0, mir_lower_us = 0;
+    unsigned long long parse_us = 0, ast_build_us = 0, bind_us = 0;
+    unsigned long long validate_us = 0, index_us = 0, mir_lower_us = 0;
     unsigned long long module_finalize_us = 0, link_us = 0, build_transpile_us = 0;
     int schema = 0;
     int matched = sscanf(line,
         "COMPILER_TIMING schema=%d parse_us=%llu ast_build_us=%llu "
+        "bind_us=%llu validate_us=%llu index_us=%llu "
         "mir_lower_us=%llu module_finalize_us=%llu link_us=%llu "
         "build_transpile_us=%llu",
-        &schema, &parse_us, &ast_build_us, &mir_lower_us,
+        &schema, &parse_us, &ast_build_us, &bind_us, &validate_us, &index_us,
+        &mir_lower_us,
         &module_finalize_us, &link_us, &build_transpile_us);
-    if (matched != 7 || schema != 1) return false;
+    if (matched != 10 || schema != 1) return false;
     out->parse_us = parse_us;
     out->ast_build_us = ast_build_us;
+    out->bind_us = bind_us;
+    out->validate_us = validate_us;
+    out->index_us = index_us;
     out->mir_lower_us = mir_lower_us;
     out->module_finalize_us = module_finalize_us;
     out->link_us = link_us;

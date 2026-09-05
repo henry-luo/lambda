@@ -2,3 +2,8 @@ t1:SyntaxError,SyntaxError,SyntaxError
 t2:gim
 t3:SyntaxError,SyntaxError,ok
 t4:true,false
+t5:true,2
+t6:true,2
+t7:false,0
+t8:true,false
+t9:true

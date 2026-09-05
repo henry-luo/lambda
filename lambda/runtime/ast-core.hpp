@@ -1340,9 +1340,6 @@ typedef struct FnAnalysis {
     ScalarReturnClass js_boxed_return_scalar_class;
     int js_formal_length;
     struct hashmap* js_cached_scope_slot_collisions;
-    // The active JS MIR compilation's backend artifact; reset with all other
-    // profile facts before the next compilation of this AST.
-    void* js_mir_backend;
     int await_point_count;
     int async_fault_handler_count;
     const char* may_await_cause;

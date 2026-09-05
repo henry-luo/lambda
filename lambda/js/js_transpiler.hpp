@@ -76,6 +76,9 @@ struct JsScript : Script {
     // A Test262 source admitted by the runner's conservative native-harness
     // gate receives realm-local native assert helpers before evaluation.
     bool test262_native_harness;
+    // The AST Test262 source can link this exhaustive helper directly while
+    // retaining its ordinary writable global binding for test code.
+    bool test262_native_build_string;
     // ES declaration instantiation happens before recursive dependency
     // evaluation so circular imports observe hoisted function exports.
     bool es_module_scope_initialized;

@@ -326,7 +326,7 @@ bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
 void jm_emit_throw_completion(JsMirTranspiler* mt, MIR_reg_t value);
 void jm_emit_generator_throw_completion(JsMirTranspiler* mt, MIR_reg_t value);
 void jm_emit_error_lane_exit(JsMirTranspiler* mt);
-MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MIR_reg_t value);
+MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MirValue value);
 MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r);
 struct hashmap* jm_var_scope_at(JsMirTranspiler* mt, int depth);
 bool jm_var_scope_set(JsMirTranspiler* mt, int depth, struct hashmap* scope);
@@ -616,7 +616,11 @@ void jm_scope_env_mark_and_writeback_entry(JsMirTranspiler* mt, const char* name
     NameEntry* binding, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY);
 void jm_scope_env_mark_and_writeback_binding(JsMirTranspiler* mt, const char* name,
     JsAstNode* binding_node, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY);
-MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MIR_reg_t val, JsAstNode* expr);
+static inline MirValue jm_item_value(MIR_reg_t reg,
+        TypeId semantic_type = LMD_TYPE_ANY) {
+    return em_value_for_rep(reg, semantic_type, VALUE_REP_ITEM);
+}
+MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MirValue value);
 MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                          TypeId target_type);
 MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,

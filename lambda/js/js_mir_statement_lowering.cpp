@@ -514,7 +514,8 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         id->name->chars, id->name->len);
                     MIR_reg_t has_with_item = jm_callr_1(mt, "js_capture_with_binding", MIR_T_I64, key_reg);
                     jm_emit_error_lane_propagate_check(mt);
-                    MIR_reg_t has_with = jm_emit_is_truthy(mt, has_with_item, NULL);
+                    MIR_reg_t has_with = jm_emit_is_truthy(mt,
+                        jm_item_value(has_with_item));
                     MIR_reg_t with_base = jm_callr_1(mt, "js_get_last_with_binding_base_or_undefined", MIR_T_I64, key_reg);
                     NameEntry* saved_assign_binding = mt->assign_target_binding;
                     mt->assign_target_binding = id->entry;
@@ -2157,7 +2158,8 @@ MIR_reg_t jm_emit_await_value_reg(JsMirTranspiler* mt, MIR_reg_t promise_val,
 
         MIR_reg_t must_suspend_item = jm_callr_1(mt, "js_async_must_suspend", MIR_T_I64, promise_val);
         jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
-        MIR_reg_t must_suspend = jm_emit_is_truthy(mt, must_suspend_item, NULL);
+        MIR_reg_t must_suspend = jm_emit_is_truthy(mt,
+            jm_item_value(must_suspend_item));
 
         jm_emit_branch(mt, MIR_BT, suspend_label, must_suspend);
 
@@ -2730,7 +2732,8 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         if (!jm_emit_delayed_return_completion(mt, forit_return_val,
                 JS_MIR_COMPLETION_RETURN_THROUGH_CLEANUP)) {
             // No outer try — emit actual return
-            MIR_reg_t native_ret = jm_native_return_reg(mt, forit_return_val);
+            MIR_reg_t native_ret = jm_native_return_reg(mt,
+                jm_item_value(forit_return_val));
             jm_emit_ret(mt, native_ret);
         }
         jm_emit_label_with_state(mt, l_no_delayed_ret, JS_ERROR_LANE_CLEAN);
@@ -2916,7 +2919,8 @@ static void jm_transpile_using_tail(JsMirTranspiler* mt, JsAstNode* tail,
     jm_emit_label(mt, end_label);
     MIR_label_t no_ret_label = jm_new_label(mt);
     jm_emit_branch(mt, MIR_BF, no_ret_label, has_return_reg);
-    MIR_reg_t native_ret = jm_native_return_reg(mt, return_val_reg);
+    MIR_reg_t native_ret = jm_native_return_reg(mt,
+        jm_item_value(return_val_reg));
     jm_emit_ret(mt, native_ret);
     jm_emit_label(mt, no_ret_label);
 
@@ -3623,7 +3627,8 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
                 jm_emit_ret(mt, done_result);
             } else {
-                MIR_reg_t native_ret = jm_native_return_reg(mt, return_val_reg);
+                MIR_reg_t native_ret = jm_native_return_reg(mt,
+                    jm_item_value(return_val_reg));
                 jm_emit_ret(mt, native_ret);
             }
             jm_emit_label_with_state(mt, no_ret_label, end_label_error_lane_state);

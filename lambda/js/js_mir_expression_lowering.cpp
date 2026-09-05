@@ -77,7 +77,8 @@ static MIR_reg_t jm_emit_with_writeback(JsMirTranspiler* mt, MIR_reg_t with_key,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs),
         MIR_T_I64, MIR_new_int_op(mt->ctx, strict_put ? 1 : 0));
     jm_emit_error_lane_propagate_check(mt);
-    MIR_reg_t wrote_with = jm_emit_is_truthy(mt, wrote_with_item, NULL);
+    MIR_reg_t wrote_with = jm_emit_is_truthy(mt,
+        jm_item_value(wrote_with_item));
     MIR_label_t local_write_label = jm_new_label(mt);
     MIR_label_t done_label = jm_new_label(mt);
     MIR_reg_t result = jm_new_reg(mt, result_name, MIR_T_I64);
@@ -142,7 +143,7 @@ static MIR_reg_t jm_emit_logical_assignment(JsMirTranspiler* mt,
         cond = jm_callr_1(mt, "js_is_nullish", MIR_T_I64, old_val);
         jm_emit_branch(mt, MIR_BT, l_assign, cond);
     } else {
-        cond = jm_emit_is_truthy(mt, old_val, NULL);
+        cond = jm_emit_is_truthy(mt, jm_item_value(old_val));
         jm_emit(mt, MIR_new_insn(mt->ctx,
             asgn->op == JS_OP_AND_ASSIGN ? MIR_BT : MIR_BF,
             MIR_new_label_op(mt->ctx, l_assign),
@@ -2418,7 +2419,8 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
             cond = jm_callr_1(mt, "js_is_nullish", MIR_T_I64, left_val);
         } else {
             // || and &&: check truthiness
-            cond = jm_emit_is_truthy(mt, left_val, bin->left);
+            cond = jm_emit_is_truthy(mt, jm_item_value(left_val,
+                jm_get_effective_type(mt, bin->left)));
         }
 
         JsErrorLaneTrack branch_exc = jm_error_lane_state(mt);
@@ -2730,7 +2732,8 @@ static bool jm_emit_unary_identifier_writeback(JsMirTranspiler* mt, JsIdentifier
             MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
             MIR_T_I64, MIR_new_int_op(mt->ctx, strict_put ? 1 : 0));
         jm_emit_error_lane_propagate_check(mt);
-        MIR_reg_t wrote_with = jm_emit_is_truthy(mt, wrote_with_item, NULL);
+        MIR_reg_t wrote_with = jm_emit_is_truthy(mt,
+            jm_item_value(wrote_with_item));
         MIR_label_t local_write_label = jm_new_label(mt);
         *with_done_label = jm_new_label(mt);
         jm_emit_branch(mt, MIR_BF, local_write_label, wrote_with);
@@ -4264,7 +4267,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                 // if nullish → evaluate RHS and assign
                 jm_emit_branch(mt, MIR_BT, l_assign, cond);
             } else {
-                cond = jm_emit_is_truthy(mt, var->reg, NULL);
+                cond = jm_emit_is_truthy(mt, jm_item_value(var->reg));
                 if (asgn->op == JS_OP_AND_ASSIGN) {
                     // &&= : if truthy → evaluate RHS and assign; if falsy → short-circuit
                     jm_emit_branch(mt, MIR_BT, l_assign, cond);
@@ -4384,7 +4387,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                 cond = jm_callr_1(mt, "js_is_nullish", MIR_T_I64, cur_val);
                 jm_emit_branch(mt, MIR_BT, l_assign, cond);
             } else {
-                cond = jm_emit_is_truthy(mt, cur_val, NULL);
+                cond = jm_emit_is_truthy(mt, jm_item_value(cur_val));
                 if (asgn->op == JS_OP_AND_ASSIGN) {
                     jm_emit_branch(mt, MIR_BT, l_assign, cond);
                 } else {
@@ -7345,7 +7348,7 @@ static MIR_reg_t jm_profile_emit_condition(void* owner, MirValue value) {
     JsMirTranspiler* mt = (JsMirTranspiler*)owner;
     value = em_apply_value_demand(&mt->em, value,
         MIR_VALUE_REQUIRED_REP, VALUE_REP_ITEM);
-    return jm_emit_is_truthy(mt, value.reg, (JsAstNode*)value.provenance_node);
+    return jm_emit_is_truthy(mt, value);
 }
 
 typedef struct JsSequenceLowering {
@@ -7398,7 +7401,8 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
             if (bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_STRICT_NE) {
                 MIR_reg_t boxed;
                 if (jm_try_emit_uri_compare_fast_path(mt, bin->left, bin->right, &boxed)) {
-                    MIR_reg_t raw = jm_emit_is_truthy(mt, boxed, expr);
+                    MIR_reg_t raw = jm_emit_is_truthy(mt,
+                        jm_item_value(boxed, LMD_TYPE_BOOL));
                     if (bin->op == JS_OP_STRICT_NE) {
                         MIR_reg_t inv = jm_new_reg(mt, "uri_ne", MIR_T_I64);
                         jm_emit_reg_binary_op(mt, MIR_XOR, inv, raw, MIR_new_int_op(mt->ctx, 1));
