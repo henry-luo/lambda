@@ -1,11 +1,11 @@
 # Lambda DOM Default Actions — the UA behavior ledger
 
-> **Status**: **normative for default-action placement and status** (2026-09-04). The architecture is decided (ES5, ES10, ES15, ES20, ES30, ES31); what this document adds is the complete per-event ledger and the gap inventory that drives it.
+> **Status**: **normative for default-action placement and status** (2026-09-05). The architecture is decided (ES5, ES10, ES15, ES20, ES30, ES31); what this document adds is the complete per-event ledger and the gap inventory that drives it.
 > **Role**: this is the **single source of truth for what Radiant does after an event is dispatched** — which UA default actions exist, where each half lives, and which are still missing. Every other doc that names a default action points here rather than restating it. Absorbs and replaces Appendix B of `vibe/Lambda_Design_DOM_State.md` (deleted there 2026-08-28).
 > **Scope**: default actions and activation behavior for HTML documents under Radiant — the pointer, keyboard, editing, focus, clipboard, drag, composition, form, and navigation families. Event *dispatch* mechanism is in scope only where a missing dispatch is what makes a default action unreachable.
 > **Companion docs**: `vibe/Lambda_Design_DOM_State.md` (the behavior-template architecture and the ES/ESO ledgers this doc extends), `vibe/Lambda_Design_DOM_Pkg.md` (layering and placement policy), `doc/dev/radiant/RAD_15_Events_Input.md`, `RAD_17_Interaction_State.md`, `RAD_19_Form_Controls.md`.
 > **Formal anchors**: S12.1.3 (reactive templates: body = pure `fn`, mutation only in `on` handlers), S12.2.2 (element mutation), S9.1.4 (state lives in view state), S7.6/S7.10 (error discharge and the sys-func contract), D4.5.1v3 (the Radiant memory seam).
-> **Ledger series**: this doc extends the DOM-State area's existing `ES#` (decisions) and `ESO#` (open issues) series per `doc/Doc_Convention.md` §4 — it mints no new series. **ES30** is minted in §2.4 and **ES31** in §2.5; ESO48–ESO62 are minted below; ESO63–ESO69 (and ES22–ES29, F17–F21) are minted in `vibe/Lambda_Design_DOM_Dispatch.md`. New open issues start at **ESO70**.
+> **Ledger series**: this doc extends the DOM-State area's existing `ES#` (decisions) and `ESO#` (open issues) series per `doc/Doc_Convention.md` §4 — it mints no new series. **ES30** is minted in §2.4 and **ES31** in §2.5; ESO48–ESO62 are minted below; ESO63–ESO69 (and ES22–ES29, F17–F21) are minted in `vibe/Lambda_Design_DOM_Dispatch.md`. ESO70–ESO71 are minted in §6; **ES30's value-operation and pointer-capture extension is §2.6 (F20)**, which mints ESO72–ESO74, and **§2.7 is the selectedness consolidation (F21)**, which mints ESO75. New open issues start at **ESO76**.
 
 ---
 
@@ -39,9 +39,9 @@ Per ES5 and the DOM_Pkg placement rules, the seam runs between *resolving* and *
 
 | Half | Home | Examples |
 | --- | --- | --- |
-| **Mechanism** — hit-testing, geometry, storage, buffers, paint, association lookup | **native (N)** | transform-aware hit test; `for="id"` label association; dropdown overlay geometry; the UTF-8 splice; caret geometry; clipboard read; the undo ring's storage |
-| **Policy** — which key means what, what a click does to a control, what an `inputType` does to the document | **dom package (L)** | `form.ls` activation, `caret.ls` key→operation, `keymap.ls` key→intent, `scroll.ls` key→scroll operation, `editing.ls` / `dom_edit.ls` appliers, `commands.ls` command set, `menu.ls`, `ime.ls`, `validate.ls`, `aria.ls` |
-| **Waist primitives** — the named, ≤4-argument operations policy drives mechanism through | **`radiant` module (M)** | `set_state`, `dispatch`, `keyboard_click`, `radio_group`, `replace_range`, `dom_replace_range`, `dom_wrap_range`, `caret_operation`, `scroll_operation` |
+| **Mechanism** — hit-testing, geometry, storage, buffers, paint, association lookup | **native (N)** | transform-aware hit test; `for="id"` label association; dropdown overlay geometry; the UTF-8 splice; caret geometry; clipboard read; the undo ring's storage; option selectedness and the listbox rows it paints |
+| **Policy** — which key means what, what a click does to a control, what an `inputType` does to the document | **dom package (L)** | `form.ls` activation, `caret.ls` key→operation, `keymap.ls` key→intent, `scroll.ls` key→scroll operation, `stepper.ls` key→value operation, `editing.ls` / `dom_edit.ls` appliers, `commands.ls` command set, `menu.ls`, `ime.ls`, `validate.ls`, `aria.ls` |
+| **Waist primitives** — the named, ≤4-argument operations policy drives mechanism through | **`radiant` module (M)** | `set_state`, `dispatch`, `keyboard_click`, `radio_group`, `replace_range`, `dom_replace_range`, `dom_wrap_range`, `caret_operation`, `scroll_operation`, `input_operation`, `set_range_from_point`, `capture_pointer` |
 
 The recurring failure mode was a default action in a **fourth** home — the JS
 dispatch layer (`lambda/dom/dom_events.cpp`) implementing activation only for
@@ -283,7 +283,43 @@ the new transaction. `_blank` and unmatched names are correctly represented as
 `new`, but current `UiContext` has no host-owned browsing-context factory, so
 native rejects rather than silently treating either as `_self` (ESO70).
 
-### 2.6 Status vocabulary
+### 2.6 Value operations and pointer capture (F20, ES30)
+
+**Landed 2026-09-05.** The per-element activation classes that had no implementation at all — the slider, the spinner, radio-group arrow navigation, `<select>` typeahead, and listbox rows — are package policy over three new mechanism waists. Nothing here is a new ruling: it is ES30's seam applied to the value-bearing controls, exactly as `caret_operation` and `scroll_operation` applied it to the caret and the scrollport.
+
+| API | Contract |
+| --- | --- |
+| `dom.input_operation(node, operation)` | Apply a named value operation — `stepUp`, `stepDown`, `pageUp`, `pageDown`, `toMinimum`, `toMaximum` — through HTML's own value algorithm, and commit it. Native owns the step base, step resolution, min/max clamping, the value-state sanitizer, the text-control buffer, the slider's painted position, and the control-value mutation notice. It answers **false when the value did not move**, so a template does not report `input`/`change` for a thumb already at its bound. It contains no key, modifier, or element table. |
+| `dom.set_range_from_point(node, x, y)` | Commit the value a document-space point selects on a range control: the inverse of `render_range`'s thumb placement, snapped to the control's step. Geometry is mechanism (`DOM_Pkg`), so the thumb size stays a render constant instead of a number copied into Lambda. Answers false when the point resolves to the value already there. |
+| `dom.capture_pointer(node)` | Deliver the pointer stream to `node` until the button is released, as the bounded behavior-only pair `pointerdrag` / `pointerdragend`. |
+
+**Why capture rather than `mousemove`.** A template declaring a hot-path event turns behavior dispatch on for *every* document's pointer stream — precisely what the ES5 hot-path guard exists to prevent. So the package asks for capture once, on the press it already claimed, and native routes the moves to that one element. The gesture reuses the previously dead `DocState::drag_target` slot, which nothing had ever set.
+
+Two engine defects surfaced while building on the existing value store, and both are fixed rather than worked around:
+
+- **A stepped spinner did not change.** `radiant_dom_input_commit_live_value` wrote only the input value store, so a text-control input's edit buffer — the thing the renderer paints and form data serializes — kept the old text. Both `stepUp()` from JS and the new keyboard step were affected. The commit now routes a text control through `tc_set_value`, its canonical writer.
+- **A moved slider submitted its start value.** The form-data walk read the `value` *content attribute* for every non-text-control input, which is the default and not the value. It now reads the live value store, the same source `input.value` reads; the store seeds itself from that attribute, so an untouched control answers exactly as before.
+
+### 2.7 Selectedness has one owner (F21, ESO72)
+
+**Landed 2026-09-05.** `<select multiple>` was the last activation class with nowhere to put its answer, and the reason was duplication rather than absence: an option's selectedness existed in **three** places that no code kept in step.
+
+| Representation | Read by | Written by |
+| --- | --- | --- |
+| the `DomElement` selectedness bit | `option.selected`, `select.value`, `selectedOptions` | the DOM setters only |
+| `ViewState.form.selected_index` | the painter, `dom.selected_index`, the test harness | `dom.set_selected_index` only |
+| the `selected` **content attribute** | form submission, `:selected`, the selector engine | nobody — it is the *default* selection |
+
+So a committed dropdown choice moved the painted index while `option.selected` and the submitted entry kept the page's original selection, and `:selected` matched the markup forever. F21 makes the node bit the single owner: `:selected` resolves from it in all three resolvers, form submission reads it, `dom.set_selected_index` routes through the DOM setter that writes it, and `dom.set_state(option, "selected", …)` is the package's way to write one. `selectedIndex` becomes a derivation — the first selected option — recomputed after every write, including for a `multiple` select, whose "ask for a reset" algorithm deliberately does nothing.
+
+Two defects fell out of making the package write through that owner:
+
+- **A Lambda-only page crashed on selecting an option.** `_set_selectedness` kept a legacy expando copy beside the node bit, and creating that map calls `js_new_object`, which builds out of a JS realm's pool. A `.ls` page has no realm. The bit is authoritative and the expando is only a fallback read path, so the copy is now skipped when no realm is live — the same shape as ESO113, one more site.
+- **A listbox painted no selection at all.** `render_block_paint_self` suppresses children for every form control that is not a `<button>`, so the option rows layout had positioned were never drawn, and `render_select` painted the *combo box* — an arrow well plus one option's text — over the whole control regardless. `render_select_listbox_rows` now paints the rows and their highlights, and the combo chrome is skipped for a listbox.
+
+Selection policy is the package's: `form.ls` owns plain, additive (Ctrl/Cmd) and range (Shift) clicks, arrow navigation that skips disabled rows and clamps at the ends, and Ctrl/Cmd+A. The extend anchor and the active row are template state per S9.1.4 — interaction memory that no other realm needs to see.
+
+### 2.8 Status vocabulary
 
 | Mark | Meaning |
 | --- | --- |
@@ -299,7 +335,7 @@ native rejects rather than silently treating either as `_self` (ESO70).
 
 ## 3. The ledger
 
-Verified against the tree at 2026-09-04 (`event.cpp`, `lambda/package/dom/*.ls`, `lambda/dom/dom_events.cpp`). Anchors are `file:line` at that revision — treat them as pointers to the right neighborhood, not as stable addresses.
+Verified against the tree at 2026-09-05 (`event.cpp`, `lambda/package/dom/*.ls`, `lambda/dom/dom_events.cpp`). Anchors are `file:line` at that revision — treat them as pointers to the right neighborhood, not as stable addresses.
 
 ### 3.1 Input & editing
 
@@ -317,9 +353,11 @@ Verified against the tree at 2026-09-04 (`event.cpp`, `lambda/package/dom/*.ls`,
 | `keydown` | UI Events; cancelable | text input, caret movement, scrolling, activation via Space/Enter — "the key processing model" | one author cascade followed by the matching package `on keydown`; a canceled author event never reaches package default policy | 🟡 — see the four rows |
 | ↳ **`caretkey`** (default action) | — | caret movement | dispatched *with* context, so a prevented keydown suppresses it → `caret.ls`, both surfaces. Arrow / Home / End apply to both; `PageUp` / `PageDown` are package-selected for `<textarea>` and use native live-buffer line geometry | 🟡 |
 | ↳ **`keyintent`** (translation) | — | key → `inputType` | dispatched context-free, deliberately (F11) → `keymap.ls` | ✅ |
-| ↳ **open `<select>`** | — | UA handling of an open popup | ordinary `on keydown` in `form.ls` owns Up / Down / Enter / Escape after author cancellation; there is no native pre-dispatch interception or `dropdownkey` hook. **No typeahead** | 🟡 |
+| ↳ **open `<select>`** | — | UA handling of an open popup | ordinary `on keydown` in `form.ls` owns Up / Down / Enter / Escape after author cancellation; there is no native pre-dispatch interception or `dropdownkey` hook. Typeahead selects the next option starting with the typed character and cycles through the matches (F20); **one character, not an accumulated prefix** — prefix typeahead is defined by an inter-keystroke timeout and the package owns no timer (ESO74) | 🟡 |
 | ↳ **document scrolling** | — | Space / PageUp / PageDown / Home / End / arrows scroll the nearest scrollport | after an uncancelled keydown and a declined `caretkey`, `scrollkey` reaches `scroll.ls`; native resolves/clamps the nearest live scrollport, emits `scroll`, updates the viewport mirror/observers, and repaints. Textarea PageUp/PageDown remain caret movement | ✅ (ESO48 / ES30) |
 | ↳ **Space/Enter activation** | — | activate the focused element | `keyboard.ls` plus element handlers own the complete table: Enter activates buttons, submit/reset inputs, links, and selects on keydown; Space activates selects on keydown and arms checkbox/radio/button template state for keyup. Ctrl/Alt/Meta combinations decline. `dom.keyboard_click` supplies only click dispatch | ✅ (ES30; §5.4) |
+| ↳ **value step** | — | arrows and paging keys change a slider's or spinner's value | `stepper.ls` names the operation; `dom.input_operation` runs HTML's value algorithm and commits (F20, §2.6). A key the control defines is consumed even when the value is already at its bound, so it never falls through to document scrolling | ✅ |
+| ↳ **radio-group navigation** | — | arrows move the checked member and the focus within a group | `form.ls` walks a snapshot of the group, skips disabled members, wraps at both ends, and moves checkedness and focus together (F20) | ✅ |
 | ↳ **clipboard/select-all command** | — | copy, cut, paste, or select all according to target editability | the ordinary `<body>` `on keydown` calls `keymap.ls`; author cancellation suppresses it. `dom.keyboard_command` executes the named command against the live canonical surface. Static text accepts only copy/select-all; cut/paste decline. No native key/modifier branch remains | ✅ (ES30; §5.5.1) |
 | `keyup` | UI Events; cancelable | Space completes activation for applicable controls | author dispatch precedes the package handler; `form.ls` consumes only a Space armed by its own uncancelled keydown and otherwise declines | ✅ |
 | `keypress` | legacy, deprecated | — | not dispatched, deliberately; `onkeypress` is not registered | — |
@@ -328,7 +366,7 @@ Verified against the tree at 2026-09-04 (`event.cpp`, `lambda/package/dom/*.ls`,
 
 | Event | Spec, cancelable | Default action per spec | Radiant | Status |
 | --- | --- | --- | --- | --- |
-| `mousedown` | UI Events; cancelable | begin selection, focus change, drag preparation | transform-aware hit-testing native (ESO47); `selectstart` dispatched at selection begin; focus transition via the state machine. Link navigation never runs here; only an uncancelled `click` may reach package-owned activation | ✅ dispatch · 🟡 default (§5.1) |
+| `mousedown` | UI Events; cancelable | begin selection, focus change, drag preparation | transform-aware hit-testing native (ESO47); `selectstart` dispatched at selection begin; focus transition via the state machine. Link navigation never runs here; only an uncancelled `click` may reach package-owned activation. A slider claims the press through the ordinary handler and asks for pointer capture, claiming *without* preventing so the focus default still runs (F20) | ✅ dispatch · 🟡 default (§5.1) |
 | `mouseup` / `click` | UI Events; cancelable; canceling `click` cancels **activation behavior** | element-specific activation (HTML) | trusted and synthetic entries reach one package activation stage for checkbox / radio / `<select>` open-close and popover. Cancellation settles before the package write, so no cross-realm checkedness restore is needed. Label association lookup stays native (`for=` is not an ancestor walk); the dispatch is retargeted | 🟡 — per element, see §3.9 |
 | dropdown option click | no spec event — the popup overlay is not DOM | — | native geometry resolves the row; behavior-only **`optioncommit`** carries the index; `form.ls` commits and closes (F2c). One commit path shared by pointer, Enter, and the test harness | ✅ |
 | `dblclick` | UI Events; cancelable | UA convention: word selection | word/line/select-all selection stays native on the click count; the final primary click now emits `dblclick` (detail 2) to `ondblclick` / EventTarget listeners without a second selection action | ✅ |
@@ -400,14 +438,14 @@ The `click` row of §3.3, expanded. This is the table to check before claiming "
 | `input[type=checkbox]` | toggle checkedness, clear indeterminate, fire `input` + `change` | `form.ls` (F1) | ✅ |
 | `input[type=radio]` | select, clear the group, fire `input` + `change` | `form.ls` incl. the group walk (F1) | ✅ |
 | `label` | retarget activation to the labeled control | native association lookup + retargeted dispatch (F1b) | ✅ |
-| `select` | open/close the picker | `form.ls` open/close (F2) + native overlay + `optioncommit` (F2c) | ✅ |
-| `option` in a listbox (`size>1` or `multiple`) | select / extend / toggle selection | laid out and painted (`layout_form.cpp:609`) but **no event code** — `event.cpp` never reads `select_size` or `multiple` | ❌ |
+| `select` | open/close the picker | `form.ls` open/close (F2) + native overlay + `optioncommit` (F2c). A listbox has no picker: the same handler selects a row instead (F21) | ✅ |
+| `option` in a listbox (`size>1` or `multiple`) | select / extend / toggle selection | `form.ls` owns it on the `<select>`, reading `evt.target` for the row: plain click replaces, Ctrl/Cmd toggles, Shift extends from the anchor, arrows navigate and skip disabled rows, Ctrl/Cmd+A takes everything (F21, §2.7). Selectedness is the one node bit, so the painter, `option.selected`, `:selected` and submission agree | ✅ |
 | `input[type=submit]` / `input[type=image]`, `button[type=submit]` (and bare `<button>`) | submit the form owner | `form.ls` activation handlers → `submit.ls`; native click/keyboard and JS click share the package-only dispatch seam | 🟡 (POST transport open) |
 | `input[type=reset]`, `button[type=reset]` | reset the form owner | `form.ls` activation handlers → cancelable reset waist | ✅ |
-| `input[type=range]` | thumb drag; arrow / Home / End / Page keys | laid out and painted; **zero interaction**. `form.ls:130` states this explicitly — the template exists only for the ARIA value mirrors | ❌ |
+| `input[type=range]` | thumb drag; arrow / Home / End / Page keys | `stepper.ls` names the operation for every key; the press moves the thumb to the point and captures the pointer, so the drag runs off the hot path (F20, §2.6). `input` per move, `change` once at the end and only if the value moved | ✅ |
 | `input[type=file]` | open the file picker | `input_type_to_control()` falls file/color/date through to `FORM_CONTROL_TEXT` (`view.hpp:2727`) | ❌ |
 | `input[type=color]`, `date`/`time`/`datetime-local`/`month`/`week` | open the respective picker | as above | ❌ |
-| `input[type=number]` | spinner buttons; arrow-key increment by `step` | text control only | ❌ |
+| `input[type=number]` | spinner buttons; arrow-key increment by `step` | Up/Down step through `stepper.ls`; Left/Right and Home/End stay caret keys, as HTML defines them for a spinner. **The spinner buttons are still not painted**, so there is nothing to click (ESO73) | 🟡 |
 | `a[href]` | follow the hyperlink | `navigation.ls` owns click/Enter policy and target/fragment resolution; native executes the resolved existing context. New browsing contexts remain ESO70 | 🟡 (ES31; ESO70) |
 | `summary` | toggle the parent `<details>` `open` attribute | `details.ls` (F15), including the `name=` exclusive accordion via the `details_group` waist. Layout already honoured `open`; the disclosure marker was a constant and now follows it | 🟡 — activation ✅, script-write and load-time exclusivity open (ESO62) |
 | `dialog` (+ `showModal`, Esc-to-cancel, focus trap, top layer) | HTML dialog behavior | absent entirely | ❌ |
@@ -427,6 +465,8 @@ Radiant-internal seams. No JS listener can observe them; each exists because the
 | `caretkey` | keydown's caret-movement **default action** | **yes** — dispatched with context |
 | `scrollkey` | keydown's document-scroll **default action** after caret/activation decline | **yes** — dispatched with context |
 | `linkactivation` | HTML hyperlink activation and package navigation policy (ES31) | **yes** — runs only after an uncancelled `click` |
+| `pointerdrag` | a widget tracking the pointer it captured — the concept Pointer Events calls pointer capture, which Radiant does not expose as an event yet (ESO50). Routing it through `mousemove` would put every document's behavior dispatch on the per-frame path (F20, §2.6) | follows the press that asked for capture |
+| `pointerdragend` | the release that ends that capture, where a gesture reports its one `change` | follows the same press |
 | `keyintent` | the key→`inputType` **translation** inside UI Events' key processing model | **no** — deliberately context-free (F11: a JS editor that prevents the keydown still relies on the intent) |
 | `domedit` | `beforeinput`'s **default action** on contenteditable (Input Events: "update the DOM as described by the inputType") | **yes** — ordinary dispatch offers it only after an uncanceled `beforeinput` |
 | `execcommand` | the deprecated command surface, one rule set with the keyboard path (F14.1) | per command |
@@ -585,8 +625,12 @@ New rows start at ESO48; ESO1–ESO47 remain in DOM_State §7. Rows here are def
 | ESO70 | **New browsing contexts cannot execute.** ES31 resolves `_blank` and unmatched target names to `target_kind:"new"`, but `UiContext` owns one current document and exposes no window/tab/context factory | add a host-level context creation API that returns a new browsing session/window, names it when requested, then execute the already-resolved `new` request without a DOM re-search |
 | ESO71 | **Form POST transport is incomplete.** The package constructs form data and selects the request method, but the browsing waist currently accepts only URL/target | extend the native request/execution seam with method, headers, and body ownership; this is transport work, not a second activation policy |
 | ESO57 | **`<dialog>` is entirely absent**, and the popover implementation fires no `beforetoggle`/`toggle` and has no light dismiss | both need a top-layer concept in the view tree and an Esc/outside-click policy; the Esc path can follow the context-menu and dropdown precedent (`event.cpp:9561`) |
-| ESO58 | **Non-text `<input>` types have no interaction**: `range` (no thumb drag, no keys — `form.ls:130` says so), `number` (no spinner, no arrow-key step), and `file`/`color`/`date`-family, which `input_type_to_control()` degrades to `FORM_CONTROL_TEXT` (`view.hpp:2727`) | `range` and `number` are template-shaped and cheap; the picker types need host UI and are a separate decision |
-| ESO59 | **Composite-widget keyboard policy is missing**: `<select multiple>` / listbox has no click or key handling at all, `<select>` has no typeahead, and radio groups have no arrow-key navigation | all three belong in `form.ls` next to the existing ordinary select `keydown` handler; the listbox additionally needs its option rows to be hit-testable |
+| ESO58 | ~~**Non-text `<input>` types have no interaction.**~~ **range and number landed 2026-09-05 (F20)** — `stepper.ls` names every value operation and `dom.input_operation` runs HTML's algorithm behind it; the slider additionally claims its press and captures the pointer for the drag. `file`/`color`/the `date` family still degrade to `FORM_CONTROL_TEXT` (`view.hpp:2727`) | the remaining picker types need host UI and are a separate decision; the spinner's *buttons* are ESO73 |
+| ESO72 | ~~**`<select multiple>` selects only one option.**~~ **landed 2026-09-05 (F21)** — selectedness had three representations that nothing kept in step; the node bit is now the single owner, the listbox paints its rows, and `form.ls` owns the click, modifier and arrow policy (§2.7). The premise was wrong in an instructive way: per-option selectedness already existed natively and was simply not reachable, read, or drawn | proved by `test/ui/dom_pkg_listbox.json` (26/26) |
+| ESO75 | **Author CSS does not reach `<option>`.** A rule on the select applies; the same rule on its options does not, so `option { font-weight: 700 }` and `option:selected { … }` are both inert. The UA pass visits options — they get `display: block` and a laid-out box — so it is the author cascade that skips them | this is a style-resolution gap, not a selection one: F21's `:selected` fix is what makes the pseudo-class *match* correctly, and it will start affecting rendering for free once the cascade reaches these elements. The listbox painter would then need to honour the resolved style instead of its UA colors |
+| ESO73 | **A number input paints no spinner buttons.** The arrow keys step it, but `render_form.cpp` draws no up/down control, so there is no pointer target to claim | paint work in `render_form.cpp` first; the activation is then two `input_operation` calls from a hit-tested sub-box, which needs the same sub-element addressing the listbox rows get for free |
+| ESO74 | **`<select>` typeahead matches one character, not a prefix.** Repeating a letter cycles the matches, which is the browser behavior that needs no timer; an accumulated prefix is defined by an inter-keystroke timeout | needs a package-visible timer, or a native seam that reports the elapsed time since the previous keydown |
+| ESO59 | ~~**Composite-widget keyboard policy is missing.**~~ **landed 2026-09-05 (F20, F21)** — radio arrow navigation and single-character `<select>` typeahead are in `form.ls`; listbox rows turned out to be hit-testable already, so no layout change was needed, and F21 then moved their click and arrow policy onto the `<select>` where the extend anchor belongs. One residue remains: prefix typeahead (ESO74) | proved by `test/ui/dom_pkg_composite.json` (31/31) and `dom_pkg_listbox.json` (26/26) |
 | ESO60 | ~~**`autofocus` only inspects the first `<input>`.**~~ **landed 2026-09-01 (ES30)** — `focusinit` runs package tree-order policy over the same focus snapshot | — |
 | ESO61 | **Small residue**: `accesskey` unimplemented; `beforeunload` unimplemented; `<img>` `load`/`error` not dispatched; `<area>` image-map activation absent; Ctrl+wheel zoom absent | individually cheap, none load-bearing; listed so they stop being rediscovered |
 
@@ -613,11 +657,10 @@ Ordered by how often the gap is hit by an ordinary page, not by implementation c
 
 **Tier 3 — bounded features**
 
-8. `<input type=range>` and `number` interaction (ESO58).
-9. Listbox, `<select>` typeahead, radio arrow keys (ESO59).
-10. `<dialog>` and popover toggle events / light dismiss (ESO57).
-11. Pointer boundary events and capture (ESO50).
-12. The ESO61 residue.
+8. ~~`<input type=range>` and `number` interaction (ESO58)~~, ~~listbox, `<select>` typeahead, radio arrow keys (ESO59)~~ and ~~multiple selection (ESO72)~~ **landed 2026-09-05 (F20, F21)**. What is left is the spinner's buttons (ESO73) and prefix typeahead (ESO74), plus the author-cascade gap F21 uncovered (ESO75).
+9. `<dialog>` and popover toggle events / light dismiss (ESO57).
+10. Pointer boundary events and capture (ESO50). F20's `pointerdrag` pair is capture *mechanism* for one captured element, not the `setPointerCapture` API; the two should be unified when that API lands rather than left as parallel paths.
+11. The ESO61 residue.
 
 Of these, only ESO71's submission transport residue (F4), link activation (DOM_State §6.1), and focus policy (DOM_State §6.2) were tracked anywhere before this document.
 

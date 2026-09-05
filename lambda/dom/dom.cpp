@@ -7415,6 +7415,13 @@ static void _set_selectedness(DomElement* opt, bool v) {
     // Layout can rebuild independently of a JS EvalContext, so selectedness
     // must have a native mirror rather than only living in an expando map.
     opt->set_option_selectedness(v);
+    // The expando copy is the legacy read path only: _get_selectedness prefers
+    // the native bit, and set_option_selectedness always marks it present, so
+    // this write is redundant once the bit is set. Creating the map needs a live
+    // realm (js_new_object builds out of the realm's pool), and a Lambda-only
+    // page that selects an option has none — which segfaulted the moment the dom
+    // package began writing selectedness (ESO113's shape, one more site).
+    if (!dom_realm_active()) return;
     Item exp = expando_get_or_create_map((DomNode*)opt);
     if (exp.item == ITEM_NULL) return;
     dom_realm_set_name(exp, "__selected", (Item){.item = b2it(v)});

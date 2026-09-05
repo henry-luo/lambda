@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>DOM package composite-widget keyboard policy</title>
+  <style>
+    body { font: 16px sans-serif; margin: 0; }
+    label, select { display: block; margin: 4px; }
+    #colours { width: 180px; }
+  </style>
+</head>
+<body>
+  <form id="form">
+    <label><input id="r1" type="radio" name="size" value="s"> Small</label>
+    <label><input id="r2" type="radio" name="size" value="m"> Medium</label>
+    <label><input id="r3" type="radio" name="size" value="l" disabled> Large</label>
+    <label><input id="r4" type="radio" name="size" value="x"> Extra</label>
+    <label><input id="other" type="radio" name="shape" value="round"> Round</label>
+
+    <select id="combo">
+      <option value="apple">Apple</option>
+      <option value="banana">Banana</option>
+      <option value="blueberry">Blueberry</option>
+      <option value="cherry">Cherry</option>
+    </select>
+
+    <select id="colours" size="4">
+      <option value="red">Red</option>
+      <option value="green">Green</option>
+      <option value="blue">Blue</option>
+      <option value="teal">Teal</option>
+      <option value="grey" disabled>Grey</option>
+      <optgroup label="Muted" disabled>
+        <option value="mauve">Mauve</option>
+      </optgroup>
+    </select>
+  </form>
+  <output id="changes">0</output>
+  <script>
+    let changes = 0;
+    document.getElementById('colours').addEventListener('change', () => {
+      document.getElementById('changes').textContent = String(++changes);
+    });
+  </script>
+</body>
+</html>
