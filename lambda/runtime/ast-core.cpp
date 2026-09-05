@@ -177,7 +177,8 @@ static AstBindingId ast_index_publish_binding(AstIndex* index, NameEntry* entry)
 static NameEntry* ast_index_node_entry(AstNode* node) {
     switch (node->node_type) {
     case AST_NODE_IDENT: return ((AstIdentNode*)node)->entry;
-    case AST_NODE_PARAM: case AST_NODE_KEY_EXPR: case AST_NODE_NAMED_ARG: return ((AstNamedNode*)node)->entry;
+    case AST_NODE_PARAM: case AST_NODE_KEY_EXPR: case AST_NODE_NAMED_ARG:
+    case AST_NODE_FOR_INDEX: return ((AstNamedNode*)node)->entry;
     case AST_NODE_VARIABLE_DECLARATOR: return ((AstDeclaratorNode*)node)->entry;
     default:
         return NULL;
@@ -448,7 +449,7 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
             AST_VISIT(named->key);
             AST_VISIT(named->as); break;
         }
-        case AST_NODE_PARAM: case AST_NODE_NAMED_ARG:
+        case AST_NODE_PARAM: case AST_NODE_NAMED_ARG: case AST_NODE_FOR_INDEX:
         case AST_NODE_STRING_PATTERN: case AST_NODE_SYMBOL_PATTERN:
             AST_VISIT(((AstNamedNode*)node)->as); break;
         case AST_NODE_DECOMPOSE: AST_VISIT(((AstDecomposeNode*)node)->as); break;

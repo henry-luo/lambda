@@ -176,6 +176,7 @@ static const char* ast_dump_kind_name(AstNodeType type) {
         case AST_NODE_ELEMENT: return "AST_NODE_ELEMENT";
         case AST_NODE_DECOMPOSE: return "AST_NODE_DECOMPOSE";
         case AST_NODE_FOR_CLAUSE: return "AST_NODE_FOR_CLAUSE";
+        case AST_NODE_FOR_INDEX: return "AST_NODE_FOR_INDEX";
         case AST_NODE_ORDER_SPEC: return "AST_NODE_ORDER_SPEC";
         case AST_NODE_GROUP_CLAUSE: return "AST_NODE_GROUP_CLAUSE";
         case AST_NODE_GROUP_KEY: return "AST_NODE_GROUP_KEY";
@@ -391,6 +392,11 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
                     parameter->has_explicit_contract);
             }
             emit_lambda_dump_field(source, "as", named->as, indent + 1);
+            break;
+        }
+        case AST_NODE_FOR_INDEX: {
+            AstNamedNode* index = (AstNamedNode*)node;
+            emit_dump_string_field("name", index->name);
             break;
         }
         case AST_NODE_DECOMPOSE: {

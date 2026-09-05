@@ -2294,6 +2294,13 @@ class PremakeGenerator:
                 # Enhanced support for test-specific flags and additional sources
                 test_special_flags = test.get('special_flags', special_flags)  # Test-specific flags override suite flags
                 additional_sources = test.get('additional_sources', [])  # New field for extra source files
+                if 'lambda-runtime-full' in dependencies:
+                    # The hosted validator DSO resolves these core globals from
+                    # its executable host.  Compile a concrete reference into
+                    # every host so archive extraction cannot omit either one.
+                    additional_sources = additional_sources + [
+                        'test/lib/runtime_full_host_symbols.cpp'
+                    ]
 
                 # Apply platform-specific overrides for tests
                 if self.use_macos_config:

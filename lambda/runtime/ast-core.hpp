@@ -145,6 +145,9 @@ typedef enum AstNodeType : uint16_t {
     // Iterator/query `for` clauses remain an AST_FOR extension edge; the
     // shared AST_NODE_LOOP tag is reserved for condition loops (D8.2.2).
     AST_NODE_FOR_CLAUSE = 548,
+    // The secondary binding in `for (key, value at source)` has the named
+    // binding layout, not the enclosing AstLoopNode layout.
+    AST_NODE_FOR_INDEX = 549,
 } AstNodeType;
 
 typedef enum LoopForm {

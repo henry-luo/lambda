@@ -1981,11 +1981,20 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         collect_captures_from_node(tp, ((AstDeclaratorNode*)node)->init,
             fn_scope, global_scope, captures);
         break;
-    case AST_NODE_KEY_EXPR:
-    case AST_NODE_FOR_CLAUSE: {
+    case AST_NODE_KEY_EXPR: {
         AstNamedNode* named = (AstNamedNode*)node;
         collect_captures_from_node(tp, named->key, fn_scope, global_scope, captures);
         collect_captures_from_node(tp, named->as, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_FOR_CLAUSE: {
+        AstLoopNode* loop = (AstLoopNode*)node;
+        collect_captures_from_node(tp, loop->as, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, loop->on, fn_scope, global_scope, captures);
+        for (AstJoinKey* key = loop->join_keys; key; key = (AstJoinKey*)key->next) {
+            collect_captures_from_node(tp, key->prior_expr, fn_scope, global_scope, captures);
+            collect_captures_from_node(tp, key->new_expr, fn_scope, global_scope, captures);
+        }
         break;
     }
     case AST_NODE_ASSIGN_STAM: {
@@ -2189,7 +2198,8 @@ static void binding_node_set_entry(AstNode* node, NameEntry* entry) {
         if (declarator->id && declarator->id->node_type == AST_NODE_IDENT)
             ((AstIdentNode*)declarator->id)->entry = entry;
     } else if (node->node_type == AST_NODE_PARAM ||
-            node->node_type == AST_NODE_KEY_EXPR) {
+            node->node_type == AST_NODE_KEY_EXPR ||
+            node->node_type == AST_NODE_FOR_INDEX) {
         // KEY_EXPR is an object type's field scope-helper (direct_object_add_field
         // and the base-inheritance copy). Without the back-pointer its
         // `ShapeEntry::binding` stayed NULL, and MIR's method prologue — which
@@ -2220,8 +2230,8 @@ static String* binding_node_name(AstNode* node) {
         ? ((AstDeclaratorNode*)node)->name : ((AstNamedNode*)node)->name;
 }
 
-void push_name(Transpiler* tp, AstNode* node, AstImportNode* import) {
-    String* name = binding_node_name(node);
+static void push_name_with_spelling(Transpiler* tp, AstNode* node,
+        String* name, AstImportNode* import) {
     log_debug("pushing name %.*s, %p", (int)name->len, name->chars, node->type);
 
     StrView name_view = {name->chars, name->len};
@@ -2269,6 +2279,10 @@ void push_name(Transpiler* tp, AstNode* node, AstImportNode* import) {
     tp->current_scope->last = entry;
     binding_node_set_entry(node, entry);
     function_binding_set_entry(tp, node, entry);
+}
+
+void push_name(Transpiler* tp, AstNode* node, AstImportNode* import) {
+    push_name_with_spelling(tp, node, binding_node_name(node), import);
 }
 
 NameScope* lambda_ast_enter_scope_with_parent(Transpiler* tp,
@@ -9536,7 +9550,7 @@ AstNode* build_loop_from_parts(Transpiler* tp, SourceSpan span,
     }
     if (loop->index_name) {
         AstNamedNode* index = (AstNamedNode*)alloc_ast_node_from_span(tp,
-            AST_NODE_FOR_CLAUSE, index_token.span, sizeof(AstNamedNode));
+            AST_NODE_FOR_INDEX, index_token.span, sizeof(AstNamedNode));
         index->name = loop->index_name;
         index->type = loop->key_filter == LOOP_KEY_INT ? &TYPE_INT :
             loop->key_filter == LOOP_KEY_SYMBOL ? &TYPE_SYMBOL :
@@ -9544,7 +9558,9 @@ AstNode* build_loop_from_parts(Transpiler* tp, SourceSpan span,
         lambda_ast_register_name(tp, index);
         loop->index_entry = lookup_name_in_current_scope(tp, loop->index_name);
     }
-    lambda_ast_register_name(tp, (AstNamedNode*)loop);
+    // AstLoopNode diverges from AstNamedNode immediately after `name`.
+    // Register its explicit spelling instead of borrowing that layout.
+    push_name_with_spelling(tp, (AstNode*)loop, loop->name, NULL);
     loop->entry = lookup_name_in_current_scope(tp, loop->name);
     if (join) {
         direct_rebind_join_ident(join, loop->name, loop->entry);

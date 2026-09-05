@@ -140,14 +140,13 @@ The whole `repl_history` StrBuf (`main.cpp:785`) is re-transpiled and re-run
 every turn, with error rollback implemented as a raw byte-truncate
 (`main.cpp:882`–`893`). Any non-idempotent side effect repeats each turn.
 
-<a id="lr01-8"></a>**LR01-8 · `init_module_import` pointer-walk is layout-coupled · OPEN**
-`init_module_import` (`runner.cpp:556`) still advances `uint8_t* mod_def` over
-the `Mod` struct by `sizeof()` arithmetic mirroring the transpiler's implicit
-layout (`:574`ff). Any change to that layout, or to the `needs_fn_call_wrapper`
-branch, silently corrupts function-pointer binding; the Lambda and cross-lang
-JS branches must stay in lockstep. Constant/type-table init has since moved to
-name-keyed `find_func("_init_mod_consts" / "_init_mod_types")` lookups
-(`:634`, `:645`) — that half is no longer layout-coupled.
+<a id="lr01-8"></a>**LR01-8 · `init_module_import` pointer-walk is layout-coupled · RESOLVED 2026-09-05**
+`init_module_import` was unreachable legacy C2MIR glue: no MIR Direct path
+called it, while the live importer links individual symbols and immutable module
+layout records. Removing the dead `uint8_t*` field walk removes its unguarded
+`Mod` layout contract outright, consistent with the single MIR Direct pipeline
+in **D8.2.5**. Existing paired-loop and module fixtures still pass after the
+removal.
 
 <a id="lr01-9"></a>**LR01-9 · Namespace export gaps (pub vars) · OPEN**
 `module_build_lambda_namespace` still skips **pub vars** entirely —
@@ -214,11 +213,14 @@ carrier stays `ANY`, so any consumer reading `returned` rather than
 [Type-infer impl progress] — "consumers reading `node->type` instead of the
 representation oracle" is the same defect class.
 
-<a id="lr02-4"></a>**LR02-4 · `AstLoopNode` / `AstNamedNode` layout divergence · OPEN**
-`AstLoopNode` (`lambda/runtime/ast.hpp:289`) still carries `index_name` between
-`name` and `as`, where `AstNamedNode` has `as` directly after `name`. A
-wrong-type cast reads the wrong field offset. Existing capture code casts
-explicitly, but any new code handling loop nodes generically is exposed.
+<a id="lr02-4"></a>**LR02-4 · `AstLoopNode` / `AstNamedNode` layout divergence · RESOLVED 2026-09-05**
+`AstLoopNode` deliberately retains its own layout. Its secondary `(key, value)`
+binding now uses `AST_NODE_FOR_INDEX`, a named-node-only kind, and the primary
+loop binding registers its explicit spelling without an `AstNamedNode` cast.
+Capture analysis traverses `AstLoopNode` directly, including join edges. This
+keeps the canonical binding identity required by **D8.2.4** typed rather than
+depending on coincidental field offsets. `for_at_pairs.ls` and
+`for_join_s3b_test.ls` pass on MIR Direct, including forced-GC mode.
 
 <a id="lr02-5"></a>**LR02-5 · `match`-arm `~` references were missed · RESOLVED 2026-08-25**
 `has_current_item_ref` (`build_ast.cpp`) walked a match node's scrutinee and
@@ -1220,13 +1222,18 @@ These records are retained for provenance but are excluded from the counts
 above. The absence of source markers is not evidence that a structural defect
 is absent; active rows must be found by behavior and ownership analysis.
 
-<a id="lr12-1"></a>**LR12-1 · The whole validator test surface cannot run, and no baseline covers it · OPEN (found 2026-09-03)**
+<a id="lr12-1"></a>**LR12-1 · The validator test surface is not a baseline gate · PARTIALLY RESOLVED 2026-09-05 (found 2026-09-03)**
 
-Every validator test binary builds and then aborts at startup on a flat-namespace symbol lookup: `test_validator_gtest` and `test_validator_input_gtest` on `_ItemNull`, `test_validator_features_gtest` and `test_ast_validator_gtest` on `_g_lambda_home`. Both are ordinary core globals — `ItemNull` is defined at `lambda/core/lambda-data.cpp:190` and `g_lambda_home` at `lambda/runtime/runner.cpp:191` — and both are present in `lambda.exe`, so this is a link-composition problem in those four targets rather than a missing definition.
+The hosted `lambda-runtime-full` DSO resolves `ItemNull` and `g_lambda_home`
+from its executable host. Every test target that links that DSO now compiles
+retained references to both globals, so static-archive extraction supplies them.
+All ten current validator executables load and enumerate their GTests. This
+does **not** make the suite green: `ValidatorTest.NonexistentHtmlFile` still
+SIGSEGVs after startup, a separate runtime defect.
 
 The `validate` CLI is separately unusable: it resolves no root type at all, failing with `REFERENCE_ERROR: Type not found or circular reference detected: Document` even on the shipped pair `test/lambda/validator/schema_comprehensive.ls` + `test_data_valid.json`. The root name is chosen by a textual scan for the last `type ` in the schema file (`validator/ast_validate.cpp:270`–`312`), so the name reaching `resolve_type_reference` looks right and the schema's type table is what comes up empty.
 
-**Why it went unnoticed:** the validator gate runs from `test-lambda-full` (`Makefile:1624`), not `test-lambda-baseline`, so both baselines stay green over a completely dead test surface. That is the finding worth keeping — a gate outside the baseline is a gate nobody runs.
+**Why it went unnoticed:** the validator gate runs from `test-lambda-full` (`Makefile:1624`), not `test-lambda-baseline`, so both baselines stay green over this unexercised surface. That is the finding worth keeping — a gate outside the baseline is a gate nobody runs.
 
 Not attributed. The `elmt code clean up` commit (2cdcc1ea1) touches none of the files involved — not `build_lambda_config.json`, not `lambda-data.cpp`, not `runner.cpp`, not any validator or test source. The two remaining candidates are the object-redesign commit (da7a97b13), which reshaped `lambda.h`/`lambda-data.cpp` heavily, and the merged upstream `DOM: seven linkage lies and a dead local` (dbe7b7dba). Confirming which needs a from-scratch build of an older tree; a worktree attempt stalled on re-fetching vendored `re2`.
 
@@ -1745,8 +1752,8 @@ One policy each, not per-site fixes.
   module vars 2048/1024, regex groups 256, and more. One grow-or-error doctrine
   retires the class. Ledger instances: [LR01-5](#lr01-5), [LR11-4](#lr11-4),
   [LR13-5](#lr13-5).
-- **Layout-coupled raw offsets** — `init_module_import` ([LR01-8](#lr01-8))
-  still needs static-assert guards or a generated offset table; GC
+- **Layout-coupled raw offsets** — resolved for module binding by removing the
+  unreachable `init_module_import` walk ([LR01-8](#lr01-8)); GC
   trace/compaction is resolved by [LR08-5](#lr08-5).
 - **One masked memory-safety bug** — the event-loop SIGSEGV band-aid remains;
   the `sys://` map-walk segfault workaround was replaced by the shape-aware
@@ -2372,7 +2379,6 @@ together, not individually.
 | **Representation ↔ semantics coupling** | LR03-3, LR07-1, LR07-5, LR07-14 | Expression results carry no `ValueRep`; each consumer re-derives it. See [Result32 lane-parity + Tune19], [Compiling lane design]. |
 | **Value-semantics residue (OI-1)** | LR03-1, LR04-4, LR09-3 | Second equality walker, `decimal_cmp` failure-as-equality, VMap key eq/hash rank consistency. Tracked as OI-1 in this ledger's [§15](#15-design-gaps-inherited-from-the-retired-outstanding-rollup-oi). |
 | **`INT64_MAX` sentinel collision** | LR03-4, LR07-4 | `INT64_ERROR == INT64_MAX` and `INT_LANE_INF` share one bit pattern; index OOB also lands on `INT64_MAX`. The former LR10-5 entry is a preserved alias for LR03-4. See [v5 int migration in flight]. |
-| **Hard-coded byte offsets** | LR01-8 | Module binding still reads struct fields at literal offsets that no `static_assert` protects. GC tracing is resolved by [LR08-5](#lr08-5). |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
 | **Surface syntax (S16) residue** | LR02-16, S16.9.5, i8-genafterlet, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
 | **Process globals** | LR01-12, LR12-6 | `g_template_registry` and `g_dry_run` block concurrent runtimes. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |
