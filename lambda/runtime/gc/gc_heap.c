@@ -1509,11 +1509,11 @@ static void gc_trace_shape_field(gc_heap_t* gc, void* field_type,
     uint8_t* field_ptr = (uint8_t*)data_ptr + byte_offset;
 
     if (lane == LMD_TYPE_ANY_) {
-        // TypedItem layout: byte 0 is the runtime TypeId, bytes 1-8 the value.
-        uint8_t stored_type = *field_ptr;
+        // TypedItem's packed value follows its one-byte runtime TypeId.
+        uint8_t stored_type = *(uint8_t*)(field_ptr + LAMBDA_GC_OFF_TYPED_ITEM_TYPE_ID);
         if (stored_type < LMD_TYPE_INT64_ || stored_type == LMD_TYPE_BOOL_ ||
-            byte_offset + 1 + 8 > byte_size) return;
-        uint64_t val = *(uint64_t*)(field_ptr + 1);
+            byte_offset + LAMBDA_GC_OFF_TYPED_ITEM_VALUE + sizeof(uint64_t) > byte_size) return;
+        uint64_t val = *(uint64_t*)(field_ptr + LAMBDA_GC_OFF_TYPED_ITEM_VALUE);
         if (!val) return;
         if (stored_type >= LMD_TYPE_RANGE_) gc_mark_item(gc, val);
         else gc_mark_object_ptr(gc, (void*)(uintptr_t)val);
@@ -1535,23 +1535,23 @@ static void gc_trace_shape_field(gc_heap_t* gc, void* field_type,
 }
 
 // Walk a TypeMap/TypeElmt shape list and trace every field edge.
-// TypeMap layout: { Type(2+6pad=8), length(8@8), byte_size(8@16),
-//   type_index(4@24), pad(4), shape*(8@32), last*(8@40) }
-// ShapeEntry:     { name*(8), type*(8), byte_offset(8), next*(8), ns*(8),
-//   default_value*(8) }
+// TypeMap and ShapeEntry offsets come from the checked LambdaGc* ABI views in
+// lambda.h; the collector must not re-declare either C++ layout locally.
 static void gc_trace_shape_fields(gc_heap_t* gc, void* type_ptr, void* data_ptr,
                                   int64_t byte_size) {
-    uint8_t* shape = (uint8_t*)*(void**)((uint8_t*)type_ptr + 32);
+    uint8_t* shape = (uint8_t*)*(void**)((uint8_t*)type_ptr + LAMBDA_GC_OFF_TYPE_MAP_SHAPE);
     while (shape) {
-        gc_trace_shape_field(gc, *(void**)(shape + 8), *(int64_t*)(shape + 16),
+        gc_trace_shape_field(gc,
+            *(void**)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_TYPE),
+            *(int64_t*)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_BYTE_OFFSET),
             data_ptr, byte_size);
-        shape = (uint8_t*)*(void**)(shape + 24);
+        shape = (uint8_t*)*(void**)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_NEXT);
     }
 }
 
 static int64_t gc_packed_data_allocation_size(void* type_ptr, int data_cap) {
     if (data_cap > 0) return (int64_t)data_cap;
-    return type_ptr ? *(int64_t*)((uint8_t*)type_ptr + 16) : 0;
+    return type_ptr ? *(int64_t*)((uint8_t*)type_ptr + LAMBDA_GC_OFF_TYPE_MAP_BYTE_SIZE) : 0;
 }
 
 // trace outgoing Item pointers from a type-aware object
@@ -1606,45 +1606,33 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         break;
     }
 
-    // D2.6.6v2 container layout — ONE chain: Map -> Array/List -> Element.
-    // The attribute face is first and identical in every container; the content
-    // face follows. These names exist so a future layout change breaks loudly
-    // here instead of silently mistracing. Mirrors the static_asserts in
-    // lambda.hpp; keep the two in step.
-    #define GC_OFF_TYPE      8    /* Map::type      — every container */
-    #define GC_OFF_DATA      16   /* Map::data */
-    #define GC_OFF_DATA_CAP  24   /* Map::data_cap */
-    #define GC_OFF_ITEMS     32   /* List::items    — array/list/element */
-    #define GC_OFF_LENGTH    40   /* List::length */
-    #define GC_OFF_EXTRA     48   /* List::extra */
-    #define GC_OFF_CAPACITY  56   /* List::capacity */
-
     case LMD_TYPE_ARRAY_NUM_: {
         // Owned 1-D arrays have no outgoing pointers; views (is_view bit 5) hold
-        // a base reference via the shape side-table in `extra` (GC_OFF_EXTRA).
+        // a base reference via the shape side-table in `extra`.
         uint8_t* p = (uint8_t*)obj;
-        uint8_t flags = p[1];
-        uint8_t array_flags = p[2];
+        uint8_t flags = p[LAMBDA_GC_OFF_CONTAINER_FLAGS];
+        uint8_t array_flags = p[LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS];
         // D2.6.6v2: the JS companion map moved to the attribute face traced
         // below, so there is no reserved elements slot to mark here.
         (void)flags;
         // D2.6.6v2: ArrayNum extends Map, so it can carry attributes too.
         {
-            void* attr_type = *(void**)(p + GC_OFF_TYPE);
-            void* attr_data = *(void**)(p + GC_OFF_DATA);
+            void* attr_type = *(void**)(p + LAMBDA_GC_OFF_MAP_TYPE);
+            void* attr_data = *(void**)(p + LAMBDA_GC_OFF_MAP_DATA);
             if (attr_type && attr_data) {
                 int64_t byte_size = gc_packed_data_allocation_size(
-                    attr_type, *(int*)(p + GC_OFF_DATA_CAP));
+                    attr_type, *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP));
                 gc_trace_shape_fields(gc, attr_type, attr_data, byte_size);
                 gc_trace_data_words(gc, attr_data, byte_size);
             }
         }
         if (array_flags & 0x02) {  // Container.is_view in array_flags byte
-            void* shape_ptr = (void*)(uintptr_t)(*(int64_t*)(p + GC_OFF_EXTRA));
+            void* shape_ptr = (void*)(uintptr_t)(*(int64_t*)(p + LAMBDA_GC_OFF_LIST_EXTRA));
             if (shape_ptr) {
                 // ArrayNumShape explicitly tags the backing source; semantic base
-                // remains at offset 16 and is the only GC-traced descriptor pointer.
-                uint64_t base = *(uint64_t*)((uint8_t*)shape_ptr + 16);
+                // remains in ArrayNumShape.base and is the only GC-traced descriptor pointer.
+                uint64_t base = *(uint64_t*)((uint8_t*)shape_ptr +
+                    LAMBDA_GC_OFF_ARRAY_NUM_SHAPE_BASE);
                 gc_mark_possible_item(gc, base);
             }
         }
@@ -1653,16 +1641,15 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
 
     case LMD_TYPE_ARRAY_: {
         // Array extends Map (D2.6.6v2): the 8-byte Container header, then the
-        // attribute face at GC_OFF_TYPE/DATA/DATA_CAP, then the content face at
-        // GC_OFF_ITEMS/LENGTH/EXTRA/CAPACITY.
+        // attribute face, then the shared List content face.
         uint8_t* p = (uint8_t*)obj;
-        void* items_ptr = *(void**)(p + GC_OFF_ITEMS);
-        int64_t length = *(int64_t*)(p + GC_OFF_LENGTH);
-        uint8_t flags = *(uint8_t*)(p + 1);
-        uint8_t array_flags = *(uint8_t*)(p + 2);
-        uint8_t lane_kind = *(uint8_t*)(p + 3) & 0x07;
-        int64_t extra = *(int64_t*)(p + GC_OFF_EXTRA);
-        int64_t capacity = *(int64_t*)(p + GC_OFF_CAPACITY);
+        void* items_ptr = *(void**)(p + LAMBDA_GC_OFF_LIST_ITEMS);
+        int64_t length = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_LENGTH);
+        uint8_t flags = *(uint8_t*)(p + LAMBDA_GC_OFF_CONTAINER_FLAGS);
+        uint8_t array_flags = *(uint8_t*)(p + LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS);
+        uint8_t lane_kind = *(uint8_t*)(p + LAMBDA_GC_OFF_CONTAINER_MAP_KIND) & 0x07;
+        int64_t extra = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_EXTRA);
+        int64_t capacity = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_CAPACITY);
         int64_t dense_limit = capacity >= extra ? capacity - extra : 0;
         int64_t dense_count = length < dense_limit ? length : dense_limit;
         // Numeric/bool native lanes are raw words, not tagged Items. Pointer
@@ -1672,7 +1659,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
             // Borrowing view (content(e), LR09-9): the items belong to the base
             // and are traced through it, so this only has to keep the base
             // alive. Tracing them here as well would be correct but wasteful.
-            ArrayNumShape* shape = *(ArrayNumShape**)(p + GC_OFF_EXTRA);
+            ArrayNumShape* shape = *(ArrayNumShape**)(p + LAMBDA_GC_OFF_LIST_EXTRA);
             if (shape && shape->base) gc_mark_object_ptr(gc, shape->base);
             break;
         }
@@ -1691,11 +1678,11 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         // for a plain array, so this costs one branch; it is what lets array
         // properties live in the array itself rather than a reserved tail slot.
         {
-            void* attr_type = *(void**)(p + GC_OFF_TYPE);
-            void* attr_data = *(void**)(p + GC_OFF_DATA);
+            void* attr_type = *(void**)(p + LAMBDA_GC_OFF_MAP_TYPE);
+            void* attr_data = *(void**)(p + LAMBDA_GC_OFF_MAP_DATA);
             if (attr_type && attr_data) {
                 int64_t byte_size = gc_packed_data_allocation_size(
-                    attr_type, *(int*)(p + GC_OFF_DATA_CAP));
+                    attr_type, *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP));
                 gc_trace_shape_fields(gc, attr_type, attr_data, byte_size);
                 gc_trace_data_words(gc, attr_data, byte_size);
             }
@@ -1707,10 +1694,10 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         // Map: the 8-byte Container header, then the attribute face. An object
         // is NOT here — it is element-shaped and shares the ELEMENT case.
         uint8_t* p = (uint8_t*)obj;
-        uint8_t map_kind = p[3];
-        void* type_ptr = *(void**)(p + GC_OFF_TYPE);
-        void* data_ptr = *(void**)(p + GC_OFF_DATA);
-        int data_cap = *(int*)(p + GC_OFF_DATA_CAP);
+        uint8_t map_kind = p[LAMBDA_GC_OFF_CONTAINER_MAP_KIND];
+        void* type_ptr = *(void**)(p + LAMBDA_GC_OFF_MAP_TYPE);
+        void* data_ptr = *(void**)(p + LAMBDA_GC_OFF_MAP_DATA);
+        int data_cap = *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP);
         if (tag == LMD_TYPE_MAP_ && gc->js_native_trace) {
             gc->js_native_trace(obj, gc);
         }
@@ -1743,15 +1730,15 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
 
     case LMD_TYPE_ELEMENT_: {
         // Element extends Array extends Map (D2.6.6v2): the attribute face is
-        // FIRST (GC_OFF_TYPE/DATA/DATA_CAP), the content face follows. Object
+        // FIRST, and the content face follows. Object
         // is Element, hence the shared case.
         uint8_t* p = (uint8_t*)obj;
-        void* items_ptr = *(void**)(p + GC_OFF_ITEMS);
-        int64_t length = *(int64_t*)(p + GC_OFF_LENGTH);
-        int64_t capacity = *(int64_t*)(p + GC_OFF_CAPACITY);
-        void* type_ptr = *(void**)(p + GC_OFF_TYPE);
-        void* data_ptr = *(void**)(p + GC_OFF_DATA);
-        int data_cap = *(int*)(p + GC_OFF_DATA_CAP);
+        void* items_ptr = *(void**)(p + LAMBDA_GC_OFF_LIST_ITEMS);
+        int64_t length = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_LENGTH);
+        int64_t capacity = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_CAPACITY);
+        void* type_ptr = *(void**)(p + LAMBDA_GC_OFF_MAP_TYPE);
+        void* data_ptr = *(void**)(p + LAMBDA_GC_OFF_MAP_DATA);
+        int data_cap = *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP);
         int64_t dense_count = length < capacity ? length : capacity;
 
         // trace children items
@@ -1773,11 +1760,10 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
 
     case LMD_TYPE_FUNC_: {
         if (gc->js_function_trace && gc->js_function_trace(obj, gc)) break;
-        // Function: { type_id(1), arity(1), closure_field_count(1@2), padding(5),
-        //             fn_type*(8@8), ptr*(8@16), closure_env*(8@24), name*(8@32) }
+        // Function's GC-relevant fields are checked against LambdaGcFunctionLayout.
         uint8_t* p = (uint8_t*)obj;
-        uint8_t field_count = *(uint8_t*)(p + 2);  // closure_field_count
-        void* closure_env = *(void**)(p + 24);
+        uint8_t field_count = *(uint8_t*)(p + LAMBDA_GC_OFF_FUNCTION_CLOSURE_FIELD_COUNT);
+        void* closure_env = *(void**)(p + LAMBDA_GC_OFF_FUNCTION_CLOSURE_ENV);
         // A guest closure can keep a traced environment whose slots are not
         // all Items (for example a generator state word).  Mark its object
         // owner first; field_count only describes the legacy Item view.
@@ -1796,25 +1782,13 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         // Backend-specific VMaps trace through their immutable vtable. Keep
         // the legacy data-first hook for test/custom HashMap payloads whose
         // vtable predates the precise callback.
-        // lambda.h intentionally keeps VMap opaque in C; mirror only its
-        // stable Container/data/vtable prefix to reach the optional precise
-        // callback without making the collector depend on C++ headers.
-        typedef void (*gc_vmap_precise_trace_fn)(void*, gc_heap_t*);
-        typedef struct {
-            void* slots[7];
-            gc_vmap_precise_trace_fn trace;
-        } GcVMapVtableLayout;
-        typedef struct {
-            uint8_t container_header[8];
-            void* data;
-            GcVMapVtableLayout* vtable;
-        } GcVMapLayout;
-        GcVMapLayout* vm = (GcVMapLayout*)obj;
-        if (vm && vm->vtable && vm->vtable->trace) {
-            vm->vtable->trace(vm->data, gc);
+        uint8_t* p = (uint8_t*)obj;
+        void* data = *(void**)(p + LAMBDA_GC_OFF_VMAP_DATA);
+        LambdaGcVMapVtableLayout* vtable = *(LambdaGcVMapVtableLayout**)(
+            p + LAMBDA_GC_OFF_VMAP_VTABLE);
+        if (vtable && vtable->trace) {
+            vtable->trace(data, gc);
         } else if (gc->vmap_trace) {
-            uint8_t* p = (uint8_t*)obj;
-            void* data = *(void**)(p + 8);
             if (data) gc->vmap_trace(data, gc);
         }
         break;
@@ -1883,14 +1857,14 @@ static size_t gc_array_num_elem_bytes(uint8_t elem_type) {
 // them. Returns the number of buffers moved.
 static int gc_compact_attr_face(gc_heap_t* gc, uint8_t* p) {
     if (!gc || !p) return 0;
-    void** data_slot = (void**)(p + GC_OFF_DATA);
-    void* type_ptr = *(void**)(p + GC_OFF_TYPE);
+    void** data_slot = (void**)(p + LAMBDA_GC_OFF_MAP_DATA);
+    void* type_ptr = *(void**)(p + LAMBDA_GC_OFF_MAP_TYPE);
     if (!*data_slot || !type_ptr ||
             !gc_data_zone_owns(gc->data_zone, *data_slot)) {
         return 0;
     }
     int64_t byte_size = gc_packed_data_allocation_size(
-        type_ptr, *(int*)(p + GC_OFF_DATA_CAP));
+        type_ptr, *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP));
     if (byte_size <= 0) return 0;
     void* moved = gc_data_zone_copy(gc->tenured_data, *data_slot, byte_size);
     if (!moved) return 0;
@@ -1899,15 +1873,17 @@ static int gc_compact_attr_face(gc_heap_t* gc, uint8_t* p) {
 }
 
 static int gc_compact_array_num_owned_data(gc_heap_t* gc, uint8_t* array) {
-    if (!gc || !array || (array[2] & 0x02)) return 0;  // views borrow base storage
-    void** data_slot = (void**)(array + GC_OFF_ITEMS);
-    int64_t capacity = *(int64_t*)(array + GC_OFF_CAPACITY);
+    if (!gc || !array ||
+            (array[LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS] & 0x02)) return 0;  // views borrow base storage
+    void** data_slot = (void**)(array + LAMBDA_GC_OFF_LIST_ITEMS);
+    int64_t capacity = *(int64_t*)(array + LAMBDA_GC_OFF_LIST_CAPACITY);
     if (!*data_slot || capacity < 0 ||
             !gc_data_zone_owns(gc->data_zone, *data_slot)) {
         return 0;
     }
 
-    size_t elem_bytes = gc_array_num_elem_bytes(array[3]);
+    size_t elem_bytes = gc_array_num_elem_bytes(
+        array[LAMBDA_GC_OFF_CONTAINER_MAP_KIND]);
     if ((uint64_t)capacity > SIZE_MAX / elem_bytes) return 0;
     size_t size = (size_t)capacity * elem_bytes;
     void* new_data = gc_data_zone_copy(gc->tenured_data, *data_slot, size);
@@ -1922,10 +1898,10 @@ static int gc_compact_array_num_owned_data(gc_heap_t* gc, uint8_t* array) {
 // force its base to move first, regardless of the order the sweep walks them.
 static int gc_compact_content_items(gc_heap_t* gc, uint8_t* p) {
     if (!gc || !p) return 0;
-    void** items_slot = (void**)(p + GC_OFF_ITEMS);
-    int64_t length = *(int64_t*)(p + GC_OFF_LENGTH);
-    int64_t extra = *(int64_t*)(p + GC_OFF_EXTRA);
-    int64_t capacity = *(int64_t*)(p + GC_OFF_CAPACITY);
+    void** items_slot = (void**)(p + LAMBDA_GC_OFF_LIST_ITEMS);
+    int64_t length = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_LENGTH);
+    int64_t extra = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_EXTRA);
+    int64_t capacity = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_CAPACITY);
     if (!*items_slot || !gc_data_zone_owns(gc->data_zone, *items_slot)) return 0;
     uint64_t* old_items = (uint64_t*)*items_slot;
     void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot,
@@ -1944,8 +1920,9 @@ static int gc_compact_content_items(gc_heap_t* gc, uint8_t* p) {
 // buffer, promoting the base first so the alias never survives a reset as a
 // pointer into the discarded nursery zone.
 static int gc_rebind_list_gc_view(gc_heap_t* gc, uint8_t* view) {
-    if (!gc || !view || !(view[2] & 0x02)) return 0;
-    void** shape_slot = (void**)(view + GC_OFF_EXTRA);
+    if (!gc || !view ||
+            !(view[LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS] & 0x02)) return 0;
+    void** shape_slot = (void**)(view + LAMBDA_GC_OFF_LIST_EXTRA);
     // The descriptor itself is nursery data. Promote it before the zone reset
     // or `extra` dangles and the rebind below reads a recycled block — which
     // is exactly how this was caught, with a view silently aliasing an
@@ -1960,37 +1937,40 @@ static int gc_rebind_list_gc_view(gc_heap_t* gc, uint8_t* view) {
     if (!shape || !shape->base) return 0;
     uint8_t* base = (uint8_t*)shape->base;
     int moved = gc_compact_content_items(gc, base);
-    *(void**)(view + GC_OFF_ITEMS) = *(void**)(base + GC_OFF_ITEMS);
+    *(void**)(view + LAMBDA_GC_OFF_LIST_ITEMS) =
+        *(void**)(base + LAMBDA_GC_OFF_LIST_ITEMS);
     // Length is shadow-copied, so a base that shrank must not leave the view
     // reading past the live prefix.
-    int64_t base_len = *(int64_t*)(base + GC_OFF_LENGTH);
-    if (*(int64_t*)(view + GC_OFF_LENGTH) > base_len) {
-        *(int64_t*)(view + GC_OFF_LENGTH) = base_len;
+    int64_t base_len = *(int64_t*)(base + LAMBDA_GC_OFF_LIST_LENGTH);
+    if (*(int64_t*)(view + LAMBDA_GC_OFF_LIST_LENGTH) > base_len) {
+        *(int64_t*)(view + LAMBDA_GC_OFF_LIST_LENGTH) = base_len;
     }
     return moved;
 }
 
 static int gc_rebind_array_num_gc_view(gc_heap_t* gc, uint8_t* view) {
-    if (!gc || !view || !(view[2] & 0x02)) return 0;
-    ArrayNumShape* shape = *(ArrayNumShape**)(view + GC_OFF_EXTRA);
+    if (!gc || !view ||
+            !(view[LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS] & 0x02)) return 0;
+    ArrayNumShape* shape = *(ArrayNumShape**)(view + LAMBDA_GC_OFF_LIST_EXTRA);
     if (!shape || shape->backing_kind != ARRAY_NUM_BACKING_GC_VIEW ||
             !shape->base) {
         return 0;
     }
 
     uint8_t* base = (uint8_t*)shape->base;
-    if (base[0] != LMD_TYPE_ARRAY_NUM_) return 0;
+    if (base[LAMBDA_GC_OFF_CONTAINER_TYPE_ID] != LMD_TYPE_ARRAY_NUM_) return 0;
     int compacted = gc_compact_array_num_owned_data(gc, base);
 
-    size_t elem_bytes = gc_array_num_elem_bytes(view[3]);
+    size_t elem_bytes = gc_array_num_elem_bytes(
+        view[LAMBDA_GC_OFF_CONTAINER_MAP_KIND]);
     if (shape->offset < 0 || (uint64_t)shape->offset > SIZE_MAX / elem_bytes) {
         log_error("gc-array-num-view: invalid element offset %lld",
             (long long)shape->offset);
-        *(void**)(view + GC_OFF_ITEMS) = NULL;
+        *(void**)(view + LAMBDA_GC_OFF_LIST_ITEMS) = NULL;
         return compacted;
     }
-    uint8_t* base_data = *(uint8_t**)(base + GC_OFF_ITEMS);
-    *(void**)(view + GC_OFF_ITEMS) = base_data ?
+    uint8_t* base_data = *(uint8_t**)(base + LAMBDA_GC_OFF_LIST_ITEMS);
+    *(void**)(view + LAMBDA_GC_OFF_LIST_ITEMS) = base_data ?
         base_data + (size_t)shape->offset * elem_bytes : NULL;
     return compacted;
 }
@@ -2027,7 +2007,7 @@ static void gc_compact_data(gc_heap_t* gc) {
                 (void)attr_moved;
 #endif
             }
-            if (p[2] & 0x02) {
+            if (p[LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS] & 0x02) {
                 // A borrowing view owns nothing: compacting it here would copy
                 // `capacity` (0) bytes and leave `items` pointing at a fresh
                 // empty block instead of the base's buffer. Rebind instead.
@@ -2039,10 +2019,10 @@ static void gc_compact_data(gc_heap_t* gc) {
 #endif
                 break;
             }
-            void** items_slot = (void**)(p + GC_OFF_ITEMS);
-            int64_t length = *(int64_t*)(p + GC_OFF_LENGTH);
-            int64_t extra = *(int64_t*)(p + GC_OFF_EXTRA);
-            int64_t capacity = *(int64_t*)(p + GC_OFF_CAPACITY);
+            void** items_slot = (void**)(p + LAMBDA_GC_OFF_LIST_ITEMS);
+            int64_t length = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_LENGTH);
+            int64_t extra = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_EXTRA);
+            int64_t capacity = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_CAPACITY);
             if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
                 uint64_t* old_items = (uint64_t*)*items_slot;
                 size_t size = capacity * sizeof(uint64_t); // sizeof(Item)
@@ -2074,12 +2054,12 @@ static void gc_compact_data(gc_heap_t* gc) {
                 (void)attr_moved;
 #endif
             }
-            uint8_t array_flags = p[2];
+            uint8_t array_flags = p[LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS];
             // N-D shape descriptors live in the nursery data zone just like
             // element buffers. Promote them before resetting that zone or a
             // live array keeps a dangling `extra` pointer after collection.
             if (array_flags & 0x01) {  // Container.is_ndim
-                void** shape_slot = (void**)(p + GC_OFF_EXTRA);
+                void** shape_slot = (void**)(p + LAMBDA_GC_OFF_LIST_EXTRA);
                 if (*shape_slot && gc_data_zone_owns(gc->data_zone, *shape_slot)) {
                     ArrayNumShape* old_shape = (ArrayNumShape*)*shape_slot;
                     if (old_shape->ndim >= 1 && old_shape->ndim <= 32) {
@@ -2115,10 +2095,10 @@ static void gc_compact_data(gc_heap_t* gc) {
         }
         case LMD_TYPE_MAP_: {
             uint8_t* p = (uint8_t*)obj;
-            void** data_slot = (void**)(p + GC_OFF_DATA);
-            void* type_ptr = *(void**)(p + GC_OFF_TYPE);
+            void** data_slot = (void**)(p + LAMBDA_GC_OFF_MAP_DATA);
+            void* type_ptr = *(void**)(p + LAMBDA_GC_OFF_MAP_TYPE);
             if (*data_slot && gc_data_zone_owns(gc->data_zone, *data_slot) && type_ptr) {
-                int data_cap = *(int*)(p + GC_OFF_DATA_CAP);
+                int data_cap = *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP);
                 // D4.3.1: data_cap is the allocation contract. TypeMap.byte_size
                 // can be smaller than a JS constructor's reserved fixed slots;
                 // copying only byte_size left the live object pointing at a
@@ -2139,10 +2119,10 @@ static void gc_compact_data(gc_heap_t* gc) {
         case LMD_TYPE_ELEMENT_: {
             uint8_t* p = (uint8_t*)obj;
             // compact items[]
-            void** items_slot = (void**)(p + GC_OFF_ITEMS);
-            int64_t elmt_length = *(int64_t*)(p + GC_OFF_LENGTH);
-            int64_t elmt_extra = *(int64_t*)(p + GC_OFF_EXTRA);
-            int64_t elmt_capacity = *(int64_t*)(p + GC_OFF_CAPACITY);
+            void** items_slot = (void**)(p + LAMBDA_GC_OFF_LIST_ITEMS);
+            int64_t elmt_length = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_LENGTH);
+            int64_t elmt_extra = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_EXTRA);
+            int64_t elmt_capacity = *(int64_t*)(p + LAMBDA_GC_OFF_LIST_CAPACITY);
             if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
                 uint64_t* old_elmt_items = (uint64_t*)*items_slot;
                 size_t size = elmt_capacity * sizeof(uint64_t);
@@ -2161,10 +2141,10 @@ static void gc_compact_data(gc_heap_t* gc) {
                 }
             }
             // compact data
-            void** data_slot = (void**)(p + GC_OFF_DATA);
-            void* type_ptr = *(void**)(p + GC_OFF_TYPE);
+            void** data_slot = (void**)(p + LAMBDA_GC_OFF_MAP_DATA);
+            void* type_ptr = *(void**)(p + LAMBDA_GC_OFF_MAP_TYPE);
             if (*data_slot && gc_data_zone_owns(gc->data_zone, *data_slot) && type_ptr) {
-                int data_cap = *(int*)(p + GC_OFF_DATA_CAP);
+                int data_cap = *(int*)(p + LAMBDA_GC_OFF_MAP_DATA_CAP);
                 int64_t byte_size = gc_packed_data_allocation_size(type_ptr, data_cap);
                 if (byte_size > 0) {
                     void* new_data = gc_data_zone_copy(gc->tenured_data, *data_slot, byte_size);
@@ -2181,8 +2161,9 @@ static void gc_compact_data(gc_heap_t* gc) {
         case LMD_TYPE_FUNC_: {
             if (gc->js_function_compact && gc->js_function_compact(obj, gc)) break;
             uint8_t* p = (uint8_t*)obj;
-            uint8_t field_count = *(uint8_t*)(p + 2);  // closure_field_count
-            void** env_slot = (void**)(p + 24);
+            uint8_t field_count = *(uint8_t*)(
+                p + LAMBDA_GC_OFF_FUNCTION_CLOSURE_FIELD_COUNT);
+            void** env_slot = (void**)(p + LAMBDA_GC_OFF_FUNCTION_CLOSURE_ENV);
             if (*env_slot && field_count > 0 && gc_data_zone_owns(gc->data_zone, *env_slot)) {
                 size_t size = (size_t)field_count * sizeof(uint64_t);
                 void* new_env = gc_data_zone_copy(gc->tenured_data, *env_slot, size);
@@ -2230,10 +2211,10 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
     else if (tag == LMD_TYPE_VMAP_) {
         // VMap host payload cleanup is independent of optional lazy backing data.
         uint8_t* p = (uint8_t*)obj;
-        void* data = *(void**)(p + 8);
+        void* data = *(void**)(p + LAMBDA_GC_OFF_VMAP_DATA);
         if (gc->vmap_destroy) {
             gc->vmap_destroy(obj, data);
-            *(void**)(p + 8) = NULL;  // prevent double-free at context teardown
+            *(void**)(p + LAMBDA_GC_OFF_VMAP_DATA) = NULL;  // prevent double-free at context teardown
         }
     }
     else if (tag == LMD_TYPE_ERROR_) {
@@ -2248,15 +2229,15 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
             gc->js_native_destroy(obj);
         }
         uint8_t* p = (uint8_t*)obj;
-        uint8_t map_kind = p[3];
+        uint8_t map_kind = p[LAMBDA_GC_OFF_CONTAINER_MAP_KIND];
         if (map_kind == MAP_KIND_ARRAY_SPARSE_) {
             gc_free_sparse_array_map_entries(obj);
         }
         if (map_kind == MAP_KIND_ITERATOR_ || map_kind == MAP_KIND_PROXY_) {
-            void* data = *(void**)(p + 16);
+            void* data = *(void**)(p + LAMBDA_GC_OFF_MAP_DATA);
             if (data) {
                 mem_free(data);
-                *(void**)(p + 16) = NULL;
+                *(void**)(p + LAMBDA_GC_OFF_MAP_DATA) = NULL;
             }
         }
     }

@@ -211,6 +211,10 @@ typedef struct TypedItem {
 } TypedItem;
 #pragma pack(pop)
 
+static_assert(offsetof(TypedItem, type_id) == LAMBDA_GC_OFF_TYPED_ITEM_TYPE_ID &&
+              offsetof(TypedItem, item) == LAMBDA_GC_OFF_TYPED_ITEM_VALUE,
+              "TypedItem must match the GC ABI");
+
 typedef struct Script Script;
 
 typedef struct TypeConst : Type {
@@ -410,6 +414,19 @@ typedef struct TypeMap : Type {
     // Authoritative; the container's `is_nominal` header bit only caches it.
     struct TypeNominal* nominal;
 } TypeMap;
+
+// The C collector walks these descriptor prefixes without including this
+// C++ header. Keep that bridge checked at the defining types.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static_assert(offsetof(ShapeEntry, type) == LAMBDA_GC_OFF_SHAPE_ENTRY_TYPE &&
+              offsetof(ShapeEntry, byte_offset) == LAMBDA_GC_OFF_SHAPE_ENTRY_BYTE_OFFSET &&
+              offsetof(ShapeEntry, next) == LAMBDA_GC_OFF_SHAPE_ENTRY_NEXT,
+              "ShapeEntry must match the GC ABI");
+static_assert(offsetof(TypeMap, byte_size) == LAMBDA_GC_OFF_TYPE_MAP_BYTE_SIZE &&
+              offsetof(TypeMap, shape) == LAMBDA_GC_OFF_TYPE_MAP_SHAPE,
+              "TypeMap must match the GC ABI");
+#pragma clang diagnostic pop
 
 typedef struct TypeMapTransition {
     NameId name_id;

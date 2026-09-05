@@ -647,20 +647,29 @@ struct ArrayNum : Map {
 // offset in every container, so an ancestor cast is always valid.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
-static_assert(offsetof(Map, type) == 8 && offsetof(Map, data) == 16 &&
-              offsetof(Map, data_cap) == 24, "Map attribute face moved");
-static_assert(offsetof(List, type) == offsetof(Map, type) &&
-              offsetof(List, data) == offsetof(Map, data) &&
-              offsetof(List, data_cap) == offsetof(Map, data_cap),
-              "List must share Map's attribute face");
-static_assert(offsetof(List, items) == 32 && offsetof(List, length) == 40 &&
-              offsetof(List, extra) == 48 && offsetof(List, capacity) == 56,
-              "List content face moved");
-static_assert(offsetof(ArrayNum, items) == offsetof(List, items) &&
-              offsetof(ArrayNum, length) == offsetof(List, length) &&
-              offsetof(ArrayNum, extra) == offsetof(List, extra) &&
-              offsetof(ArrayNum, capacity) == offsetof(List, capacity),
-              "ArrayNum must share List's header and tail offsets");
+static_assert(offsetof(Container, type_id) == LAMBDA_GC_OFF_CONTAINER_TYPE_ID &&
+              offsetof(Container, flags) == LAMBDA_GC_OFF_CONTAINER_FLAGS &&
+              offsetof(Container, array_flags) == LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS &&
+              offsetof(Container, map_kind) == LAMBDA_GC_OFF_CONTAINER_MAP_KIND,
+              "Container must match the GC ABI");
+static_assert(offsetof(Map, type) == LAMBDA_GC_OFF_MAP_TYPE &&
+              offsetof(Map, data) == LAMBDA_GC_OFF_MAP_DATA &&
+              offsetof(Map, data_cap) == LAMBDA_GC_OFF_MAP_DATA_CAP,
+              "Map must match the GC ABI");
+static_assert(offsetof(List, type) == LAMBDA_GC_OFF_MAP_TYPE &&
+              offsetof(List, data) == LAMBDA_GC_OFF_MAP_DATA &&
+              offsetof(List, data_cap) == LAMBDA_GC_OFF_MAP_DATA_CAP,
+              "List must share Map's GC ABI face");
+static_assert(offsetof(List, items) == LAMBDA_GC_OFF_LIST_ITEMS &&
+              offsetof(List, length) == LAMBDA_GC_OFF_LIST_LENGTH &&
+              offsetof(List, extra) == LAMBDA_GC_OFF_LIST_EXTRA &&
+              offsetof(List, capacity) == LAMBDA_GC_OFF_LIST_CAPACITY,
+              "List must match the GC ABI content face");
+static_assert(offsetof(ArrayNum, items) == LAMBDA_GC_OFF_LIST_ITEMS &&
+              offsetof(ArrayNum, length) == LAMBDA_GC_OFF_LIST_LENGTH &&
+              offsetof(ArrayNum, extra) == LAMBDA_GC_OFF_LIST_EXTRA &&
+              offsetof(ArrayNum, capacity) == LAMBDA_GC_OFF_LIST_CAPACITY,
+              "ArrayNum must share the GC ABI content face");
 #pragma clang diagnostic pop
 
 static_assert(sizeof(List) == sizeof(ArrayNum),
@@ -810,6 +819,15 @@ struct VMap : Container {
     const void* host_type;  // optional branded native host type; NULL for ordinary VMaps
     void* host_data;        // optional native payload for host-object adapters
 };
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static_assert(offsetof(VMap, data) == LAMBDA_GC_OFF_VMAP_DATA &&
+              offsetof(VMap, vtable) == LAMBDA_GC_OFF_VMAP_VTABLE,
+              "VMap must match the GC ABI");
+static_assert(offsetof(VMapVtable, trace) == LAMBDA_GC_OFF_VMAP_VTABLE_TRACE,
+              "VMap trace hook must match the GC ABI");
+#pragma clang diagnostic pop
 
 // Object: nominally-typed map with type name and methods
 // Same memory layout as Map for field access compatibility

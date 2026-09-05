@@ -28,7 +28,8 @@ pn main() {
     print(arr[0])
     print(arr[49])
 
-    // ===== Map field additions =====
+    // ===== Map field additions through a var borrow =====
+    // S9.1.6/D3.4.5: maps admit named keys and transition their shape.
     var obj = {}
     var first_map_error = null
     write_empty_map(obj, "a", 1) ^ { first_map_error = ^ }

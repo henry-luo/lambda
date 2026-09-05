@@ -778,15 +778,14 @@ into storage-owned lanes. The shared store/rehome helpers enforce the current
 paths; a new raw Item store that bypasses them creates a dangling scalar
 pointer.
 
-<a id="lr08-5"></a>**LR08-5 · Hard-coded struct byte offsets in tracing and compaction · OPEN**
-`gc_trace_object` (`gc_heap.c:1413`) and `gc_compact_data` (`:1872`) read fields
-at fixed offsets — Array items @+8 (`:1459`, `:1490`), length @+16 (`:1491`),
-Map type @+8 / data @+16 (`:1526`–`:1527`), ShapeEntry type @+8 (`:1564`), and a
-`+16` type-length read at `:1408`. Any change to
-`Container`/`Map`/`Element`/`TypeMap`/`ShapeEntry`/`Function` layout silently
-corrupts tracing or compaction; the `TypeId` enum aliasing defends the *enum
-values* but not the *offsets*. `item_to_ptr` likewise assumes high-byte-zero
-heap pointers — a documented-but-unenforced platform assumption.
+<a id="lr08-5"></a>**LR08-5 · Hard-coded struct byte offsets in tracing and compaction · RESOLVED 2026-09-05**
+D2.6.6v2/D3.4.1: the C collector now consumes `LAMBDA_GC_OFF_*` constants
+derived by `offsetof` from one canonical C ABI layout. Assertions bind that
+layout to the C and C++ definitions of the container chain, `TypeMap`,
+`ShapeEntry`, `TypedItem`, `ArrayNumShape`, `Function`, and `VMap`; trace,
+compaction, and GC test fixtures no longer embed their own byte positions.
+The retained separate `item_to_ptr` high-byte-zero platform assumption is not
+an offset-layout issue.
 
 <a id="lr08-6"></a>**LR08-6 · `SHAPE_POOL_MAX_CHAIN_LENGTH` = 64 silently returns NULL · OPEN**
 Maps/elements with more than 64 fields get no pooled shape
@@ -1746,9 +1745,9 @@ One policy each, not per-site fixes.
   module vars 2048/1024, regex groups 256, and more. One grow-or-error doctrine
   retires the class. Ledger instances: [LR01-5](#lr01-5), [LR11-4](#lr11-4),
   [LR13-5](#lr13-5).
-- **Layout-coupled raw offsets** — GC trace/compaction and `init_module_import`
-  ([LR01-8](#lr01-8), [LR08-5](#lr08-5)); static-assert guards or generated
-  offset tables.
+- **Layout-coupled raw offsets** — `init_module_import` ([LR01-8](#lr01-8))
+  still needs static-assert guards or a generated offset table; GC
+  trace/compaction is resolved by [LR08-5](#lr08-5).
 - **One masked memory-safety bug** — the event-loop SIGSEGV band-aid remains;
   the `sys://` map-walk segfault workaround was replaced by the shape-aware
   traversal in [LR01-R3](#lr01-r3).
@@ -2373,7 +2372,7 @@ together, not individually.
 | **Representation ↔ semantics coupling** | LR03-3, LR07-1, LR07-5, LR07-14 | Expression results carry no `ValueRep`; each consumer re-derives it. See [Result32 lane-parity + Tune19], [Compiling lane design]. |
 | **Value-semantics residue (OI-1)** | LR03-1, LR04-4, LR09-3 | Second equality walker, `decimal_cmp` failure-as-equality, VMap key eq/hash rank consistency. Tracked as OI-1 in this ledger's [§15](#15-design-gaps-inherited-from-the-retired-outstanding-rollup-oi). |
 | **`INT64_MAX` sentinel collision** | LR03-4, LR07-4 | `INT64_ERROR == INT64_MAX` and `INT_LANE_INF` share one bit pattern; index OOB also lands on `INT64_MAX`. The former LR10-5 entry is a preserved alias for LR03-4. See [v5 int migration in flight]. |
-| **Hard-coded byte offsets** | LR01-8, LR08-5 | Two subsystems read struct fields at literal offsets that no `static_assert` protects. A single layout change corrupts module binding or GC tracing silently. |
+| **Hard-coded byte offsets** | LR01-8 | Module binding still reads struct fields at literal offsets that no `static_assert` protects. GC tracing is resolved by [LR08-5](#lr08-5). |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
 | **Surface syntax (S16) residue** | LR02-16, S16.9.5, i8-genafterlet, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
 | **Process globals** | LR01-12, LR12-6 | `g_template_registry` and `g_dry_run` block concurrent runtimes. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |

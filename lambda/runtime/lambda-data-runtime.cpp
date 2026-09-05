@@ -43,10 +43,10 @@ extern "C" Item path_resolve_for_iteration(Path* path);
 // External: interned ASCII char table (implemented in lambda-mem.cpp)
 extern "C" String* get_ascii_char_string(unsigned char ch);
 
-static_assert(offsetof(ArrayNumShape, base) == 16,
-    "ArrayNumShape.base offset is part of the C GC tracing ABI");
-static_assert(offsetof(ArrayNumShape, backing) == 24,
-    "ArrayNumShape.backing offset is part of the backing descriptor ABI");
+static_assert(offsetof(ArrayNumShape, base) == LAMBDA_GC_OFF_ARRAY_NUM_SHAPE_BASE,
+    "ArrayNumShape.base must match the C GC ABI");
+static_assert(offsetof(ArrayNumShape, backing) == LAMBDA_GC_OFF_ARRAY_NUM_SHAPE_BACKING,
+    "ArrayNumShape.backing must match the descriptor ABI");
 
 static uint8_t array_num_clamp_uint8_even(double value) {
     if (isnan(value) || value <= 0.0) return 0;
