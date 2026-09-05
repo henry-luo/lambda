@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>DOM package listbox multiple selection</title>
+  <style>
+    body { font: 16px sans-serif; margin: 0; }
+    select { display: block; margin: 4px; width: 180px; }
+    /* :selected has one owner now, so an author rule sees the live selection */
+    option:selected { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <form id="form">
+    <select id="picks" name="pick" multiple size="5">
+      <option value="a">Alpha</option>
+      <option value="b">Bravo</option>
+      <option value="c">Charlie</option>
+      <option value="d" disabled>Delta</option>
+      <option value="e">Echo</option>
+    </select>
+    <select id="one" name="one" size="4">
+      <option value="p">Peach</option>
+      <option value="q">Quince</option>
+      <option value="r">Rhubarb</option>
+    </select>
+  </form>
+  <output id="chosen">-</output>
+  <output id="entries">-</output>
+  <output id="changes">0</output>
+  <script>
+    const picks = document.getElementById('picks');
+    let changes = 0;
+    function report() {
+      document.getElementById('chosen').textContent =
+        Array.from(picks.selectedOptions).map(o => o.value).join(',') || '-';
+      const data = new FormData(document.getElementById('form'));
+      document.getElementById('entries').textContent =
+        data.getAll('pick').join(',') || '-';
+    }
+    picks.addEventListener('change', () => {
+      changes++;
+      document.getElementById('changes').textContent = String(changes);
+      report();
+    });
+    report();
+  </script>
+</body>
+</html>

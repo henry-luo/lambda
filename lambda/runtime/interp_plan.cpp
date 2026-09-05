@@ -1407,8 +1407,45 @@ static uint32_t plan_need(AstNode* node) {
         if (post > collect) collect = post;
         return final_clause > collect ? final_clause : collect;
     }
-    case AST_NODE_MAP:
-        return 1 + plan_need_max_siblings(((AstMapNode*)node)->item);
+    case AST_NODE_MAP: {
+        AstMapNode* map = (AstMapNode*)node;
+        if (!map->has_computed_key) return 1 + plan_need_max_siblings(map->item);
+        uint32_t best = 1;  // the runtime-built map owner
+        for (AstNode* item = map->item; item; item = item->next) {
+            AstNamedNode* named = item->node_type == AST_NODE_KEY_EXPR
+                ? (AstNamedNode*)item : NULL;
+            uint32_t need = named && named->is_spread
+                ? 1 + plan_need(named->as) : 2 + plan_need(named ? named->as : item);
+            if (named && !named->is_spread) {
+                uint32_t key_need = 1 + plan_need(named->key);
+                if (key_need > need) need = key_need;
+            }
+            if (need > best) best = need;
+        }
+        return best;
+    }
+    case AST_NODE_ELEMENT: {
+        AstElementNode* element = (AstElementNode*)node;
+        if (!element->has_computed_key) {
+            NeedAcc acc = {0};
+            interp_visit_children(node, plan_need_child, &acc);
+            return 1 + acc.best;
+        }
+        uint32_t best = 1;  // element owner
+        for (AstNode* item = element->item; item; item = item->next) {
+            AstNamedNode* named = item->node_type == AST_NODE_KEY_EXPR
+                ? (AstNamedNode*)item : NULL;
+            uint32_t need = named && named->is_spread
+                ? 1 + plan_need(named->as) : 2 + plan_need(named ? named->as : item);
+            if (named && !named->is_spread) {
+                uint32_t key_need = 1 + plan_need(named->key);
+                if (key_need > need) need = key_need;
+            }
+            if (need > best) best = need;
+        }
+        uint32_t content_need = 1 + plan_need(element->content);
+        return content_need > best ? content_need : best;
+    }
     case AST_NODE_OBJECT_LITERAL: {
         AstObjectLiteralNode* literal = (AstObjectLiteralNode*)node;
         // eval_object_literal keeps its optional spread home in scope even for
@@ -1439,7 +1476,12 @@ static uint32_t plan_need(AstNode* node) {
         // planned no scratch slot even though parameter entry must convert x.
         return named->declared_type && need < 1 ? 1 : need;
     }
-    case AST_NODE_KEY_EXPR:
+    case AST_NODE_KEY_EXPR: {
+        AstNamedNode* named = (AstNamedNode*)node;
+        int key_need = plan_need(named->key);
+        int value_need = plan_need(named->as);
+        return key_need > value_need ? key_need : value_need;
+    }
     case AST_NODE_NAMED_ARG:
         // The destination is a named slot or the enclosing builder, not scratch.
         return plan_need(((AstNamedNode*)node)->as);

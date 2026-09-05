@@ -443,7 +443,12 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
         case AST_NODE_PROPERTY:
             AST_VISIT(((AstPropertyNode*)node)->key);
             AST_VISIT(((AstPropertyNode*)node)->value); break;
-        case AST_NODE_KEY_EXPR: case AST_NODE_PARAM: case AST_NODE_NAMED_ARG:
+        case AST_NODE_KEY_EXPR: {
+            AstNamedNode* named = (AstNamedNode*)node;
+            AST_VISIT(named->key);
+            AST_VISIT(named->as); break;
+        }
+        case AST_NODE_PARAM: case AST_NODE_NAMED_ARG:
         case AST_NODE_STRING_PATTERN: case AST_NODE_SYMBOL_PATTERN:
             AST_VISIT(((AstNamedNode*)node)->as); break;
         case AST_NODE_DECOMPOSE: AST_VISIT(((AstDecomposeNode*)node)->as); break;

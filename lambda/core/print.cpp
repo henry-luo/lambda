@@ -1000,7 +1000,13 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
     }
     case AST_NODE_KEY_EXPR: {
         AstNamedNode* key = (AstNamedNode*)node;
-        log_debug("[key expr:%.*s:%s]", (int)key->name->len, key->name->chars, type_name);
+        if (key->key) {
+            log_debug("[key expr:computed:%s]", type_name);
+            print_ast_node(script, key->key, indent + 1);
+        } else {
+            log_debug("[key expr:%.*s:%s]", key->name ? (int)key->name->len : 0,
+                key->name ? key->name->chars : "", type_name);
+        }
         print_ast_node(script, key->as, indent + 1);
         break;
     }

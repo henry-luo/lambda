@@ -424,6 +424,10 @@
           "named": true
         },
         {
+          "type": "computed_key",
+          "named": true
+        },
+        {
           "type": "dotted_name",
           "named": true
         },
@@ -1141,6 +1145,54 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "computed_key",
+    "named": true,
+    "fields": {
+      "key": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "for_expr",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
+            "named": true
+          },
+          {
+            "type": "not_expr",
+            "named": true
+          },
+          {
+            "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "raise_expr",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
+          },
+          {
+            "type": "while_expr",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -3046,6 +3098,10 @@
           },
           {
             "type": "base_type",
+            "named": true
+          },
+          {
+            "type": "computed_key",
             "named": true
           },
           {

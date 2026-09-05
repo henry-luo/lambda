@@ -54,6 +54,20 @@ pub fn details_group(node) {
     if (group == null or group == "") [] else [for (peer in peers where dom.get_attribute(peer, "name") == group and not dom.same_node(peer, node)) peer]
 }
 
+// The position of `node` within a snapshot array, or null when it is not in it.
+// Node identity is same_node and not `==`: two wrappers can address one element,
+// so comparing them directly finds nothing and every group walk that used it
+// would silently start from the beginning.
+pub fn index_in(nodes, node) {
+    let hits = [for (i in 0 to len(nodes) - 1 where dom.same_node(nodes[i], node)) i];
+    if (len(hits) == 0) null else hits[0]
+}
+
+// The options a <select> owns, in tree order. query_selector_all is scoped to
+// the select, so options inside an <optgroup> are included at their document
+// position — which is the order the engine's selected_index counts in.
+pub fn options_of(select) { dom.query_selector_all(select, "option") }
+
 // ---------------------------------------------------------------------------
 // Composites over the engine's own reads (F32).
 //

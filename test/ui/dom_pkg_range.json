@@ -1,0 +1,83 @@
+{
+  "name": "ESO58: the dom package owns range and number value stepping",
+  "html": "test/ui/dom_pkg_range.html",
+  "viewport": {"width": 520, "height": 420},
+  "events": [
+    {"type": "log", "message": "=== slider keyboard stepping (stepper.ls -> dom.input_operation) ==="},
+    {"type": "focus", "target": {"selector": "#slider"}},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "50"},
+
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "60"},
+    {"type": "assert_text", "target": {"selector": "#inputs"}, "equals": "1"},
+    {"type": "assert_text", "target": {"selector": "#changes"}, "equals": "1"},
+
+    {"type": "log", "message": "--- Up is the same direction as Right on a slider ---"},
+    {"type": "key_press", "key": "ArrowUp"},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "70"},
+
+    {"type": "key_press", "key": "ArrowLeft"},
+    {"type": "key_press", "key": "ArrowDown"},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "50"},
+
+    {"type": "log", "message": "--- the ARIA mirror follows the value, not the attribute ---"},
+    {"type": "assert_attr", "target": {"selector": "#slider"}, "attribute": "aria-valuenow", "equals": "50"},
+
+    {"type": "log", "message": "--- Home and End land on the bounds ---"},
+    {"type": "key_press", "key": "Home"},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "0"},
+    {"type": "key_press", "key": "End"},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "100"},
+
+    {"type": "log", "message": "--- a step already at its bound moves nothing and fires nothing ---"},
+    {"type": "assert_text", "target": {"selector": "#inputs"}, "equals": "6"},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "100"},
+    {"type": "assert_text", "target": {"selector": "#inputs"}, "equals": "6"},
+
+    {"type": "log", "message": "--- PageDown is the coarser step: (max-min)/10 = one step of 10 here ---"},
+    {"type": "key_press", "key": "PageDown"},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "90"},
+
+    {"type": "log", "message": "--- a modified arrow is not a step ---"},
+    {"type": "key_press", "key": "ArrowLeft", "mods_str": "ctrl"},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "90"},
+
+    {"type": "log", "message": "=== fractional step resolves through HTML's value algorithm ==="},
+    {"type": "focus", "target": {"selector": "#fine"}},
+    {"type": "assert_value", "target": {"selector": "#fine"}, "equals": "0"},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "assert_value", "target": {"selector": "#fine"}, "equals": "0.5"},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "assert_value", "target": {"selector": "#fine"}, "equals": "1"},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "assert_value", "target": {"selector": "#fine"}, "equals": "1"},
+    {"type": "key_press", "key": "Home"},
+    {"type": "assert_value", "target": {"selector": "#fine"}, "equals": "-1"},
+
+    {"type": "log", "message": "=== <input type=number> steps on Up/Down only ==="},
+    {"type": "focus", "target": {"selector": "#count"}},
+    {"type": "assert_value", "target": {"selector": "#count"}, "equals": "2"},
+    {"type": "key_press", "key": "ArrowUp"},
+    {"type": "assert_value", "target": {"selector": "#count"}, "equals": "3"},
+    {"type": "key_press", "key": "ArrowDown"},
+    {"type": "key_press", "key": "ArrowDown"},
+    {"type": "assert_value", "target": {"selector": "#count"}, "equals": "1"},
+
+    {"type": "log", "message": "--- Left/Right and Home/End are caret keys in a spinner, not steps ---"},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "key_press", "key": "End"},
+    {"type": "assert_value", "target": {"selector": "#count"}, "equals": "1"},
+
+    {"type": "log", "message": "--- min clamps the spinner ---"},
+    {"type": "key_press", "key": "ArrowDown"},
+    {"type": "assert_value", "target": {"selector": "#count"}, "equals": "0"},
+    {"type": "key_press", "key": "ArrowDown"},
+    {"type": "assert_value", "target": {"selector": "#count"}, "equals": "0"},
+
+    {"type": "log", "message": "=== an author-cancelled keydown suppresses the UA step ==="},
+    {"type": "focus", "target": {"selector": "#blocked"}},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "assert_value", "target": {"selector": "#blocked"}, "equals": "50"}
+  ]
+}

@@ -933,7 +933,7 @@ static bool mir_region_producer_node(AstNode* node, AstFuncNode* producer,
             saw_map, saw_recursive_call);
     case AST_NODE_MAP: {
         AstMapNode* map = (AstMapNode*)node;
-        if (!map->item) return false;
+        if (map->has_computed_key || !map->item) return false;
         *saw_map = true;
         for (AstNode* item = map->item; item; item = item->next) {
             AstNode* value = item->node_type == AST_NODE_KEY_EXPR
@@ -991,7 +991,7 @@ static bool mir_region_scalar_field_node(AstNode* node, String* field_name,
             field_name, saw_field);
     case AST_NODE_MAP: {
         AstMapNode* map = (AstMapNode*)node;
-        if (!map->item) return false;
+        if (map->has_computed_key || !map->item) return false;
         for (AstNode* item = map->item; item; item = item->next) {
             if (item->node_type != AST_NODE_KEY_EXPR) continue;
             AstNamedNode* named = (AstNamedNode*)item;
@@ -5080,7 +5080,8 @@ static bool static_const_array_from_node(MirTranspiler* mt, AstArrayNode* arr_no
 }
 
 static bool static_const_map_from_node(MirTranspiler* mt, AstMapNode* map_node, Item* out) {
-    if (!mt || !map_node || !map_node->type || !out || !mt->script_pool) return false;
+    if (!mt || !map_node || map_node->has_computed_key || !map_node->type || !out ||
+            !mt->script_pool) return false;
     TypeMap* map_type = (TypeMap*)map_node->type;
     Map* map = (Map*)pool_calloc(mt->script_pool, sizeof(Map));
     if (!map) return false;
@@ -14055,7 +14056,7 @@ static MIR_reg_t mir_emit_trusted_map_field_argument(MirTranspiler* mt,
 
 static bool mir_map_literal_matches_contract(AstMapNode* map_node,
         TypeMap* expected) {
-    if (!map_node || !map_node->type || !expected) return false;
+    if (!map_node || map_node->has_computed_key || !map_node->type || !expected) return false;
     TypeMap* candidate = (TypeMap*)map_node->type;
     MapContractRelation relation = lambda_map_contract_relation(candidate, expected);
     if (relation != MAP_CONTRACT_INCOMPATIBLE) {
@@ -14143,7 +14144,7 @@ static bool mir_map_contract_storage_valid(TypeMap* expected) {
 // map_fill -- walk the literal's values against the shape in lockstep.
 static bool mir_map_literal_shape_matches_contract(AstMapNode* map_node,
         TypeMap* expected) {
-    if (!map_node || !map_node->type || !expected) return false;
+    if (!map_node || map_node->has_computed_key || !map_node->type || !expected) return false;
     if (!mir_map_contract_storage_valid(expected)) return false;
     TypeMap* candidate = (TypeMap*)map_node->type;
     if (candidate->length != expected->length) return false;
@@ -14246,7 +14247,71 @@ static MIR_reg_t emit_map_alloc(MirTranspiler* mt, TypeMap* contract,
         MIR_T_P, MIR_new_reg_op(mt->ctx, type_list));
 }
 
+// S16.8.9: a computed NameKey keeps the literal's syntactic items in source
+// order. Build the normal Map/Element shape through the runtime setter rather
+// than turning the literal into a VMap with an arbitrary Item key domain.
+static MIR_reg_t emit_dynamic_keyed_literal_items(MirTranspiler* mt,
+        AstNode* item, MIR_reg_t owner, TypeId owner_type) {
+    int owner_root = create_pointer_gc_root_slot(mt, owner);
+    for (; item; item = item->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR) {
+            log_error("mir: computed literal has non-key item");
+            return load_gc_root_slot(mt, owner_root, "literal_owner");
+        }
+        AstNamedNode* named = (AstNamedNode*)item;
+        if (named->is_spread) {
+            MIR_reg_t source = transpile_box_item(mt, named->as);
+            int source_root = create_gc_root_slot(mt, source);
+            MIR_reg_t live_owner = load_gc_root_slot(mt, owner_root, "literal_owner");
+            MIR_reg_t owner_item = emit_box(mt, live_owner, owner_type);
+            source = load_gc_root_slot(mt, source_root, "literal_spread");
+            MIR_reg_t result = emit_call_2(mt, "map_literal_spread", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, owner_item),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, source));
+            emit_return_if_item_error(mt, result);
+            continue;
+        }
+
+        MIR_reg_t key;
+        if (named->key) {
+            key = transpile_box_item(mt, named->key);
+        } else {
+            const char* chars = named->name ? named->name->chars : "";
+            int64_t length = named->name ? named->name->len : 0;
+            MIR_reg_t key_ptr = emit_call_2(mt, "heap_strcpy", MIR_T_P,
+                MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)chars),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, length));
+            key = emit_box_string(mt, key_ptr);
+        }
+        int key_root = create_gc_root_slot(mt, key);
+        mir_note_value_captured(mt, named->as);
+        MIR_reg_t value = named->as ? transpile_box_item(mt, named->as) :
+            emit_null_item_reg(mt);
+        if (named->as && ast_expr_insertion_needs_capture(named->as)) {
+            emit_call_1(mt, "cow_capture_value", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+        }
+        int value_root = create_gc_root_slot(mt, value);
+        MIR_reg_t live_owner = load_gc_root_slot(mt, owner_root, "literal_owner");
+        MIR_reg_t owner_item = emit_box(mt, live_owner, owner_type);
+        key = load_gc_root_slot(mt, key_root, "literal_key");
+        value = load_gc_root_slot(mt, value_root, "literal_value");
+        MIR_reg_t result = emit_call_3(mt, "map_literal_put", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, owner_item),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+        emit_return_if_item_error(mt, result);
+    }
+    return load_gc_root_slot(mt, owner_root, "literal_owner");
+}
+
 static MIR_reg_t emit_map_storage(MirTranspiler* mt, AstMapNode* map_node) {
+    if (map_node->has_computed_key) {
+        MIR_reg_t owner_item = emit_call_0(mt, "map_literal_begin", MIR_T_I64);
+        emit_return_if_item_error(mt, owner_item);
+        MIR_reg_t owner = emit_unbox(mt, owner_item, LMD_TYPE_MAP);
+        return emit_dynamic_keyed_literal_items(mt, map_node->item, owner, LMD_TYPE_MAP);
+    }
     TypeMap* map_contract = NULL;
     AstNode* hinted_node = mt->map_contract_hint_node
         ? ast_unwrap_primary(mt->map_contract_hint_node) : NULL;
@@ -14587,15 +14652,25 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
 
     TypeElmt* type = (TypeElmt*)elmt_node->type;
 
-    // Create element: Element* el = elmt_with_tl(type_index, type_list_ptr)
-    MIR_reg_t el = emit_call_2(mt, "elmt_with_tl", MIR_T_P,
-        MIR_T_I64, MIR_new_int_op(mt->ctx, type->type_index),
-        MIR_T_P, MIR_new_reg_op(mt->ctx, emit_load_module_type_list(mt)));
-    int el_root = create_pointer_gc_root_slot(mt, el);
+    MIR_reg_t el;
+    int el_root;
+    if (elmt_node->has_computed_key) {
+        el = emit_call_1(mt, "elmt_literal_begin", MIR_T_P,
+            MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)type));
+        el = emit_dynamic_keyed_literal_items(mt, elmt_node->item, el,
+            LMD_TYPE_ELEMENT);
+        el_root = create_pointer_gc_root_slot(mt, el);
+    } else {
+        // Create element: Element* el = elmt_with_tl(type_index, type_list_ptr)
+        el = emit_call_2(mt, "elmt_with_tl", MIR_T_P,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, type->type_index),
+            MIR_T_P, MIR_new_reg_op(mt->ctx, emit_load_module_type_list(mt)));
+        el_root = create_pointer_gc_root_slot(mt, el);
+    }
 
     // Fill attributes if present
     AstNode* item = elmt_node->item;
-    if (item) {
+    if (item && !elmt_node->has_computed_key) {
         // Count attribute values
         int attr_count = em_linked_node_count(item);
         AstNode* scan = item;

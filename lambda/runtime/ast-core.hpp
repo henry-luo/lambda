@@ -618,6 +618,11 @@ typedef AstBinaryNode AstPipeNode;
 typedef struct AstNamedNode : AstNode {
     String* name;
     AstNode *as;
+    // S16.8.9 map/element items retain their evaluated NameKey here. It is
+    // NULL for ordinary named fields, parameters, and named arguments.
+    AstNode* key;
+    // Preserves `*: value` versus `'*': value` in runtime-built literals.
+    bool is_spread;
     NameEntry* entry;
     Type* declared_type;
 } AstNamedNode;
@@ -731,6 +736,9 @@ typedef struct AstMapNode : AstNode {
         AstNode *item;
         AstNode *properties;
     };
+    // Computed keys force run-time shape construction; static literals retain
+    // their precomputed ShapeEntry chain.
+    bool has_computed_key;
 } AstMapNode;
 
 typedef struct AstPropertyNode : AstNode {

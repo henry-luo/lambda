@@ -3687,6 +3687,22 @@ static bool apply_keyboard_scroll_operation(EventContext* evcon, View* origin,
     return true;
 }
 
+// F20: the bounded pointer-capture pair. A package handler that claimed a press
+// asked for capture through `dom.capture_pointer`; these deliver the moves and
+// the release to that one element. Behavior-only because the spec concept they
+// serve -- a widget tracking the pointer it captured -- has no event of its own
+// here, and routing it through `mousemove` would put every document's behavior
+// dispatch on the per-frame path the ES5 hot-path guard forbids.
+extern "C" bool radiant_dispatch_behavior_pointer_drag(EventContext* evcon,
+                                                        View* target) {
+    return dispatch_behavior_handler(evcon, target, "pointerdrag", nullptr, nullptr);
+}
+
+extern "C" bool radiant_dispatch_behavior_pointer_drag_end(EventContext* evcon,
+                                                            View* target) {
+    return dispatch_behavior_handler(evcon, target, "pointerdragend", nullptr, nullptr);
+}
+
 // F10: behavior-only after the ordinary cancelable DOM `contextmenu` event.
 // The template decides whether this target gets a menu and computes the enable
 // mask; native supplies only the hit target and the popup position.
@@ -9962,10 +9978,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         if (state && state->drag_target) {
             log_debug("Dragging in progress");
-            ArrayList* target_list = build_view_stack(&evcon, static_cast<View*>(state->drag_target));
+            View* captured = static_cast<View*>(state->drag_target);
+            ArrayList* target_list = build_view_stack(&evcon, captured);
             evcon.event.type = RDT_EVENT_MOUSE_DRAG;  // deliver as drag event
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
+            // MouseButtonEvent derives from MousePositionEvent, so the record
+            // builder's x/y read the motion coordinates unchanged here.
+            radiant_dispatch_behavior_pointer_drag(&evcon, captured);
         }
 
         if (uicon->mouse_state.cursor != evcon.new_cursor) {
@@ -10898,9 +10918,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // fire drag event if dragging in progress
         if (evcon.event.type == RDT_EVENT_MOUSE_UP && state && state->drag_target) {
             log_debug("mouse up in dragging");
-            ArrayList* target_list = build_view_stack(&evcon, static_cast<View*>(state->drag_target));
+            View* captured = static_cast<View*>(state->drag_target);
+            ArrayList* target_list = build_view_stack(&evcon, captured);
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
+            // The end hook runs while the capture is still live, so a handler
+            // can still read the element it captured; the clear follows.
+            radiant_dispatch_behavior_pointer_drag_end(&evcon, captured);
             update_drag_state(&evcon, NULL, false);
         }
 

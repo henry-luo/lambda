@@ -1,0 +1,36 @@
+{
+  "name": "ESO58: slider pointer press, capture and drag",
+  "html": "test/ui/dom_pkg_range.html",
+  "viewport": {"width": 520, "height": 420},
+  "events": [
+    {"type": "log", "message": "=== a press on the track moves the thumb to the point ==="},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "50"},
+    {"type": "click", "target": {"selector": "#slider"}},
+    {"type": "log", "message": "--- the centre of a 0..100 track is the value it already had ---"},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "50"},
+    {"type": "assert_text", "target": {"selector": "#inputs"}, "equals": "0"},
+    {"type": "assert_text", "target": {"selector": "#changes"}, "equals": "0"},
+
+    {"type": "log", "message": "--- the press also gives the slider keyboard focus ---"},
+    {"type": "assert_focus", "target": {"selector": "#slider"}},
+
+    {"type": "log", "message": "=== a drag tracks the pointer through the captured stream ==="},
+    {"type": "mouse_drag", "target": {"selector": "#slider"}, "dx": 60, "dy": 0},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "80"},
+
+    {"type": "log", "message": "--- input fired during the drag, change exactly once at its end ---"},
+    {"type": "assert_text", "target": {"selector": "#changes"}, "equals": "1"},
+
+    {"type": "log", "message": "=== a drag past the end clamps to the maximum ==="},
+    {"type": "mouse_drag", "target": {"selector": "#slider"}, "dx": 400, "dy": 0},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "100"},
+
+    {"type": "log", "message": "=== and past the start clamps to the minimum ==="},
+    {"type": "mouse_drag", "target": {"selector": "#slider"}, "dx": -400, "dy": 0},
+    {"type": "assert_value", "target": {"selector": "#slider"}, "equals": "0"},
+
+    {"type": "log", "message": "=== the moved value is what the form submits, not the attribute ==="},
+    {"type": "assert_attr", "target": {"selector": "#slider"}, "attribute": "value", "equals": "50"},
+    {"type": "assert_attr", "target": {"selector": "#slider"}, "attribute": "aria-valuenow", "equals": "0"}
+  ]
+}

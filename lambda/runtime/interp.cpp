@@ -1916,6 +1916,49 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
 // collect, for no gain.
 static Item eval_map(InterpFrame* f, AstMapNode* node) {
     TypeMap* map_type = (TypeMap*)node->type;
+    if (node->has_computed_key) {
+        Scratch owner(f);
+        owner.set(map_literal_begin());
+        if (get_type_id(owner.get()) == LMD_TYPE_ERROR) {
+            interp_signal(f, EvalSignal::RETURNED, owner.get());
+            return owner.get();
+        }
+        for (AstNode* item = node->item; item; item = item->next) {
+            AstNamedNode* named = item->node_type == AST_NODE_KEY_EXPR
+                ? (AstNamedNode*)item : NULL;
+            if (!named) return ItemError;
+            if (named->is_spread) {
+                Scratch source(f);
+                source.set(named->as ? eval_expr(f, named->as) : ItemNull);
+                if (interp_frame_pending(f)) return ItemNull;
+                Item result = map_literal_spread(owner.get(), source.get());
+                if (get_type_id(result) == LMD_TYPE_ERROR) {
+                    interp_signal(f, EvalSignal::RETURNED, result);
+                    return result;
+                }
+                owner.set(result);
+                continue;
+            }
+            Scratch key(f);
+            key.set(named->key ? eval_expr(f, named->key) : (Item){.item = s2it(
+                heap_strcpy(named->name ? named->name->chars : "",
+                    named->name ? named->name->len : 0))});
+            if (interp_frame_pending(f)) return ItemNull;
+            Scratch value(f);
+            value.set(named->as ? eval_expr(f, named->as) : ItemNull);
+            if (interp_frame_pending(f)) return ItemNull;
+            if (named->as && ast_expr_insertion_needs_capture(named->as)) {
+                cow_capture_value(value.get());
+            }
+            Item result = map_literal_put(owner.get(), key.get(), value.get());
+            if (get_type_id(result) == LMD_TYPE_ERROR) {
+                interp_signal(f, EvalSignal::RETURNED, result);
+                return result;
+            }
+            owner.set(result);
+        }
+        return owner.get();
+    }
     int val_count = 0;
     for (AstNode* item = node->item; item; item = item->next) val_count++;
     if (val_count == 0) {
@@ -3011,31 +3054,70 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
     TypeElmt* type = (TypeElmt*)node->type;
     if (!type) return ItemError;
 
-    int attr_count = 0;
-    for (AstNode* a = node->item; a; a = a->next) attr_count++;
-
-    RootSpan attrs((size_t)(attr_count > 0 ? attr_count : 1));
-    uint64_t* attr_words = attrs.words();
-    int ai = 0;
-    for (AstNode* a = node->item; a; a = a->next) {
-        AstNode* value_node = a->node_type == AST_NODE_KEY_EXPR
-            ? ((AstNamedNode*)a)->as : a;
-        Item value = value_node ? eval_expr(f, value_node) : ItemNull;
-        // S9.3.1: a named attribute value is captured into the element.
-        if (value_node && ast_expr_insertion_needs_capture(value_node)) {
-            cow_capture_value(value);
-        }
-        attr_words[ai++] = value.item;
-        if (interp_frame_pending(f)) return ItemNull;
-    }
-
-    Element* fresh = elmt_with_tl(type->type_index, f->module->type_list);
-    if (!fresh) return ItemError;
     Scratch acc(f);
-    acc.set(interp_ptr_item(fresh));
-    if (attr_count > 0) {
-        elmt_fill_items((Element*)(uintptr_t)acc.get().item,
-            (const Item*)(void*)attr_words, ai);
+    if (node->has_computed_key) {
+        acc.set(interp_ptr_item(elmt_literal_begin(type)));
+        if (get_type_id(acc.get()) == LMD_TYPE_ERROR || !acc.get().item) {
+            interp_signal(f, EvalSignal::RETURNED, ItemError);
+            return ItemError;
+        }
+        for (AstNode* item = node->item; item; item = item->next) {
+            AstNamedNode* named = item->node_type == AST_NODE_KEY_EXPR
+                ? (AstNamedNode*)item : NULL;
+            if (!named) return ItemError;
+            if (named->is_spread) {
+                Scratch source(f);
+                source.set(named->as ? eval_expr(f, named->as) : ItemNull);
+                if (interp_frame_pending(f)) return ItemNull;
+                Item result = map_literal_spread(acc.get(), source.get());
+                if (get_type_id(result) == LMD_TYPE_ERROR) {
+                    interp_signal(f, EvalSignal::RETURNED, result);
+                    return result;
+                }
+                continue;
+            }
+            Scratch key(f);
+            key.set(named->key ? eval_expr(f, named->key) : (Item){.item = s2it(
+                heap_strcpy(named->name ? named->name->chars : "",
+                    named->name ? named->name->len : 0))});
+            if (interp_frame_pending(f)) return ItemNull;
+            Scratch value(f);
+            value.set(named->as ? eval_expr(f, named->as) : ItemNull);
+            if (interp_frame_pending(f)) return ItemNull;
+            if (named->as && ast_expr_insertion_needs_capture(named->as)) {
+                cow_capture_value(value.get());
+            }
+            if (get_type_id(map_literal_put(acc.get(), key.get(), value.get())) ==
+                    LMD_TYPE_ERROR) {
+                interp_signal(f, EvalSignal::RETURNED, ItemError);
+                return ItemError;
+            }
+        }
+    } else {
+        int attr_count = 0;
+        for (AstNode* a = node->item; a; a = a->next) attr_count++;
+        RootSpan attrs((size_t)(attr_count > 0 ? attr_count : 1));
+        uint64_t* attr_words = attrs.words();
+        int ai = 0;
+        for (AstNode* a = node->item; a; a = a->next) {
+            AstNode* value_node = a->node_type == AST_NODE_KEY_EXPR
+                ? ((AstNamedNode*)a)->as : a;
+            Item value = value_node ? eval_expr(f, value_node) : ItemNull;
+            // S9.3.1: a named attribute value is captured into the element.
+            if (value_node && ast_expr_insertion_needs_capture(value_node)) {
+                cow_capture_value(value);
+            }
+            attr_words[ai++] = value.item;
+            if (interp_frame_pending(f)) return ItemNull;
+        }
+
+        Element* fresh = elmt_with_tl(type->type_index, f->module->type_list);
+        if (!fresh) return ItemError;
+        acc.set(interp_ptr_item(fresh));
+        if (attr_count > 0) {
+            elmt_fill_items((Element*)(uintptr_t)acc.get().item,
+                (const Item*)(void*)attr_words, ai);
+        }
     }
 
     if (node->content) {

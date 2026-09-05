@@ -41,14 +41,18 @@ struct ReductionMetadataRecorder {
     LambdaParseReduction postfix;
     LambdaParseReduction named_argument;
     LambdaParseReduction map_item;
+    LambdaParseReduction computed_map_item;
     LambdaParseReduction element_attribute;
+    LambdaParseReduction computed_element_attribute;
     LambdaParseReduction assignment;
     int atom_count;
     int binary_count;
     int postfix_count;
     int named_argument_count;
     int map_item_count;
+    int computed_map_item_count;
     int element_attribute_count;
+    int computed_element_attribute_count;
     int assignment_count;
 };
 
@@ -92,9 +96,17 @@ static LambdaParseValue record_reduction_metadata(void* context,
         recorder->map_item = *reduction;
         recorder->map_item_count++;
     }
+    if (reduction->form == LAMBDA_REDUCTION_FORM_COMPUTED_MAP_ITEM) {
+        recorder->computed_map_item = *reduction;
+        recorder->computed_map_item_count++;
+    }
     if (reduction->form == LAMBDA_REDUCTION_FORM_ELEMENT_ATTRIBUTE) {
         recorder->element_attribute = *reduction;
         recorder->element_attribute_count++;
+    }
+    if (reduction->form == LAMBDA_REDUCTION_FORM_COMPUTED_ELEMENT_ATTRIBUTE) {
+        recorder->computed_element_attribute = *reduction;
+        recorder->computed_element_attribute_count++;
     }
     if (reduction->kind == LAMBDA_REDUCE_ASSIGNMENT) {
         recorder->assignment = *reduction;
@@ -227,7 +239,8 @@ TEST(LambdaRdParserPoc, PublishesCommittedTokenFormsAndCompletePrattSpans) {
 }
 
 TEST(LambdaRdParserPoc, PublishesCommittedNamedAndCollectionItemForms) {
-    const char* source = "{item: 1}\ncall(option: 2);\n<tag title: \"x\">";
+    const char* source = "{item: 1, [map_key]: 2}\ncall(option: 2);\n"
+        "<tag title: \"x\", [attribute_key]: \"y\">";
     LambdaParseError error = {};
     ReductionMetadataRecorder recorder = {};
     LambdaParseSink sink = {record_reduction_metadata};
@@ -235,8 +248,10 @@ TEST(LambdaRdParserPoc, PublishesCommittedNamedAndCollectionItemForms) {
         NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
 
     ASSERT_EQ(recorder.map_item_count, 1);
+    ASSERT_EQ(recorder.computed_map_item_count, 1);
     ASSERT_EQ(recorder.named_argument_count, 1);
     ASSERT_EQ(recorder.element_attribute_count, 1);
+    ASSERT_EQ(recorder.computed_element_attribute_count, 1);
     EXPECT_EQ(recorder.map_item.detail_token.kind, LAMBDA_TOK_IDENTIFIER);
     EXPECT_EQ(recorder.named_argument.detail_token.kind, LAMBDA_TOK_IDENTIFIER);
     EXPECT_EQ(recorder.element_attribute.detail_token.kind, LAMBDA_TOK_IDENTIFIER);
@@ -248,6 +263,11 @@ TEST(LambdaRdParserPoc, PublishesCommittedNamedAndCollectionItemForms) {
         "title", 5), 0);
     EXPECT_EQ(recorder.element_attribute.detail_token.span.end_byte -
         recorder.element_attribute.detail_token.span.start_byte, 5u);
+    EXPECT_EQ(recorder.computed_map_item.detail_token.kind, LAMBDA_TOK_LBRACKET);
+    EXPECT_EQ(recorder.computed_map_item.child_count, 2u);
+    EXPECT_EQ(recorder.computed_element_attribute.detail_token.kind,
+        LAMBDA_TOK_LBRACKET);
+    EXPECT_EQ(recorder.computed_element_attribute.child_count, 2u);
 }
 
 TEST(LambdaRdParserPoc, PublishesProceduralAssignmentTargetAndValue) {
