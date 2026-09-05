@@ -516,13 +516,13 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     jm_emit_error_lane_propagate_check(mt);
                     MIR_reg_t has_with = jm_emit_is_truthy(mt, has_with_item, NULL);
                     MIR_reg_t with_base = jm_callr_1(mt, "js_get_last_with_binding_base_or_undefined", MIR_T_I64, key_reg);
-                    const char* saved_assign_target = mt->assign_target_vname;
-                    mt->assign_target_vname = vname;
+                    NameEntry* saved_assign_binding = mt->assign_target_binding;
+                    mt->assign_target_binding = id->entry;
                     // Resolve the object-environment binding before the initializer.
                     // The initializer may delete or replace the property, but the
                     // assignment target remains the pre-resolved with base.
                     MIR_reg_t boxed_val = jm_transpile_box_item(mt, d->init);
-                    mt->assign_target_vname = saved_assign_target;
+                    mt->assign_target_binding = saved_assign_binding;
                     MIR_label_t normal_init = jm_new_label(mt);
                     MIR_label_t init_done = jm_new_label(mt);
                     jm_emit_branch(mt, MIR_BF, normal_init, has_with);
@@ -595,10 +595,10 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     // var redeclaration without initializer (e.g. `var x;` when x already exists)
                     // is a no-op in JS — do NOT reset to undefined.
                     if (d->init) {
-                        const char* saved_assign_target = mt->assign_target_vname;
-                        mt->assign_target_vname = vname;
+                        NameEntry* saved_assign_binding = mt->assign_target_binding;
+                        mt->assign_target_binding = id->entry;
                         MIR_reg_t boxed_val = jm_transpile_box_item(mt, d->init);
-                        mt->assign_target_vname = saved_assign_target;
+                        mt->assign_target_binding = saved_assign_binding;
                         jm_store_module_var(mt, (uint32_t)modvar_index, boxed_val);
                         JsMirVarEntry* existing_modvar_local =
                             jm_find_var_by_binding(mt, id->entry);
@@ -681,12 +681,12 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             // Publish the declarator identity after a name-set
                             // hoist reserved its register before body lowering.
                             existing_var->binding = id->entry;
-                            const char* saved_assign_target = mt->assign_target_vname;
+                            NameEntry* saved_assign_binding = mt->assign_target_binding;
                             // Hoisted initializers still define this binding; anonymous class
                             // expressions use the target name to recover their class metadata.
-                            mt->assign_target_vname = vname;
+                            mt->assign_target_binding = id->entry;
                             MIR_reg_t val = jm_transpile_box_item(mt, d->init);
-                            mt->assign_target_vname = saved_assign_target;
+                            mt->assign_target_binding = saved_assign_binding;
                             jm_emit_mov(mt, existing_var->reg, val);
                             jm_write_env_backing_if_needed(mt, existing_var, val, LMD_TYPE_ANY);
                             // Hoisted `var` initializers may shadow same-named
@@ -779,9 +779,9 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         // boxed (string, object, array, any, etc.)
                         MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
                         // Set assignment target hint for closure self-capture detection
-                        mt->assign_target_vname = vname;
+                        mt->assign_target_binding = id->entry;
                         MIR_reg_t val = jm_transpile_box_item(mt, d->init);
-                        mt->assign_target_vname = NULL;
+                        mt->assign_target_binding = NULL;
                         jm_emit_mov(mt, reg, val);
                         jm_set_var(mt, vname, reg, MIR_T_I64, init_type,
                             id->entry);
@@ -965,11 +965,10 @@ bool jm_push_typeof_narrow(JsMirTranspiler* mt, JsIdentifierNode* id, TypeId nar
 static bool jm_branch_assigns_identifier(JsMirTranspiler* mt, JsAstNode* branch,
         JsIdentifierNode* id) {
     if (!branch || !id || !id->name) return false;
-    const char* vname = jm_var_name(id->name);
     struct hashmap* assigned = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-        jm_name_hash, jm_name_cmp, NULL, NULL);
+        jm_name_hash, jm_binding_cmp, NULL, NULL);
     jm_collect_indexed_func_assignments(mt, branch, assigned);
-    bool assigns = jm_name_set_has(assigned, vname);
+    bool assigns = jm_binding_set_has(assigned, id->entry);
     hashmap_free(assigned);
     return assigns;
 }

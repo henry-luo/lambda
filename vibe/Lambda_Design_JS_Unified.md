@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-29
 
-**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3j compile-unit migrations, P4a–P4l indexed function facts, P5 structural MIR lowering, and P6 shared execution/runtime lifecycle are fully implemented and verified. The principal Lambda/JS raw-register expression boundaries remain open under P5. The P5/P6 review base and candidate each governed 326,064 `lambda/runtime` + `lambda/js` lines; the post-P6 direct-frontend retirement reduced that scope to 318,980 (`-7,084`), and the active binding/pass-schedule and structural-parent convergence phase measures 316,936. Proposal-wide structural convergence and the historical 308,711-line project target remain open.
+**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3j compile-unit migrations, P4a–P4l indexed function facts, P5 structural MIR lowering, and P6 shared execution/runtime lifecycle are fully implemented and verified. The current Lambda and JS core expression boundaries publish demand-carrying `MirValue`; JS runtime property-key linking is manager-owned at its execution boundary. The unresolved **D8.2.5** work is a physical Lambda parse/build/bind split, not a manager-label change: direct reduction still constructs scopes and resolves later syntax while it builds. Sole-`FunctionId` fact ownership, the quantified deletion ledger, and the compiler-time ratchets also remain open. The P5/P6 review base and candidate each governed 326,064 `lambda/runtime` + `lambda/js` lines; the post-P6 direct-frontend retirement reduced that scope to 318,980 (`-7,084`), and the current project cap check is 286,157 against 308,711. Proposal-wide structural convergence remains open.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -197,10 +197,10 @@ state, but never publishes an indexed unit. JavaScript/TypeScript mode and
 module selection both enter that same boundary.
 
 The same JS manager then resumes with analysis/plan, lowering,
-finalization/load, and static property-key prelink operations; it never
-re-seeds front-end facts in a second manager. Runtime module-state key linking
-remains after context activation because it publishes into the live module
-slab. Lambda's active `Transpiler` starts a single manager with
+finalization/load, static property-key prelink, and an execution-boundary
+`runtime-link` pass; it never re-seeds front-end facts in a second manager.
+The last pass is appended only after context activation because it publishes
+into the live module slab. Lambda's active `Transpiler` starts a single manager with
 `parse-build-bind` → `validate` → `index`, then continues through const-fold,
 planning, lowering, finalization/load, and link. Direct source reduction and
 lexical binding remain one synchronous `parse-build-bind` operation because
@@ -208,14 +208,21 @@ the reducer requires each declaration and scope as it processes later syntax;
 post-reduction semantic validation is separately manager-owned and a rejected
 unit cannot publish `INDEXED`. Retained-AST fallback starts a new manager at an
 already indexed unit. This is not yet the complete **D8.2.5** production
-schedule: JS runtime linking and a possible future separation of Lambda
-parse/build/bind remain open.
+schedule: a real Lambda bind pass remains open. Splitting the current
+`parse-build-bind` labels without moving declaration publication and use
+resolution out of reduction would create a false schedule.
 
-### 2.6 `MirValue` exists around a bare-register core
+### 2.6 Core expression lowering uses `MirValue`
 
 `MirValue` already carries the physical register, full type contract, semantic type, representation, provenance, demand, rooting home, scalar home, and pending-completion lane. `MirEmitter` already owns common frame, root, representation-conversion, call-effect, and finalization machinery.
 
-The principal Lambda and JS expression functions still return `MIR_reg_t`. Consumers consequently re-derive whether a register is boxed, native, rooted, scalar-backed, discarded, or branch-only. This is the unfinished **D2.4.1–D2.4.3** and **D8.2.6** migration.
+`transpile_expr_value_core()`/`transpile_expr_value()` and
+`jm_transpile_expression_direct()`/`jm_transpile_expression_value()` are the
+core Lambda and JS expression boundaries. They return `MirValue` and apply
+their explicit demand before a consumer observes the value. Internal
+register-only helpers remain allowed below those producers; they do not form a
+core expression boundary. This completes the boundary requirement of
+**D2.4.1–D2.4.3** and **D8.2.6**.
 
 ### 2.7 Execution is more unified than compilation
 
@@ -2234,9 +2241,10 @@ retiring the repeated three-bit spelling from Lambda and JavaScript schedules.
 This completes the manager continuity for normal direct Lambda compilation.
 It does not claim separate direct Lambda parse/build/bind passes: source
 reduction and lexical binding remain coupled in the parser. The subsequent
-manager-owned validation/index schedule is recorded below; JS runtime linking
-remains outside its manager. This is an implementation-status record only; no
-formal ruling or semver changed.
+manager-owned validation/index schedule is recorded below. At this 2026-08-31
+record, JS runtime linking remained outside its manager; the 2026-09-05 audit
+below records its later manager-owned execution-boundary pass. This is an
+implementation-status record only; no formal ruling or semver changed.
 
 #### Post-P6 implementation record — Lambda manager-owned validation and indexing, 2026-08-31
 
@@ -2271,10 +2279,11 @@ setup, including `shape_pool`; the runner's duplicate setup is deleted.
 | full regression gates | Lambda/Input baseline `4,063/4,063`; fresh Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
 
 This establishes the manager-owned Lambda validation/index boundary without
-pretending that source reduction and binding can be arbitrarily split. JS
-runtime linking and a future physical Lambda parse/build/bind separation remain
-open. This is an implementation-status record only; no formal ruling or
-semver changed.
+pretending that source reduction and binding can be arbitrarily split. At this
+record, JS runtime linking and a future physical Lambda parse/build/bind
+separation remained open; the current state is recorded in the 2026-09-05
+audit below. This is an implementation-status record only; no formal ruling
+or semver changed.
 
 #### Post-P6 implementation record — structural FunctionId parents, 2026-08-31
 
@@ -2451,6 +2460,46 @@ records remain separate under **D8.1.3v10**.
 This is an implementation-only P5 status update. It does not add an internal
 compatibility wrapper, alter JavaScript semantics, or change a formal ruling.
 
+#### Current-boundary and schedule audit — 2026-09-05
+
+The historical primary-only record above is superseded for the core expression
+boundary. Lambda now enters through `transpile_expr_value_core()` and
+`transpile_expr_value()`; JavaScript enters through
+`jm_transpile_expression_direct()` and `jm_transpile_expression_value()`.
+Each producer returns a full demand-carrying `MirValue`, and the emitter owns
+representation conversion, rooting, and final storage as required by
+**D2.4.1–D2.4.3**, **D5.3.4**, and **D8.2.6**. A static declaration audit finds
+no core `transpile_expr*` or `jm_transpile_expression*` boundary returning
+`MIR_reg_t`.
+
+The runtime property-key linker is now `js_mir_runtime_link_pass`, appended as
+the required `runtime-link` manager pass only after module-state activation.
+This preserves its live-slab precondition while making the publication part of
+the typed **D8.2.5** schedule for classic scripts and ES modules. Binding-keyed
+assignment facts, closure self-capture, Annex B self-body selection, IIFE
+self-reference, and tail recursion now consume `NameEntry` identity rather
+than matching generated spellings. The shadowed-tail-call regression is forced
+through MIR and returns the inner binding's value.
+
+The current audit does **not** claim overall completion. Lambda's direct
+reducer creates scopes, publishes declarations, and binds later identifiers in
+the same reduction operation; a true build/bind split requires a new binder
+rather than splitting the manager label. `JsFuncCollected` also still owns
+backend artifacts, so the proposal's sole-`FunctionId` fact-table completion
+criterion remains unchecked. The corrective slice is `+101/-76 = +25`
+changed C/C++ lines including its regression, so it earns **no** independent
+deletion-ledger credit; the project-level source cap remains
+`310,711 → 286,157 = -24,554`, but the required named `-2,000` consolidation
+ledger and the release timing ratchets are still open under **D8.6.4v2**.
+
+Current validation: `make build-test`; forced-MIR shadowed-tail-call `1/1`;
+Lambda/Input baseline `4,095/4,095`; and complete Test262 `40,256/40,261`
+fully passing, with zero failed/regressed tests. Five RegExp cases recover only
+in the runner's required isolated retry after a batch failure, so the command
+returns success but this does not satisfy the proposal's stricter zero-retry
+closeout criterion. These are implementation-status facts under **D8.2.4–D8.2.6**
+and **D8.6.4v2**, not revised formal rulings.
+
 ---
 
 ## 5. Phase Exit Gates
@@ -2590,7 +2639,7 @@ This proposal is complete only when all statements are true:
 - [ ] One pass manager runs the complete **D8.2.5** schedule for Lambda and JavaScript.
 - [ ] Source contracts and inferred/effective facts are separate under **D3.2.3** and **D3.3.1v2**.
 - [ ] `FunctionId` is the sole function-analysis identity; duplicate JS collection indexes and analysis records are gone.
-- [ ] Core expression boundaries return full `MirValue` and accept explicit demands under **D8.2.6**.
+- [x] Core expression boundaries return full `MirValue` and accept explicit demands under **D8.2.6**.
 - [ ] `MirEmitter` is the sole owner of representation conversion, root/final-store policy, and common finalization under **D5.3.4**.
 - [ ] Lambda and JS retain separate semantic interpreters but share one execution shell and runtime substrate under **D8.1.3v10**.
 - [ ] Every phase and subphase has non-positive governed, changed-C/C++, and changed-source LOC deltas.
