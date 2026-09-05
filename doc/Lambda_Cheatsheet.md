@@ -193,7 +193,9 @@ Collections:
 |---|---|
 | `[1, 2, 3]` | Array |
 | `{a: 1, b: 2}` | Map |
+| `{[key]: value}` | Map field whose string/symbol key is computed at run time |
 | `<div id: "main">` | Element |
+| `<input [name]: value>` | Element attribute whose string/symbol name is computed at run time |
 
 Indexing & Slicing:
 

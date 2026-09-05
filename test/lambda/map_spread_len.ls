@@ -43,3 +43,13 @@ let names = for (k at rebuilt) k;
 [names]
 rebuilt.id
 rebuilt.custom
+
+// A `map([...])` VMap has no statically known raw Map shape. Its spread must
+// use the same source-order runtime builder as a computed-key literal.
+let dynamic = map(["shape", "box"])
+let dynamic_map = {*:dynamic, id: "a"};
+[dynamic_map.shape, dynamic_map.id, len(dynamic_map)]
+
+let dynamic_element = <node *:dynamic, id: "a", "new">;
+[dynamic_element.shape, dynamic_element.id,
+  [for (item in content(dynamic_element)) item]]

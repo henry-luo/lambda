@@ -145,7 +145,7 @@ void decimal_retain(Decimal* dec);
 // Decrement reference count, free if zero
 void decimal_release(Decimal* dec);
 
-// Release the external mpd_t owned by a pool-backed Decimal wrapper.
+// Release a Decimal wrapper's external mpd_t and clear it for idempotent GC cleanup.
 void decimal_payload_release(Decimal* dec);
 
 // Release mpdecimal payloads tracked by a compiler-owned constant list.
@@ -232,9 +232,9 @@ bool decimal_to_uint64_exact(Item item, uint64_t* out);
 // Comparison
 // ─────────────────────────────────────────────────────────────────────
 
-// Compare two decimal items: returns -1, 0, or 1
-// Uses appropriate context based on operand types
-int decimal_cmp_items(Item a, Item b);
+// Compare two decimal items. Returns false when an operand cannot be converted;
+// otherwise writes -1, 0, or 1 to result.
+bool decimal_cmp_items(Item a, Item b, int* result);
 
 // ─────────────────────────────────────────────────────────────────────
 // Predicates

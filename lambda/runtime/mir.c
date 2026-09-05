@@ -641,15 +641,22 @@ void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
     // Sort by address
     qsort(debug_list->items, debug_list->length, sizeof(FuncDebugInfo*), compare_debug_info);
 
-    // Compute end addresses using next function's start
+    // MIR publishes generated code sequentially; its next allocation address is
+    // the exclusive bound for the final generated function (including padding).
+    uint8_t* generated_code_end = _MIR_get_new_code_addr(ctx, 0);
+
+    // Compute end addresses using next function's start.
     for (size_t i = 0; i < debug_list->length; i++) {
         FuncDebugInfo* info = debug_list->items[i];
         if (i + 1 < debug_list->length) {
             FuncDebugInfo* next = debug_list->items[i + 1];
             info->native_addr_end = next->native_addr_start;
         } else {
-            // Last function: use conservative size (64KB should cover any function)
-            info->native_addr_end = (char*)info->native_addr_start + 65536;
+            // Never synthesize a size for the final function: a failed bound
+            // loses only a diagnostic frame, while a guessed bound can label
+            // unrelated native code as Lambda.
+            info->native_addr_end = generated_code_end > (uint8_t*)info->native_addr_start
+                ? generated_code_end : info->native_addr_start;
         }
         log_debug("build_debug_info_table: func '%s' range [%p, %p)",
                   info->lambda_func_name, info->native_addr_start, info->native_addr_end);

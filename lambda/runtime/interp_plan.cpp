@@ -728,7 +728,8 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         bool direct_untyped_binding_index = dynamic_index_entry &&
             !dynamic_index_entry->declared_type &&
             (!dynamic_index_entry->node ||
-             dynamic_index_entry->node->node_type != AST_NODE_FOR_CLAUSE);
+             (dynamic_index_entry->node->node_type != AST_NODE_FOR_CLAUSE &&
+              dynamic_index_entry->node->node_type != AST_NODE_FOR_INDEX));
         // MIR routes a typed numeric-array key through fn_index_assign, whose
         // runtime mask validation owns the bool-lane and shape checks. Source
         // numeric literals retain ARRAY AST type until their ArrayNum builds.

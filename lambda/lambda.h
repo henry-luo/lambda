@@ -645,6 +645,127 @@ typedef struct Type {
     uint8_t is_nominal:1;
 } Type;
 
+// D2.6.6v2 / D3.4.1: gc_heap.c is C while the runtime carriers live in C++.
+// Keep its byte-level view in one canonical C ABI layout and assert the real
+// C and C++ structs against it where their full definitions are available.
+typedef struct LambdaGcContainerLayout {
+    TypeId type_id;
+    uint8_t flags;
+    uint8_t array_flags;
+    uint8_t map_kind;
+    uint8_t cow_state;
+    uint8_t ctor_reserved_mask_lo;
+    uint8_t ctor_reserved_mask_hi;
+    uint8_t reserved_state;
+} LambdaGcContainerLayout;
+
+typedef struct LambdaGcMapLayout {
+    LambdaGcContainerLayout container;
+    void* type;
+    void* data;
+    int data_cap;
+} LambdaGcMapLayout;
+
+typedef struct LambdaGcListLayout {
+    LambdaGcMapLayout map;
+    void* items;
+    int64_t length;
+    int64_t extra;
+    int64_t capacity;
+} LambdaGcListLayout;
+
+typedef struct LambdaGcTypeMapLayout {
+    Type base;
+    int64_t length;
+    int64_t byte_size;
+    int type_index;
+    uint8_t has_spread;
+    uint8_t has_named_shape;
+    uint8_t is_trusted_contract;
+    void* shape;
+} LambdaGcTypeMapLayout;
+
+typedef struct LambdaGcShapeEntryLayout {
+    void* name;
+    Type* type;
+    int64_t byte_offset;
+    void* next;
+} LambdaGcShapeEntryLayout;
+
+#pragma pack(push, 1)
+typedef struct LambdaGcTypedItemLayout {
+    TypeId type_id;
+    uint64_t value;
+} LambdaGcTypedItemLayout;
+#pragma pack(pop)
+
+typedef struct LambdaGcArrayNumShapeLayout {
+    uint8_t ndim;
+    uint8_t layout_flags;
+    uint8_t backing_kind;
+    uint8_t backing_padding[5];
+    int64_t offset;
+    void* base;
+    void* backing;
+} LambdaGcArrayNumShapeLayout;
+
+struct gc_heap;
+typedef struct LambdaGcVMapVtableLayout {
+    void* get;
+    void* set;
+    void* count;
+    void* keys;
+    void* key_at;
+    void* value_at;
+    void* destroy;
+    void (*trace)(void* data, struct gc_heap* gc);
+} LambdaGcVMapVtableLayout;
+
+typedef struct LambdaGcVMapLayout {
+    LambdaGcContainerLayout container;
+    void* data;
+    LambdaGcVMapVtableLayout* vtable;
+} LambdaGcVMapLayout;
+
+typedef struct LambdaGcFunctionLayout {
+    TypeId type_id;
+    uint8_t arity;
+    uint8_t closure_field_count;
+    uint8_t entry_abi;
+    uint32_t flags;
+    void* fn_type;
+    void* ptr;
+    void* closure_env;
+} LambdaGcFunctionLayout;
+
+enum LambdaGcLayoutOffset {
+    LAMBDA_GC_OFF_CONTAINER_TYPE_ID = offsetof(LambdaGcContainerLayout, type_id),
+    LAMBDA_GC_OFF_CONTAINER_FLAGS = offsetof(LambdaGcContainerLayout, flags),
+    LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS = offsetof(LambdaGcContainerLayout, array_flags),
+    LAMBDA_GC_OFF_CONTAINER_MAP_KIND = offsetof(LambdaGcContainerLayout, map_kind),
+    LAMBDA_GC_OFF_MAP_TYPE = offsetof(LambdaGcMapLayout, type),
+    LAMBDA_GC_OFF_MAP_DATA = offsetof(LambdaGcMapLayout, data),
+    LAMBDA_GC_OFF_MAP_DATA_CAP = offsetof(LambdaGcMapLayout, data_cap),
+    LAMBDA_GC_OFF_LIST_ITEMS = offsetof(LambdaGcListLayout, items),
+    LAMBDA_GC_OFF_LIST_LENGTH = offsetof(LambdaGcListLayout, length),
+    LAMBDA_GC_OFF_LIST_EXTRA = offsetof(LambdaGcListLayout, extra),
+    LAMBDA_GC_OFF_LIST_CAPACITY = offsetof(LambdaGcListLayout, capacity),
+    LAMBDA_GC_OFF_TYPE_MAP_BYTE_SIZE = offsetof(LambdaGcTypeMapLayout, byte_size),
+    LAMBDA_GC_OFF_TYPE_MAP_SHAPE = offsetof(LambdaGcTypeMapLayout, shape),
+    LAMBDA_GC_OFF_SHAPE_ENTRY_TYPE = offsetof(LambdaGcShapeEntryLayout, type),
+    LAMBDA_GC_OFF_SHAPE_ENTRY_BYTE_OFFSET = offsetof(LambdaGcShapeEntryLayout, byte_offset),
+    LAMBDA_GC_OFF_SHAPE_ENTRY_NEXT = offsetof(LambdaGcShapeEntryLayout, next),
+    LAMBDA_GC_OFF_TYPED_ITEM_TYPE_ID = offsetof(LambdaGcTypedItemLayout, type_id),
+    LAMBDA_GC_OFF_TYPED_ITEM_VALUE = offsetof(LambdaGcTypedItemLayout, value),
+    LAMBDA_GC_OFF_ARRAY_NUM_SHAPE_BASE = offsetof(LambdaGcArrayNumShapeLayout, base),
+    LAMBDA_GC_OFF_ARRAY_NUM_SHAPE_BACKING = offsetof(LambdaGcArrayNumShapeLayout, backing),
+    LAMBDA_GC_OFF_VMAP_DATA = offsetof(LambdaGcVMapLayout, data),
+    LAMBDA_GC_OFF_VMAP_VTABLE = offsetof(LambdaGcVMapLayout, vtable),
+    LAMBDA_GC_OFF_VMAP_VTABLE_TRACE = offsetof(LambdaGcVMapVtableLayout, trace),
+    LAMBDA_GC_OFF_FUNCTION_CLOSURE_FIELD_COUNT = offsetof(LambdaGcFunctionLayout, closure_field_count),
+    LAMBDA_GC_OFF_FUNCTION_CLOSURE_ENV = offsetof(LambdaGcFunctionLayout, closure_env),
+};
+
 typedef struct Container Container;
 typedef struct Range Range;
 typedef struct List List;
@@ -809,21 +930,21 @@ struct Container {
     uint8_t reserved_state;
 };
 
-LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, type_id) == 0,
-                     "Container TypeId must remain at byte zero");
-LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, flags) == 1,
-                     "Container flags ABI offset changed");
-LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, array_flags) == 2,
-                     "Container array flags ABI offset changed");
-LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, map_kind) == 3,
-                     "Container map kind ABI offset changed");
-LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, cow_state) == 4,
+LAMBDA_STATIC_ASSERT(offsetof(Container, type_id) == LAMBDA_GC_OFF_CONTAINER_TYPE_ID,
+                     "Container TypeId must match the GC ABI");
+LAMBDA_STATIC_ASSERT(offsetof(Container, flags) == LAMBDA_GC_OFF_CONTAINER_FLAGS,
+                     "Container flags must match the GC ABI");
+LAMBDA_STATIC_ASSERT(offsetof(Container, array_flags) == LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS,
+                     "Container array flags must match the GC ABI");
+LAMBDA_STATIC_ASSERT(offsetof(Container, map_kind) == LAMBDA_GC_OFF_CONTAINER_MAP_KIND,
+                     "Container map kind must match the GC ABI");
+LAMBDA_STATIC_ASSERT(offsetof(Container, cow_state) == 4,
                      "Container COW state must reuse padding byte zero");
-LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, ctor_reserved_mask_lo) == 5,
+LAMBDA_STATIC_ASSERT(offsetof(Container, ctor_reserved_mask_lo) == 5,
                      "Container constructor mask low-byte ABI offset changed");
-LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, ctor_reserved_mask_hi) == 6,
+LAMBDA_STATIC_ASSERT(offsetof(Container, ctor_reserved_mask_hi) == 6,
                      "Container constructor mask high-byte ABI offset changed");
-LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, reserved_state) == 7,
+LAMBDA_STATIC_ASSERT(offsetof(Container, reserved_state) == 7,
                      "Container reserved-state ABI offset changed");
 LAMBDA_STATIC_ASSERT(sizeof(Container) == 8,
                      "Container header must remain eight bytes");
@@ -1015,29 +1136,31 @@ typedef struct LaneStorageDesc {
 // must match the C++ definitions in lambda.hpp byte for byte. gc_heap.c is C and
 // compiles against THIS mirror, so the C++ static_asserts cannot reach it — a
 // silent divergence here mistraces the heap. These are that guard.
-LAMBDA_STATIC_ASSERT(__builtin_offsetof(struct Map, type) == 8 &&
-                     __builtin_offsetof(struct Map, data) == 16 &&
-                     __builtin_offsetof(struct Map, data_cap) == 24,
-                     "C mirror: Map attribute face moved");
-LAMBDA_STATIC_ASSERT(__builtin_offsetof(struct List, type) == 8 &&
-                     __builtin_offsetof(struct List, data) == 16 &&
-                     __builtin_offsetof(struct List, items) == 32 &&
-                     __builtin_offsetof(struct List, length) == 40 &&
-                     __builtin_offsetof(struct List, extra) == 48 &&
-                     __builtin_offsetof(struct List, capacity) == 56,
-                     "C mirror: List layout diverged from lambda.hpp");
-LAMBDA_STATIC_ASSERT(__builtin_offsetof(struct Element, type) == 8 &&
-                     __builtin_offsetof(struct Element, data) == 16 &&
-                     __builtin_offsetof(struct Element, items) == 32 &&
-                     __builtin_offsetof(struct Element, length) == 40 &&
-                     __builtin_offsetof(struct Element, extra) == 48 &&
-                     __builtin_offsetof(struct Element, capacity) == 56,
-                     "C mirror: Element layout diverged from lambda.hpp");
-LAMBDA_STATIC_ASSERT(__builtin_offsetof(struct ArrayNum, items) == 32 &&
-                     __builtin_offsetof(struct ArrayNum, length) == 40 &&
-                     __builtin_offsetof(struct ArrayNum, extra) == 48 &&
-                     __builtin_offsetof(struct ArrayNum, capacity) == 56,
-                     "C mirror: ArrayNum must share List's content face");
+LAMBDA_STATIC_ASSERT(offsetof(struct Map, type) == LAMBDA_GC_OFF_MAP_TYPE &&
+                     offsetof(struct Map, data) == LAMBDA_GC_OFF_MAP_DATA &&
+                     offsetof(struct Map, data_cap) == LAMBDA_GC_OFF_MAP_DATA_CAP,
+                     "C mirror: Map must match the GC ABI");
+LAMBDA_STATIC_ASSERT(offsetof(struct List, type) == LAMBDA_GC_OFF_MAP_TYPE &&
+                     offsetof(struct List, data) == LAMBDA_GC_OFF_MAP_DATA &&
+                     offsetof(struct List, data_cap) == LAMBDA_GC_OFF_MAP_DATA_CAP &&
+                     offsetof(struct List, items) == LAMBDA_GC_OFF_LIST_ITEMS &&
+                     offsetof(struct List, length) == LAMBDA_GC_OFF_LIST_LENGTH &&
+                     offsetof(struct List, extra) == LAMBDA_GC_OFF_LIST_EXTRA &&
+                     offsetof(struct List, capacity) == LAMBDA_GC_OFF_LIST_CAPACITY,
+                     "C mirror: List must match the GC ABI");
+LAMBDA_STATIC_ASSERT(offsetof(struct Element, type) == LAMBDA_GC_OFF_MAP_TYPE &&
+                     offsetof(struct Element, data) == LAMBDA_GC_OFF_MAP_DATA &&
+                     offsetof(struct Element, data_cap) == LAMBDA_GC_OFF_MAP_DATA_CAP &&
+                     offsetof(struct Element, items) == LAMBDA_GC_OFF_LIST_ITEMS &&
+                     offsetof(struct Element, length) == LAMBDA_GC_OFF_LIST_LENGTH &&
+                     offsetof(struct Element, extra) == LAMBDA_GC_OFF_LIST_EXTRA &&
+                     offsetof(struct Element, capacity) == LAMBDA_GC_OFF_LIST_CAPACITY,
+                     "C mirror: Element must match the GC ABI");
+LAMBDA_STATIC_ASSERT(offsetof(struct ArrayNum, items) == LAMBDA_GC_OFF_LIST_ITEMS &&
+                     offsetof(struct ArrayNum, length) == LAMBDA_GC_OFF_LIST_LENGTH &&
+                     offsetof(struct ArrayNum, extra) == LAMBDA_GC_OFF_LIST_EXTRA &&
+                     offsetof(struct ArrayNum, capacity) == LAMBDA_GC_OFF_LIST_CAPACITY,
+                     "C mirror: ArrayNum must match the GC ABI");
 LAMBDA_STATIC_ASSERT(sizeof(struct Element) == sizeof(struct List) &&
                      sizeof(struct List) == sizeof(struct ArrayNum),
                      "C mirror: element/array headers must stay identical");
@@ -1062,8 +1185,10 @@ typedef enum ArrayNumBackingKind {
     ARRAY_NUM_BACKING_BYTE_STORAGE = 4,
 } ArrayNumBackingKind;
 
+#define LAMBDA_ARRAY_NUM_MAX_NDIM 32
+
 typedef struct ArrayNumShape {
-    uint8_t  ndim;            // number of dimensions (1..32)
+    uint8_t  ndim;            // number of dimensions (1..LAMBDA_ARRAY_NUM_MAX_NDIM)
     uint8_t  is_c_contig:1;   // contiguous in row-major
     uint8_t  is_f_contig:1;   // contiguous in column-major
     uint8_t  reserved:6;
@@ -1075,6 +1200,11 @@ typedef struct ArrayNumShape {
     uint64_t resolved_generation; // last ByteBufferHandle generation cached in ArrayNum.data
     int64_t  data[];          // shape[ndim] followed by strides[ndim] — total 2*ndim entries
 } ArrayNumShape;
+
+LAMBDA_STATIC_ASSERT(offsetof(ArrayNumShape, base) == LAMBDA_GC_OFF_ARRAY_NUM_SHAPE_BASE,
+                     "ArrayNumShape base must match the GC ABI");
+LAMBDA_STATIC_ASSERT(offsetof(ArrayNumShape, backing) == LAMBDA_GC_OFF_ARRAY_NUM_SHAPE_BACKING,
+                     "ArrayNumShape backing must match the GC ABI");
 
 static inline int64_t* array_num_shape_dims(ArrayNumShape* s) { return s->data; }
 static inline int64_t* array_num_shape_strides(ArrayNumShape* s) { return s->data + s->ndim; }
@@ -1228,6 +1358,11 @@ LAMBDA_STATIC_ASSERT(__builtin_offsetof(Function, type_id) == 0,
                      "Function TypeId must remain at byte zero");
 LAMBDA_STATIC_ASSERT(__builtin_offsetof(Function, fn_type) == 8,
                      "Function metadata must preserve pointer alignment");
+LAMBDA_STATIC_ASSERT(offsetof(Function, closure_field_count) ==
+                         LAMBDA_GC_OFF_FUNCTION_CLOSURE_FIELD_COUNT,
+                     "Function closure count must match the GC ABI");
+LAMBDA_STATIC_ASSERT(offsetof(Function, closure_env) == LAMBDA_GC_OFF_FUNCTION_CLOSURE_ENV,
+                     "Function closure environment must match the GC ABI");
 
 // Dynamic function invocation for first-class functions
 Item fn_call(Function* fn, List* args);
@@ -1264,6 +1399,7 @@ typedef struct PathMeta PathMeta;
 // Path construction API (called by JIT-generated code)
 Path* path_new(Pool* pool, int scheme);                           // Create new path with scheme
 Path* path_new_authority(Pool* pool, int scheme, const char* authority);
+Path* path_clone(Pool* pool, Path* source);                       // Clone immutable path spine into pool
 Path* path_extend(Pool* pool, Path* base, const char* segment);   // Extend path with segment
 Path* path_extend_int(Pool* pool, Path* base, int64_t value);
 Path* path_select_parent(Pool* pool, Path* base);

@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include <mpdecimal.h>
+#include <cstring>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -19,7 +21,10 @@
 #include "../lambda/jube/jube_registry.h"
 #include "../lambda/core/lambda-decimal.hpp"
 #include "../lambda/core/name_pool.hpp"
+#include "../lambda/mir/mir.h"
+#include "../lambda/mir/mir-gen.h"
 #include "../lambda/input/input.hpp"
+#include "../lambda/validator/validator.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/mempool.h"
 #include "../lib/uv_loop.h"
@@ -34,6 +39,119 @@ extern const int32_t radiant_dom_type_binding_count;
 #ifndef _WIN32
 extern __thread Context* input_context;
 #endif
+
+TEST(LambdaArrayNumShape, RejectsOutOfRangeRankBeforeStackDecode) {
+    ArrayNum array = {};
+    array.type_id = LMD_TYPE_ARRAY_NUM;
+    array.set_elem_type(ELEM_INT64);
+    array.is_ndim = 1;
+    array.length = 1;
+    array.capacity = 1;
+    int64_t data[1] = {0};
+    array.data = data;
+
+    // Deliberately allocate a 1-D descriptor then corrupt its rank. The decoder
+    // must reject it before it reads or writes past this descriptor or a 32-slot stack buffer.
+    uint8_t shape_storage[sizeof(ArrayNumShape) + 2 * sizeof(int64_t)] = {};
+    ArrayNumShape* shape = (ArrayNumShape*)shape_storage;
+    shape->ndim = LAMBDA_ARRAY_NUM_MAX_NDIM + 1;
+    array.extra = (int64_t)(uintptr_t)shape;
+    Item item = {.array_num = &array};
+
+    EXPECT_EQ(get_type_id(fn_shape(item)), LMD_TYPE_ERROR);
+    EXPECT_EQ(get_type_id(fn_matmul(item, item)), LMD_TYPE_ERROR);
+}
+
+TEST(LambdaDecimal, QuietInt64ExtractionRejectsOverflowAndInvalidComparison) {
+    mpd_context_t* context = decimal_fixed_context();
+    mpd_t* large = mpd_new(context);
+    ASSERT_NE(large, nullptr);
+    uint32_t status = 0;
+    mpd_qset_string(large, "9223372036854775808", context, &status);
+    ASSERT_EQ(status, 0u);
+
+    // The quiet extractor must not enter libmpdec's SIGFPE path on overflow.
+    EXPECT_EQ(decimal_mpd_to_int64(large, context), INT64_ERROR);
+
+    Decimal valid_decimal = {0, large};
+    Decimal invalid_decimal = {};
+    Item valid = {.item = c2it(&valid_decimal)};
+    Item invalid = {.item = c2it(&invalid_decimal)};
+    int comparison = 0;
+    EXPECT_FALSE(decimal_cmp_items(invalid, valid, &comparison));
+
+    mpd_del(large);
+}
+
+TEST(LambdaJitDebugInfo, FinalFunctionRangeUsesJitAllocationFrontier) {
+    MIR_context_t ctx = MIR_init();
+    ASSERT_NE(ctx, nullptr);
+    MIR_gen_init(ctx);
+    MIR_gen_set_optimize_level(ctx, 0);
+
+    MIR_module_t module = MIR_new_module(ctx, "debug_span_test");
+    MIR_type_t return_type = MIR_T_I64;
+    MIR_item_t function = MIR_new_func(ctx, "debug_span_test", 1, &return_type, 0);
+    MIR_reg_t accumulator = MIR_new_func_reg(ctx, function->u.func, MIR_T_I64, "accumulator");
+    MIR_append_insn(ctx, function,
+        MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, accumulator), MIR_new_int_op(ctx, 0)));
+    for (int64_t i = 0; i < 12000; i++) {
+        MIR_append_insn(ctx, function,
+            MIR_new_insn(ctx, MIR_ADD, MIR_new_reg_op(ctx, accumulator),
+                         MIR_new_reg_op(ctx, accumulator), MIR_new_int_op(ctx, 1024 + i)));
+    }
+    MIR_append_insn(ctx, function, MIR_new_ret_insn(ctx, 1, MIR_new_reg_op(ctx, accumulator)));
+    MIR_finish_func(ctx);
+    MIR_finish_module(ctx);
+    MIR_load_module(ctx, module);
+    MIR_link(ctx, MIR_set_gen_interface, nullptr);
+    ASSERT_NE(MIR_gen(ctx, function), nullptr);
+
+    uint8_t* code_start = (uint8_t*)function->u.func->machine_code;
+    uint8_t* code_end = _MIR_get_new_code_addr(ctx, 0);
+    ASSERT_NE(code_start, nullptr);
+    ASSERT_GT(code_end, code_start);
+    ASSERT_GT((uintptr_t)(code_end - code_start), 65536u);
+
+    void* debug_info = build_debug_info_table(ctx, nullptr);
+    ASSERT_NE(debug_info, nullptr);
+    EXPECT_NE(lookup_debug_info(debug_info, code_start + 65536), nullptr);
+    free_debug_info_table(debug_info);
+
+    MIR_gen_finish(ctx);
+    MIR_finish(ctx);
+}
+
+TEST(LambdaValidator, TypeMismatchSuggestionsAreAttachedAndReported) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    SchemaValidator* validator = schema_validator_create(pool);
+    ASSERT_NE(validator, nullptr);
+
+    Type expected = {};
+    expected.type_id = LMD_TYPE_STRING;
+    Item actual = {.item = i2it(42)};
+    ValidationResult* result = validator->validate_type(actual.to_const(), &expected);
+    ASSERT_NE(result, nullptr);
+    ASSERT_NE(result->errors, nullptr);
+    ASSERT_NE(result->errors->suggestions, nullptr);
+
+    String* formatted = format_error_with_context(result->errors, pool);
+    ASSERT_NE(formatted, nullptr);
+    EXPECT_NE(strstr(formatted->chars, "Try wrapping the value in quotes"), nullptr);
+
+    schema_validator_set_show_suggestions(validator, false);
+    ValidationResult* suppressed = validator->validate_type(actual.to_const(), &expected);
+    ASSERT_NE(suppressed, nullptr);
+    ASSERT_NE(suppressed->errors, nullptr);
+    EXPECT_EQ(suppressed->errors->suggestions, nullptr);
+    String* suppressed_formatted = format_error_with_context(suppressed->errors, pool);
+    ASSERT_NE(suppressed_formatted, nullptr);
+    EXPECT_EQ(strstr(suppressed_formatted->chars, "Suggestions:"), nullptr);
+
+    schema_validator_destroy(validator);
+    pool_destroy(pool);
+}
 
 struct CallableRealmSnapshot {
     Item math_abs = ItemNull;

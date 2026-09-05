@@ -13,8 +13,6 @@
 #include <string.h>
 #include <assert.h>
 
-// Forward declarations for functions used in this file
-List* suggest_corrections(ValidationError* error, Pool* pool);
 String* format_validation_path(PathSegment* path, Pool* pool);
 String* format_type_name(void* type, Pool* pool);
 
@@ -34,10 +32,7 @@ List* suggest_similar_names(const char* name, List* available_names, Pool* pool)
 }
 
 List* suggest_corrections(ValidationError* error, Pool* pool) {
-    // Return NULL for now - suggestions not implemented
-    (void)error;
-    (void)pool;
-    return nullptr;
+    return generate_error_suggestions(error, pool);
 }
 
 // ==================== Error Message Formatting ====================
@@ -73,6 +68,13 @@ const char* get_error_code_name(ValidationErrorCode code) {
 
 String* format_error_with_context(ValidationError* error, Pool* pool) {
     if (!error || !pool) return nullptr;
+
+    if (!error->suggestions_processed) {
+        // Errors constructed outside SchemaValidator still receive the same
+        // diagnostics when they are first reported.
+        error->suggestions = suggest_corrections(error, pool);
+        error->suggestions_processed = true;
+    }
 
     StringBuf* sb = stringbuf_new(pool);
 

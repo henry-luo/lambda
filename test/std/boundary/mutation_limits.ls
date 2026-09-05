@@ -28,9 +28,9 @@ pn main() {
     print(arr[0])
     print(arr[49])
 
-    // ===== Map field additions =====
-    // S2.1.4(3)/S9.1.6: named writes grow an open map, including through a
-    // mutable parameter; the handlers therefore observe no error.
+    // ===== Map field additions through a var borrow =====
+    // S2.1.4(3)/S9.1.6: open-map writes grow its shape through a mutable
+    // parameter; the handlers therefore observe no error.
     var obj = {}
     var first_map_error = null
     write_empty_map(obj, "a", 1) ^ { first_map_error = ^ }

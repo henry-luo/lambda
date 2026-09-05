@@ -264,7 +264,11 @@ static inline LambdaNumericComparison lambda_numeric_compare(Item left, Item rig
     }
 
     if (!left_simple || !right_simple) {
-        int cmp = decimal_cmp_items(left, right);
+        int cmp = 0;
+        if (!decimal_cmp_items(left, right, &cmp)) {
+            result.valid = 0;
+            return result;
+        }
         result.order = cmp < 0 ? -1 : cmp > 0 ? 1 : 0;
         return result;
     }

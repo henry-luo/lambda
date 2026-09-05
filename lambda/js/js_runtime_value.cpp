@@ -1611,7 +1611,11 @@ extern "C" Item js_strict_equal(Item left, Item right) {
         if (js_is_bigint(left) && js_is_bigint(right)) {
             return (Item){.item = b2it(bigint_cmp(left, right) == 0)};
         }
-        return (Item){.item = b2it(decimal_cmp_items(left, right) == 0)};
+        {
+            int comparison = 0;
+            return (Item){.item = b2it(decimal_cmp_items(left, right, &comparison) &&
+                comparison == 0)};
+        }
 
     case LMD_TYPE_FLOAT: {
         double l = it2d(left);

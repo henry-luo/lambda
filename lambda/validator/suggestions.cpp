@@ -133,7 +133,7 @@ static int compare_suggestions(const void* a, const void* b) {
  * @return List of String* suggestions (may be nullptr if none found)
  */
 List* generate_field_suggestions(const char* typo_field, TypeMap* map_type, Pool* pool) {
-    if (!typo_field || !map_type || !map_type->shape) {
+    if (!typo_field || !map_type || !map_type->shape || !pool) {
         return nullptr;
     }
 
@@ -232,7 +232,7 @@ List* generate_type_suggestions(TypeId actual_type, Type* expected_type, Pool* p
  * @return List of String* suggestions (may be nullptr)
  */
 List* generate_error_suggestions(ValidationError* error, Pool* pool) {
-    if (!error) return nullptr;
+    if (!error || !pool) return nullptr;
 
     switch (error->code) {
         case VALID_ERROR_TYPE_MISMATCH:
@@ -243,11 +243,14 @@ List* generate_error_suggestions(ValidationError* error, Pool* pool) {
             break;
 
         case VALID_ERROR_MISSING_FIELD:
-            // Could suggest similar field names if we had the map type
-            break;
-
         case VALID_ERROR_UNEXPECTED_FIELD:
-            // Could suggest similar valid field names
+            // Callers that retain the containing schema in `expected` can
+            // reuse the field-ranking helper without a reporting-side scan.
+            if (error->expected && error->path && error->path->type == PATH_FIELD &&
+                    ((Type*)error->expected)->type_id == LMD_TYPE_MAP) {
+                return generate_field_suggestions(error->path->data.field_name.str,
+                    (TypeMap*)error->expected, pool);
+            }
             break;
 
         default:

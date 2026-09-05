@@ -20,6 +20,10 @@
 #include <cstdint>
 #include <stdlib.h>
 
+#include "../../lambda/lambda-data.hpp"
+#include "../../lambda/core/lambda-decimal.hpp"
+#include "../../lambda/runtime/heap_api.h"
+
 extern "C" {
 #include "../../lambda/lambda.h"
 #include "../../lambda/runtime/gc/gc_heap.h"
@@ -55,14 +59,13 @@ protected:
         }
     }
 
-    // Helper: create a fake List-like object with items array
+    // Helper: create a fake List-like object with items array. Keep this raw
+    // fixture on the collector's checked ABI rather than its own offsets.
     void* make_list(int64_t length, int64_t capacity) {
-        // List layout: { type_id(1), flags(1), pad(6), Item* items(8@8),
-        //                length(8@16), extra(8@24), capacity(8@32) }
-        void* obj = gc_heap_calloc(gc, 40, LMD_TYPE_ARRAY);
+        void* obj = gc_heap_calloc(gc, sizeof(LambdaGcListLayout), LMD_TYPE_ARRAY);
         EXPECT_NE(obj, nullptr);
         uint8_t* p = (uint8_t*)obj;
-        *(uint8_t*)(p + 0) = LMD_TYPE_ARRAY;  // type_id
+        p[LAMBDA_GC_OFF_CONTAINER_TYPE_ID] = LMD_TYPE_ARRAY;
 
         // allocate items from data zone
         size_t items_size = capacity * sizeof(uint64_t);
@@ -70,9 +73,9 @@ protected:
         EXPECT_NE(items, nullptr);
         memset(items, 0, items_size);
 
-        *(void**)(p + 8) = items;              // items pointer
-        *(int64_t*)(p + 16) = length;          // length
-        *(int64_t*)(p + 32) = capacity;        // capacity
+        *(void**)(p + LAMBDA_GC_OFF_LIST_ITEMS) = items;
+        *(int64_t*)(p + LAMBDA_GC_OFF_LIST_LENGTH) = length;
+        *(int64_t*)(p + LAMBDA_GC_OFF_LIST_CAPACITY) = capacity;
         return obj;
     }
 
@@ -108,6 +111,9 @@ protected:
 
 static int external_destroy_calls = 0;
 static uint16_t external_destroy_last_tag = 0;
+static int decimal_destroy_calls = 0;
+static bool decimal_destroy_had_payload = false;
+static bool decimal_destroy_released_payload = false;
 static int weak_clear_calls = 0;
 static void* weak_clear_context = nullptr;
 static int ephemeron_clear_calls = 0;
@@ -117,6 +123,18 @@ static void test_external_destroy(void* data, uint16_t type_tag) {
     external_destroy_calls++;
     external_destroy_last_tag = type_tag;
     *(void**)data = NULL;
+}
+
+static void observe_decimal_finalizer_bridge(void* data, uint16_t type_tag) {
+    if (type_tag != LMD_TYPE_DECIMAL) {
+        heap_gc_destroy_external_payload(data, type_tag);
+        return;
+    }
+    Decimal* decimal = (Decimal*)data;
+    decimal_destroy_calls++;
+    decimal_destroy_had_payload = decimal && decimal->dec_val;
+    heap_gc_destroy_external_payload(data, type_tag);
+    decimal_destroy_released_payload = decimal && !decimal->dec_val;
 }
 
 static void test_weak_clear(uint64_t* slot, void* context) {
@@ -706,6 +724,25 @@ TEST_F(GCHeapTest, ExternalPayloadFinalizerRunsDuringSweep) {
     EXPECT_EQ(external_destroy_last_tag, LMD_TYPE_BINARY);
 }
 
+TEST_F(GCHeapTest, DecimalPayloadFinalizerReleasesMpdDuringSweep) {
+    decimal_destroy_calls = 0;
+    decimal_destroy_had_payload = false;
+    decimal_destroy_released_payload = false;
+    gc->external_destroy = observe_decimal_finalizer_bridge;
+    Decimal* decimal = (Decimal*)gc_heap_calloc(gc, sizeof(Decimal),
+        LMD_TYPE_DECIMAL);
+    ASSERT_NE(decimal, nullptr);
+    decimal->dec_val = decimal_parse_fixed_str("123.456");
+    ASSERT_NE(decimal->dec_val, nullptr);
+
+    gc_collect(gc, NULL, 0);
+
+    EXPECT_EQ(decimal_destroy_calls, 1);
+    EXPECT_TRUE(decimal_destroy_had_payload);
+    EXPECT_TRUE(decimal_destroy_released_payload);
+    EXPECT_EQ(gc->object_count, 0u);
+}
+
 TEST_F(GCHeapTest, ExternalPayloadFinalizerRunsAtHeapTeardown) {
     external_destroy_calls = 0;
     external_destroy_last_tag = 0;
@@ -905,7 +942,8 @@ TEST_F(GCHeapTest, EphemeronValueCannotKeepItsOwnKeyAlive) {
     void* value_object = make_list(1, 1);
     uint64_t key = list_item(key_object);
     uint64_t value = list_item(value_object);
-    uint64_t* value_items = *(uint64_t**)((uint8_t*)value_object + 8);
+    uint64_t* value_items = *(uint64_t**)((uint8_t*)value_object +
+        LAMBDA_GC_OFF_LIST_ITEMS);
     ASSERT_NE(value_items, nullptr);
     value_items[0] = key;
     ASSERT_TRUE(gc_register_ephemeron(gc, &key, &value,
@@ -1076,7 +1114,7 @@ TEST_F(GCHeapTest, MarkListTracesChildren) {
 
     // set items
     uint8_t* p = (uint8_t*)list;
-    uint64_t* items = (uint64_t*)(*(void**)(p + 8));
+    uint64_t* items = (uint64_t*)(*(void**)(p + LAMBDA_GC_OFF_LIST_ITEMS));
     items[0] = string_item(str_a);
     items[1] = string_item(str_b);
 
@@ -1159,7 +1197,7 @@ TEST_F(GCHeapTest, CompactMovesNurseryData) {
     // create a list with data in nursery
     void* list = make_list(2, 4);
     uint8_t* p = (uint8_t*)list;
-    void* old_items = *(void**)(p + 8);
+    void* old_items = *(void**)(p + LAMBDA_GC_OFF_LIST_ITEMS);
 
     // items should be in nursery
     EXPECT_TRUE(gc_is_nursery_data(gc, old_items));
@@ -1171,7 +1209,7 @@ TEST_F(GCHeapTest, CompactMovesNurseryData) {
     gc_collect(gc, NULL, 0);
 
     // items should now be in tenured, NOT nursery
-    void* new_items = *(void**)(p + 8);
+    void* new_items = *(void**)(p + LAMBDA_GC_OFF_LIST_ITEMS);
     EXPECT_FALSE(gc_is_nursery_data(gc, new_items));
     // items pointer should have changed (moved from nursery to tenured)
     EXPECT_NE(old_items, new_items);
@@ -1183,7 +1221,7 @@ TEST_F(GCHeapTest, CompactPreservesListData) {
     // create a list with known Item values
     void* list = make_list(3, 4);
     uint8_t* p = (uint8_t*)list;
-    uint64_t* items = (uint64_t*)(*(void**)(p + 8));
+    uint64_t* items = (uint64_t*)(*(void**)(p + LAMBDA_GC_OFF_LIST_ITEMS));
     items[0] = int_item(10);
     items[1] = int_item(20);
     items[2] = int_item(30);
@@ -1194,7 +1232,7 @@ TEST_F(GCHeapTest, CompactPreservesListData) {
     gc_collect(gc, NULL, 0);
 
     // verify items data was preserved after compaction
-    uint64_t* new_items = (uint64_t*)(*(void**)(p + 8));
+    uint64_t* new_items = (uint64_t*)(*(void**)(p + LAMBDA_GC_OFF_LIST_ITEMS));
     EXPECT_EQ(new_items[0], int_item(10));
     EXPECT_EQ(new_items[1], int_item(20));
     EXPECT_EQ(new_items[2], int_item(30));
@@ -1203,27 +1241,29 @@ TEST_F(GCHeapTest, CompactPreservesListData) {
 }
 
 TEST_F(GCHeapTest, CompactPromotesArrayNumBaseAndRebindsLiveView) {
-    // Build the raw ArrayNum ABI used by the C collector: the view is newer and
-    // therefore visited before its base in the all_objects list.
-    uint8_t* base = (uint8_t*)gc_heap_calloc(gc, 40, LMD_TYPE_ARRAY_NUM);
+    // Build the checked ArrayNum ABI used by the C collector: the view is newer
+    // and therefore visited before its base in the all_objects list.
+    uint8_t* base = (uint8_t*)gc_heap_calloc(gc, sizeof(LambdaGcListLayout),
+        LMD_TYPE_ARRAY_NUM);
     ASSERT_NE(base, nullptr);
-    base[0] = LMD_TYPE_ARRAY_NUM;
-    base[3] = ELEM_INT64;
+    base[LAMBDA_GC_OFF_CONTAINER_TYPE_ID] = LMD_TYPE_ARRAY_NUM;
+    base[LAMBDA_GC_OFF_CONTAINER_MAP_KIND] = ELEM_INT64;
     int64_t* base_data = (int64_t*)gc_data_alloc(gc, 4 * sizeof(int64_t));
     ASSERT_NE(base_data, nullptr);
     base_data[0] = 10;
     base_data[1] = 20;
     base_data[2] = 30;
     base_data[3] = 40;
-    *(void**)(base + 8) = base_data;
-    *(int64_t*)(base + 16) = 4;
-    *(int64_t*)(base + 32) = 4;
+    *(void**)(base + LAMBDA_GC_OFF_LIST_ITEMS) = base_data;
+    *(int64_t*)(base + LAMBDA_GC_OFF_LIST_LENGTH) = 4;
+    *(int64_t*)(base + LAMBDA_GC_OFF_LIST_CAPACITY) = 4;
 
-    uint8_t* view = (uint8_t*)gc_heap_calloc(gc, 40, LMD_TYPE_ARRAY_NUM);
+    uint8_t* view = (uint8_t*)gc_heap_calloc(gc, sizeof(LambdaGcListLayout),
+        LMD_TYPE_ARRAY_NUM);
     ASSERT_NE(view, nullptr);
-    view[0] = LMD_TYPE_ARRAY_NUM;
-    view[2] = 0x03;  // is_ndim | is_view
-    view[3] = ELEM_INT64;
+    view[LAMBDA_GC_OFF_CONTAINER_TYPE_ID] = LMD_TYPE_ARRAY_NUM;
+    view[LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS] = 0x03;  // is_ndim | is_view
+    view[LAMBDA_GC_OFF_CONTAINER_MAP_KIND] = ELEM_INT64;
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
     ArrayNumShape* shape = (ArrayNumShape*)gc_data_alloc(gc, shape_bytes);
     ASSERT_NE(shape, nullptr);
@@ -1236,17 +1276,17 @@ TEST_F(GCHeapTest, CompactPromotesArrayNumBaseAndRebindsLiveView) {
     shape->base = base;
     array_num_shape_dims(shape)[0] = 2;
     array_num_shape_strides(shape)[0] = 1;
-    *(void**)(view + 8) = base_data + 1;
-    *(int64_t*)(view + 16) = 2;
-    *(void**)(view + 24) = shape;
-    *(int64_t*)(view + 32) = 2;
+    *(void**)(view + LAMBDA_GC_OFF_LIST_ITEMS) = base_data + 1;
+    *(int64_t*)(view + LAMBDA_GC_OFF_LIST_LENGTH) = 2;
+    *(void**)(view + LAMBDA_GC_OFF_LIST_EXTRA) = shape;
+    *(int64_t*)(view + LAMBDA_GC_OFF_LIST_CAPACITY) = 2;
 
     uint64_t root = list_item(view);
     gc_register_root(gc, &root);
     gc_collect(gc, NULL, 0);
 
-    int64_t* promoted_base = *(int64_t**)(base + 8);
-    int64_t* rebound_view = *(int64_t**)(view + 8);
+    int64_t* promoted_base = *(int64_t**)(base + LAMBDA_GC_OFF_LIST_ITEMS);
+    int64_t* rebound_view = *(int64_t**)(view + LAMBDA_GC_OFF_LIST_ITEMS);
     EXPECT_FALSE(gc_is_nursery_data(gc, promoted_base));
     EXPECT_NE(promoted_base, base_data);
     EXPECT_EQ(rebound_view, promoted_base + 1);
@@ -1275,7 +1315,7 @@ TEST_F(GCHeapTest, CollectTracesListChildren) {
     void* list = make_list(2, 4);
 
     uint8_t* p = (uint8_t*)list;
-    uint64_t* items = (uint64_t*)(*(void**)(p + 8));
+    uint64_t* items = (uint64_t*)(*(void**)(p + LAMBDA_GC_OFF_LIST_ITEMS));
     items[0] = string_item(str_a);
     items[1] = string_item(str_b);
 
@@ -1541,23 +1581,19 @@ TEST_F(GCHeapTest, StressAllocCollect) {
 // 14. Closure Environment Tracing
 // ============================================================================
 
-// Helper: create a fake Function object with a closure env containing cap_count Items
-// Function layout: { type_id(1@0), arity(1@1), closure_field_count(1@2), pad(5),
-//                    fn_type*(8@8), ptr*(8@16), closure_env*(8@24), name*(8@32) }
-// Total: 40 bytes
+// Helper: create a fake Function object with a closure env containing cap_count Items.
 static void* make_closure(GCHeapTest* t, gc_heap_t* gc, int cap_count, uint64_t* env_items_out[]) {
-    void* fn = gc_heap_calloc(gc, 40, LMD_TYPE_FUNC);
+    void* fn = gc_heap_calloc(gc, sizeof(LambdaGcFunctionLayout), LMD_TYPE_FUNC);
     EXPECT_NE(fn, nullptr);
     uint8_t* p = (uint8_t*)fn;
-    *(uint8_t*)(p + 0) = LMD_TYPE_FUNC;        // type_id
-    *(uint8_t*)(p + 1) = 0;                     // arity
-    *(uint8_t*)(p + 2) = (uint8_t)cap_count;    // closure_field_count
+    p[LAMBDA_GC_OFF_CONTAINER_TYPE_ID] = LMD_TYPE_FUNC;
+    p[LAMBDA_GC_OFF_FUNCTION_CLOSURE_FIELD_COUNT] = (uint8_t)cap_count;
 
     if (cap_count > 0) {
         void* env = gc_data_alloc(gc, cap_count * sizeof(uint64_t));
         EXPECT_NE(env, nullptr);
         memset(env, 0, cap_count * sizeof(uint64_t));
-        *(void**)(p + 24) = env;  // closure_env
+        *(void**)(p + LAMBDA_GC_OFF_FUNCTION_CLOSURE_ENV) = env;
         if (env_items_out) *env_items_out = (uint64_t*)env;
     }
     return fn;
@@ -1610,7 +1646,7 @@ TEST_F(GCHeapTest, ClosureEnvCompactsToTenured) {
 
     // After compaction, env should be in tenured (not nursery)
     uint8_t* p = (uint8_t*)fn;
-    uint64_t* new_env = (uint64_t*)(*(void**)(p + 24));
+    uint64_t* new_env = (uint64_t*)(*(void**)(p + LAMBDA_GC_OFF_FUNCTION_CLOSURE_ENV));
     EXPECT_FALSE(gc_is_nursery_data(gc, new_env));
     EXPECT_NE((void*)new_env, (void*)env_items);  // pointer changed
 
@@ -1636,7 +1672,7 @@ TEST_F(GCHeapTest, ClosureCycleCollected) {
 
     // Make the list reference the function (creating the cycle)
     uint8_t* lp = (uint8_t*)list;
-    uint64_t* list_items = (uint64_t*)(*(void**)(lp + 8));
+    uint64_t* list_items = (uint64_t*)(*(void**)(lp + LAMBDA_GC_OFF_LIST_ITEMS));
     list_items[0] = list_item(fn);   // list -> fn
 
     // We have: fn -> env -> list -> fn (cycle!)
@@ -1659,7 +1695,7 @@ TEST_F(GCHeapTest, ClosureCycleSurvivesWhenRooted) {
     env_items[0] = list_item(list);
 
     uint8_t* lp = (uint8_t*)list;
-    uint64_t* list_items = (uint64_t*)(*(void**)(lp + 8));
+    uint64_t* list_items = (uint64_t*)(*(void**)(lp + LAMBDA_GC_OFF_LIST_ITEMS));
     list_items[0] = list_item(fn);
 
     // Root the function
@@ -1676,12 +1712,12 @@ TEST_F(GCHeapTest, ClosureCycleSurvivesWhenRooted) {
 
 TEST_F(GCHeapTest, ClosureNoEnvSafe) {
     // Function with closure_field_count=0 and closure_env as a boxed Item (bound method pattern)
-    void* fn = gc_heap_calloc(gc, 40, LMD_TYPE_FUNC);
+    void* fn = gc_heap_calloc(gc, sizeof(LambdaGcFunctionLayout), LMD_TYPE_FUNC);
     uint8_t* p = (uint8_t*)fn;
-    *(uint8_t*)(p + 0) = LMD_TYPE_FUNC;
-    *(uint8_t*)(p + 2) = 0;  // closure_field_count = 0
+    p[LAMBDA_GC_OFF_CONTAINER_TYPE_ID] = LMD_TYPE_FUNC;
+    p[LAMBDA_GC_OFF_FUNCTION_CLOSURE_FIELD_COUNT] = 0;
     // Set closure_env to a non-null value (boxed Item, not a real env)
-    *(void**)(p + 24) = (void*)(uintptr_t)0xDEADBEEF;
+    *(void**)(p + LAMBDA_GC_OFF_FUNCTION_CLOSURE_ENV) = (void*)(uintptr_t)0xDEADBEEF;
 
     // Root it and collect — should not crash trying to trace the fake env
     uint64_t root = list_item(fn);
@@ -1698,8 +1734,7 @@ TEST_F(GCHeapTest, ClosureNoEnvSafe) {
 // 10. VMap GC Tracing and Finalization
 // ============================================================================
 
-// VMap layout: { type_id(2@0), pad(6), data*(8@8), vtable*(8@16) } = 24 bytes
-// type_id is Container.id which is uint16_t, matching LMD_TYPE_VMAP = 20
+// VMap test fixtures use the same checked prefix the C collector reads.
 
 // Test-local state for VMap callback verification
 static int s_vmap_trace_calls = 0;
@@ -1750,17 +1785,17 @@ static void reset_vmap_test_state() {
 // Helper: create a fake VMap with a malloc'd data block
 // The data block is an array of 2 uint64_t Items (simulating key/value pairs).
 static void* make_vmap(GCHeapTest* /*t*/, gc_heap_t* gc, uint64_t item0, uint64_t item1) {
-    void* obj = gc_heap_calloc(gc, 24, LMD_TYPE_VMAP);
+    void* obj = gc_heap_calloc(gc, sizeof(LambdaGcVMapLayout), LMD_TYPE_VMAP);
     uint8_t* p = (uint8_t*)obj;
-    *(uint16_t*)(p + 0) = LMD_TYPE_VMAP;  // Container type_id
+    p[LAMBDA_GC_OFF_CONTAINER_TYPE_ID] = LMD_TYPE_VMAP;
 
     // Allocate fake "data" via malloc (simulates HashMapData*)
     uint64_t* fake_data = (uint64_t*)calloc(2, sizeof(uint64_t));
     fake_data[0] = item0;
     fake_data[1] = item1;
 
-    *(void**)(p + 8) = fake_data;   // data pointer
-    *(void**)(p + 16) = nullptr;    // vtable (not needed for GC)
+    *(void**)(p + LAMBDA_GC_OFF_VMAP_DATA) = fake_data;
+    *(void**)(p + LAMBDA_GC_OFF_VMAP_VTABLE) = nullptr;
     return obj;
 }
 
@@ -1853,11 +1888,11 @@ TEST_F(GCHeapTest, VMapNullDataSafe) {
     gc->vmap_trace = test_vmap_trace;
     gc->vmap_destroy = test_vmap_destroy;
 
-    void* obj = gc_heap_calloc(gc, 24, LMD_TYPE_VMAP);
+    void* obj = gc_heap_calloc(gc, sizeof(LambdaGcVMapLayout), LMD_TYPE_VMAP);
     uint8_t* p = (uint8_t*)obj;
-    *(uint16_t*)(p + 0) = LMD_TYPE_VMAP;
-    *(void**)(p + 8) = nullptr;   // NULL data
-    *(void**)(p + 16) = nullptr;
+    p[LAMBDA_GC_OFF_CONTAINER_TYPE_ID] = LMD_TYPE_VMAP;
+    *(void**)(p + LAMBDA_GC_OFF_VMAP_DATA) = nullptr;
+    *(void**)(p + LAMBDA_GC_OFF_VMAP_VTABLE) = nullptr;
 
     // Collect with no roots — should not crash
     gc_collect(gc, NULL, 0);
@@ -1878,11 +1913,11 @@ TEST_F(GCHeapTest, VMapNoCallbacksSafe) {
     EXPECT_EQ(gc->vmap_destroy, nullptr);
 
     void* fake_data = calloc(2, sizeof(uint64_t));
-    void* obj = gc_heap_calloc(gc, 24, LMD_TYPE_VMAP);
+    void* obj = gc_heap_calloc(gc, sizeof(LambdaGcVMapLayout), LMD_TYPE_VMAP);
     uint8_t* p = (uint8_t*)obj;
-    *(uint16_t*)(p + 0) = LMD_TYPE_VMAP;
-    *(void**)(p + 8) = fake_data;
-    *(void**)(p + 16) = nullptr;
+    p[LAMBDA_GC_OFF_CONTAINER_TYPE_ID] = LMD_TYPE_VMAP;
+    *(void**)(p + LAMBDA_GC_OFF_VMAP_DATA) = fake_data;
+    *(void**)(p + LAMBDA_GC_OFF_VMAP_VTABLE) = nullptr;
 
     // Root it, then collect — should silently skip tracing
     uint64_t root = list_item(obj);

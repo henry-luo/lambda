@@ -16,7 +16,6 @@
 #include "lambda-stack.h"
 #include "side_stack.h"
 #include "../core/binary.h"
-#include <mpdecimal.h>
 #include <math.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -149,7 +148,7 @@ static void lambda_region_destroy_caches(Heap* heap) {
     }
 }
 
-static void gc_destroy_external_payload(void* obj, uint16_t type_tag) {
+void heap_gc_destroy_external_payload(void* obj, uint16_t type_tag) {
     if (!obj) return;
     if (type_tag == LMD_TYPE_DECIMAL) {
         // Decimal wrappers can die during a collection; release the libmpdec
@@ -422,7 +421,7 @@ static void heap_finish_init(void) {
     context->heap->gc->js_native_destroy = js_native_map_gc_destroy;
     context->heap->gc->js_function_trace = js_function_gc_trace;
     context->heap->gc->js_function_compact = js_function_gc_compact;
-    context->heap->gc->external_destroy = gc_destroy_external_payload;
+    context->heap->gc->external_destroy = heap_gc_destroy_external_payload;
     err_set_heap_allocator(heap_calloc);
     if (!ascii_char_table_initialized) init_ascii_char_table();
 }
@@ -1247,13 +1246,6 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
                 vm->data = NULL;
             }
         }
-        else if (tag == LMD_TYPE_DECIMAL) {
-            Decimal *dec = (Decimal*)obj;
-            if (dec->dec_val) {
-                mpd_del(dec->dec_val);
-                dec->dec_val = NULL;
-            }
-        }
         else if (tag == LMD_TYPE_ERROR) {
             err_gc_destroy(obj);
         }
@@ -1296,23 +1288,4 @@ void check_memory_leak() {
     gc_heap_t *gc = context->heap->gc;
     log_debug("gc objects at shutdown: %zu (all freed by pool_destroy)", gc->object_count);
 #endif
-}
-
-// free_item / free_container / free_map_item are no longer called.
-// All memory is freed at context end via gc_finalize_all_objects + pool_destroy.
-// These stubs remain for API compatibility with any external callers.
-void free_item(Item item, bool clear_entry) {
-    (void)item; (void)clear_entry;
-}
-
-void free_container(Container* cont, bool clear_entry) {
-    (void)cont; (void)clear_entry;
-}
-
-void frame_start() {
-    // no-op: frame management removed (GC Phase 4)
-}
-
-void frame_end() {
-    // no-op: frame management removed (GC Phase 4)
 }

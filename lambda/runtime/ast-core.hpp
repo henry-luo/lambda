@@ -145,6 +145,9 @@ typedef enum AstNodeType : uint16_t {
     // Iterator/query `for` clauses remain an AST_FOR extension edge; the
     // shared AST_NODE_LOOP tag is reserved for condition loops (D8.2.2).
     AST_NODE_FOR_CLAUSE = 548,
+    // The secondary binding in `for (key, value at source)` has the named
+    // binding layout, not the enclosing AstLoopNode layout.
+    AST_NODE_FOR_INDEX = 549,
 } AstNodeType;
 
 typedef enum LoopForm {
@@ -532,6 +535,8 @@ typedef struct AstFieldNode : AstNode {
     };
     bool computed;
     bool optional;
+    // S12.3.3v2: a resolved pn method may only appear as a direct call callee.
+    bool is_proc_method_reference;
 } AstFieldNode;
 
 typedef struct AstCallNode : AstNode {
@@ -736,8 +741,8 @@ typedef struct AstMapNode : AstNode {
         AstNode *item;
         AstNode *properties;
     };
-    // Computed keys force run-time shape construction; static literals retain
-    // their precomputed ShapeEntry chain.
+    // Computed keys and spreads force run-time shape construction; static
+    // literals retain their precomputed ShapeEntry chain.
     bool has_computed_key;
 } AstMapNode;
 

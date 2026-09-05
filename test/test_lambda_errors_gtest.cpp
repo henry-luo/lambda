@@ -999,6 +999,13 @@ TEST_F(StackTraceTest, CaptureStackTraceWithoutDebugInfo) {
     }
 }
 
+TEST_F(StackTraceTest, RawStackTraceUsesSharedDefaultDepth) {
+    RawStackTrace* trace = err_capture_raw_stack_trace(nullptr, 0);
+    ASSERT_NE(trace, nullptr);
+    EXPECT_EQ(trace->max_frames, LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
+    err_free_raw_stack_trace(trace);
+}
+
 //==============================================================================
 // Error Chaining Tests
 //==============================================================================
@@ -1465,6 +1472,11 @@ TEST_F(NegativeScriptTest, SemanticError_ImmutableInteriorAssignment) {
 TEST_F(NegativeScriptTest, SemanticError_ProcMethodRequiresMutableReceiver) {
     ExpectErrorMessage("test/lambda/negative/semantic/proc_method_let_receiver.ls",
         "mutating method 'increment' needs a `var` binding receiver");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_ProcMethodCannotBeTakenAsValue) {
+    ExpectErrorMessage("test/lambda/negative/semantic/proc_method_reference.ls",
+        "procedure method 'increment' cannot be used as a value; call it directly");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_CaptureMutation) {

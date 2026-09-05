@@ -101,6 +101,9 @@ typedef bool (*LambdaAstVisitor)(AstNode* node, void* data);
 static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
                             bool descend_functions);
 
+static TypeMethod* direct_lookup_object_method(Transpiler* tp,
+        AstNode* receiver, StrView name, bool* out_has_user_member);
+
 // System function definitions — single source of truth in sys_func_registry.cpp
 // See lambda/sys_func_registry.cpp for the complete table.
 extern SysFuncInfo sys_func_defs[];
@@ -1981,11 +1984,20 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         collect_captures_from_node(tp, ((AstDeclaratorNode*)node)->init,
             fn_scope, global_scope, captures);
         break;
-    case AST_NODE_KEY_EXPR:
-    case AST_NODE_FOR_CLAUSE: {
+    case AST_NODE_KEY_EXPR: {
         AstNamedNode* named = (AstNamedNode*)node;
         collect_captures_from_node(tp, named->key, fn_scope, global_scope, captures);
         collect_captures_from_node(tp, named->as, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_FOR_CLAUSE: {
+        AstLoopNode* loop = (AstLoopNode*)node;
+        collect_captures_from_node(tp, loop->as, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, loop->on, fn_scope, global_scope, captures);
+        for (AstJoinKey* key = loop->join_keys; key; key = (AstJoinKey*)key->next) {
+            collect_captures_from_node(tp, key->prior_expr, fn_scope, global_scope, captures);
+            collect_captures_from_node(tp, key->new_expr, fn_scope, global_scope, captures);
+        }
         break;
     }
     case AST_NODE_ASSIGN_STAM: {
@@ -2189,7 +2201,8 @@ static void binding_node_set_entry(AstNode* node, NameEntry* entry) {
         if (declarator->id && declarator->id->node_type == AST_NODE_IDENT)
             ((AstIdentNode*)declarator->id)->entry = entry;
     } else if (node->node_type == AST_NODE_PARAM ||
-            node->node_type == AST_NODE_KEY_EXPR) {
+            node->node_type == AST_NODE_KEY_EXPR ||
+            node->node_type == AST_NODE_FOR_INDEX) {
         // KEY_EXPR is an object type's field scope-helper (direct_object_add_field
         // and the base-inheritance copy). Without the back-pointer its
         // `ShapeEntry::binding` stayed NULL, and MIR's method prologue — which
@@ -2220,8 +2233,8 @@ static String* binding_node_name(AstNode* node) {
         ? ((AstDeclaratorNode*)node)->name : ((AstNamedNode*)node)->name;
 }
 
-void push_name(Transpiler* tp, AstNode* node, AstImportNode* import) {
-    String* name = binding_node_name(node);
+static void push_name_with_spelling(Transpiler* tp, AstNode* node,
+        String* name, AstImportNode* import) {
     log_debug("pushing name %.*s, %p", (int)name->len, name->chars, node->type);
 
     StrView name_view = {name->chars, name->len};
@@ -2275,6 +2288,10 @@ void push_name(Transpiler* tp, AstNode* node, AstImportNode* import) {
         binding_node_set_entry(node, entry);
         function_binding_set_entry(tp, node, entry);
     }
+}
+
+void push_name(Transpiler* tp, AstNode* node, AstImportNode* import) {
+    push_name_with_spelling(tp, node, binding_node_name(node), import);
 }
 
 NameScope* lambda_ast_enter_scope_with_parent(Transpiler* tp,
@@ -4971,9 +4988,11 @@ static bool ast_node_is_computed_key(AstNode* item) {
         ((AstNamedNode*)item)->key;
 }
 
-static bool ast_map_items_have_computed_key(AstNode* items) {
+static bool ast_map_items_require_runtime_shape(Transpiler* tp, AstNode* items) {
     for (AstNode* item = items; item; item = item->next) {
-        if (ast_node_is_computed_key(item)) return true;
+        if (ast_node_is_computed_key(item) || ast_node_is_syntactic_spread_key(tp, item)) {
+            return true;
+        }
     }
     return false;
 }
@@ -4985,15 +5004,22 @@ AstNode* build_map_from_items(Transpiler* tp, SourceSpan span,
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
     TypeMap* type = (TypeMap*)ast_node->type;
 
-    if (ast_map_items_have_computed_key(items)) {
+    if (ast_map_items_require_runtime_shape(tp, items)) {
         // S16.8.9: source order, including spreads, reaches the runtime
-        // builder intact because it owns computed-name replacement.
+        // builder intact because it owns computed-name replacement. A spread
+        // can be a VMap, whose fields have no static raw-Map storage shape.
         ast_node->has_computed_key = true;
         type->has_spread = true;
         AstNode* previous = NULL;
         for (AstNode* item = items; item;) {
             AstNode* next = item->next;
             item->next = NULL;
+            if (ast_node_is_syntactic_spread_key(tp, item)) {
+                // The runtime builder retains KeyExpr nodes, so carry the
+                // syntactic spread marker that static shape construction
+                // otherwise consumes while creating a nameless slot.
+                ((AstNamedNode*)item)->is_spread = true;
+            }
             if (previous) previous->next = item;
             else ast_node->item = item;
             previous = item;
@@ -7342,8 +7368,26 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
     arraylist_free(functions);
 }
 
+static bool reject_proc_method_value(AstNode* node, void* data) {
+    if (!node || node->node_type != AST_NODE_MEMBER_EXPR) return true;
+    AstFieldNode* member = (AstFieldNode*)node;
+    if (!member->is_proc_method_reference) return true;
+    Transpiler* tp = (Transpiler*)data;
+    AstIdentNode* field = (AstIdentNode*)ast_unwrap_primary(member->field);
+    record_semantic_error_span(tp, member->source_span, ERR_PROC_IN_FN,
+        "procedure method '%.*s' cannot be used as a value; call it directly",
+        field && field->name ? (int)field->name->len : 0,
+        field && field->name ? field->name->chars : "");
+    member->type = &TYPE_ERROR;
+    return false;
+}
+
 bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script) {
     if (!tp || !script || tp->error_count != 0) return false;
+    // A pn member is bound by the runtime member lane so calls can lower it,
+    // but S12.3.3v2/D2.6.7 forbid retaining that bound closure as a value.
+    walk_lambda_ast((AstNode*)script, reject_proc_method_value, tp, true);
+    if (tp->error_count != 0) return false;
     for (AstNode* item = script->child; item; item = item->next) {
         validate_top_level_enforcing_calls(tp, item);
         validate_top_level_cross_frame_binding_reads(tp, item);
@@ -8724,6 +8768,17 @@ AstNode* build_field_node_from_parts(Transpiler* tp, SourceSpan span,
     node->object = object;
     node->field = field;
     node->computed = node_type == AST_NODE_INDEX_EXPR;
+    node->is_proc_method_reference = false;
+    if (node_type == AST_NODE_MEMBER_EXPR) {
+        AstNode* receiver = ast_unwrap_primary(object);
+        AstNode* method_name = ast_unwrap_primary(field);
+        if (receiver && method_name && method_name->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident = (AstIdentNode*)method_name;
+            StrView name = strview_init(ident->name->chars, ident->name->len);
+            TypeMethod* method = direct_lookup_object_method(tp, receiver, name, NULL);
+            node->is_proc_method_reference = method && method->is_proc;
+        }
+    }
     if (node_type == AST_NODE_INDEX_EXPR) {
         Type* declared = declared_compound_destination_type(tp,
             (AstNode*)node, NULL);
@@ -8978,6 +9033,9 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
                 user_method_is_proc = user_method->is_proc;
                 user_method_receiver = receiver;
                 user_method_name = field_name;
+                // This member is consumed as a call callee. Keep the mark on
+                // every other pn member so final validation can reject values.
+                if (user_method_is_proc) member->is_proc_method_reference = false;
             } else if (!receiver_has_member) {
                 info = get_sys_func_for_method(&field_name, arg_count, object_type);
                 if (info) {
@@ -9228,7 +9286,7 @@ AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
     String* name = name_pool_create_strview(tp->name_pool, tag);
     type->name = (StrView){name->chars, name->len};
     node->type = (Type*)type;
-    bool has_computed_key = ast_map_items_have_computed_key(children);
+    bool has_computed_key = ast_map_items_require_runtime_shape(tp, children);
 
     AstNode* prev = NULL;
     ShapeEntry* prev_shape = NULL;
@@ -9279,6 +9337,7 @@ AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
             if (has_computed_key) {
                 // Preserve the normalized syntax node: the runtime builder
                 // needs static names and spreads beside the computed entries.
+                if (spread) ((AstNamedNode*)candidate)->is_spread = true;
                 candidate->next = NULL;
                 if (!node->item) node->item = candidate;
                 else prev->next = candidate;
@@ -10090,7 +10149,7 @@ AstNode* build_loop_from_parts(Transpiler* tp, SourceSpan span,
     }
     if (loop->index_name) {
         AstNamedNode* index = (AstNamedNode*)alloc_ast_node_from_span(tp,
-            AST_NODE_FOR_CLAUSE, index_token.span, sizeof(AstNamedNode));
+            AST_NODE_FOR_INDEX, index_token.span, sizeof(AstNamedNode));
         index->name = loop->index_name;
         index->type = loop->key_filter == LOOP_KEY_INT ? &TYPE_INT :
             loop->key_filter == LOOP_KEY_SYMBOL ? &TYPE_SYMBOL :
@@ -10098,7 +10157,9 @@ AstNode* build_loop_from_parts(Transpiler* tp, SourceSpan span,
         lambda_ast_register_name(tp, index);
         loop->index_entry = lookup_name_in_current_scope(tp, loop->index_name);
     }
-    lambda_ast_register_name(tp, (AstNamedNode*)loop);
+    // AstLoopNode diverges from AstNamedNode immediately after `name`.
+    // Register its explicit spelling instead of borrowing that layout.
+    push_name_with_spelling(tp, (AstNode*)loop, loop->name, NULL);
     loop->entry = lookup_name_in_current_scope(tp, loop->name);
     if (join) {
         direct_rebind_join_ident(join, loop->name, loop->entry);

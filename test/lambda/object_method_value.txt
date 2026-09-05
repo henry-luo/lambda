@@ -21,5 +21,3 @@ type.null
 type.null
 type.null
 2
-'=f='
-function
