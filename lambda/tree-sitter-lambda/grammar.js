@@ -446,7 +446,15 @@ module.exports = grammar({
       alias($._base_type_kw, $.base_type), alias('type', $.base_type),
       $.last_index, '*'),
 
-    map_item: $ => seq(field('name', $._key), ':', field('as', $._expr)),
+    // S16.8.9: a bracketed key is evaluated, while a bare name remains a
+    // literal attribute name. Keeping the computed form separate prevents
+    // `_key` from admitting expressions anywhere other than keyed literals.
+    computed_key: $ => seq('[', field('key', $._expr), ']'),
+
+    map_item: $ => seq(
+      field('name', choice($._key, $.computed_key)),
+      ':', field('as', $._expr),
+    ),
 
     // §5.9v3 / S16.4.1. Three disjoint brace forms. `map` and `block` are told
     // apart by their interiors; `empty_braces` is the neutral node for `{}`,
@@ -470,7 +478,8 @@ module.exports = grammar({
 
     // ============================= Elements ===============================
 
-    attr_name: $ => choice(alias($._attr_dotted_name, $.dotted_name), $._key),
+    attr_name: $ => choice(alias($._attr_dotted_name, $.dotted_name),
+      $._key, $.computed_key),
     _attr_dotted_name: $ => qualified_name($, 120),
     dotted_name: $ => qualified_name($, 120),
 

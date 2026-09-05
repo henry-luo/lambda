@@ -1,0 +1,5 @@
+[2, 4, 7, 3]
+"symbol"
+["range", "42"]
+["first", "second", "value"]
+[1, 2]

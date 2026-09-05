@@ -378,6 +378,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         case AST_NODE_NAMED_ARG: {
             AstNamedNode* named = (AstNamedNode*)node;
             emit_dump_string_field("name", named->name);
+            emit_lambda_dump_field(source, "key", named->key, indent + 1);
             emit_lambda_dump_field(source, "as", named->as, indent + 1);
             break;
         }

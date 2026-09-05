@@ -2786,6 +2786,11 @@ extern "C" {
     Item fn_mutable_value(Item value);
     Item fn_array_set(Array* arr, int64_t index, Item value);
     Item fn_map_set(Item map, Item key, Item value);
+    // S16.8.9 runtime builder for a literal that contains a computed NameKey.
+    Item map_literal_begin(void);
+    Item map_literal_put(Item owner, Item key, Item value);
+    Item map_literal_spread(Item owner, Item source);
+    Element* elmt_literal_begin(struct TypeElmt* type);
     bool cow_item_is_container(Item value);
     Item cow_mark_shared(Item value);
     Item array_num_set_cow_idx(Item owner, int64_t index, Item value);

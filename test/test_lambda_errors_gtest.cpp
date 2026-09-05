@@ -1207,6 +1207,8 @@ TEST_F(NegativeScriptTest, DynamicFractionalDecimalRejectsIntegerBoundary) {
 }
 
 TEST_F(NegativeScriptTest, TypeEnforcementRuntimeNegativeGoldensPinDiagnostics) {
+    ExpectRuntimeErrorMessage("test/lambda/negative/runtime/computed_key_non_name.ls",
+        "error[E201]: computed map key must evaluate to string or symbol");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_array_write.ls",
         "error[E201]: type check at typed array element assignment failed: expected int, got string 'not an integer'");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_dynamic_arity.ls",

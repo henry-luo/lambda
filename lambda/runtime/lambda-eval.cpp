@@ -8138,7 +8138,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     TypeId extend_tid = get_type_id(map_item);
     if (!lambda_type_id_has_attr_face(extend_tid)) return false;
     Map* map = map_item.map;
-    if (!map || !map->type || !map->data || !context || !context->pool) return false;
+    if (!map || !map->type || !context || !context->pool) return false;
     const char* key_chars = NULL;
     uint32_t key_length = 0;
     TypeId key_type = get_type_id(key);
@@ -8154,6 +8154,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     if (!key_chars) return false;
 
     TypeMap* old_type = (TypeMap*)map->type;
+    if (!map->data && old_type->length > 0) return false;
     int old_count = 0;
     int64_t new_size = 0;
     for (ShapeEntry* entry = old_type->shape; entry; entry = entry->next) {
@@ -8166,8 +8167,19 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     RootFrame roots(2);
     Rooted<Map*> rooted_map(roots, map);
     Rooted<Item> rooted_value(roots, value);
-    TypeMap* new_type = (TypeMap*)alloc_type(context->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    bool is_element = extend_tid == LMD_TYPE_ELEMENT;
+    TypeMap* new_type = (TypeMap*)alloc_type(context->pool,
+        is_element ? LMD_TYPE_ELEMENT : LMD_TYPE_MAP,
+        is_element ? sizeof(TypeElmt) : sizeof(TypeMap));
     if (!new_type) return false;
+    if (is_element) {
+        TypeElmt* old_element = (TypeElmt*)old_type;
+        TypeElmt* new_element = (TypeElmt*)new_type;
+        new_element->name = old_element->name;
+        new_element->name_id = old_element->name_id;
+        new_element->content_length = old_element->content_length;
+        new_element->ns = old_element->ns;
+    }
     void* new_data = heap_data_calloc(new_size > 0 ? (size_t)new_size : 1);
     if (!new_data) return false;
     map = rooted_map.get();
@@ -9422,7 +9434,7 @@ Item fn_map_set(Item map_item, Item key, Item value) {
     }
 
     map_type = (TypeMap*)*type_slot;
-    if (!map_type || !map_type->shape) {
+    if (!map_type) {
         log_error("fn_map_set: no shape");
         return ItemError;
     }
@@ -9447,6 +9459,11 @@ Item fn_map_set(Item map_item, Item key, Item value) {
     }
     if (!key_cstr) {
         log_error("fn_map_set: null key string");
+        return ItemError;
+    }
+    if (!map_type->shape) {
+        if (map_extend_open_shape(map_item, key, value)) return ItemNull;
+        log_error("fn_map_set: unable to create field '%s'", key_cstr);
         return ItemError;
     }
     NameRef key_ref = key_type == LMD_TYPE_STRING &&
@@ -9596,4 +9613,72 @@ Item fn_map_set(Item map_item, Item key, Item value) {
     if (map_extend_open_shape(map_item, key, value)) return ItemNull;
     log_error("fn_map_set: field '%s' not found", key_cstr);
     return ItemError;
+}
+
+Item map_literal_begin(void) {
+    Map* map = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    if (!map) {
+        set_runtime_error(ERR_OUT_OF_MEMORY, "computed map literal allocation failed");
+        return ItemError;
+    }
+    map->type_id = LMD_TYPE_MAP;
+    map->type = &EmptyMap;
+    return (Item){.map = map};
+}
+
+Element* elmt_literal_begin(TypeElmt* type) {
+    if (!type) return NULL;
+    // Reuse the ordinary element allocator so UI-mode literals retain their
+    // DomElement representation while their attribute shape grows at runtime.
+    return elmt_with_tl(type->type_index, context ? context->type_list : NULL);
+}
+
+Item map_literal_put(Item owner, Item key, Item value) {
+    if (!is_text_type_id(get_type_id(key))) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "computed map key must evaluate to string or symbol");
+        return ItemError;
+    }
+    RootFrame roots(3);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_key(roots, key);
+    Rooted<Item> rooted_value(roots, value);
+    Item result = fn_map_set(rooted_owner.get(), rooted_key.get(), rooted_value.get());
+    if (get_type_id(result) == LMD_TYPE_ERROR) {
+        set_runtime_error(ERR_INVALID_OPERATION, "computed map key could not be stored");
+        return ItemError;
+    }
+    return rooted_owner.get();
+}
+
+Item map_literal_spread(Item owner, Item source) {
+    TypeId source_type = get_type_id(source);
+    if (source_type != LMD_TYPE_MAP && source_type != LMD_TYPE_ELEMENT) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "map literal spread requires a map or element");
+        return ItemError;
+    }
+
+    RootFrame roots(4);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_source(roots, source);
+    Rooted<Item> rooted_key(roots, ItemNull);
+    Rooted<Item> rooted_value(roots, ItemNull);
+    SymbolKeyList* keys = item_keys(rooted_source.get());
+    int64_t key_count = symbol_key_list_len(keys);
+    for (int64_t index = 0; index < key_count; index++) {
+        Symbol* symbol = symbol_key_list_at(keys, index);
+        rooted_key.set((Item){.item = y2it(symbol)});
+        rooted_value.set(fn_index(rooted_source.get(), rooted_key.get()));
+        // A spread contributes each selected field to the fresh literal.
+        cow_capture_value(rooted_value.get());
+        if (get_type_id(rooted_value.get()) == LMD_TYPE_ERROR ||
+                get_type_id(map_literal_put(rooted_owner.get(), rooted_key.get(),
+                    rooted_value.get())) == LMD_TYPE_ERROR) {
+            symbol_key_list_free(keys);
+            return ItemError;
+        }
+    }
+    symbol_key_list_free(keys);
+    return rooted_owner.get();
 }

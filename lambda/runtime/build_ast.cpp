@@ -1981,6 +1981,7 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
     case AST_NODE_KEY_EXPR:
     case AST_NODE_FOR_CLAUSE: {
         AstNamedNode* named = (AstNamedNode*)node;
+        collect_captures_from_node(tp, named->key, fn_scope, global_scope, captures);
         collect_captures_from_node(tp, named->as, fn_scope, global_scope, captures);
         break;
     }
@@ -4246,7 +4247,8 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_VARIABLE_DECLARATOR:
         return has_current_item_ref(((AstDeclaratorNode*)node)->init);
     case AST_NODE_KEY_EXPR:
-        return has_current_item_ref(((AstNamedNode*)node)->as);
+        return has_current_item_ref(((AstNamedNode*)node)->key) ||
+            has_current_item_ref(((AstNamedNode*)node)->as);
     default:
         return false;
     }
@@ -4946,6 +4948,7 @@ static ShapeEntry* build_map_shape_entry(Transpiler* tp, TypeMap* owner, AstNode
 
 static bool ast_node_is_syntactic_spread_key(Transpiler* tp, AstNode* item) {
     if (!item || item->node_type != AST_NODE_KEY_EXPR) return false;
+    if (((AstNamedNode*)item)->is_spread) return true;
 
     // A quoted `'*'` remains an ordinary key. The source spelling is retained
     // until the direct sink has committed the map item, so inspect it here
@@ -4954,12 +4957,43 @@ static bool ast_node_is_syntactic_spread_key(Transpiler* tp, AstNode* item) {
     return source.length > 0 && source.str[0] == '*';
 }
 
+static bool ast_node_is_computed_key(AstNode* item) {
+    return item && item->node_type == AST_NODE_KEY_EXPR &&
+        ((AstNamedNode*)item)->key;
+}
+
+static bool ast_map_items_have_computed_key(AstNode* items) {
+    for (AstNode* item = items; item; item = item->next) {
+        if (ast_node_is_computed_key(item)) return true;
+    }
+    return false;
+}
+
 AstNode* build_map_from_items(Transpiler* tp, SourceSpan span,
         AstNode* items) {
     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node_from_span(tp,
         AST_NODE_MAP, span, sizeof(AstMapNode));
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
     TypeMap* type = (TypeMap*)ast_node->type;
+
+    if (ast_map_items_have_computed_key(items)) {
+        // S16.8.9: source order, including spreads, reaches the runtime
+        // builder intact because it owns computed-name replacement.
+        ast_node->has_computed_key = true;
+        type->has_spread = true;
+        AstNode* previous = NULL;
+        for (AstNode* item = items; item;) {
+            AstNode* next = item->next;
+            item->next = NULL;
+            if (previous) previous->next = item;
+            else ast_node->item = item;
+            previous = item;
+            item = next;
+        }
+        arraylist_append(tp->type_list, type);
+        type->type_index = tp->type_list->length - 1;
+        return (AstNode*)ast_node;
+    }
 
     AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
     for (AstNode* raw_item = items; raw_item;) {
@@ -5596,7 +5630,16 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
             binding_acknowledgment, return_acknowledgment);
         return;
     }
-    case AST_NODE_KEY_EXPR:
+    case AST_NODE_KEY_EXPR: {
+        AstNamedNode* named = (AstNamedNode*)node;
+        bool binding_acknowledgment = named->declared_type &&
+            lambda_type_has_proven_error(named->declared_type);
+        validate_enforcing_calls_in_expression(tp, named->key, binding_acknowledgment,
+            return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, named->as, binding_acknowledgment,
+            return_acknowledgment);
+        return;
+    }
     case AST_NODE_NAMED_ARG: {
         AstNamedNode* named = (AstNamedNode*)node;
         bool binding_acknowledgment = named->declared_type &&
@@ -5793,7 +5836,11 @@ static bool ast_reads_binding(AstNode* node, String* name) {
     }
     case AST_NODE_VARIABLE_DECLARATOR:
         return ast_reads_binding(((AstDeclaratorNode*)node)->init, name);
-    case AST_NODE_KEY_EXPR:
+    case AST_NODE_KEY_EXPR: {
+        AstNamedNode* named = (AstNamedNode*)node;
+        return ast_reads_binding(named->key, name) ||
+            ast_reads_binding(named->as, name);
+    }
     case AST_NODE_NAMED_ARG:
         return ast_reads_binding(((AstNamedNode*)node)->as, name);
     case AST_NODE_ASSIGN_STAM:
@@ -5999,7 +6046,12 @@ static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* n
         case AST_NODE_VARIABLE_DECLARATOR:
             scan_invalidated_bindings(state, ((AstDeclaratorNode*)node)->init);
             break;
-        case AST_NODE_KEY_EXPR:
+        case AST_NODE_KEY_EXPR: {
+            AstNamedNode* named = (AstNamedNode*)node;
+            scan_invalidated_bindings(state, named->key);
+            scan_invalidated_bindings(state, named->as);
+            break;
+        }
         case AST_NODE_NAMED_ARG:
             scan_invalidated_bindings(state, ((AstNamedNode*)node)->as);
             break;
@@ -6383,7 +6435,12 @@ static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
     case AST_NODE_VARIABLE_DECLARATOR:
         walk_lambda_ast(((AstDeclaratorNode*)node)->init, visitor, data, descend_functions);
         break;
-    case AST_NODE_KEY_EXPR:
+    case AST_NODE_KEY_EXPR: {
+        AstNamedNode* named = (AstNamedNode*)node;
+        walk_lambda_ast(named->key, visitor, data, descend_functions);
+        walk_lambda_ast(named->as, visitor, data, descend_functions);
+        break;
+    }
     case AST_NODE_NAMED_ARG:
     case AST_NODE_PARAM:
         walk_lambda_ast(((AstNamedNode*)node)->as, visitor, data, descend_functions);
@@ -8572,6 +8629,8 @@ AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
     String* name = name_pool_create_strview(tp->name_pool, tag);
     type->name = (StrView){name->chars, name->len};
     node->type = (Type*)type;
+    bool has_computed_key = ast_map_items_have_computed_key(children);
+
     AstNode* prev = NULL;
     ShapeEntry* prev_shape = NULL;
     int byte_offset = 0;
@@ -8618,6 +8677,16 @@ AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
                 }
             }
             bool spread = ast_node_is_syntactic_spread_key(tp, candidate);
+            if (has_computed_key) {
+                // Preserve the normalized syntax node: the runtime builder
+                // needs static names and spreads beside the computed entries.
+                candidate->next = NULL;
+                if (!node->item) node->item = candidate;
+                else prev->next = candidate;
+                prev = candidate;
+                raw = next;
+                continue;
+            }
             AstNode* item = spread ? ((AstNamedNode*)candidate)->as : candidate;
             if (item) {
                 if (!node->item) node->item = item;
@@ -8634,6 +8703,14 @@ AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
             }
         }
         raw = next;
+    }
+    if (has_computed_key) {
+        // S16.8.9 shares the dynamic shape path with spread-bearing elements.
+        node->has_computed_key = true;
+        type->has_spread = true;
+        arraylist_append(tp->type_list, type);
+        type->type_index = tp->type_list->length - 1;
+        return (AstNode*)node;
     }
     type->byte_size = byte_offset;
     arraylist_append(tp->type_list, type);
@@ -10355,8 +10432,19 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 AST_NODE_KEY_EXPR, reduction->span, sizeof(AstNamedNode));
             StrView name = direct_key_text(tp, reduction->detail_token);
             item->name = name_pool_create_strview(tp->name_pool, name);
+            StrView source = direct_token_text(tp, reduction->detail_token);
+            item->is_spread = source.length > 0 && source.str[0] == '*';
             item->as = child0;
             item->type = child0 && child0->type ? child0->type : &TYPE_ANY;
+            return direct_ast_value((AstNode*)item);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_COMPUTED_MAP_ITEM) {
+            AstNamedNode* item = (AstNamedNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_KEY_EXPR, reduction->span, sizeof(AstNamedNode));
+            item->key = child0;
+            item->as = reduction->child_count > 1
+                ? direct_ast_node(reduction->children[1]) : NULL;
+            item->type = item->as && item->as->type ? item->as->type : &TYPE_ANY;
             return direct_ast_value((AstNode*)item);
         }
         if (reduction->form == LAMBDA_REDUCTION_FORM_ELEMENT_ATTRIBUTE) {
@@ -10364,8 +10452,19 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 AST_NODE_KEY_EXPR, reduction->span, sizeof(AstNamedNode));
             StrView name = direct_key_text(tp, reduction->detail_token);
             item->name = name_pool_create_strview(tp->name_pool, name);
+            StrView source = direct_token_text(tp, reduction->detail_token);
+            item->is_spread = source.length > 0 && source.str[0] == '*';
             item->as = child0;
             item->type = child0 && child0->type ? child0->type : &TYPE_ANY;
+            return direct_ast_value((AstNode*)item);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_COMPUTED_ELEMENT_ATTRIBUTE) {
+            AstNamedNode* item = (AstNamedNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_KEY_EXPR, reduction->span, sizeof(AstNamedNode));
+            item->key = child0;
+            item->as = reduction->child_count > 1
+                ? direct_ast_node(reduction->children[1]) : NULL;
+            item->type = item->as && item->as->type ? item->as->type : &TYPE_ANY;
             return direct_ast_value((AstNode*)item);
         }
         if (reduction->form == LAMBDA_REDUCTION_FORM_MATCH_ARM) {
