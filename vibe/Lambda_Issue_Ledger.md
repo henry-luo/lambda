@@ -753,14 +753,15 @@ the semantic-promotion consolidation.
 
 ## 8. Memory management & GC (LR_08)
 
-<a id="lr08-1"></a>**LR08-1 · Decimal `mpd_t` leak (in-code TODO) · OPEN**
-`gc_finalize_dead_object` does nothing for `LMD_TYPE_DECIMAL` because the
-`mpd_t` from libmpdec cannot be freed from that C file: dead decimals "will have
-their mpd_t leaked until context end. TODO: Add a finalization callback
-mechanism." (`lambda/runtime/gc/gc_heap.c:2068`–`2069`). Mid-execution
-collections leak an `mpd_t` per dead Decimal; storage is reclaimed only by
-`gc_finalize_all_objects` at teardown. A real per-cycle leak in decimal-heavy
-long-running scripts.
+<a id="lr08-1"></a>**LR08-1 · Decimal `mpd_t` leak (in-code TODO) · RESOLVED 2026-09-05**
+Per **D4.3.3**, the GC delegates out-of-zone cleanup to the C++
+`heap_gc_destroy_external_payload` bridge. For `LMD_TYPE_DECIMAL`, it calls
+`decimal_payload_release`, which runs `mpd_del` and clears `dec_val` before
+sweep reclaims the wrapper. Teardown uses the same bridge, so it has one
+idempotent ownership path rather than a Decimal-specific second free.
+`GCHeapTest.DecimalPayloadFinalizerReleasesMpdDuringSweep` verifies that a
+dead Decimal's real `mpd_t` payload is released during collection, not only at
+context teardown.
 
 <a id="lr08-2"></a>**LR08-2 · Execution-side-stack capacity is reserved up front · OPEN**
 Root and raw-number regions have fixed virtual limits. Checked prologues fail

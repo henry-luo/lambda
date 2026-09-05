@@ -145,7 +145,7 @@ void decimal_retain(Decimal* dec);
 // Decrement reference count, free if zero
 void decimal_release(Decimal* dec);
 
-// Release the external mpd_t owned by a pool-backed Decimal wrapper.
+// Release a Decimal wrapper's external mpd_t and clear it for idempotent GC cleanup.
 void decimal_payload_release(Decimal* dec);
 
 // Release mpdecimal payloads tracked by a compiler-owned constant list.

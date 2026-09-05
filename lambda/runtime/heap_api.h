@@ -10,6 +10,8 @@ void* heap_alloc(int size, TypeId type_id);
 void heap_init();
 void heap_destroy();
 String* heap_create_name(const char* str, size_t len);
+// C++ bridge for resources owned by GC wrappers but allocated outside GC zones.
+void heap_gc_destroy_external_payload(void* obj, uint16_t type_tag);
 
 #ifdef __cplusplus
 extern "C" {

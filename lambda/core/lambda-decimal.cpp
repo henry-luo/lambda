@@ -590,7 +590,7 @@ void decimal_retain(Decimal* dec) {
 }
 
 void decimal_release(Decimal* dec) {
-    // no-op: ref counting removed, gc_finalize_all_objects handles cleanup
+    // no-op: the GC external-payload bridge owns Decimal lifetime.
 }
 
 void decimal_payload_release(Decimal* decimal) {

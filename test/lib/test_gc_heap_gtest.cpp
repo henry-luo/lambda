@@ -20,6 +20,10 @@
 #include <cstdint>
 #include <stdlib.h>
 
+#include "../../lambda/lambda-data.hpp"
+#include "../../lambda/core/lambda-decimal.hpp"
+#include "../../lambda/runtime/heap_api.h"
+
 extern "C" {
 #include "../../lambda/lambda.h"
 #include "../../lambda/runtime/gc/gc_heap.h"
@@ -107,6 +111,9 @@ protected:
 
 static int external_destroy_calls = 0;
 static uint16_t external_destroy_last_tag = 0;
+static int decimal_destroy_calls = 0;
+static bool decimal_destroy_had_payload = false;
+static bool decimal_destroy_released_payload = false;
 static int weak_clear_calls = 0;
 static void* weak_clear_context = nullptr;
 static int ephemeron_clear_calls = 0;
@@ -116,6 +123,18 @@ static void test_external_destroy(void* data, uint16_t type_tag) {
     external_destroy_calls++;
     external_destroy_last_tag = type_tag;
     *(void**)data = NULL;
+}
+
+static void observe_decimal_finalizer_bridge(void* data, uint16_t type_tag) {
+    if (type_tag != LMD_TYPE_DECIMAL) {
+        heap_gc_destroy_external_payload(data, type_tag);
+        return;
+    }
+    Decimal* decimal = (Decimal*)data;
+    decimal_destroy_calls++;
+    decimal_destroy_had_payload = decimal && decimal->dec_val;
+    heap_gc_destroy_external_payload(data, type_tag);
+    decimal_destroy_released_payload = decimal && !decimal->dec_val;
 }
 
 static void test_weak_clear(uint64_t* slot, void* context) {
@@ -703,6 +722,25 @@ TEST_F(GCHeapTest, ExternalPayloadFinalizerRunsDuringSweep) {
 
     EXPECT_EQ(external_destroy_calls, 1);
     EXPECT_EQ(external_destroy_last_tag, LMD_TYPE_BINARY);
+}
+
+TEST_F(GCHeapTest, DecimalPayloadFinalizerReleasesMpdDuringSweep) {
+    decimal_destroy_calls = 0;
+    decimal_destroy_had_payload = false;
+    decimal_destroy_released_payload = false;
+    gc->external_destroy = observe_decimal_finalizer_bridge;
+    Decimal* decimal = (Decimal*)gc_heap_calloc(gc, sizeof(Decimal),
+        LMD_TYPE_DECIMAL);
+    ASSERT_NE(decimal, nullptr);
+    decimal->dec_val = decimal_parse_fixed_str("123.456");
+    ASSERT_NE(decimal->dec_val, nullptr);
+
+    gc_collect(gc, NULL, 0);
+
+    EXPECT_EQ(decimal_destroy_calls, 1);
+    EXPECT_TRUE(decimal_destroy_had_payload);
+    EXPECT_TRUE(decimal_destroy_released_payload);
+    EXPECT_EQ(gc->object_count, 0u);
 }
 
 TEST_F(GCHeapTest, ExternalPayloadFinalizerRunsAtHeapTeardown) {

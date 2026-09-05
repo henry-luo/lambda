@@ -2200,15 +2200,7 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
         gc->external_destroy(obj, tag);
     }
 
-    if (tag == LMD_TYPE_DECIMAL_) {
-        // Decimal: mpd_t is allocated by libmpdec (outside GC)
-        // We can't call mpd_del here from C code — it requires mpdecimal.h
-        // This will be handled by gc_finalize_all_objects in lambda-mem.cpp
-        // during context teardown. During mid-execution GC, decimals that
-        // are truly dead will have their mpd_t leaked until context end.
-        // TODO: Add a finalization callback mechanism.
-    }
-    else if (tag == LMD_TYPE_VMAP_) {
+    if (tag == LMD_TYPE_VMAP_) {
         // VMap host payload cleanup is independent of optional lazy backing data.
         uint8_t* p = (uint8_t*)obj;
         void* data = *(void**)(p + LAMBDA_GC_OFF_VMAP_DATA);

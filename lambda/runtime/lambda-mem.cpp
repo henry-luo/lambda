@@ -16,7 +16,6 @@
 #include "lambda-stack.h"
 #include "side_stack.h"
 #include "../core/binary.h"
-#include <mpdecimal.h>
 #include <math.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -149,7 +148,7 @@ static void lambda_region_destroy_caches(Heap* heap) {
     }
 }
 
-static void gc_destroy_external_payload(void* obj, uint16_t type_tag) {
+void heap_gc_destroy_external_payload(void* obj, uint16_t type_tag) {
     if (!obj) return;
     if (type_tag == LMD_TYPE_DECIMAL) {
         // Decimal wrappers can die during a collection; release the libmpdec
@@ -422,7 +421,7 @@ static void heap_finish_init(void) {
     context->heap->gc->js_native_destroy = js_native_map_gc_destroy;
     context->heap->gc->js_function_trace = js_function_gc_trace;
     context->heap->gc->js_function_compact = js_function_gc_compact;
-    context->heap->gc->external_destroy = gc_destroy_external_payload;
+    context->heap->gc->external_destroy = heap_gc_destroy_external_payload;
     err_set_heap_allocator(heap_calloc);
     if (!ascii_char_table_initialized) init_ascii_char_table();
 }
@@ -1245,13 +1244,6 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
             if (vm->vtable && vm->data) {
                 vm->vtable->destroy(vm->data);
                 vm->data = NULL;
-            }
-        }
-        else if (tag == LMD_TYPE_DECIMAL) {
-            Decimal *dec = (Decimal*)obj;
-            if (dec->dec_val) {
-                mpd_del(dec->dec_val);
-                dec->dec_val = NULL;
             }
         }
         else if (tag == LMD_TYPE_ERROR) {
