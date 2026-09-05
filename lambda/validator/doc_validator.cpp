@@ -160,6 +160,57 @@ void SchemaValidator::destroy() {
     // Note: Memory pool cleanup handled by caller
 }
 
+// The direct parser records aliases as declarators, while named patterns use
+// AstNamedNode. Keep the registry aligned with those canonical AST layouts.
+static int validator_register_type_declaration(SchemaValidator* validator,
+        AstNode* declaration) {
+    String* name = nullptr;
+    Type* declared_type = nullptr;
+
+    if (declaration->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        AstDeclaratorNode* declarator = (AstDeclaratorNode*)declaration;
+        if (!declarator->is_type_definition) return 0;
+        name = declarator->name;
+        declared_type = declarator->type;
+    } else if (declaration->node_type == AST_NODE_STRING_PATTERN ||
+            declaration->node_type == AST_NODE_SYMBOL_PATTERN) {
+        AstNamedNode* pattern = (AstNamedNode*)declaration;
+        name = pattern->name;
+        declared_type = pattern->type;
+    } else {
+        return 0;
+    }
+
+    Type* runtime_type = unwrap_simple_type_type(declared_type);
+    if (!name || !runtime_type) {
+        log_warn("validator: skipping malformed type declaration");
+        return -1;
+    }
+
+    TypeDefinition* definition = (TypeDefinition*)pool_calloc(
+        validator->get_pool(), sizeof(TypeDefinition));
+    if (!definition) {
+        log_error("validator: failed to allocate type definition");
+        return -1;
+    }
+
+    definition->name.str = name->chars;
+    definition->name.length = name->len;
+    definition->runtime_type = runtime_type;
+    definition->schema_type = nullptr;
+    definition->is_exported = true;
+
+    TypeRegistryEntry entry;
+    entry.definition = definition;
+    entry.name_key = definition->name;
+    hashmap_set(validator->get_type_definitions(), &entry);
+
+    log_debug("validator: registered type %.*s (type_id=%d)",
+        (int)definition->name.length, definition->name.str,
+        runtime_type->type_id);
+    return 1;
+}
+
 int SchemaValidator::load_schema(const char* source, const char* root_type) {
     if (!source || !root_type) return -1;
 
@@ -186,71 +237,19 @@ int SchemaValidator::load_schema(const char* source, const char* root_type) {
         }
 
         while (child) {
-            if (child->node_type == AST_NODE_TYPE_STAM) {
-                // Type statement: type Name = TypeExpr
-                // After refactoring, AST_NODE_TYPE_STAM is an AstLetNode wrapper
-                // The actual type assignment(s) are in the declare field, potentially chained via next
+            if (child->node_type == AST_NODE_TYPE_STAM ||
+                    child->node_type == AST_NODE_PUB_STAM) {
+                // A type statement owns one or more direct-parser declarations.
                 AstLetNode* type_stam = (AstLetNode*)child;
-
-                // Process all declarations in the type statement (could be chained)
                 AstNode* declare_node = type_stam->declare;
                 while (declare_node) {
-                    if (declare_node->node_type != AST_NODE_ASSIGN) {
-                        log_warn("Skipping non-ASSIGN declare node (type=%d)", declare_node->node_type);
-                        declare_node = declare_node->next;
-                        continue;
+                    int registered = validator_register_type_declaration(this,
+                        declare_node);
+                    if (registered < 0) return -1;
+                    if (registered == 0 && child->node_type == AST_NODE_TYPE_STAM) {
+                        log_warn("validator: skipping unexpected type declaration (node=%d)",
+                            declare_node->node_type);
                     }
-
-                    AstNamedNode* type_node = (AstNamedNode*)declare_node;
-
-                    if (!type_node->name || !type_node->type) {
-                        log_warn("Skipping type node without name or type");
-                        declare_node = declare_node->next;
-                        continue;
-                    }
-
-                    // Unwrap the TypeType* to get the actual Type*
-                    // type_node->type is a TypeType* wrapper (e.g., &LIT_TYPE_STRING)
-                    // We need to extract the underlying Type* from it
-                    Type* actual_type = nullptr;
-                    if (type_node->type->type_id == LMD_TYPE_TYPE) {
-                        // It's a TypeType wrapper, unwrap it
-                        TypeType* type_wrapper = (TypeType*)type_node->type;
-                        actual_type = type_wrapper->type;
-                    } else {
-                        // For other cases, use the type directly
-                        actual_type = type_node->type;
-                    }
-
-                    if (!actual_type) {
-                        log_warn("Skipping type node with null actual type");
-                        declare_node = declare_node->next;
-                        continue;
-                    }
-
-                    // Create TypeDefinition
-                    TypeDefinition* def = (TypeDefinition*)pool_calloc(this->pool, sizeof(TypeDefinition));
-                    if (!def) {
-                        log_error("Failed to allocate TypeDefinition");
-                        return -1;
-                    }
-
-                    def->name.str = type_node->name->chars;
-                    def->name.length = type_node->name->len;
-                    def->runtime_type = actual_type;  // Use the unwrapped type
-                    def->schema_type = nullptr;  // Can be filled in later if needed
-                    def->is_exported = true;  // Assume exported by default
-
-                    // Create TypeRegistryEntry for hashmap
-                    TypeRegistryEntry entry;
-                    entry.definition = def;
-                    entry.name_key = def->name;
-
-                    hashmap_set(this->type_definitions, &entry);
-
-                    log_debug("Registered type: %.*s (type_id=%d)",
-                        (int)def->name.length, def->name.str,
-                        actual_type->type_id);
                     declare_node = declare_node->next;
                 }
             }

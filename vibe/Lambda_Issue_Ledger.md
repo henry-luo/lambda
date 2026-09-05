@@ -1227,11 +1227,21 @@ is absent; active rows must be found by behavior and ownership analysis.
 The hosted `lambda-runtime-full` DSO resolves `ItemNull` and `g_lambda_home`
 from its executable host. Every test target that links that DSO now compiles
 retained references to both globals, so static-archive extraction supplies them.
-All ten current validator executables load and enumerate their GTests. This
-does **not** make the suite green: `ValidatorTest.NonexistentHtmlFile` still
-SIGSEGVs after startup, a separate runtime defect.
+All ten current validator executables load and enumerate their GTests. The
+post-startup SIGSEGV was a second link-closure defect: the direct AST reducer
+calls `parse_type_pattern_text_span`, but `lambda-runtime-full` omitted
+`runtime/parse_type_pattern.cpp`; macOS dynamic lookup therefore supplied a
+null reduction target. Including that translation unit restores the call, and
+the enabled `test_validator_gtest` cases complete without a crash.
 
-The `validate` CLI is separately unusable: it resolves no root type at all, failing with `REFERENCE_ERROR: Type not found or circular reference detected: Document` even on the shipped pair `test/lambda/validator/schema_comprehensive.ls` + `test_data_valid.json`. The root name is chosen by a textual scan for the last `type ` in the schema file (`validator/ast_validate.cpp:270`–`312`), so the name reaching `resolve_type_reference` looks right and the schema's type table is what comes up empty.
+The selected-root lookup is also repaired. The loader still expected a retired
+`AST_NODE_ASSIGN`, while the direct parser canonically emits an
+`AST_NODE_VARIABLE_DECLARATOR` marked `is_type_definition`; it now registers
+that form (and named patterns) after shared `TypeType` unwrapping. The shipped
+`validate` invocation reaches genuine validation rather than `REFERENCE_ERROR`.
+It currently reports its independent `element`-versus-`map` mismatch. Root
+*selection* remains the separate open LR13-3 CLI-contract issue: it still uses
+the raw textual scan and filename map (`validator/ast_validate.cpp:270`–`312`).
 
 **Why it went unnoticed:** the validator gate runs from `test-lambda-full` (`Makefile:1624`), not `test-lambda-baseline`, so both baselines stay green over this unexercised surface. That is the finding worth keeping — a gate outside the baseline is a gate nobody runs.
 
