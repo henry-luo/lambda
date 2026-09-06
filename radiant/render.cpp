@@ -55,24 +55,19 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
 
     // Constrain clip region to iframe content box (before scroller setup)
     // This ensures embedded documents (SVG, PDF, etc.) don't render outside iframe bounds
-    float content_left = rdcon->block.x;
-    float content_top = rdcon->block.y;
-    float content_right = rdcon->block.x + block->width * s;
-    float content_bottom = rdcon->block.y + block->height * s;
+    Rect content_rect = {rdcon->block.x, rdcon->block.y,
+                         block->width * s, block->height * s};
 
     // Adjust for borders if present
     if (block->bound && block->boundary_mut()->border) {
-        content_left += block->boundary()->border->width.left * s;
-        content_top += block->boundary()->border->width.top * s;
-        content_right -= block->boundary()->border->width.right * s;
-        content_bottom -= block->boundary()->border->width.bottom * s;
+        content_rect = render_geometry_adjust_box_rect(
+            content_rect, CSS_VALUE_PADDING_BOX, s,
+            block->boundary()->border, nullptr);
     }
 
     // Intersect with parent clip region
-    rdcon->block.clip.left = max(rdcon->block.clip.left, content_left);
-    rdcon->block.clip.top = max(rdcon->block.clip.top, content_top);
-    rdcon->block.clip.right = min(rdcon->block.clip.right, content_right);
-    rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, content_bottom);
+    rdcon->block.clip = view_geometry_intersect_bound_rect(
+        rdcon->block.clip, content_rect);
 
 
     // setup clip box for scrolling
@@ -136,11 +131,9 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                         }
                     }
                     if (canvas_bg.a > 0) {
-                        // Fill iframe content box (already computed above as content_left/top/right/bottom).
-                        rc_fill_rect(rdcon,
-                                     content_left, content_top,
-                                     content_right - content_left,
-                                     content_bottom - content_top,
+                        // Fill the iframe content box computed above.
+                        rc_fill_rect(rdcon, content_rect.x, content_rect.y,
+                                     content_rect.width, content_rect.height,
                                      canvas_bg);
                     }
                 }

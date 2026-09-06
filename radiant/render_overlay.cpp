@@ -1,4 +1,3 @@
-#include "render.hpp"
 #include "event.hpp"
 #include "view.hpp"
 #include "render.hpp"
@@ -24,20 +23,12 @@ static void render_focus_outline(RenderContext* rdcon, DocState* state) {
     ViewBlock* block = lam::view_require_block(focused);
     float s = rdcon->raster_scale;
 
-    float x = block->x;
-    float y = block->y;
+    RdtLogicalPoint origin = view_geometry_local_to_block_document(
+        static_cast<View*>(block), {block->x, block->y});
+    float x = origin.x;
+    float y = origin.y;
     float width = block->width;
     float height = block->height;
-
-    View* parent = block->parent;
-    while (parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK) {
-            ViewBlock* parent_block = lam::view_require_block(parent);
-            x += parent_block->x;
-            y += parent_block->y;
-        }
-        parent = parent->parent;
-    }
 
     x *= s;  y *= s;
     width *= s;  height *= s;
@@ -81,60 +72,16 @@ static void render_caret(RenderContext* rdcon, DocState* state) {
     }
 
     float s = rdcon->raster_scale;
-    float x = caret_x;
-    float y = caret_y;
-
-    View* parent = view->parent;
-    bool applied_root_scroll = false;
     DomDocument* doc = rdcon && rdcon->ui_context ? rdcon->ui_context->document : nullptr;
     ViewBlock* root_block = nullptr;
     if (doc && doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         root_block = lam::view_require_block(doc->view_tree->root);
     }
-    float root_scroll_x = 0.0f;
-    float root_scroll_y = 0.0f;
-    if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
-        DocState* root_state = root_block->doc ? root_block->doc->state : NULL;
-        scroll_state_get_position_for_view(root_state, static_cast<View*>(root_block), root_block->scroll()->pane,
-                                           &root_scroll_x, &root_scroll_y, NULL, NULL);
-    }
-    bool offset_covers_root_scroll_x = fabsf(iframe_offset_x + root_scroll_x) < 0.5f;
-    bool offset_covers_root_scroll_y = fabsf(iframe_offset_y + root_scroll_y) < 0.5f;
-    while (parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK ||
-            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-            parent->view_type == RDT_VIEW_LIST_ITEM) {
-            ViewBlock* block = lam::view_require_block(parent);
-            x += block->x;
-            y += block->y;
-            if (block->scroller && block->scroll_mut()->pane) {
-                DocState* block_state = block->doc ? block->doc->state : NULL;
-                float scroll_x = 0.0f, scroll_y = 0.0f;
-                scroll_state_get_position_for_view(block_state, static_cast<View*>(block), block->scroll()->pane,
-                                                   &scroll_x, &scroll_y, NULL, NULL);
-                if (!(block == root_block && offset_covers_root_scroll_x)) {
-                    x -= scroll_x;
-                }
-                if (!(block == root_block && offset_covers_root_scroll_y)) {
-                    y -= scroll_y;
-                }
-                if (block == root_block) applied_root_scroll = true;
-            }
-        }
-        parent = parent->parent;
-    }
-
-    if (!applied_root_scroll && root_block && root_block->scroller && root_block->scroll_mut()->pane) {
-        if (!offset_covers_root_scroll_x) {
-            x -= root_scroll_x;
-        }
-        if (!offset_covers_root_scroll_y) {
-            y -= root_scroll_y;
-        }
-    }
-
-    x += iframe_offset_x;
-    y += iframe_offset_y;
+    RdtLogicalPoint point = view_geometry_local_to_window(
+        view, {caret_x, caret_y}, root_block,
+        {iframe_offset_x, iframe_offset_y}, scroll_state_resolve_view_geometry);
+    float x = point.x;
+    float y = point.y;
 
     float css_x = x;
     float css_y = y;
@@ -154,23 +101,16 @@ static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud
     SelectionPaintCtx* ctx = (SelectionPaintCtx*)ud;
     if (w <= 0 || h <= 0) return;
     float s = ctx->scale;
-    float scroll_x = 0.0f;
-    float scroll_y = 0.0f;
     DomDocument* doc = ctx->rdcon && ctx->rdcon->ui_context ? ctx->rdcon->ui_context->document : nullptr;
+    ViewBlock* root = nullptr;
     if (doc && doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
-        ViewBlock* root = lam::view_require_block(doc->view_tree->root);
-        if (root->scroller && root->scroll_mut()->pane) {
-            DocState* root_state = root->doc ? root->doc->state : NULL;
-            scroll_state_get_position_for_view(root_state, static_cast<View*>(root), root->scroll()->pane,
-                                               &scroll_x, &scroll_y, NULL, NULL);
-        }
+        root = lam::view_require_block(doc->view_tree->root);
     }
-    bool offset_covers_scroll_x = fabsf(ctx->iframe_offset_x + scroll_x) < 0.5f;
-    bool offset_covers_scroll_y = fabsf(ctx->iframe_offset_y + scroll_y) < 0.5f;
-    float paint_scroll_x = offset_covers_scroll_x ? 0.0f : scroll_x;
-    float paint_scroll_y = offset_covers_scroll_y ? 0.0f : scroll_y;
-    float px = (x + ctx->iframe_offset_x - paint_scroll_x) * s;
-    float py = (y + ctx->iframe_offset_y - paint_scroll_y) * s;
+    RdtLogicalPoint point = view_geometry_apply_external_viewport(
+        {x, y}, root, {ctx->iframe_offset_x, ctx->iframe_offset_y},
+        scroll_state_resolve_view_geometry);
+    float px = point.x * s;
+    float py = point.y * s;
     float pw = w * s;
     float ph = h * s;
     rc_fill_rect(ctx->rdcon, px, py, pw, ph, ctx->color);
@@ -297,16 +237,10 @@ void render_ui_overlays(RenderContext* rdcon, DocState* state) {
 
         if (dd->drop_target && dd->drop_target->view_type == RDT_VIEW_BLOCK) {
             ViewBlock* dt = lam::view_require_block(dd->drop_target);
-            float dx = dt->x, dy = dt->y;
-            View* par = dt->parent;
-            while (par) {
-                if (par->view_type == RDT_VIEW_BLOCK) {
-                    ViewBlock* parent_block = lam::view_require_block(par);
-                    dx += parent_block->x;
-                    dy += parent_block->y;
-                }
-                par = par->parent;
-            }
+            RdtLogicalPoint origin = view_geometry_local_to_block_document(
+                static_cast<View*>(dt), {dt->x, dt->y});
+            float dx = origin.x;
+            float dy = origin.y;
             dx *= s;  dy *= s;
             float dw = dt->width * s;
             float dh = dt->height * s;

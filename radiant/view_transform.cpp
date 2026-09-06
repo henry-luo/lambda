@@ -12,37 +12,28 @@ static RdtMatrix4 matrix4_from_scale(float x, float y, float z) {
     return matrix;
 }
 
-static RdtMatrix4 matrix4_from_rotate_x(float angle) {
+static RdtMatrix4 matrix4_from_plane_rotation(float angle, int first_axis,
+                                              int second_axis, float orientation) {
     RdtMatrix4 matrix = rdt_matrix4_identity();
     float cosine = cosf(angle);
-    float sine = sinf(angle);
-    matrix.values[5] = cosine;
-    matrix.values[6] = -sine;
-    matrix.values[9] = sine;
-    matrix.values[10] = cosine;
+    float sine = sinf(angle) * orientation;
+    matrix.values[first_axis * 4 + first_axis] = cosine;
+    matrix.values[first_axis * 4 + second_axis] = -sine;
+    matrix.values[second_axis * 4 + first_axis] = sine;
+    matrix.values[second_axis * 4 + second_axis] = cosine;
     return matrix;
+}
+
+static RdtMatrix4 matrix4_from_rotate_x(float angle) {
+    return matrix4_from_plane_rotation(angle, 1, 2, 1.0f);
 }
 
 static RdtMatrix4 matrix4_from_rotate_y(float angle) {
-    RdtMatrix4 matrix = rdt_matrix4_identity();
-    float cosine = cosf(angle);
-    float sine = sinf(angle);
-    matrix.values[0] = cosine;
-    matrix.values[2] = sine;
-    matrix.values[8] = -sine;
-    matrix.values[10] = cosine;
-    return matrix;
+    return matrix4_from_plane_rotation(angle, 0, 2, -1.0f);
 }
 
 static RdtMatrix4 matrix4_from_rotate_z(float angle) {
-    RdtMatrix4 matrix = rdt_matrix4_identity();
-    float cosine = cosf(angle);
-    float sine = sinf(angle);
-    matrix.values[0] = cosine;
-    matrix.values[1] = -sine;
-    matrix.values[4] = sine;
-    matrix.values[5] = cosine;
-    return matrix;
+    return matrix4_from_plane_rotation(angle, 0, 1, 1.0f);
 }
 
 static RdtMatrix4 matrix4_from_rotate3d(float x, float y, float z,

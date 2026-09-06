@@ -67,7 +67,6 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "render.hpp"
 #include "../radiant/layout.hpp"
 #include "view.hpp"
-#include "render.hpp"
 #include "event.hpp"
 #include "../radiant/radiant.hpp"
 #include "../lib/tagged.hpp"
@@ -300,6 +299,12 @@ static HtmlVersion classify_html_doctype_identifiers(const char* name,
     return HTML4_01_STRICT;
 }
 
+static Element* lambda_list_element_at(List* list, int64_t index) {
+    if (!list || index < 0 || index >= list->length) return nullptr;
+    Item item = list->items[index];
+    return get_type_id(item) == LMD_TYPE_ELEMENT ? item.element : nullptr;
+}
+
 // Function to determine HTML version from Lambda CSS document DOCTYPE
 // This function examines the original Element tree to find DOCTYPE information
 // before it gets filtered out during DomElement tree construction
@@ -342,11 +347,8 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
 
         // Search through the list for DOCTYPE element
         for (int64_t i = 0; i < root_list->length; i++) {
-            Item item = root_list->items[i];
-            TypeId item_type = get_type_id(item);
-
-            if (item_type == LMD_TYPE_ELEMENT) {
-                Element* elem = item.element;
+            Element* elem = lambda_list_element_at(root_list, i);
+            if (elem) {
                 TypeElmt* type = (TypeElmt*)elem->type;
 
                 bool is_attribute_doctype = type && str_ieq_const(
@@ -477,11 +479,8 @@ Element* get_html_root_element(Input* input) {
         // Old parser: root is a list, search for HTML element
         List* root_list = input->root.array;
         for (int64_t i = 0; i < root_list->length; i++) {
-            Item item = root_list->items[i];
-            TypeId item_type = get_type_id(item);
-
-            if (item_type == LMD_TYPE_ELEMENT) {
-                Element* elem = item.element;
+            Element* elem = lambda_list_element_at(root_list, i);
+            if (elem) {
                 TypeElmt* type = (TypeElmt*)elem->type;
 
                 // Skip DOCTYPE and comments (case-insensitive for DOCTYPE)
@@ -4238,19 +4237,6 @@ void rebuild_lambda_doc(UiContext* uicon) {
         duration<double, std::milli>(t_end - t_start).count());
 }
 
-static void compute_absolute_bounds(DomNode* node, float* abs_x, float* abs_y, float* w, float* h) {
-    *abs_x = node->x;
-    *abs_y = node->y;
-    *w = node->width;
-    *h = node->height;
-    DomNode* p = node->parent;
-    while (p) {
-        *abs_x += p->x;
-        *abs_y += p->y;
-        p = p->parent;
-    }
-}
-
 void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count) {
     if (!uicon || !uicon->document) {
         log_error("rebuild_lambda_doc_incremental: no document");
@@ -4317,8 +4303,10 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         Element* old_elem = results[i].old_result.element;
         DomElement* old_dom = element_dom_map_lookup(doc->element_dom_map, old_elem);
         if (old_dom) {
-            compute_absolute_bounds(static_cast<DomNode*>(old_dom),
-                &old_bounds[i].x, &old_bounds[i].y, &old_bounds[i].w, &old_bounds[i].h);
+            RdtLogicalPoint origin = view_geometry_node_document_origin(
+                static_cast<View*>(old_dom));
+            old_bounds[i] = {origin.x, origin.y,
+                             old_dom->width, old_dom->height};
         }
     }
 
@@ -5450,9 +5438,9 @@ int cmd_layout(int argc, char** argv) {
         }
 
         bool success = false;
-#ifdef _WIN32
-        try {
-            success = layout_single_file(
+        auto attempt_layout = [&]() -> bool {
+            try {
+                return layout_single_file(
                 input_file,
                 output_path,
                 opts.css_file,
@@ -5468,37 +5456,19 @@ int cmd_layout(int argc, char** argv) {
                 auto_close,
                 opts.disable_animations,
                 opts.stream_layout_results ? stdout : nullptr
-            );
-        } catch (...) {
-            log_error("batch layout: uncaught exception processing %s", input_file);
-            success = false;
-        }
+                );
+            } catch (...) {
+                log_error("batch layout: uncaught exception processing %s", input_file);
+                return false;
+            }
+        };
+#ifdef _WIN32
+        success = attempt_layout();
 #else
         layout_crash_guarded = 1;
         int crash_sig = sigsetjmp(layout_crash_jmpbuf, 1);
         if (crash_sig == 0) {
-            try {
-                success = layout_single_file(
-                    input_file,
-                    output_path,
-                    opts.css_file,
-                    opts.viewport_width,
-                    opts.viewport_height,
-                    &ui_context,
-                    cwd,
-                    opts.debug,
-                    opts.event_log,
-                    opts.state_dump,
-                    timing_file,
-                    opts.memory_profile_output_file,
-                    auto_close,
-                    opts.disable_animations,
-                    opts.stream_layout_results ? stdout : nullptr
-                );
-            } catch (...) {
-                log_error("batch layout: uncaught exception processing %s", input_file);
-                success = false;
-            }
+            success = attempt_layout();
             layout_crash_guarded = 0;
         } else {
             fprintf(stderr, "layout: recovered from signal %d processing %s — exiting\n",

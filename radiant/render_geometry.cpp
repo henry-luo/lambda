@@ -31,15 +31,6 @@ Rect render_geometry_adjust_box_rect(Rect rect, CssEnum box, float scale,
     return out;
 }
 
-Bound render_geometry_intersect_bound_rect(Bound bound, Rect rect) {
-    Bound out = bound;
-    out.left = max(out.left, rect.x);
-    out.top = max(out.top, rect.y);
-    out.right = min(out.right, rect.x + rect.width);
-    out.bottom = min(out.bottom, rect.y + rect.height);
-    return out;
-}
-
 IRect render_geometry_clip_to_pixel_bounds(Bound clip,
                                            const ImageSurface* surface) {
     int left = max(0, render_geometry_pixel_coord(clip.left));
@@ -81,27 +72,6 @@ Rect render_geometry_block_content_rect(const BlockBlot* parent_block,
     return render_geometry_adjust_box_rect(rect, CSS_VALUE_CONTENT_BOX, scale,
                                            block->boundary()->border,
                                            &block->boundary()->padding);
-}
-
-Rect render_geometry_expand_rect(Rect rect, float expand) {
-    if (expand <= 0.0f) return rect;
-    rect.x -= expand;
-    rect.y -= expand;
-    rect.width += expand * 2.0f;
-    rect.height += expand * 2.0f;
-    if (rect.width < 0.0f) rect.width = 0.0f;
-    if (rect.height < 0.0f) rect.height = 0.0f;
-    return rect;
-}
-
-Bound render_geometry_rect_to_bound(Rect rect) {
-    Bound bound = {rect.x, rect.y, rect.x + rect.width, rect.y + rect.height};
-    return bound;
-}
-
-bool render_geometry_bounds_intersect(Bound a, Bound b) {
-    return a.left < b.right && a.right > b.left &&
-           a.top < b.bottom && a.bottom > b.top;
 }
 
 static float render_geometry_absf(float value) {

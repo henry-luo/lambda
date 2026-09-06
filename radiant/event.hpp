@@ -347,6 +347,24 @@ void event_state_log_write_node_ref(JsonWriter* w, const char* key,
 void event_state_log_node_stable_id(const struct DomNode* node,
                                     char* buf, size_t buf_sz);
 
+#ifndef RADIANT_EVENT_CORE_ONLY
+static inline const char* event_node_author_id(const DomNode* node) {
+    const DomElement* element = node ? node->as_element() : nullptr;
+    return element && element->id && element->id[0] ? element->id : nullptr;
+}
+
+static inline int event_node_ancestor_chain(const DomNode* node,
+                                            const DomNode** chain,
+                                            int capacity) {
+    int depth = 0;
+    while (node && chain && depth < capacity) {
+        chain[depth++] = node;
+        node = node->parent;
+    }
+    return depth;
+}
+#endif
+
 void event_log_write_surface_core_fields(JsonWriter* w,
                                          const struct EditingSurface* surface,
                                          bool include_state_flags);
@@ -1405,6 +1423,7 @@ extern "C" {
 // that mutate the DOM should call `dom_range_invalidate_layout(range)` to
 // force a re-resolve.
 bool dom_range_resolve_layout(DomRange* range);
+DomText* dom_range_next_text_after_any(DomNode* node);
 
 // Convenience: resolve the layout for the first range of `selection`.
 bool dom_selection_resolve_layout(DomSelection* selection);
@@ -1421,8 +1440,8 @@ bool dom_selection_resolve_layout(DomSelection* selection);
 // the tree contains no text nodes.
 //
 // `(vx, vy)` are in CSS pixels in the same coordinate space the layout was
-// performed in (i.e. the absolute coordinates `view_to_absolute_position`
-// would produce, NOT physical/device pixels).
+// performed in (i.e. the absolute logical coordinates produced by the view
+// geometry helpers, NOT physical/device pixels).
 DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float vy);
 
 // ---------------------------------------------------------------------------
@@ -3148,6 +3167,9 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane,
 void scroll_state_get_position_for_view(DocState* state, View* view, void* pane,
                                         float* out_h_pos, float* out_v_pos,
                                         float* out_h_max, float* out_v_max);
+void scroll_state_resolve_view_geometry(ViewBlock* block,
+                                        float* out_x, float* out_y,
+                                        void* context);
 
 /**
  * Read a concrete view's signed scroll ranges through ViewState.scroll.
@@ -4281,10 +4303,6 @@ typedef struct EventContext {
 int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     TextRect* rect, float mouse_x, float mouse_y);
 
-void view_to_absolute_position(View* view, float rel_x, float rel_y,
-    float iframe_offset_x, float iframe_offset_y,
-    float* out_abs_x, float* out_abs_y);
-
 /**
  * Calculate visual position (x, y, height) from byte offset within a text rect
  * The target_offset is a byte offset aligned to UTF-8 character boundaries
@@ -4297,8 +4315,6 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
  * Find the TextRect containing a given character offset
  * Returns the TextRect and updates the rect pointer, or NULL if not found
  */
-TextRect* find_text_rect_for_offset(ViewText* text, int char_offset);
-
 /**
  * Glyph-precise X position (relative to the text rect's parent block) of
  * `byte_offset` within `rect` of `text`. Sets up the proper font for `text`

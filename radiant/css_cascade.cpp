@@ -11,30 +11,20 @@ static void apply_rule_to_element(DomElement* element, CssRule* rule,
                                   CssEngine* engine) {
     if (!element || !rule || !matcher || !pool) return;
 
-    if (rule->type == CSS_RULE_MEDIA) {
-        if (css_evaluate_media_query(engine, rule->data.conditional_rule.condition)) {
+    bool nested_rule = rule->type == CSS_RULE_MEDIA ||
+        rule->type == CSS_RULE_SUPPORTS || rule->type == CSS_RULE_LAYER;
+    if (nested_rule) {
+        // Conditional and layer blocks preserve source order while applying
+        // their nested selector rules.
+        bool enabled = rule->type == CSS_RULE_LAYER ||
+            (rule->type == CSS_RULE_MEDIA
+                ? css_evaluate_media_query(engine, rule->data.conditional_rule.condition)
+                : css_evaluate_supports_condition(engine, rule->data.conditional_rule.condition));
+        if (enabled) {
             for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
                 CssRule* nested = rule->data.conditional_rule.rules[i];
                 if (nested) apply_rule_to_element(element, nested, matcher, pool, engine);
             }
-        }
-        return;
-    }
-    if (rule->type == CSS_RULE_SUPPORTS) {
-        if (css_evaluate_supports_condition(engine, rule->data.conditional_rule.condition)) {
-            for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
-                CssRule* nested = rule->data.conditional_rule.rules[i];
-                if (nested) apply_rule_to_element(element, nested, matcher, pool, engine);
-            }
-        }
-        return;
-    }
-    if (rule->type == CSS_RULE_LAYER) {
-        // Layer blocks still contain ordinary author rules; preserve their
-        // source order while applying the nested selector rules.
-        for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
-            CssRule* nested = rule->data.conditional_rule.rules[i];
-            if (nested) apply_rule_to_element(element, nested, matcher, pool, engine);
         }
         return;
     }

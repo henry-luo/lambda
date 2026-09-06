@@ -759,43 +759,12 @@ static Item call_template_event_handler(TemplateHandlerEntry* entry,
     return handler.typed((Context*)context, model_item, event_item);
 }
 
-static bool pdf_text_run_metrics(ViewText* text, float* out_width, bool* out_copy_space) {
-    if (out_width) *out_width = 0.0f;
-    if (out_copy_space) *out_copy_space = false;
-    if (!text || !text->parent || !text->parent->is_element()) return false;
-
-    DomElement* elem = lam::dom_require_element(text->parent);
-    const char* cls = elem->get_attribute("class");
-    if (!cls || !strstr(cls, "pdf-text-run")) return false;
-
-    const char* width_attr = elem->get_attribute("data-pdf-width");
-    float width = width_attr ? (float)str_to_double_default(width_attr, strlen(width_attr), 0.0) : 0.0f;
-    if (width <= 0.0f) return false;
-
-    const char* copy_attr = elem->get_attribute("data-pdf-copy-space");
-    if (out_width) *out_width = width;
-    if (out_copy_space) *out_copy_space = copy_attr && strcmp(copy_attr, "1") == 0;
-    return true;
-}
-
-static int pdf_visible_end_offset(ViewText* text, TextRect* rect, bool copy_space) {
-    int end_offset = rect ? rect->start_index + max(rect->length, 0) : 0;
-    if (!copy_space || !text || !rect || end_offset <= rect->start_index) return end_offset;
-    unsigned char* data = text->text_data();
-    if (data && data[end_offset - 1] == ' ') return end_offset - 1;
-    return end_offset;
-}
-
 static float pdf_text_run_visible_natural_width(FontBox* font, TextRect* rect, bool copy_space) {
     float width = rect ? rect->width : 0.0f;
     if (copy_space && font && font->style) {
         width -= font->style->space_width;
     }
     return width > 0.0f ? width : (rect ? rect->width : 0.0f);
-}
-
-static float pdf_text_run_visible_natural_width(EventContext* evcon, TextRect* rect, bool copy_space) {
-    return pdf_text_run_visible_natural_width(evcon ? &evcon->font : NULL, rect, copy_space);
 }
 
 static void target_stacking_view(EventContext* evcon, View* view) {
@@ -909,7 +878,7 @@ void target_text_view(EventContext* evcon, ViewText* text) {
     float pdf_width = 0.0f;
     bool pdf_copy_space = false;
     float rect_width = text_rect->width;
-    if (pdf_text_run_metrics(text, &pdf_width, &pdf_copy_space)) {
+    if (view_geometry_pdf_text_metrics(text, &pdf_width, &pdf_copy_space)) {
         rect_width = pdf_width;
     }
     float rect_right = x + rect_width;
@@ -2861,21 +2830,33 @@ extern "C" void radiant_dispatch_author_template_participant(void* dom_node,
 // a press anywhere else still starts a selection exactly as before.
 // Answers the control and the selection so the caller can arm the drag with the
 // range it will move.
+static DomElement* radiant_text_drag_control_at(EventContext* evcon,
+                                                DocState* state, View* target,
+                                                bool require_writable) {
+    if (!evcon || !evcon->ui_context || !state || !target) return nullptr;
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface) ||
+        !editing_surface_is_text_control(&surface) || !surface.owner) {
+        return nullptr;
+    }
+    DomElement* elem = surface.owner;
+    if (form_control_is_disabled(state, static_cast<View*>(elem)) ||
+        (require_writable &&
+         form_control_is_readonly(state, static_cast<View*>(elem)))) {
+        return nullptr;
+    }
+    return elem;
+}
+
 static bool radiant_text_drag_source_at(EventContext* evcon, DocState* state,
                                         View* target, float x, float y,
                                         DomElement** out_elem,
                                         uint32_t* out_start, uint32_t* out_end,
                                         uint32_t* out_press) {
-    if (!evcon || !evcon->ui_context || !state || !target) return false;
-    EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface) || !surface.owner) {
-        return false;
-    }
-    DomElement* elem = surface.owner;
     // A read-only control still allows dragging text out; a disabled one is
     // inert, and an empty selection has nothing to drag.
-    if (form_control_is_disabled(state, static_cast<View*>(elem))) return false;
+    DomElement* elem = radiant_text_drag_control_at(evcon, state, target, false);
+    if (!elem) return false;
     uint32_t sel_start = 0, sel_end = 0;
     form_control_get_selection(state, static_cast<View*>(elem), &sel_start, &sel_end, nullptr);
     if (sel_end <= sel_start) return false;
@@ -2902,17 +2883,8 @@ static bool radiant_text_drag_source_at(EventContext* evcon, DocState* state,
 static bool radiant_text_drop_target_at(EventContext* evcon, DocState* state,
                                         View* target, float x, float y,
                                         DomElement** out_elem, uint32_t* out_offset) {
-    if (!evcon || !evcon->ui_context || !state || !target) return false;
-    EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface) || !surface.owner) {
-        return false;
-    }
-    DomElement* elem = surface.owner;
-    if (form_control_is_disabled(state, static_cast<View*>(elem)) ||
-        form_control_is_readonly(state, static_cast<View*>(elem))) {
-        return false;
-    }
+    DomElement* elem = radiant_text_drag_control_at(evcon, state, target, true);
+    if (!elem) return false;
     uint32_t offset = 0;
     if (!editing_geometry_text_control_offset_for_point(evcon->ui_context, elem,
                                                         x, y, &offset)) {
@@ -3130,7 +3102,11 @@ extern "C" bool radiant_select_set_dropdown_open(void* dom_node, bool open) {
 // package's `dispatch()` primitive (ES6). The event enters the normal pipeline
 // as a fresh event, so anything it triggers is dispatched in a quiescent state
 // rather than nested inside the handler that raised it.
-extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* event_name) {
+static bool radiant_dispatch_event_from_script_impl(void* dom_node,
+                                                    const char* event_name,
+                                                    bool bubbles,
+                                                    bool cancelable,
+                                                    bool report_flags) {
     if (!dom_node || !event_name || !event_name[0]) return false;
     EmitHandlerContext* ctx = g_emit_handler_ctx;
     if (!ctx || !ctx->evcon) {
@@ -3138,11 +3114,24 @@ extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* e
         return false;
     }
     View* view = static_cast<View*>(static_cast<DomNode*>(dom_node));
+    bool ok = radiant_dispatch_simple_event(
+        ctx->evcon, view, event_name, bubbles, cancelable);
+    if (report_flags) {
+        log_debug("dispatch-from-script: '%s' (bubbles=%d cancelable=%d) -> %s",
+                  event_name, bubbles ? 1 : 0, cancelable ? 1 : 0,
+                  ok ? "dispatched" : "no listener");
+    } else {
+        log_debug("dispatch-from-script: '%s' -> %s",
+                  event_name, ok ? "dispatched" : "no listener");
+    }
+    return ok;
+}
+
+extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* event_name) {
     // `input` and `change` are the notifications a control emits after its own
     // state settles: they bubble and are not cancelable (HTML 4.10.5).
-    bool ok = radiant_dispatch_simple_event(ctx->evcon, view, event_name, true, false);
-    log_debug("dispatch-from-script: '%s' -> %s", event_name, ok ? "dispatched" : "no listener");
-    return ok;
+    return radiant_dispatch_event_from_script_impl(
+        dom_node, event_name, true, false, false);
 }
 
 // The same dispatch, told what kind of event it is. The name-only entry above
@@ -3166,17 +3155,8 @@ extern "C" bool radiant_dispatch_event_with_flags_from_script(void* dom_node,
                                                               const char* event_name,
                                                               bool bubbles,
                                                               bool cancelable) {
-    if (!dom_node || !event_name || !event_name[0]) return false;
-    EmitHandlerContext* ctx = g_emit_handler_ctx;
-    if (!ctx || !ctx->evcon) {
-        log_error("dispatch(): no active event context — only callable from a handler");
-        return false;
-    }
-    View* view = static_cast<View*>(static_cast<DomNode*>(dom_node));
-    bool ok = radiant_dispatch_simple_event(ctx->evcon, view, event_name, bubbles, cancelable);
-    log_debug("dispatch-from-script: '%s' (bubbles=%d cancelable=%d) -> %s",
-              event_name, bubbles ? 1 : 0, cancelable ? 1 : 0, ok ? "dispatched" : "no listener");
-    return ok;
+    return radiant_dispatch_event_from_script_impl(
+        dom_node, event_name, bubbles, cancelable, true);
 }
 
 // F4: package submission policy uses this as the cancelable event waist. The
@@ -5860,14 +5840,12 @@ static bool dom_js_compute_absolute_bound(DomNode* node, DomJsDirtyBound* bound)
     if (!node || !bound) return false;
 
     bound->node = node;
-    bound->x = node->x;
-    bound->y = node->y;
+    RdtLogicalPoint origin = view_geometry_node_document_origin(
+        static_cast<View*>(node));
+    bound->x = origin.x;
+    bound->y = origin.y;
     bound->width = node->width;
     bound->height = node->height;
-    for (DomNode* parent = node->parent; parent; parent = parent->parent) {
-        bound->x += parent->x;
-        bound->y += parent->y;
-    }
     bound->valid = bound->width > 0.0f && bound->height > 0.0f;
     return bound->valid;
 }
@@ -6739,6 +6717,25 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
     };
     return radiant_dispatch_built_event(evcon, target, build_pointer_event_item,
         &args, true, dispatched, true, type);
+}
+
+static bool radiant_dispatch_button_mouse_event(
+        EventContext* evcon, View* target, const char* type,
+        double x, double y, const MouseButtonEvent* event,
+        int buttons, int detail) {
+    return event && radiant_dispatch_mouse_event(
+        evcon, target, type, x, y, event->button, buttons,
+        event_mod_ctrl(event->mods), event_mod_shift(event->mods),
+        event_mod_alt(event->mods), event_mod_super(event->mods), detail);
+}
+
+static bool radiant_dispatch_button_pointer_event(
+        EventContext* evcon, View* target, const char* type,
+        double x, double y, const MouseButtonEvent* event, int buttons) {
+    return event && radiant_dispatch_pointer_event(
+        evcon, target, type, x, y, event->button, buttons,
+        event_mod_ctrl(event->mods), event_mod_shift(event->mods),
+        event_mod_alt(event->mods), event_mod_super(event->mods), "mouse");
 }
 
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
@@ -8888,44 +8885,6 @@ bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source) {
     return executed;
 }
 
-/**
- * Calculate absolute window position from view-relative coordinates.
- * Walks up the parent chain accumulating block positions.
- * @param view The view whose coordinate system the position is relative to
- * @param rel_x X coordinate relative to view's parent block
- * @param rel_y Y coordinate relative to view's parent block
- * @param iframe_offset_x Additional X offset for iframe content
- * @param iframe_offset_y Additional Y offset for iframe content
- * @param out_abs_x Output: absolute X in window coordinates
- * @param out_abs_y Output: absolute Y in window coordinates
- */
-void view_to_absolute_position(View* view, float rel_x, float rel_y,
-    float iframe_offset_x, float iframe_offset_y,
-    float* out_abs_x, float* out_abs_y) {
-
-    float abs_x = rel_x;
-    float abs_y = rel_y;
-
-    // Walk up from view's parent to accumulate block positions
-    View* parent = view->parent;
-    while (parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK ||
-            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-            parent->view_type == RDT_VIEW_LIST_ITEM) {
-            abs_x += (lam::view_require_block(parent))->x;
-            abs_y += (lam::view_require_block(parent))->y;
-        }
-        parent = parent->parent;
-    }
-
-    // Add iframe offset
-    abs_x += iframe_offset_x;
-    abs_y += iframe_offset_y;
-
-    *out_abs_x = abs_x;
-    *out_abs_y = abs_y;
-}
-
 struct EventTextRun {
     unsigned char* end;
     int visible_end_offset;
@@ -8936,8 +8895,10 @@ struct EventTextRun {
 
 static EventTextRun event_text_run(ViewText* text, TextRect* rect) {
     EventTextRun run = {0};
-    run.is_pdf = pdf_text_run_metrics(text, &run.pdf_width, &run.pdf_copy_space);
-    run.visible_end_offset = pdf_visible_end_offset(text, rect, run.pdf_copy_space);
+    run.is_pdf = view_geometry_pdf_text_metrics(
+        text, &run.pdf_width, &run.pdf_copy_space);
+    run.visible_end_offset = view_geometry_pdf_visible_end_offset(
+        text, rect, run.pdf_copy_space);
     int end_offset = run.is_pdf
         ? run.visible_end_offset : rect->start_index + max(rect->length, 0);
     run.end = text->text_data() + end_offset;
@@ -8968,112 +8929,118 @@ static bool event_text_glyph_advance(FontBox* font, unsigned char* p, unsigned c
     return true;
 }
 
+static float event_text_x_for_offset(FontBox* font, ViewText* text,
+                                     TextRect* rect, int byte_offset,
+                                     EventTextRun run) {
+    unsigned char* data = text->text_data();
+    unsigned char* current = data + rect->start_index;
+    int current_offset = rect->start_index;
+    float x = rect->x;
+    bool has_space = false;
+    while (current < run.end && current_offset < byte_offset) {
+        float advance = 0.0f;
+        int bytes = 1;
+        bool has_advance = event_text_glyph_advance(
+            font, current, run.end, &has_space, &bytes, &advance);
+        current += bytes;
+        current_offset += bytes;
+        if (has_advance) x += advance;
+    }
+    if (run.is_pdf && run.pdf_width > 0.0f) {
+        float natural_width = pdf_text_run_visible_natural_width(
+            font, rect, run.pdf_copy_space);
+        if (natural_width > 0.0f) {
+            if (byte_offset >= run.visible_end_offset) return rect->x + run.pdf_width;
+            x = rect->x + (x - rect->x) * run.pdf_width / natural_width;
+        }
+    }
+    return x;
+}
+
+static int event_text_offset_for_x(UiContext* uicon, FontBox* font,
+                                   ViewText* text, TextRect* rect,
+                                   float target_x, float block_x) {
+    if (!text || !rect || !font || !font->style) {
+        return rect ? rect->start_index : 0;
+    }
+    EventTextRun run = event_text_run(text, rect);
+    float x = block_x + rect->x;
+    if (run.is_pdf && run.pdf_width > 0.0f) {
+        float natural_width = pdf_text_run_visible_natural_width(
+            font, rect, run.pdf_copy_space);
+        float local_x = target_x - x;
+        if (local_x <= 0.0f) return rect->start_index;
+        if (local_x >= run.pdf_width) return run.visible_end_offset;
+        if (natural_width > 0.0f) {
+            target_x = x + local_x * natural_width / run.pdf_width;
+        }
+    }
+
+    unsigned char* current = text->text_data() + rect->start_index;
+    int byte_offset = rect->start_index;
+    while (current < run.end &&
+           (is_space(*current) || *current == '\n' ||
+            *current == '\r' || *current == '\t')) {
+        current++;
+        byte_offset++;
+    }
+
+    float raster_scale = ui_context_raster_scale(uicon);
+    float letter_spacing = font->style->letter_spacing;
+    float word_spacing = font->style->word_spacing;
+    bool has_space = false;
+    while (current < run.end) {
+        if (*current == '\n' || *current == '\r') break;
+        float advance = 0.0f;
+        int bytes = 1;
+        if (is_space(*current)) {
+            if (has_space) {
+                current++;
+                byte_offset++;
+                continue;
+            }
+            has_space = true;
+            advance = font->style->space_width + word_spacing;
+        } else {
+            has_space = false;
+            uint32_t codepoint;
+            bytes = str_utf8_decode(
+                (const char*)current, (size_t)(run.end - current), &codepoint);
+            if (bytes <= 0) {
+                bytes = 1;
+                codepoint = *current;
+            }
+            FontStyleDesc style = font_style_desc_from_prop(font->style);
+            LoadedGlyph* glyph = font_load_glyph(
+                font_box_handle(font), &style, codepoint, false);
+            if (!glyph) {
+                current += bytes;
+                byte_offset += bytes;
+                continue;
+            }
+            advance = glyph->advance_x / raster_scale;
+        }
+        unsigned char* next = current + bytes;
+        if (next < run.end && *next != '\n' && *next != '\r') {
+            advance += letter_spacing;
+        }
+        if (target_x < x + advance / 2.0f) return byte_offset;
+        x += advance;
+        current = next;
+        byte_offset += bytes;
+    }
+    return byte_offset;
+}
+
 /**
  * Calculate character offset from mouse click position within a text rect
  * Returns the byte offset closest to the click position, aligned to UTF-8 character boundaries
  */
 int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     TextRect* rect, float mouse_x, float mouse_y) {
-    unsigned char* str = text->text_data();
-    float x = evcon->block.x + rect->x;
-
-    unsigned char* p = str + rect->start_index;
-    EventTextRun run = event_text_run(text, rect);
-    unsigned char* end = run.end;
-    int byte_offset = rect->start_index;  // track byte offset for return value
-
-    float raster_scale = ui_context_raster_scale(evcon->ui_context);
-
-    // Get letter-spacing and word-spacing from font style (same as used in layout)
-    float letter_spacing = evcon->font.style ? evcon->font.style->letter_spacing : 0.0f;
-    float word_spacing = evcon->font.style ? evcon->font.style->word_spacing : 0.0f;
-
-    bool has_space = false;
-
-    if (run.is_pdf && run.pdf_width > 0.0f) {
-        float visible_width = pdf_text_run_visible_natural_width(evcon, rect, run.pdf_copy_space);
-        if (visible_width > 0.0f) {
-            float local_pdf_x = mouse_x - x;
-            if (local_pdf_x <= 0.0f) return rect->start_index;
-            if (local_pdf_x >= run.pdf_width) return run.visible_end_offset;
-            mouse_x = x + local_pdf_x * visible_width / run.pdf_width;
-        }
-    }
-
-    log_debug("calculate_char_offset: mouse_x=%.1f, start x=%.1f, rect.width=%.1f, rect.length=%d, block.x=%.1f, rect.x=%.1f",
-              mouse_x, x, rect->width, rect->length, evcon->block.x, rect->x);
-
-    // Skip leading collapsed whitespace (spaces, tabs, newlines at the start)
-    // These characters don't contribute to visual width but are part of the text
-    while (p < end && (is_space(*p) || *p == '\n' || *p == '\r' || *p == '\t')) {
-        p++;
-        byte_offset++;
-    }
-
-    while (p < end) {
-        float wd = 0;
-        int bytes = 1;  // number of bytes for current character
-
-        // Skip newlines and carriage returns - they don't have visual width
-        if (*p == '\n' || *p == '\r') {
-            // At end of visual content - treat rest as trailing whitespace
-            break;
-        }
-        if (is_space(*p)) {
-            if (has_space) {
-                // Consecutive spaces are collapsed - skip without adding width
-                p++;
-                byte_offset++;
-                continue;
-            }
-            has_space = true;
-            wd = evcon->font.style->space_width + word_spacing;
-            bytes = 1;  // spaces are always single byte
-        } else {
-            has_space = false;
-            // Decode UTF-8 codepoint to handle multi-byte characters
-            uint32_t codepoint;
-            bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
-            if (bytes <= 0) {
-                // Invalid UTF-8 sequence, skip single byte
-                bytes = 1;
-                codepoint = *p;
-            }
-            // Use font_load_glyph to match layout calculation
-            FontStyleDesc _sd = font_style_desc_from_prop(evcon->font.style);
-            LoadedGlyph* glyph = font_load_glyph(font_box_handle(&evcon->font), &_sd, codepoint, false);
-            if (!glyph) {
-                log_error("Could not load codepoint U+%04X", codepoint);
-                p += bytes;
-                byte_offset += bytes;
-                continue;
-            }
-            wd = glyph->advance_x / raster_scale;
-        }
-
-        // Add letter-spacing (applied after each character except the last)
-        unsigned char* next_p = p + bytes;
-        if (next_p < end && *next_p != '\n' && *next_p != '\r') {
-            wd += letter_spacing;
-        }
-
-        float char_mid = x + wd / 2.0f;
-
-        // If mouse is before the midpoint of this character, return current byte offset
-        // (caret should be placed before this character)
-        if (mouse_x < char_mid) {
-            log_debug("calculate_char_offset: matched at byte_offset %d", byte_offset);
-            return byte_offset;
-        }
-
-        x += wd;
-        p += bytes;
-        byte_offset += bytes;
-    }
-
-    log_debug("calculate_char_offset: end of text, returning byte_offset=%d", byte_offset);
-    // Mouse is after all characters - return end offset
-    return byte_offset;
+    (void)mouse_y;
+    return event_text_offset_for_x(
+        evcon->ui_context, &evcon->font, text, rect, mouse_x, evcon->block.x);
 }
 
 /**
@@ -9083,47 +9050,20 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
  */
 void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
     TextRect* rect, int target_offset, float* out_x, float* out_y, float* out_height) {
-
-    unsigned char* str = text->text_data();
-    float x = rect->x;  // relative to block
-    float y = rect->y;
-
-    unsigned char* p = str + rect->start_index;
     EventTextRun run = event_text_run(text, rect);
-    unsigned char* end = run.end;
-    int byte_offset = rect->start_index;  // track byte offset
     float raster_scale = ui_context_raster_scale(evcon->ui_context);
-    bool has_space = false;
 
     // Debug: log initial state
     log_debug("[CALC-POS] target_offset=%d, rect->x=%.1f, rect->start_index=%d, raster_scale=%.1f, y_ppem=%d",
         target_offset, rect->x, rect->start_index, raster_scale,
         font_box_handle(&evcon->font) ? (int)font_handle_get_physical_size_px(font_box_handle(&evcon->font)) : -1);
 
-    while (p < end && byte_offset < target_offset) {
-        float wd = 0;
-        int bytes;
-        bool has_advance = event_text_glyph_advance(
-            &evcon->font, p, end, &has_space, &bytes, &wd);
-        if (!has_advance) { p += bytes; byte_offset += bytes; continue; }
-        x += wd;
-        p += bytes;
-        byte_offset += bytes;
-    }
-    if (run.is_pdf && run.pdf_width > 0.0f) {
-        float visible_width = pdf_text_run_visible_natural_width(evcon, rect, run.pdf_copy_space);
-        if (visible_width > 0.0f) {
-            if (target_offset >= run.visible_end_offset) {
-                x = rect->x + run.pdf_width;
-            } else {
-                x = rect->x + (x - rect->x) * run.pdf_width / visible_width;
-            }
-        }
-    }
+    float x = event_text_x_for_offset(
+        &evcon->font, text, rect, target_offset, run);
     log_debug("[CALC-POS] final x=%.1f for target_offset=%d", x, target_offset);
 
     *out_x = x;
-    *out_y = y;
+    *out_y = rect->y;
     *out_height = rect->height;  // use rect height as caret height
 }
 
@@ -9168,33 +9108,7 @@ static float event_glyph_x_resolver(UiContext* uicon, ViewText* text,
     if (text->font) setup_font(uicon, &fbox, text->font);
     if (!font_box_handle(&fbox) || !fbox.style) return rect->x;
 
-    unsigned char* str = text->text_data();
-    unsigned char* p = str + rect->start_index;
-    unsigned char* end = str + rect_end_offset;
-    int byte_off = rect->start_index;
-    float x = rect->x;
-    bool has_space = false;
-
-    while (p < end && byte_off < byte_offset) {
-        float wd = 0;
-        int bytes;
-        bool has_advance = event_text_glyph_advance(
-            &fbox, p, end, &has_space, &bytes, &wd);
-        if (!has_advance) { p += bytes; byte_off += bytes; continue; }
-        x += wd;
-        p += bytes;
-        byte_off += bytes;
-    }
-    if (run.is_pdf && run.pdf_width > 0.0f) {
-        float visible_width = pdf_text_run_visible_natural_width(&fbox, rect, run.pdf_copy_space);
-        if (visible_width > 0.0f) {
-            if (byte_offset >= run.visible_end_offset) {
-                return rect->x + run.pdf_width;
-            }
-            return rect->x + (x - rect->x) * run.pdf_width / visible_width;
-        }
-    }
-    return x;
+    return event_text_x_for_offset(&fbox, text, rect, byte_offset, run);
 }
 
 // Static registration: hooks the resolver into dom_range_resolver.cpp at
@@ -9213,79 +9127,17 @@ static int event_byte_offset_for_x_resolver(UiContext* uicon, ViewText* text,
     if (!text || !rect) return rect ? rect->start_index : 0;
     if (rect->length <= 0) return rect->start_index;
     if (target_local_x <= rect->x) return rect->start_index;
-    EventTextRun run = event_text_run(text, rect);
-    float target_x = target_local_x;
-
-    if (run.is_pdf && run.pdf_width > 0.0f) {
-        if (target_x >= rect->x + run.pdf_width) return run.visible_end_offset;
-    } else if (target_x >= rect->x + rect->width) {
-        return rect->start_index + rect->length;
-    }
-
     FontBox fbox;
     memset(&fbox, 0, sizeof(fbox));
     if (text->font) setup_font(uicon, &fbox, text->font);
     if (!font_box_handle(&fbox) || !fbox.style) return rect->start_index;
-
-    unsigned char* str = text->text_data();
-    unsigned char* p = str + rect->start_index;
-    unsigned char* end = run.end;
-    int byte_off = rect->start_index;
-    float x = rect->x;
-    bool has_space = false;
-
-    if (run.is_pdf && run.pdf_width > 0.0f) {
-        float visible_width = pdf_text_run_visible_natural_width(&fbox, rect, run.pdf_copy_space);
-        if (visible_width > 0.0f) {
-            target_x = rect->x + (target_x - rect->x) * visible_width / run.pdf_width;
-        }
-    }
-
-    while (p < end) {
-        float wd = 0;
-        int bytes;
-        bool has_advance = event_text_glyph_advance(
-            &fbox, p, end, &has_space, &bytes, &wd);
-        if (!has_advance) { p += bytes; byte_off += bytes; continue; }
-        // Caret goes BEFORE this glyph if target_local_x is left of the midpoint.
-        if (target_x < x + wd / 2.0f) return byte_off;
-        x += wd;
-        p += bytes;
-        byte_off += bytes;
-    }
-    return run.is_pdf ? run.visible_end_offset : rect->start_index + rect->length;
+    return event_text_offset_for_x(
+        uicon, &fbox, text, rect, target_local_x, 0.0f);
 }
 
 __attribute__((constructor))
 static void register_event_byte_offset_for_x_resolver() { // UNUSED_FUNCTION_OK: process constructor installs the DOM range resolver
     dom_range_set_byte_offset_for_x_resolver(event_byte_offset_for_x_resolver);
-}
-
-/**
- * Find the TextRect containing a given character offset
- * Returns the TextRect that contains the offset, or the last rect if offset is beyond all rects
- */
-TextRect* find_text_rect_for_offset(ViewText* text, int char_offset) {
-    if (!text || !text->rect) return nullptr;
-
-    TextRect* rect = text->rect;
-    TextRect* prev_rect = rect;
-
-    while (rect) {
-        int rect_start = rect->start_index;
-        int rect_end = rect->start_index + rect->length;
-
-        // Check if offset is within this rect
-        if (char_offset >= rect_start && char_offset <= rect_end) {
-            return rect;
-        }
-
-        prev_rect = rect;
-        rect = rect->next;
-    }
-
-    // If offset is beyond all rects, return the last one
-    return prev_rect;
 }
 
 static bool text_point_inside_existing_selection(DocState* state, View* view, int char_offset) {
@@ -9344,7 +9196,7 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
         }
 
         // Find the TextRect containing the current offset
-        TextRect* rect = find_text_rect_for_offset(text, caret_offset);
+        TextRect* rect = view_geometry_text_rect_for_offset(text, caret_offset);
         if (!rect) {
             log_debug("[CARET-VISUAL] Could not find rect for offset %d", caret_offset);
             return;
@@ -9830,26 +9682,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 // Calculate the correct block position for the drag target view
                 // by walking up ITS parent chain
-                float sel_block_x = 0, sel_block_y = 0;
-                View* parent = text->parent;
-                while (parent) {
-                    if (parent->view_type == RDT_VIEW_BLOCK ||
-                        parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-                        parent->view_type == RDT_VIEW_LIST_ITEM) {
-                        sel_block_x += (lam::view_require_block(parent))->x;
-                        sel_block_y += (lam::view_require_block(parent))->y;
-                    }
-                    parent = parent->parent;
-                }
-
-                // Add the iframe offset that was stored when selection started
-                sel_block_x += selection_iframe_offset_x;
-                sel_block_y += selection_iframe_offset_y;
+                RdtLogicalPoint selection_origin =
+                    view_geometry_local_to_block_document(
+                        static_cast<View*>(text),
+                        {selection_iframe_offset_x, selection_iframe_offset_y});
 
                 // Save evcon.block and temporarily set it to the selection view's block position
                 BlockBlot saved_block = evcon.block;
-                evcon.block.x = sel_block_x;
-                evcon.block.y = sel_block_y;
+                evcon.block.x = selection_origin.x;
+                evcon.block.y = selection_origin.y;
 
                 // Pick the TextRect whose vertical band best matches mouse_y. For
                 // multi-line wrapped text the chain `text->rect -> next -> next ...`
@@ -9868,7 +9709,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // through that gap directly below the anchor x and the
                 // recomputed offset would equal the anchor offset -> selection
                 // visually disappears for one frame.
-                float rel_y = motion->y - sel_block_y;
+                float rel_y = motion->y - selection_origin.y;
                 TextRect* picked = rect;
                 bool in_gap = false;
                 int gap_offset = -1;
@@ -9947,7 +9788,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                       &caret_x, &caret_y, &caret_height);
 
                 log_debug("[CARET DRAG] char_offset=%d, calc pos: (%.1f, %.1f) height=%.1f, sel_block: (%.1f, %.1f)",
-                    char_offset, caret_x, caret_y, caret_height, sel_block_x, sel_block_y);
+                    char_offset, caret_x, caret_y, caret_height,
+                    selection_origin.x, selection_origin.y);
 
                 // Restore evcon.block and evcon.font
                 evcon.block = saved_block;
@@ -10069,11 +9911,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         if (event->type == RDT_EVENT_MOUSE_DOWN &&
             btn_event->button == GLFW_MOUSE_BUTTON_RIGHT &&
             state && evcon.target && evcon.target->is_element()) {
-            bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
-                "contextmenu", btn_event->x, btn_event->y,
-                btn_event->button, 0,
-                event_mod_ctrl(btn_event->mods), event_mod_shift(btn_event->mods),
-                event_mod_alt(btn_event->mods), event_mod_super(btn_event->mods), 0);
+            bool prevented = radiant_dispatch_button_mouse_event(
+                &evcon, evcon.target, "contextmenu", btn_event->x,
+                btn_event->y, btn_event, 0, 0);
             if (!prevented) {
                 state->pending_context_menu_target = evcon.target;
                 state->pending_context_menu_x = (float)btn_event->x;
@@ -10095,26 +9935,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Set :active state
             update_active_state(&evcon, evcon.target, true);
 
-            bool pointer_prevented = radiant_dispatch_pointer_event(
-                &evcon, evcon.target, "pointerdown",
-                btn_event->x, btn_event->y, btn_event->button,
-                1 << btn_event->button,
-                event_mod_ctrl(btn_event->mods),
-                event_mod_shift(btn_event->mods),
-                event_mod_alt(btn_event->mods),
-                event_mod_super(btn_event->mods), "mouse");
+            bool pointer_prevented = radiant_dispatch_button_pointer_event(
+                &evcon, evcon.target, "pointerdown", btn_event->x,
+                btn_event->y, btn_event, 1 << btn_event->button);
             if (pointer_prevented) evcon.default_prevented = true;
             // Dispatch through JS EventTarget before native defaults so
             // preventDefault() can suppress focus/caret default actions.
             {
-                bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
-                    "mousedown", btn_event->x, btn_event->y,
-                    btn_event->button, 1 << btn_event->button,
-                    event_mod_ctrl(btn_event->mods),
-                    event_mod_shift(btn_event->mods),
-                    event_mod_alt(btn_event->mods),
-                    event_mod_super(btn_event->mods),
-                    1);
+                bool prevented = radiant_dispatch_button_mouse_event(
+                    &evcon, evcon.target, "mousedown", btn_event->x,
+                    btn_event->y, btn_event, 1 << btn_event->button, 1);
                 if (prevented) evcon.default_prevented = true;
             }
 
@@ -10302,21 +10132,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     log_debug("CARET VISUAL: x=%.1f y=%.1f height=%.1f iframe_offset=(%.1f,%.1f)",
                         caret_x, caret_y, caret_height,
                         caret_iframe_offset_x, caret_iframe_offset_y);
-                    float render_x = caret_x;
-                    float render_y = caret_y;
-                    for (View* render_parent = text->parent; render_parent; render_parent = render_parent->parent) {
-                        if (render_parent->view_type == RDT_VIEW_BLOCK ||
-                            render_parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-                            render_parent->view_type == RDT_VIEW_LIST_ITEM) {
-                            render_x += render_parent->x;
-                            render_y += render_parent->y;
-                        }
-                    }
-                    render_x += caret_iframe_offset_x;
-                    render_y += caret_iframe_offset_y;
+                    RdtLogicalPoint render_point =
+                        view_geometry_local_to_block_document(
+                            static_cast<View*>(text),
+                            {caret_x + caret_iframe_offset_x,
+                             caret_y + caret_iframe_offset_y});
                     log_info("[CARET FINAL] mouse=(%.1f,%.1f) local=(%.1f,%.1f) render=(%.1f,%.1f) offset=%d block=(%.1f,%.1f) rect=(%.1f,%.1f %.1fx%.1f)",
                         btn_event->x, btn_event->y, caret_x, caret_y,
-                        render_x, render_y, char_offset, evcon.block.x, evcon.block.y,
+                        render_point.x, render_point.y, char_offset,
+                        evcon.block.x, evcon.block.y,
                         rect->x, rect->y, rect->width, rect->height);
                 }
 #endif
@@ -10538,13 +10362,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // act on one that was already open when the click arrived.
             View* dropdown_open_at_press = state ? state->open_dropdown : nullptr;
             if (evcon.target) {
-                bool pointer_up_prevented = radiant_dispatch_pointer_event(
-                    &evcon, evcon.target, "pointerup",
-                    btn_event->x, btn_event->y, btn_event->button, 0,
-                    event_mod_ctrl(btn_event->mods),
-                    event_mod_shift(btn_event->mods),
-                    event_mod_alt(btn_event->mods),
-                    event_mod_super(btn_event->mods), "mouse");
+                bool pointer_up_prevented = radiant_dispatch_button_pointer_event(
+                    &evcon, evcon.target, "pointerup", btn_event->x,
+                    btn_event->y, btn_event, 0);
                 if (pointer_up_prevented) evcon.default_prevented = true;
             }
             // Dispatch the JS 'mouseup' event through the EventTarget pipeline
@@ -10554,14 +10374,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // drag-reorder using window.addEventListener('mouseup') — never ran
             // under `view`. It bubbles to document/window like mousedown does.
             if (evcon.target) {
-                bool up_prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
-                    "mouseup", btn_event->x, btn_event->y,
-                    btn_event->button, 1 << btn_event->button,
-                    event_mod_ctrl(btn_event->mods),
-                    event_mod_shift(btn_event->mods),
-                    event_mod_alt(btn_event->mods),
-                    event_mod_super(btn_event->mods),
-                    1);
+                bool up_prevented = radiant_dispatch_button_mouse_event(
+                    &evcon, evcon.target, "mouseup", btn_event->x,
+                    btn_event->y, btn_event, 1 << btn_event->button, 1);
                 if (up_prevented) evcon.default_prevented = true;
             }
 
@@ -10762,14 +10577,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 bool click_on_disabled_control = click_target_is_disabled_control(
                     state, evcon.target);
                 if (evcon.target && !click_on_disabled_control) {
-                    bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
-                        "click", mouse_x, mouse_y,
-                        btn_event->button, 0,
-                        event_mod_ctrl(btn_event->mods),
-                        event_mod_shift(btn_event->mods),
-                        event_mod_alt(btn_event->mods),
-                        event_mod_super(btn_event->mods),
-                        1);
+                    bool prevented = radiant_dispatch_button_mouse_event(
+                        &evcon, evcon.target, "click", mouse_x, mouse_y,
+                        btn_event, 0, 1);
                     if (prevented) evcon.default_prevented = true;
                 }
                 // The final primary click in a double-click carries the same
@@ -10778,11 +10588,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // already used the click count on mousedown; this dispatch adds
                 // no second selection policy.
                 if (evcon.target && btn_event->clicks == 2) {
-                    radiant_dispatch_mouse_event(&evcon, evcon.target,
-                        "dblclick", mouse_x, mouse_y,
-                        btn_event->button, 0,
-                        event_mod_ctrl(btn_event->mods), event_mod_shift(btn_event->mods),
-                        event_mod_alt(btn_event->mods), event_mod_super(btn_event->mods), 2);
+                    radiant_dispatch_button_mouse_event(
+                        &evcon, evcon.target, "dblclick", mouse_x, mouse_y,
+                        btn_event, 0, 2);
                 }
 
                 // Handle click on <video> element — play/pause toggle + seek bar

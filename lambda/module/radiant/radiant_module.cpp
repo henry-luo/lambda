@@ -2615,8 +2615,8 @@ RADIANT_C_API Item fn_radiant_set_range_from_point(Item node_item, Item x_item, 
     if (!view->is_block()) return (Item){.item = b2it(0)};
     ViewBlock* block = lam::view_require_block(view);
 
-    float abs_x = 0.0f, abs_y = 0.0f;
-    view_to_absolute_position(view, block->x, block->y, 0.0f, 0.0f, &abs_x, &abs_y);
+    RdtLogicalPoint origin = view_geometry_local_to_block_document(
+        view, {block->x, block->y});
     // render_range centres the thumb on the value, so the usable track is
     // shorter than the box by one thumb and the pointer addresses the thumb's
     // centre, not its left edge.
@@ -2626,7 +2626,7 @@ RADIANT_C_API Item fn_radiant_set_range_from_point(Item node_item, Item x_item, 
     float point_x = 0.0f;
     if (!radiant_item_to_float(x_item, &point_x)) return (Item){.item = b2it(0)};
     (void)y_item;   // a horizontal slider's value depends on x alone
-    float fraction = (point_x - abs_x - thumb / 2.0f) / track;
+    float fraction = (point_x - origin.x - thumb / 2.0f) / track;
     if (fraction < 0.0f) fraction = 0.0f;
     if (fraction > 1.0f) fraction = 1.0f;
 

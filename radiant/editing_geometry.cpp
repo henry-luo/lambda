@@ -53,37 +53,11 @@ static bool editing_geometry_range_intersects_text_control_descendant(
     return false;
 }
 
-static void editing_geometry_block_scroll(ViewBlock* block, float* scroll_x,
-                                          float* scroll_y) {
-    *scroll_x = 0.0f;
-    *scroll_y = 0.0f;
-    if (!block || !block->scroller || !block->scroll()->pane) return;
-
-    DocState* state = block->doc ? block->doc->state : NULL;
-    scroll_state_get_position_for_view(state, static_cast<View*>(block),
-        block->scroll()->pane, scroll_x, scroll_y, NULL, NULL);
-}
-
 static void editing_geometry_viewport_xy(View* view, float* out_x, float* out_y) {
-    float x = 0.0f, y = 0.0f;
-    View* origin = view;
-    View* p = view;
-    while (p) {
-        x += p->x;
-        y += p->y;
-        if (p != origin && p->is_block()) {
-            ViewBlock* block = lam::view_require_block(p);
-            if (block->scroller && block->scroll_mut()->pane) {
-                float scroll_x, scroll_y;
-                editing_geometry_block_scroll(block, &scroll_x, &scroll_y);
-                x -= scroll_x;
-                y -= scroll_y;
-            }
-        }
-        p = static_cast<View*>(p->parent);
-    }
-    if (out_x) *out_x = x;
-    if (out_y) *out_y = y;
+    RdtLogicalPoint point = view_geometry_node_viewport_origin(
+        view, scroll_state_resolve_view_geometry);
+    if (out_x) *out_x = point.x;
+    if (out_y) *out_y = point.y;
 }
 
 static bool editing_geometry_find_document_offset(View* view,
@@ -94,19 +68,11 @@ static bool editing_geometry_find_document_offset(View* view,
                                                   float* out_y) {
     if (!view || !target_doc) return false;
 
-    float here_x = base_x + view->x;
-    float here_y = base_y + view->y;
-    float scroll_x = 0.0f;
-    float scroll_y = 0.0f;
-    if (view->is_block()) {
-        editing_geometry_block_scroll(lam::view_require_block(view),
-                                      &scroll_x, &scroll_y);
-    }
     // Descendant viewports and ordinary children share the same scrolled
     // content origin; omitting this made nested-document overlays drift when
     // any outer ancestor, rather than only the iframe itself, was scrolled.
-    float child_base_x = here_x - scroll_x;
-    float child_base_y = here_y - scroll_y;
+    RdtLogicalPoint child_origin = view_geometry_child_node_origin(
+        view, {base_x, base_y}, scroll_state_resolve_view_geometry);
 
     if (view->is_block() &&
         view->is_element()) {
@@ -114,14 +80,14 @@ static bool editing_geometry_find_document_offset(View* view,
         if (block->embed && block->embedp()->doc) {
             DomDocument* embed_doc = block->embedp()->doc;
             if (embed_doc == target_doc) {
-                if (out_x) *out_x = child_base_x;
-                if (out_y) *out_y = child_base_y;
+                if (out_x) *out_x = child_origin.x;
+                if (out_y) *out_y = child_origin.y;
                 return true;
             }
             if (embed_doc->view_tree && embed_doc->view_tree->root &&
                 editing_geometry_find_document_offset(
                     embed_doc->view_tree->root, target_doc,
-                    child_base_x, child_base_y, out_x, out_y)) {
+                    child_origin.x, child_origin.y, out_x, out_y)) {
                 return true;
             }
         }
@@ -133,7 +99,7 @@ static bool editing_geometry_find_document_offset(View* view,
         View* child_view = static_cast<View*>(child);
         if (!child_view->view_type) continue;
         if (editing_geometry_find_document_offset(child_view, target_doc,
-                                                  child_base_x, child_base_y,
+                                                  child_origin.x, child_origin.y,
                                                   out_x, out_y)) {
             return true;
         }
@@ -164,24 +130,11 @@ void radiant_document_viewport_offset(UiContext* uicon,
 }
 
 static void editing_geometry_text_block_abs_xy(ViewText* text, float* out_x, float* out_y) {
-    float x = 0.0f, y = 0.0f;
-    if (text) {
-        for (View* p = text->parent; p; p = p->parent) {
-            if (p->is_block()) {
-                x += p->x;
-                y += p->y;
-                ViewBlock* block = lam::view_require_block(p);
-                if (block->scroller && block->scroll_mut()->pane) {
-                    float scroll_x, scroll_y;
-                    editing_geometry_block_scroll(block, &scroll_x, &scroll_y);
-                    x -= scroll_x;
-                    y -= scroll_y;
-                }
-            }
-        }
-    }
-    if (out_x) *out_x = x;
-    if (out_y) *out_y = y;
+    RdtLogicalPoint point = view_geometry_local_to_block_viewport(
+        static_cast<View*>(text), {0.0f, 0.0f},
+        scroll_state_resolve_view_geometry);
+    if (out_x) *out_x = point.x;
+    if (out_y) *out_y = point.y;
 }
 
 static bool editing_geometry_text_metrics(UiContext* uicon, ViewBlock* block,
@@ -895,13 +848,10 @@ bool editing_geometry_caret_rect(UiContext* uicon,
     }
 
     DomText* text = lam::dom_require_text(boundary->dom.node);
-    TextRect* rect = text ? text->rect : nullptr;
-    if (!text || !rect) return false;
+    if (!text || !text->rect) return false;
     uint32_t byte_offset = dom_text_utf16_to_utf8(text, boundary->dom.offset);
-    while (rect && byte_offset > (uint32_t)(rect->start_index + rect->length)) {
-        rect = rect->next;
-    }
-    if (!rect) rect = text->rect;
+    TextRect* rect = view_geometry_text_rect_for_offset(
+        text, (int)byte_offset); // INT_CAST_OK: DOM text rect offsets use int byte indexes.
 
     float x = dom_range_glyph_x_for_byte_offset(uicon,
         static_cast<ViewText*>(text), rect, (int)byte_offset); // INT_CAST_OK: editor selection offsets are byte-index ints

@@ -8,7 +8,6 @@
 #include "../lib/escape.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
-#include "view.hpp"
 #include "render.hpp"
 #include "../lambda/runtime/ast.hpp"
 #include "../lambda/runtime/transpiler.hpp"
@@ -277,19 +276,14 @@ static void state_dump_node_ref(const DomNode* node, char* buf, size_t buf_sz) {
     buf[0] = '\0';
     if (!node) return;
 
-    const DomElement* el = node->as_element();
-    if (el && el->id && el->id[0]) {
-        snprintf(buf, buf_sz, "#%s", el->id);
+    const char* author_id = event_node_author_id(node);
+    if (author_id) {
+        snprintf(buf, buf_sz, "#%s", author_id);
         return;
     }
 
     const DomNode* chain[64];
-    int depth = 0;
-    const DomNode* cur = node;
-    while (cur && depth < 64) {
-        chain[depth++] = cur;
-        cur = cur->parent;
-    }
+    int depth = event_node_ancestor_chain(node, chain, 64);
 
     size_t pos = 0;
     for (int i = depth - 1; i >= 0; i--) {
@@ -1693,25 +1687,10 @@ static bool selection_extend_dom_to_focus(DomSelection* selection,
 
 static void caret_local_from_absolute(View* view, float abs_x, float abs_y,
                                       float* out_x, float* out_y) {
-    float x = abs_x;
-    float y = abs_y;
-    View* parent = view ? view->parent : NULL;
-    while (parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK ||
-            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-            parent->view_type == RDT_VIEW_LIST_ITEM) {
-            ViewBlock* block = lam::view_require_block(parent);
-            x -= block->x;
-            y -= block->y;
-            if (block->scroller && block->scroll_mut()->pane) {
-                x += block->scroll()->pane->h_scroll_position;
-                y += block->scroll()->pane->v_scroll_position;
-            }
-        }
-        parent = parent->parent;
-    }
-    if (out_x) *out_x = x;
-    if (out_y) *out_y = y;
+    RdtLogicalPoint point = view_geometry_block_viewport_to_local(
+        view, {abs_x, abs_y});
+    if (out_x) *out_x = point.x;
+    if (out_y) *out_y = point.y;
 }
 
 static void dom_boundary_to_projection(const DomBoundary& boundary,
@@ -4373,6 +4352,18 @@ void scroll_state_get_position_for_view(DocState* state, View* view, void* pane_
     scroll_state_get_position(state, pane_ptr, out_h_pos, out_v_pos, out_h_max, out_v_max);
 }
 
+void scroll_state_resolve_view_geometry(ViewBlock* block,
+                                        float* out_x, float* out_y, void*) {
+    if (!block || !block->scroller || !block->scroll()->pane) {
+        if (out_x) *out_x = 0.0f;
+        if (out_y) *out_y = 0.0f;
+        return;
+    }
+    DocState* state = block->doc ? block->doc->state : NULL;
+    scroll_state_get_position_for_view(state, static_cast<View*>(block),
+        block->scroll()->pane, out_x, out_y, NULL, NULL);
+}
+
 void scroll_state_get_range_for_view(DocState* state, View* view, void* pane_ptr,
                                      float* out_h_min, float* out_h_max,
                                      float* out_v_min, float* out_v_max) {
@@ -5388,15 +5379,9 @@ void dirty_mark_element(DocState* state, void* view_ptr) {
     View* view = static_cast<View*>(view_ptr);
 
     // Get element's absolute bounds
-    float abs_x = view->x, abs_y = view->y;
-    ViewElement* p = view->parent_view();
-    while (p) {
-        abs_x += p->x;
-        abs_y += p->y;
-        p = p->parent_view();
-    }
+    RdtLogicalPoint origin = view_geometry_node_document_origin(view);
 
-    dirty_mark_rect_with_source(&state->dirty_tracker, abs_x, abs_y,
+    dirty_mark_rect_with_source(&state->dirty_tracker, origin.x, origin.y,
                                 view->width, view->height, view->id);
     state->needs_repaint = true;
 }
@@ -6291,19 +6276,6 @@ void state_store_caret_move(DocState* state, int delta) {
         delta, caret->view, caret->char_offset);
 }
 
-static TextRect* caret_rect_at_offset(TextRect* rect, int offset,
-                                     int* out_line) {
-    int line = 0;
-    while (rect) {
-        int rect_end = rect->start_index + rect->length;
-        if (offset >= rect->start_index && offset <= rect_end) break;
-        line++;
-        rect = rect->next;
-    }
-    if (out_line) *out_line = line;
-    return rect;
-}
-
 void state_store_caret_move_to_boundary(DocState* state, int where) {
     caret_goal_invalidate(state);
     CaretNavigationPosition position = {};
@@ -6319,8 +6291,8 @@ void state_store_caret_move_to_boundary(DocState* state, int where) {
         switch (where) {
             case 0: {  // line start
                 int line = 0;
-                TextRect* current_rect = caret_rect_at_offset(
-                    rect, caret->char_offset, &line);
+                TextRect* current_rect = view_geometry_text_rect_for_offset(
+                    text, caret->char_offset, &line, false);
                 if (current_rect) {
                     caret->char_offset = current_rect->start_index;
                     caret->line = line;
@@ -6330,8 +6302,8 @@ void state_store_caret_move_to_boundary(DocState* state, int where) {
             }
             case 1: {  // line end
                 int line = 0;
-                TextRect* current_rect = caret_rect_at_offset(
-                    rect, caret->char_offset, &line);
+                TextRect* current_rect = view_geometry_text_rect_for_offset(
+                    text, caret->char_offset, &line, false);
                 if (current_rect) {
                     caret->char_offset = current_rect->start_index + current_rect->length;
                     caret->line = line;
@@ -6388,57 +6360,6 @@ void state_store_caret_move_to_boundary(DocState* state, int where) {
 }
 
 /**
- * Get the absolute visual Y position of a view
- * Walks up the parent chain to accumulate Y offsets
- */
-static float get_absolute_y(View* view) {
-    float y = 0;
-    View* v = view;
-    while (v) {
-        y += v->y;
-        v = v->parent;
-    }
-    return y;
-}
-
-/**
- * Get the absolute visual X position of a view
- */
-static float get_absolute_x(View* view) {
-    float x = 0;
-    View* v = view;
-    while (v) {
-        x += v->x;
-        v = v->parent;
-    }
-    return x;
-}
-
-/**
- * Get the absolute visual Y position of a TextRect within a text view
- */
-static float get_rect_absolute_y(View* view, TextRect* rect) {
-    float base_y = get_absolute_y(view);
-    // TextRect y is relative to the parent block, same as the text view's y
-    // So we need to use parent's absolute position + rect->y
-    if (view->parent) {
-        base_y = get_absolute_y(view->parent) + rect->y;
-    }
-    return base_y;
-}
-
-/**
- * Get the absolute visual X position of a TextRect within a text view.
- * TextRect coordinates are relative to the text view's parent block.
- */
-static float get_rect_absolute_x(View* view, TextRect* rect) {
-    if (view && view->parent) {
-        return get_absolute_x(view->parent) + rect->x;
-    }
-    return get_absolute_x(view) + (rect ? rect->x : 0);
-}
-
-/**
  * Get the visual Y position of the caret's current position (absolute)
  */
 static float get_caret_visual_y(View* view, int char_offset) {
@@ -6446,19 +6367,16 @@ static float get_caret_visual_y(View* view, int char_offset) {
 
     if (view->is_text()) {
         ViewText* text = lam::view_require_text(view);
-        TextRect* rect = text->rect;
-        while (rect) {
-            int rect_end = rect->start_index + rect->length;
-            if (char_offset >= rect->start_index && char_offset <= rect_end) {
-                return get_rect_absolute_y(view, rect);
-            }
-            rect = rect->next;
-        }
+        TextRect* rect = view_geometry_text_rect_for_offset(
+            text, char_offset, nullptr, false);
+        if (rect) return view_geometry_text_rect_document_origin(view, rect).y;
         // Default to first rect's Y
-        if (text->rect) return get_rect_absolute_y(view, text->rect);
+        if (text->rect) {
+            return view_geometry_text_rect_document_origin(view, text->rect).y;
+        }
     }
 
-    return get_absolute_y(view);
+    return view_geometry_node_document_origin(view).y;
 }
 
 /**
@@ -6490,7 +6408,7 @@ static View* find_view_at_different_y(View* current_view, int current_offset,
     float     line_y = 0;            // Y of the new line, set when first candidate found
 
     auto consider_rect = [&](View* v, TextRect* r) {
-        float r_abs_x = get_rect_absolute_x(v, r);
+        float r_abs_x = view_geometry_text_rect_document_origin(v, r).x;
         bool contains = (current_abs_x >= r_abs_x &&
                          current_abs_x <= r_abs_x + r->width);
         float center = r_abs_x + r->width / 2.0f;
@@ -6516,7 +6434,8 @@ static View* find_view_at_different_y(View* current_view, int current_offset,
         best_view = v;
         best_rect = nullptr;
         best_contains = false;
-        best_score = fabsf(current_abs_x - get_absolute_x(v));
+        best_score = fabsf(
+            current_abs_x - view_geometry_node_document_origin(v).x);
     };
 
     if (direction > 0) {
@@ -6537,7 +6456,7 @@ static View* find_view_at_different_y(View* current_view, int current_offset,
                         found_current_in_view = true;
                     }
                 } else {
-                    float rect_y = get_rect_absolute_y(view, rect);
+                    float rect_y = view_geometry_text_rect_document_origin(view, rect).y;
                     if (rect_y > current_y + Y_TOLERANCE) {
                         if (!best_view) line_y = rect_y;
                         if (fabsf(rect_y - line_y) <= Y_TOLERANCE) {
@@ -6557,7 +6476,7 @@ static View* find_view_at_different_y(View* current_view, int current_offset,
                 ViewText* next_text = lam::view_require_text(next);
                 TextRect* rect = next_text->rect;
                 while (rect) {
-                    float rect_y = get_rect_absolute_y(next, rect);
+                    float rect_y = view_geometry_text_rect_document_origin(next, rect).y;
                     if (rect_y > current_y + Y_TOLERANCE) {
                         if (!best_view) line_y = rect_y;
                         if (fabsf(rect_y - line_y) <= Y_TOLERANCE) {
@@ -6569,7 +6488,7 @@ static View* find_view_at_different_y(View* current_view, int current_offset,
                     rect = rect->next;
                 }
             } else {
-                float view_y = get_absolute_y(next);
+                float view_y = view_geometry_node_document_origin(next).y;
                 if (view_y > current_y + Y_TOLERANCE) {
                     if (!best_view) {
                         line_y = view_y;
@@ -6600,7 +6519,7 @@ done_down: ;
             while (r) {
                 int rect_end = r->start_index + r->length;
                 if (current_offset >= r->start_index && current_offset <= rect_end) break;
-                float r_y = get_rect_absolute_y(view, r);
+                float r_y = view_geometry_text_rect_document_origin(view, r).y;
                 if (r_y < current_y - Y_TOLERANCE) {
                     if (!any || r_y > line_y_local) { line_y_local = r_y; any = true; }
                 }
@@ -6612,7 +6531,7 @@ done_down: ;
                 while (r) {
                     int rect_end = r->start_index + r->length;
                     if (current_offset >= r->start_index && current_offset <= rect_end) break;
-                    float r_y = get_rect_absolute_y(view, r);
+                    float r_y = view_geometry_text_rect_document_origin(view, r).y;
                     if (fabsf(r_y - line_y) <= Y_TOLERANCE) consider_rect(view, r);
                     r = r->next;
                 }
@@ -6628,13 +6547,13 @@ done_down: ;
                 if (prev->is_text()) {
                     ViewText* pt = lam::view_require_text(prev);
                     for (TextRect* r = pt->rect; r; r = r->next) {
-                        float r_y = get_rect_absolute_y(prev, r);
+                        float r_y = view_geometry_text_rect_document_origin(prev, r).y;
                         if (r_y < current_y - Y_TOLERANCE) {
                             if (!prev_any || r_y > prev_max_y) { prev_max_y = r_y; prev_any = true; }
                         }
                     }
                 } else {
-                    float v_y = get_absolute_y(prev);
+                    float v_y = view_geometry_node_document_origin(prev).y;
                     if (v_y < current_y - Y_TOLERANCE) { prev_max_y = v_y; prev_any = true; }
                 }
                 if (prev_any) {
@@ -6643,7 +6562,7 @@ done_down: ;
                     if (prev->is_text()) {
                         ViewText* pt = lam::view_require_text(prev);
                         for (TextRect* r = pt->rect; r; r = r->next) {
-                            float r_y = get_rect_absolute_y(prev, r);
+                            float r_y = view_geometry_text_rect_document_origin(prev, r).y;
                             if (fabsf(r_y - line_y) <= Y_TOLERANCE) consider_rect(prev, r);
                         }
                     } else {
@@ -6656,14 +6575,14 @@ done_down: ;
                         if (prev->is_text()) {
                             ViewText* pt = lam::view_require_text(prev);
                             for (TextRect* r = pt->rect; r; r = r->next) {
-                                float r_y = get_rect_absolute_y(prev, r);
+                                float r_y = view_geometry_text_rect_document_origin(prev, r).y;
                                 if (fabsf(r_y - line_y) <= Y_TOLERANCE) {
                                     consider_rect(prev, r);
                                     any_on_line = true;
                                 }
                             }
                         } else {
-                            float v_y = get_absolute_y(prev);
+                            float v_y = view_geometry_node_document_origin(prev).y;
                             if (fabsf(v_y - line_y) <= Y_TOLERANCE) any_on_line = true;
                         }
                         if (!any_on_line) break;
@@ -6704,7 +6623,7 @@ void state_store_caret_move_line(DocState* state, int delta, struct UiContext* u
     // as the parent block). Convert to absolute X so it can be compared across
     // sibling text segments under different inline ancestors.
     float current_y = get_caret_visual_y(view, caret->char_offset);
-    float current_abs_x = (view->parent ? get_absolute_x(view->parent) : 0) + caret->x;
+    float current_abs_x = view_geometry_node_document_origin(view->parent).x + caret->x;
 
     // Find view/rect at different Y position whose X best matches current_abs_x
     int new_offset = 0;
@@ -6717,7 +6636,8 @@ void state_store_caret_move_line(DocState* state, int delta, struct UiContext* u
         // the caret lands directly under its previous position rather than at
         // the start of the new line.
         if (new_view->is_text() && new_rect) {
-            float new_parent_abs_x = (new_view->parent ? get_absolute_x(new_view->parent) : 0);
+            float new_parent_abs_x =
+                view_geometry_node_document_origin(new_view->parent).x;
             float target_local_x = current_abs_x - new_parent_abs_x;
             new_offset = dom_range_byte_offset_for_x(uicon,
                 lam::view_require_text(new_view), new_rect, target_local_x);
@@ -6753,22 +6673,6 @@ void state_store_caret_clear(DocState* state) {
     log_debug("caret_clear");
 }
 
-static void projection_chain_offset(View* view, float* out_x, float* out_y) {
-    float chain_x = 0;
-    float chain_y = 0;
-    for (View* parent = view ? view->parent : NULL; parent; parent = parent->parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK ||
-            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-            parent->view_type == RDT_VIEW_LIST_ITEM) {
-            ViewBlock* block = lam::view_require_block(parent);
-            chain_x += block->x;
-            chain_y += block->y;
-        }
-    }
-    if (out_x) *out_x = chain_x;
-    if (out_y) *out_y = chain_y;
-}
-
 void caret_project_visual(DocState* state, float x, float y, float height) {
     if (!state || !state_store_ensure_selection_presentation(state)) return;
     state->selection_presentation->caret_x = x;
@@ -6782,11 +6686,10 @@ void caret_project_visual_from_block(DocState* state, View* view,
                                      float block_x, float block_y) {
     if (!state || !state_store_ensure_selection_presentation(state)) return;
     caret_project_visual(state, x, y, height);
-    float chain_x = 0;
-    float chain_y = 0;
-    projection_chain_offset(view, &chain_x, &chain_y);
-    state->selection_presentation->iframe_offset_x = block_x - chain_x;
-    state->selection_presentation->iframe_offset_y = block_y - chain_y;
+    RdtLogicalPoint chain = view_geometry_local_to_block_document(
+        view, {0.0f, 0.0f});
+    state->selection_presentation->iframe_offset_x = block_x - chain.x;
+    state->selection_presentation->iframe_offset_y = block_y - chain.y;
 }
 
 void caret_project_visual_from_selection(DocState* state, float x, float y, float height) {

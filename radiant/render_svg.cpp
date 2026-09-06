@@ -1,10 +1,8 @@
 #include "render.hpp"
 #include "view.hpp"
 #include "layout.hpp"
-#include "render.hpp"
 #include "render_effect_raster_fallback.hpp"
 #include "render_glyph_run_raster_lower.hpp"
-#include "render.hpp"
 #include "event.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
@@ -27,13 +25,6 @@ extern "C" {
 #include <cctype>
 #include <cwctype>
 
-typedef struct SvgEffectRasterFallback {
-    bool active;
-    int nested_depth;
-    PaintEffectGroup group;
-    PaintList paint_list;
-} SvgEffectRasterFallback;
-
 typedef struct {
     StrBuf* svg_content;
     int indent_level;
@@ -45,7 +36,7 @@ typedef struct {
     Color color;
     UiContext* ui_context;
     PaintList paint_list;
-    SvgEffectRasterFallback effect_fallback;
+    RenderEffectRasterFallback effect_fallback;
     Arena* page_backdrop_arena;
     DisplayList page_backdrop_dl;
     bool page_backdrop_ready;
@@ -224,12 +215,8 @@ static bool svg_emit_raster_fallback_image(SvgRenderContext* ctx,
 static void svg_begin_effect_raster_fallback(SvgRenderContext* ctx,
                                              const PaintEffectGroup* group) {
     if (!ctx || !group) return;
-    ctx->effect_fallback.active = true;
-    ctx->effect_fallback.nested_depth = 0;
-    ctx->effect_fallback.group = *group;
-    paint_list_clear(&ctx->effect_fallback.paint_list);
-    paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
-    paint_begin_effect_group(&ctx->effect_fallback.paint_list, group);
+    render_effect_raster_begin(
+        &ctx->effect_fallback, group, render_glyph_run_raster_lower);
     log_error("[SVG_PAINT_IR] raster fallback effect group opacity=%.3f blend=%d filter=%p backdrop=%d backdrop_filter=%p shadow=%d isolation=%d",
               group->opacity, group->blend_mode, group->filter,
               group->backdrop ? 1 : 0, group->backdrop_filter,
@@ -1184,13 +1171,11 @@ static void svg_append_graph_semantic_attrs(SvgRenderContext* ctx,
         strbuf_append_char(ctx->svg_content, '\"');
     }
 
-    float abs_x = 0.0f;
-    float abs_y = 0.0f;
-    view_to_absolute_position(static_cast<View*>(block), block->x, block->y,
-                              0.0f, 0.0f, &abs_x, &abs_y);
+    RdtLogicalPoint origin = view_geometry_local_to_block_document(
+        static_cast<View*>(block), {block->x, block->y});
     strbuf_append_format(ctx->svg_content,
         " data-x=\"%.3f\" data-y=\"%.3f\" data-width=\"%.3f\" data-height=\"%.3f\"",
-        abs_x, abs_y, block->width, block->height);
+        origin.x, origin.y, block->width, block->height);
 }
 
 static void svg_cb_begin_block_children(void* vctx, ViewBlock* block) {
@@ -1463,24 +1448,10 @@ static void render_caret_svg(SvgRenderContext* ctx, DocState* state) {
         return;
     }
 
-    // Calculate absolute position (CSS pixels)
-    float x = caret_x;
-    float y = caret_y;
-
-    // Walk up the tree to get absolute coordinates
-    View* parent = view;
-    while (parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK) {
-            ViewBlock* parent_block = lam::view_require_block(parent);
-            x += parent_block->x;
-            y += parent_block->y;
-        }
-        parent = parent->parent;
-    }
-
-    // Add iframe offset (if the caret is inside an iframe, parent chain stops at iframe doc root)
-    x += iframe_offset_x;
-    y += iframe_offset_y;
+    RdtLogicalPoint origin = view_geometry_local_to_block_document(
+        view, {caret_x + iframe_offset_x, caret_y + iframe_offset_y});
+    float x = origin.x;
+    float y = origin.y;
 
     float height = caret_height;
 

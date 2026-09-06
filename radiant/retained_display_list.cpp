@@ -1,6 +1,5 @@
 #include "render.hpp"
 
-#include "render.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/mem_factory.h"
 #include "../lib/hashmap_helpers.h"
@@ -388,11 +387,6 @@ static bool retained_dl_bounds_match(Bound cached, Bound current) {
            fabsf(cached.bottom - current.bottom) <= tolerance;
 }
 
-static bool retained_dl_bounds_intersect(Bound a, Bound b) {
-    return !(a.left >= b.right || a.right <= b.left ||
-             a.top >= b.bottom || a.bottom <= b.top);
-}
-
 static bool retained_dl_dirty_rect_intersects_bound(const DirtyRect* dirty,
                                                     Bound visual_bound,
                                                     float scale) {
@@ -404,7 +398,7 @@ static bool retained_dl_dirty_rect_intersects_bound(const DirtyRect* dirty,
         (dirty->x + dirty->width) * s,
         (dirty->y + dirty->height) * s
     };
-    return retained_dl_bounds_intersect(visual_bound, dirty_bound);
+    return view_geometry_bounds_intersect(visual_bound, dirty_bound);
 }
 
 static bool retained_dl_surface_generation_current(void* surface_ptr, uint64_t generation) {

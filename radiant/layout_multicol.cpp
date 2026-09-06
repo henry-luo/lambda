@@ -2608,6 +2608,18 @@ static float multicol_fragmentable_item_min_fragmentainer(
     return 0.0f;
 }
 
+static ViewBlock* multicol_balance_unit(View* child) {
+    ViewBlock* child_block = multicol_in_flow_block(child);
+    if (!child_block || !layout_view_is_block_flow_box(child_block)) return nullptr;
+    bool child_is_avoid = child_block->blk &&
+        child_block->block()->break_inside == CSS_VALUE_AVOID;
+    bool child_is_fragmentable =
+        multicol_has_fragmentable_line_boxes(child_block) ||
+        multicol_has_fragmentable_block_children(child_block);
+    // An avoid-break block stays atomic even when its descendants can fragment.
+    return child_is_fragmentable && !child_is_avoid ? nullptr : child_block;
+}
+
 static float multicol_block_children_balance_floor(
     ViewBlock* parent, int column_count) {
     if (!parent || column_count <= 1 ||
@@ -2624,19 +2636,8 @@ static float multicol_block_children_balance_floor(
     float upper = 0.0f;
     for (View* child = parent->first_placed_child(); child;
          child = child->next()) {
-        ViewBlock* child_block = multicol_in_flow_block(child);
+        ViewBlock* child_block = multicol_balance_unit(child);
         if (!child_block) continue;
-        bool child_is_avoid = child_block->blk &&
-            child_block->block()->break_inside == CSS_VALUE_AVOID;
-        bool child_is_fragmentable =
-            multicol_has_fragmentable_line_boxes(child_block) ||
-            multicol_has_fragmentable_block_children(child_block);
-        if (!layout_view_is_block_flow_box(child_block) ||
-            (child_is_fragmentable && !child_is_avoid)) {
-            // css fragmentation: an avoid-break child is a balance unit even
-            // when its own descendants have internal break opportunities.
-            continue;
-        }
         float margin_before = 0.0f;
         float margin_after = 0.0f;
         multicol_flow_margins(parent, child_block,
@@ -2655,14 +2656,8 @@ static float multicol_block_children_balance_floor(
         bool has_item = false;
         for (View* child = parent->first_placed_child(); child;
              child = child->next()) {
-            ViewBlock* child_block = multicol_in_flow_block(child);
+            ViewBlock* child_block = multicol_balance_unit(child);
             if (!child_block) continue;
-            bool child_is_avoid = child_block->blk &&
-                child_block->block()->break_inside == CSS_VALUE_AVOID;
-            bool child_is_fragmentable =
-                multicol_has_fragmentable_line_boxes(child_block) ||
-                multicol_has_fragmentable_block_children(child_block);
-            if (child_is_fragmentable && !child_is_avoid) continue;
             float margin_before = 0.0f;
             float margin_after = 0.0f;
             multicol_flow_margins(parent, child_block,

@@ -1,7 +1,5 @@
 #include "render.hpp"
 
-#include "render.hpp"
-
 #include "../lib/log.h"
 
 #include <math.h>
@@ -180,7 +178,7 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
     if (group.has_filter) {
         float filter_expand = render_geometry_filter_effect_expand(block->filter_prop());
         Rect border_rect = render_geometry_block_border_rect(parent_block, block, scale);
-        group.filter_rect = render_geometry_expand_rect(border_rect, filter_expand);
+        group.filter_rect = view_geometry_expand_rect(border_rect, filter_expand);
 
         float backdrop_expand = 0;
         render_effect_filter_backdrop_info(block->filter_prop(),

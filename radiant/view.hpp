@@ -2064,6 +2064,71 @@ struct ViewBlock : ViewSpan {
     // ViewBlock* last_child;
 };
 
+// ===== view geometry =====
+
+// Coordinate walks accept a resolver because StateStore-backed callers must
+// read canonical scroll state, while dependency-light DOM tests use the pane
+// mirror. Both paths otherwise share exactly the same coordinate contract.
+typedef void (*ViewGeometryScrollResolver)(ViewBlock* block,
+                                           float* out_x, float* out_y,
+                                           void* context);
+
+void view_geometry_pane_scroll(ViewBlock* block, float* out_x, float* out_y,
+                               void* context);
+RdtLogicalPoint view_geometry_node_document_origin(View* view);
+RdtLogicalPoint view_geometry_local_to_block_document(
+    View* view, RdtLogicalPoint local);
+RdtLogicalPoint view_geometry_node_viewport_origin(
+    View* view, ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_local_to_block_viewport(
+    View* view, RdtLogicalPoint local,
+    ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_block_viewport_to_local(
+    View* view, RdtLogicalPoint point,
+    ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_child_content_origin(
+    View* view, RdtLogicalPoint parent_origin,
+    ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_child_node_origin(
+    View* view, RdtLogicalPoint parent_origin,
+    ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_apply_external_viewport(
+    RdtLogicalPoint point, ViewBlock* viewport_root,
+    RdtLogicalPoint document_offset,
+    ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_local_to_window(
+    View* view, RdtLogicalPoint local, ViewBlock* viewport_root,
+    RdtLogicalPoint document_offset,
+    ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+
+bool view_geometry_rect_contains_point(Rect rect, RdtLogicalPoint point);
+bool view_geometry_rect_contains_rect(Rect outer, Rect inner, float epsilon);
+float view_geometry_point_rect_distance(Rect rect, RdtLogicalPoint point);
+Rect view_geometry_intersect_rect(Rect first, Rect second);
+Bound view_geometry_intersect_bound_rect(Bound bound, Rect rect);
+Rect view_geometry_expand_rect(Rect rect, float expand);
+Bound view_geometry_rect_to_bound(Rect rect);
+bool view_geometry_bounds_intersect(Bound first, Bound second);
+RdtLogicalPoint view_geometry_text_rect_document_origin(View* view,
+                                                        TextRect* rect);
+bool view_geometry_pdf_text_metrics(DomText* text, float* out_width,
+                                    bool* out_copy_space);
+int view_geometry_pdf_visible_end_offset(DomText* text, TextRect* rect,
+                                         bool copy_space);
+float view_geometry_text_rect_width(DomText* text, TextRect* rect);
+TextRect* view_geometry_text_rect_for_offset(
+    DomText* text, int byte_offset, int* out_line = nullptr,
+    bool clamp_to_last = true);
+float view_geometry_interpolate_text_x(DomText* text, TextRect* rect,
+                                       int byte_offset, bool pdf_metrics);
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct TableProp {
     // Table layout algorithm mode

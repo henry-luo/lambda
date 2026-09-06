@@ -61,123 +61,6 @@ extern "C" int dom_range_byte_offset_for_x(UiContext* uicon, ViewText* text,
 // Internal helpers — view tree walks
 // ---------------------------------------------------------------------------
 
-// Walk parents to accumulate absolute (x, y) — same logic as
-// view_to_absolute_position() in event.cpp, replicated here so the
-// resolver does not depend on event.cpp.
-static void rel_to_abs(View* view, float rel_x, float rel_y,
-                       float* out_abs_x, float* out_abs_y) {
-    float x = rel_x, y = rel_y;
-    View* p = view ? view->parent : NULL;
-    while (p) {
-        if (p->is_block()) {
-            ViewBlock* block = lam::view_require_block(p);
-            x += block->x;
-            y += block->y;
-            if (block->scroller && block->scroll_mut()->pane) {
-                x -= block->scroll()->pane->h_scroll_position;
-                y -= block->scroll()->pane->v_scroll_position;
-            }
-        }
-        p = p->parent;
-    }
-    if (out_abs_x) *out_abs_x = x;
-    if (out_abs_y) *out_abs_y = y;
-}
-
-static void child_content_origin_for_view(View* node,
-                                          float abs_x,
-                                          float abs_y,
-                                          float* out_x,
-                                          float* out_y) {
-    float cx = abs_x;
-    float cy = abs_y;
-    if (node && node->is_block()) {
-        ViewBlock* block = lam::view_require_block(node);
-        cx += block->x;
-        cy += block->y;
-        if (block->scroller && block->scroll_mut()->pane) {
-            cx -= block->scroll()->pane->h_scroll_position;
-            cy -= block->scroll()->pane->v_scroll_position;
-        }
-    }
-    if (out_x) *out_x = cx;
-    if (out_y) *out_y = cy;
-}
-
-static bool pdf_text_run_metrics(DomText* text, float* out_width, bool* out_copy_space) {
-    if (out_width) *out_width = 0.0f;
-    if (out_copy_space) *out_copy_space = false;
-    if (!text || !text->parent || !text->parent->is_element()) return false;
-
-    DomElement* elem = lam::dom_require_element(text->parent);
-    const char* cls = elem->get_attribute("class");
-    if (!cls || !strstr(cls, "pdf-text-run")) return false;
-
-    const char* width_attr = elem->get_attribute("data-pdf-width");
-    float width = width_attr ? (float)str_to_double_default(width_attr, strlen(width_attr), 0.0) : 0.0f;
-    if (width <= 0.0f) return false;
-
-    const char* copy_attr = elem->get_attribute("data-pdf-copy-space");
-    if (out_width) *out_width = width;
-    if (out_copy_space) *out_copy_space = copy_attr && strcmp(copy_attr, "1") == 0;
-    return true;
-}
-
-static int pdf_visible_end_offset(DomText* text, TextRect* rect, bool copy_space) {
-    int end_offset = rect ? rect->start_index + (rect->length > 0 ? rect->length : 0) : 0;
-    if (!copy_space || !text || !rect || end_offset <= rect->start_index) return end_offset;
-    unsigned char* data = text->text_data();
-    if (data && data[end_offset - 1] == ' ') return end_offset - 1;
-    return end_offset;
-}
-
-static float text_rect_effective_width(DomText* text, TextRect* rect) {
-    float pdf_width = 0.0f;
-    bool copy_space = false;
-    if (pdf_text_run_metrics(text, &pdf_width, &copy_space)) return pdf_width;
-    return rect ? rect->width : 0.0f;
-}
-
-// Find the TextRect within `text` that contains UTF-8 byte offset `bo`.
-// Returns the last rect if `bo` is past the end. Returns NULL if `text`
-// has no rects (i.e. layout has not been performed).
-static TextRect* rect_for_byte_offset(DomText* text, int bo) {
-    if (!text || !text->rect) return NULL;
-    TextRect* best = text->rect;
-    for (TextRect* r = text->rect; r; r = r->next) {
-        if (bo >= r->start_index && bo <= r->start_index + r->length) {
-            return r;
-        }
-        best = r;  // remember last so we can clamp to end
-    }
-    return best;
-}
-
-// Linear-interpolation x within a text rect for byte offset `bo`. Caller
-// must have selected the rect that contains `bo`.
-static float interp_x_in_rect(const TextRect* rect, int bo) {
-    if (!rect || rect->length <= 0) return rect ? rect->x : 0.0f;
-    int local = bo - rect->start_index;
-    if (local <= 0) return rect->x;
-    if (local >= rect->length) return rect->x + rect->width;
-    return rect->x + ((float)local / (float)rect->length) * rect->width;
-}
-
-static float interp_x_in_text_rect(DomText* text, TextRect* rect, int bo) {
-    if (!text || !rect || rect->length <= 0) return rect ? rect->x : 0.0f;
-    float pdf_width = 0.0f;
-    bool copy_space = false;
-    if (!pdf_text_run_metrics(text, &pdf_width, &copy_space)) return interp_x_in_rect(rect, bo);
-
-    int visible_end = pdf_visible_end_offset(text, rect, copy_space);
-    int visible_len = visible_end - rect->start_index;
-    if (visible_len <= 0) return rect->x;
-    int local = bo - rect->start_index;
-    if (local <= 0) return rect->x;
-    if (bo >= visible_end) return rect->x + pdf_width;
-    return rect->x + ((float)local / (float)visible_len) * pdf_width;
-}
-
 extern "C" float dom_range_glyph_x_for_byte_offset(UiContext* uicon,
                                                     ViewText* text,
                                                     TextRect* rect,
@@ -186,7 +69,7 @@ extern "C" float dom_range_glyph_x_for_byte_offset(UiContext* uicon,
     if (uicon && text && g_glyph_x_resolver) {
         return g_glyph_x_resolver(uicon, text, rect, byte_offset);
     }
-    return interp_x_in_rect(rect, byte_offset);
+    return view_geometry_interpolate_text_x(text, rect, byte_offset, false);
 }
 
 static DomNode* child_at_boundary_offset(DomElement* elem, uint32_t offset) {
@@ -225,16 +108,16 @@ static bool resolve_text_boundary(DomText* text, int byte_off,
                                   float* out_x, float* out_y,
                                   float* out_h) {
     if (!text) return false;
-    TextRect* r = rect_for_byte_offset(text, byte_off);
+    TextRect* r = view_geometry_text_rect_for_offset(text, byte_off);
     if (!r) return false;
 
-    float local_x = interp_x_in_text_rect(text, r, byte_off);
-    float ax = 0.0f, ay = 0.0f;
-    rel_to_abs(static_cast<View*>(text), local_x, r->y, &ax, &ay);
+    float local_x = view_geometry_interpolate_text_x(text, r, byte_off, true);
+    RdtLogicalPoint point = view_geometry_local_to_block_viewport(
+        static_cast<View*>(text), {local_x, r->y});
     if (out_view) *out_view = static_cast<View*>(text);
     if (out_byte) *out_byte = byte_off;
-    if (out_x) *out_x = ax;
-    if (out_y) *out_y = ay;
+    if (out_x) *out_x = point.x;
+    if (out_y) *out_y = point.y;
     if (out_h) *out_h = r->height;
     return true;
 }
@@ -282,12 +165,12 @@ static bool resolve_node_box_edge(DomNode* node, bool trailing,
     if (!node || !node->view_type) return false;
     float edge_x = node->x + (trailing ? node->width : 0.0f);
     float edge_y = node->y;
-    float ax = 0.0f, ay = 0.0f;
-    rel_to_abs(static_cast<View*>(node), edge_x, edge_y, &ax, &ay);
+    RdtLogicalPoint point = view_geometry_local_to_block_viewport(
+        static_cast<View*>(node), {edge_x, edge_y});
     if (out_view) *out_view = static_cast<View*>(node);
     if (out_byte) *out_byte = trailing ? 1 : 0;
-    if (out_x) *out_x = ax;
-    if (out_y) *out_y = ay;
+    if (out_x) *out_x = point.x;
+    if (out_y) *out_y = point.y;
     if (out_h) *out_h = node->height > 0.0f ? node->height : 16.0f;
     return true;
 }
@@ -643,7 +526,7 @@ static DomText* hit_test_text_at(View* node, float vx, float vy,
         for (TextRect* r = t->rect; r; r = r->next) {
             float rx = abs_x + r->x;
             float ry = abs_y + r->y;
-            float rect_width = text_rect_effective_width(t, r);
+            float rect_width = view_geometry_text_rect_width(t, r);
             if (vx >= rx && vx <= rx + rect_width &&
                 vy >= ry && vy <= ry + r->height) {
                 if (out_rect) *out_rect = r;
@@ -657,10 +540,11 @@ static DomText* hit_test_text_at(View* node, float vx, float vy,
     // Element: descend into children, accumulating block offsets.
     if (node->is_element()) {
         DomElement* el = lam::dom_require_element(node);
-        float cx = abs_x, cy = abs_y;
-        child_content_origin_for_view(node, abs_x, abs_y, &cx, &cy);
+        RdtLogicalPoint child_origin = view_geometry_child_content_origin(
+            node, {abs_x, abs_y});
         for (DomNode* c = static_cast<DomNode*>(el->first_child); c; c = c->next_sibling) {
-            DomText* t = hit_test_text_at(static_cast<View*>(c), vx, vy, cx, cy,
+            DomText* t = hit_test_text_at(static_cast<View*>(c), vx, vy,
+                                          child_origin.x, child_origin.y,
                                           out_rect, out_local_x);
             if (t) { found = t; break; }
         }
@@ -740,18 +624,6 @@ typedef struct VerticalWritingBoundaryHit {
     bool valid;
 } VerticalWritingBoundaryHit;
 
-static float point_box_distance(float px, float py,
-                                float x, float y,
-                                float w, float h) {
-    float dx = 0.0f;
-    float dy = 0.0f;
-    if (px < x) dx = x - px;
-    else if (px > x + w) dx = px - (x + w);
-    if (py < y) dy = y - py;
-    else if (py > y + h) dy = py - (y + h);
-    return dx + dy;
-}
-
 static bool vertical_writing_boundary_for_text(DomText* text, float vx,
                                                float vy,
                                                VerticalWritingBoundaryHit* hit) {
@@ -765,15 +637,15 @@ static bool vertical_writing_boundary_for_text(DomText* text, float vx,
     ViewBlock* block = nearest_block_ancestor(static_cast<View*>(text));
     if (!block || block->width <= 0.0f || block->height <= 0.0f) return false;
 
-    float box_x = 0.0f;
-    float box_y = 0.0f;
-    rel_to_abs(static_cast<View*>(block), block->x, block->y, &box_x, &box_y);
+    RdtLogicalPoint box = view_geometry_local_to_block_viewport(
+        static_cast<View*>(block), {block->x, block->y});
     float box_w = block->width;
     float box_h = block->height;
     float cell = vertical_text_cell_size(text);
     if (cell <= 0.0f) return false;
 
-    float distance = point_box_distance(vx, vy, box_x, box_y, box_w, box_h);
+    float distance = view_geometry_point_rect_distance(
+        {box.x, box.y, box_w, box_h}, {vx, vy});
     if (hit->valid && distance > hit->score) return false;
 
     uint32_t inline_capacity = (uint32_t)floorf(box_h / cell); // INT_CAST_OK: glyph-cell count from block extent.
@@ -784,8 +656,8 @@ static bool vertical_writing_boundary_for_text(DomText* text, float vx,
     bool block_rl = mode == CSS_VALUE_VERTICAL_RL ||
         mode == CSS_VALUE_SIDEWAYS_RL;
     bool inline_reverse = mode == CSS_VALUE_SIDEWAYS_LR;
-    float block_progress = block_rl ? (box_x + box_w - vx) : (vx - box_x);
-    float inline_progress = inline_reverse ? (box_y + box_h - vy) : (vy - box_y);
+    float block_progress = block_rl ? (box.x + box_w - vx) : (vx - box.x);
+    float inline_progress = inline_reverse ? (box.y + box_h - vy) : (vy - box.y);
 
     int line_index = (int)floorf(block_progress / cell); // INT_CAST_OK: line index from pointer coordinate.
     int inline_index = (int)floorf(inline_progress / cell); // INT_CAST_OK: inline glyph index from pointer coordinate.
@@ -990,6 +862,7 @@ static DomText* editable_boundary_text(View* node, bool inside_editable) {
 static void find_editable_boundary_hit(View* node, float vx, float vy,
                                        float abs_x, float abs_y,
                                        bool inside_editable,
+                                       bool edge_only,
                                        EditableBoundaryHit* hit) {
     if (!node || !hit) return;
 
@@ -999,51 +872,54 @@ static void find_editable_boundary_hit(View* node, float vx, float vy,
             if (rect->height <= 0) continue;
             float rect_x = abs_x + rect->x;
             float rect_y = abs_y + rect->y;
-            float rect_width = text_rect_effective_width(text, rect);
+            float rect_width = view_geometry_text_rect_width(text, rect);
             float rect_right = rect_x + rect_width;
             float rect_bottom = rect_y + rect->height;
-
             float score = -1.0f;
             float local_x = 0.0f;
             bool prefer_later_equal_score = false;
-            if (rect_y <= vy && vy < rect_bottom) {
+            bool inside_y = rect_y <= vy && vy < rect_bottom;
+            if (edge_only) {
+                float vertical_gap = inside_y ? 0.0f
+                    : vy < rect_y ? rect_y - vy : vy - rect_bottom;
+                float vertical_penalty = inside_y ? 0.0f : 1000.0f;
                 if (vx < rect_x) {
-                    score = rect_x - vx;
-                    local_x = 0.0f;
+                    score = (rect_x - vx) + vertical_gap + vertical_penalty;
                 } else if (vx >= rect_right) {
-                    score = vx - rect_right;
                     local_x = rect_width;
-                }
-            } else if (vy >= rect_bottom) {
-                float horizontal_gap = 0.0f;
-                if (vx < rect_x) {
-                    horizontal_gap = rect_x - vx;
-                    local_x = 0.0f;
-                } else if (vx >= rect_right) {
-                    horizontal_gap = vx - rect_right;
-                    local_x = rect_width;
-                } else {
+                    score = (vx - rect_right) + vertical_gap + vertical_penalty;
+                } else if (!inside_y) {
                     local_x = vx - rect_x;
+                    score = vertical_gap + vertical_penalty;
                 }
-                score = (vy - rect_bottom) + horizontal_gap + 10000.0f;
-                if (effective_direction_for_node(static_cast<DomNode*>(text)) ==
-                        CSS_VALUE_RTL) {
-                    local_x = rect_width;
-                    score = (vy - rect_bottom) + 10000.0f;
-                    prefer_later_equal_score = true;
-                }
-            } else if (vy < rect_y) {
-                float horizontal_gap = 0.0f;
-                if (vx < rect_x) {
-                    horizontal_gap = rect_x - vx;
-                    local_x = 0.0f;
-                } else if (vx >= rect_right) {
-                    horizontal_gap = vx - rect_right;
-                    local_x = rect_width;
+            } else {
+                if (inside_y) {
+                    if (vx < rect_x) {
+                        score = rect_x - vx;
+                    } else if (vx >= rect_right) {
+                        score = vx - rect_right;
+                        local_x = rect_width;
+                    }
                 } else {
-                    local_x = vx - rect_x;
+                    float horizontal_gap = 0.0f;
+                    if (vx < rect_x) {
+                        horizontal_gap = rect_x - vx;
+                    } else if (vx >= rect_right) {
+                        horizontal_gap = vx - rect_right;
+                        local_x = rect_width;
+                    } else {
+                        local_x = vx - rect_x;
+                    }
+                    score = fabsf(vy < rect_y ? rect_y - vy : vy - rect_bottom) +
+                        (vy < rect_y ? 20000.0f : 10000.0f) + horizontal_gap;
+                    if (vy >= rect_bottom &&
+                        effective_direction_for_node(static_cast<DomNode*>(text)) ==
+                            CSS_VALUE_RTL) {
+                        local_x = rect_width;
+                        score = (vy - rect_bottom) + 10000.0f;
+                        prefer_later_equal_score = true;
+                    }
                 }
-                score = (rect_y - vy) + horizontal_gap + 20000.0f;
             }
 
             if (score >= 0.0f &&
@@ -1063,15 +939,15 @@ static void find_editable_boundary_hit(View* node, float vx, float vy,
     if (!node->is_element()) return;
 
     bool child_inside_editable = inside_editable || is_rich_editable_host(node);
-    float cx = abs_x, cy = abs_y;
-    child_content_origin_for_view(node, abs_x, abs_y, &cx, &cy);
+    RdtLogicalPoint child_origin = view_geometry_child_content_origin(
+        node, {abs_x, abs_y});
 
     DomElement* el = lam::dom_require_element(node);
-    if (inside_editable && is_contenteditable_false_island(el)) {
+    if (!edge_only && inside_editable && is_contenteditable_false_island(el)) {
         maybe_record_atomic_boundary_hit(node, vx, vy, abs_x, abs_y, hit);
         return;
     }
-    if (inside_editable) {
+    if (!edge_only && inside_editable) {
         maybe_record_table_edge_boundary_hit(node, vx, vy, abs_x, abs_y, hit);
         maybe_record_table_interior_text_edge_hit(node, vx, vy, abs_x, abs_y,
                                                   hit);
@@ -1080,67 +956,9 @@ static void find_editable_boundary_hit(View* node, float vx, float vy,
     for (DomNode* c = el->first_child; c; c = c->next_sibling) {
         View* child_view = static_cast<View*>(c);
         if (!child_view->view_type) continue;
-        find_editable_boundary_hit(child_view, vx, vy, cx, cy,
-                                   child_inside_editable, hit);
-    }
-}
-
-static void find_text_edge_boundary_hit(View* node, float vx, float vy,
-                                        float abs_x, float abs_y,
-                                        bool inside_editable,
-                                        EditableBoundaryHit* hit) {
-    if (!node || !hit) return;
-
-    DomText* text = editable_boundary_text(node, inside_editable);
-    if (text) {
-        for (TextRect* rect = text->rect; rect; rect = rect->next) {
-            if (rect->height <= 0.0f) continue;
-            float rect_x = abs_x + rect->x;
-            float rect_y = abs_y + rect->y;
-            float rect_width = text_rect_effective_width(text, rect);
-            float rect_right = rect_x + rect_width;
-            float rect_bottom = rect_y + rect->height;
-            bool inside_y = rect_y <= vy && vy < rect_bottom;
-            float vertical_gap = 0.0f;
-            if (!inside_y) {
-                vertical_gap = vy < rect_y ? rect_y - vy : vy - rect_bottom;
-            }
-            float vertical_penalty = inside_y ? 0.0f : 1000.0f;
-
-            float local_x = 0.0f;
-            float score = -1.0f;
-            if (vx < rect_x) {
-                score = (rect_x - vx) + vertical_gap + vertical_penalty;
-            } else if (vx >= rect_right) {
-                local_x = rect_width;
-                score = (vx - rect_right) + vertical_gap + vertical_penalty;
-            } else if (!inside_y) {
-                local_x = vx - rect_x;
-                score = vertical_gap + vertical_penalty;
-            }
-            if (score >= 0.0f &&
-                    (editable_boundary_hit_empty(hit) || score < hit->score)) {
-                hit->text = text;
-                hit->rect = rect;
-                hit->has_boundary = false;
-                hit->local_x = local_x;
-                hit->score = score;
-            }
-        }
-        return;
-    }
-
-    if (!node->is_element()) return;
-    bool child_inside_editable = inside_editable || is_rich_editable_host(node);
-    float cx = abs_x;
-    float cy = abs_y;
-    child_content_origin_for_view(node, abs_x, abs_y, &cx, &cy);
-    DomElement* elem = lam::dom_require_element(node);
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        View* child_view = static_cast<View*>(child);
-        if (!child_view->view_type) continue;
-        find_text_edge_boundary_hit(child_view, vx, vy, cx, cy,
-                                    child_inside_editable, hit);
+        find_editable_boundary_hit(child_view, vx, vy,
+                                   child_origin.x, child_origin.y,
+                                   child_inside_editable, edge_only, hit);
     }
 }
 
@@ -1188,9 +1006,8 @@ static bool find_editable_element_boundary(View* node, float vx, float vy,
     float box_y = abs_y + node->y;
     // Point must lie within this element's border box; if not, no descendant
     // (laid out within the box) can contain it either.
-    if (!(node->width > 0.0f && node->height > 0.0f &&
-          vx >= box_x && vx < box_x + node->width &&
-          vy >= box_y && vy < box_y + node->height)) {
+    if (!view_geometry_rect_contains_point(
+            {box_x, box_y, node->width, node->height}, {vx, vy})) {
         return false;
     }
 
@@ -1200,13 +1017,14 @@ static bool find_editable_element_boundary(View* node, float vx, float vy,
     if (is_non_caret_container_element(el)) return false;
 
     bool here_editable = inside_editable || is_rich_editable_host(node);
-    float cx = abs_x, cy = abs_y;
-    child_content_origin_for_view(node, abs_x, abs_y, &cx, &cy);
+    RdtLogicalPoint child_origin = view_geometry_child_content_origin(
+        node, {abs_x, abs_y});
 
     // Prefer the deepest editable element that also contains the point.
     for (DomNode* c = el->first_child; c; c = c->next_sibling) {
         if (find_editable_element_boundary(static_cast<View*>(c), vx, vy,
-                                           cx, cy, here_editable, out)) {
+                                           child_origin.x, child_origin.y,
+                                           here_editable, out)) {
             return true;
         }
     }
@@ -1223,7 +1041,7 @@ static bool find_editable_element_boundary(View* node, float vx, float vy,
     for (DomNode* c = el->first_child; c; c = c->next_sibling) {
         View* cv = static_cast<View*>(c);
         if (!cv->view_type) continue;
-        if (vy >= cy + cv->y + cv->height) offset++;
+        if (vy >= child_origin.y + cv->y + cv->height) offset++;
         else break;
     }
     out->node = static_cast<DomNode*>(node);
@@ -1239,9 +1057,10 @@ static int byte_offset_for_x(DomText* text, const TextRect* r, float local_x) {
     int length = r->length;
     float pdf_width = 0.0f;
     bool copy_space = false;
-    if (pdf_text_run_metrics(text, &pdf_width, &copy_space)) {
+    if (view_geometry_pdf_text_metrics(text, &pdf_width, &copy_space)) {
         width = pdf_width;
-        int visible_end = pdf_visible_end_offset(text, const_cast<TextRect*>(r), copy_space);
+        int visible_end = view_geometry_pdf_visible_end_offset(
+            text, const_cast<TextRect*>(r), copy_space);
         length = visible_end - r->start_index;
     }
     if (local_x >= width) return r->start_index + length;
@@ -1289,7 +1108,8 @@ extern "C" DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float
         // text-edge snapping is an editing affordance; generic DOM hit tests
         // outside all text rects must remain null instead of fabricating a
         // nearest text boundary.
-        find_text_edge_boundary_hit(root_view, vx, vy, 0, 0, false, &text_hit);
+        find_editable_boundary_hit(
+            root_view, vx, vy, 0, 0, false, true, &text_hit);
         if (text_hit.text && text_hit.rect) {
             t = text_hit.text;
             rect = text_hit.rect;
@@ -1298,7 +1118,8 @@ extern "C" DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float
     }
     if (!t || !rect) {
         EditableBoundaryHit hit = { NULL, NULL, { NULL, 0 }, false, 0.0f, -1.0f };
-        find_editable_boundary_hit(root_view, vx, vy, 0, 0, false, &hit);
+        find_editable_boundary_hit(
+            root_view, vx, vy, 0, 0, false, false, &hit);
         if (hit.has_boundary) return hit.boundary;
         t = hit.text;
         rect = hit.rect;
@@ -1314,6 +1135,36 @@ extern "C" DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float
 // ---------------------------------------------------------------------------
 // Public — multi-rect rendering helper
 // ---------------------------------------------------------------------------
+
+static float range_rect_x(UiContext* uicon, DomText* text, TextRect* rect,
+                          int byte_offset, bool pdf_fallback) {
+    if (uicon && g_glyph_x_resolver) {
+        return g_glyph_x_resolver(
+            uicon, lam::view_require_text(text), rect, byte_offset);
+    }
+    return view_geometry_interpolate_text_x(
+        text, rect, byte_offset, pdf_fallback);
+}
+
+static void emit_text_rects(DomText* text, int byte_start, int byte_end,
+                            TextRect* target_rect, UiContext* uicon,
+                            bool pdf_fallback, DomRangeRectCb cb,
+                            void* userdata) {
+    for (TextRect* rect = text ? text->rect : NULL; rect; rect = rect->next) {
+        if (target_rect && rect != target_rect) continue;
+        int rect_start = rect->start_index;
+        int rect_end = rect->start_index + rect->length;
+        int start = max(byte_start, rect_start);
+        int end = min(byte_end, rect_end);
+        if (start >= end) continue;
+        float x0 = range_rect_x(uicon, text, rect, start, pdf_fallback);
+        float x1 = range_rect_x(uicon, text, rect, end, pdf_fallback);
+        RdtLogicalPoint point = view_geometry_local_to_block_viewport(
+            static_cast<View*>(text), {x0, rect->y});
+        cb(point.x, point.y, x1 - x0, rect->height, userdata);
+        if (target_rect) break;
+    }
+}
 
 extern "C" void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
     DomRangeRectCb cb, void* userdata) {
@@ -1334,91 +1185,42 @@ extern "C" void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
         return;
     }
 
-    // Glyph-precise X for `bo` within `r` of text node `t`. Falls back to
-    // linear interpolation when no UiContext / font is available, or when
-    // the resolver function pointer hasn't been registered (unit-test
-    // binaries that don't link event.cpp).
-    auto glyph_x = [&](DomText* t, TextRect* r, int bo) -> float {
-        if (uicon && g_glyph_x_resolver) {
-            return g_glyph_x_resolver(uicon, lam::view_require_text(t), r, bo);
-        }
-        return interp_x_in_text_rect(t, r, bo);
-    };
-
     // Same-text-node, single TextRect (the common case): one rectangle.
     if (sv == ev && sv->is_text()) {
         DomText* t = lam::dom_require_text(sv);
-        TextRect* sr = rect_for_byte_offset(t, range->start_byte_offset);
-        TextRect* er = rect_for_byte_offset(t, range->end_byte_offset);
+        TextRect* sr = view_geometry_text_rect_for_offset(
+            t, range->start_byte_offset);
+        TextRect* er = view_geometry_text_rect_for_offset(
+            t, range->end_byte_offset);
         if (!sr || !er) return;
 
-        // Walk every TextRect in [sr .. er] inclusive.
-        for (TextRect* r = sr; r; r = r->next) {
-            float lx0 = (r == sr) ? glyph_x(t, r, range->start_byte_offset) : r->x;
-            float lx1 = (r == er) ? glyph_x(t, r, range->end_byte_offset)   : r->x + r->width;
-            float ax, ay;
-            rel_to_abs(static_cast<View*>(t), lx0, r->y, &ax, &ay);
-            cb(ax, ay, lx1 - lx0, r->height, userdata);
-            if (r == er) break;
-        }
+        emit_text_rects(t, range->start_byte_offset,
+                        range->end_byte_offset, NULL, uicon, true,
+                        cb, userdata);
         return;
     }
 
-    // Cross-node range: emit start rect (start..end of its TextRect chain),
-    // intermediate text nodes (full rects), and end rect (start..end_byte).
-    // We walk forward from sv to ev in document order using the DOM tree
-    // (next_text_after is a static helper; replicate its logic locally).
-    auto emit_text_node = [&](DomText* t, int bo_lo, int bo_hi) {
-        for (TextRect* r = t->rect; r; r = r->next) {
-            int rs = r->start_index;
-            int re = r->start_index + r->length;
-            int lo = bo_lo > rs ? bo_lo : rs;
-            int hi = bo_hi < re ? bo_hi : re;
-            if (lo >= hi) continue;
-            float lx0 = glyph_x(t, r, lo);
-            float lx1 = glyph_x(t, r, hi);
-            float ax, ay;
-            rel_to_abs(static_cast<View*>(t), lx0, r->y, &ax, &ay);
-            cb(ax, ay, lx1 - lx0, r->height, userdata);
-        }
-    };
-
-    // Local document-order text walker (forward).
-    auto next_text = [](DomNode* n) -> DomText* {
-        if (!n) return NULL;
-        // Descend to first child; else next sibling; else up.
-        DomNode* cur = n;
-        while (cur) {
-            DomElement* el = cur->as_element();
-            if (el && el->first_child) {
-                cur = static_cast<DomNode*>(el->first_child);
-            } else if (cur->next_sibling) {
-                cur = cur->next_sibling;
-            } else {
-                while (cur && !cur->next_sibling) cur = cur->parent;
-                if (cur) cur = cur->next_sibling;
-            }
-            if (cur && cur->is_text()) return lam::dom_require_text(cur);
-        }
-        return NULL;
-    };
-
     if (sv->is_text()) {
         DomText* t = lam::dom_require_text(sv);
-        emit_text_node(t, range->start_byte_offset,
-                       (int)(t->length > 0 ? t->length : 0));
+        emit_text_rects(t, range->start_byte_offset,
+            (int)(t->length > 0 ? t->length : 0), // INT_CAST_OK: text layout offsets are byte indexes.
+            NULL, uicon, true, cb, userdata);
     }
 
-    DomText* cur = sv->is_text() ? next_text(static_cast<DomNode*>(sv)) : NULL;
+    DomText* cur = sv->is_text()
+        ? dom_range_next_text_after_any(static_cast<DomNode*>(sv)) : NULL;
     int safety = 100000;
     while (cur && static_cast<View*>(cur) != ev && --safety > 0) {
-        emit_text_node(cur, 0, (int)(cur->length > 0 ? cur->length : 0));
-        cur = next_text(static_cast<DomNode*>(cur));
+        emit_text_rects(cur, 0,
+            (int)(cur->length > 0 ? cur->length : 0), // INT_CAST_OK: text layout offsets are byte indexes.
+            NULL, uicon, true, cb, userdata);
+        cur = dom_range_next_text_after_any(static_cast<DomNode*>(cur));
     }
 
     if (ev->is_text()) {
         DomText* t = lam::dom_require_text(ev);
-        emit_text_node(t, 0, range->end_byte_offset);
+        emit_text_rects(t, 0, range->end_byte_offset, NULL, uicon, true,
+                        cb, userdata);
     }
 }
 
@@ -1458,7 +1260,8 @@ extern "C" void dom_range_for_each_rect_in_text_rect(DomRange* range,
     if (!sv || !ev) return;
 
     int bo_lo = 0;
-    int bo_hi = (target_text->length > 0) ? (int)target_text->length : 0;
+    int bo_hi = (target_text->length > 0)
+        ? (int)target_text->length : 0; // INT_CAST_OK: text layout offsets are byte indexes.
     bool include = false;
     if (static_cast<View*>(target_text) == sv && static_cast<View*>(target_text) == ev) {
         bo_lo = range->start_byte_offset;
@@ -1473,49 +1276,16 @@ extern "C" void dom_range_for_each_rect_in_text_rect(DomRange* range,
     } else if (sv == ev) {
         return;
     } else {
-        auto next_text = [](DomNode* n) -> DomText* {
-            if (!n) return NULL;
-            DomNode* cur = n;
-            while (cur) {
-                DomElement* el = cur->as_element();
-                if (el && el->first_child) cur = static_cast<DomNode*>(el->first_child);
-                else if (cur->next_sibling) cur = cur->next_sibling;
-                else {
-                    while (cur && !cur->next_sibling) cur = cur->parent;
-                    if (cur) cur = cur->next_sibling;
-                }
-                if (cur && cur->is_text()) return lam::dom_require_text(cur);
-            }
-            return NULL;
-        };
-        DomText* cur = sv->is_text() ? next_text(static_cast<DomNode*>(sv)) : NULL;
+        DomText* cur = sv->is_text()
+            ? dom_range_next_text_after_any(static_cast<DomNode*>(sv)) : NULL;
         int safety = 100000;
         while (cur && static_cast<View*>(cur) != ev && --safety > 0) {
             if (cur == target_text) { include = true; break; }
-            cur = next_text(static_cast<DomNode*>(cur));
+            cur = dom_range_next_text_after_any(static_cast<DomNode*>(cur));
         }
     }
     if (!include || bo_lo >= bo_hi) return;
 
-    auto glyph_x = [&](DomText* t, TextRect* r, int bo) -> float {
-        if (uicon && g_glyph_x_resolver) {
-            return g_glyph_x_resolver(uicon, lam::view_require_text(t), r, bo);
-        }
-        return interp_x_in_rect(r, bo);
-    };
-
-    for (TextRect* r = target_text->rect; r; r = r->next) {
-        if (target_rect && r != target_rect) continue;
-        int rs = r->start_index;
-        int re = r->start_index + r->length;
-        int lo = bo_lo > rs ? bo_lo : rs;
-        int hi = bo_hi < re ? bo_hi : re;
-        if (lo >= hi) continue;
-        float lx0 = glyph_x(target_text, r, lo);
-        float lx1 = glyph_x(target_text, r, hi);
-        float ax, ay;
-        rel_to_abs(static_cast<View*>(target_text), lx0, r->y, &ax, &ay);
-        cb(ax, ay, lx1 - lx0, r->height, userdata);
-        if (target_rect) break;
-    }
+    emit_text_rects(target_text, bo_lo, bo_hi, target_rect, uicon, false,
+                    cb, userdata);
 }

@@ -1031,10 +1031,8 @@ static void render_select_listbox_rows(RenderContext* rdcon, ViewBlock* block,
     // Rows are clipped to the control's own box: layout places every option,
     // including the ones past `size` rows, and this control does not scroll yet.
     Bound saved_clip = rdcon->block.clip;
-    rdcon->block.clip.left = max(rdcon->block.clip.left, fc->x);
-    rdcon->block.clip.top = max(rdcon->block.clip.top, fc->y);
-    rdcon->block.clip.right = min(rdcon->block.clip.right, fc->x + fc->w);
-    rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, fc->y + fc->h);
+    rdcon->block.clip = view_geometry_intersect_bound_rect(
+        rdcon->block.clip, {fc->x, fc->y, fc->w, fc->h});
 
     Color selected_bg = fc->disabled ? make_color(212, 212, 212) : make_color(0, 120, 215);
     Color selected_fg = make_color(255, 255, 255);

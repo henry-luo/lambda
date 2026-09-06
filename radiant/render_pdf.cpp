@@ -1,7 +1,6 @@
 #include "render.hpp"
 #include "render_effect_raster_fallback.hpp"
 #include "render_glyph_run_raster_lower.hpp"
-#include "render.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 
@@ -40,13 +39,6 @@ typedef struct PdfPaintLoweringState {
     int unsupported_count;
 } PdfPaintLoweringState;
 
-typedef struct PdfEffectRasterFallback {
-    bool active;
-    int nested_depth;
-    PaintEffectGroup group;
-    PaintList paint_list;
-} PdfEffectRasterFallback;
-
 typedef struct PdfRenderContext {
     HPDF_Doc pdf_doc;
     HPDF_Page current_page;
@@ -62,7 +54,7 @@ typedef struct PdfRenderContext {
     Color color;
     BlockBlot block;  // Current block context for coordinate transformation
     PaintList paint_list;
-    PdfEffectRasterFallback effect_fallback;
+    RenderEffectRasterFallback effect_fallback;
     Arena* page_backdrop_arena;
     DisplayList page_backdrop_dl;
     bool page_backdrop_ready;
@@ -572,12 +564,8 @@ static void pdf_paint_record_fallback(PdfPaintLoweringState* state,
 static void pdf_begin_effect_raster_fallback(PdfRenderContext* ctx,
                                              const PaintEffectGroup* group) {
     if (!ctx || !group) return;
-    ctx->effect_fallback.active = true;
-    ctx->effect_fallback.nested_depth = 0;
-    ctx->effect_fallback.group = *group;
-    paint_list_clear(&ctx->effect_fallback.paint_list);
-    paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
-    paint_begin_effect_group(&ctx->effect_fallback.paint_list, group);
+    render_effect_raster_begin(
+        &ctx->effect_fallback, group, render_glyph_run_raster_lower);
     log_error("[PDF_PAINT_IR] raster fallback effect group opacity=%.3f blend=%d filter=%p backdrop=%d backdrop_filter=%p shadow=%d isolation=%d",
               group->opacity, group->blend_mode, group->filter,
               group->backdrop ? 1 : 0, group->backdrop_filter,

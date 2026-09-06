@@ -1114,6 +1114,21 @@ static void parse_pointer_fields(MapReader& reader, SimEvent* ev) {
     parse_target(reader, ev);
 }
 
+static void parse_drag_geometry(MapReader& reader, SimEvent* ev) {
+    ev->x = sim_number_as_float(reader.get("from_x"));
+    ev->y = sim_number_as_float(reader.get("from_y"));
+    ev->to_x = sim_number_as_float(reader.get("to_x"));
+    ev->to_y = sim_number_as_float(reader.get("to_y"));
+    ev->button = reader.get("button").asInt32();
+    // With a resolved target, dx/dy expresses the destination relative to the
+    // start so fixtures need not know the target's absolute position.
+    if (reader.has("dx") || reader.has("dy")) {
+        ev->has_drag_delta = true;
+        ev->drag_dx = sim_number_as_float(reader.get("dx"));
+        ev->drag_dy = sim_number_as_float(reader.get("dy"));
+    }
+}
+
 static void parse_assertion_strings(MapReader& reader, SimEvent* ev,
                                     bool with_target) {
     const char* equals = reader.get("equals").cstring();
@@ -1121,6 +1136,15 @@ static void parse_assertion_strings(MapReader& reader, SimEvent* ev,
     const char* contains = reader.get("contains").cstring();
     if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
     if (with_target) parse_target(reader, ev);
+}
+
+static void parse_element_at_fields(MapReader& reader, SimEvent* ev) {
+    ev->at_x = sim_number_as_float(reader.get("x"));
+    ev->at_y = sim_number_as_float(reader.get("y"));
+    const char* selector = reader.get("expected_selector").cstring();
+    if (selector) ev->expected_at_selector = mem_strdup(selector, MEM_CAT_LAYOUT);
+    const char* tag = reader.get("expected_tag").cstring();
+    if (tag) ev->expected_at_tag = mem_strdup(tag, MEM_CAT_LAYOUT);
 }
 
 static void sim_event_free_owned_fields(SimEvent* ev) {
@@ -1203,34 +1227,13 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     }
     else if (strcmp(type_str, "mouse_drag") == 0) {
         ev->type = SIM_EVENT_MOUSE_DRAG;
-        ev->x = sim_number_as_float(reader.get("from_x"));
-        ev->y = sim_number_as_float(reader.get("from_y"));
-        ev->to_x = sim_number_as_float(reader.get("to_x"));
-        ev->to_y = sim_number_as_float(reader.get("to_y"));
-        ev->button = reader.get("button").asInt32();
-        // Relative delta form: with a `target` start and dx/dy, the destination
-        // is start+(dx,dy). Lets a fixture drag a resolved element (e.g. a resize
-        // handle whose absolute position isn't known statically) by an offset.
-        if (reader.has("dx") || reader.has("dy")) {
-            ev->has_drag_delta = true;
-            ev->drag_dx = sim_number_as_float(reader.get("dx"));
-            ev->drag_dy = sim_number_as_float(reader.get("dy"));
-        }
+        parse_drag_geometry(reader, ev);
         parse_target(reader, ev);
         parse_to_target(reader, ev, false);
     }
     else if (strcmp(type_str, "pointer_drag") == 0) {
         ev->type = SIM_EVENT_POINTER_DRAG;
-        ev->x = sim_number_as_float(reader.get("from_x"));
-        ev->y = sim_number_as_float(reader.get("from_y"));
-        ev->to_x = sim_number_as_float(reader.get("to_x"));
-        ev->to_y = sim_number_as_float(reader.get("to_y"));
-        ev->button = reader.get("button").asInt32();
-        if (reader.has("dx") || reader.has("dy")) {
-            ev->has_drag_delta = true;
-            ev->drag_dx = sim_number_as_float(reader.get("dx"));
-            ev->drag_dy = sim_number_as_float(reader.get("dy"));
-        }
+        parse_drag_geometry(reader, ev);
         const char* pointer_type = reader.get("pointerType").cstring();
         ev->pointer_type = mem_strdup(pointer_type ? pointer_type : "touch", MEM_CAT_LAYOUT);
         int steps = reader.get("steps").asInt32();
@@ -1650,25 +1653,11 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_element_at") == 0) {
         ev->type = SIM_EVENT_ASSERT_ELEMENT_AT;
-        ItemReader x = reader.get("x");
-        ItemReader y = reader.get("y");
-        ev->at_x = (float)(x.isFloat() ? x.asFloat() : x.asInt());
-        ev->at_y = (float)(y.isFloat() ? y.asFloat() : y.asInt());
-        const char* sel = reader.get("expected_selector").cstring();
-        if (sel) ev->expected_at_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
-        const char* tag = reader.get("expected_tag").cstring();
-        if (tag) ev->expected_at_tag = mem_strdup(tag, MEM_CAT_LAYOUT);
+        parse_element_at_fields(reader, ev);
     }
     else if (strcmp(type_str, "assert_hit_test") == 0) {
         ev->type = SIM_EVENT_ASSERT_HIT_TEST;
-        ItemReader x = reader.get("x");
-        ItemReader y = reader.get("y");
-        ev->at_x = (float)(x.isFloat() ? x.asFloat() : x.asInt());
-        ev->at_y = (float)(y.isFloat() ? y.asFloat() : y.asInt());
-        const char* sel = reader.get("expected_selector").cstring();
-        if (sel) ev->expected_at_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
-        const char* tag = reader.get("expected_tag").cstring();
-        if (tag) ev->expected_at_tag = mem_strdup(tag, MEM_CAT_LAYOUT);
+        parse_element_at_fields(reader, ev);
         if (!ev->expected_at_selector && !ev->expected_at_tag) {
             log_error("event_sim: assert_hit_test requires expected_selector or expected_tag");
             return parse_sim_event_fail(ev);

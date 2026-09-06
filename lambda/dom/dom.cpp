@@ -230,12 +230,6 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_ensure_roots, (void), (js_active_runtime_
 static Item dom_document_element_from_point(DomDocument* doc,
                                                Item x_arg,
                                                Item y_arg);
-static void dom_absolute_node_position(DomNode* node,
-                                          float* out_x,
-                                          float* out_y);
-static void dom_viewport_node_position(DomNode* node,
-                                          float* out_x,
-                                          float* out_y);
 static DomElement* dom_offset_parent_element(DomElement* elem);
 static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis);
 static Item dom_svg_create_matrix(void);
@@ -11782,10 +11776,9 @@ static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
         }
     }
     if (screen_space && outermost_svg) {
-        float x = 0.0f;
-        float y = 0.0f;
-        dom_viewport_node_position((DomNode*)outermost_svg, &x, &y);
-        RdtMatrix layout_transform = rdt_matrix_translate(x, y);
+        RdtLogicalPoint origin = view_geometry_node_viewport_origin(
+            static_cast<View*>(outermost_svg));
+        RdtMatrix layout_transform = rdt_matrix_translate(origin.x, origin.y);
         matrix = rdt_matrix_multiply(&layout_transform, &matrix);
     }
     return matrix;
@@ -12892,19 +12885,6 @@ extern "C" void* dom_document_svg_element_from_point(void* doc_ptr,
     return dom_svg_element_from_document_point_walk((DomNode*)doc->root, x, y);
 }
 
-static void dom_absolute_node_position(DomNode* node,
-                                          float* out_x,
-                                          float* out_y) {
-    float x = 0.0f;
-    float y = 0.0f;
-    for (DomNode* cur = node; cur; cur = cur->parent) {
-        x += cur->x;
-        y += cur->y;
-    }
-    if (out_x) *out_x = x;
-    if (out_y) *out_y = y;
-}
-
 static DomElement* dom_offset_parent_element(DomElement* elem) {
     if (!elem) return nullptr;
     DomNode* p = elem->parent;
@@ -12929,61 +12909,21 @@ static DomElement* dom_offset_parent_element(DomElement* elem) {
 
 static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
     if (!elem) return 0;
-    float abs_x = 0.0f;
-    float abs_y = 0.0f;
-    dom_absolute_node_position((DomNode*)elem, &abs_x, &abs_y);
-    float value = x_axis ? abs_x : abs_y;
+    RdtLogicalPoint origin = view_geometry_node_document_origin(
+        static_cast<View*>(elem));
+    float value = x_axis ? origin.x : origin.y;
 
     DomElement* offset_parent = dom_offset_parent_element(elem);
     if (offset_parent) {
         if (!offset_parent->tag_name ||
             strcasecmp(offset_parent->tag_name, "body") != 0) {
-            float parent_x = 0.0f;
-            float parent_y = 0.0f;
-            dom_absolute_node_position((DomNode*)offset_parent, &parent_x,
-                                          &parent_y);
-            value -= x_axis ? parent_x : parent_y;
+            RdtLogicalPoint parent_origin = view_geometry_node_document_origin(
+                static_cast<View*>(offset_parent));
+            value -= x_axis ? parent_origin.x : parent_origin.y;
         }
     }
     return (int64_t)value;
 }
-
-static void dom_scroll_offset_for_node(DomNode* node,
-                                          float* out_x,
-                                          float* out_y) {
-    if (out_x) *out_x = 0.0f;
-    if (out_y) *out_y = 0.0f;
-    if (!node || !node->is_element()) return;
-    if (!node->is_block()) {
-        return;
-    }
-    DomElement* elem = node->as_element();
-    if (!elem || !elem->scroller || !elem->scroll()->pane) return;
-    if (out_x) *out_x = elem->scroll()->pane->h_scroll_position;
-    if (out_y) *out_y = elem->scroll()->pane->v_scroll_position;
-}
-
-static void dom_viewport_node_position(DomNode* node,
-                                          float* out_x,
-                                          float* out_y) {
-    float x = 0.0f;
-    float y = 0.0f;
-    DomNode* origin = node;
-    for (DomNode* cur = node; cur; cur = cur->parent) {
-        x += cur->x;
-        y += cur->y;
-        if (cur != origin) {
-            float scroll_x = 0.0f;
-            float scroll_y = 0.0f;
-            dom_scroll_offset_for_node(cur, &scroll_x, &scroll_y);
-            x -= scroll_x;
-            y -= scroll_y;
-        }
-    }
-    if (out_x) *out_x = x;
-    if (out_y) *out_y = y;
-}
-JS_FORWARD_STATIC_EXPRESSION(bool, dom_point_in_box, (float px, float py,                                 float x, float y,                                 float w, float h), (w > 0.0f && h > 0.0f && x <= px && px < x + w && y <= py && py < y + h))
 
 static bool dom_text_contains_point(DomText* text,
                                        float abs_x,
@@ -12992,8 +12932,9 @@ static bool dom_text_contains_point(DomText* text,
                                        float py) {
     if (!text) return false;
     for (TextRect* rect = text->rect; rect; rect = rect->next) {
-        if (dom_point_in_box(px, py, abs_x + rect->x, abs_y + rect->y,
-                rect->width, rect->height)) {
+        if (view_geometry_rect_contains_point(
+                {abs_x + rect->x, abs_y + rect->y, rect->width, rect->height},
+                {px, py})) {
             return true;
         }
     }
@@ -13046,9 +12987,9 @@ static DomElement* dom_shadow_element_from_point_walk(DomNode* node,
     float node_y = abs_y + node->y;
 
     if (node->is_text()) {
-        if (dom_point_in_box(px, py, node_x, node_y,
-                dom_shadow_node_synthetic_width(node),
-                dom_shadow_node_synthetic_height(node)) &&
+        if (view_geometry_rect_contains_point(
+                {node_x, node_y, dom_shadow_node_synthetic_width(node),
+                 dom_shadow_node_synthetic_height(node)}, {px, py}) &&
             node->parent && node->parent->is_element()) {
             return node->parent->as_element();
         }
@@ -13070,9 +13011,9 @@ static DomElement* dom_shadow_element_from_point_walk(DomNode* node,
     if (best) return best;
     if (dom_is_document_fragment_element(elem)) return nullptr;
 
-    return dom_point_in_box(px, py, node_x, node_y,
-        dom_shadow_node_synthetic_width(node),
-        dom_shadow_node_synthetic_height(node)) ? elem : nullptr;
+    return view_geometry_rect_contains_point(
+        {node_x, node_y, dom_shadow_node_synthetic_width(node),
+         dom_shadow_node_synthetic_height(node)}, {px, py}) ? elem : nullptr;
 }
 
 static DomElement* dom_element_from_point_walk(DomNode* node,
@@ -13104,17 +13045,12 @@ static DomElement* dom_element_from_point_walk(DomNode* node,
         if (shadow_hit) return shadow_hit;
     }
 
-    float child_base_x = node_x;
-    float child_base_y = node_y;
-    float scroll_x = 0.0f;
-    float scroll_y = 0.0f;
-    dom_scroll_offset_for_node(node, &scroll_x, &scroll_y);
-    child_base_x -= scroll_x;
-    child_base_y -= scroll_y;
+    RdtLogicalPoint child_origin = view_geometry_child_content_origin(
+        static_cast<View*>(node), {abs_x, abs_y});
 
     for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
-        DomElement* hit = dom_element_from_point_walk(child, child_base_x,
-            child_base_y, px, py);
+        DomElement* hit = dom_element_from_point_walk(
+            child, child_origin.x, child_origin.y, px, py);
         if (hit) return hit;
     }
 
@@ -13129,8 +13065,8 @@ static DomElement* dom_element_from_point_walk(DomNode* node,
         }
     }
 
-    return dom_point_in_box(px, py, node_x, node_y, hit_width,
-        hit_height) ? elem : nullptr;
+    return view_geometry_rect_contains_point(
+        {node_x, node_y, hit_width, hit_height}, {px, py}) ? elem : nullptr;
 }
 
 static DomElement* dom_shadow_element_from_document_point_walk(DomNode* node,
@@ -13147,13 +13083,12 @@ static DomElement* dom_shadow_element_from_document_point_walk(DomNode* node,
     }
     if (!elem->shadow_root_element()) return nullptr;
 
-    float host_x = 0.0f;
-    float host_y = 0.0f;
-    dom_viewport_node_position((DomNode*)elem, &host_x, &host_y);
+    RdtLogicalPoint host = view_geometry_node_viewport_origin(
+        static_cast<View*>(elem));
     DomElement* hit = dom_shadow_element_from_point_walk((DomNode*)elem->shadow_root_element(),
-        host_x, host_y, px, py);
+        host.x, host.y, px, py);
     if (hit) return hit;
-    if (host_x != 0.0f || host_y != 0.0f) {
+    if (host.x != 0.0f || host.y != 0.0f) {
         // Shadow descendants in headless editing tests expose synthetic
         // offsetLeft/offsetTop before Radiant has real shadow layout boxes.
         return dom_shadow_element_from_point_walk(
@@ -13354,12 +13289,11 @@ extern "C" Item dom_get_bounding_client_rect_bridge(void* dom_elem) {
     if (layout_noscript_content_suppressed(elem)) {
         return dom_make_rect_object_in(elem->doc, 0.0f, 0.0f, 0.0f, 0.0f);
     }
-    float abs_x = 0.0f;
-    float abs_y = 0.0f;
-    dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
+    RdtLogicalPoint origin = view_geometry_node_viewport_origin(
+        static_cast<View*>(elem));
     float width = elem->width;
     float height = elem->height;
-    return dom_make_rect_object_in(elem->doc, abs_x, abs_y,
+    return dom_make_rect_object_in(elem->doc, origin.x, origin.y,
         width > 0.0f ? width : (float)dom_geometry_dimension(elem, true),
         height > 0.0f ? height : (float)dom_geometry_dimension(elem, false));
 }
@@ -13372,9 +13306,8 @@ extern "C" Item dom_get_client_rects_bridge(void* dom_elem) {
         return js_array_new(0);
     }
 
-    float abs_x = 0.0f;
-    float abs_y = 0.0f;
-    dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
+    RdtLogicalPoint origin = view_geometry_node_viewport_origin(
+        static_cast<View*>(elem));
     float w = elem->width;
     float h = elem->height;
     if (w <= 0.0f) w = (float)dom_geometry_dimension(elem, true);
@@ -13383,7 +13316,7 @@ extern "C" Item dom_get_client_rects_bridge(void* dom_elem) {
     // This built the same eight fields by hand, which is why it kept crashing
     // after dom_make_rect learned a realm-free path: one rect, one builder.
     // (The hand-rolled copy also truncated every coordinate to an integer.)
-    Item rect = dom_make_rect_in(elem->doc, abs_x, abs_y, w, h);
+    Item rect = dom_make_rect_in(elem->doc, origin.x, origin.y, w, h);
 
     Item arr = js_array_new(0);
     js_array_push(arr, rect);

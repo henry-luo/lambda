@@ -1,6 +1,4 @@
 #include "render.hpp"
-
-#include "render.hpp"
 #include "radiant.hpp"
 
 #include "../lib/tagged.hpp"
@@ -10,29 +8,10 @@
 #include <math.h>
 #include <string.h>
 
-static Bound render_media_intersect_clip_rect(const Bound* clip, const Rect* rect) {
-    Bound out = clip ? *clip : Bound{rect->x, rect->y, rect->x + rect->width, rect->y + rect->height};
-    float rect_right = rect->x + rect->width;
-    float rect_bottom = rect->y + rect->height;
-    if (out.left < rect->x) out.left = rect->x;
-    if (out.top < rect->y) out.top = rect->y;
-    if (out.right > rect_right) out.right = rect_right;
-    if (out.bottom > rect_bottom) out.bottom = rect_bottom;
-    return out;
-}
-
-static bool render_media_rect_contains(const Rect* outer, const Rect* inner) {
-    if (!outer || !inner) return true;
-    const float eps = 0.01f;
-    return inner->x >= outer->x - eps &&
-           inner->y >= outer->y - eps &&
-           inner->x + inner->width <= outer->x + outer->width + eps &&
-           inner->y + inner->height <= outer->y + outer->height + eps;
-}
-
 static bool render_media_push_content_clip(RenderContext* rdcon, const Rect* content_rect,
                                            const Rect* image_rect) {
-    if (!rdcon || !content_rect || render_media_rect_contains(content_rect, image_rect)) {
+    if (!rdcon || !content_rect || !image_rect ||
+        view_geometry_rect_contains_rect(*content_rect, *image_rect, 0.01f)) {
         return false;
     }
     RdtPath* clip_path = rdt_path_new();
@@ -171,7 +150,7 @@ static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     uint8_t content_opacity = render_media_content_opacity(view);
     Bound image_clip = rdcon->has_transform
         ? rdcon->block.clip
-        : render_media_intersect_clip_rect(&rdcon->block.clip, &rect);
+        : view_geometry_intersect_bound_rect(rdcon->block.clip, rect);
     bool pushed_content_clip = render_media_push_content_clip(rdcon, &rect, &img_rect);
     if (img->format == IMAGE_FORMAT_SVG) {
         bool drew_svg = false;

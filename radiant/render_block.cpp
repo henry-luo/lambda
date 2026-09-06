@@ -1,7 +1,6 @@
 #include "render.hpp"
 #include "event.hpp"
 #include "layout.hpp"
-#include "render.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
@@ -37,7 +36,7 @@ bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block) {
 
     float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
     float visual_overflow = render_geometry_block_visual_overflow(block) * s;
-    Rect marker_rect = render_geometry_expand_rect(
+    Rect marker_rect = view_geometry_expand_rect(
         render_geometry_block_border_rect(&rdcon->block, block, s),
         visual_overflow);
     Bound dirty = {
@@ -49,7 +48,7 @@ bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block) {
     bool has_transform = rdcon->has_transform ||
         (block->transform && block->transformp()->functions);
     return !has_transform &&
-        !render_geometry_bounds_intersect(render_geometry_rect_to_bound(marker_rect), dirty);
+        !view_geometry_bounds_intersect(view_geometry_rect_to_bound(marker_rect), dirty);
 }
 
 bool render_block_viewport_misses(RenderContext* rdcon, ViewBlock* block) {
@@ -69,11 +68,11 @@ bool render_block_viewport_misses(RenderContext* rdcon, ViewBlock* block) {
 
     float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
     float visual_overflow = render_geometry_block_visual_overflow(block) * s;
-    Rect marker_rect = render_geometry_expand_rect(
+    Rect marker_rect = view_geometry_expand_rect(
         render_geometry_block_border_rect(&rdcon->block, block, s),
         visual_overflow);
-    Bound marker_bound = render_geometry_rect_to_bound(marker_rect);
-    return !render_geometry_bounds_intersect(marker_bound, rdcon->block.clip);
+    Bound marker_bound = view_geometry_rect_to_bound(marker_rect);
+    return !view_geometry_bounds_intersect(marker_bound, rdcon->block.clip);
 }
 
 static bool render_view_subtree_contains_id(View* view, uint32_t id) {
@@ -125,7 +124,7 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
 
     float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
     float visual_overflow = render_geometry_block_visual_overflow(block) * s;
-    Rect marker_rect = render_geometry_expand_rect(
+    Rect marker_rect = view_geometry_expand_rect(
         render_geometry_block_border_rect(&rdcon->block, block, s),
         visual_overflow);
     Bound marker_bound = {
@@ -152,7 +151,7 @@ RenderElementMarkerScope render_element_marker_begin(RenderContext* rdcon, ViewB
 
     float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
     float visual_overflow = render_geometry_block_visual_overflow(block) * s;
-    Rect marker_rect = render_geometry_expand_rect(
+    Rect marker_rect = view_geometry_expand_rect(
         render_geometry_block_border_rect(&rdcon->block, block, s),
         visual_overflow);
     uint32_t view_id = static_cast<View*>(block)->id;

@@ -201,23 +201,6 @@ static void editing_controller_log_autoscroll(
                           velocity_x, velocity_y, hooks->user);
 }
 
-static void editing_controller_view_abs_xy(View* view,
-                                           float* out_x,
-                                           float* out_y) {
-    float x = 0.0f;
-    float y = 0.0f;
-    for (View* cur = view; cur; cur = cur->parent) {
-        if (cur->view_type == RDT_VIEW_BLOCK ||
-            cur->view_type == RDT_VIEW_INLINE_BLOCK ||
-            cur->view_type == RDT_VIEW_LIST_ITEM) {
-            x += cur->x;
-            y += cur->y;
-        }
-    }
-    if (out_x) *out_x = x;
-    if (out_y) *out_y = y;
-}
-
 static bool editing_controller_velocity_for_rect(float pointer_x,
                                                  float pointer_y,
                                                  float left,
@@ -395,16 +378,15 @@ static bool editing_controller_text_control_drag_autoscroll(
 
     ViewBlock* block = lam::view_require_block(elem);
     bool is_textarea = elem->form->control_type == FORM_CONTROL_TEXTAREA;
-    float abs_x = 0.0f;
-    float abs_y = 0.0f;
-    editing_controller_view_abs_xy(static_cast<View*>(block), &abs_x, &abs_y);
+    RdtLogicalPoint origin = view_geometry_local_to_block_document(
+        static_cast<View*>(block), {block->x, block->y});
 
     bool has_css_border = block->bound && block->boundary_mut()->border;
     float border = has_css_border ? block->boundary()->border->width.left : 1.0f;
     float padding = block->bound ? block->boundary()->padding.left :
         (is_textarea ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
-    float content_x = abs_x + border + padding;
-    float content_y = abs_y + border + padding;
+    float content_x = origin.x + border + padding;
+    float content_y = origin.y + border + padding;
     float content_w = editing_controller_text_control_content_width(block, elem);
     float content_h = editing_controller_text_control_content_height(block, elem);
 
@@ -569,8 +551,11 @@ bool editing_controller_drag_autoscroll(EventContext* evcon,
         rect_h = evcon->ui_context->viewport_height > 0
             ? (float)evcon->ui_context->viewport_height : root_block->height;
     } else {
-        editing_controller_view_abs_xy(static_cast<View*>(scroll_block),
-            &rect_x, &rect_y);
+        RdtLogicalPoint origin = view_geometry_local_to_block_document(
+            static_cast<View*>(scroll_block),
+            {scroll_block->x, scroll_block->y});
+        rect_x = origin.x;
+        rect_y = origin.y;
     }
     if (rect_w <= 0.0f || rect_h <= 0.0f) return false;
 

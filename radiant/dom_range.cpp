@@ -1829,7 +1829,7 @@ static DomText* next_text_after(DomNode* n) {
 // where the CSS visibility classifier (`text_excluded_for_rendered_stringify`)
 // makes per-element decisions — e.g. a <style> with `display:block` SHOULD
 // contribute its text content per spec.
-static DomText* next_text_after_any(DomNode* n) {
+DomText* dom_range_next_text_after_any(DomNode* n) {
     return next_text_after_impl(n);
 }
 
@@ -2614,7 +2614,7 @@ static bool range_stringify_advance(DomText** current,
     if (dom_boundary_compare(text_end, range_end) != DOM_BOUNDARY_BEFORE) {
         return false;
     }
-    *current = next_text_after_any(static_cast<DomNode*>(*current));
+    *current = dom_range_next_text_after_any(static_cast<DomNode*>(*current));
     return true;
 }
 
@@ -2654,10 +2654,10 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
         for (uint32_t i = 0; i < r->start.offset && c; i++) c = c->next_sibling;
         if (c) {
             cur = leftmost_text_in(c);
-            if (!cur) cur = next_text_after_any(c);
+            if (!cur) cur = dom_range_next_text_after_any(c);
         } else {
             // start is past last child: walk forward from element
-            cur = next_text_after_any(r->start.node);
+            cur = dom_range_next_text_after_any(r->start.node);
         }
     }
 
@@ -3191,15 +3191,15 @@ static DomText* raw_next_text_from_boundary(DomBoundary b) {
     if (b.node->is_text()) {
         DomText* t = b.node->as_text();
         if (b.offset < dom_text_utf16_length(t)) return t;
-        return next_text_after_impl(static_cast<DomNode*>(t));
+        return dom_range_next_text_after_any(static_cast<DomNode*>(t));
     }
-    if (!b.node->is_element()) return next_text_after_impl(b.node);
+    if (!b.node->is_element()) return dom_range_next_text_after_any(b.node);
     DomElement* e = b.node->as_element();
     for (DomNode* c = child_at_offset(e, b.offset); c; c = c->next_sibling) {
         DomText* t = leftmost_text_in(c);
         if (t) return t;
     }
-    return next_text_after_impl(static_cast<DomNode*>(e));
+    return dom_range_next_text_after_any(static_cast<DomNode*>(e));
 }
 
 static DomText* raw_prev_text_from_boundary(DomBoundary b) {
