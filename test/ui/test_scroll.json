@@ -15,6 +15,9 @@
     {"type": "log", "message": "Step 3: Scroll down more"},
     {"type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -10},
 
+    {"type": "log", "message": "Step 3b: Wheel default is selected by the DOM package"},
+    {"type": "assert_scroll", "y": 750, "tolerance": 5},
+
     {"type": "log", "message": "Step 4: Verify top section is visible"},
     {"type": "assert_visible", "target": {"selector": "#sec-top"}, "visible": true},
 

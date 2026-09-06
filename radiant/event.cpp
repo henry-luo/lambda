@@ -1432,20 +1432,7 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
     // fire as inline view first
     fire_inline_event(evcon, lam::view_require_element(block));
     if (block->scroller && block->scroll_mut()->pane) {
-        if (evcon->event.type == RDT_EVENT_SCROLL) {
-            if (scrollpane_scroll(evcon, block, block->scroll()->pane)) {
-                // Native wheel scrolling mutates the pane outside JS; dispatch
-                // the non-bubbling element scroll event that virtualizers observe.
-                radiant_dispatch_simple_event(evcon, static_cast<View*>(block),
-                                              "scroll", false, false);
-            }
-        }
-        else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN &&
-            scroll_state_is_hovered_for_view(event_view_owner_state(static_cast<View*>(block)),
-                                             static_cast<View*>(block))) {
-            scrollpane_mouse_down(evcon, block);
-        }
-        else if (evcon->event.type == RDT_EVENT_MOUSE_UP) {
+        if (evcon->event.type == RDT_EVENT_MOUSE_UP) {
             scrollpane_mouse_up(evcon, block);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_DRAG &&
@@ -1454,6 +1441,40 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
             scrollpane_drag(evcon, block);
         }
     }
+}
+
+// The package selects `wheel`; this helper retains only the live pane walk,
+// clamped mutation, non-bubbling scroll notification, and repaint mechanism.
+static bool apply_wheel_scroll_to_stack(EventContext* evcon, ArrayList* stack) {
+    if (!evcon || !stack) return false;
+    bool changed = false;
+    for (int i = 0; i < stack->length; i++) {
+        View* view = static_cast<View*>(stack->data[i]);
+        if (!view || !view->is_block()) continue;
+        ViewBlock* block = lam::view_require_block(view);
+        if (!block->scroller || !block->scroll()->pane) continue;
+        if (scrollpane_scroll(evcon, block, block->scroll()->pane)) {
+            radiant_dispatch_simple_event(evcon, static_cast<View*>(block),
+                                          "scroll", false, false);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+static bool apply_wheel_scroll_operation(EventContext* evcon, View* target) {
+    if (!evcon || !target) return false;
+    ArrayList* target_list = build_view_stack(evcon, target);
+    bool changed = apply_wheel_scroll_to_stack(evcon, target_list);
+    arraylist_free(target_list);
+
+    // An embedded document's wheel chain continues at its iframe container.
+    if (evcon->iframe_container) {
+        ArrayList* parent_list = build_view_stack(evcon, evcon->iframe_container);
+        if (apply_wheel_scroll_to_stack(evcon, parent_list)) changed = true;
+        arraylist_free(parent_list);
+    }
+    return changed;
 }
 
 void fire_events(EventContext* evcon, ArrayList* target_list) {
@@ -2000,6 +2021,7 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     // in a Lambda-only document that a JS-backed event already exposes.
     if (evcon && (strcmp(event_name, "mousedown") == 0 ||
                   strcmp(event_name, "mousepress") == 0 ||
+                  strcmp(event_name, "scrollbarpress") == 0 ||
                   strcmp(event_name, "mouseup") == 0 ||
                   strcmp(event_name, "click") == 0 ||
                   strcmp(event_name, "dblclick") == 0)) {
@@ -2010,6 +2032,24 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         mb.put("ctrlKey",  (mouse->mods & RDT_MOD_CTRL) != 0);
         mb.put("altKey",   (mouse->mods & RDT_MOD_ALT) != 0);
         mb.put("metaKey",  (mouse->mods & RDT_MOD_SUPER) != 0);
+    }
+
+    // `scrollwheel` is behavior-only, after the public WheelEvent has had its
+    // cancellation chance. Expose the same CSS-pixel deltas to package policy
+    // without giving it a mutable scroll offset or live layout geometry.
+    if (evcon && strcmp(event_name, "scrollwheel") == 0) {
+        const ScrollEvent* scroll = &evcon->event.scroll;
+        mb.put("deltaX", -(double)scroll->xoffset * 100.0);
+        mb.put("deltaY", -(double)scroll->yoffset * 100.0);
+    }
+
+    // The scrollbar part is a geometry result. The package alone maps this
+    // stable vocabulary to paging versus thumb-drag operations.
+    if (evcon && strcmp(event_name, "scrollbarpress") == 0 && target &&
+        target->is_block()) {
+        ViewBlock* block = lam::view_require_block(target);
+        mb.put("scrollbarPart", scrollpane_press_part_name(
+            scrollpane_press_part(evcon, block)));
     }
 
     // InputIntent owns an input event's data. The native RdtEvent union can
@@ -2764,6 +2804,7 @@ static bool event_is_hot_path(const char* event_name) {
            strcmp(event_name, "pointermove") == 0 ||
            strcmp(event_name, "scroll") == 0 ||
            strcmp(event_name, "wheel") == 0 ||
+           strcmp(event_name, "scrollwheel") == 0 ||
            strcmp(event_name, "dragmove") == 0 ||
            strcmp(event_name, "dragover") == 0;
 }
@@ -3650,18 +3691,49 @@ extern "C" bool radiant_dispatch_behavior_caret_key(EventContext* evcon, View* t
     return dispatch_behavior_handler(evcon, target, "caretkey", intent, nullptr);
 }
 
+// S12.1.3: document-wide policy starts at the body so a first interaction with
+// static text, a tabindex widget, or a scrollbar can install the package even
+// when the innermost hit has no behavior template of its own.
+static bool dispatch_behavior_document_policy(EventContext* evcon, View* target,
+                                              const char* event_name) {
+    DomDocument* doc = event_context_target_document(evcon);
+    DomElement* body = radiant_document_body_element(doc);
+    if (!body || !radiant_dom_package_ensure(doc, static_cast<View*>(body))) {
+        return false;
+    }
+    return dispatch_behavior_handler(evcon, target, event_name, nullptr, nullptr);
+}
+
 // Behavior-only after the cancelable mousedown and any element-local press
 // default. The body hook owns document-wide focus and selection policy without
 // letting a slider's claimed mousedown hide that policy from the ancestor.
 extern "C" bool radiant_dispatch_behavior_mouse_press(EventContext* evcon,
                                                         View* target) {
-    return dispatch_behavior_handler(evcon, target, "mousepress", nullptr, nullptr);
+    return dispatch_behavior_document_policy(evcon, target, "mousepress");
 }
 
 extern "C" bool radiant_dispatch_behavior_scroll_key(EventContext* evcon,
                                                      View* target,
                                                      const InputIntent* intent) {
     return dispatch_behavior_handler(evcon, target, "scrollkey", intent, nullptr);
+}
+
+// Wheel and scrollbar input use the same document-scoped loader as mousepress:
+// no arbitrary content hit may prevent a static document's first scroll
+// gesture from installing its package default.
+static bool dispatch_behavior_scroll_input(EventContext* evcon, View* target,
+                                           const char* event_name) {
+    return dispatch_behavior_document_policy(evcon, target, event_name);
+}
+
+extern "C" bool radiant_dispatch_behavior_scroll_wheel(EventContext* evcon,
+                                                         View* target) {
+    return dispatch_behavior_scroll_input(evcon, target, "scrollwheel");
+}
+
+extern "C" bool radiant_dispatch_behavior_scrollbar_press(EventContext* evcon,
+                                                            View* target) {
+    return dispatch_behavior_scroll_input(evcon, target, "scrollbarpress");
 }
 
 static ViewBlock* keyboard_scrollport_from_view(DomDocument* doc, View* start) {
@@ -10163,22 +10235,46 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (prevented) evcon.default_prevented = true;
             }
 
+            // A scrollbar hit has its own package-selected default. It never
+            // enters mousepress: clicking browser chrome must not clear focus
+            // or begin a document selection behind the scrollbar.
+            ViewBlock* scrollbar_press_block = nullptr;
+            if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+                evcon.target->is_block()) {
+                ViewBlock* target_block = lam::view_require_block(evcon.target);
+                if (scrollpane_press_part(&evcon, target_block) !=
+                    SCROLLBAR_PRESS_NONE) {
+                    scrollbar_press_block = target_block;
+                }
+            }
+            if (!evcon.default_prevented && scrollbar_press_block) {
+                uint64_t scroll_epoch = s_scroll_op_epoch;
+                radiant_dispatch_behavior_scrollbar_press(&evcon, evcon.target);
+                if (s_scroll_op_epoch != scroll_epoch &&
+                    scrollpane_apply_press_operation(&evcon, scrollbar_press_block,
+                                                      s_scroll_op_name)) {
+                    radiant_dispatch_simple_event(&evcon,
+                        static_cast<View*>(scrollbar_press_block),
+                        "scroll", false, false);
+                }
+            }
+
             // S12.1.3: after author cancellation and element-local defaults
             // settle, the package chooses mouse focus and selection policy.
             // Native consumes only the named requests, preserving the focus
             // state-machine and live selection geometry at this event boundary.
             uint64_t mouse_focus_epoch = radiant_mouse_focus_epoch();
             uint64_t pointer_selection_epoch = radiant_pointer_selection_epoch();
-            if (!evcon.default_prevented) {
+            if (!evcon.default_prevented && !scrollbar_press_block) {
                 radiant_dispatch_behavior_mouse_press(&evcon, evcon.target);
             }
-            if (!evcon.default_prevented &&
+            if (!evcon.default_prevented && !scrollbar_press_block &&
                 radiant_mouse_focus_epoch() != mouse_focus_epoch) {
                 update_focus_state(&evcon, radiant_mouse_focus_target(), false);
             }
 
             const char* pointer_selection_operation = nullptr;
-            if (!evcon.default_prevented &&
+            if (!evcon.default_prevented && !scrollbar_press_block &&
                 radiant_pointer_selection_epoch() != pointer_selection_epoch) {
                 pointer_selection_operation = radiant_pointer_selection_operation();
             }
@@ -11028,18 +11124,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 log_debug("wheel default suppressed by preventDefault()");
                 break;
             }
-            // build stack of views from root to target view
-            ArrayList* target_list = build_view_stack(&evcon, evcon.target);
-
-            // fire event to views in the stack (inside iframe if applicable)
-            fire_events(&evcon, target_list);
-            arraylist_free(target_list);
-
-            // Propagate scroll to iframe container (the outer iframe block handles scrolling)
-            if (evcon.iframe_container) {
-                ArrayList* parent_list = build_view_stack(&evcon, evcon.iframe_container);
-                fire_events(&evcon, parent_list);
-                arraylist_free(parent_list);
+            // S12.1.3: after author WheelEvent listeners settle, the package
+            // decides whether this physical gesture has a scrolling default.
+            // The chosen request leaves target/range/scroll-chain resolution
+            // to native layout state.
+            uint64_t scroll_epoch = s_scroll_op_epoch;
+            radiant_dispatch_behavior_scroll_wheel(&evcon, evcon.target);
+            if (s_scroll_op_epoch != scroll_epoch &&
+                strcmp(s_scroll_op_name, "wheel") == 0) {
+                apply_wheel_scroll_operation(&evcon, evcon.target);
             }
         } else {
             log_debug("No target view found at position (%.1f, %.1f)", mouse_x, mouse_y);

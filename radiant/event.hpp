@@ -498,6 +498,10 @@ DomElement* radiant_document_body_element(DomDocument* doc);
 extern "C" bool radiant_dispatch_behavior_scroll_key(struct EventContext* evcon,
                                                        View* target,
                                                        const InputIntent* intent);
+extern "C" bool radiant_dispatch_behavior_scroll_wheel(struct EventContext* evcon,
+                                                         View* target);
+extern "C" bool radiant_dispatch_behavior_scrollbar_press(struct EventContext* evcon,
+                                                            View* target);
 extern "C" void radiant_scroll_operation_request(const char* operation);
 extern "C" bool radiant_dispatch_behavior_mouse_press(struct EventContext* evcon,
                                                          View* target);
@@ -2028,8 +2032,25 @@ void scroll_apply_pending_element_scroll(ViewBlock* block);
 
 bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp);
 bool scrollpane_target(EventContext* evcon, ViewBlock* block);
+
+// Scrollbar hit classification is geometry, not input policy. The DOM package
+// maps the returned part to a named operation; native applies that operation
+// against the live pane and keeps drag motion on the native hot path.
+enum ScrollbarPressPart {
+    SCROLLBAR_PRESS_NONE = 0,
+    SCROLLBAR_PRESS_HORIZONTAL_BEFORE,
+    SCROLLBAR_PRESS_HORIZONTAL_THUMB,
+    SCROLLBAR_PRESS_HORIZONTAL_AFTER,
+    SCROLLBAR_PRESS_VERTICAL_BEFORE,
+    SCROLLBAR_PRESS_VERTICAL_THUMB,
+    SCROLLBAR_PRESS_VERTICAL_AFTER,
+};
+
+ScrollbarPressPart scrollpane_press_part(EventContext* evcon, ViewBlock* block);
+const char* scrollpane_press_part_name(ScrollbarPressPart part);
+bool scrollpane_apply_press_operation(EventContext* evcon, ViewBlock* block,
+                                      const char* operation);
 void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block);
-void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block);
 void scrollpane_drag(EventContext* evcon, ViewBlock* block);
 
 

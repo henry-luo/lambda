@@ -560,6 +560,11 @@ on caretkey(evt) { caret.navigate(~, evt) }
 on keyintent(evt) { keymap.resolve(~, evt) }
 // ESO48: runs only after keydown, caret, and activation have all declined.
 on scrollkey(evt) { scroll.navigate(~, evt) }
+// ES33: public wheel cancellation settles before this one package decision.
+on scrollwheel(evt) { scroll.wheel(evt) }
+// ES33: native reports only the scrollbar hit part; scroll.ls selects paging
+// or a thumb drag without bringing layout geometry into the package.
+on scrollbarpress(evt) { scroll.scrollbar_press(evt) }
 // ES30: Tab order belongs to the package; native sends focus events and applies
 // the scroll request after this policy handler chooses the target.
 on focuskey(evt) { focus.navigate(~, evt) }
