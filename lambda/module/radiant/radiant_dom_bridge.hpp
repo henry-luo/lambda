@@ -175,6 +175,7 @@ RADIANT_C_API Item fn_radiant_next_element_sibling(Item node_item);
 RADIANT_C_API Item fn_radiant_focus_candidates(Item root_item);
 RADIANT_C_API Item fn_radiant_focused(Item node_item);
 RADIANT_C_API Item fn_radiant_focus_set(Item node_item, Item from_keyboard_item);
+RADIANT_C_API Item fn_radiant_mouse_focus(Item node_item);
 RADIANT_C_API Item fn_radiant_scroll_into_view(Item node_item);
 RADIANT_C_API Item fn_radiant_embedding_element(Item node_item);
 RADIANT_C_API Item fn_radiant_embedded_document_root(Item iframe_item);

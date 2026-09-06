@@ -1345,6 +1345,7 @@ JitImport jit_runtime_imports[] = {
     {"array_limit_last_inplace", FPTR(array_limit_last_inplace)},
     {"fn_take_last", FPTR(fn_take_last)},
     {"array_push", FPTR(array_push)},
+    {"array_push_argument", FPTR(array_push_argument)},
     {"array_push_capture", FPTR(array_push_capture)},
     {"array_push_spread", FPTR(array_push_spread)},
     {"array_push_spread_all", FPTR(array_push_spread_all)},

@@ -634,12 +634,37 @@ void gc_heap_destroy(gc_heap_t* gc) {
 // Allocation
 // ============================================================================
 
+// Upper bound for the paced object threshold; keeps a runaway allocator from
+// deferring collection indefinitely.
+#define GC_OBJECT_HEAP_THRESHOLD_CAP ((size_t)1024 * 1024 * 1024)
+
 static void gc_heap_rebase_object_threshold(gc_heap_t* gc) {
     if (!gc) return;
     size_t live = gc->total_allocated;
     size_t next = live > SIZE_MAX / 2 ? SIZE_MAX : live * 2;
-    gc->object_threshold = next > GC_OBJECT_HEAP_THRESHOLD
-        ? next : GC_OBJECT_HEAP_THRESHOLD;
+    // Pacing: `total_allocated` counts dead-but-unswept objects too, so the
+    // live-bytes trigger is in effect "bytes since the last sweep" and fires
+    // every floor's worth of churn. A tree-building script paid a full mark
+    // nineteen times per run (Result36 gcbench2, 0 -> 19 collections, ~50% of
+    // its time in marking). Grow the threshold while the collector's share of
+    // wall time since the previous pressure collection exceeds the 10% budget
+    // (Tune20 T20-5's gate); shrink back toward 2x live when it is cheap.
+    size_t floor = GC_OBJECT_HEAP_THRESHOLD;
+    if (gc->object_pressure_last_end_ns && gc->object_pressure_last_cost_ns) {
+        uint64_t now = gc_now_nanos();
+        uint64_t mutator = now > gc->object_pressure_last_end_ns
+            ? now - gc->object_pressure_last_end_ns : 0;
+        uint64_t cost = gc->object_pressure_last_cost_ns;
+        size_t previous = gc->object_threshold;
+        if (cost * 2 > mutator) {
+            floor = previous > SIZE_MAX / 4 ? SIZE_MAX : previous * 4;   // > 50% share
+        } else if (cost * 10 > mutator) {
+            floor = previous > SIZE_MAX / 2 ? SIZE_MAX : previous * 2;   // > 10% share
+        }
+        if (floor > GC_OBJECT_HEAP_THRESHOLD_CAP) floor = GC_OBJECT_HEAP_THRESHOLD_CAP;
+        if (floor < GC_OBJECT_HEAP_THRESHOLD) floor = GC_OBJECT_HEAP_THRESHOLD;
+    }
+    gc->object_threshold = next > floor ? next : floor;
 }
 
 static void gc_heap_maybe_collect_object_pressure(gc_heap_t* gc, const char* site) {
@@ -649,8 +674,14 @@ static void gc_heap_maybe_collect_object_pressure(gc_heap_t* gc, const char* sit
     }
     log_debug("gc-object-pressure: allocated=%zu threshold=%zu site=%s",
               gc->total_allocated, gc->object_threshold, site ? site : "unknown");
+    uint64_t start = gc_now_nanos();
     gc->collect_callback();
+    uint64_t end = gc_now_nanos();
+    // Rebase before recording this cycle so the pacing compares the previous
+    // collection's cost against the mutator time it bought.
     gc_heap_rebase_object_threshold(gc);
+    gc->object_pressure_last_cost_ns = end > start ? end - start : 1;
+    gc->object_pressure_last_end_ns = end;
 }
 
 int gc_heap_maybe_force_collect(gc_heap_t* gc, const char* site) {

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "description": "T21-1e: `var n: u32 = <int lane>` admits its initializer through the inline u32 range check (ge 0 / le 4294967295 on the lane register) because the declaration site declares the initializer's VALUE_REP_INT_LANE witness to the boundary. After ca574c869 retired the MIR_reg_type probe (D2.4.1) the witness was never passed, so every such declaration boxed the lane, spilled it, and called lambda_type_check -- on crypto_sha1 that was every SHA round (3x, Result36). Neither helper may appear in these two procedures.",
+  "checks": [
+    {
+      "in_func": "_rol_#",
+      "forbid": [
+        "call\tlambda_type_check_p, lambda_type_check"
+      ],
+      "expect_seq": [
+        { "pattern": "ge\t{{r}}, %p1, 0" },
+        { "pattern": "le\t{{r}}, %p1, 4294967295" }
+      ]
+    },
+    {
+      "in_func": "_safe_add_#",
+      "forbid": [
+        "call\tlambda_type_check_p, lambda_type_check"
+      ],
+      "expect": [
+        "le\t{{r}}, {{r}}, 4294967295"
+      ]
+    }
+  ]
+}

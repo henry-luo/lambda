@@ -1,7 +1,7 @@
 # AST Interpreter — Tier-0 Execution for Lambda and LambdaJS
 
 **Date:** 2026-08-15 (rev 2 — DECIDED by user ruling; spec revision landed same day)
-**Status:** **DECIDED 2026-08-15 (user ruling); implementation substantially landed.** Current formal authority is **D8.1.1v5**: ordinary Lambda compilation retains a boxed AST interpreter as T0, `AUTO` may promote eligible hot definitions to boxed MIR satellites, and explicit `jit` retains eager whole-module MIR. General loop OSR and the remaining reference-parser fragment/span migration are still open. This reverses **U26**, which remains struck/superseded in `vibe/Lambda_Design_Unified_AST.md` §12; the restriction in `impl/Lambda_Impl_Tune_Ast (retired).md` is lifted. Ledger **AI1–AI22** remains the design record; **D8.1.1v5** wins on disagreement.
+**Status:** **DECIDED 2026-08-15 (user ruling); implementation substantially landed; satellite admission widened 2026-09-06 (D8.1.1v6, Tune21 T21-3).** Current formal authority is **D8.1.1v6**: ordinary Lambda compilation retains a boxed AST interpreter as T0, `AUTO` may promote eligible hot definitions to boxed MIR satellites, and explicit `jit` retains eager whole-module MIR. General loop OSR and the remaining reference-parser fragment/span migration are still open. This reverses **U26**, which remains struck/superseded in `vibe/Lambda_Design_Unified_AST.md` §12; the restriction in `impl/Lambda_Impl_Tune_Ast (retired).md` is lifted. Ledger **AI1–AI22** remains the design record; **D8.1.1v5** wins on disagreement.
 **Design authority:** `doc/Lambda_Formal_Design.md` — **D8.1.1v2** (landed; §15), D1.3/D1.6/D1.7, D5.1–D5.4, D6.1–D6.2, D7.2, D8.2–D8.6, DI14; `doc/Lambda_Formal_Semantics.md` — S1.6/SI3, S3.1, S5.5.1, S7.4/S7.7/S7.11.4, S9.1, S11.2.1, S15.3.
 **Working design:** `vibe/Lambda_Design_Unified_AST.md` (§12/U26 — amended by this doc), `vibe/Lambda_Repl.md`, `vibe/Lambda_Design_MIR_Cache.md` + `_L3`, `vibe/Lambda_Design_Stack_Rooting.md`, `vibe/Lambda_Design_Compiling_Return_Value.md`, `vibe/Lambda_Design_Stack_Frame.md`.
 **Scope:** Stage 1 = Lambda core (§3–§8, §10–§11). Stage 2 = LambdaJS (§9). C2MIR is untouched per D1.6 and CLAUDE rule 14.
@@ -205,6 +205,42 @@ The promotion unit is a **satellite MIR module**: one Lambda function + its `_b`
 | `MIR_link` with gen interface (whole-module codegen) | `MIR_link` per satellite generates just the two functions. Neither known failure of MIR-level laziness applies: `LAMBDA_LAZY_MIR`'s thunk-lifetime hazard (we link on demand with the Script alive by construction), and the measured rejection of `MIR_set_lazy_gen_interface` on the JS side (**≈80× costlier per-function on-demand gen, ≈O(n²) at opt≥2** — JS_15) — that interface re-enters the generator inside a monolithic whole-module context, while a satellite bounds generation scope to its own two-function module. Per-satellite compile latency is still a P2 gate measurement |
 
 The transient `MirTranspiler` session state (var scopes, loop stack, TCO context, …) is already save/restored around each `transpile_func_def`; a satellite session is that machinery pointed at one function. The tables freed at end-of-lowering today (`local_funcs`, `import_cache`, `callsite_info`, `global_vars`) are exactly the ones AI10 promotes to Script lifetime. `ast_index_destroy` moves from pre-handoff to Script teardown so ID-keyed side tables remain valid for late lowering (AIO4 tracks the memory cost).
+
+#### 5.2.1 Admission widening — D8.1.1v6 (2026-09-06, T21-3)
+
+The v5 gate pinned every definition with a plain `any` parameter and every
+body containing a local `var` declaration or a rebinding assignment, on the
+argument that the satellite's raw-carrier specialization could mis-decode an
+aggregate and that procedural writes need the T0 frame's replacement channel.
+Neither holds for those two shapes: a satellite is entered only through its
+boxed `_b` wrapper, an `any` parameter has no raw carrier, a lane the body
+alone infers is guarded by the wrapper's exact shape test with the boxed slow
+body behind it, and a promoted body owns its whole activation (its locals are
+MIR registers with the eager compiler's GC root slots). The measured effect
+of the pin was that the shipped auto tier interpreted the hot loops of most
+untyped scripts (Tune21 §T21-3: hyphen 64 ms vs 3.3 JIT, sum 155 vs 0.82,
+tak 53 vs 0.13). Still pinned, unchanged: aggregate/structured parameter
+contracts, `var` parameters, indexed/member stores, nested definitions,
+indirect Lambda calls, object-field identifiers, match expressions.
+
+Two invariants the widening exposed (both pre-existing, both fixed):
+
+1. A satellite resolves literals through the T0 module *state*, whose const
+   image is bound at module init to the const list's buffer of that moment.
+   T0 never interns literals (it reads AST pools), so the satellite lowering
+   is what appends them, and the append can reallocate the list. The state
+   must be rebound after every satellite compile; an imported module's first
+   promoted function (pdf `path.ls` `apply_op`) otherwise compared against
+   garbage string pointers.
+2. A dynamic-call argument list must be built by verbatim positional append.
+   `array_push` splices a content list into its receiver (S16.7), so a
+   `split()` result passed as one argument reached `fn_call_into` as several
+   (`expects 4 arguments, got 5`). `array_push_argument` is that appender;
+   the eager JIT's own >3-argument dynamic calls had the same latent defect.
+
+Gates: the auto-tier differential over all 751 `test/lambda` scripts is
+exact against the pre-widening binary; forced `jit`/`interp` sweeps
+unchanged; `make test-lambda-baseline` green under the unset AUTO default.
 
 ### 5.3 Entry swap and consistency
 

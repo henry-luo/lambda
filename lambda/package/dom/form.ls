@@ -13,6 +13,7 @@ import caret: lambda.package.dom.caret
 import keymap: lambda.package.dom.keymap
 import scroll: lambda.package.dom.scroll
 import focus: lambda.package.dom.focus
+import mouse: lambda.package.dom.mouse
 import dom_edit: lambda.package.dom.dom_edit
 import commands: lambda.package.dom.commands
 import submit: lambda.package.dom.submit
@@ -542,6 +543,10 @@ on resetactivation(evt) { submit.reset(tree.form_of(~)) }
 // Composition events bubble from the focused control, so the ancestor walk
 // reaches <body> and this template claims them there.
 view <body> state ime_composing, context_menu_open {}
+// The ordinary mousedown has already settled author cancellation and any
+// element-local press behavior (such as range capture). This hook chooses the
+// remaining document-wide focus and selection default action.
+on mousepress(evt) { mouse.press(~, evt) }
 // S12.1.3: clipboard/select-all key policy is a cancelable package default;
 // the native waist owns only event, selection/edit, and clipboard mechanism.
 on keydown(evt) { keymap.run_shortcut(~, evt) }
@@ -555,6 +560,11 @@ on caretkey(evt) { caret.navigate(~, evt) }
 on keyintent(evt) { keymap.resolve(~, evt) }
 // ESO48: runs only after keydown, caret, and activation have all declined.
 on scrollkey(evt) { scroll.navigate(~, evt) }
+// ES33: public wheel cancellation settles before this one package decision.
+on scrollwheel(evt) { scroll.wheel(evt) }
+// ES33: native reports only the scrollbar hit part; scroll.ls selects paging
+// or a thumb drag without bringing layout geometry into the package.
+on scrollbarpress(evt) { scroll.scrollbar_press(evt) }
 // ES30: Tab order belongs to the package; native sends focus events and applies
 // the scroll request after this policy handler chooses the target.
 on focuskey(evt) { focus.navigate(~, evt) }

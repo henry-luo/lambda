@@ -868,7 +868,17 @@ static inline int64_t lane_saturate(int64_t sign_source) {
     return sign_source >= 0 ? INT_LANE_INF : INT_LANE_NEG_INF;
 }
 
+// The lane null (ItemNull's bits, 2^56) is out of band, so every arithmetic
+// fast path hands it to these slow arms; arithmetic with an absent operand
+// is absent (S7), as the div/mod classifier below already rules. Without
+// this the null was saturated to inf: `fill(3, 5)[10] + 1` printed `inf` on
+// the JIT and `null` on the interpreter.
+static inline bool lane_has_null(int64_t a, int64_t b) {
+    return a == INT_LANE_NULL || b == INT_LANE_NULL;
+}
+
 int64_t lambda_int_lane_add_slow(int64_t a, int64_t b) {
+    if (lane_has_null(a, b)) return INT_LANE_NULL;
     if (lane_is_nan(a) || lane_is_nan(b)) return INT_LANE_NAN;
     if (lane_is_inf(a) && lane_is_inf(b)) {
         // inf + inf = inf; inf + (-inf) = nan -- IEEE's indeterminate form.
@@ -880,6 +890,7 @@ int64_t lambda_int_lane_add_slow(int64_t a, int64_t b) {
 }
 
 int64_t lambda_int_lane_sub_slow(int64_t a, int64_t b) {
+    if (lane_has_null(a, b)) return INT_LANE_NULL;
     if (lane_is_nan(a) || lane_is_nan(b)) return INT_LANE_NAN;
     if (lane_is_inf(a) && lane_is_inf(b)) {
         // inf - inf = nan; inf - (-inf) = inf.
@@ -891,6 +902,7 @@ int64_t lambda_int_lane_sub_slow(int64_t a, int64_t b) {
 }
 
 int64_t lambda_int_lane_mul_slow(int64_t a, int64_t b) {
+    if (lane_has_null(a, b)) return INT_LANE_NULL;
     if (lane_is_nan(a) || lane_is_nan(b)) return INT_LANE_NAN;
     if (lane_is_inf(a) || lane_is_inf(b)) {
         // inf * 0 = nan -- IEEE's other indeterminate form.

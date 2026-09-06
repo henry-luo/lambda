@@ -327,53 +327,99 @@ bool scrollpane_target(EventContext* evcon, ViewBlock* block) {
     return false;
 }
 
-void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
-    MouseButtonEvent *event = &evcon->event.mouse_button;
+ScrollbarPressPart scrollpane_press_part(EventContext* evcon, ViewBlock* block) {
+    if (!evcon || !block || !block->scroller || !block->scroll()->pane) {
+        return SCROLLBAR_PRESS_NONE;
+    }
     ScrollPane* sp = block->scroll()->pane;
     DocState* state = scrollpane_doc_state(evcon, block);
     ScrollInteractionState interaction;
     scroll_state_get_interaction_for_view(state, (View*)block, &interaction);
-
-    float h = 0.0f, v = 0.0f;
-    scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, NULL, NULL);
     ScrollHandleGeometry geometry = scrollpane_handle_geometry(
         sp, state, static_cast<View*>(block), block->width, block->height,
         block->content_width, block->content_height);
 
     if (interaction.h_hovered) {
-        if (evcon->offset_x < geometry.h_x) {
-            float next_h = h - block->width * 0.85f;  // scroll 85% of the block width
-            scroll_state_set_position_for_view(state, (View*)block, sp, next_h, v, false);
-            evcon->need_repaint = true;
+        if (evcon->offset_x < geometry.h_x) return SCROLLBAR_PRESS_HORIZONTAL_BEFORE;
+        if (evcon->offset_x > geometry.h_x + geometry.h_width) {
+            return SCROLLBAR_PRESS_HORIZONTAL_AFTER;
         }
-        else if (evcon->offset_x > geometry.h_x + geometry.h_width) { // page right
-            float next_h = h + block->width * 0.85f;  // scroll 85% of the block width
-            scroll_state_set_position_for_view(state, (View*)block, sp, next_h, v, false);
-            evcon->need_repaint = true;
-        }
-        else {
-            scroll_state_begin_drag_for_view(state, (View*)block, sp, true, event->x, event->y, h, v);
-            DragTransitionArgs drag_args = { .target = (View*)block, .dragging = true };
-            drag_transition(state, DRAG_TRANSITION_SET_STATE, &drag_args);
-        }
+        return SCROLLBAR_PRESS_HORIZONTAL_THUMB;
     }
-    else if (interaction.v_hovered) {
-        if (evcon->offset_y < geometry.v_y) { // page up
-            float next_v = v - block->height * 0.85f;  // scroll 85% of the block height
-            scroll_state_set_position_for_view(state, (View*)block, sp, h, next_v, false);
-            evcon->need_repaint = true;
+    if (interaction.v_hovered) {
+        if (evcon->offset_y < geometry.v_y) return SCROLLBAR_PRESS_VERTICAL_BEFORE;
+        if (evcon->offset_y > geometry.v_y + geometry.v_height) {
+            return SCROLLBAR_PRESS_VERTICAL_AFTER;
         }
-        else if (evcon->offset_y > geometry.v_y + geometry.v_height) { // page down
-            float next_v = v + block->height * 0.85f;  // scroll 85% of the block height
-            scroll_state_set_position_for_view(state, (View*)block, sp, h, next_v, false);
-            evcon->need_repaint = true;
-        }
-        else {
-            scroll_state_begin_drag_for_view(state, (View*)block, sp, false, event->x, event->y, h, v);
-            DragTransitionArgs drag_args = { .target = (View*)block, .dragging = true };
-            drag_transition(state, DRAG_TRANSITION_SET_STATE, &drag_args);
-        }
+        return SCROLLBAR_PRESS_VERTICAL_THUMB;
     }
+    return SCROLLBAR_PRESS_NONE;
+}
+
+const char* scrollpane_press_part_name(ScrollbarPressPart part) {
+    switch (part) {
+        case SCROLLBAR_PRESS_HORIZONTAL_BEFORE: return "horizontalBefore";
+        case SCROLLBAR_PRESS_HORIZONTAL_THUMB: return "horizontalThumb";
+        case SCROLLBAR_PRESS_HORIZONTAL_AFTER: return "horizontalAfter";
+        case SCROLLBAR_PRESS_VERTICAL_BEFORE: return "verticalBefore";
+        case SCROLLBAR_PRESS_VERTICAL_THUMB: return "verticalThumb";
+        case SCROLLBAR_PRESS_VERTICAL_AFTER: return "verticalAfter";
+        default: return "none";
+    }
+}
+
+bool scrollpane_apply_press_operation(EventContext* evcon, ViewBlock* block,
+                                      const char* operation) {
+    if (!evcon || !block || !operation || !block->scroller ||
+        !block->scroll()->pane) {
+        return false;
+    }
+
+    MouseButtonEvent* event = &evcon->event.mouse_button;
+    ScrollPane* sp = block->scroll()->pane;
+    DocState* state = scrollpane_doc_state(evcon, block);
+    ScrollbarPressPart part = scrollpane_press_part(evcon, block);
+    float h = 0.0f, v = 0.0f;
+    scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, NULL, NULL);
+
+    // The operation name is package policy; this routine only translates the
+    // current geometric part into the associated range/drag transition.
+    if (strcmp(operation, "pageLeft") == 0 &&
+        part == SCROLLBAR_PRESS_HORIZONTAL_BEFORE) {
+        float next_h = h - block->width * 0.85f;
+        scroll_state_set_position_for_view(state, (View*)block, sp, next_h, v, false);
+    } else if (strcmp(operation, "pageRight") == 0 &&
+               part == SCROLLBAR_PRESS_HORIZONTAL_AFTER) {
+        float next_h = h + block->width * 0.85f;
+        scroll_state_set_position_for_view(state, (View*)block, sp, next_h, v, false);
+    } else if (strcmp(operation, "pageBackward") == 0 &&
+               part == SCROLLBAR_PRESS_VERTICAL_BEFORE) {
+        float next_v = v - block->height * 0.85f;
+        scroll_state_set_position_for_view(state, (View*)block, sp, h, next_v, false);
+    } else if (strcmp(operation, "pageForward") == 0 &&
+               part == SCROLLBAR_PRESS_VERTICAL_AFTER) {
+        float next_v = v + block->height * 0.85f;
+        scroll_state_set_position_for_view(state, (View*)block, sp, h, next_v, false);
+    } else if (strcmp(operation, "drag") == 0 &&
+               (part == SCROLLBAR_PRESS_HORIZONTAL_THUMB ||
+                part == SCROLLBAR_PRESS_VERTICAL_THUMB)) {
+        bool horizontal = part == SCROLLBAR_PRESS_HORIZONTAL_THUMB;
+        scroll_state_begin_drag_for_view(state, (View*)block, sp, horizontal,
+                                         event->x, event->y, h, v);
+        DragTransitionArgs drag_args = { .target = (View*)block, .dragging = true };
+        drag_transition(state, DRAG_TRANSITION_SET_STATE, &drag_args);
+        return false;
+    } else {
+        return false;
+    }
+
+    float next_h = h;
+    float next_v = v;
+    scroll_state_get_position_for_view(state, (View*)block, sp,
+                                       &next_h, &next_v, NULL, NULL);
+    bool changed = next_h != h || next_v != v;
+    if (changed) evcon->need_repaint = true;
+    return changed;
 }
 
 void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block) {

@@ -240,6 +240,27 @@ Item pn_splice_cow(Item owner, Item start_item, Item count_item) {
     return pn_splice(replacement, start_item, count_item);
 }
 
+// Positional call arguments are appended verbatim. array_push splices a
+// content list into its receiver (S16.7 content semantics) and list_push also
+// drops nulls, so a dynamic-call argument that happened to be a content list
+// (a split() result) reached fn_call_into as several arguments ("expects 4
+// arguments, got 5") once satellites routed every cross-function call through
+// the dynamic ABI. The builder's array() has no native lane; keep the fallback
+// for any caller that hands one in.
+void array_push_argument(Array* arr, Item item) {
+    if (!arr) return;
+    if (array_has_native_lane(arr)) {
+        array_push(arr, item);
+        return;
+    }
+    if (arr->length >= arr->capacity) {
+        int64_t old_capacity = arr->capacity;
+        expand_list((List*)arr, nullptr);
+        if (arr->capacity <= old_capacity) return;
+    }
+    arr->items[arr->length++] = item;
+}
+
 void list_push(List* list, Item item) {
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_NULL) return;

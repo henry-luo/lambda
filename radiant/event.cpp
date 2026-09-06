@@ -1401,20 +1401,7 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
     // fire as inline view first
     fire_inline_event(evcon, lam::view_require_element(block));
     if (block->scroller && block->scroll_mut()->pane) {
-        if (evcon->event.type == RDT_EVENT_SCROLL) {
-            if (scrollpane_scroll(evcon, block, block->scroll()->pane)) {
-                // Native wheel scrolling mutates the pane outside JS; dispatch
-                // the non-bubbling element scroll event that virtualizers observe.
-                radiant_dispatch_simple_event(evcon, static_cast<View*>(block),
-                                              "scroll", false, false);
-            }
-        }
-        else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN &&
-            scroll_state_is_hovered_for_view(event_view_owner_state(static_cast<View*>(block)),
-                                             static_cast<View*>(block))) {
-            scrollpane_mouse_down(evcon, block);
-        }
-        else if (evcon->event.type == RDT_EVENT_MOUSE_UP) {
+        if (evcon->event.type == RDT_EVENT_MOUSE_UP) {
             scrollpane_mouse_up(evcon, block);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_DRAG &&
@@ -1423,6 +1410,40 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
             scrollpane_drag(evcon, block);
         }
     }
+}
+
+// The package selects `wheel`; this helper retains only the live pane walk,
+// clamped mutation, non-bubbling scroll notification, and repaint mechanism.
+static bool apply_wheel_scroll_to_stack(EventContext* evcon, ArrayList* stack) {
+    if (!evcon || !stack) return false;
+    bool changed = false;
+    for (int i = 0; i < stack->length; i++) {
+        View* view = static_cast<View*>(stack->data[i]);
+        if (!view || !view->is_block()) continue;
+        ViewBlock* block = lam::view_require_block(view);
+        if (!block->scroller || !block->scroll()->pane) continue;
+        if (scrollpane_scroll(evcon, block, block->scroll()->pane)) {
+            radiant_dispatch_simple_event(evcon, static_cast<View*>(block),
+                                          "scroll", false, false);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+static bool apply_wheel_scroll_operation(EventContext* evcon, View* target) {
+    if (!evcon || !target) return false;
+    ArrayList* target_list = build_view_stack(evcon, target);
+    bool changed = apply_wheel_scroll_to_stack(evcon, target_list);
+    arraylist_free(target_list);
+
+    // An embedded document's wheel chain continues at its iframe container.
+    if (evcon->iframe_container) {
+        ArrayList* parent_list = build_view_stack(evcon, evcon->iframe_container);
+        if (apply_wheel_scroll_to_stack(evcon, parent_list)) changed = true;
+        arraylist_free(parent_list);
+    }
+    return changed;
 }
 
 void fire_events(EventContext* evcon, ArrayList* target_list) {
@@ -1823,7 +1844,8 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
                                    Item existing_event = ItemNull) {
     RootFrame roots(1);
     Rooted<Item> event_root(roots, existing_event);
-    if (!radiant_dom_event_is(event_root.get())) {
+    bool created_event = !radiant_dom_event_is(event_root.get());
+    if (created_event) {
         event_root.set(radiant_dom_event_create(event_name ? event_name : "",
                                                 event_record_bubbles(event_name),
                                                 event_record_is_cancelable(event_name),
@@ -1837,6 +1859,14 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     MarkBuilder builder(doc->input);
     DomEventPayloadBuilder mb(event_root.get());
     mb.put("type", event_name);
+    // Behavior-only hooks have no preceding JS dispatch to set their target.
+    // Seed it on a freshly created record so package policy sees the real hit
+    // target in Lambda-only and JS-backed documents alike.
+    if (created_event && target) {
+        Item target_item = radiant_dom_wrap_node(target);
+        mb.put("target", target_item);
+        mb.put("srcElement", target_item);
+    }
 
     // Emitted outside the intent-type guard: an option commit carries no edit
     // intent, only the index the geometry resolved.
@@ -1956,6 +1986,41 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         mb.put("y", (double)evcon->event.mouse_button.y);
     }
 
+    // Package mouse policy needs the same standard MouseEvent decision inputs
+    // in a Lambda-only document that a JS-backed event already exposes.
+    if (evcon && (strcmp(event_name, "mousedown") == 0 ||
+                  strcmp(event_name, "mousepress") == 0 ||
+                  strcmp(event_name, "scrollbarpress") == 0 ||
+                  strcmp(event_name, "mouseup") == 0 ||
+                  strcmp(event_name, "click") == 0 ||
+                  strcmp(event_name, "dblclick") == 0)) {
+        const MouseButtonEvent* mouse = &evcon->event.mouse_button;
+        mb.put("button", (int64_t)mouse->button);
+        mb.put("detail", (int64_t)mouse->clicks);
+        mb.put("shiftKey", (mouse->mods & RDT_MOD_SHIFT) != 0);
+        mb.put("ctrlKey",  (mouse->mods & RDT_MOD_CTRL) != 0);
+        mb.put("altKey",   (mouse->mods & RDT_MOD_ALT) != 0);
+        mb.put("metaKey",  (mouse->mods & RDT_MOD_SUPER) != 0);
+    }
+
+    // `scrollwheel` is behavior-only, after the public WheelEvent has had its
+    // cancellation chance. Expose the same CSS-pixel deltas to package policy
+    // without giving it a mutable scroll offset or live layout geometry.
+    if (evcon && strcmp(event_name, "scrollwheel") == 0) {
+        const ScrollEvent* scroll = &evcon->event.scroll;
+        mb.put("deltaX", -(double)scroll->xoffset * 100.0);
+        mb.put("deltaY", -(double)scroll->yoffset * 100.0);
+    }
+
+    // The scrollbar part is a geometry result. The package alone maps this
+    // stable vocabulary to paging versus thumb-drag operations.
+    if (evcon && strcmp(event_name, "scrollbarpress") == 0 && target &&
+        target->is_block()) {
+        ViewBlock* block = lam::view_require_block(target);
+        mb.put("scrollbarPart", scrollpane_press_part_name(
+            scrollpane_press_part(evcon, block)));
+    }
+
     // InputIntent owns an input event's data. The native RdtEvent union can
     // still hold the preceding key code when a deletion emits `input`, so it
     // must not be decoded as a character.
@@ -2041,7 +2106,8 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
     bool event_uses_hit_source_pos = evcon &&
         (strcmp(event_name, "mousedown") == 0 || strcmp(event_name, "mousemove") == 0 ||
-         strcmp(event_name, "mouseup") == 0 || strcmp(event_name, "click") == 0);
+         strcmp(event_name, "mouseup") == 0 || strcmp(event_name, "click") == 0 ||
+         strcmp(event_name, "mousepress") == 0);
 
     // R7 step 3b — attach SourcePos / SourceSelection for editor handlers.
     // The editor's `mod_source_pos` shapes are:
@@ -2707,6 +2773,7 @@ static bool event_is_hot_path(const char* event_name) {
            strcmp(event_name, "pointermove") == 0 ||
            strcmp(event_name, "scroll") == 0 ||
            strcmp(event_name, "wheel") == 0 ||
+           strcmp(event_name, "scrollwheel") == 0 ||
            strcmp(event_name, "dragmove") == 0 ||
            strcmp(event_name, "dragover") == 0;
 }
@@ -3416,12 +3483,28 @@ static __thread uint64_t s_caret_op_epoch = 0;
 static __thread char s_caret_op_name[32];
 static __thread bool s_caret_op_extend = false;
 
+// Mousedown follows the same request/resolve shape as caret navigation: the
+// package chooses a focus target and selection operation, then native applies
+// them at the event boundary where it can preserve focus/selection ordering.
+static __thread uint64_t s_mouse_focus_epoch = 0;
+static __thread View* s_mouse_focus_target = nullptr;
+static __thread uint64_t s_pointer_selection_epoch = 0;
+static __thread char s_pointer_selection_operation[32];
+
 // ESO48 follows the same request/resolve seam as caret navigation: policy
 // names an operation in Lambda, then native resolves the current scrollport.
 static __thread uint64_t s_scroll_op_epoch = 0;
 static __thread char s_scroll_op_name[32];
 
 extern "C" uint64_t radiant_caret_operation_epoch(void) { return s_caret_op_epoch; }
+extern "C" uint64_t radiant_mouse_focus_epoch(void) { return s_mouse_focus_epoch; }
+extern "C" View* radiant_mouse_focus_target(void) { return s_mouse_focus_target; }
+extern "C" uint64_t radiant_pointer_selection_epoch(void) {
+    return s_pointer_selection_epoch;
+}
+extern "C" const char* radiant_pointer_selection_operation(void) {
+    return s_pointer_selection_operation;
+}
 
 // F11: the key-intent epoch, same pattern as the caret one.
 static __thread uint64_t s_key_intent_epoch = 0;
@@ -3463,6 +3546,18 @@ extern "C" void radiant_caret_operation_request(const char* operation, bool exte
     snprintf(s_caret_op_name, sizeof(s_caret_op_name), "%s", operation);
     s_caret_op_extend = extend;
     s_caret_op_epoch++;
+}
+
+extern "C" void radiant_mouse_focus_request(View* target) {
+    s_mouse_focus_target = target;
+    s_mouse_focus_epoch++;
+}
+
+extern "C" void radiant_pointer_selection_request(const char* operation) {
+    if (!operation) return;
+    snprintf(s_pointer_selection_operation, sizeof(s_pointer_selection_operation), "%s",
+             operation);
+    s_pointer_selection_epoch++;
 }
 
 extern "C" void radiant_scroll_operation_request(const char* operation) {
@@ -3576,10 +3671,49 @@ extern "C" bool radiant_dispatch_behavior_caret_key(EventContext* evcon, View* t
     return dispatch_behavior_handler(evcon, target, "caretkey", intent, nullptr);
 }
 
+// S12.1.3: document-wide policy starts at the body so a first interaction with
+// static text, a tabindex widget, or a scrollbar can install the package even
+// when the innermost hit has no behavior template of its own.
+static bool dispatch_behavior_document_policy(EventContext* evcon, View* target,
+                                              const char* event_name) {
+    DomDocument* doc = event_context_target_document(evcon);
+    DomElement* body = radiant_document_body_element(doc);
+    if (!body || !radiant_dom_package_ensure(doc, static_cast<View*>(body))) {
+        return false;
+    }
+    return dispatch_behavior_handler(evcon, target, event_name, nullptr, nullptr);
+}
+
+// Behavior-only after the cancelable mousedown and any element-local press
+// default. The body hook owns document-wide focus and selection policy without
+// letting a slider's claimed mousedown hide that policy from the ancestor.
+extern "C" bool radiant_dispatch_behavior_mouse_press(EventContext* evcon,
+                                                        View* target) {
+    return dispatch_behavior_document_policy(evcon, target, "mousepress");
+}
+
 extern "C" bool radiant_dispatch_behavior_scroll_key(EventContext* evcon,
                                                      View* target,
                                                      const InputIntent* intent) {
     return dispatch_behavior_handler(evcon, target, "scrollkey", intent, nullptr);
+}
+
+// Wheel and scrollbar input use the same document-scoped loader as mousepress:
+// no arbitrary content hit may prevent a static document's first scroll
+// gesture from installing its package default.
+static bool dispatch_behavior_scroll_input(EventContext* evcon, View* target,
+                                           const char* event_name) {
+    return dispatch_behavior_document_policy(evcon, target, event_name);
+}
+
+extern "C" bool radiant_dispatch_behavior_scroll_wheel(EventContext* evcon,
+                                                         View* target) {
+    return dispatch_behavior_scroll_input(evcon, target, "scrollwheel");
+}
+
+extern "C" bool radiant_dispatch_behavior_scrollbar_press(EventContext* evcon,
+                                                            View* target) {
+    return dispatch_behavior_scroll_input(evcon, target, "scrollbarpress");
 }
 
 static ViewBlock* keyboard_scrollport_from_view(DomDocument* doc, View* start) {
@@ -8278,23 +8412,6 @@ bool is_view_programmatically_focusable(View* view) {
     return elem->get_attribute("tabindex") != NULL;
 }
 
-static View* mouse_focus_target(View* hit) {
-    for (View* view = hit; view; view = view->parent) {
-        if (is_view_programmatically_focusable(view)) return view;
-    }
-    // Generated widget internals can be hit-tested through a visual child
-    // whose View parent is not its DOM parent; follow the DOM chain so a
-    // tabindex handle still receives the browser's mouse-focus default.
-    for (DomNode* node = hit ? static_cast<DomNode*>(hit) : nullptr;
-         node; node = node->parent) {
-        if (node->is_element() &&
-            is_view_programmatically_focusable(static_cast<View*>(node))) {
-            return static_cast<View*>(node);
-        }
-    }
-    return nullptr;
-}
-
 static bool prepare_previous_focus_blur(EventContext* evcon,
                                         DocState* state,
                                         View* prev_focus) {
@@ -9948,20 +10065,62 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (prevented) evcon.default_prevented = true;
             }
 
-            // Update focus if target is focusable (mouse-triggered focus).
-            // A canceled mousedown suppresses the browser focus default action;
-            // toolbar controls use this to keep text-control selection active.
-            // Hit testing commonly lands on a button's text child; browser
-            // mouse focus belongs to the nearest focusable ancestor instead.
-            View* mouse_focus = mouse_focus_target(evcon.target);
-            if (!evcon.default_prevented && mouse_focus) {
-                update_focus_state(&evcon, mouse_focus, false);  // from_keyboard=false
-            } else if (!evcon.default_prevented) {
-                DomElement* rich_host = rich_editable_from_target(evcon.target);
-                if (rich_host && is_view_focusable(static_cast<View*>(rich_host))) {
-                    update_focus_state(&evcon, static_cast<View*>(rich_host), false);
+            // A scrollbar hit has its own package-selected default. It never
+            // enters mousepress: clicking browser chrome must not clear focus
+            // or begin a document selection behind the scrollbar.
+            ViewBlock* scrollbar_press_block = nullptr;
+            if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+                evcon.target->is_block()) {
+                ViewBlock* target_block = lam::view_require_block(evcon.target);
+                if (scrollpane_press_part(&evcon, target_block) !=
+                    SCROLLBAR_PRESS_NONE) {
+                    scrollbar_press_block = target_block;
                 }
             }
+            if (!evcon.default_prevented && scrollbar_press_block) {
+                uint64_t scroll_epoch = s_scroll_op_epoch;
+                radiant_dispatch_behavior_scrollbar_press(&evcon, evcon.target);
+                if (s_scroll_op_epoch != scroll_epoch &&
+                    scrollpane_apply_press_operation(&evcon, scrollbar_press_block,
+                                                      s_scroll_op_name)) {
+                    radiant_dispatch_simple_event(&evcon,
+                        static_cast<View*>(scrollbar_press_block),
+                        "scroll", false, false);
+                }
+            }
+
+            // S12.1.3: after author cancellation and element-local defaults
+            // settle, the package chooses mouse focus and selection policy.
+            // Native consumes only the named requests, preserving the focus
+            // state-machine and live selection geometry at this event boundary.
+            uint64_t mouse_focus_epoch = radiant_mouse_focus_epoch();
+            uint64_t pointer_selection_epoch = radiant_pointer_selection_epoch();
+            if (!evcon.default_prevented && !scrollbar_press_block) {
+                radiant_dispatch_behavior_mouse_press(&evcon, evcon.target);
+            }
+            if (!evcon.default_prevented && !scrollbar_press_block &&
+                radiant_mouse_focus_epoch() != mouse_focus_epoch) {
+                update_focus_state(&evcon, radiant_mouse_focus_target(), false);
+            }
+
+            const char* pointer_selection_operation = nullptr;
+            if (!evcon.default_prevented && !scrollbar_press_block &&
+                radiant_pointer_selection_epoch() != pointer_selection_epoch) {
+                pointer_selection_operation = radiant_pointer_selection_operation();
+            }
+            bool pointer_selection_start = pointer_selection_operation &&
+                strcmp(pointer_selection_operation, "select") == 0;
+            bool pointer_selection_extend = pointer_selection_operation &&
+                strcmp(pointer_selection_operation, "extend") == 0;
+            bool pointer_selection_word = pointer_selection_operation &&
+                strcmp(pointer_selection_operation, "selectWord") == 0;
+            bool pointer_selection_line = pointer_selection_operation &&
+                strcmp(pointer_selection_operation, "selectLine") == 0;
+            bool pointer_selection_all = pointer_selection_operation &&
+                strcmp(pointer_selection_operation, "selectAll") == 0;
+            bool pointer_selection_requested = pointer_selection_start ||
+                pointer_selection_extend || pointer_selection_word ||
+                pointer_selection_line || pointer_selection_all;
 
             // A click that lands in an empty / non-text editable element (an
             // empty <li>, an empty <p>, a block holding only an image) resolves
@@ -9969,7 +10128,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // so the element is focusable/typable, before the text-snapping and
             // host-last-text fallbacks below (which would jump to a neighbour).
             bool placed_element_caret = false;
-            if (!evcon.default_prevented) {
+            if (pointer_selection_start && !evcon.default_prevented) {
                 DomDocument* mdoc = event_context_target_document(&evcon);
                 View* mroot = (mdoc && mdoc->view_tree)
                     ? static_cast<View*>(mdoc->view_tree->root) : nullptr;
@@ -9993,7 +10152,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
             }
 
-            if (!placed_element_caret && !evcon.default_prevented &&
+            if (pointer_selection_start && !placed_element_caret && !evcon.default_prevented &&
                 evcon.target->view_type != RDT_VIEW_TEXT &&
                 !is_view_focusable(evcon.target)) {
                 DomElement* rich_host = rich_editable_from_target(evcon.target);
@@ -10053,7 +10212,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Handle click in text - position caret or start selection.
             // This is a mousedown default action, so a canceled mousedown must
             // leave the existing text-control selection intact.
-            if (!placed_element_caret &&
+            if (pointer_selection_requested && !placed_element_caret &&
                 !evcon.default_prevented && evcon.target->view_type == RDT_VIEW_TEXT &&
                 evcon.target_text_rect && text_target_allows_caret(evcon.target)) {
                 ViewText* text = lam::view_require_text(evcon.target);
@@ -10083,9 +10242,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 log_debug("CLICK IN TEXT at offset %d (target=%p)", char_offset, evcon.target);
 
-                bool mouse_down_in_selection = btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
-                    event->mouse_button.clicks == 1 &&
-                    !(event->mouse_button.mods & RDT_MOD_SHIFT) &&
+                bool mouse_down_in_selection = pointer_selection_start &&
                     text_point_inside_existing_selection(state, evcon.target, char_offset);
 
                 if (mouse_down_in_selection) {
@@ -10095,25 +10252,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
                 } else {
 
-                bool shift_extending = (event->mouse_button.mods & RDT_MOD_SHIFT) &&
+                bool shift_extending = pointer_selection_extend &&
                     selection_has_projection(state);
                 if (!shift_extending) {
                     // Set caret at clicked position for a fresh placement. A
                     // shift-click must preserve the existing collapsed
                     // selection anchor so state_store_selection_extend_to_offset() can use it.
-                    View* focused = focus_get(state);
-                    if (focused && focused->is_element()) {
-                        DomElement* focused_elem = lam::dom_require_element(focused);
-                        DomNode* target_node = static_cast<DomNode*>(evcon.target);
-                        DomNode* focused_node = static_cast<DomNode*>(focused);
-                        if (tc_is_text_control(focused_elem) &&
-                            !dom_node_is_descendant_of(target_node, focused_node)) {
-                            // plain document text clicks must transfer caret ownership
-                            // away from the focused text control before StateStore
-                            // refresh preserves that control's selection shadow.
-                            update_focus_state(&evcon, NULL, false);
-                        }
-                    }
                     collapse_active_text_control_selection_for_rich_target(state, evcon.target);
                     state_store_caret_collapse_to_view_offset(state, evcon.target, char_offset);
                 }
@@ -10146,7 +10290,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 #endif
 
                 // Start new selection if shift not pressed, otherwise extend
-                if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                if (!pointer_selection_extend) {
                     SmTransitionGuard sm_guard(state, SM_FAMILY_SELECTION,
                         SM_EV_UI_START_POINTER_SELECTION, evcon.target);
                     dispatch_selectstart(&evcon, evcon.target);
@@ -10167,25 +10311,27 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     selection_project_focus_visual(state, caret_x, caret_y, caret_height);
                 }
 
-                if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                if (pointer_selection_line) {
                     const char* text_buf = (const char*)text->text_data();
                     uint32_t text_len = text_buf ? (uint32_t)strlen(text_buf) : 0;
                     uint32_t click_off = char_offset < 0 ? 0 : (uint32_t)char_offset;
                     if (click_off > text_len) click_off = text_len;
-                    if (event->mouse_button.clicks >= 3) {
-                        uint32_t start = te_line_start(text_buf, text_len, click_off);
-                        uint32_t end = te_line_end(text_buf, text_len, click_off);
+                    uint32_t start = te_line_start(text_buf, text_len, click_off);
+                    uint32_t end = te_line_end(text_buf, text_len, click_off);
+                    te_apply_byte_range(state, evcon.target, start, end);
+                    dispatch_rich_selection_snapshot(&evcon, state, evcon.target,
+                        "selectLine", nullptr);
+                } else if (pointer_selection_word) {
+                    const char* text_buf = (const char*)text->text_data();
+                    uint32_t text_len = text_buf ? (uint32_t)strlen(text_buf) : 0;
+                    uint32_t click_off = char_offset < 0 ? 0 : (uint32_t)char_offset;
+                    if (click_off > text_len) click_off = text_len;
+                    uint32_t start = te_word_start(text_buf, text_len, click_off);
+                    uint32_t end = te_word_end(text_buf, text_len, click_off);
+                    if (start != end) {
                         te_apply_byte_range(state, evcon.target, start, end);
                         dispatch_rich_selection_snapshot(&evcon, state, evcon.target,
-                            "selectLine", nullptr);
-                    } else if (event->mouse_button.clicks == 2) {
-                        uint32_t start = te_word_start(text_buf, text_len, click_off);
-                        uint32_t end = te_word_end(text_buf, text_len, click_off);
-                        if (start != end) {
-                            te_apply_byte_range(state, evcon.target, start, end);
-                            dispatch_rich_selection_snapshot(&evcon, state, evcon.target,
-                                "selectWord", nullptr);
-                        }
+                            "selectWord", nullptr);
                     }
                 }
 
@@ -10194,7 +10340,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Restore font
                 evcon.font = saved_font;
                 evcon.need_repaint = true;
-            } else if (!evcon.default_prevented && evcon.target->is_element()) {
+            } else if (pointer_selection_requested && !evcon.default_prevented &&
+                       evcon.target->is_element()) {
                 DomElement* target_elem = lam::dom_require_element(evcon.target);
 
                 // Text input form controls: place caret inside the input
@@ -10227,7 +10374,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // (RDT_EVENT_MOUSE_MOVE with is_selecting=true) hits
                     // the single-line input drag-selection branch and
                     // mirrors the result back into form->selection_*.
-                    if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                    if (!pointer_selection_extend) {
                         dispatch_form_selection_start(&evcon, target_elem, state,
                             evcon.target, (uint32_t)char_offset, "mouseDown");
                     } else if (selection_has_projection(state)) {
@@ -10238,9 +10385,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // F2 (Radiant_Design_Form_Input.md §3.4): dblclick =>
                     // word selection, tripleclick (or higher) => select-all
                     // for single-line <input>.
-                    if (event->mouse_button.clicks >= 3) {
+                    if (pointer_selection_all) {
                         dispatch_form_select_all(&evcon, target_elem, state, evcon.target);
-                    } else if (event->mouse_button.clicks == 2) {
+                    } else if (pointer_selection_word) {
                         dispatch_form_select_word(
                             &evcon, target_elem, state, evcon.target, char_offset);
                     }
@@ -10257,7 +10404,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     int char_offset = (int)click_boundary.offset; // INT_CAST_OK: StateStore selection API uses int offsets.
 
                     // Start/extend textarea selection
-                    if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                    if (!pointer_selection_extend) {
                         dispatch_form_selection_start(&evcon, target_elem, state,
                             evcon.target, (uint32_t)char_offset, "mouseDown");
                     } else if (selection_has_projection(state)) {
@@ -10268,7 +10415,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     log_debug("TEXTAREA CARET: offset=%d", char_offset);
                     // F2: dblclick selects the word, tripleclick selects the
                     // logical line in <textarea>.
-                    if (event->mouse_button.clicks >= 3) {
+                    if (pointer_selection_line) {
                         const char* select_value = target_elem->form
                             ? target_elem->form->current_value : nullptr;
                         uint32_t select_len = target_elem->form
@@ -10278,7 +10425,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         uint32_t end = te_line_end(select_value, select_len, click_off);
                         dispatch_form_selection_range(&evcon, target_elem, state,
                             evcon.target, start, end, "selectLine");
-                    } else if (event->mouse_button.clicks == 2) {
+                    } else if (pointer_selection_word) {
                         dispatch_form_select_word(
                             &evcon, target_elem, state, evcon.target, char_offset);
                     }
@@ -10785,18 +10932,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 log_debug("wheel default suppressed by preventDefault()");
                 break;
             }
-            // build stack of views from root to target view
-            ArrayList* target_list = build_view_stack(&evcon, evcon.target);
-
-            // fire event to views in the stack (inside iframe if applicable)
-            fire_events(&evcon, target_list);
-            arraylist_free(target_list);
-
-            // Propagate scroll to iframe container (the outer iframe block handles scrolling)
-            if (evcon.iframe_container) {
-                ArrayList* parent_list = build_view_stack(&evcon, evcon.iframe_container);
-                fire_events(&evcon, parent_list);
-                arraylist_free(parent_list);
+            // S12.1.3: after author WheelEvent listeners settle, the package
+            // decides whether this physical gesture has a scrolling default.
+            // The chosen request leaves target/range/scroll-chain resolution
+            // to native layout state.
+            uint64_t scroll_epoch = s_scroll_op_epoch;
+            radiant_dispatch_behavior_scroll_wheel(&evcon, evcon.target);
+            if (s_scroll_op_epoch != scroll_epoch &&
+                strcmp(s_scroll_op_name, "wheel") == 0) {
+                apply_wheel_scroll_operation(&evcon, evcon.target);
             }
         } else {
             log_debug("No target view found at position (%.1f, %.1f)", mouse_x, mouse_y);

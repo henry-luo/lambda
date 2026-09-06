@@ -261,6 +261,18 @@ static inline Item int_integral_division(double left, double right,
         }
         return (Item){ .item = lambda_int_box_double(left / 0.0) };
     }
+    // T21-4: both operands are in-band ints (|x| <= 2^53) whenever they came
+    // from compact int Items, and there the machine remainder is exact and
+    // agrees with fmod (truncation toward zero, dividend-signed) while costing
+    // one instruction instead of a libm call. hashmap's `hash % hm.cap` spent
+    // its top profile slot in fmod through this boxed path.
+    if (left >= -9007199254740992.0 && left <= 9007199254740992.0 &&
+            right >= -9007199254740992.0 && right <= 9007199254740992.0) {
+        int64_t l = (int64_t)left, r = (int64_t)right;
+        int64_t irem = l % r;
+        int64_t ivalue = op == LAMBDA_NUM_OP_MOD ? irem : (l - irem) / r;
+        return (Item){ .item = lambda_int_box_double((double)ivalue) };
+    }
     // fmod is exact in IEEE, so `left - rem` is exactly divisible by `right`
     // and the quotient below involves no rounding: this is the *exact*
     // truncated quotient, not an approximation of one. Computing it as
