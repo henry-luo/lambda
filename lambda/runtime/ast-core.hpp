@@ -1094,6 +1094,14 @@ typedef struct FnParamEvidence {
     bool used_as_container;
     TypeId container_store_type;
     bool container_store_conflict;
+    // T21-2a: some subscript on this parameter uses a key the call-site
+    // typer cannot prove int (a string key, an untyped call result). An
+    // inferred ArrayNum witness would lower that subscript through the
+    // int-key lane, so the witness is withheld.
+    bool container_key_dynamic;
+    // T21-2e: some subscript on this parameter is a store target; a string
+    // lane is immutable, so the inferred string witness is withheld.
+    bool container_stored;
     bool compared_with_non_numeric;
     bool param_reassigned;
 } FnParamEvidence;
@@ -1345,9 +1353,6 @@ typedef struct FnAnalysis {
     ScalarReturnClass js_boxed_return_scalar_class;
     int js_formal_length;
     struct hashmap* js_cached_scope_slot_collisions;
-    // The active JS MIR compilation's backend artifact; reset with all other
-    // profile facts before the next compilation of this AST.
-    void* js_mir_backend;
     int await_point_count;
     int async_fault_handler_count;
     const char* may_await_cause;

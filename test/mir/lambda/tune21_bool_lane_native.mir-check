@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "description": "T21-1c: an inferred bool array element read (fill(n, true) through an untyped parameter) is published as a native bool descriptor -- VALUE_REP_I64 with semantic type BOOL -- so `if (flags[i])` branches on the masked byte and `and`/`not` stay native. The Result36 defect published the same i64 under the AST's `any`, which the Item firewall boxed as an int64 and then read through is_truthy as the truthy integer zero; the fix in 56ab0a571 boxed every read instead. Neither is_truthy nor an int64 box may appear in these two loops. The out-of-bounds arm carries the lane's null (2) and boxes to null at the print, which the .txt golden pins on both tiers.",
+  "checks": [
+    {
+      "in_func": "_count_set_#",
+      "forbid": [
+        "call\tis_truthy_p, is_truthy",
+        "call\tbox_int64_value_p, box_int64_value"
+      ],
+      "expect": [
+        "and\t{{r}}, {{r}}, 1"
+      ]
+    },
+    {
+      "in_func": "_count_pairs_#",
+      "forbid": [
+        "call\tis_truthy_p, is_truthy",
+        "call\tbox_int64_value_p, box_int64_value",
+        "call\tfn_not_p, fn_not"
+      ],
+      "expect": [
+        "and\t{{r}}, {{r}}, 1"
+      ]
+    }
+  ]
+}

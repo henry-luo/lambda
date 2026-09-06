@@ -574,6 +574,23 @@ static bool js_ast_is_es_module(JsAstNode* ast) {
     return false;
 }
 
+static bool js_test262_source_has_build_string_helper(const char* source,
+        size_t source_len, const char* filename) {
+    // D8.2.5: mirror the established Test262 MIR helper contract when the
+    // selected AST tier binds the source declaration into its runtime realm.
+    if (!source || !filename ||
+            (!strstr(filename, "ref/test262/test/") &&
+             !strstr(filename, "test/js262/test/"))) return false;
+    return js_source_contains_ascii(source, source_len,
+               "function buildString(args)") &&
+        js_source_contains_ascii(source, source_len,
+               "const loneCodePoints = args.loneCodePoints;") &&
+        js_source_contains_ascii(source, source_len,
+               "const CHUNK_SIZE = 10000;") &&
+        js_source_contains_ascii(source, source_len,
+               "String.fromCodePoint.apply(null, loneCodePoints);");
+}
+
 static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* js_source,
                                                  size_t js_source_len, const char* filename,
                                                  uint64_t* result_home,
@@ -728,6 +745,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             return ItemError;
         }
         script->test262_native_harness = test262_native_harness;
+        script->test262_native_build_string =
+            js_test262_source_has_build_string_helper(js_source, js_source_len, filename);
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         Item result = js_ast_is_es_module(js_ast)

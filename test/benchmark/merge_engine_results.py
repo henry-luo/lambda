@@ -89,6 +89,9 @@ def main():
         "source_finished_at": source_meta.get("finished_at"),
         "source_runs": source_meta.get("runs"),
         "source_platform": source_meta.get("platform"),
+        # T21-5: the Lambda commit the merged cells were measured on; the
+        # header's lambda_commit only describes the target run.
+        "source_lambda_commit": source_meta.get("lambda_commit"),
         "merged_at": datetime.datetime.now().isoformat(timespec="seconds"),
         "cells": len(copied),
     }

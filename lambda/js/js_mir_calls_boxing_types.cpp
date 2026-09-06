@@ -1326,24 +1326,28 @@ void jm_scope_env_mark_and_writeback_binding(JsMirTranspiler* mt, const char* na
 // v23: truthiness check with inline fast-path for known boolean Items.
 // For known-BOOL expressions (comparisons, !expr), extracts the low bit directly
 // instead of calling js_is_truthy (saves a function call).
-MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MIR_reg_t val, JsAstNode* expr) {
-    TypeId expr_type = expr ? jm_get_effective_type(mt, expr) : LMD_TYPE_ANY;
-    if (expr_type == LMD_TYPE_BOOL) {
+MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MirValue value) {
+    if (value.semantic_type == LMD_TYPE_BOOL) {
         MIR_reg_t result = jm_new_reg(mt, "trthy", MIR_T_I64);
-        jm_emit_reg_binary_op(mt, MIR_AND, result, val, MIR_new_int_op(mt->ctx, 1));
+        jm_emit_reg_binary_op(mt, MIR_AND, result, value.reg,
+            MIR_new_int_op(mt->ctx, 1));
         return result;
     }
-    if (expr_type == LMD_TYPE_FLOAT && MIR_reg_type(mt->ctx, val, mt->em.func) == MIR_T_D) {
+    if (value.semantic_type == LMD_TYPE_FLOAT && value.rep == VALUE_REP_F64) {
         MIR_reg_t nonzero = jm_new_reg(mt, "dtruth_nz", MIR_T_I64);
-        jm_emit_reg_binary_op(mt, MIR_DNE, nonzero, val, MIR_new_double_op(mt->ctx, 0.0));
+        jm_emit_reg_binary_op(mt, MIR_DNE, nonzero, value.reg,
+            MIR_new_double_op(mt->ctx, 0.0));
         MIR_reg_t notnan = jm_new_reg(mt, "dtruth_nn", MIR_T_I64);
-        jm_emit_reg_binary(mt, MIR_DEQ, notnan, val, val);
+        jm_emit_reg_binary(mt, MIR_DEQ, notnan, value.reg, value.reg);
         MIR_reg_t result = jm_new_reg(mt, "dtruth", MIR_T_I64);
         // JS Number truthiness treats +0, -0, and NaN as false; all other doubles are true.
         jm_emit_reg_binary(mt, MIR_AND, result, nonzero, notnan);
         return result;
     }
-    return jm_emit_uext8(mt, jm_callr_1(mt, "js_is_truthy", MIR_T_I64, val));
+    value = em_apply_value_demand(&mt->em, value,
+        MIR_VALUE_REQUIRED_REP, VALUE_REP_ITEM);
+    return jm_emit_uext8(mt, jm_callr_1(mt, "js_is_truthy", MIR_T_I64,
+        value.reg));
 }
 
 // v23b: transpile an expression for use as a branch condition (if/while/for/ternary).

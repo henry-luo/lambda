@@ -413,6 +413,9 @@ struct JsMirTranspiler {
 
     // Collected functions (pre-pass)
     JsFuncCollected* func_entries;      // exact-sized from shared indexed identity
+    // FunctionId-keyed backend artifacts. `func_entries` keeps post-order
+    // lowering storage only; source nodes never publish an artifact pointer.
+    JsFuncCollected** func_entries_by_id;
     int func_capacity;
     int func_count;
     // Collected classes
@@ -573,12 +576,19 @@ struct JsMirTranspiler {
 
 static inline JsFuncCollected* jm_collected_func_by_id(JsMirTranspiler* mt,
         AstFunctionId function_id) {
-    if (!mt || !mt->tp || function_id == AST_FUNCTION_ID_INVALID) return NULL;
+    if (!mt || function_id == AST_FUNCTION_ID_INVALID ||
+            function_id >= (AstFunctionId)mt->func_capacity ||
+            !mt->func_entries_by_id) return NULL;
+    return mt->func_entries_by_id[function_id];
+}
+
+static inline AstFunctionId jm_function_id_for_node(const JsMirTranspiler* mt,
+        const JsFunctionNode* function) {
+    if (!mt || !mt->tp || !function) return AST_FUNCTION_ID_INVALID;
     AstIndex* index = &mt->tp->ast_index;
-    if (function_id >= index->function_count) return NULL;
-    JsFunctionNode* function = (JsFunctionNode*)index->functions[function_id].node;
-    return function && function->analysis
-        ? (JsFuncCollected*)function->analysis->js_mir_backend : NULL;
+    AstNodeId node_id = ast_index_find(index, (const AstNode*)function);
+    return node_id != AST_NODE_ID_INVALID && node_id < index->count
+        ? index->owner_functions[node_id] : AST_FUNCTION_ID_INVALID;
 }
 
 static inline AstFunctionId jm_parent_function_id(const JsMirTranspiler* mt,

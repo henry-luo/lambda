@@ -26,6 +26,12 @@ pn main() {
         checksum = checksum + snapshot_score((round + 1) % 2)
         round = round + 1
     }
-    print("microdiff: CHECKSUM:" ++ checksum ++ "\n")
+    // 3278848 is the checksum every engine port must reproduce; a FAIL marker
+    // makes the runner exclude a wrong result instead of timing it (T21-5)
+    if (checksum == 3278848) {
+        print("microdiff: CHECKSUM:" ++ checksum ++ "\n")
+    } else {
+        print("microdiff: FAIL checksum=" ++ checksum ++ "\n")
+    }
     print("__TIMING__:" ++ ((clock() - t0) * 1000.0) ++ "\n")
 }

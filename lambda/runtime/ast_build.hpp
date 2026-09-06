@@ -150,10 +150,25 @@ AstNode* build_while_from_parts(Transpiler* tp, SourceSpan span,
 AstNode* build_propagate_node_from_parts(Transpiler* tp, SourceSpan span,
     AstNode* operand);
 
-// Reduce one compilation unit and construct its binding-bearing AST from the
-// recursive-descent/Pratt stream. Validation remains a later pass.
+// The parser publishes a reduction tape without AST allocation or scope
+// mutation. The builder replays it into the binding-bearing AST; validation
+// remains a later pass.
+typedef struct LambdaReductionTape LambdaReductionTape;
+LambdaParseStatus lambda_rd_parse_reductions(const char* source, size_t length,
+        LambdaReductionTape** tape_out, LambdaParseError* error);
+LambdaParseStatus lambda_rd_build_reductions(Transpiler* tp, const char* source,
+        size_t length, const LambdaReductionTape* tape, AstScript** root_out,
+        LambdaParseError* error);
+void lambda_rd_destroy_reductions(LambdaReductionTape* tape);
+
+// Compatibility composition for callers that require the direct build result.
 LambdaParseStatus lambda_rd_reduce_ast(Transpiler* tp, const char* source,
         size_t length, AstScript** root_out, LambdaParseError* error);
+
+// The direct reduction replay uses short-lived construction scopes for
+// bottom-up type assembly. Rebuild the canonical lexical graph from the
+// retained AST before validation or lowering publishes any of those edges.
+bool lambda_ast_rebind_direct_scope_graph(Transpiler* tp, AstScript* script);
 
 // Run post-reduction semantic validation and analysis for an already built AST.
 bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script);

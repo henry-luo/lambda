@@ -76,7 +76,7 @@ compare_suite() {
                 awk -F '\t' 'NR > 1 && ($5 ~ /^lib_/ || $5 == "underscore_lib") { print $5 "\t" $25 }' "$bmanifest" | sort > "$btmp.lib"
                 awk -F '\t' 'NR > 1 && ($5 ~ /^lib_/ || $5 == "underscore_lib") { print $5 "\t" $25 }' "$cmanifest" | sort > "$ctmp.lib"
                 join -t '	' "$btmp.lib" "$ctmp.lib" | awk -F '\t' '{ printf "js mir_library_sample %s baseline=%s candidate=%s delta=%s\n", $1, $2, $3, $3-$2 }'
-                awk -v r="$mratio" 'BEGIN { if (r > 0.85) print "JS library MIR diagnostic: growth above 15%" > "/dev/stderr" }'
+                awk -v r="$mratio" 'BEGIN { if (r > 1.15) print "JS library MIR diagnostic: growth above 15%" > "/dev/stderr" }'
             else
                 awk -v r="$mratio" 'BEGIN { if (r > 1.00) print "JS complete MIR diagnostic: volume growth" > "/dev/stderr" }'
             fi

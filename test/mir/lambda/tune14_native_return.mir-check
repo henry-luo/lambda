@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune14 A3 publishes a native recursive success return for a closed immutable result while retaining the boxed arithmetic path for a mutable accumulator.",
+  "description": "Tune14 A3 publishes a native recursive success return for a closed immutable result. The mutable accumulator originally kept the boxed arithmetic path ('until mutation-aware lane tracking exists'); T21-2c added that tracking -- a reassigned binding keeps its lane when its initializer and every write prove the lane, with a self-referencing write proved inductively -- so `value = value + tune14_mutable(n - 1)` now stays on the native int lane too.",
   "checks": [
     {
       "in_func": "_tune14_recursive_#",
@@ -16,8 +16,12 @@
     },
     {
       "in_func": "_tune14_mutable_#",
-      "expect": [
+      "forbid": [
         "call\tfn_add_p, fn_add"
+      ],
+      "expect": [
+        ":\tfunc\ti64,",
+        "add\t{{r}}"
       ]
     }
   ]

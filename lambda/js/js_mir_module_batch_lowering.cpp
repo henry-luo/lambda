@@ -1195,9 +1195,11 @@ static int js_mir_analyze_and_plan(void* opaque) {
     // metadata derived from them, so allocate them with the transpiler pools.
     mt->func_entries = (JsFuncCollected*)pool_calloc(
         mt->tp->pool, (size_t)mt->func_capacity * sizeof(JsFuncCollected));
+    mt->func_entries_by_id = (JsFuncCollected**)pool_calloc(mt->tp->pool,
+        (size_t)mt->func_capacity * sizeof(JsFuncCollected*));
     mt->class_entries = (JsClassEntry*)pool_calloc(
         mt->tp->pool, (size_t)mt->class_capacity * sizeof(JsClassEntry));
-    if ((mt->func_capacity && !mt->func_entries) ||
+    if ((mt->func_capacity && (!mt->func_entries || !mt->func_entries_by_id)) ||
         (mt->class_capacity && !mt->class_entries)) {
         log_error("js-mir: failed to allocate exact function/class metadata");
         mt->collection_failed = true;

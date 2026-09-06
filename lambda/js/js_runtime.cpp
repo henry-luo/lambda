@@ -14684,6 +14684,13 @@ static void js_regexp_update_last_match(String* input_s,
     }
 }
 
+typedef enum JsRegexSimpleClassKind {
+    JS_REGEX_SIMPLE_CLASS_NONE = 0,
+    JS_REGEX_SIMPLE_CLASS_DIGIT,
+    JS_REGEX_SIMPLE_CLASS_WORD,
+    JS_REGEX_SIMPLE_CLASS_WHITESPACE,
+} JsRegexSimpleClassKind;
+
 struct JsRegexData {
     re2::RE2* re2;            // compiled regex (direct, for patterns without assertions)
     JsRegexCompiled* wrapper; // wrapper with post-filters (for patterns with lookaheads/backrefs)
@@ -14691,6 +14698,11 @@ struct JsRegexData {
     const char* literal_pattern; // simple literal pattern handled without RE2
     int literal_pattern_len;
     int special_property_kind; // +/-: fast Unicode property-repeat kind
+    JsRegexSimpleClassKind simple_class_kind;
+    bool simple_class_negated;
+    bool simple_class_one_or_more;
+    bool simple_class_anchor_start;
+    bool simple_class_anchor_end;
     char** named_alias_re2_names;
     int* named_alias_re2_lens;
     char** named_alias_js_names;
@@ -15372,6 +15384,113 @@ static bool js_is_whitespace_cp(uint32_t cp) {
         return false;
     }
 }
+
+// Restrict this lane to one built-in character class with optional anchors and
+// `+`. It preserves the ordinary matcher for groups, alternation, case-folded
+// word classes, and multiline anchors while avoiding an RE2 scan of generated
+// all-codepoint inputs.
+static bool js_regex_detect_simple_class(const char* pattern, int pattern_len,
+        JsRegExpCompileInfo* info, JsRegexData* rd) {
+    if (!pattern || pattern_len < 2 || !info || !rd) return false;
+    int pos = 0;
+    bool anchor_start = false;
+    bool anchor_end = false;
+    bool one_or_more = false;
+    if (pattern[pos] == '^') {
+        anchor_start = true;
+        pos++;
+    }
+    if (pos + 1 >= pattern_len || pattern[pos] != '\\') return false;
+    JsRegexSimpleClassKind kind = JS_REGEX_SIMPLE_CLASS_NONE;
+    bool negated = false;
+    switch (pattern[pos + 1]) {
+    case 'd': kind = JS_REGEX_SIMPLE_CLASS_DIGIT; break;
+    case 'D': kind = JS_REGEX_SIMPLE_CLASS_DIGIT; negated = true; break;
+    case 'w': kind = JS_REGEX_SIMPLE_CLASS_WORD; break;
+    case 'W': kind = JS_REGEX_SIMPLE_CLASS_WORD; negated = true; break;
+    case 's': kind = JS_REGEX_SIMPLE_CLASS_WHITESPACE; break;
+    case 'S': kind = JS_REGEX_SIMPLE_CLASS_WHITESPACE; negated = true; break;
+    default: return false;
+    }
+    pos += 2;
+    if (pos < pattern_len && pattern[pos] == '+') {
+        one_or_more = true;
+        pos++;
+    }
+    if (pos < pattern_len && pattern[pos] == '$') {
+        anchor_end = true;
+        pos++;
+    }
+    if (pos != pattern_len || (info->multiline && (anchor_start || anchor_end)) ||
+            (info->ignore_case && kind == JS_REGEX_SIMPLE_CLASS_WORD)) {
+        return false;
+    }
+    rd->simple_class_kind = kind;
+    rd->simple_class_negated = negated;
+    rd->simple_class_one_or_more = one_or_more;
+    rd->simple_class_anchor_start = anchor_start;
+    rd->simple_class_anchor_end = anchor_end;
+    return true;
+}
+
+static bool js_regex_simple_class_contains(JsRegexSimpleClassKind kind, int cp) {
+    switch (kind) {
+    case JS_REGEX_SIMPLE_CLASS_DIGIT:
+        return cp >= '0' && cp <= '9';
+    case JS_REGEX_SIMPLE_CLASS_WORD:
+        return (cp >= '0' && cp <= '9') || (cp >= 'A' && cp <= 'Z') ||
+            (cp >= 'a' && cp <= 'z') || cp == '_';
+    case JS_REGEX_SIMPLE_CLASS_WHITESPACE:
+        return js_is_whitespace_cp((uint32_t)cp);
+    default:
+        return false;
+    }
+}
+
+static bool js_regex_simple_class_matches(const JsRegexData* rd, int cp) {
+    bool contains = js_regex_simple_class_contains(rd->simple_class_kind, cp);
+    return rd->simple_class_negated ? !contains : contains;
+}
+
+static bool js_regex_match_simple_class(const JsRegexData* rd, const char* input,
+        int input_len, int start_pos, re2::RE2::Anchor anchor,
+        re2::StringPiece* matches, int num_groups) {
+    if (!rd || !input || start_pos < 0 || start_pos > input_len) return false;
+    // `^` anchors to the subject start, not a sticky/global lastIndex.
+    if (rd->simple_class_anchor_start && start_pos != 0) return false;
+    bool must_start = rd->simple_class_anchor_start ||
+        anchor == re2::RE2::ANCHOR_START;
+    int candidate = start_pos;
+    while (candidate < input_len) {
+        int next = candidate;
+        int cp = js_regex_decode_utf8_permissive(input, input_len, &next);
+        if (!js_regex_simple_class_matches(rd, cp)) {
+            if (must_start) return false;
+            candidate = next;
+            continue;
+        }
+        int end = next;
+        if (rd->simple_class_one_or_more) {
+            while (end < input_len) {
+                int following = end;
+                int following_cp = js_regex_decode_utf8_permissive(input,
+                    input_len, &following);
+                if (!js_regex_simple_class_matches(rd, following_cp)) break;
+                end = following;
+            }
+        }
+        if (rd->simple_class_anchor_end && end != input_len) {
+            if (must_start) return false;
+            candidate = next;
+            continue;
+        }
+        if (num_groups > 0) {
+            matches[0] = re2::StringPiece(input + candidate, end - candidate);
+        }
+        return true;
+    }
+    return false;
+}
 JS_FORWARD_STATIC_EXPRESSION(bool, js_regex_is_noncharacter_cp, (int cp), ((cp >= 0xFDD0 && cp <= 0xFDEF) || (cp >= 0 && cp <= 0x10FFFF && (cp & 0xFFFE) == 0xFFFE)))
 
 static bool js_regex_append_hex_property_class(std::string& out, int kind, bool negate) {
@@ -15870,6 +15989,7 @@ static inline uint64_t js_regex_content_hash(const char* pat, int plen, const ch
 // When wrapper is active, use original JS group count (not RE2's inflated count)
 static int js_regex_num_groups(JsRegexData* rd) {
     if (rd->special_property_kind != 0) return 1;
+    if (rd->simple_class_kind != JS_REGEX_SIMPLE_CLASS_NONE) return 1;
     if (rd->literal_fast) return 1;
     if (rd->bt) return js_bt_group_count(rd->bt) + 1; // +1 for full match
     if (rd->wrapper && rd->wrapper->has_filters) {
@@ -15886,6 +16006,10 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
     if (rd->special_property_kind != 0) {
         return js_regex_match_special_property(rd->special_property_kind, input, input_len,
                                                start_pos, matches, num_groups);
+    }
+    if (rd->simple_class_kind != JS_REGEX_SIMPLE_CLASS_NONE) {
+        return js_regex_match_simple_class(rd, input, input_len, start_pos,
+            anchor, matches, num_groups);
     }
     if (rd->literal_fast) {
         if (start_pos < 0 || start_pos > input_len) return false;
@@ -17153,6 +17277,33 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
             pattern_len, pattern, flags_len, flags);
         Item m = js_name_item(errbuf, strlen(errbuf));
         return js_throw_syntax_error(m);
+    }
+
+    // D8.2.6: standalone ECMAScript character classes carry an explicit
+    // matcher representation instead of reaching through a physical RE2 lane.
+    // This follows frontend validation so it shares the general RegExp syntax
+    // and flag contract.
+    {
+        JsRegexData simple_class = {};
+        if (js_regex_detect_simple_class(pattern, pattern_len,
+                &compile_info, &simple_class)) {
+            JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool,
+                sizeof(JsRegexData));
+            if (!rd) return ItemError;
+            *rd = simple_class;
+            rd->global = compile_info.global;
+            rd->ignore_case = compile_info.ignore_case;
+            rd->multiline = compile_info.multiline;
+            rd->sticky = compile_info.sticky;
+            rd->has_indices = compile_info.has_indices;
+            rd->unicode = compile_info.unicode || compile_info.unicode_sets;
+            const char* stable_flags = js_regex_copy_stable_span(
+                compile_info.canonical_flags, compile_info.canonical_flags_len);
+            JsRegexCacheEntry entry = {rd, pattern, pattern_len, stable_flags,
+                compile_info.canonical_flags_len, compile_info.dot_all,
+                compile_info.has_indices, rd->unicode, compile_info.unicode_sets};
+            return js_regex_build_object_from_cache(entry, !cache_static_literal);
+        }
     }
 
     if (flags_len == 0 &&
@@ -21279,6 +21430,9 @@ static void js_apply_replacement(StrBuf* buf, const char* repl, int repl_len,
 
 // build a named groups object from regex match data (for replace $<name> and callback)
 static Item js_build_groups_object(JsRegexData* rd, re2::StringPiece* matches, int num_groups) {
+    if (rd && rd->simple_class_kind != JS_REGEX_SIMPLE_CLASS_NONE) {
+        return make_js_undefined();
+    }
     if (rd->bt) {
         int nc = js_bt_named_count(rd->bt);
         if (nc <= 0) return make_js_undefined();

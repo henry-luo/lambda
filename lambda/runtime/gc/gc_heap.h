@@ -267,6 +267,11 @@ typedef struct gc_heap {
     // Collection trigger
     size_t gc_threshold;            // data zone bytes that trigger auto-collection
     size_t object_threshold;        // live object bytes that trigger auto-collection
+    // Object-pressure pacing (T21-1a): the pressure trigger is paced by the
+    // collector's own share of wall time, so an allocation-bound script is not
+    // charged a full mark for every threshold's worth of short-lived objects.
+    uint64_t object_pressure_last_end_ns;   // when the last pressure collection returned
+    uint64_t object_pressure_last_cost_ns;  // how long that collection took
     int collecting;                 // re-entrancy guard (1 = GC in progress)
     gc_collect_callback_t collect_callback;  // called when threshold exceeded
 

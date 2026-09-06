@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "T21-2e: the implicit `any \\ error` contract of an untyped pn parameter only rejects an error Item. A closed `+ - *` int tree over int-lane leaves (element reads with an int witness and int keys, counter locals, literals) has no error arm -- overflow widens on the checked slow arm and an out-of-range read yields the lane null -- so the call-site lambda_type_check on such an argument is redundant and is elided (levenshtein paid it three times per inner iteration for its min3 arguments). Both calls in main pass only such trees.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "forbid": [
+        "call\tlambda_type_check_p, lambda_type_check"
+      ]
+    }
+  ]
+}

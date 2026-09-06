@@ -418,13 +418,12 @@ bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
     return true;
 }
 
-MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MIR_reg_t value) {
-    if (!mt || !mt->in_native_func || !mt->current_fc) return value;
-    if (JM_JS_FACT(mt->current_fc, return_type) != LMD_TYPE_FLOAT) return value;
-    MIR_type_t value_type = MIR_reg_type(mt->ctx, value, mt->em.func);
-    if (value_type == MIR_T_D) return value;
-    // Delayed completions use boxed I64 slots, so native float returns must unbox here.
-    return jm_emit_unbox_float(mt, value);
+MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MirValue value) {
+    if (!mt || !mt->in_native_func || !mt->current_fc) return value.reg;
+    if (JM_JS_FACT(mt->current_fc, return_type) != LMD_TYPE_FLOAT) return value.reg;
+    // Delayed completions publish an Item lane. Requesting the native return
+    // carrier from its descriptor avoids recovering that fact from MIR.
+    return em_require_rep(&mt->em, value, VALUE_REP_F64).reg;
 }
 
 static void jm_emit_throw_completion_impl(JsMirTranspiler* mt, MIR_reg_t value,
@@ -449,7 +448,7 @@ static void jm_emit_throw_completion_impl(JsMirTranspiler* mt, MIR_reg_t value,
         jm_emit_jmp(mt, target);
         return;
     }
-    MIR_reg_t native_value = jm_native_return_reg(mt, thrown);
+    MIR_reg_t native_value = jm_native_return_reg(mt, jm_item_value(thrown));
     jm_emit_ret(mt, native_value);
 }
 

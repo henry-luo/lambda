@@ -769,6 +769,9 @@ test-js-parser-diff:
 # Debug build
 debug: $(RE2_LIB) $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
+	@# debug and release share lambda.exe; force the debug-profile relink when
+	@# a newer non-profile host would otherwise satisfy the target timestamp.
+	@rm -f lambda.exe
 	@echo "Building debug version using Premake build system..."
 	@echo "Optimizations: O3 with symbols, frame pointers, JS execution profiling"
 	$(call toolchain_verify)
@@ -3300,6 +3303,7 @@ build-lambda-baseline: build-input-baseline build-node-core build-node-fs
 		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)"; \
 	else \
 		echo "Rebuilding lambda.exe in debug mode (incremental)..."; \
+		rm -f lambda.exe; \
 		$(MAKE) -C build/premake config=debug_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)"; \
 	fi
 	$(call run_make_with_error_summary,lambda-baseline,debug_native,,$(LAMBDA_BASELINE_TEST_PROJECTS))
@@ -3363,6 +3367,7 @@ build-radiant-baseline:
 		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"; \
 	else \
 		echo "Rebuilding lambda.exe in debug mode (incremental)..."; \
+		rm -f lambda.exe; \
 		$(MAKE) -C build/premake config=debug_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"; \
 	fi
 	@echo "Building Radiant baseline test executables (debug mode, $(TEST_JOBS) jobs)..."

@@ -125,8 +125,19 @@ class PremakeGenerator:
             shutil.copyfile(source_path, output_path)
             # jpeg-turbo 3.2 bundles zlib objects; retaining them would collide
             # with the separately force-loaded zlib archive in the final host.
+            listed = subprocess.run(['ar', '-t', str(output_path)],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, check=False)
+            if listed.returncode != 0:
+                raise RuntimeError(
+                    f"could not list copied archive {output_path}: "
+                    f"{listed.stderr.strip()}")
+            present_members = [member for member in excluded_members
+                               if member in listed.stdout.splitlines()]
+            if not present_members:
+                continue
             completed = subprocess.run(
-                ['ar', '-d', str(output_path), *excluded_members],
+                ['ar', '-d', str(output_path), *present_members],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
             if completed.returncode != 0:
                 raise RuntimeError(

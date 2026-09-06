@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "T21-5 / D8.6.2: typed crypto_sha12's core_sha1 (u32 int lanes through safe_add/rol/shl/shr/bor/bxor and int[] stores) must lower and run under the emission gate. On the 176bdd934..33a178ed0 builds it failed with 'mir-value: unavailable representation transition 1 -> 2 in _core_sha1' (Item -> IntLane) -- a missing representation-conversion pair that only a compile-and-run fixture can pin. The .txt golden pins the SHA-1 digests on both tiers.",
+  "checks": [
+    {
+      "in_func": "_core_sha1_#",
+      "expect": [
+        ":\tfunc\t"
+      ]
+    }
+  ]
+}
