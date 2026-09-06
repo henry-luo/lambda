@@ -499,6 +499,14 @@ extern "C" bool radiant_dispatch_behavior_scroll_key(struct EventContext* evcon,
                                                        View* target,
                                                        const InputIntent* intent);
 extern "C" void radiant_scroll_operation_request(const char* operation);
+extern "C" bool radiant_dispatch_behavior_mouse_press(struct EventContext* evcon,
+                                                         View* target);
+extern "C" uint64_t radiant_mouse_focus_epoch(void);
+extern "C" View* radiant_mouse_focus_target(void);
+extern "C" void radiant_mouse_focus_request(View* target);
+extern "C" uint64_t radiant_pointer_selection_epoch(void);
+extern "C" const char* radiant_pointer_selection_operation(void);
+extern "C" void radiant_pointer_selection_request(const char* operation);
 
 
 // ===== editing surface =====
