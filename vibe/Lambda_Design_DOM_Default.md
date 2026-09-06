@@ -1,11 +1,11 @@
 # Lambda DOM Default Actions — the UA behavior ledger
 
-> **Status**: **normative for default-action placement and status** (2026-09-06). The architecture is decided (ES5, ES10, ES15, ES20, ES30–ES34); what this document adds is the complete per-event ledger and the gap inventory that drives it.
+> **Status**: **normative for default-action placement and status** (2026-09-06). The architecture is decided (ES5, ES10, ES15, ES20, ES30–ES35); what this document adds is the complete per-event ledger and the gap inventory that drives it.
 > **Role**: this is the **single source of truth for what Radiant does after an event is dispatched** — which UA default actions exist, where each half lives, and which are still missing. Every other doc that names a default action points here rather than restating it. Absorbs and replaces Appendix B of `vibe/Lambda_Design_DOM_State.md` (deleted there 2026-08-28).
 > **Scope**: default actions and activation behavior for HTML documents under Radiant — the pointer, keyboard, editing, focus, clipboard, drag, composition, form, and navigation families. Event *dispatch* mechanism is in scope only where a missing dispatch is what makes a default action unreachable.
 > **Companion docs**: `vibe/Lambda_Design_DOM_State.md` (the behavior-template architecture and the ES/ESO ledgers this doc extends), `vibe/Lambda_Design_DOM_Pkg.md` (layering and placement policy), `doc/dev/radiant/RAD_15_Events_Input.md`, `RAD_17_Interaction_State.md`, `RAD_19_Form_Controls.md`.
 > **Formal anchors**: S12.1.3 (reactive templates: body = pure `fn`, mutation only in `on` handlers), S12.2.2 (element mutation), S9.1.4 (state lives in view state), S7.6/S7.10 (error discharge and the sys-func contract), D4.5.1v3 (the Radiant memory seam).
-> **Ledger series**: this doc extends the DOM-State area's existing `ES#` (decisions) and `ESO#` (open issues) series per `doc/Doc_Convention.md` §4 — it mints no new series. **ES30** is minted in §2.4, **ES31** in §2.5, **ES32** in §2.8, **ES33** in §2.9, and **ES34** in §2.10; ESO48–ESO62 are minted below; ESO63–ESO69 (and ES22–ES29, F17–F21) are minted in `vibe/Lambda_Design_DOM_Dispatch.md`. ESO70–ESO71 are minted in §6; **ES30's value-operation and pointer-capture extension is §2.6 (F20)**, which mints ESO72–ESO74, and **§2.7 is the selectedness consolidation (F21)**, which mints ESO75. New open issues start at **ESO76**.
+> **Ledger series**: this doc extends the DOM-State area's existing `ES#` (decisions) and `ESO#` (open issues) series per `doc/Doc_Convention.md` §4 — it mints no new series. **ES30** is minted in §2.4, **ES31** in §2.5, **ES32** in §2.8, **ES33** in §2.9, **ES34** in §2.10, and **ES35** in §2.11; ESO48–ESO62 are minted below; ESO63–ESO69 (and ES22–ES29, F17–F21) are minted in `vibe/Lambda_Design_DOM_Dispatch.md`. ESO70–ESO71 are minted in §6; **ES30's value-operation and pointer-capture extension is §2.6 (F20)**, which mints ESO72–ESO74, and **§2.7 is the selectedness consolidation (F21)**, which mints ESO75. New open issues start at **ESO76**.
 
 ---
 
@@ -425,7 +425,32 @@ author `contextmenu` remains cancelable at the opening boundary.
 | `dropdowndismiss` | A context-free behavior hook on the open `<select>` after native containment says the release missed both anchor and popup; `form.ls` closes that select. |
 | `dom.keyboard_command(node, name)` | Executes a package-selected keyboard or context-menu command against the live canonical target; it makes no policy decision from physical input. |
 
-### 2.11 Status vocabulary
+### 2.11 Incomplete non-form text-input fallback (ES35)
+
+**Ruling (user direction, 2026-09-06).** `lambda/package/dom/caret.ls`
+owns the remaining legacy `TextInput` fallback after the rich-text and form
+appliers decline. It deliberately maps that callback only to
+`moveCharacterForward`: the shared caret waist collapses a projected selection
+and advances the caret, but the package performs no DOM text mutation. This is
+an explicit compatibility behavior, not a claim that static document text is
+editable. Under S12.1.3 the decision belongs to the body behavior handler;
+S9.1.4 and D4.5.1v3 retain the selection, caret projection, live geometry,
+selection events, and paint in Radiant.
+
+Native still filters the platform callback at its existing event boundary: a
+matching canceled keydown does not reach it, and rich `beforeinput` or form
+replacement wins first. Once those paths decline, `textinputfallback` receives
+the immutable insert-text intent and may request the named caret operation. A
+missing or declining package handler performs no fallback. Until a package
+text applier can edit arbitrary non-form document selections, the ledger marks
+this deliberately no-text-mutation behavior as a divergence.
+
+| Hook / waist | Contract |
+| --- | --- |
+| `textinputfallback` | Behavior-only legacy fallback after rich/form text paths decline; `caret.ls` selects the intentionally incomplete advance-only behavior. |
+| `dom.caret_operation(node, "moveCharacterForward", false)` | The existing operation waist clears/collapses selection and resolves the next live caret position; it never mutates DOM text. |
+
+### 2.12 Status vocabulary
 
 | Mark | Meaning |
 | --- | --- |
@@ -448,6 +473,7 @@ Verified against the tree at 2026-09-06 (`event.cpp`, `lambda/package/dom/*.ls`,
 | Event | Spec, cancelable | Default action per spec | Radiant | Status |
 | --- | --- | --- | --- | --- |
 | `beforeinput` | Input Events L1/L2; cancelable except `insertCompositionText` / `deleteCompositionText` | UA updates the DOM as described by `inputType` | dispatched through the ordinary JS/author path; the package supplies the default — `editing.ls` splices text controls (F5/ES9), `dom_edit.ls` splices contenteditable through the DOM-range waist (F13). Prevented ⇒ the package default is not invoked (ES20/F14.3–F14.4) | ✅ text controls · ✅ contenteditable (§4) |
+| platform `TextInput` callback after rich/form handling declines | — | historical fallback, not a web-standard editing action | behavior-only `textinputfallback` reaches `caret.ls` only with a focused non-form caret. It collapses selection and advances one character through the caret waist, deliberately without editing text | ⚠️ (ES35) |
 | `input` | Input Events; not cancelable | none — reports a mutation that already happened | dispatched post-mutation from the one engine path that applied the edit; package `on input` re-derives `:valid`/`:invalid` and the ARIA mirrors | ✅ |
 | `change` | HTML; not cancelable | none | the *decision* is the behavior-only `commit` hook before blur (ESO42); native fires the event so it precedes `blur` for JS and templates alike | ✅ |
 | `select` | HTML; not cancelable | none | text-control selection writers queue one post-commit, noncancelable `select` task on the element; contenteditable selection remains `selectionchange` | ✅ text controls |

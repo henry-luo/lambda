@@ -73,3 +73,11 @@ pub pn navigate(body, evt) {
     if (op == null) { 'pass' }
     else { dom.caret_operation(body, op, evt.shift) }
 }
+
+// ES35: the remaining native text-input fallback never wrote a character. Keep
+// that intentionally incomplete compatibility behavior explicit in the package:
+// collapse any selection and advance one character, without mutating DOM text.
+pub pn text_input_fallback(body, evt) {
+    if (dom.caret_surface(body) != "rich") { 'pass' }
+    else { dom.caret_operation(body, "moveCharacterForward", false) }
+}

@@ -563,6 +563,8 @@ on contextmenudismiss(evt) { menu.dismiss(~) }
 // F9: keyboard caret navigation. Document-scoped for the same reason — one
 // caret per document, not one per control.
 on caretkey(evt) { caret.navigate(~, evt) }
+// ES35: retained only as the old non-form no-text-mutation compatibility path.
+on textinputfallback(evt) { caret.text_input_fallback(~, evt) }
 // F11: key -> edit intent, one rule set for both surfaces.
 on keyintent(evt) { keymap.resolve(~, evt) }
 // ESO48: runs only after keydown, caret, and activation have all declined.

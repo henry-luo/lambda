@@ -3706,6 +3706,15 @@ extern "C" bool radiant_dispatch_behavior_mouse_press(EventContext* evcon,
     return dispatch_behavior_document_policy(evcon, target, "mousepress");
 }
 
+// ES35: the historical non-form text callback has no DOM text applier. Keep
+// its deliberately incomplete outcome package-owned; the caret-operation waist
+// remains the only native path that resolves and commits the live geometry.
+extern "C" bool radiant_dispatch_behavior_text_input_fallback(
+    EventContext* evcon, View* target, const InputIntent* intent) {
+    return dispatch_behavior_document_policy(evcon, target,
+                                             "textinputfallback", intent);
+}
+
 // ES34: overlay geometry resolves only a menu row. Mapping that row to a
 // command and closing the popup are document policy, routed through the same
 // generic command waist keyboard shortcuts already use.
@@ -11456,17 +11465,23 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         if (!is_form_input && focused && caret_has_projection(state)) {
-            // Delete any existing selection first
-            if (selection_has(state)) {
-                // TODO: delete selected text
-                state_store_selection_clear(state);
+            // ES35: rich/form appliers declined this callback. The old fallback
+            // never changed text; `textinputfallback` now decides whether its
+            // selection-collapse plus character advance remains appropriate.
+            InputIntent intent;
+            char utf8_buf[5];
+            if (input_intent_from_text_input(text_event->codepoint, &intent,
+                                             utf8_buf, sizeof(utf8_buf))) {
+                uint64_t caret_epoch_before = radiant_caret_operation_epoch();
+                radiant_dispatch_behavior_text_input_fallback(&evcon, focused, &intent);
+                if (radiant_caret_operation_epoch() != caret_epoch_before) {
+                    EditingControllerHooks controller_hooks = editing_controller_hooks();
+                    editing_controller_apply_caret_operation(
+                        &evcon, state, &controller_hooks,
+                        radiant_caret_operation_name(),
+                        radiant_caret_operation_extend());
+                }
             }
-
-            // TODO: insert character at caret position
-            // This requires access to the text content of the focused element
-
-            // Move caret forward
-            state_store_caret_move(state, 1);
         }
         evcon.need_repaint = true;
         break;
