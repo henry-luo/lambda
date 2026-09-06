@@ -1,0 +1,12 @@
+{
+  "html": "test/ui/test_form_input.html",
+  "description": "ES34: Escape dismisses the context-menu through its package default",
+  "events": [
+    {"type": "click", "target": {"selector": "#name"}, "button": 1},
+    {"type": "render_pending"},
+    {"type": "assert_state_store", "target": {"selector": "#name"}, "context_menu_open": true},
+    {"type": "key_press", "key": "escape"},
+    {"type": "render_pending"},
+    {"type": "assert_state_store", "target": {"selector": "#name"}, "context_menu_open": false}
+  ]
+}

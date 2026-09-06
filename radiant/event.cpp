@@ -1874,6 +1874,12 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         mb.put("option_index", (int64_t)intent->option_index);
     }
 
+    // ES34: the overlay identifies a physical context-menu row only. Its
+    // command mapping belongs to the dom package, alongside execution policy.
+    if (intent && intent->context_menu_item >= 0) {
+        mb.put("context_menu_item", (int64_t)intent->context_menu_item);
+    }
+
     // F14.1: an execCommand names a legacy command, not a WHATWG input type, so
     // it too sits outside the guard. `value` is the call's third argument.
     if (intent && intent->command) {
@@ -3149,14 +3155,21 @@ extern "C" bool radiant_select_dropdown_is_open(void* dom_node) {
 
 extern "C" bool radiant_select_set_dropdown_open(void* dom_node, bool open) {
     EmitHandlerContext* ctx = g_emit_handler_ctx;
-    if (!ctx || !ctx->evcon || !dom_node) return false;
-    DocState* state = event_context_target_state(ctx->evcon);
+    if (!dom_node) return false;
+    DomNode* node = static_cast<DomNode*>(dom_node);
+    if (!node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    DocState* state = ctx && ctx->evcon
+        ? event_context_target_state(ctx->evcon)
+        : (elem && elem->doc ? (DocState*)elem->doc->state : nullptr);
     if (!state) return false;
-    View* view = static_cast<View*>(static_cast<DomNode*>(dom_node));
+    View* view = static_cast<View*>(node);
     if (!open) {
+        // Overlay dismissal is behavior-only, so it has no event context.
         if (state->open_dropdown == view) doc_state_close_dropdown(state, view);
         return true;
     }
+    if (!ctx || !ctx->evcon) return false;
     // canonical popup state permits one open dropdown at a time
     if (state->open_dropdown && state->open_dropdown != view) {
         doc_state_close_dropdown(state, state->open_dropdown);
@@ -3675,13 +3688,14 @@ extern "C" bool radiant_dispatch_behavior_caret_key(EventContext* evcon, View* t
 // static text, a tabindex widget, or a scrollbar can install the package even
 // when the innermost hit has no behavior template of its own.
 static bool dispatch_behavior_document_policy(EventContext* evcon, View* target,
-                                              const char* event_name) {
+                                              const char* event_name,
+                                              const InputIntent* intent = nullptr) {
     DomDocument* doc = event_context_target_document(evcon);
     DomElement* body = radiant_document_body_element(doc);
     if (!body || !radiant_dom_package_ensure(doc, static_cast<View*>(body))) {
         return false;
     }
-    return dispatch_behavior_handler(evcon, target, event_name, nullptr, nullptr);
+    return dispatch_behavior_handler(evcon, target, event_name, intent, nullptr);
 }
 
 // Behavior-only after the cancelable mousedown and any element-local press
@@ -3690,6 +3704,28 @@ static bool dispatch_behavior_document_policy(EventContext* evcon, View* target,
 extern "C" bool radiant_dispatch_behavior_mouse_press(EventContext* evcon,
                                                         View* target) {
     return dispatch_behavior_document_policy(evcon, target, "mousepress");
+}
+
+// ES34: overlay geometry resolves only a menu row. Mapping that row to a
+// command and closing the popup are document policy, routed through the same
+// generic command waist keyboard shortcuts already use.
+extern "C" bool radiant_dispatch_behavior_context_menu_action(
+    EventContext* evcon, View* target, const InputIntent* intent) {
+    return dispatch_behavior_document_policy(evcon, target,
+                                             "contextmenuaction", intent);
+}
+
+// Overlay dismissal has no DOM target of its own. It intentionally ignores an
+// unrelated underlying pointer/key cancellation, matching the old modal popup
+// behavior while making the cleanup decision package-owned.
+extern "C" bool radiant_dispatch_behavior_context_menu_dismiss(View* target) {
+    return dispatch_behavior_handler(nullptr, target, "contextmenudismiss",
+                                     nullptr, nullptr);
+}
+
+extern "C" bool radiant_dispatch_behavior_dropdown_dismiss(View* target) {
+    return dispatch_behavior_handler(nullptr, target, "dropdowndismiss",
+                                     nullptr, nullptr);
 }
 
 extern "C" bool radiant_dispatch_behavior_scroll_key(EventContext* evcon,
@@ -4339,35 +4375,6 @@ static uint32_t dispatch_form_text_paste(EventContext* evcon, DomElement* elem,
     return ok ? len : 0;
 }
 
-static bool dispatch_context_menu_cut(void* user, DomElement* elem,
-                                      DocState* state,
-                                      uint32_t start, uint32_t end) {
-    EventContext* evcon = (EventContext*)user;
-    if (!evcon || !elem || !state) return false;
-    return dispatch_form_text_replace(evcon, elem, state, static_cast<View*>(elem),
-                                      start, end, nullptr, 0,
-                                      INPUT_INTENT_DELETE_BY_CUT);
-}
-
-static bool dispatch_context_menu_delete(void* user, DomElement* elem,
-                                         DocState* state,
-                                         uint32_t start, uint32_t end) {
-    EventContext* evcon = (EventContext*)user;
-    if (!evcon || !elem || !state) return false;
-    return dispatch_form_text_replace(evcon, elem, state, static_cast<View*>(elem),
-                                      start, end, nullptr, 0,
-                                      INPUT_INTENT_DELETE_CONTENT_FORWARD);
-}
-
-static bool dispatch_context_menu_paste(void* user, DomElement* elem,
-                                        DocState* state,
-                                        const char* text, uint32_t len) {
-    EventContext* evcon = (EventContext*)user;
-    if (!evcon || !elem || !state) return false;
-    return dispatch_form_text_paste(evcon, elem, state, static_cast<View*>(elem),
-                                    text, len) > 0;
-}
-
 static void dispatch_selectstart(EventContext* evcon, View* target);
 
 static bool dispatch_form_selection_byte_range(DomElement* elem, DocState* state,
@@ -4443,24 +4450,32 @@ static bool dispatch_form_copy_selection(EventContext* evcon, DomElement* elem,
     return true;
 }
 
-static bool dispatch_form_cut_selection(EventContext* evcon, DomElement* elem,
-                                        DocState* state, View* target) {
+// Cut and Delete differ only in clipboard side effects; both erase the live
+// selected byte range through the same beforeinput/applier mechanism.
+static bool dispatch_form_delete_selection(EventContext* evcon, DomElement* elem,
+                                           DocState* state, View* target,
+                                           InputIntentType input_type) {
     if (!evcon || !elem || !state || !target) return false;
-    bool editable = !form_control_is_user_readonly(state, static_cast<View*>(elem));
-    if (!editable) return false;
+    if (form_control_is_user_readonly(state, static_cast<View*>(elem))) return false;
 
     uint32_t start = 0;
     uint32_t end = 0;
-    if (!dispatch_form_selection_byte_range(elem, state, target,
-                                            &start, &end)) {
-        return false;
-    }
-    if (!dispatch_form_copy_selection(evcon, elem, state, target, "form cut")) {
+    if (!dispatch_form_selection_byte_range(elem, state, target, &start, &end)) {
         return false;
     }
     return dispatch_form_text_replace(evcon, elem, state, target,
-                                      start, end, nullptr, 0,
-                                      INPUT_INTENT_DELETE_BY_CUT);
+                                      start, end, nullptr, 0, input_type);
+}
+
+static bool dispatch_form_cut_selection(EventContext* evcon, DomElement* elem,
+                                        DocState* state, View* target) {
+    if (!evcon || !elem || !state || !target) return false;
+    if (form_control_is_user_readonly(state, static_cast<View*>(elem))) return false;
+    if (!dispatch_form_copy_selection(evcon, elem, state, target, "form cut")) {
+        return false;
+    }
+    return dispatch_form_delete_selection(evcon, elem, state, target,
+                                          INPUT_INTENT_DELETE_BY_CUT);
 }
 
 static const char* form_control_live_value(DomElement* elem, uint32_t* out_len) {
@@ -4501,13 +4516,6 @@ static bool dispatch_form_select_all(EventContext* evcon, DomElement* elem,
     event_log_editing_selection(state, &surface, &intent, "selectAll",
                                 0, value_len);
     return true;
-}
-
-static bool dispatch_context_menu_select_all(void* user, DomElement* elem,
-                                             DocState* state) {
-    EventContext* evcon = (EventContext*)user;
-    if (!evcon || !elem || !state) return false;
-    return dispatch_form_select_all(evcon, elem, state, static_cast<View*>(elem));
 }
 
 static bool dispatch_form_caret_collapse(EventContext* evcon, DomElement* elem,
@@ -7967,6 +7975,7 @@ static bool dispatch_package_keyboard_command(EventContext* evcon,
     InputIntentType type = input_intent_type_from_name(name);
     if (type != INPUT_INTENT_INSERT_FROM_PASTE &&
         type != INPUT_INTENT_DELETE_BY_CUT &&
+        type != INPUT_INTENT_DELETE_CONTENT_FORWARD &&
         type != INPUT_INTENT_COPY &&
         type != INPUT_INTENT_SELECT_ALL) {
         return false;
@@ -7990,6 +7999,10 @@ static bool dispatch_package_keyboard_command(EventContext* evcon,
             case INPUT_INTENT_DELETE_BY_CUT:
                 handled = dispatch_form_cut_selection(evcon, elem, state, control);
                 break;
+            case INPUT_INTENT_DELETE_CONTENT_FORWARD:
+                handled = dispatch_form_delete_selection(
+                    evcon, elem, state, control, INPUT_INTENT_DELETE_CONTENT_FORWARD);
+                break;
             case INPUT_INTENT_INSERT_FROM_PASTE:
                 handled = dispatch_form_keyboard_paste(evcon, state, control);
                 break;
@@ -8003,7 +8016,9 @@ static bool dispatch_package_keyboard_command(EventContext* evcon,
     View* rich_target = rich_keyboard_target_from_selection(state, target,
                                                             &surface);
     if (rich_target) {
-        if (type != INPUT_INTENT_SELECT_ALL) {
+        if (type == INPUT_INTENT_INSERT_FROM_PASTE ||
+            type == INPUT_INTENT_DELETE_BY_CUT ||
+            type == INPUT_INTENT_COPY) {
             const char* event_name = type == INPUT_INTENT_INSERT_FROM_PASTE
                 ? "paste" : (type == INPUT_INTENT_DELETE_BY_CUT ? "cut" : "copy");
             if (radiant_dispatch_clipboard_event(evcon, rich_target, event_name)) {
@@ -8307,13 +8322,13 @@ static bool editing_key_may_emit_text(const KeyEvent* key_event) {
     }
 }
 
-/**
- * Close dropdown if clicking outside
- */
-static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float mouse_y) {
+// Native supplies only the overlay/anchor containment test. The package owns
+// the outside-click dismissal so opening, committing, Escape, and dismissal
+// remain one <select> policy surface.
+static bool dropdown_click_is_outside(EventContext* evcon, float mouse_x, float mouse_y) {
     DocState* state = nullptr;
     ViewBlock* select = event_open_dropdown_select(evcon, &state);
-    if (!select) return;
+    if (!select) return false;
 
     float select_abs_x = 0.0f, select_abs_y = 0.0f;
     float select_w = 0.0f, select_h = 0.0f;
@@ -8328,18 +8343,16 @@ static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float 
     // Check if click is on the select itself (toggle handled elsewhere)
     if (mouse_x >= select_abs_x && mouse_x <= select_abs_x + select_w &&
         mouse_y >= select_abs_y && mouse_y <= select_abs_y + select_h) {
-        return;  // Click on the select box itself; the <select> behavior template owns opening/closing it
+        return false;  // The <select> click behavior owns its own toggle.
     }
 
     // Check if click is on dropdown popup
     if (mouse_x >= state->dropdown_x && mouse_x <= state->dropdown_x + state->dropdown_width &&
         mouse_y >= state->dropdown_y && mouse_y <= state->dropdown_y + state->dropdown_height) {
-        return;  // Click on dropdown, let handle_dropdown_option_click deal with it
+        return false;  // optioncommit handles a popup-row hit.
     }
 
-    // Click outside - close dropdown
-    log_debug("close_dropdown_if_outside: closing dropdown");
-    doc_state_close_dropdown(state, static_cast<View*>(select));
+    return true;
 }
 
 /**
@@ -10000,27 +10013,26 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             uicon->mouse_state.is_mouse_down = event->type == RDT_EVENT_MOUSE_DOWN;
         }
 
-        // F8 (Radiant_Design_Form_Input.md §3.10): native context menu
-        // hit-testing. Runs before any focus / drag work so a click inside
-        // the popup or its dismissal doesn't reach underlying views.
+        // ES34: native context-menu hit-testing runs before focus/drag work so
+        // an overlay click cannot reach the underlying view. It reports only
+        // the physical row; the package maps it to a command and cleans up.
         if (event->type == RDT_EVENT_MOUSE_DOWN && state && state->context_menu_target) {
             float mxp = (float)btn_event->x;
             float myp = (float)btn_event->y;
             if (context_menu_contains(state, mxp, myp)) {
                 if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
-                    ContextMenuEditHooks hooks;
-                    hooks.cut_selection = dispatch_context_menu_cut;
-                    hooks.delete_selection = dispatch_context_menu_delete;
-                    hooks.paste_text = dispatch_context_menu_paste;
-                    hooks.select_all = dispatch_context_menu_select_all;
-                    hooks.user = &evcon;
-                    context_menu_click_with_hooks(state, mxp, myp, &hooks);
+                    InputIntent intent;
+                    intent.context_menu_item = context_menu_item_at(state, mxp, myp);
+                    if (intent.context_menu_item >= 0) {
+                        radiant_dispatch_behavior_context_menu_action(
+                            &evcon, state->context_menu_target, &intent);
+                    }
                 }
                 break;
             }
-            // Click outside the open menu always dismisses it; we then
-            // continue with normal handling so the new click still works.
-            context_menu_close(state);
+            // The package chooses the dismissal, then this click continues to
+            // its ordinary target so the newly addressed control still works.
+            radiant_dispatch_behavior_context_menu_dismiss(state->context_menu_target);
         }
         // F10: a right click first emits the ordinary cancelable DOM event, so
         // an author can install a custom menu. Only an unclaimed default reaches
@@ -10705,8 +10717,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // Option was selected, done - skip other click handlers
                     dropdown_handled = true;
                 } else {
-                    // Check if clicking outside dropdown - close it
-                    close_dropdown_if_outside(&evcon, (float)mouse_x, (float)mouse_y);
+                    // Native resolves containment; the <select> template owns
+                    // whether an outside release closes its open popup.
+                    if (dropdown_click_is_outside(&evcon, (float)mouse_x,
+                                                  (float)mouse_y)) {
+                        radiant_dispatch_behavior_dropdown_dismiss(
+                            static_cast<View*>(state->open_dropdown));
+                    }
                     dropdown_handled = true;  // Still handled - don't re-open dropdown
                 }
             }
@@ -10952,9 +10969,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         DocState* state = event_context_target_state(&evcon);
         if (!state) break;
 
-        // F8: Esc closes the native context menu before any other handler.
+        // ES34: Esc remains modal-overlay precedence, but the package now
+        // owns the teardown rather than native event code.
         if (state->context_menu_target && key_event->key == RDT_KEY_ESCAPE) {
-            context_menu_close(state);
+            radiant_dispatch_behavior_context_menu_dismiss(state->context_menu_target);
             evcon.need_repaint = true;
             break;
         }

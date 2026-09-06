@@ -6,11 +6,9 @@
 // what moved here is the two decisions native used to make — which target
 // deserves a menu, and which of its items are live.
 //
-// The five commands themselves did NOT need moving: cut, delete, paste and
-// select-all already route through `dispatch_form_text_replace` /
-// `dispatch_form_text_paste` / `dispatch_form_select_all`, which fire
-// `beforeinput` and land in editing.apply. So the exec half has been package
-// policy since F5; only the gate in front of it was still native.
+// ES34: a popup row now reaches this module as an index. Mapping it to the
+// shared command vocabulary and deciding the cleanup live beside the open
+// policy; `dom.keyboard_command` remains the one native edit/clipboard waist.
 import dom
 
 // One bit per item, in CtxMenuItem order (event.hpp): Cut, Copy, Paste,
@@ -55,4 +53,28 @@ pub pn open_for(body) {
         let clip = dom.clipboard_text();
         dom.open_context_menu(target, enabled_mask(target, clip != null))
     }
+}
+
+// The renderer's five rows are stable overlay mechanism. Their command meaning
+// is policy: keep it here so the same generic command waist serves keyboard
+// accelerators and context-menu actions without a second native edit route.
+fn command_for_item(item) {
+    if (item == 0) "deleteByCut"
+    else if (item == 1) "copy"
+    else if (item == 2) "insertFromPaste"
+    else if (item == 3) "deleteContentForward"
+    else if (item == 4) "selectAll"
+    else null
+}
+
+pub pn run_item(body, evt) {
+    let command = command_for_item(evt.context_menu_item);
+    let handled = if (command == null) false else dom.keyboard_command(body, command);
+    // A disabled or stale row still dismisses, matching native menu behavior.
+    dom.close_context_menu(body)
+    handled
+}
+
+pub pn dismiss(body) {
+    dom.close_context_menu(body)
 }

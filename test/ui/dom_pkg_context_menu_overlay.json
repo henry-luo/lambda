@@ -1,0 +1,78 @@
+{
+  "html": "test/ui/test_form_input.html",
+  "description": "ES34: a context-menu row action is a package default",
+  "events": [
+    {
+      "type": "log",
+      "message": "=== a physical popup row reaches the package command policy ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#name"
+      }
+    },
+    {
+      "type": "paste_text",
+      "target": {
+        "selector": "#name"
+      },
+      "text": "menu"
+    },
+    {
+      "type": "key_combo",
+      "key": "a",
+      "mods_str": "super"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#name"
+      },
+      "button": 1
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#name"
+      },
+      "context_menu_open": true
+    },
+    {
+      "type": "log",
+      "message": "--- click Delete (row 3): the package maps it to deleteContentForward ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#name",
+        "offset_x": 140,
+        "offset_y": 97
+      }
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": ""
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#name"
+      },
+      "context_menu_open": false
+    },
+    {
+      "type": "log",
+      "message": "--- the item closes the overlay after its shared command runs ---"
+    }
+  ]
+}

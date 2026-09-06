@@ -301,6 +301,9 @@ pn listbox_move(select, options, key, active) {
 // being used, and no other realm needs to see them.
 view <select> state dropdown_open, listbox_anchor: -1, listbox_active: -1 {}
 on init(evt) { aria.reflect(~) }
+// ES34: native overlay geometry identifies an outside release, while the
+// control's package policy owns the close transition.
+on dropdowndismiss(evt) { dom.set_dropdown_open(~, false) }
 on click(evt) {
     if (dom.get_state(~, "disabled")) { return 'pass' }
     // A listbox has no dropdown: the click selects a row instead (ESO72). The
@@ -553,6 +556,10 @@ on keydown(evt) { keymap.run_shortcut(~, evt) }
 // F10: the context menu is document-scoped state, the same cardinality argument
 // ES18 made for the IME session — one menu per document, not one per control.
 on contextmenu(evt) { menu.open_for(~) }
+// ES34: the popup is not a DOM subtree, so its row and dismissal decisions are
+// behavior-only document defaults rather than synthetic author events.
+on contextmenuaction(evt) { menu.run_item(~, evt) }
+on contextmenudismiss(evt) { menu.dismiss(~) }
 // F9: keyboard caret navigation. Document-scoped for the same reason — one
 // caret per document, not one per control.
 on caretkey(evt) { caret.navigate(~, evt) }

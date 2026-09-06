@@ -6,9 +6,6 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
-#include "../lib/memtrack.h"
-
-#include <string.h>
 
 // Local copies of helpers from render_form.cpp (static there). Mirrors the
 // dropdown popup style.
@@ -101,107 +98,11 @@ bool context_menu_hover(DocState* state, float x, float y) {
     return true;
 }
 
-// Convert UTF-16 selection [a, b) to UTF-8 byte range over current_value.
-static bool ctx_menu_selection_bytes(DomElement* elem, uint32_t* out_a, uint32_t* out_b) {
-    if (!elem || !elem->form || !elem->form->current_value) return false;
-    FormControlProp* f = elem->form;
-    uint32_t a16 = f->selection_start, b16 = f->selection_end;
-    if (a16 == b16) return false;
-    if (a16 > b16) { uint32_t t = a16; a16 = b16; b16 = t; }
-    uint32_t a = tc_utf16_to_utf8_offset(f->current_value, f->current_value_len, a16);
-    uint32_t b = tc_utf16_to_utf8_offset(f->current_value, f->current_value_len, b16);
-    if (a > b) { uint32_t t = a; a = b; b = t; }
-    if (a > f->current_value_len) a = f->current_value_len;
-    if (b > f->current_value_len) b = f->current_value_len;
-    *out_a = a;
-    *out_b = b;
-    return true;
-}
-
-static void ctx_menu_exec_copy(DomElement* elem) {
-    uint32_t a, b;
-    if (!ctx_menu_selection_bytes(elem, &a, &b)) return;
-    char* tmp = (char*)mem_alloc((size_t)(b - a) + 1, MEM_CAT_TEMP);
-    if (!tmp) return;
-    memcpy(tmp, elem->form->current_value + a, b - a);
-    tmp[b - a] = '\0';
-    clipboard_copy_text(tmp);
-    mem_free(tmp);
-}
-
-static void ctx_menu_exec_cut(DomElement* elem, DocState* state,
-                              const ContextMenuEditHooks* hooks) {
-    uint32_t a, b;
-    if (!ctx_menu_selection_bytes(elem, &a, &b)) return;
-    ctx_menu_exec_copy(elem);
-    if (hooks && hooks->cut_selection &&
-        hooks->cut_selection(hooks->user, elem, state, a, b)) {
-        return;
-    }
-    te_replace_byte_range(elem, state, static_cast<View*>(elem), a, b, nullptr, 0);
-}
-
-static void ctx_menu_exec_delete(DomElement* elem, DocState* state,
-                                 const ContextMenuEditHooks* hooks) {
-    uint32_t a, b;
-    if (!ctx_menu_selection_bytes(elem, &a, &b)) return;
-    if (hooks && hooks->delete_selection &&
-        hooks->delete_selection(hooks->user, elem, state, a, b)) {
-        return;
-    }
-    te_replace_byte_range(elem, state, static_cast<View*>(elem), a, b, nullptr, 0);
-}
-
-static void ctx_menu_exec_paste(DomElement* elem, DocState* state,
-                                const ContextMenuEditHooks* hooks) {
-    const char* clip = clipboard_get_text();
-    if (!clip || !*clip) return;
-    // Paste policy (newline sanitization, maxlength) lives in the dom package
-    // and is reached through this hook, which routes to the live editing path.
-    // Without the hook there is no applier and therefore no paste — pasting raw
-    // clipboard text here would bypass the policy rather than fall back to it.
-    if (hooks && hooks->paste_text) {
-        hooks->paste_text(hooks->user, elem, state, clip, (uint32_t)strlen(clip));
-    }
-}
-
-static void ctx_menu_exec_select_all(DomElement* elem, DocState* state,
-                                     const ContextMenuEditHooks* hooks) {
-    if (!elem || !elem->form) return;
-    if (hooks && hooks->select_all &&
-        hooks->select_all(hooks->user, elem, state)) {
-        return;
-    }
-    tc_set_selection_range(elem, 0, elem->form->current_value_u16_len, 1);
-}
-
-bool context_menu_click(DocState* state, float x, float y) {
-    return context_menu_click_with_hooks(state, x, y, nullptr);
-}
-
-bool context_menu_click_with_hooks(DocState* state, float x, float y,
-                                   const ContextMenuEditHooks* hooks) {
-    if (!context_menu_contains(state, x, y)) return false;
+int context_menu_item_at(DocState* state, float x, float y) {
+    if (!context_menu_contains(state, x, y)) return -1;
+    // INT_CAST_OK: context-menu row is an array index derived from CSS geometry.
     int idx = (int)((y - state->context_menu_y) / CTX_MENU_ITEM_HEIGHT);
-    if (idx < 0 || idx >= CTX_MENU_ITEM_COUNT) {
-        context_menu_close(state);
-        return true;
-    }
-    DomElement* elem = ctx_menu_target_elem(state);
-    if (!elem || !context_menu_item_enabled(state, idx)) {
-        context_menu_close(state);
-        return true;
-    }
-    log_info("context_menu_click: %s", CTX_MENU_LABELS[idx]);
-    switch (idx) {
-        case CTX_MENU_CUT:        ctx_menu_exec_cut(elem, state, hooks); break;
-        case CTX_MENU_COPY:       ctx_menu_exec_copy(elem); break;
-        case CTX_MENU_PASTE:      ctx_menu_exec_paste(elem, state, hooks); break;
-        case CTX_MENU_DELETE:     ctx_menu_exec_delete(elem, state, hooks); break;
-        case CTX_MENU_SELECT_ALL: ctx_menu_exec_select_all(elem, state, hooks); break;
-    }
-    context_menu_close(state);
-    return true;
+    return idx >= 0 && idx < CTX_MENU_ITEM_COUNT ? idx : -1;
 }
 
 void context_menu_render(RenderContext* rdcon, DocState* state) {
