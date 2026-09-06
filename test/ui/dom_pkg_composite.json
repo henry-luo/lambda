@@ -1,0 +1,391 @@
+{
+  "name": "ESO59: radio arrow navigation, select typeahead, listbox click",
+  "html": "test/ui/dom_pkg_composite.html",
+  "viewport": {
+    "width": 520,
+    "height": 520
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "=== radio group arrow navigation (form.ls move_within_group) ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#r1"
+      }
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#r1"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#r1"
+      }
+    },
+    {
+      "type": "log",
+      "message": "--- ArrowDown moves the checkedness and the focus together ---"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#r2"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#r1"
+      },
+      "checked": false
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#r2"
+      }
+    },
+    {
+      "type": "log",
+      "message": "--- a disabled member is skipped, not landed on ---"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#r4"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#r3"
+      },
+      "checked": false
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#r4"
+      }
+    },
+    {
+      "type": "log",
+      "message": "--- and the group wraps at its end ---"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowRight"
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#r1"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#r1"
+      }
+    },
+    {
+      "type": "log",
+      "message": "--- ArrowUp wraps the other way ---"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowUp"
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#r4"
+      },
+      "checked": true
+    },
+    {
+      "type": "log",
+      "message": "--- a differently named radio is a different group ---"
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#other"
+      },
+      "checked": false
+    },
+    {
+      "type": "log",
+      "message": "--- a modified arrow is not group navigation ---"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowUp",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#r4"
+      },
+      "checked": true
+    },
+    {
+      "type": "log",
+      "message": "--- Space still activates: the arrows did not displace it ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#r1"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Space"
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#r1"
+      },
+      "checked": true
+    },
+    {
+      "type": "log",
+      "message": "=== <select> typeahead (form.ls typeahead) ==="
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#combo"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#combo"
+      },
+      "equals": "apple"
+    },
+    {
+      "type": "key_press",
+      "key": "b"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#combo"
+      },
+      "equals": "banana"
+    },
+    {
+      "type": "log",
+      "message": "--- the same letter again walks to the next match ---"
+    },
+    {
+      "type": "key_press",
+      "key": "b"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#combo"
+      },
+      "equals": "blueberry"
+    },
+    {
+      "type": "log",
+      "message": "--- and wraps back to the first ---"
+    },
+    {
+      "type": "key_press",
+      "key": "b"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#combo"
+      },
+      "equals": "banana"
+    },
+    {
+      "type": "log",
+      "message": "--- a letter with no match leaves the selection alone ---"
+    },
+    {
+      "type": "key_press",
+      "key": "z"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#combo"
+      },
+      "equals": "banana"
+    },
+    {
+      "type": "log",
+      "message": "--- an accelerator is not typeahead ---"
+    },
+    {
+      "type": "key_press",
+      "key": "c",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#combo"
+      },
+      "equals": "banana"
+    },
+    {
+      "type": "log",
+      "message": "--- Space still opens the picker rather than searching ---"
+    },
+    {
+      "type": "key_press",
+      "key": "Space"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#combo"
+      },
+      "open_dropdown": true
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#combo"
+      },
+      "open_dropdown": false
+    },
+    {
+      "type": "log",
+      "message": "=== listbox rows are ordinary click targets (ESO59) ==="
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#colours"
+      },
+      "equals": "red"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#colours option[value=blue]"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#colours"
+      },
+      "equals": "blue"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#changes"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "log",
+      "message": "--- clicking the row already selected reports no change ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#colours option[value=blue]"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#colours"
+      },
+      "equals": "blue"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#changes"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "log",
+      "message": "--- a disabled option, and one inside a disabled optgroup, are not selectable ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#colours option[value=grey]"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#colours"
+      },
+      "equals": "blue"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#colours option[value=mauve]"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#colours"
+      },
+      "equals": "blue"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#changes"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "log",
+      "message": "--- a listbox has no dropdown to open ---"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#colours"
+      },
+      "open_dropdown": false
+    }
+  ]
+}

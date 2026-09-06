@@ -580,16 +580,66 @@ TEST(AstBuildAllocationTest, SizedLiteralCopyFailureDoesNotCrash) {
 
     AstScript* root = nullptr;
     LambdaParseError parse_error = {};
-    memtrack_fault_inject(0);
-    LambdaParseStatus status = lambda_rd_reduce_ast(&tp, source,
-        sizeof(source) - 1, &root, &parse_error);
+    LambdaReductionTape* tape = nullptr;
+    ASSERT_EQ(lambda_rd_parse_reductions(source, sizeof(source) - 1,
+        &tape, &parse_error), LAMBDA_PARSE_OK);
+    ASSERT_NE(tape, nullptr);
+    // The replay workspace is the first tracked builder allocation; fail the
+    // following sized-literal copy, which is the failure this test covers.
+    memtrack_fault_inject(1);
+    LambdaParseStatus status = lambda_rd_build_reductions(&tp, source,
+        sizeof(source) - 1, tape, &root, &parse_error);
     if (status == LAMBDA_PARSE_OK && root) lambda_ast_finalize_script(&tp, root);
     memtrack_fault_clear();
+    lambda_rd_destroy_reductions(tape);
 
-    EXPECT_EQ(status, LAMBDA_PARSE_OK);
-    EXPECT_NE(root, nullptr);
+    // D8.2.5: a failed build replay cannot publish a partial AST.
+    EXPECT_EQ(status, LAMBDA_PARSE_ERROR);
+    EXPECT_EQ(root, nullptr);
     EXPECT_GT(tp.error_count, 0);
 
+    arraylist_free(tp.const_list);
+    arraylist_free(input->type_list);
+    pool_destroy(pool);
+}
+
+TEST(AstBuildReductionTest, ParseTapeDefersBindingUntilBuildReplay) {
+    const char source[] =
+        "fn outer(value: int) => inner(value)\n"
+        "fn inner(value: int) => value + 1\n";
+    Pool* pool = pool_create_sized(64 * 1024);
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+
+    Transpiler tp = {};
+    tp.source = source;
+    tp.pool = pool;
+    tp.arena = input->arena;
+    tp.name_pool = input->name_pool;
+    tp.type_list = input->type_list;
+    tp.root = input->root;
+    tp.const_list = arraylist_new(16);
+    tp.current_scope = (NameScope*)pool_calloc(pool, sizeof(NameScope));
+    tp.max_errors = 10;
+    ASSERT_NE(tp.const_list, nullptr);
+    ASSERT_NE(tp.current_scope, nullptr);
+
+    LambdaReductionTape* tape = nullptr;
+    LambdaParseError parse_error = {};
+    ASSERT_EQ(lambda_rd_parse_reductions(source, sizeof(source) - 1,
+        &tape, &parse_error), LAMBDA_PARSE_OK);
+    ASSERT_NE(tape, nullptr);
+    // D8.2.5: parsing records source reductions but cannot publish bindings.
+    EXPECT_EQ(tp.current_scope->first, nullptr);
+
+    AstScript* root = nullptr;
+    ASSERT_EQ(lambda_rd_build_reductions(&tp, source, sizeof(source) - 1,
+        tape, &root, &parse_error), LAMBDA_PARSE_OK);
+    EXPECT_NE(root, nullptr);
+    EXPECT_NE(tp.current_scope->first, nullptr);
+
+    lambda_rd_destroy_reductions(tape);
     arraylist_free(tp.const_list);
     arraylist_free(input->type_list);
     pool_destroy(pool);
@@ -949,6 +999,13 @@ TEST_F(StackTraceTest, CaptureStackTraceWithoutDebugInfo) {
     }
 }
 
+TEST_F(StackTraceTest, RawStackTraceUsesSharedDefaultDepth) {
+    RawStackTrace* trace = err_capture_raw_stack_trace(nullptr, 0);
+    ASSERT_NE(trace, nullptr);
+    EXPECT_EQ(trace->max_frames, LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
+    err_free_raw_stack_trace(trace);
+}
+
 //==============================================================================
 // Error Chaining Tests
 //==============================================================================
@@ -1207,6 +1264,8 @@ TEST_F(NegativeScriptTest, DynamicFractionalDecimalRejectsIntegerBoundary) {
 }
 
 TEST_F(NegativeScriptTest, TypeEnforcementRuntimeNegativeGoldensPinDiagnostics) {
+    ExpectRuntimeErrorMessage("test/lambda/negative/runtime/computed_key_non_name.ls",
+        "error[E201]: computed map key must evaluate to string or symbol");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_array_write.ls",
         "error[E201]: type check at typed array element assignment failed: expected int, got string 'not an integer'");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_dynamic_arity.ls",
@@ -1413,6 +1472,11 @@ TEST_F(NegativeScriptTest, SemanticError_ImmutableInteriorAssignment) {
 TEST_F(NegativeScriptTest, SemanticError_ProcMethodRequiresMutableReceiver) {
     ExpectErrorMessage("test/lambda/negative/semantic/proc_method_let_receiver.ls",
         "mutating method 'increment' needs a `var` binding receiver");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_ProcMethodCannotBeTakenAsValue) {
+    ExpectErrorMessage("test/lambda/negative/semantic/proc_method_reference.ls",
+        "procedure method 'increment' cannot be used as a value; call it directly");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_CaptureMutation) {

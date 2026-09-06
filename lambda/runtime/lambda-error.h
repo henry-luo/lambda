@@ -192,6 +192,8 @@ typedef struct RawStackTrace {
     int max_frames;
 } RawStackTrace;
 
+enum { LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES = 64 };
+
 // ============================================================================
 // Lambda Error Structure
 // ============================================================================
@@ -252,7 +254,7 @@ typedef struct LambdaFaultRecord {
 // Debug information for a compiled function
 typedef struct FuncDebugInfo {
     void* native_addr_start;        // start of native code
-    void* native_addr_end;          // end of native code (computed via address ordering)
+    void* native_addr_end;          // exclusive native-code end (next address or JIT allocation frontier)
     const char* lambda_func_name;   // Lambda function name
     const char* source_file;        // source file path
     uint32_t source_line;           // line number of function definition

@@ -51,9 +51,3 @@ let m = {a: 1, b: 2}
 type(m["len"])
 type(m.len)
 m.len()
-
-// f: a bare `pn` method still binds. OB6 rules this a compile error, but the
-// rejection cannot live in the runtime member lane — MIR lowers a `pn` method
-// CALL by lowering its callee through that same lane (LR02-18).
-'=f='
-type(p.shift)

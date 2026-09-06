@@ -203,7 +203,7 @@ Item js_mir_compile_unit_fail(MIR_context_t ctx, JsMirTranspiler* mt,
     JsTranspiler* tp, char* owned_source, Runtime* runtime,
     EvalContext* js_context, bool reusing_context,
     int mir_gen_initialized = -1);
-bool js_link_compiled_name_table(const JsMirTranspiler* mt);
+int js_mir_runtime_link_pass(void* opaque);
 bool js_prelink_compiled_name_table(const JsMirTranspiler* mt);
 bool js_append_compiled_name_table(const JsMirTranspiler* mt);
 bool js_capture_compiled_name_table(const JsMirTranspiler* mt, JsPreambleState* state);
@@ -326,7 +326,7 @@ bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
 void jm_emit_throw_completion(JsMirTranspiler* mt, MIR_reg_t value);
 void jm_emit_generator_throw_completion(JsMirTranspiler* mt, MIR_reg_t value);
 void jm_emit_error_lane_exit(JsMirTranspiler* mt);
-MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MIR_reg_t value);
+MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MirValue value);
 MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r);
 struct hashmap* jm_var_scope_at(JsMirTranspiler* mt, int depth);
 bool jm_var_scope_set(JsMirTranspiler* mt, int depth, struct hashmap* scope);
@@ -375,8 +375,10 @@ int jm_resumable_local_env_slot(JsMirTranspiler* mt, NameEntry* binding);
 void jm_clear_resumable_locals(JsMirTranspiler* mt);
 uint64_t jm_name_hash(const void* item, uint64_t seed0, uint64_t seed1);
 int jm_name_cmp(const void* a, const void* b, void* udata);
+int jm_binding_cmp(const void* a, const void* b, void* udata);
 void jm_name_set_add(struct hashmap* set, const char* name);
 bool jm_name_set_has(struct hashmap* set, const char* name);
+bool jm_binding_set_has(struct hashmap* set, NameEntry* binding);
 int jm_count_yields(JsMirTranspiler* mt, JsAstNode* node);
 int jm_gen_spill_save(JsMirTranspiler* mt, MIR_reg_t reg);
 void jm_gen_spill_load(JsMirTranspiler* mt, MIR_reg_t reg, int slot);
@@ -614,7 +616,11 @@ void jm_scope_env_mark_and_writeback_entry(JsMirTranspiler* mt, const char* name
     NameEntry* binding, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY);
 void jm_scope_env_mark_and_writeback_binding(JsMirTranspiler* mt, const char* name,
     JsAstNode* binding_node, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY);
-MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MIR_reg_t val, JsAstNode* expr);
+static inline MirValue jm_item_value(MIR_reg_t reg,
+        TypeId semantic_type = LMD_TYPE_ANY) {
+    return em_value_for_rep(reg, semantic_type, VALUE_REP_ITEM);
+}
+MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MirValue value);
 MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                          TypeId target_type);
 MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
@@ -764,9 +770,9 @@ void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body);
 void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt);
 void jm_emit_eval_local_pop_if_needed(JsMirTranspiler* mt);
 bool transpile_js_mir_ast(JsMirTranspiler* mt);
+bool js_mir_link_runtime_state(JsMirTranspiler* mt);
 bool jm_validate_mir_labels(MIR_context_t ctx);
 bool js_activate_runtime_name_pool(void);
-bool js_prelink_compiled_name_table(const JsMirTranspiler* mt);
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
 void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename);
 extern "C" Item js_new_function_from_string(Item* args, int argc);

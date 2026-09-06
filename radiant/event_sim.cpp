@@ -20,6 +20,7 @@
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/dom/dom.h"
+#include "../lambda/module/radiant/radiant_input_value.hpp"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
@@ -4688,6 +4689,13 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 if (!actual) actual = "";
             } else if (dom_elem->form_control() && dom_elem->form->current_value) {
                 actual = dom_elem->form->current_value;
+            } else if (dom_elem->tag() == MARKUP_NAME_INPUT) {
+                // A non-text input (range, color, the date family) has no edit
+                // buffer; its live value lives in the input value store, which
+                // is what `input.value` and form submission read. The store
+                // seeds from the `value` attribute, so this still answers the
+                // default until something writes.
+                actual = radiant_input_live_value(dom_elem);
             }
             if (!actual) {
                 const char* val = dom_elem->get_attribute("value");

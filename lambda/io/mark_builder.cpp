@@ -1028,9 +1028,8 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
             // not in lambda-input library. Caller is responsible for resolving paths
             // before deep_copy if needed.
         }
-        // For non-sys paths, we need to deep-copy the path structure
-        // For now, just return as-is (caller should be aware paths may reference external memory)
-        return item;
+        Path* copied = path_clone(pool_, path);
+        return copied ? mark_item_from_bits((uint64_t)(uintptr_t)copied) : ItemError;
     } else if constexpr (Tag == LMD_TYPE_ANY || Tag == LMD_TYPE_ERROR || Tag == LMD_TYPE_UNDEFINED) {
         return item;
     } else {

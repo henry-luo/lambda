@@ -5,6 +5,7 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/core/mark_reader.hpp"  // for ArrayReader
+#include "../lambda/core/lambda-path.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/log.h"
@@ -78,6 +79,38 @@ TEST_F(MarkBuilderDeepCopyTest, CopyInt) {
     // Ints are inline - should return same
     Item copied = builder.deep_copy(int_item);
     EXPECT_EQ(it2i(copied), 42);
+}
+
+TEST_F(MarkBuilderDeepCopyTest, CopyPathRehomesSpineAndDropsSourceCaches) {
+    Pool* source_pool = pool_create();
+    ASSERT_NE(source_pool, nullptr);
+    Path* source = path_extend(source_pool,
+        path_extend(source_pool, path_new(source_pool, PATH_SCHEME_FILE), "reports"),
+        "daily.json");
+    ASSERT_NE(source, nullptr);
+    source->result = i2it(9);
+    source->meta = (PathMeta*)pool_calloc(source_pool, sizeof(PathMeta));
+    ASSERT_NE(source->meta, nullptr);
+
+    StrBuf* source_text = strbuf_new();
+    ASSERT_NE(source_text, nullptr);
+    path_to_string(source, source_text);
+
+    MarkBuilder builder(input2);
+    Item copied = builder.deep_copy({.item = (uint64_t)(uintptr_t)source});
+    ASSERT_EQ(get_type_id(copied), LMD_TYPE_PATH);
+    ASSERT_NE(copied.path, source);
+    EXPECT_EQ(copied.path->result, 0u);
+    EXPECT_EQ(copied.path->meta, nullptr);
+
+    pool_destroy(source_pool);
+
+    StrBuf* copied_text = strbuf_new();
+    ASSERT_NE(copied_text, nullptr);
+    path_to_string(copied.path, copied_text);
+    EXPECT_STREQ(copied_text->str, source_text->str);
+    strbuf_free(copied_text);
+    strbuf_free(source_text);
 }
 
 TEST_F(MarkBuilderDeepCopyTest, TypedBuilderOutputsCarryTagWitnesses) {

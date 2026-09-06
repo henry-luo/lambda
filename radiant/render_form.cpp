@@ -1003,6 +1003,66 @@ static const char* get_option_text_at_index(ViewBlock* select, int index) {
     return nullptr;
 }
 
+// A listbox is a `multiple` select, or one with `size` above 1: its options are
+// laid out as real rows inside the control rather than in a popup.
+static bool form_select_is_listbox(const FormControlProp* form) {
+    return form && (form->multiple || form->select_size > 1);
+}
+
+/**
+ * Render a listbox's option rows (F21).
+ *
+ * These rows have real geometry from layout_form.cpp, but nothing painted them:
+ * render_block_paint_self suppresses children for every form control that is
+ * not a <button>, and render_select drew the *combo box* — an arrow well plus
+ * the one selected option's text — over the whole box regardless. So a listbox
+ * showed one label at the top and no selection at all, which is why multiple
+ * selection had "nowhere to draw" before this.
+ *
+ * Selectedness is read from the DOM node bit, the same owner `:selected`,
+ * `option.selected` and form submission read, so a set of selected rows needs
+ * no separate painting state.
+ */
+static void render_select_listbox_rows(RenderContext* rdcon, ViewBlock* block,
+                                       FormControlProp* form,
+                                       const FormControlBox* fc) {
+    if (!block->is_element() || !block->font) return;
+    float s = fc->s;
+    // Rows are clipped to the control's own box: layout places every option,
+    // including the ones past `size` rows, and this control does not scroll yet.
+    Bound saved_clip = rdcon->block.clip;
+    rdcon->block.clip.left = max(rdcon->block.clip.left, fc->x);
+    rdcon->block.clip.top = max(rdcon->block.clip.top, fc->y);
+    rdcon->block.clip.right = min(rdcon->block.clip.right, fc->x + fc->w);
+    rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, fc->y + fc->h);
+
+    Color selected_bg = fc->disabled ? make_color(212, 212, 212) : make_color(0, 120, 215);
+    Color selected_fg = make_color(255, 255, 255);
+    Color text_color = fc->disabled ? make_color(128, 128, 128) : make_color(0, 0, 0);
+    float text_padding = FormDefaults::TEXT_PADDING_H * s;
+    float font_height = block->fontp() ? block->fontp()->font_height * s : 0.0f;
+
+    for (DomElement* option = dom_select_next_option(block->as_element(), nullptr); option;
+         option = dom_select_next_option(block->as_element(), option)) {
+        if (option->height <= 0.0f || option->width <= 0.0f) continue;   // hidden row
+        float row_x = fc->x + option->x * s;
+        float row_y = fc->y + option->y * s;
+        float row_w = option->width * s;
+        float row_h = option->height * s;
+        bool selected = dom_option_is_selected(option);
+        if (selected) {
+            fill_rect(rdcon, row_x, row_y, row_w, row_h, selected_bg);
+        }
+        const char* label = dom_option_text(option);
+        if (label && *label) {
+            render_simple_string(rdcon, label, row_x + text_padding,
+                                 row_y + (row_h - font_height) / 2, block->font,
+                                 selected ? selected_fg : text_color);
+        }
+    }
+    rdcon->block.clip = saved_clip;
+}
+
 /**
  * Render a select dropdown (closed state).
  */
@@ -1041,6 +1101,13 @@ static void render_select(RenderContext* rdcon, ViewBlock* block, FormControlPro
         bw = block->boundary()->border->width.right * s;
     } else {
         bw = 0.0f;
+    }
+
+    // A listbox has no arrow and no single overlaid label: its rows *are* the
+    // control's content, so paint them and stop (F21).
+    if (form_select_is_listbox(form)) {
+        render_select_listbox_rows(rdcon, block, form, &fc);
+        return;
     }
 
     // Dropdown arrow area

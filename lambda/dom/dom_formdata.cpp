@@ -554,8 +554,12 @@ static void fd_append_select_entries(Item entries, DomElement* select_elem) {
     DomNode* child = select_elem->first_child;
     while (child) {
         DomElement* ce = child->is_element() ? (DomElement*)child : nullptr;
+        // Live selectedness, not the `selected` content attribute: that
+        // attribute is only the *default* selection, so a user-chosen option
+        // submitted the page's initial one (F21). dom_option_is_selected falls
+        // back to the attribute when nothing has selected anything yet.
         if (ce && ce->tag_name && strcasecmp(ce->tag_name, "option") == 0 &&
-            ce->has_attribute("selected") &&
+            dom_option_is_selected(ce) &&
             !ce->has_attribute("disabled")) {
             // Spec: option value = value attr if present, else text content
             const char* opt_val = ce->get_attribute("value");
@@ -581,7 +585,7 @@ static void fd_append_select_entries(Item entries, DomElement* select_elem) {
             while (ogchild) {
                 DomElement* oce = ogchild->is_element() ? (DomElement*)ogchild : nullptr;
                 if (oce && oce->tag_name && strcasecmp(oce->tag_name, "option") == 0 &&
-                    oce->has_attribute("selected") &&
+                    dom_option_is_selected(oce) &&
                     !oce->has_attribute("disabled") && !og_disabled) {
                     const char* opt_val = oce->get_attribute("value");
                     if (!opt_val) {
@@ -670,8 +674,15 @@ static void fd_walk_form_controls(Item entries, DomNode* node, DomElement* form)
                             val = (elem->form && elem->form->current_value)
                                 ? elem->form->current_value : "";
                         } else {
-                            // type=hidden or other non-text-control: use attribute value
-                            val = elem->get_attribute("value");
+                            // Every other value state (range, hidden, color, the
+                            // date family) keeps its live value in the input
+                            // value store, which is what `input.value` reads and
+                            // what the range slider and stepUp() write. Reading
+                            // the content attribute here submitted the *default*
+                            // instead, so a moved slider posted its start value.
+                            // The store seeds itself from that attribute, so this
+                            // is still the attribute when nothing has written.
+                            val = radiant_input_live_value(elem);
                             if (!val) val = "";
                         }
                         Item pair = js_array_new(0);

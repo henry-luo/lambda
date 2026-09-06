@@ -83,6 +83,7 @@ typedef struct ValidationError {
     void* expected;            // Expected type (optional)
     Item actual;               // Actual value (optional)
     List* suggestions;         // List of String* suggestions (optional)
+    bool suggestions_processed; // report-time generation attempted or intentionally disabled
     struct ValidationError* next;
 } ValidationError;
 
@@ -94,6 +95,7 @@ typedef struct ValidationWarning {
     void* expected;            // Expected type (optional)
     Item actual;               // Actual value (optional)
     List* suggestions;         // List of String* suggestions (optional)
+    bool suggestions_processed; // keeps the layout aligned with ValidationError
     struct ValidationWarning* next;
 } ValidationWarning;
 
@@ -456,6 +458,11 @@ List* generate_type_suggestions(TypeId actual_type, Type* expected_type, Pool* p
  * Generate suggestions for a validation error
  */
 List* generate_error_suggestions(ValidationError* error, Pool* pool);
+
+/**
+ * Generate the applicable existing hints for an error.
+ */
+List* suggest_corrections(ValidationError* error, Pool* pool);
 
 /**
  * Format error with context

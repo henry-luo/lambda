@@ -781,9 +781,38 @@ Key-value mappings with structural typing:
 // Empty map
 {}
 
-// Dynamic map construction
+// Value-keyed VMap construction
 map([k1, v1, k2, v2, ...])
 ```
+
+#### Computed Map Keys
+
+Use `[expression]: value` when a map field name is known only at run time.
+The expression must evaluate to a string or symbol; it uses the same name-key
+domain as `record[expression]` access. This is an ordinary map literal, not a
+value-keyed `VMap` (S16.8.9).
+
+```lambda
+let field = "display-name"
+let record = {id: 7, [field]: "Ada"}
+record[field]  // "Ada"
+```
+
+Computed entries, static entries, and spreads are evaluated from left to
+right. A later entry for the same key wins:
+
+```lambda
+let key = "level"
+let base = {level: "base"}
+let settings = {[key]: "computed", *:base, [key]: "final"}
+settings.level  // "final"
+```
+
+Use this syntax for dynamically named map fields. `map()` and
+`map([key, value, ...])` instead construct a `VMap`, whose keys are values and
+whose pairs are positional. A computed literal key must be a string or symbol;
+for example, `{[1]: "one"}` is an error. The alternative `(expression): value`
+is not valid syntax (S16.8.9).
 
 #### Map Access
 
@@ -834,6 +863,20 @@ Structured markup elements with attributes and content, used for document proces
     <p "This is the second paragraph.">
 >
 ```
+
+An element attribute can use the same computed-key form. The attribute name
+must evaluate to a string or symbol:
+
+```lambda
+let attribute = "aria-label"
+let input_el = <input type: "range", [attribute]: "Volume">
+input_el[attribute]  // "Volume"
+```
+
+The boundary comma before element content is unchanged. In an attribute list,
+`[expression]: value` defines an attribute; after the boundary comma,
+`[expression]` is array content unless it is followed by `:` (S16.8.9,
+S16.4.1v3).
 
 #### Element Access
 

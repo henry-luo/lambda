@@ -59,31 +59,37 @@ float/decimal paths retain the existing shortest-round-trip conversion required
 by **S4.7.1**. Focused decimal and numeric tests pass; the full Lambda baseline
 passes **3978/3978**.
 
+### Direct implementation pass — 2026-09-05
+
+Six independently reproduced items were resolved without changing a language
+ruling: LR02-18 (**S12.3.3v2**, **D2.6.7**), LR05-3 (**S6.2.2v3**), LR07-12,
+LR08-8, LR10-1, and LR10-4. Focused JIT/T0 fixtures and the error regression
+suite pass; the resolution records are in Appendix A.
 
 Counts:
 
 | Source doc | Area | Open | Partial | Resolved | Total |
 |---|---|---:|---:|---:|---:|
 | LR_01 | Compilation pipeline, CLI & REPL | 8 | 2 | 5 | 15 |
-| LR_02 | Parsing & AST construction | 3 | 4 | 13 | 20 |
+| LR_02 | Parsing & AST construction | 2 | 4 | 14 | 20 |
 | LR_03 | Value & type model | 5 | 1 | 2 | 8 |
 | LR_04 | Numbers, decimal & datetime | 6 | 0 | 1 | 7 |
-| LR_05 | Strings, symbols & vectors | 3 | 1 | 5 | 9 |
+| LR_05 | Strings, symbols & vectors | 2 | 1 | 6 | 9 |
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 9 | 9 |
-| LR_07 | MIR Direct transpiler & JIT | 13 | 1 | 2 | 16 |
-| LR_08 | Memory management & GC | 10 | 0 | 0 | 10 |
+| LR_07 | MIR Direct transpiler & JIT | 12 | 1 | 3 | 16 |
+| LR_08 | Memory management & GC | 9 | 0 | 1 | 10 |
 | LR_09 | Runtime builtins | 5 | 0 | 4 | 9 |
-| LR_10 | Error handling | 2 | 1 | 2 | 5 |
+| LR_10 | Error handling | 1 | 0 | 4 | 5 |
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
 | LR_12 | Procedural runtime | 7 | 0 | 2 | 9 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 8 | 15 |
-| **Total** | | **83** | **11** | **55** | **149** |
+| **Total** | | **78** | **10** | **61** | **149** |
 
 The 149 record total exceeds the 127 items in the original source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
 LR_03 #4 (sentinels → LR03-4 + LR03-5) and LR_05 #3 (two string orderings →
-LR05-R2 + LR05-3). And two defects were **found during verification** rather
+LR05-R2 + LR05-R3). And two defects were **found during verification** rather
 than extracted: LR02-8 through LR02-10, each marked as such in place (a fourth, LR02-11, was fixed the same day and is now LR02-R6).
 
 The 2026-08-28 ledger cleanup removes seven non-live records: five
@@ -134,14 +140,13 @@ The whole `repl_history` StrBuf (`main.cpp:785`) is re-transpiled and re-run
 every turn, with error rollback implemented as a raw byte-truncate
 (`main.cpp:882`–`893`). Any non-idempotent side effect repeats each turn.
 
-<a id="lr01-8"></a>**LR01-8 · `init_module_import` pointer-walk is layout-coupled · OPEN**
-`init_module_import` (`runner.cpp:556`) still advances `uint8_t* mod_def` over
-the `Mod` struct by `sizeof()` arithmetic mirroring the transpiler's implicit
-layout (`:574`ff). Any change to that layout, or to the `needs_fn_call_wrapper`
-branch, silently corrupts function-pointer binding; the Lambda and cross-lang
-JS branches must stay in lockstep. Constant/type-table init has since moved to
-name-keyed `find_func("_init_mod_consts" / "_init_mod_types")` lookups
-(`:634`, `:645`) — that half is no longer layout-coupled.
+<a id="lr01-8"></a>**LR01-8 · `init_module_import` pointer-walk is layout-coupled · RESOLVED 2026-09-05**
+`init_module_import` was unreachable legacy C2MIR glue: no MIR Direct path
+called it, while the live importer links individual symbols and immutable module
+layout records. Removing the dead `uint8_t*` field walk removes its unguarded
+`Mod` layout contract outright, consistent with the single MIR Direct pipeline
+in **D8.2.5**. Existing paired-loop and module fixtures still pass after the
+removal.
 
 <a id="lr01-9"></a>**LR01-9 · Namespace export gaps (pub vars) · OPEN**
 `module_build_lambda_namespace` still skips **pub vars** entirely —
@@ -208,11 +213,14 @@ carrier stays `ANY`, so any consumer reading `returned` rather than
 [Type-infer impl progress] — "consumers reading `node->type` instead of the
 representation oracle" is the same defect class.
 
-<a id="lr02-4"></a>**LR02-4 · `AstLoopNode` / `AstNamedNode` layout divergence · OPEN**
-`AstLoopNode` (`lambda/runtime/ast.hpp:289`) still carries `index_name` between
-`name` and `as`, where `AstNamedNode` has `as` directly after `name`. A
-wrong-type cast reads the wrong field offset. Existing capture code casts
-explicitly, but any new code handling loop nodes generically is exposed.
+<a id="lr02-4"></a>**LR02-4 · `AstLoopNode` / `AstNamedNode` layout divergence · RESOLVED 2026-09-05**
+`AstLoopNode` deliberately retains its own layout. Its secondary `(key, value)`
+binding now uses `AST_NODE_FOR_INDEX`, a named-node-only kind, and the primary
+loop binding registers its explicit spelling without an `AstNamedNode` cast.
+Capture analysis traverses `AstLoopNode` directly, including join edges. This
+keeps the canonical binding identity required by **D8.2.4** typed rather than
+depending on coincidental field offsets. `for_at_pairs.ls` and
+`for_join_s3b_test.ls` pass on MIR Direct, including forced-GC mode.
 
 <a id="lr02-5"></a>**LR02-5 · `match`-arm `~` references were missed · RESOLVED 2026-08-25**
 `has_current_item_ref` (`build_ast.cpp`) walked a match node's scrutinee and
@@ -467,17 +475,21 @@ the decimal baseline passes.
 100000 bits (`:1773`, `:1803`); string ingest rejects above 100000 (`:1310`).
 Implementation guardrails, not mathematical limits in the surface model.
 
-<a id="lr04-3"></a>**LR04-3 · Trapping `mpd_get_ssize` can SIGFPE · OPEN**
-`decimal_to_int64` (`lambda-decimal.cpp:1163`) and `decimal_mpd_to_int64`
-(`:661`) use the **trapping** `mpd_get_ssize`, which can SIGFPE on overflow.
-BigInt shift/pow paths use quiet extraction before narrowing; the decimal
-conversion helpers remain an unhandled-crash risk on out-of-range magnitudes.
+<a id="lr04-3"></a>**LR04-3 · Trapping `mpd_get_ssize` can SIGFPE · RESOLVED 2026-09-05**
+Decimal narrowing now uses `mpd_qget_ssize` and maps an invalid conversion to
+the existing `INT64_ERROR` sentinel. Thus an out-of-range decimal cannot enter
+libmpdec's trapping path; the native boundary remains total as required by
+**S4.1.2**. Regression:
+`LambdaDecimal.QuietInt64ExtractionRejectsOverflowAndInvalidComparison` covers
+`9223372036854775808` without a signal.
 
-<a id="lr04-4"></a>**LR04-4 · `decimal_cmp` swallows conversion failure as equality · OPEN**
-On a failed operand conversion, `decimal_cmp` returns `0` with the comment
-`// error case, treat as equal` (`lambda-decimal.cpp:1004`), so a malformed
-comparand compares **equal** rather than raising — a silent-wrong-answer path
-feeding `decimal_cmp_items` (`:1023`). Also tracked under **[OI-1](#15-design-gaps-inherited-from-the-retired-outstanding-rollup-oi)**.
+<a id="lr04-4"></a>**LR04-4 · `decimal_cmp` swallows conversion failure as equality · RESOLVED 2026-09-05**
+`decimal_cmp_items` now returns success separately from its order result. A
+failed operand conversion is invalid ordering (and false for JS strict
+equality), never equality; validator pattern matching also rejects it. This
+preserves the poison/non-equality rule in **S4.2.3**. Regression:
+`LambdaDecimal.QuietInt64ExtractionRejectsOverflowAndInvalidComparison` covers
+an invalid Decimal operand.
 
 <a id="lr04-5"></a>**LR04-5 · Float↔decimal round-trip via text is lossy and hot · OPEN**
 `decimal_mpd_to_double` reverses through `mpd_to_sci` + `strtod`
@@ -501,15 +513,15 @@ are the finest precision. Out-of-range construction yields
 
 ## 5. Strings, symbols & vectors (LR_05)
 
-<a id="lr05-1"></a>**LR05-1 · `ndim` cap of 32 is unchecked in the helpers · PARTIAL**
-*Fixed at construction:* `lambda/runtime/lambda-data-runtime.cpp:465` now
-rejects `ndim < 1 || ndim > 32`, and `gc_heap.c:1925` / `lambda-eval.cpp:1825`,
-`:1833` re-check before use.
-*Residue:* the broadcast/stride helpers in
-`lambda/runtime/lambda-vector.cpp` still declare fixed `int64_t shp[32],
-str[32]` stack buffers with **no bound re-check** (`:696`, `:794`, `:3123`,
-`:3271`, `:3357`, `:3391`, `:3463`, `:3581`, `:3663`, `:3680`). Any path that
-reaches them with an unvalidated shape overruns the stack.
+<a id="lr05-1"></a>**LR05-1 · `ndim` cap of 32 is unchecked in the helpers · RESOLVED (D1.9)**
+`LAMBDA_ARRAY_NUM_MAX_NDIM` is the single rank cap. Construction, GC promotion,
+and equality use it; `lambda/runtime/lambda-vector.cpp` now validates descriptor
+rank at the shared shape/stride decode boundary before writing a caller's
+fixed-rank buffer. Every vector, structural, reduction, mask, and image caller
+converts a rejected descriptor to `ItemError`; direct native reduction returns
+`NaN` after logging because its ABI is `double`. The regression injects an
+out-of-range descriptor and verifies shape and matrix operations fail without
+decoding it. This implements D1.9's malformed-input fail-closed rule.
 
 <a id="lr05-2"></a>**LR05-2 · Not full UCA collation · RESOLVED (not a defect; ruled by S6.2.2)**
 The former expectation was wrong: Lambda's normative total order is bytewise
@@ -517,14 +529,6 @@ UTF-8, with no locale collation or accent ordering. The utf8proc casefold path
 is used only for markup tag/attribute matching. The stale comment at
 `lambda/core/utf_string.cpp:57` should be corrected, but implementing UCA would
 contradict **S6.2.2** rather than fix Lambda's operators.
-
-<a id="lr05-3"></a>**LR05-3 · Dead `*_comp_unicode` Item wrappers · OPEN**
-`equal_comp_unicode` / `less_comp_unicode` / `greater_comp_unicode` /
-`less_equal_comp_unicode` / `greater_equal_comp_unicode`
-(`lambda/core/utf_string.h:23`–`27`, defined `utf_string.cpp:144`ff) still have
-**no callers**. Candidates for deletion, or for a future explicit collator API
-that governs equality *and* ordering together (SQL/XQuery model) — never a
-change to the core operators.
 
 <a id="lr05-5"></a>**LR05-5 · `fn_label` bypasses the runtime allocator with raw `malloc`/`free` · RESOLVED 2026-08-28**
 The flood-fill stack was allocated with raw `malloc` and released with `free`,
@@ -653,14 +657,6 @@ so the type-dependent semantic split is real, just now explicit.
 `:5796`, `:6250`, `:6682`, `:15109`), and `proto_name[140]`
 (`mir_emitter_shared.hpp:1569`).
 
-<a id="lr07-12"></a>**LR07-12 · Magic struct offset for `heap->gc` · OPEN**
-The prologue loads the GC handle with a hard-coded offset of `8`
-(`transpile-mir.cpp:24078`, `:26721`) under a suppressed
-`-Winvalid-offsetof` (`:62`, `:4470`) — a magic constant rather than an
-`offsetof`, fragile if `Heap` layout changes. The adjacent `EvalContext.heap`
-load *does* use `offsetof` (`:24074`, `:26717`) and there is a `static_assert`
-on it (`:63`), so only the second hop is unprotected.
-
 <a id="lr07-13"></a>**LR07-13 · TCO iteration ceiling · OPEN**
 Tail-recursive loops emit a guard raising a stack-overflow error past
 `LAMBDA_TCO_MAX_ITERATIONS` (`transpile-mir.cpp:24607`–`24611`); the interpreter
@@ -747,27 +743,6 @@ That gap is now closed by `test/lambda/element_content_axes.ls`, which pins both
 
 **Still open, and worth a ruling of its own:** a `group by … into g` binds an element whose attributes are the group key, so `len(g)` now counts the key alongside the members and member count must be spelled `len(content(g))`. That is correct under S8.3.1v2 but is an ergonomic wart on the group-by surface.
 
-<a id="lr02-18"></a>**LR02-18 · Bare `pn` method reference is not rejected · OPEN (2026-09-03)**
-S12.3.3v2/OB6 rules that taking a `pn` method as a value is a compile error: the
-bound closure captures its receiver by value (S9.3.1), so a detached one could
-only mutate its own copy — the reason S12.3.2 already rejects dynamic calls to a
-`var` signature. Today `let b = c.bump` yields an ordinary bound function.
-
-The rejection cannot live in the runtime member lane. MIR lowers a `pn` method
-CALL by lowering its callee member expression as a value through
-`lambda_object_member`, so refusing to bind a proc method there turns
-`c.bump()` into a silent no-op on the JIT tier — measured, after LR07-15 made
-the write-back work at all. Only `build_ast` can tell a bare reference from a
-sanctioned callee, because it holds `call->function`; the call builder already
-detects the sanctioned case (`call->is_proc_method`, `build_ast.cpp:8407`).
-
-What it needs: a flag on `AstFieldNode` set when a member expression resolves to
-a `pn` method, cleared by the call builder when it consumes that node as a
-callee, plus a validation point for whatever remains — the member node is built
-*before* the call node that consumes it, so a single build-order check cannot
-work. Fixture section `=f=` of `test/lambda/object_method_value.ls` pins the
-current permissive answer and must flip when this lands.
-
 <a id="lr07-14"></a>**LR07-14 · Cross-cutting gaps · OPEN (rollup)**
 Numeric result-domain inference is duplicated across AST / MIR / runtime;
 `SysFuncInfo` has no complete data-driven argument convention, so some return
@@ -780,14 +755,15 @@ the semantic-promotion consolidation.
 
 ## 8. Memory management & GC (LR_08)
 
-<a id="lr08-1"></a>**LR08-1 · Decimal `mpd_t` leak (in-code TODO) · OPEN**
-`gc_finalize_dead_object` does nothing for `LMD_TYPE_DECIMAL` because the
-`mpd_t` from libmpdec cannot be freed from that C file: dead decimals "will have
-their mpd_t leaked until context end. TODO: Add a finalization callback
-mechanism." (`lambda/runtime/gc/gc_heap.c:2068`–`2069`). Mid-execution
-collections leak an `mpd_t` per dead Decimal; storage is reclaimed only by
-`gc_finalize_all_objects` at teardown. A real per-cycle leak in decimal-heavy
-long-running scripts.
+<a id="lr08-1"></a>**LR08-1 · Decimal `mpd_t` leak (in-code TODO) · RESOLVED 2026-09-05**
+Per **D4.3.3**, the GC delegates out-of-zone cleanup to the C++
+`heap_gc_destroy_external_payload` bridge. For `LMD_TYPE_DECIMAL`, it calls
+`decimal_payload_release`, which runs `mpd_del` and clears `dec_val` before
+sweep reclaims the wrapper. Teardown uses the same bridge, so it has one
+idempotent ownership path rather than a Decimal-specific second free.
+`GCHeapTest.DecimalPayloadFinalizerReleasesMpdDuringSweep` verifies that a
+dead Decimal's real `mpd_t` payload is released during collection, not only at
+context teardown.
 
 <a id="lr08-2"></a>**LR08-2 · Execution-side-stack capacity is reserved up front · OPEN**
 Root and raw-number regions have fixed virtual limits. Checked prologues fail
@@ -809,15 +785,14 @@ into storage-owned lanes. The shared store/rehome helpers enforce the current
 paths; a new raw Item store that bypasses them creates a dangling scalar
 pointer.
 
-<a id="lr08-5"></a>**LR08-5 · Hard-coded struct byte offsets in tracing and compaction · OPEN**
-`gc_trace_object` (`gc_heap.c:1413`) and `gc_compact_data` (`:1872`) read fields
-at fixed offsets — Array items @+8 (`:1459`, `:1490`), length @+16 (`:1491`),
-Map type @+8 / data @+16 (`:1526`–`:1527`), ShapeEntry type @+8 (`:1564`), and a
-`+16` type-length read at `:1408`. Any change to
-`Container`/`Map`/`Element`/`TypeMap`/`ShapeEntry`/`Function` layout silently
-corrupts tracing or compaction; the `TypeId` enum aliasing defends the *enum
-values* but not the *offsets*. `item_to_ptr` likewise assumes high-byte-zero
-heap pointers — a documented-but-unenforced platform assumption.
+<a id="lr08-5"></a>**LR08-5 · Hard-coded struct byte offsets in tracing and compaction · RESOLVED 2026-09-05**
+D2.6.6v2/D3.4.1: the C collector now consumes `LAMBDA_GC_OFF_*` constants
+derived by `offsetof` from one canonical C ABI layout. Assertions bind that
+layout to the C and C++ definitions of the container chain, `TypeMap`,
+`ShapeEntry`, `TypedItem`, `ArrayNumShape`, `Function`, and `VMap`; trace,
+compaction, and GC test fixtures no longer embed their own byte positions.
+The retained separate `item_to_ptr` high-byte-zero platform assumption is not
+an offset-layout issue.
 
 <a id="lr08-6"></a>**LR08-6 · `SHAPE_POOL_MAX_CHAIN_LENGTH` = 64 silently returns NULL · OPEN**
 Maps/elements with more than 64 fields get no pooled shape
@@ -829,11 +804,6 @@ Frames no longer allocate heap root blocks, but recursion accumulates each
 function's statically reserved slots until the epilogue restores them. The
 side-stack bound check or the C-stack guard terminates pathological depth,
 whichever fires first.
-
-<a id="lr08-8"></a>**LR08-8 · Dead stubs · OPEN**
-`free_item`, `free_container`, `frame_start`, `frame_end`
-(`lambda/runtime/lambda-mem.cpp:1291`–`1305`, declared `transpiler.hpp:61`) are
-no-op API-compat relics — harmless but dead code.
 
 <a id="lr08-9"></a>**LR08-9 · Re-entrant allocation during GC silently skips collection · OPEN**
 `gc_collect` guards with `gc->collecting` (`gc_heap.c:1106`) and the allocation
@@ -899,8 +869,8 @@ existing `memtrack` allocator before creating the error. This satisfies the
 message-bearing error contract in **S7.4.4** and removes the duplicated
 formatting path; no new data structure or design ruling was added.
 
-The separate 32-frame native stack-trace limit remains tracked by
-[LR10-4](#lr10-4).
+The shared 64-frame native stack-trace default is recorded in
+[LR10-R4](#lr10-r4).
 
 Regression: `ErrorCreationTest.CreateFormattedErrorPreservesLongMessage`
 verifies the full 1514-byte formatted message. The focused error suite passes
@@ -910,33 +880,13 @@ verifies the full 1514-byte formatted message. The focused error suite passes
 
 ## 10. Error handling (LR_10)
 
-<a id="lr10-1"></a>**LR10-1 · `total_frames_found` asymmetric `NDEBUG` guard · OPEN (latent)**
-The counter is declared and incremented only under `#ifndef NDEBUG`
-(`lambda/runtime/lambda-error.cpp:636`–`638`, `:686`–`688`, `:723`–`725`), yet
-the final `log_info(... total_frames_found)` at `:750` references it with **no
-guard**. This is not a release build break: under `NDEBUG` (and without
-`LOG_IMPL`) `lib/log.h` defines `log_info(...)` as `((void)0)`, a variadic macro
-that textually discards its arguments, so the preprocessed output never mentions
-the identifier. The asymmetry is nonetheless fragile — it depends entirely on
-`log_info` staying macro-elided. The clean fix is to move the
-declaration/increment out of the guard, or guard the log line to match.
-
-<a id="lr10-2"></a>**LR10-2 · Hard-coded 64 KB last-function span · OPEN**
-`build_debug_info_table` computes each function's end address as the next
-function's start; the *last* function has no successor and is given a fixed
-64 KB span (`info->native_addr_end = native_addr_start + 65536`,
-`lambda/runtime/mir.c:646`). A JIT function larger than 64 KB placed last in
-address order mis-attributes return addresses past that boundary, silently
-dropping or mislabeling the deepest frame.
-
-<a id="lr10-4"></a>**LR10-4 · Two stack-trace capture depths and a trace-free path · PARTIAL**
-`set_runtime_error` and `fn_error` pass `max_frames = 32` while
-`err_capture_stack_trace` defaults to 64 when passed `<= 0`
-(`lambda-error.cpp:617`); `set_runtime_error_no_trace` captures nothing.
-*Improved:* the newer `err_capture_raw_stack_trace` clamps explicitly —
-default 64, hard max 128, capacity max 1024 (`:755`–`760`).
-*Residue:* the callers still pass 32, so deep recursion — the very case where a
-trace is most wanted — is silently truncated.
+<a id="lr10-2"></a>**LR10-2 · Hard-coded 64 KB last-function span · RESOLVED 2026-09-05**
+`build_debug_info_table` now gets MIR's actual next allocation address for the
+final function's exclusive end, instead of inventing a 64 KiB bound. A missing
+frontier falls back to an empty range rather than labeling unrelated native
+code. Regression:
+`LambdaJitDebugInfo.FinalFunctionRangeUsesJitAllocationFrontier` emits a final
+function larger than 64 KiB and resolves an address beyond the old boundary.
 
 ---
 
@@ -978,12 +928,13 @@ All four caps survive, and so does the inconsistency in how they fail:
 Truncate vs. error vs. clamp vs. fail, for four caps in one subsystem, is itself
 the hazard.
 
-<a id="lr11-5"></a>**LR11-5 · `deep_copy` of `PATH` is shallow · OPEN**
-For non-`sys` `LMD_TYPE_PATH` values `deep_copy_typed` returns the item as-is;
-`sys://` paths are copied only if already resolved
-(`lambda/io/mark_builder.cpp:1081`ff). The code comment warns the result "may
-reference external memory" — a latent dangling reference if the source `Input`
-is torn down first.
+<a id="lr11-5"></a>**LR11-5 · `deep_copy` of `PATH` is shallow · RESOLVED 2026-09-05**
+`path_clone` replays the immutable path spine into the destination pool, giving
+every copied non-`sys` path independent names and links. Resolution and metadata
+caches are deliberately not copied, so no source-owned payload survives. This
+keeps the ownership chain precise under **D4.4.3**. Regression:
+`MarkBuilderDeepCopyTest.CopyPathRehomesSpineAndDropsSourceCaches` destroys the
+source pool before reading the copied path.
 
 <a id="lr11-6"></a>**LR11-6 · Conservative safety analysis (adjacent) · OPEN**
 `function_needs_stack_check` is hard-`true` and `function_is_tail_recursive` is
@@ -1220,12 +1171,15 @@ registry row.
 
 ## 13. Schema validator (LR_13)
 
-<a id="lr13-1"></a>**LR13-1 · Suggestions are built but never surfaced · OPEN**
-`generate_field_suggestions` (`lambda/validator/suggestions.cpp:135`, declared
-`validator.hpp:448`) is complete but has **no callers**;
-`suggest_similar_names` and `suggest_corrections`
-(`error_reporting.cpp:28`–`41`) both `return nullptr` with
-`// suggestions not implemented`. Wiring it in remains a small, high-value fix.
+<a id="lr13-1"></a>**LR13-1 · Suggestions are built but never surfaced · RESOLVED 2026-09-05**
+Validation now populates the existing correction generator before errors are
+reported when `show_suggestions` is enabled; errors constructed outside a
+`SchemaValidator` lazily take the same reporting path. Missing/unexpected
+schema-field errors can now call the existing field-ranking helper when the
+containing map type is available. The option explicitly suppresses both
+population and reporting. Regression:
+`LambdaValidator.TypeMismatchSuggestionsAreAttachedAndReported` verifies the
+hint appears and that disabling the option omits it.
 
 <a id="lr13-2"></a>**LR13-2 · Inconsistent `max_depth` defaults · OPEN**
 `SchemaValidator::create()` sets 1024 (`doc_validator.cpp:139`),
@@ -1268,13 +1222,28 @@ These records are retained for provenance but are excluded from the counts
 above. The absence of source markers is not evidence that a structural defect
 is absent; active rows must be found by behavior and ownership analysis.
 
-<a id="lr12-1"></a>**LR12-1 · The whole validator test surface cannot run, and no baseline covers it · OPEN (found 2026-09-03)**
+<a id="lr12-1"></a>**LR12-1 · The validator test surface is not a baseline gate · PARTIALLY RESOLVED 2026-09-05 (found 2026-09-03)**
 
-Every validator test binary builds and then aborts at startup on a flat-namespace symbol lookup: `test_validator_gtest` and `test_validator_input_gtest` on `_ItemNull`, `test_validator_features_gtest` and `test_ast_validator_gtest` on `_g_lambda_home`. Both are ordinary core globals — `ItemNull` is defined at `lambda/core/lambda-data.cpp:190` and `g_lambda_home` at `lambda/runtime/runner.cpp:191` — and both are present in `lambda.exe`, so this is a link-composition problem in those four targets rather than a missing definition.
+The hosted `lambda-runtime-full` DSO resolves `ItemNull` and `g_lambda_home`
+from its executable host. Every test target that links that DSO now compiles
+retained references to both globals, so static-archive extraction supplies them.
+All ten current validator executables load and enumerate their GTests. The
+post-startup SIGSEGV was a second link-closure defect: the direct AST reducer
+calls `parse_type_pattern_text_span`, but `lambda-runtime-full` omitted
+`runtime/parse_type_pattern.cpp`; macOS dynamic lookup therefore supplied a
+null reduction target. Including that translation unit restores the call, and
+the enabled `test_validator_gtest` cases complete without a crash.
 
-The `validate` CLI is separately unusable: it resolves no root type at all, failing with `REFERENCE_ERROR: Type not found or circular reference detected: Document` even on the shipped pair `test/lambda/validator/schema_comprehensive.ls` + `test_data_valid.json`. The root name is chosen by a textual scan for the last `type ` in the schema file (`validator/ast_validate.cpp:270`–`312`), so the name reaching `resolve_type_reference` looks right and the schema's type table is what comes up empty.
+The selected-root lookup is also repaired. The loader still expected a retired
+`AST_NODE_ASSIGN`, while the direct parser canonically emits an
+`AST_NODE_VARIABLE_DECLARATOR` marked `is_type_definition`; it now registers
+that form (and named patterns) after shared `TypeType` unwrapping. The shipped
+`validate` invocation reaches genuine validation rather than `REFERENCE_ERROR`.
+It currently reports its independent `element`-versus-`map` mismatch. Root
+*selection* remains the separate open LR13-3 CLI-contract issue: it still uses
+the raw textual scan and filename map (`validator/ast_validate.cpp:270`–`312`).
 
-**Why it went unnoticed:** the validator gate runs from `test-lambda-full` (`Makefile:1624`), not `test-lambda-baseline`, so both baselines stay green over a completely dead test surface. That is the finding worth keeping — a gate outside the baseline is a gate nobody runs.
+**Why it went unnoticed:** the validator gate runs from `test-lambda-full` (`Makefile:1624`), not `test-lambda-baseline`, so both baselines stay green over this unexercised surface. That is the finding worth keeping — a gate outside the baseline is a gate nobody runs.
 
 Not attributed. The `elmt code clean up` commit (2cdcc1ea1) touches none of the files involved — not `build_lambda_config.json`, not `lambda-data.cpp`, not `runner.cpp`, not any validator or test source. The two remaining candidates are the object-redesign commit (da7a97b13), which reshaped `lambda.h`/`lambda-data.cpp` heavily, and the merged upstream `DOM: seven linkage lies and a dead local` (dbe7b7dba). Confirming which needs a from-scratch build of an older tree; a worktree attempt stalled on re-fetching vendored `re2`.
 
@@ -1683,30 +1652,21 @@ boundary-comma check and is untouched. `lambda_parser.c` `parse_element`;
 covered by `test/std/negative/element_semicolon_opens_content.ls` +
 `NegativeScriptTest.ElementSemicolonCannotOpenContent`.
 
-<a id="i8-dynspread"></a>**Issues8 · Spreading a dynamically-constructed map yields a null-key nested map · OPEN**
-Map spread flattens a statically shaped map but not one built at runtime, even
-though both are `type() == map`:
+<a id="i8-dynspread"></a>**Issues8 · Spreading a dynamically-constructed map yields a null-key nested map · RESOLVED 2026-09-05**
+Any spread-bearing map now retains its keyed AST items for runtime construction;
+the builder enumerates both shaped maps and VMaps in source order. VMap symbols
+are re-entered through the name lookup seam, matching their String-key backing
+store, rather than inserting null values. This follows **S16.8.9**'s runtime
+shape rule and later-entry-wins ordering. Regression:
+`test/lambda/map_spread_len.ls` spreads `map(["shape", "box"])` and produces
+`["box", "a", 2]`.
 
-```
-let stat    = {shape: "box"}
-let dynamic = map(["shape", "box"])
-{*: stat,    id: "a"}   ->  {shape: "box", id: "a"}       correct
-{*: dynamic, id: "a"}   ->  {[null nested map], id: "a"}  wrong
-```
-
-`dynamic` itself is sound (`type` is `map`, prints as `{shape: "box"}`), so the
-defect is in the spread's handling of a runtime-built shape, not in the map. The
-same operand also loses its fields across an element-attribute spread, which is
-[the entry below](#i8-attrspread) — likely one root cause for both.
-
-<a id="i8-attrspread"></a>**Issues8 / Issues5 §23 · Element attribute spread lands the map as a child · OPEN**
-`<path *attrs>` does not error, but the spread map becomes a *child* rather than
-attributes: `<path {a: 1, b: 2}>` instead of `<path a: 1, b: 2>`. Recorded twice
-— `impl/Lambda_Issues8 (retired).md` ("Runtime map attribute spread creates a nested element
-child") and `impl/Lambda_Issues5 (retired).md` §23 — as one issue. The sibling half of the
-Issues5 entry (an inline `if` as an attribute value) is **fixed**:
-`<path d: "M0", 'stroke-dasharray': if (has_dash) dash else "none">` now
-evaluates to `<path d: "M0", stroke-dasharray: "4 2">`.
+<a id="i8-attrspread"></a>**Issues8 / Issues5 §23 · Element attribute spread lands the map as a child · RESOLVED 2026-09-05**
+Elements use the same runtime keyed-literal path for attribute spreads, so a
+dynamic map's fields are installed as attributes and its ordinary content stays
+on the content face. This is the same **S16.8.9** source-order construction as
+map spread. Regression: `test/lambda/map_spread_len.ls` produces
+`["box", "a", ["new"]]` for the dynamic attribute-spread element.
 
 ---
 
@@ -1802,9 +1762,9 @@ One policy each, not per-site fixes.
   module vars 2048/1024, regex groups 256, and more. One grow-or-error doctrine
   retires the class. Ledger instances: [LR01-5](#lr01-5), [LR11-4](#lr11-4),
   [LR13-5](#lr13-5).
-- **Layout-coupled raw offsets** — GC trace/compaction and `init_module_import`
-  ([LR01-8](#lr01-8), [LR08-5](#lr08-5)); static-assert guards or generated
-  offset tables.
+- **Layout-coupled raw offsets** — resolved for module binding by removing the
+  unreachable `init_module_import` walk ([LR01-8](#lr01-8)); GC
+  trace/compaction is resolved by [LR08-5](#lr08-5).
 - **One masked memory-safety bug** — the event-loop SIGSEGV band-aid remains;
   the `sys://` map-walk segfault workaround was replaced by the shape-aware
   traversal in [LR01-R3](#lr01-r3).
@@ -2048,6 +2008,15 @@ either row to the enclosing `fn`/`pn` colour. This implements `S12.1.4` and
 `S12.3.4` without changing closure construction. The tracked dynamic-procedure
 regression passes, as does the full baseline.
 
+<a id="lr02-r18"></a>**LR02-R18 · Bare `pn` method reference · RESOLVED 2026-09-05**
+`AstFieldNode::is_proc_method_reference` marks a resolved dotted `pn` member;
+the call builder clears that mark only when it consumes the member as the direct
+callee. The shared final AST pass rejects every remaining mark with E224 before
+either T0 or MIR lowering. This implements **S12.3.3v2** and **D2.6.7** without
+changing the runtime member lane that valid `pn` calls need. Regression:
+`NegativeScriptTest.SemanticError_ProcMethodCannotBeTakenAsValue`; the retained
+positive member-value fixture passes on both JIT and T0.
+
 ## A.3 Value & type model (LR_03)
 
 <a id="lr03-r1"></a>**LR03-R1 · Two parallel type vocabularies · RESOLVED**
@@ -2080,8 +2049,13 @@ Every language comparison is raw byte order and mutually consistent: `==`
 (`fn_eq`), ordered `<`/`>` (`fn_lt_scalar`/`fn_gt_scalar` — `memcmp` plus length
 tiebreak), and the sort-facing total order (`total_byte_cmp`). The utf8proc
 casefold comparators are used only by the markup parser for case-insensitive
-tag/attribute matching. The dead Item-level wrappers survive as
-[LR05-3](#lr05-3).
+tag/attribute matching; the dead Item-level wrappers were removed in
+[LR05-R3](#lr05-r3).
+
+<a id="lr05-r3"></a>**LR05-R3 · Dead `*_comp_unicode` Item wrappers · RESOLVED 2026-09-05**
+The five unused Item-level Unicode comparison wrappers and their declarations
+are deleted. String-level casefold helpers remain markup-only, so Lambda's core
+equality and order continue to follow **S6.2.2v3** bytewise UTF-8 semantics.
 
 <a id="lr05-r4"></a>**LR05-R4 · `index_to_item` truncates int64 → int · RESOLVED 2026-08-26**
 `index_to_item` now passes its `int64_t` index directly to the 64-bit `i2it`
@@ -2144,7 +2118,21 @@ LambdaJS source formals stay dynamically represented. Remaining fixed
 source-name staging buffers are tracked in
 `vibe/Lambda_Design_Function_Arg.md`.
 
-## A.7 Error handling (LR_10)
+<a id="lr07-r12"></a>**LR07-R12 · Magic JIT layout offsets · RESOLVED 2026-09-05**
+The JIT's `EvalContext.heap` and `Heap.gc` hops now derive from `offsetof` once,
+with layout assertions; the remaining equivalent `64`-byte runtime-state load
+uses the same named offset. Generated MIR no longer inherits these struct
+positions as literals.
+
+## A.7 Memory management & GC (LR_08)
+
+<a id="lr08-r8"></a>**LR08-R8 · Dead free/frame stubs · RESOLVED 2026-09-05**
+The unreferenced `free_item`, `free_container`, `frame_start`, and `frame_end`
+no-ops and the lone public declaration are removed. Current ownership is the
+precise GC and root-frame model required by **D1.5**; no compatibility caller
+remained in the tree.
+
+## A.8 Error handling (LR_10)
 
 <a id="lr10-r1"></a>**LR10-R1 · Error code / table drift · RESOLVED**
 `ERR_RETURN_OUTSIDE_FUNCTION` (227) and `ERR_UNHANDLED_ERROR` (228) now have
@@ -2166,7 +2154,19 @@ if (trace->is_native && trace->function_name) mem_free((void*)trace->function_na
 Lambda-JIT frames still point at table-owned names, so the ownership split is
 now explicit and correct.
 
-## A.8 Mark data API (LR_11)
+<a id="lr10-r3"></a>**LR10-R3 · Release stack-trace frame counter · RESOLVED 2026-09-05**
+`total_frames_found` and both increments are now ordinary code rather than
+depending on release logging macro elision. The diagnostic path is build-mode
+independent, preserving the error information expected by **S7.4.4**.
+
+<a id="lr10-r4"></a>**LR10-R4 · Mismatched stack-trace depths · RESOLVED 2026-09-05**
+All ordinary Lambda error paths use
+`LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES` (64), the same default used by
+raw and materialized capture. `set_runtime_error_no_trace` remains the explicit
+low-stack escape hatch. Regression:
+`StackTraceTest.RawStackTraceUsesSharedDefaultDepth`.
+
+## A.9 Mark data API (LR_11)
 
 <a id="lr11-r1"></a>**LR11-R1 · Stale `.bak` in tree · RESOLVED (for Lambda sources)**
 `lambda/mark_editor.cpp.bak` is gone, as are the sibling Lambda-side `.bak`
@@ -2176,7 +2176,7 @@ files. The only remaining `.bak` files are inside the **vendored**
 CLAUDE.md rule 16 puts off limits for in-place edits — they are upstream
 artefacts, not Lambda drift.
 
-## A.9 Schema validator (LR_13)
+## A.10 Schema validator (LR_13)
 
 <a id="lr13-r1"></a><a id="a8-schema-validator-lr_13"></a>**LR13-R1 · The dead unified-schema model · RESOLVED**
 `schema_builder.cpp` (which could not compile — it referenced an undefined
@@ -2187,13 +2187,13 @@ were deleted, along with their three stale `exclude_source_files` entries and
 parallel type vocabularies" hazard ([LR03-R1](#a3-value--type-model-lr_03)); the
 `TODO` it carried (map fields → runtime shape) went with it.
 
-## A.10 Runtime builtins (LR_09)
+## A.11 Runtime builtins (LR_09)
 
 <a id="lr09-r1"></a>**LR09-R1 · String-comparison inconsistency · RESOLVED (stale)**
 `fn_eq`, `fn_lt_scalar`/`fn_gt_scalar`, and the sort total order all compare
 strings by raw bytes and are mutually consistent. The utf8proc casefold
 comparators are markup-parser-only and their Item-level wrappers have no callers
-([LR05-3](#lr05-3)). Any future
+([LR05-R3](#lr05-r3)). Any future
 collation support must be an explicit opt-in governing equality and ordering
 together, not an operator change.
 
@@ -2315,12 +2315,12 @@ with retiring the dead flag.
 <a id="lr09-r4"></a><a id="lr10-3"></a>**LR09-R4 · `set_runtime_error` message buffer cap · RESOLVED 2026-08-28**
 `err_createf` and `set_runtime_error` now share the exact-size variadic
 formatter backed by `mem_alloc`, so long diagnostics are not silently
-truncated at 1023 bytes. The 32-frame trace cap is a separate LR10-4
-residue. This also closes the duplicate LR10-3 index entry; its stable anchor
+truncated at 1023 bytes. The shared 64-frame trace default is recorded in
+[LR10-R4](#lr10-r4). This also closes the duplicate LR10-3 index entry; its stable anchor
 is retained here. Regression: `ErrorCreationTest.CreateFormattedErrorPreservesLongMessage`;
 the error suite passes 121/121 and the Lambda baseline passes 3978/3978.
 
-## A.11 Procedural runtime (LR_12)
+## A.12 Procedural runtime (LR_12)
 
 <a id="lr12-r2"></a>**LR12-R2 · Mutation builtins swallow type errors · RESOLVED 2026-08-26**
 `pn_push` and `pn_splice` now return `ItemError` for invalid owners, indices,
@@ -2342,7 +2342,7 @@ raises E211 and the full baseline passes 3914/3914.
 
 ---
 
-## A.12 Sibling vibe ledgers
+## A.13 Sibling vibe ledgers
 
 <a id="issues0-r9"></a>**Issues0 #9-R · ShapePool hash collision reused a different shape · RESOLVED 2026-08-27**
 The hashmap now confirms the existing structural shape comparison after the
@@ -2389,8 +2389,7 @@ together, not individually.
 | **Representation ↔ semantics coupling** | LR03-3, LR07-1, LR07-5, LR07-14 | Expression results carry no `ValueRep`; each consumer re-derives it. See [Result32 lane-parity + Tune19], [Compiling lane design]. |
 | **Value-semantics residue (OI-1)** | LR03-1, LR04-4, LR09-3 | Second equality walker, `decimal_cmp` failure-as-equality, VMap key eq/hash rank consistency. Tracked as OI-1 in this ledger's [§15](#15-design-gaps-inherited-from-the-retired-outstanding-rollup-oi). |
 | **`INT64_MAX` sentinel collision** | LR03-4, LR07-4 | `INT64_ERROR == INT64_MAX` and `INT_LANE_INF` share one bit pattern; index OOB also lands on `INT64_MAX`. The former LR10-5 entry is a preserved alias for LR03-4. See [v5 int migration in flight]. |
-| **Hard-coded byte offsets** | LR01-8, LR07-12, LR08-5 | Three subsystems read struct fields at literal offsets that no `static_assert` protects. A single layout change corrupts module binding, GC tracing, or the JIT prologue silently. |
-| **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR10-4, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
+| **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
 | **Surface syntax (S16) residue** | LR02-16, S16.9.5, i8-genafterlet, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
 | **Process globals** | LR01-12, LR12-6 | `g_template_registry` and `g_dry_run` block concurrent runtimes. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |
 

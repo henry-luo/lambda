@@ -145,6 +145,9 @@ typedef enum AstNodeType : uint16_t {
     // Iterator/query `for` clauses remain an AST_FOR extension edge; the
     // shared AST_NODE_LOOP tag is reserved for condition loops (D8.2.2).
     AST_NODE_FOR_CLAUSE = 548,
+    // The secondary binding in `for (key, value at source)` has the named
+    // binding layout, not the enclosing AstLoopNode layout.
+    AST_NODE_FOR_INDEX = 549,
 } AstNodeType;
 
 typedef enum LoopForm {
@@ -532,6 +535,8 @@ typedef struct AstFieldNode : AstNode {
     };
     bool computed;
     bool optional;
+    // S12.3.3v2: a resolved pn method may only appear as a direct call callee.
+    bool is_proc_method_reference;
 } AstFieldNode;
 
 typedef struct AstCallNode : AstNode {
@@ -618,6 +623,11 @@ typedef AstBinaryNode AstPipeNode;
 typedef struct AstNamedNode : AstNode {
     String* name;
     AstNode *as;
+    // S16.8.9 map/element items retain their evaluated NameKey here. It is
+    // NULL for ordinary named fields, parameters, and named arguments.
+    AstNode* key;
+    // Preserves `*: value` versus `'*': value` in runtime-built literals.
+    bool is_spread;
     NameEntry* entry;
     Type* declared_type;
 } AstNamedNode;
@@ -731,6 +741,9 @@ typedef struct AstMapNode : AstNode {
         AstNode *item;
         AstNode *properties;
     };
+    // Computed keys and spreads force run-time shape construction; static
+    // literals retain their precomputed ShapeEntry chain.
+    bool has_computed_key;
 } AstMapNode;
 
 typedef struct AstPropertyNode : AstNode {
@@ -1340,9 +1353,6 @@ typedef struct FnAnalysis {
     ScalarReturnClass js_boxed_return_scalar_class;
     int js_formal_length;
     struct hashmap* js_cached_scope_slot_collisions;
-    // The active JS MIR compilation's backend artifact; reset with all other
-    // profile facts before the next compilation of this AST.
-    void* js_mir_backend;
     int await_point_count;
     int async_fault_handler_count;
     const char* may_await_cause;

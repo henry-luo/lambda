@@ -4213,10 +4213,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 if (!timing.valid) timing.valid = 1;
                 if (timing.valid) {
                     printf("\x01" "COMPILER_TIMING schema=1 parse_us=%llu ast_build_us=%llu "
+                           "bind_us=%llu validate_us=%llu index_us=%llu "
                            "mir_lower_us=%llu module_finalize_us=%llu link_us=%llu "
                            "build_transpile_us=%llu\n",
                            (unsigned long long)timing.parse_us,
                            (unsigned long long)timing.ast_build_us,
+                           (unsigned long long)timing.bind_us,
+                           (unsigned long long)timing.validate_us,
+                           (unsigned long long)timing.index_us,
                            (unsigned long long)timing.mir_lower_us,
                            (unsigned long long)timing.module_finalize_us,
                            (unsigned long long)timing.link_us,

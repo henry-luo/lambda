@@ -178,6 +178,26 @@ TEST(JsMir, CapturesTopLevelForOfBindingsAfterSiblingFunctionDeclaration) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsMir, KeepsShadowedTailCallAsOrdinaryCall) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+
+    const char source[] =
+        "function descend(n) { if (n === 0) return 0; "
+        "{ const descend = function(x) { return x + 40; }; return descend(n); } } "
+        "globalThis.__lambdaShadowedTailCall = descend(2);";
+    Item result = transpile_js_to_mir(&runtime, source, "shadowed-tail-call.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_FALSE(item_is_error(result));
+    Item value = js_get_key_default(js_get_global_this(),
+        js_make_string("__lambdaShadowedTailCall"));
+    EXPECT_EQ(value.item, flt2it(42.0).item);
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, SeparateClassicScriptsReadHarnessGlobalLexicalBindings) {
     Runtime runtime = {};
     runtime_init(&runtime);

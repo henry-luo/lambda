@@ -33,3 +33,17 @@ TEST(CompilerPassManager, FailingPassStopsSchedule) {
     EXPECT_EQ(compiler_pass_manager_run(&manager, nullptr), 0);
     EXPECT_EQ(manager.facts, (uint32_t)COMPILER_FACT_AST);
 }
+
+TEST(CompilerPassManager, ParseFactPrecedesBuildAndBind) {
+    CompilerPassManager manager;
+    compiler_pass_manager_init(&manager, COMPILER_FACT_NONE);
+    CompilerPassSpec parse = {"parse", COMPILER_FACT_NONE,
+        COMPILER_FACT_PARSED, pass_ok};
+    CompilerPassSpec build_bind = {"build-bind", COMPILER_FACT_PARSED,
+        COMPILER_FACT_AST | COMPILER_FACT_BOUND, pass_ok};
+    ASSERT_EQ(compiler_pass_manager_add(&manager, &parse), 1);
+    ASSERT_EQ(compiler_pass_manager_add(&manager, &build_bind), 1);
+    EXPECT_EQ(compiler_pass_manager_run(&manager, nullptr), 1);
+    EXPECT_EQ(manager.facts, (uint32_t)(COMPILER_FACT_PARSED |
+        COMPILER_FACT_AST | COMPILER_FACT_BOUND));
+}

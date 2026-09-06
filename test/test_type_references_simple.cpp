@@ -175,6 +175,22 @@ TEST_F(TypeReferenceTest, MapWithTypeReferences) {
     EXPECT_EQ(phone_type->type_id, LMD_TYPE_STRING);
 }
 
+TEST_F(TypeReferenceTest, PublicSelectedRootType) {
+    const char* schema = R"(
+        type Title = string
+        pub type Document = {
+            title: Title
+        }
+    )";
+
+    ASSERT_EQ(schema_validator_load_schema(validator, schema, "Document"), 0);
+
+    Type* root_type = schema_validator_resolve_type_reference(validator,
+        "Document");
+    ASSERT_NE(root_type, nullptr);
+    EXPECT_EQ(root_type->type_id, LMD_TYPE_MAP);
+}
+
 // Note: Circular reference test omitted as it may be caught during schema parsing
 // The circular detection in schema_validator_resolve_type_reference is more for
 // runtime resolution of complex type graphs

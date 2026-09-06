@@ -1,0 +1,379 @@
+{
+  "name": "ESO72: <select multiple> selection, keyboard, and submission",
+  "html": "test/ui/dom_pkg_listbox.html",
+  "viewport": {
+    "width": 520,
+    "height": 520
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "=== a plain click replaces the selection ==="
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "-"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#picks option[value=a]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "a"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#picks option[value=c]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "c"
+    },
+    {
+      "type": "log",
+      "message": "--- and the live selection is what the form submits, in tree order ---"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#entries"
+      },
+      "equals": "c"
+    },
+    {
+      "type": "log",
+      "message": "=== Ctrl+click adds to the selection ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#picks option[value=a]"
+      },
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "a,c"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#entries"
+      },
+      "equals": "a,c"
+    },
+    {
+      "type": "log",
+      "message": "--- and Ctrl+click on a selected row removes it ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#picks option[value=c]"
+      },
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "a"
+    },
+    {
+      "type": "log",
+      "message": "=== Shift+click extends from the anchor ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#picks option[value=a]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#picks option[value=c]"
+      },
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "a,b,c"
+    },
+    {
+      "type": "log",
+      "message": "--- extending keeps its anchor, so a second Shift+click re-extends ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#picks option[value=b]"
+      },
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "a,b"
+    },
+    {
+      "type": "log",
+      "message": "--- a disabled row is never selected, even inside an extended range ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#picks option[value=e]"
+      },
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "a,b,c,e"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#picks option[value=d]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "a,b,c,e"
+    },
+    {
+      "type": "log",
+      "message": "=== :selected matches the live selection, not the attribute ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#picks option[value=b]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#picks option:selected"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#picks option[selected]"
+      },
+      "count": 0
+    },
+    {
+      "type": "log",
+      "message": "=== keyboard: arrows move the selection and clamp at the ends ==="
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "c"
+    },
+    {
+      "type": "log",
+      "message": "--- ArrowDown again skips the disabled Delta row ---"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "e"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowUp"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowUp"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "b"
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "a"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowUp"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "a"
+    },
+    {
+      "type": "key_press",
+      "key": "End"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "e"
+    },
+    {
+      "type": "log",
+      "message": "--- Shift+Arrow extends from the anchor ---"
+    },
+    {
+      "type": "key_press",
+      "key": "Home"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "a,b"
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowDown",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "a,b,c"
+    },
+    {
+      "type": "log",
+      "message": "--- Ctrl+A takes every enabled option ---"
+    },
+    {
+      "type": "key_press",
+      "key": "a",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#chosen"
+      },
+      "equals": "a,b,c,e"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#entries"
+      },
+      "equals": "a,b,c,e"
+    },
+    {
+      "type": "log",
+      "message": "=== a single-selection listbox keeps exactly one row ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#one option[value=q]"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#one"
+      },
+      "equals": "q"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#one option[value=r]"
+      },
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#one"
+      },
+      "equals": "r"
+    },
+    {
+      "type": "focus",
+      "target": {
+        "selector": "#one"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "ArrowUp"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#one"
+      },
+      "equals": "q"
+    }
+  ]
+}

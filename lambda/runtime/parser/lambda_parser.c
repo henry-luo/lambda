@@ -725,6 +725,26 @@ static LambdaParseValue parse_map(LambdaRdParser* parser) {
     parser_advance(parser);
     if (!parser_accept(parser, LAMBDA_TOK_RBRACE)) {
         for (;;) {
+            if (parser->current.kind == LAMBDA_TOK_LBRACKET) {
+                LambdaToken opening = parser->current;
+                LambdaParseValue key;
+                parser_advance(parser);
+                if (!parser_parse_expression_value(parser, 0, &key)) return 0;
+                if (!parser_expect(parser, LAMBDA_TOK_RBRACKET)) return 0;
+                if (!parser_expect(parser, LAMBDA_TOK_COLON)) return 0;
+                LambdaParseValue value;
+                if (!parser_parse_expression_value(parser, 0, &value)) return 0;
+                LambdaParseValue children[2] = {key, value};
+                SourceSpan item_span = {opening.span.start_byte, parser->current.span.start_byte};
+                LambdaParseValue item = parser_reduce_tokens(parser,
+                    LAMBDA_REDUCE_STATEMENT, LAMBDA_REDUCTION_FORM_COMPUTED_MAP_ITEM,
+                    item_span, opening, (LambdaToken){0}, 0, children, 2);
+                items = parser_list_append(parser,
+                    (SourceSpan){first.span.start_byte, parser->current.span.start_byte},
+                    items, item);
+                if (!parser_accept(parser, LAMBDA_TOK_COMMA)) break;
+                continue;
+            }
             if (parser->current.kind == LAMBDA_TOK_STRING) {
                 return parser_fail(parser, error_map_string_key, LAMBDA_TOK_IDENTIFIER);
             }
@@ -746,6 +766,13 @@ static LambdaParseValue parse_map(LambdaRdParser* parser) {
 
 static bool element_attribute_starts(const LambdaRdParser* parser) {
     LambdaRdParser probe = parser_probe(parser);
+    if (probe.current.kind == LAMBDA_TOK_LBRACKET) {
+        LambdaParseValue ignored;
+        parser_advance(&probe);
+        if (!parser_parse_expression_value(&probe, 0, &ignored)) return false;
+        return parser_accept(&probe, LAMBDA_TOK_RBRACKET) &&
+            probe.status == LAMBDA_PARSE_OK && probe.current.kind == LAMBDA_TOK_COLON;
+    }
     if (!token_is_key(probe.current.kind)) return false;
     parser_advance(&probe);
     while (probe.current.kind == LAMBDA_TOK_DOT) {
@@ -773,11 +800,20 @@ static LambdaParseValue parse_element(LambdaRdParser* parser) {
             error_expected_namespace_segment)) return 0;
     for (;;) {
         if (!element_attribute_starts(parser)) break;
+        bool computed_key = parser->current.kind == LAMBDA_TOK_LBRACKET;
         LambdaToken attribute_name = parser->current;
-        parser_advance(parser);
-        if (!parser_extend_element_name(parser, &attribute_name,
-                error_expected_attribute_namespace_segment)) return 0;
-        parser_advance(parser);
+        LambdaParseValue computed_key_value = 0;
+        if (computed_key) {
+            parser_advance(parser);
+            if (!parser_parse_expression_value(parser, 0, &computed_key_value)) return 0;
+            if (!parser_expect(parser, LAMBDA_TOK_RBRACKET)) return 0;
+            if (!parser_expect(parser, LAMBDA_TOK_COLON)) return 0;
+        } else {
+            parser_advance(parser);
+            if (!parser_extend_element_name(parser, &attribute_name,
+                    error_expected_attribute_namespace_segment)) return 0;
+            parser_advance(parser);
+        }
         if (count == 64) {
             return parser_fail(parser, error_too_many_element_attributes, LAMBDA_TOK_GT);
         }
@@ -788,7 +824,16 @@ static LambdaParseValue parse_element(LambdaRdParser* parser) {
         parser->stop_at_element_close--;
         if (parser->status != LAMBDA_PARSE_OK) return 0;
         SourceSpan attribute_span = {attribute_name.span.start_byte, parser->current.span.start_byte};
-        children[count++] = parser_reduce_one(parser, LAMBDA_REDUCE_STATEMENT, LAMBDA_REDUCTION_FORM_ELEMENT_ATTRIBUTE, attribute_span, attribute_name, value);
+        if (computed_key) {
+            LambdaParseValue entries[2] = {computed_key_value, value};
+            children[count++] = parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT,
+                LAMBDA_REDUCTION_FORM_COMPUTED_ELEMENT_ATTRIBUTE, attribute_span,
+                attribute_name, (LambdaToken){0}, 0, entries, 2);
+        } else {
+            children[count++] = parser_reduce_one(parser, LAMBDA_REDUCE_STATEMENT,
+                LAMBDA_REDUCTION_FORM_ELEMENT_ATTRIBUTE, attribute_span, attribute_name,
+                value);
+        }
         had_attributes = true;
         if (!parser_accept(parser, LAMBDA_TOK_COMMA)) break;
         if (!element_attribute_starts(parser)) {
@@ -955,6 +1000,13 @@ static bool braced_expression_is_map(const LambdaRdParser* parser) {
     LambdaRdParser probe = parser_probe(parser);
     if (probe.current.kind != LAMBDA_TOK_LBRACE) return false;
     parser_advance(&probe);
+    if (probe.current.kind == LAMBDA_TOK_LBRACKET) {
+        LambdaParseValue ignored;
+        parser_advance(&probe);
+        if (!parser_parse_expression_value(&probe, 0, &ignored)) return false;
+        return parser_accept(&probe, LAMBDA_TOK_RBRACKET) &&
+            probe.status == LAMBDA_PARSE_OK && probe.current.kind == LAMBDA_TOK_COLON;
+    }
     if (probe.next.kind != LAMBDA_TOK_COLON) return false;
     return token_is_key(probe.current.kind) || probe.current.kind == LAMBDA_TOK_STRING;
 }

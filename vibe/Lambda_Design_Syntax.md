@@ -7,7 +7,7 @@ mark; see Appendix A for the per-ruling conformance list. §7 audit rulings
 (points 19–31, 33) decided 2026-08-21; §7.13 fully resolved; §7.14
 (closed-tail juxtaposition) and §7.15 (relative path `\.a.b`) decided.
 2026-08-27: handler-arm brace placement reaffirmed with rationale (§5.9,
-ledger 16; spec v15.2.1 records it in S16.4.3).
+ledger 16; spec v15.2.1 records it in S16.4.3). 2026-09-05: computed keys `{[expr]: val}` ratified as S16.8.9 + S16.4.1v3 (§7.26, ledger 41; spec v22.0.0).
 
 > **The body states current rulings only.** Superseded wording has been
 > moved out to **Appendix S — Superseded Rulings**, struck through and
@@ -34,7 +34,7 @@ S16.2.6, §3.8 → S16.3.1, §5.9 → S16.4.1v2–S16.4.3, §5.10 → S16.5.1,
 S16.8.3, §7.9 → S16.8.4, §7.12 → S16.8.5, §7.10 → S16.8.6, §7.8 → S16.8.7,
 §7.13 → S16.8.8, §7.6 → S16.9.1, §7.7 → S16.9.2, §7.11 → S16.9.3, §7.15 →
 S16.9.4, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v2, §7.23 → S16.7,
-§7.24 → S16.10, §7.25 → S12.3.7.
+§7.24 → S16.10, §7.25 → S12.3.7, §7.26 → S16.8.9 + S16.4.1v3.
 **Not ratified into S16 (process, not syntax):** ledger 18 (authority order)
 and 32 (two parsers, §4.4) stay here. A future formal syntax document is
 tracked as `SO35`.
@@ -1479,6 +1479,7 @@ for scalars".
     rejected: maximum silent-capture protection, but it freezes the stdlib
     namespace. Builtin-access spelling deferred (SO37). Full argument
     in §7.25.
+41. *(ratified 2026-09-05 as S16.8.9 + S16.4.1v3, spec v22.0.0)* **Computed keys: `{[expr]: val}` and `<tag [expr]: val>`.** A map literal or element attribute list admits an entry whose key is a bracketed expression evaluating to a name (string or symbol, S8.2.2v2; anything else is an error, as for the literal `{1: …}`). Chosen for access symmetry with `m[expr]`; later entries win as with spread; a literal holding a computed key builds its shape at run time exactly as a spread-holding literal does. `map([k, v, …])` rejected as the substitute: it builds a `VMap`, not a shaped map, and pairs positionally. `(expr): val` rejected: parens must stay inert (§5.9 rule 1) and it mirrors nothing on the read side. §5.9 rule 1's two-token map/block test relaxes to "one balanced `[…]` group, then `:`" (S16.4.1v3). Keyed for-splice deferred. Full argument in §7.26.
 
 **Open** *(O1 and O2 resolved above — decided points 13–14)***:**
 
@@ -1749,6 +1750,7 @@ spellings.** The doctrine:
 | parameters | — | `...` (rest) |
 | values, positional | `*x` spread | — |
 | values, keyed | `*: x` spread | — |
+| values, keyed, one computed name | `[expr]: v` (§7.26) | — |
 
 **Normative equivalence: pattern `...` ≡ `any*`** — the two families meet
 by definition, not by accident, and `[a, ..., b]` stays the preferred
@@ -2806,6 +2808,36 @@ at none of the evolution cost.
 inside the shadowing module (Python's `builtins.len`; ECMAScript has none
 and survives). If ever demanded it rides the module system as a prelude
 import, not new syntax — recorded as SO37.
+
+### 7.26 Computed keys: `{[expr]: val}` and `<tag [expr]: val>` (decided 2026-09-05)
+
+**The gap.** A map-literal key is a name — an identifier, a quoted symbol, or (since §7.24) a keyword — and an element attribute name is the same `_key` plus the dotted form. There is no literal spelling that builds a shaped map, or an element with an attribute, whose key is known only at run time. The DOM behaviour templates under `lambda/package/dom` hit this directly: a control that must emit `<input type: "range", …>` with an attribute whose *name* comes from the event or the schema has nowhere to put it.
+
+**Why `map([k1, v1, …])` is not the answer.** It was the candidate, and it was turned down on three counts:
+
+1. **It is a different type.** `map(…)` constructs a `VMap` (`LMD_TYPE_VMAP`, the value-keyed hash map with in-place `.set`), not the shaped `{…}` map of D3.4. Element attributes and every shaped-map consumer need the latter; routing a name-keyed construction through a value-keyed dictionary is a category error, not a convenience.
+2. **Positional pairing is fragile.** `[k1, v1, k2, v2]` loses the key/value structure the reader needs, and one misplaced element silently shifts every later pair.
+3. **It cannot express a comprehension.** A keyed for-splice — a map built by iterating another container — has no positional form that reads as a map at all.
+
+**The ruling (user, 2026-09-05): a computed-key entry `[expr]: val`, in map literals and in element attribute lists.**
+
+1. **Spelling is `[expr]`.** The decisive ground is **access symmetry**: the dynamic read is already `m[expr]` (S12.3.3v2 — `obj["m"]` is the one member operation in dynamic form), so `{[k]: v}` constructs exactly what `m[k]` reads back. The bracket is the key-expression bracket on both sides of the assignment. That JS/TS readers already know the form is a secondary benefit, not the reason.
+2. **The key domain is the name domain, unchanged.** `expr` evaluates to a `NameKey` under S8.2.2v2 — a string or a symbol, normalized by contents — and the entry defines that name. A computed key therefore never turns a `{…}` into a `VMap`: `{[1]: "one"}` is an error, exactly as the literal `{1: "one"}` is, and the literal's key domain stays the domain `m[expr]` ranges over. (This keeps the map-literal/`VMap` line where the `map(…)` paragraph above draws it; a wider key domain would be a `VMap`-literal question, not a change here.)
+3. **Entries evaluate left to right; a later entry wins.** This is the rule spread already has (`{*: base, x: 99}` shadows `base.x`), applied uniformly: a static key, a computed key, and a spread that all land on the same name resolve by position, no special case.
+4. **Shape follows the spread precedent, not a new mechanism.** A literal containing any computed key builds its shape at run time, as a literal containing `*: m` already does; its static entries keep their inferred types, and the literal's static type is the open map. No new representation, no new tier work beyond the construction path — D3.4.1's packed layout is reached the same way a spread-built map reaches it.
+5. **Element attributes take the same entry.** `<input type: "range", [name]: value>` is legal; `attr_name` is `_key` plus the dotted form, so the grammar change is one alternative in `_key` and covers both literals. The attribute/content boundary rule (§5.10, the required boundary comma before content) is untouched: `[…]` after that comma is array content as today.
+6. **Not ruled here: the keyed for-splice.** `{for (k at src) [k]: f(src[k])}` is the natural payoff — S8.3.3 already says for-expressions splice at the construction site — but the `for` clause inside a map literal is a separate grammar question and is recorded as a follow-on, not folded into this ruling.
+
+**Parser consequence — §5.9 rule 1 is relaxed from two tokens to one balanced group.** Rule 1 rests on map-versus-block being decidable from `key ':'` at the front. A computed key opens with `[`, which can also open a block whose first statement is an array literal, so the predicate becomes: *skip one balanced `[…]` group, then require `:`*. `{[1, 2]}` stays a block yielding an array (no colon follows); `{[k]: 1}` is a map. This is still a bounded, decidable lookahead — a bracket counter, not a guess — and it is the same test `element_attribute_starts` needs at the head of an element. The spec wording of S16.4.1v2 ("a decidable two-token choice") became S16.4.1v3 ("one balanced group, then a colon") on ratification. Type-annotation braces are scanner-owned type space (§5.9 table, last row) and see none of this.
+
+**Considered and turned down: `(expr): val`.** It was the first proposal and has the identical parser cost — a balanced `(…)` group then `:` — so cost did not decide it. It lost on two grounds:
+
+- **Parens must stay inert.** §5.9 rule 1 and S16.4.1v2 promise that grouping parens never flip a reading — `if c {a: 1}` and `if (c) {a: 1}` are the same program. A paren key breaks that promise at exactly one position: `{a: 1}` and `{(a): 1}` would mean different things (the symbol `a` versus the value of `a`). Brackets carry no inertness expectation; parens do.
+- **No symmetry to buy.** `(expr)` mirrors nothing on the read side; `[expr]` mirrors `m[expr]`. Since the two spellings tie on every other axis, the one that pairs construction with access wins.
+
+**Implementation (not started).** `grammar.js`: add `seq('[', $._expr, ']')` to `_key` (covers `map_item` and `attr_name`). C parser: `parse_map` and `parse_element` accept the bracketed key; `braced_expression_is_map` and `element_attribute_starts` skip one balanced bracket group before testing for `:`. `build_ast`: a computed variant of the key-expression node carrying an expression instead of a name, lowered on both tiers through the same runtime path the keyed spread uses. Fixtures: a map case, an element-attribute case, the block-vs-map probe `{[1, 2]}` / `{[k]: 1}`, and the non-name-key error.
+
+**Ratified 2026-09-05, spec v22.0.0:** S16.8.9 carries points 1–4 and the rejected `(expr)` spelling; S16.4.1v3 carries the relaxed predicate. Point 4 needs no D ruling — it rides the shape path spread already uses (D3.4.3: runtime-built maps rebuild per transition). Cite S16.8.9 / S16.4.1v3, not this section.
 
 ---
 

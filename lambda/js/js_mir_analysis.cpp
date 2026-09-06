@@ -9,6 +9,13 @@ int jm_name_cmp(const void* a, const void* b, void* udata) {
     return strcmp(((const JsNameSetEntry*)a)->name, ((const JsNameSetEntry*)b)->name);
 }
 
+int jm_binding_cmp(const void* a, const void* b, void* udata) {
+    const JsNameSetEntry* lhs = (const JsNameSetEntry*)a;
+    const JsNameSetEntry* rhs = (const JsNameSetEntry*)b;
+    if (lhs->entry || rhs->entry) return lhs->entry == rhs->entry ? 0 : 1;
+    return jm_name_cmp(a, b, udata);
+}
+
 bool jm_function_decl_is_direct_binding(JsFunctionNode* fn, bool arrow_body_is_direct) {
     (void)arrow_body_is_direct;
     if (!fn || !fn->vars || !fn->vars->parent) return false;
@@ -159,6 +166,13 @@ bool jm_name_set_has(struct hashmap* set, const char* name) {
     JsNameSetEntry key;
     memset(&key, 0, sizeof(key));
     key.name = jm_persist_name(name);
+    return hashmap_get(set, &key) != NULL;
+}
+
+bool jm_binding_set_has(struct hashmap* set, NameEntry* binding) {
+    JsNameSetEntry key = {};
+    key.name = binding && binding->name ? jm_var_name(binding->name) : "";
+    key.entry = binding;
     return hashmap_get(set, &key) != NULL;
 }
 
@@ -748,11 +762,8 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
     // Find captures: referenced identifiers that are not params/locals but ARE in outer scope
     // Track self-references separately — if the function has other captures (and thus
     // becomes a closure), it also needs to capture itself for recursive calls.
-    const char* self_name = NULL;
     bool has_self_ref = false;
-    if (fn->name) {
-        self_name = jm_var_name(fn->name);
-    }
+    const char* self_name = fn->name ? jm_var_name(fn->name) : NULL;
     bool is_method_syntax = jm_analysis_function_is_method_syntax(fn);
     bool is_func_expr = fn->node_type == JS_AST_NODE_FUNCTION_EXPRESSION;
 
@@ -769,8 +780,7 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
         // The AST now resolves an NFE self name to its private function scope,
         // but MIR still represents recursion through the closure environment.
         if (!JM_JS_FACT(fc, is_class_method) && !is_method_syntax &&
-            self_name && self_name[0] && strcmp(ref->name, self_name) == 0 &&
-            !local_binding) {
+            ref->entry == fn->entry && !local_binding) {
             has_self_ref = true;
             continue;
         }

@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 21.2.0 (2026-09-04)
+**Spec version:** 22.0.0 (2026-09-05)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1681,12 +1681,14 @@ below by its section.
 
 ### S16.4 Braces
 
-- **S16.4.1v2** **Interior decides, wherever braces are an expression.** A
-  map needs `key ':'` at the front, and `ident ':'` occurs nowhere in
+- **S16.4.1v3*** **Interior decides, wherever braces are an expression.** A
+  map needs a key and `':'` at the front — a name, or one balanced `[expr]`
+  group (S16.8.9) — and neither `ident ':'` nor `[…] ':'` occurs in
   statement space — Lambda has no labels — so the two interiors are
-  **disjoint grammars**: `{a: 1}` is a map, `{let x = 1 x}` and `{f(1)}` are
-  blocks. This is a decidable two-token choice, not a guess, and it holds in
-  every expression position **and in control-form bodies of both spellings**.
+  **disjoint grammars**: `{a: 1}` and `{[k]: 1}` are maps, `{let x = 1 x}`,
+  `{f(1)}` and `{[1, 2]}` are blocks. This is a decidable bounded lookahead
+  (one balanced group, then a colon), not a guess, and it holds in every
+  expression position **and in control-form bodies of both spellings**.
   Grouping parens never flip the reading: `if c {a: 1}` and `if (c) {a: 1}`
   are the same program, as grouping parens must be. Block expressions
   therefore exist — `{statements}` is legal in any expression position, its
@@ -1713,7 +1715,7 @@ below by its section.
   `case int: {a: 1}`). `match`'s outer braces delimit the arm list
   (S16.6.4); `type` bodies have their own interior; map-*type* patterns
   (`{a: int}`) live in type space and are untouched. The dividing test
-  between S16.4.1v2 and this ruling: interior decides exactly where a
+  between S16.4.1v3 and this ruling: interior decides exactly where a
   bare-expression second form exists; the brace is structural exactly
   where it is mandatory — handler arms have no unbraced form, since
   `expr ^ expr` is already propagate-then-continue (S16.2.6).
@@ -1788,7 +1790,7 @@ below by its section.
   expressions everywhere, so `case T: { … }` stays legal and — by this very
   ruling — can never conceal a statement: after `:`, braces are a map or a
   pure block, nothing else. Classification is by interior, extending
-  S16.4.1v2's doctrine from brace-disambiguation to statement-ness.
+  S16.4.1v3's doctrine from brace-disambiguation to statement-ness.
   [Design_Syntax §6 point 37]
 - **S16.6.9*** **Branch homogeneity.** An `if`/`else` chain or `match` is
   either a **value form** — every branch an expression, where functional
@@ -1857,6 +1859,17 @@ below by its section.
   otherwise.** String interpolation is deferred with its direction fixed: if
   built, `` `...` `` is a quoted-DSL mechanism — interpolated text being one
   instance — never plain string interpolation. [Design_Syntax §7.13]
+- **S16.8.9*** **Computed keys: `[expr]: val`.** A map literal or element
+  attribute list admits an entry whose key is a bracketed expression, chosen
+  for symmetry with the dynamic read `m[expr]` (S12.3.3v2): `{[k]: v}`
+  defines what `m[k]` reads. `expr` must yield a name (string or symbol,
+  S8.2.2v2); any other value is an error, as the literal `{1: v}` is — the
+  key domain is unchanged and a computed key never makes a `VMap`. Entries
+  evaluate left to right and a later entry wins, as with `*: m` spread; a
+  literal holding a computed key builds its shape at run time exactly as a
+  spread-holding literal does. `(expr): val` is rejected: grouping parens
+  must stay inert (S16.4.1v3). The keyed for-splice `{for … [k]: v}` is not
+  ruled. [Design_Syntax §7.26]
 
 ### S16.9 Declarations, elements, paths
 
@@ -2011,7 +2024,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S8.2.3, S12.3.3v2 | **Conformant as of 2026-09-03**, with one deliberate substitution. `lambda_object_member` is the single resolver for both member lanes — the ANY lane (`fn_member`) and the static lane (`item_attr`), which previously diverged: a bare `obj.m` bound on one and read `null` on the other. It resolves the key domain, then the type's own methods, then the base chain; `lambda_object_find_method` is the one walk. A bare `fn` method now yields a receiver-captured closure on both tiers (T0 binds through the new `interp_bind_object_method` seam, since an un-JITted method has no `compiled_fn`), and `obj["m"]` resolves identically to `obj.m`. `len`, `in`, `at` and the projections were already key-domain-only and are unchanged. **Gap:** S12.3.3v2 rules a bare `pn` method reference a compile error; it is not rejected at all today. The rejection cannot live in the runtime member lane — MIR lowers a `pn` method *call* by lowering its callee through that same lane, so refusing there makes the call a silent no-op on the JIT tier. It needs an AST flag plus a validation point in build_ast, which alone can tell a bare reference from a sanctioned callee. Tracked as [LR02-18](../vibe/Lambda_Issue_Ledger.md). Fixtures: `test/lambda/object_method_value.ls`, `object_method_receiver.ls`, `proc/object_method_write.ls`; baseline 4082/4082. |
 | S2.1.1v3, S2.1.3v2, S2.1.4, S2.1.5, S5.4.2v3, S6.2.2v3, S11.3.1v2 | **Conformant as of 2026-09-03.** Nominal-ness is a property of the type descriptor, carried by a `TypeNominal` record allocated once per declaration and cached by an `is_nominal` base flag (D2.6.6v2, D2.6.11). A nominal value wears its DECLARED structural kind, so an attribute-only type yields maps and a type with a content pattern yields elements, and `is object` / `is map` read as the independent axes S2.1.1v3 rules. Nominal sameness is record identity rather than name equality, so two modules' `Point`s stay distinct while every shape grown from one declaration still answers `is T` — which is also what makes S2.1.4 part 3 work: an undeclared field grows the shape and the grown shape points at the same record. The object TypeId is gone from the enum entirely; `object` survives as a TYPE matched by pointer identity. Fixtures `test/lambda/object_nominal.ls` and `proc/object_open_instance.ls`; baseline 4085/4085, exact tier parity, stable under forced GC. Still open: schema-driven input producing objects (S2.1.3v2), and the S12.3.3v2 bare-`pn` rejection tracked as [LR02-18](../vibe/Lambda_Issue_Ledger.md). |
 | S2.1.1v2, S5.4.2v2, S6.2.2v2, S8.1.2v2, S8.2.1v3, S8.3.1v2 (object arm) | **Shipped state under the superseded v2 rulings (2026-09-03).** `entity` is retired from all three keyword tables (C lexer `base_types`, `grammar.js` `_base_type_kw`, `is_type_keyword`) and the reference grammar is regenerated; `let entity = 1` is now legal, where it was `error[E201]`. Objects carry content (D2.6.6 — `Object` is an alias of `struct Element`) and conform across the whole surface: `len` is attributes + content, `in`/`at` walk attribute values then children, an IntKey subscript selects a child, equality is nominal type + unordered attributes + ordered content, ordering is type name then attributes then content, both clone paths copy content, and printing emits round-trippable `<T a: 1, "child">`. Three pre-existing defects were fixed on the way: `item_keys` had NO object arm, so `for (v in obj)` yielded nothing while `len(obj)` reported the field count; object equality compared attributes only, so two objects of DIFFERENT nominal types with matching fields compared equal; and ordering likewise ignored the type name. Fixture `test/lambda/object_content.ls`; baseline 4083/4083, exact tier parity. |
-| S2.1.3 (v1, shipped state; superseded by S2.1.3v2) | **Partially implemented 2026-09-03.** Content patterns, the `<T attrs, content>` literal on both tiers, content-pattern inheritance, and tag-name output (markup formats emit `<TypeName …>` via the shared element handler; JSON keeps its `"@"` type key and gains the element `"_"` content key) all work. **Not implemented:** schema-driven input — `input(doc, schema: …)` and a document declaring its own schema still yield structural elements, never objects — and object construction from a schema is unverifiable end-to-end today ([LR12-1](../vibe/Lambda_Issue_Ledger.md)). The **content-arity check is no longer missing**: `validate_against_element_type` enforces `content_length` (`validator/validate.cpp`, both the fast verdict and the reporting path), and since the flip a content-bearing nominal type wears `LMD_TYPE_ELEMENT` and so dispatches into it. That routing is read from the code, NOT confirmed by a run: the whole validator surface is non-functional in-tree — `test_validator_gtest`, `test_validator_input_gtest`, `test_validator_features_gtest` and `test_ast_validator_gtest` all build and then abort at startup on a flat-namespace symbol (`_ItemNull`, `_g_lambda_home`), and the `validate` CLI cannot resolve any root type, failing with `REFERENCE_ERROR: Type not found` even on the shipped `schema_comprehensive.ls` + `test_data_valid.json` pair. Those targets sit in `test-lambda-full`, not `test-lambda-baseline`, which is why the baseline stays green over them. |
+| S2.1.3 (v1, shipped state; superseded by S2.1.3v2) | **Partially implemented 2026-09-03.** Content patterns, the `<T attrs, content>` literal on both tiers, content-pattern inheritance, and tag-name output (markup formats emit `<TypeName …>` via the shared element handler; JSON keeps its `"@"` type key and gains the element `"_"` content key) all work. **Not implemented:** schema-driven input — `input(doc, schema: …)` and a document declaring its own schema still yield structural elements, never objects — and object construction from a schema is unverifiable end-to-end today ([LR12-1](../vibe/Lambda_Issue_Ledger.md)). The **content-arity check is no longer missing**: `validate_against_element_type` enforces `content_length` (`validator/validate.cpp`, both the fast verdict and the reporting path), and since the flip a content-bearing nominal type wears `LMD_TYPE_ELEMENT` and so dispatches into it. Validator tests now load, parse type annotations, and register direct-parser type declarators; the `validate` CLI reaches real validation for the shipped `schema_comprehensive.ls` + `test_data_valid.json` pair instead of failing root lookup. That pair currently reports its independent `element`-versus-`map` mismatch. LR13-3's root-*selection* policy remains open, and these targets still sit in `test-lambda-full`, not `test-lambda-baseline`. |
 | S5.1.4v2, S9.1.5v2, S10.4.3v2, S10.5.3v2 | **Ruled 2026-09-03, not implemented.** No container carries a node identity and no `===` exists; the DOM package compares wrappers structurally (`test/lambda/dom_api_core.ls`). The carrier, the id-preserving operation set, and the universal addressing scheme are open (SO39, DO25). |
 | S6.1.1 | `fn_lt` uses `strcmp` (NUL-unsafe) and accepts symbols; two-layer invalid-comparison treatment not landed. |
 | S6.2.1 | `sort()` coerces to float (`sort(["b","a","c"])` → `[nan,nan,nan]`); total order not implemented in `sort`/`order by`. |
@@ -2046,13 +2059,14 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S14.2, S14.3 | Group-by and joins (S14.1) are implemented; verbs, `over(...)`, DataFrame, and the whole stream/plan system are pending (phases P3–P8). |
 | S15.3 | `compile()`, closed environments, and `quote` unimplemented; C9 grammar worklist open (general expression children). |
 | S16.1–S16.6 (all) | **Conformant on the S16 harness as of 2026-08-24** (C 123/123, Tree-sitter 118/118). The harness is a case sample, not a proof of total conformance, so the `*` marks stand. Residue: O3 (sibling Tree-sitter scanners), §7.17 (comment vs line-start guard, benign), and the O4 doc sweep — all in [Design_Syntax §4.5/§6](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep). |
-| S16.4.1v2 | **Conformant as of 2026-08-22.** Two inverse flips were fixed in `lambda/runtime/parser/lambda_parser.c`: `if_statement_body_is_map` bailed out on a `(` head (so the paren spelling rejected every map body in statement position), and `parse_for_expression` gated the map reading on `parenthesized` (so the *bare* `for` spelling rejected one the paren spelling accepted). Both spellings of `if` and `for` now agree; `while` correctly stays always-block per S16.4.3. |
+| S16.4.1v3 | **v2 core conformant as of 2026-08-22; the v3 computed-key head (one balanced `[…]` group before the colon) is not implemented — tracked with S16.8.9.** Two inverse flips were fixed in `lambda/runtime/parser/lambda_parser.c`: `if_statement_body_is_map` bailed out on a `(` head (so the paren spelling rejected every map body in statement position), and `parse_for_expression` gated the map reading on `parenthesized` (so the *bare* `for` spelling rejected one the paren spelling accepted). Both spellings of `if` and `for` now agree; `while` correctly stays always-block per S16.4.3. |
 | S16.4.2 | **Conformant as of 2026-08-22.** `control_body_brace_is_map` breaks the empty-brace tie in `if`/`for` bodies from `procedural_depth`; that depth now tracks the enclosing function's *effect kind* rather than a nesting count, so a `fn` inside a `pn` is fn context, and an arrow body is forced to fn context so `() => {}` mid-procedure is still the empty map. Verified across value, content, `if`, `for` (both spellings), arrow, and `pn` positions, plus fn-in-pn and arrow-in-pn nesting. |
 | S16.6.6, S16.6.7 | **Conformant in both front ends as of 2026-08-24** (C 140/140, Tree-sitter 135/135, zero corpus movement). Enforcement mechanics and findings: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 35. |
 | S16.6.8, S16.6.9 | **Conformant as of 2026-08-24** (`E312` in `build_ast` per S16.6.5; C 152/152, Tree-sitter 135/135, baseline 3868/3868). Classifier subtleties (three-way recursive `ast_branch_kind`, NEUTRAL empty branch) and migration: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 38 addendum. |
 | S16.8.4, S16.8.8, S16.9.2, S16.9.4 | Not probed against the implementation; the `*` is precautionary, not a known defect. S16.8.1–S16.8.3, S16.8.5–S16.8.7, S16.9.1, S16.9.3 were spot-checked conformant on 2026-08-22 and ship unmarked — including the S16.9.3 element boundary-comma biconditional in all four of its cases. |
 | S16.9.5 | **Parsing conformant as of 2026-08-25; the field/value distinction is not yet represented.** Residue: the marker wraps the field type in `OPERATOR_OPTIONAL` — the same representation `a: T?` produces — so the two spellings this ruling calls *distinct* are indistinguishable downstream until `ShapeEntry` carries a field-level flag; independently, the declaration binding checker treats an optional field as required for both spellings (`error[E205]`, pre-existing). History: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep). |
 | S12.3.7 | **Ruled 2026-08-27, not implemented — currently a crash.** `fn sum(a) => 99` plus a call executes the interpreter tier with no printed result and dies at teardown (ASan dealloc, debug build); `len`/`min` shadows likewise. Needs one resolution point in `build_ast` (both tiers) plus the shadow warning. Tracked as [LR02-15](../vibe/Lambda_Issue_Ledger.md). |
+| S16.8.9 | **Ruled 2026-09-05, not implemented.** Grammar `_key` (covers `map_item` and `attr_name`), the C parser's `parse_map`/`parse_element` and the two lookahead predicates (`braced_expression_is_map`, `element_attribute_starts`) that must skip one balanced `[…]` group, and a computed variant of the key-expression AST node lowered on both tiers through the keyed-spread path. Design record: [Design_Syntax §7.26](../vibe/Lambda_Design_Syntax.md). |
 | S16.10 | **Ruled 2026-08-27, largely not implemented.** Current divergences: element tags reject keywords (`<if a:1>` errors, legal under S16.10.2); `import edit:` parses and every use fails; `import 'edit':` parses and creates an unreachable binding (use is silently null); `let if = 1` parses and uses fail; `let type = 1` parses and `type` silently reads the base type — the silent misread is the priority defect. E201 exists for `last` only and must extend to the whole table, in the C parser and the reference grammar. Migration: ~55 keyword-named corpus bindings (breakdown in [Design_Syntax §7.24](../vibe/Lambda_Design_Syntax.md)). Tracked as [LR02-14](../vibe/Lambda_Issue_Ledger.md). |
 | int v5 (S4.1) | Substantially landed (lane, encoding, saturation, printing, goldens). Residue: `INT64_ERROR` collides with `INT_LANE_INF` (pre-cutover gate unsatisfied); ELEM_INT SIMD kernels partly gated; nullable lane (`INT_LANE_NULL`) partial; `IntLane`/ValueRep typing of the four i64 meanings pending (known silent bug class). |
 

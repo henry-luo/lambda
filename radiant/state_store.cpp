@@ -2329,7 +2329,13 @@ bool state_get_pseudo_state(DocState* state, View* view, uint32_t pseudo_state) 
         case PSEUDO_STATE_PLACEHOLDER_SHOWN:
             return state_get_bool(state, view, STATE_PLACEHOLDER);
         case PSEUDO_STATE_SELECTED:
-            return state_get_bool(state, view, STATE_SELECTED);
+            // Selectedness has one owner, and it is the DOM node bit that
+            // `option.selected`, `select.value` and `selectedOptions` already
+            // read (F21). STATE_SELECTED was a parallel bit no code ever wrote,
+            // so `:selected` matched the `selected` content attribute forever
+            // and never the live selection.
+            return view && view->is_element() &&
+                   dom_option_is_selected(lam::dom_require_element(view));
         default:
             return false;
     }
@@ -2359,7 +2365,9 @@ static bool dom_element_default_pseudo_state(DomElement* element, uint32_t pseud
             return !(element->has_attribute("readonly") ||
                      element->has_attribute("disabled"));
         case PSEUDO_STATE_SELECTED:
-            return element->has_attribute("selected");
+            // Same owner as above; dom_option_is_selected falls back to the
+            // content attribute itself when nothing has set live selectedness.
+            return dom_option_is_selected(element);
         default:
             return false;
     }

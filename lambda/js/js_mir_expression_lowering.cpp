@@ -77,7 +77,8 @@ static MIR_reg_t jm_emit_with_writeback(JsMirTranspiler* mt, MIR_reg_t with_key,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs),
         MIR_T_I64, MIR_new_int_op(mt->ctx, strict_put ? 1 : 0));
     jm_emit_error_lane_propagate_check(mt);
-    MIR_reg_t wrote_with = jm_emit_is_truthy(mt, wrote_with_item, NULL);
+    MIR_reg_t wrote_with = jm_emit_is_truthy(mt,
+        jm_item_value(wrote_with_item));
     MIR_label_t local_write_label = jm_new_label(mt);
     MIR_label_t done_label = jm_new_label(mt);
     MIR_reg_t result = jm_new_reg(mt, result_name, MIR_T_I64);
@@ -142,7 +143,7 @@ static MIR_reg_t jm_emit_logical_assignment(JsMirTranspiler* mt,
         cond = jm_callr_1(mt, "js_is_nullish", MIR_T_I64, old_val);
         jm_emit_branch(mt, MIR_BT, l_assign, cond);
     } else {
-        cond = jm_emit_is_truthy(mt, old_val, NULL);
+        cond = jm_emit_is_truthy(mt, jm_item_value(old_val));
         jm_emit(mt, MIR_new_insn(mt->ctx,
             asgn->op == JS_OP_AND_ASSIGN ? MIR_BT : MIR_BF,
             MIR_new_label_op(mt->ctx, l_assign),
@@ -1746,12 +1747,8 @@ static MIR_reg_t jm_emit_identifier_read(JsMirTranspiler* mt,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, global_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx,
                             jm_module_name_id(mt, "function", 8)));
-                    bool annexb_self_body = false;
-                    if (mt->current_fc && mt->current_fc->node && mt->current_fc->node->name) {
-                        String* cur_name = mt->current_fc->node->name;
-                        annexb_self_body = cur_name->len == strlen(js_name) &&
-                            memcmp(cur_name->chars, js_name, cur_name->len) == 0;
-                    }
+                    bool annexb_self_body = mt->current_fc && mt->current_fc->node &&
+                        id->entry && id->entry == mt->current_fc->node->entry;
                     MIR_reg_t prefer_non_function_module = jm_new_reg(mt, "annexb_pnfm", MIR_T_I64);
                     if (mt->is_eval_direct || annexb_self_body) {
                         jm_emit_mov(mt, prefer_non_function_module, module_not_function);
@@ -2422,7 +2419,8 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
             cond = jm_callr_1(mt, "js_is_nullish", MIR_T_I64, left_val);
         } else {
             // || and &&: check truthiness
-            cond = jm_emit_is_truthy(mt, left_val, bin->left);
+            cond = jm_emit_is_truthy(mt, jm_item_value(left_val,
+                jm_get_effective_type(mt, bin->left)));
         }
 
         JsErrorLaneTrack branch_exc = jm_error_lane_state(mt);
@@ -2734,7 +2732,8 @@ static bool jm_emit_unary_identifier_writeback(JsMirTranspiler* mt, JsIdentifier
             MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
             MIR_T_I64, MIR_new_int_op(mt->ctx, strict_put ? 1 : 0));
         jm_emit_error_lane_propagate_check(mt);
-        MIR_reg_t wrote_with = jm_emit_is_truthy(mt, wrote_with_item, NULL);
+        MIR_reg_t wrote_with = jm_emit_is_truthy(mt,
+            jm_item_value(wrote_with_item));
         MIR_label_t local_write_label = jm_new_label(mt);
         *with_done_label = jm_new_label(mt);
         jm_emit_branch(mt, MIR_BF, local_write_label, wrote_with);
@@ -4228,7 +4227,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
         MIR_reg_t rhs;
         if (asgn->op == JS_OP_ASSIGN) {
             // Set assignment target hint for closure self-capture detection
-            mt->assign_target_vname = vname;
+            mt->assign_target_binding = id->entry;
             MIR_reg_t simple_with_key = 0;
             bool strict_put = jm_strict_put(mt);
             if (mt->with_depth > 0) {
@@ -4238,7 +4237,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                 jm_emit_error_lane_propagate_check(mt);
             }
             rhs = jm_transpile_box_item(mt, asgn->right);
-            mt->assign_target_vname = NULL;
+            mt->assign_target_binding = NULL;
             // v18: function name inference for simple assignment
             if (asgn->right && (asgn->right->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
                                 asgn->right->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
@@ -4268,7 +4267,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                 // if nullish → evaluate RHS and assign
                 jm_emit_branch(mt, MIR_BT, l_assign, cond);
             } else {
-                cond = jm_emit_is_truthy(mt, var->reg, NULL);
+                cond = jm_emit_is_truthy(mt, jm_item_value(var->reg));
                 if (asgn->op == JS_OP_AND_ASSIGN) {
                     // &&= : if truthy → evaluate RHS and assign; if falsy → short-circuit
                     jm_emit_branch(mt, MIR_BT, l_assign, cond);
@@ -4388,7 +4387,7 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                 cond = jm_callr_1(mt, "js_is_nullish", MIR_T_I64, cur_val);
                 jm_emit_branch(mt, MIR_BT, l_assign, cond);
             } else {
-                cond = jm_emit_is_truthy(mt, cur_val, NULL);
+                cond = jm_emit_is_truthy(mt, jm_item_value(cur_val));
                 if (asgn->op == JS_OP_AND_ASSIGN) {
                     jm_emit_branch(mt, MIR_BT, l_assign, cond);
                 } else {
@@ -6837,7 +6836,7 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
     if (!mt || !fc || env == 0) return;
     int count = jm_last_closure_track_count(fc);
     struct hashmap* assigned = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-        jm_name_hash, jm_name_cmp, NULL, NULL);
+        jm_name_hash, jm_binding_cmp, NULL, NULL);
     if (assigned && fc->node && fc->node->body) {
         jm_collect_indexed_func_assignments(mt, fc->node->body, assigned);
         jm_collect_descendant_func_assignments(mt, fc, assigned);
@@ -6854,10 +6853,8 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
         mt->last_closure_capture_is_nfe[ci] = JM_CAPTURE_ARRAY(fc)[ci].is_nfe_binding;
         bool capture_assigned = false;
         if (assigned) {
-            JsNameSetEntry lookup;
-            memset(&lookup, 0, sizeof(lookup));
-            lookup.name = jm_persist_name(JM_CAPTURE_ARRAY(fc)[ci].name);
-            capture_assigned = hashmap_get(assigned, &lookup) != NULL;
+            capture_assigned = jm_binding_set_has(assigned,
+                JM_CAPTURE_ARRAY(fc)[ci].entry);
         }
         // readback is only valid for captures this closure can mutate; read-only
         // captures can be stale private copies and must not overwrite caller locals.
@@ -7032,12 +7029,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             // Detect self-capture: if the function references its own name, we must
             // defer filling that env slot until after the closure is created, then
             // patch it to point to the closure itself.
-            char self_vname[128] = {0};
             int self_ref_slot = -1;
-            if (fc->node && fc->node->name) {
-                snprintf(self_vname, sizeof(self_vname), "_js_%.*s",
-                    (int)fc->node->name->len, fc->node->name->chars);
-            }
 
             MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
@@ -7057,7 +7049,8 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 if (slot < 0) continue;
 
                 // Skip self-capture — will be patched after closure creation
-                if (self_vname[0] && strcmp(JM_CAPTURE_ARRAY(fc)[ci].name, self_vname) == 0) {
+                if (fc->node && fc->node->entry &&
+                        JM_CAPTURE_ARRAY(fc)[ci].entry == fc->node->entry) {
                     self_ref_slot = slot;
                     continue;
                 }
@@ -7174,20 +7167,20 @@ static MirValue jm_emit_function_value(JsMirTranspiler* mt,
             // never defines it — only the closure itself knows its own identity.
             // Without this, recursive calls via the NFE name find null in the env.
             if (fn->name) {
-                const char* nfe_self = jm_var_name(fn->name);
                 for (int i = 0; i < JM_CAPTURE_COUNT(fc); i++) {
                     if (JM_CAPTURE_ARRAY(fc)[i].is_nfe_binding &&
-                        strcmp(JM_CAPTURE_ARRAY(fc)[i].name, nfe_self) == 0 &&
+                        JM_CAPTURE_ARRAY(fc)[i].entry == fn->entry &&
                         JM_CAPTURE_ARRAY(fc)[i].scope_env_slot >= 0) {
                         jm_emit_store_i64(mt, JM_CAPTURE_ARRAY(fc)[i].scope_env_slot * (int)sizeof(uint64_t), mt->scope_env_reg, fn_reg);
                         break;
                     }
                 }
             }
-            // Also handle assign_target_vname self-reference (e.g., var f = function() { ... f() ... })
-            if (mt->assign_target_vname) {
+            // Also handle assignment-target self-reference (e.g., var f = function() { ... f() ... }).
+            if (mt->assign_target_binding) {
                 for (int i = 0; i < JM_CAPTURE_COUNT(fc); i++) {
-                    if (strcmp(JM_CAPTURE_ARRAY(fc)[i].name, mt->assign_target_vname) == 0 && JM_CAPTURE_ARRAY(fc)[i].scope_env_slot >= 0) {
+                    if (JM_CAPTURE_ARRAY(fc)[i].entry == mt->assign_target_binding &&
+                            JM_CAPTURE_ARRAY(fc)[i].scope_env_slot >= 0) {
                         jm_emit_store_i64(mt, JM_CAPTURE_ARRAY(fc)[i].scope_env_slot * (int)sizeof(uint64_t), mt->scope_env_reg, fn_reg);
                         break;
                     }
@@ -7202,11 +7195,6 @@ static MirValue jm_emit_function_value(JsMirTranspiler* mt,
             // Also detect NFE self-reference via the function's own name:
             // e.g. var f = function myName() { return myName; }
             int self_ref_slot_fe = -1;
-            char nfe_self_name[128] = {0};
-            if (fn->name) {
-                snprintf(nfe_self_name, sizeof(nfe_self_name), "_js_%.*s",
-                    (int)fn->name->len, fn->name->chars);
-            }
 
             MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
@@ -7226,9 +7214,10 @@ static MirValue jm_emit_function_value(JsMirTranspiler* mt,
                 if (slot < 0) continue;
 
                 // Skip self-capture — will be patched after closure creation
-                if ((mt->assign_target_vname && strcmp(JM_CAPTURE_ARRAY(fc)[i].name, mt->assign_target_vname) == 0) ||
-                    (nfe_self_name[0] && JM_CAPTURE_ARRAY(fc)[i].is_nfe_binding &&
-                     strcmp(JM_CAPTURE_ARRAY(fc)[i].name, nfe_self_name) == 0)) {
+                if ((mt->assign_target_binding &&
+                        JM_CAPTURE_ARRAY(fc)[i].entry == mt->assign_target_binding) ||
+                    (JM_CAPTURE_ARRAY(fc)[i].is_nfe_binding &&
+                     JM_CAPTURE_ARRAY(fc)[i].entry == fn->entry)) {
                     self_ref_slot_fe = slot;
                     continue;
                 }
@@ -7359,7 +7348,7 @@ static MIR_reg_t jm_profile_emit_condition(void* owner, MirValue value) {
     JsMirTranspiler* mt = (JsMirTranspiler*)owner;
     value = em_apply_value_demand(&mt->em, value,
         MIR_VALUE_REQUIRED_REP, VALUE_REP_ITEM);
-    return jm_emit_is_truthy(mt, value.reg, (JsAstNode*)value.provenance_node);
+    return jm_emit_is_truthy(mt, value);
 }
 
 typedef struct JsSequenceLowering {
@@ -7412,7 +7401,8 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
             if (bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_STRICT_NE) {
                 MIR_reg_t boxed;
                 if (jm_try_emit_uri_compare_fast_path(mt, bin->left, bin->right, &boxed)) {
-                    MIR_reg_t raw = jm_emit_is_truthy(mt, boxed, expr);
+                    MIR_reg_t raw = jm_emit_is_truthy(mt,
+                        jm_item_value(boxed, LMD_TYPE_BOOL));
                     if (bin->op == JS_OP_STRICT_NE) {
                         MIR_reg_t inv = jm_new_reg(mt, "uri_ne", MIR_T_I64);
                         jm_emit_reg_binary_op(mt, MIR_XOR, inv, raw, MIR_new_int_op(mt->ctx, 1));

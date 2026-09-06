@@ -125,8 +125,19 @@ class PremakeGenerator:
             shutil.copyfile(source_path, output_path)
             # jpeg-turbo 3.2 bundles zlib objects; retaining them would collide
             # with the separately force-loaded zlib archive in the final host.
+            listed = subprocess.run(['ar', '-t', str(output_path)],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, check=False)
+            if listed.returncode != 0:
+                raise RuntimeError(
+                    f"could not list copied archive {output_path}: "
+                    f"{listed.stderr.strip()}")
+            present_members = [member for member in excluded_members
+                               if member in listed.stdout.splitlines()]
+            if not present_members:
+                continue
             completed = subprocess.run(
-                ['ar', '-d', str(output_path), *excluded_members],
+                ['ar', '-d', str(output_path), *present_members],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
             if completed.returncode != 0:
                 raise RuntimeError(
@@ -2294,6 +2305,13 @@ class PremakeGenerator:
                 # Enhanced support for test-specific flags and additional sources
                 test_special_flags = test.get('special_flags', special_flags)  # Test-specific flags override suite flags
                 additional_sources = test.get('additional_sources', [])  # New field for extra source files
+                if 'lambda-runtime-full' in dependencies:
+                    # The hosted validator DSO resolves these core globals from
+                    # its executable host.  Compile a concrete reference into
+                    # every host so archive extraction cannot omit either one.
+                    additional_sources = additional_sources + [
+                        'test/lib/runtime_full_host_symbols.cpp'
+                    ]
 
                 # Apply platform-specific overrides for tests
                 if self.use_macos_config:

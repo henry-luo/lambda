@@ -5,6 +5,8 @@
 #include "../../runtime/transpiler.hpp"
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
+#include "radiant_input_value.hpp"
+#include "../../../lib/tagged.hpp"
 #include "../../../radiant/layout.hpp"
 #include "../../../radiant/render.hpp"
 #include "../../../radiant/event.hpp"
@@ -17,6 +19,7 @@
 #include "../../runtime/gc/gc_heap.h"
 #include "../../../lib/url.h"
 #include <limits.h>
+#include <math.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -64,6 +67,9 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
 #define dom_popover_target_for_button radiant_host_api->dom_catalog->popover_target_for_button
 #define dom_popover_target_action radiant_host_api->dom_catalog->popover_target_action
 #define dom_activate_popover radiant_host_api->dom_catalog->activate_popover_native
+#define dom_notify_mutation radiant_host_api->dom_catalog->notify_mutation
+#define dom_set_option_selected radiant_host_api->dom_catalog->set_option_selected_dirty
+#define dom_select_set_selected_index radiant_host_api->dom_catalog->select_set_selected_index_bridge
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -1245,7 +1251,14 @@ RADIANT_C_API Item fn_radiant_set_attr(Item node_item, Item name_item, Item valu
 // carry a payload (ES4). `value` is text: the HTML attribute is its default and
 // the live buffer answers once the control has one, exactly as `checked` falls
 // back to the `checked` attribute until a ViewState bit exists.
-typedef enum RadiantStateKind { RSTATE_BOOL = 0, RSTATE_TEXT } RadiantStateKind;
+// `selected` is a third kind because its owner is the DOM node, not the state
+// store: `option.selected`, `select.value`, `selectedOptions`, `:selected`, the
+// listbox painter and form submission all read one native selectedness bit
+// (F21). Routing this name to a ViewState bit gave a second answer that only
+// the state store could see, and nothing ever wrote it.
+typedef enum RadiantStateKind {
+    RSTATE_BOOL = 0, RSTATE_TEXT, RSTATE_OPTION_SELECTED
+} RadiantStateKind;
 
 static const struct {
     const char* lambda_name;
@@ -1277,7 +1290,7 @@ static const struct {
     {"required",          STATE_REQUIRED,       true,  PSEUDO_STATE_REQUIRED, RSTATE_BOOL},
     {"optional",          STATE_OPTIONAL,       true,  PSEUDO_STATE_OPTIONAL, RSTATE_BOOL},
     {"placeholder_shown", STATE_PLACEHOLDER,    false, 0, RSTATE_BOOL},
-    {"selected",          STATE_SELECTED,       false, 0, RSTATE_BOOL},
+    {"selected",          STATE_SELECTED,       false, PSEUDO_STATE_SELECTED, RSTATE_OPTION_SELECTED},
     // text-valued: no interned pseudo name and no pseudo-class of its own
     {"value",             "value",              false, 0, RSTATE_TEXT},
 };
@@ -1338,7 +1351,41 @@ RADIANT_C_API Item fn_radiant_get_state(Item node_item, Item name_item) {
         const char* attr = elem->get_attribute("value");
         return radiant_string_item(attr ? attr : "");
     }
+    if (kind == RSTATE_OPTION_SELECTED) {
+        return (Item){.item = b2it(dom_option_is_selected(elem) ? 1 : 0)};
+    }
     return (Item){.item = b2it(state_get_bool(state, elem, interned) ? 1 : 0)};
+}
+
+// HTML's `selectedIndex` is a *derivation*: the index of the first selected
+// option, or -1. The DOM setter keeps it in step for a single-selection select
+// through "ask for a reset", but that algorithm returns immediately for a
+// `multiple` select — so without this the painter and `dom.selected_index`
+// would keep whatever index the last single-selection write left behind.
+static void radiant_option_selection_changed(DomElement* option, DocState* state) {
+    // The owner is the nearest select ancestor: an option may sit directly in
+    // the select or one level down inside an <optgroup>.
+    DomElement* select = nullptr;
+    for (DomNode* node = option ? option->parent : nullptr; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* ancestor = node->as_element();
+        if (ancestor->tag_name && strcasecmp(ancestor->tag_name, "select") == 0) {
+            select = ancestor;
+            break;
+        }
+        if (ancestor->tag_name && strcasecmp(ancestor->tag_name, "optgroup") != 0) break;
+    }
+    if (!select || !state) return;
+    int index = -1, i = 0;
+    for (DomElement* opt = dom_select_next_option(select, nullptr); opt;
+         opt = dom_select_next_option(select, opt), i++) {
+        if (dom_option_is_selected(opt)) { index = i; break; }
+    }
+    form_control_set_selected_index(state, (View*)select, index);
+    // Selectedness is painted, so the row highlight has to be scheduled here;
+    // the state write above only reports a change when the index moved, and a
+    // multiple-select toggle very often leaves the first selected index alone.
+    doc_state_request_repaint(state);
 }
 
 RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item value_item) {
@@ -1372,6 +1419,21 @@ RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item val
         const char* text = fn_to_cstr(value_item);
         if (!text) text = "";
         tc_set_value(elem, text, strlen(text));
+        return (Item){.item = b2it(1)};
+    }
+    if (kind == RSTATE_OPTION_SELECTED) {
+        if (!elem->tag_name || strcasecmp(elem->tag_name, "option") != 0) {
+            log_error("JUBE_RADIANT_SET_STATE: 'selected' is only defined on <option>");
+            return (Item){.item = b2it(0)};
+        }
+        bool select_it = is_truthy(value_item);
+        if (dom_option_is_selected(elem) == select_it) return (Item){.item = b2it(1)};
+        // The DOM setter owns the whole transition: it marks the option dirty,
+        // applies HTML's single-selection exclusivity for a non-multiple select,
+        // runs "ask for a reset", and refreshes the cached selectedOptions.
+        dom_set_option_selected(elem, select_it);
+        radiant_sync_pseudo_state((View*)elem, PSEUDO_STATE_SELECTED, select_it);
+        radiant_option_selection_changed(elem, state);
         return (Item){.item = b2it(1)};
     }
     bool want = is_truthy(value_item);
@@ -1803,12 +1865,18 @@ RADIANT_C_API Item fn_radiant_selected_index(Item node_item) {
     return radiant_int_item((int64_t)form_control_get_selected_index(state, (View*)elem));
 }
 
+// Selecting by index goes through the DOM setter, not straight to view state
+// (F21). The two were separate writers: this one moved the painted index while
+// `option.selected`, `select.value` and the submitted entry kept the old
+// selection, so a committed dropdown choice was invisible to script and to the
+// server. `_select_set_selected_index` sets every option's selectedness and
+// syncs the view state itself.
 RADIANT_C_API Item fn_radiant_set_selected_index(Item node_item, Item index_item) {
     DomElement* elem = nullptr;
     DocState* state = radiant_state_for_element(node_item, "SET_SELECTED_INDEX", &elem);
-    if (!state) return (Item){.item = b2it(0)};
-    int64_t idx = it2l(index_item);
-    form_control_set_selected_index(state, (View*)elem, (int)idx);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    dom_select_set_selected_index(elem, index_item);
+    doc_state_request_repaint(state);
     return (Item){.item = b2it(1)};
 }
 
@@ -2371,6 +2439,215 @@ static Item radiant_range_field(Item node_item, const char* op, int which) {
 RADIANT_C_API Item fn_radiant_range_value(Item n) { return radiant_range_field(n, "RANGE_VALUE", 0); }
 RADIANT_C_API Item fn_radiant_range_min(Item n) { return radiant_range_field(n, "RANGE_MIN", 1); }
 RADIANT_C_API Item fn_radiant_range_max(Item n) { return radiant_range_field(n, "RANGE_MAX", 2); }
+
+// ---- input value operations (F20, ES30) ------------------------------------
+//
+// The package names a value-changing operation; the HTML value algorithm and
+// every write it implies stay here. Same seam as caret_operation and
+// scroll_operation: policy chooses "which key means step up", mechanism owns
+// min/max/step resolution, the value sanitizer, the painted slider position and
+// the mutation notice. No key, modifier or element table crosses into this.
+//
+// radiant_input_value.cpp already implements HTML's value algorithms for every
+// input value state (it backs valueAsNumber/stepUp/stepDown), so this reuses
+// them rather than growing a second stepper for the keyboard path.
+
+// The value this input currently shows. A text control keeps it in the edit
+// buffer, everything else in the input value store; reading the wrong one is
+// how a step computes from a stale number.
+static const char* radiant_input_current_value(DomElement* elem) {
+    if (elem && tc_is_text_control(elem)) {
+        FormControlProp* f = elem->form_control();
+        if (f && f->current_value) return f->current_value;
+    }
+    return radiant_input_live_value(elem);
+}
+
+// A range control paints from a *normalized* 0..1 position held in view state,
+// while its value state is the ordinary input live value. Both are the same
+// number in two representations, so a commit that writes one without the other
+// leaves the thumb and the submitted value disagreeing -- which is what made
+// JS stepUp() move the value but never the thumb.
+static void radiant_input_sync_range_position(DomElement* elem, DocState* state,
+                                              const char* value) {
+    FormControlProp* f = elem ? elem->form_control() : nullptr;
+    if (!f || f->control_type != FORM_CONTROL_RANGE || !state) return;
+    float span = f->range_max - f->range_min;
+    if (!(span > 0.0f)) return;
+    double number = 0.0;
+    if (!radiant_input_value_as_number("range", value ? value : "", &number)) return;
+    form_control_set_range_value(state, (View*)elem,
+                                 (float)((number - (double)f->range_min) / (double)span));
+}
+
+// One commit point for every package-driven input value write: sanitize through
+// the value state, refresh the display pointer the renderer reads, move the
+// slider position, and publish the control-value mutation so layout/paint and
+// the observers see it. Callers supply a value the value algorithm produced.
+static bool radiant_input_commit_value(DomElement* elem, DocState* state,
+                                       const char* value) {
+    if (!elem || !radiant_input_set_live_value(elem, value)) return false;
+    // Copy out of the value store before writing: the two writers below own
+    // different allocations, and passing one store's buffer into the other is
+    // the aliasing bug this ordering would otherwise invite.
+    char committed[128];
+    snprintf(committed, sizeof(committed), "%s", radiant_input_live_value(elem));
+    // A spinner is a text control: its value *is* the edit buffer, and
+    // tc_set_value is the only writer that replaces it, collapses the selection
+    // and refreshes the pointer the renderer paints from. Writing the live-value
+    // store alone stepped `input.value` while the field on screen and the
+    // submitted entry both kept the old text.
+    if (tc_is_text_control(elem)) {
+        tc_set_value(elem, committed, strlen(committed));
+    } else if (elem->form) {
+        elem->form->value = committed;
+    }
+    radiant_input_sync_range_position(elem, state, committed);
+    dom_notify_mutation(DOM_JS_MUTATION_CONTROL_VALUE, (void*)elem, (void*)elem->parent);
+    return true;
+}
+
+// HTML's "step" for a keyboard page operation is deliberately coarser than one
+// step. Browsers use max(step, span/10) so a 0..100 slider pages by 10 rather
+// than by 1; expressing it as a step multiplier keeps the arithmetic inside the
+// spec algorithm instead of duplicating it here.
+static int radiant_input_page_step_count(DomElement* elem) {
+    FormControlProp* f = elem ? elem->form_control() : nullptr;
+    if (!f || f->control_type != FORM_CONTROL_RANGE) return 10;
+    float span = f->range_max - f->range_min;
+    float step = f->range_step > 0.0f ? f->range_step : 1.0f;
+    if (!(span > 0.0f)) return 10;
+    int count = (int)(span / 10.0f / step);   // INT_CAST_OK: step multiplier, not a layout dimension
+    return count > 1 ? count : 1;
+}
+
+// The bound a "toMinimum"/"toMaximum" operation lands on. min/max are content
+// attributes for every value state; a range additionally has resolved defaults
+// (0 and 100) that layout already computed, so a slider with no attributes
+// still has both ends.
+static bool radiant_input_bound_value(DomElement* elem, bool maximum,
+                                      char* out, size_t out_size) {
+    const char* type = elem->get_attribute("type");
+    const char* attr = elem->get_attribute(maximum ? "max" : "min");
+    double bound = 0.0;
+    // A malformed min/max is "absent" per HTML, so it must not be copied through
+    // as text; parsing it here is what makes that the same answer as no attribute.
+    if (attr && *attr && radiant_input_value_as_number(type, attr, &bound)) {
+        return radiant_input_value_from_number(type, bound, out, out_size);
+    }
+    FormControlProp* f = elem->form_control();
+    if (!f || f->control_type != FORM_CONTROL_RANGE) return false;
+    return radiant_input_value_from_number(
+        "range", (double)(maximum ? f->range_max : f->range_min), out, out_size);
+}
+
+RADIANT_C_API Item fn_radiant_input_operation(Item node_item, Item op_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "INPUT_OPERATION", &elem);
+    const char* op = fn_to_cstr(op_item);
+    if (!state || !elem || !op || !*op) return (Item){.item = b2it(0)};
+    // A disabled or read-only control has no value operation at all; refusing
+    // here rather than in the template keeps the guard on the write, where a
+    // future caller cannot forget it.
+    if (form_control_is_disabled(state, (View*)elem)) return (Item){.item = b2it(0)};
+
+    char stepped[128];
+    bool ok = false;
+    if (strcmp(op, "toMinimum") == 0 || strcmp(op, "toMaximum") == 0) {
+        ok = radiant_input_bound_value(elem, strcmp(op, "toMaximum") == 0,
+                                       stepped, sizeof(stepped));
+    } else {
+        int count = 0;
+        if (strcmp(op, "stepUp") == 0) count = 1;
+        else if (strcmp(op, "stepDown") == 0) count = -1;
+        else if (strcmp(op, "pageUp") == 0) count = radiant_input_page_step_count(elem);
+        else if (strcmp(op, "pageDown") == 0) count = -radiant_input_page_step_count(elem);
+        else {
+            log_error("JUBE_RADIANT_INPUT_OPERATION: unknown operation '%s'", op);
+            return (Item){.item = b2it(0)};
+        }
+        ok = radiant_input_value_step(elem->get_attribute("type"),
+                                      radiant_input_current_value(elem),
+                                      elem->get_attribute("min"),
+                                      elem->get_attribute("max"),
+                                      elem->get_attribute("step"),
+                                      count, stepped, sizeof(stepped));
+    }
+    if (!ok) return (Item){.item = b2it(0)};
+    // Report whether the value actually moved: a slider already at its maximum
+    // must not report a change, or the template fires input/change per keypress
+    // for a value that never moved.
+    const char* before = radiant_input_current_value(elem);
+    bool unchanged = before && strcmp(before, stepped) == 0;
+    if (unchanged) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(radiant_input_commit_value(elem, state, stepped) ? 1 : 0)};
+}
+
+// Pointer capture for a package-driven drag gesture (F20).
+//
+// A slider thumb, and any widget like it, needs the pointer stream between
+// press and release. Routing that through `mousemove` would put the whole
+// document's behavior dispatch on the per-frame path, which is exactly what the
+// ES5 hot-path guard exists to prevent. So the package asks for capture once,
+// on the press it already claimed, and native delivers the bounded
+// `pointerdrag` / `pointerdragend` pair to that one element until the button
+// comes up. Mechanism only: no element kind, no geometry, no policy.
+RADIANT_C_API Item fn_radiant_capture_pointer(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "CAPTURE_POINTER", &elem);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    DragTransitionArgs args = { .target = (View*)elem, .dragging = true };
+    return (Item){.item = b2it(drag_transition(state, DRAG_TRANSITION_SET_STATE, &args) ? 1 : 0)};
+}
+
+// Pointer geometry for a range control: which value the given document-space
+// point selects. The inverse of render_range's thumb placement, so it lives
+// beside the renderer's constants rather than being reconstructed in Lambda
+// from a hard-coded thumb size (DOM_Pkg: geometry is mechanism).
+RADIANT_C_API Item fn_radiant_set_range_from_point(Item node_item, Item x_item, Item y_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SET_RANGE_FROM_POINT", &elem);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    FormControlProp* f = elem->form_control();
+    if (!f || f->control_type != FORM_CONTROL_RANGE) return (Item){.item = b2it(0)};
+    if (form_control_is_disabled(state, (View*)elem)) return (Item){.item = b2it(0)};
+    View* view = (View*)elem;
+    if (!view->is_block()) return (Item){.item = b2it(0)};
+    ViewBlock* block = lam::view_require_block(view);
+
+    float abs_x = 0.0f, abs_y = 0.0f;
+    view_to_absolute_position(view, block->x, block->y, 0.0f, 0.0f, &abs_x, &abs_y);
+    // render_range centres the thumb on the value, so the usable track is
+    // shorter than the box by one thumb and the pointer addresses the thumb's
+    // centre, not its left edge.
+    float thumb = FormDefaults::RANGE_THUMB_SIZE;
+    float track = block->width - thumb;
+    if (!(track > 0.0f)) return (Item){.item = b2it(0)};
+    float point_x = 0.0f;
+    if (!radiant_item_to_float(x_item, &point_x)) return (Item){.item = b2it(0)};
+    (void)y_item;   // a horizontal slider's value depends on x alone
+    float fraction = (point_x - abs_x - thumb / 2.0f) / track;
+    if (fraction < 0.0f) fraction = 0.0f;
+    if (fraction > 1.0f) fraction = 1.0f;
+
+    double number = (double)f->range_min +
+        (double)(f->range_max - f->range_min) * (double)fraction;
+    // Snap to the control's step before committing: the value algorithm is the
+    // only place that knows a step base, so a drag must not write between steps.
+    double step = f->range_step > 0.0f ? (double)f->range_step : 1.0;
+    double base = (double)f->range_min;
+    number = base + step * (double)llround((number - base) / step);
+    if (number < (double)f->range_min) number = (double)f->range_min;
+    if (number > (double)f->range_max) number = (double)f->range_max;
+
+    char text[128];
+    if (!radiant_input_value_from_number("range", number, text, sizeof(text))) {
+        return (Item){.item = b2it(0)};
+    }
+    const char* before = radiant_input_current_value(elem);
+    if (before && strcmp(before, text) == 0) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(radiant_input_commit_value(elem, state, text) ? 1 : 0)};
+}
 
 // ---- IME session (ES18/F7) -------------------------------------------------
 //
@@ -2955,6 +3232,9 @@ RADIANT_PROVIDE_ENGINE_2(form_entries, fn_radiant_form_entries)
 RADIANT_PROVIDE_ENGINE_1(form_url, fn_radiant_form_url)
 RADIANT_PROVIDE_ENGINE_1(hover_index, fn_radiant_hover_index)
 RADIANT_PROVIDE_ENGINE_1(option_count, fn_radiant_option_count)
+RADIANT_PROVIDE_ENGINE_1(capture_pointer, fn_radiant_capture_pointer)
+RADIANT_PROVIDE_ENGINE_2(input_operation, fn_radiant_input_operation)
+RADIANT_PROVIDE_ENGINE_3(set_range_from_point, fn_radiant_set_range_from_point)
 RADIANT_PROVIDE_ENGINE_1(range_max, fn_radiant_range_max)
 RADIANT_PROVIDE_ENGINE_1(range_min, fn_radiant_range_min)
 RADIANT_PROVIDE_ENGINE_1(range_value, fn_radiant_range_value)

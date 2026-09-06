@@ -78,6 +78,11 @@ static bool array_pattern_simple_type_matches(Item item, Type* type_pattern, boo
     return actual == expected->type_id;
 }
 
+static bool array_pattern_decimal_items_equal(Item item, Item pattern) {
+    int comparison = 0;
+    return decimal_cmp_items(item, pattern, &comparison) && comparison == 0;
+}
+
 static bool array_pattern_literal_matches(Item item, Item pattern) {
     TypeId item_type = get_type_id(item);
     TypeId pattern_type = get_type_id(pattern);
@@ -89,7 +94,7 @@ static bool array_pattern_literal_matches(Item item, Item pattern) {
         }
         if (IS_NUMERIC_ID(item_type) && IS_NUMERIC_ID(pattern_type)) {
             if (item_type == LMD_TYPE_DECIMAL || pattern_type == LMD_TYPE_DECIMAL) {
-                return decimal_cmp_items(item, pattern) == 0;
+                return array_pattern_decimal_items_equal(item, pattern);
             }
             double item_val = item_type == LMD_TYPE_NUM_SIZED ? item.get_num_sized_as_double() : it2d(item);
             double pattern_val = pattern_type == LMD_TYPE_NUM_SIZED ? pattern.get_num_sized_as_double() : it2d(pattern);
@@ -116,7 +121,7 @@ static bool array_pattern_literal_matches(Item item, Item pattern) {
     case LMD_TYPE_COMPLEX:
         return fn_eq(item, pattern) == BOOL_TRUE;
     case LMD_TYPE_DECIMAL:
-        return decimal_cmp_items(item, pattern) == 0;
+        return array_pattern_decimal_items_equal(item, pattern);
     case LMD_TYPE_DTIME: {
         DateTime item_dt = item.get_datetime();
         DateTime pattern_dt = pattern.get_datetime();

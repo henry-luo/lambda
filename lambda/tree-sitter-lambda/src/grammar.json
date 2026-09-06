@@ -2020,6 +2020,27 @@
         }
       ]
     },
+    "computed_key": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "["
+        },
+        {
+          "type": "FIELD",
+          "name": "key",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_expr"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "]"
+        }
+      ]
+    },
     "map_item": {
       "type": "SEQ",
       "members": [
@@ -2027,8 +2048,17 @@
           "type": "FIELD",
           "name": "name",
           "content": {
-            "type": "SYMBOL",
-            "name": "_key"
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "_key"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "computed_key"
+              }
+            ]
           }
         },
         {
@@ -2204,6 +2234,10 @@
         {
           "type": "SYMBOL",
           "name": "_key"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "computed_key"
         }
       ]
     },

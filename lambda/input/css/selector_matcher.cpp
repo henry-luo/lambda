@@ -149,7 +149,12 @@ static bool selector_matcher_get_pseudo_state(SelectorMatcher* matcher,
         case PSEUDO_STATE_READ_WRITE:
             return !element->has_attribute("readonly");
         case PSEUDO_STATE_SELECTED:
-            return element->has_attribute("selected");
+            // One owner for selectedness (F21): the node bit `option.selected`,
+            // form submission and the listbox painter read, which falls back to
+            // the `selected` content attribute itself when nothing has selected
+            // anything yet. Reading the attribute directly here made `:selected`
+            // match the page's *default* selection forever.
+            return dom_option_is_selected(element);
         case PSEUDO_STATE_PLACEHOLDER_SHOWN:
             {
                 const char* placeholder = element->get_attribute("placeholder");

@@ -1,6 +1,6 @@
 # Radiant — Form Controls & Text-Control Editing
 
-> **Last verified against tree:** 2026-08-31
+> **Last verified against tree:** 2026-09-05
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's HTML form controls (`<input>`, `<textarea>`, `<select>`, `<button>`) as replaced elements with UA-chrome layout and rendering, and — critically — the **native** text-control editing engine that still applies value mutations in C++. [RAD_18 — Editing, Selection & DOM Ranges](RAD_18_Editing_Selection_Ranges.md) documents the registered contenteditable action gate; form controls remain a distinct value-store action between their cancelable `beforeinput` and non-cancelable post-mutation `input` notifications.
 >
@@ -108,6 +108,12 @@ The OS input method's partial text lives in `preedit_utf8` and is *not* part of 
 ---
 
 ## 7. Where input comes from
+
+> **Amendment (2026-09-05)** — the value-bearing controls have their own policy/mechanism seam now. `<input type=range>` and `<input type=number>` take their keyboard and pointer interaction from the dom package's `stepper.ls`, which names a value operation and lets `dom.input_operation` run HTML's own value algorithm (step base, step resolution, min/max clamp, value-state sanitizer) and commit it. A slider's press additionally commits the value the point selects and asks for pointer capture, so the drag arrives as the behavior-only `pointerdrag` / `pointerdragend` pair rather than on the `mousemove` hot path. Radio-group arrow navigation, `<select>` typeahead, and listbox row clicks are likewise `form.ls` policy. The per-event ledger and the residues are [`vibe/Lambda_Design_DOM_Default.md`](../../../vibe/Lambda_Design_DOM_Default.md) §2.6, §3.9 and ESO72–ESO74; that document, not this one, is the source of truth for what a default action does.
+>
+> **Selectedness (F21)** — an option's live selectedness is one bit on the DOM node, and `:selected`, `option.selected`, `select.value`, `selectedOptions`, form submission and the listbox painter all read it. It previously had three unsynchronised representations (the node bit, `ViewState.form.selected_index`, and the `selected` content attribute), so a committed choice moved the painted index while script and the server saw the page's original selection. `render_select` now splits: a listbox — `multiple`, or `size` above 1 — paints its option rows and their highlights through `render_select_listbox_rows` and skips the combo chrome, because `render_block_paint_self` suppresses a form control's children and nothing had ever drawn those rows. `<select multiple>` selection policy (plain, Ctrl/Cmd, Shift, arrows, Ctrl/Cmd+A) is `form.ls`.
+>
+> One correction landed with it: a commit to the input **value store** alone left a text control's edit buffer stale, so `stepUp()` moved `input.value` while the painted field and the submitted entry kept the old text. Every package-driven value commit now routes a text control through `tc_set_value`, and the form-data walk reads the live value store rather than the `value` content attribute for non-text-control inputs.
 
 Form controls are driven by the same GLFW key/text/composition/paste plumbing as the rest of editing ([RAD_15 — Events & Input](RAD_15_Events_Input.md)). The event handlers resolve an `EditingSurface`; when it is a text control the flow takes the value-store action described in [§1](#1-why-form-controls-stay-native): `dispatch_form_text_replace` → `editing_dispatch_form_beforeinput` → (`te_replace_byte_range_no_events` | `te_paste` | `te_ime_commit_*`) → `editing_dispatch_form_input`. Selection extension for click-drag routes through `dispatch_form_selection_extend`, and rich `selectAll` reaching into a subtree with descendant text controls is reconciled by `rich_select_all_sync_descendant_text_controls`. Checkbox/radio/button/select activation is ordinary click handling that flips the StateStore bits and, for `<select>`, toggles `dropdown_open`.
 

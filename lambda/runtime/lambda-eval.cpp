@@ -82,7 +82,6 @@ extern "C" void lambda_recovery_publish_fault(
         prior_error_code);
 }
 
-Item vmap_get_by_item(VMap* vm, Item key);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
 
 // create_match_map helper for find() (implemented in re2_wrapper.cpp)
@@ -162,7 +161,8 @@ static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     if (!error) return;
 
     // capture native stack trace via FP walking
-    error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
+    error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
+        LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
 
     // store in context
     if (context->last_error) {
@@ -226,7 +226,8 @@ Item fn_error(Item message) {
         }
         LambdaError* error = err_create_heap(ERR_USER_ERROR, msg, &loc);
         if (error) {
-            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
+                LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
             return err2it(error);
         }
     }
@@ -938,7 +939,8 @@ static Item lambda_dynamic_call_error(LambdaErrorCode code, const char* caller,
         if (context->current_file) loc.file = context->current_file;
         LambdaError* error = err_create_heap(code, message, &loc);
         if (error) {
-            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
+                LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
             return err2it(error);
         }
     }
@@ -1722,7 +1724,8 @@ static Item lambda_type_error_with_validation(Item actual, Type* expected,
         if (context->current_file) loc.file = context->current_file;
         LambdaError* error = err_create_heap(ERR_TYPE_MISMATCH, message, &loc);
         if (error) {
-            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info, 32);
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
+                LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
             return err2it(error);
         }
     }
@@ -1951,13 +1954,13 @@ static Bool list_eq(List* a, List* b, int depth) {
 
 static bool array_num_shape_eq(ArrayNum* a, ArrayNum* b) {
     int a_ndim = 1, b_ndim = 1;
-    int64_t a_dims_stack[32], b_dims_stack[32];
+    int64_t a_dims_stack[LAMBDA_ARRAY_NUM_MAX_NDIM], b_dims_stack[LAMBDA_ARRAY_NUM_MAX_NDIM];
     a_dims_stack[0] = a ? a->length : 0;
     b_dims_stack[0] = b ? b->length : 0;
 
     if (a && a->is_ndim && a->extra) {
         ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)a->extra;
-        if (s && s->ndim >= 1 && s->ndim <= 32) {
+        if (s && s->ndim >= 1 && s->ndim <= LAMBDA_ARRAY_NUM_MAX_NDIM) {
             a_ndim = s->ndim;
             int64_t* dims = array_num_shape_dims(s);
             for (int i = 0; i < a_ndim; i++) a_dims_stack[i] = dims[i];
@@ -1965,7 +1968,7 @@ static bool array_num_shape_eq(ArrayNum* a, ArrayNum* b) {
     }
     if (b && b->is_ndim && b->extra) {
         ArrayNumShape* s = (ArrayNumShape*)(uintptr_t)b->extra;
-        if (s && s->ndim >= 1 && s->ndim <= 32) {
+        if (s && s->ndim >= 1 && s->ndim <= LAMBDA_ARRAY_NUM_MAX_NDIM) {
             b_ndim = s->ndim;
             int64_t* dims = array_num_shape_dims(s);
             for (int i = 0; i < b_ndim; i++) b_dims_stack[i] = dims[i];
@@ -8138,7 +8141,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     TypeId extend_tid = get_type_id(map_item);
     if (!lambda_type_id_has_attr_face(extend_tid)) return false;
     Map* map = map_item.map;
-    if (!map || !map->type || !map->data || !context || !context->pool) return false;
+    if (!map || !map->type || !context || !context->pool) return false;
     const char* key_chars = NULL;
     uint32_t key_length = 0;
     TypeId key_type = get_type_id(key);
@@ -8154,6 +8157,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     if (!key_chars) return false;
 
     TypeMap* old_type = (TypeMap*)map->type;
+    if (!map->data && old_type->length > 0) return false;
     int old_count = 0;
     int64_t new_size = 0;
     for (ShapeEntry* entry = old_type->shape; entry; entry = entry->next) {
@@ -8166,8 +8170,19 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     RootFrame roots(2);
     Rooted<Map*> rooted_map(roots, map);
     Rooted<Item> rooted_value(roots, value);
-    TypeMap* new_type = (TypeMap*)alloc_type(context->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    bool is_element = extend_tid == LMD_TYPE_ELEMENT;
+    TypeMap* new_type = (TypeMap*)alloc_type(context->pool,
+        is_element ? LMD_TYPE_ELEMENT : LMD_TYPE_MAP,
+        is_element ? sizeof(TypeElmt) : sizeof(TypeMap));
     if (!new_type) return false;
+    if (is_element) {
+        TypeElmt* old_element = (TypeElmt*)old_type;
+        TypeElmt* new_element = (TypeElmt*)new_type;
+        new_element->name = old_element->name;
+        new_element->name_id = old_element->name_id;
+        new_element->content_length = old_element->content_length;
+        new_element->ns = old_element->ns;
+    }
     void* new_data = heap_data_calloc(new_size > 0 ? (size_t)new_size : 1);
     if (!new_data) return false;
     map = rooted_map.get();
@@ -9422,7 +9437,7 @@ Item fn_map_set(Item map_item, Item key, Item value) {
     }
 
     map_type = (TypeMap*)*type_slot;
-    if (!map_type || !map_type->shape) {
+    if (!map_type) {
         log_error("fn_map_set: no shape");
         return ItemError;
     }
@@ -9447,6 +9462,11 @@ Item fn_map_set(Item map_item, Item key, Item value) {
     }
     if (!key_cstr) {
         log_error("fn_map_set: null key string");
+        return ItemError;
+    }
+    if (!map_type->shape) {
+        if (map_extend_open_shape(map_item, key, value)) return ItemNull;
+        log_error("fn_map_set: unable to create field '%s'", key_cstr);
         return ItemError;
     }
     NameRef key_ref = key_type == LMD_TYPE_STRING &&
@@ -9596,4 +9616,80 @@ Item fn_map_set(Item map_item, Item key, Item value) {
     if (map_extend_open_shape(map_item, key, value)) return ItemNull;
     log_error("fn_map_set: field '%s' not found", key_cstr);
     return ItemError;
+}
+
+Item map_literal_begin(void) {
+    Map* map = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    if (!map) {
+        set_runtime_error(ERR_OUT_OF_MEMORY, "computed map literal allocation failed");
+        return ItemError;
+    }
+    map->type_id = LMD_TYPE_MAP;
+    map->type = &EmptyMap;
+    return (Item){.map = map};
+}
+
+Element* elmt_literal_begin(TypeElmt* type) {
+    if (!type) return NULL;
+    // Reuse the ordinary element allocator so UI-mode literals retain their
+    // DomElement representation while their attribute shape grows at runtime.
+    return elmt_with_tl(type->type_index, context ? context->type_list : NULL);
+}
+
+Item map_literal_put(Item owner, Item key, Item value) {
+    if (!is_text_type_id(get_type_id(key))) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "computed map key must evaluate to string or symbol");
+        return ItemError;
+    }
+    RootFrame roots(3);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_key(roots, key);
+    Rooted<Item> rooted_value(roots, value);
+    Item result = fn_map_set(rooted_owner.get(), rooted_key.get(), rooted_value.get());
+    if (get_type_id(result) == LMD_TYPE_ERROR) {
+        set_runtime_error(ERR_INVALID_OPERATION, "computed map key could not be stored");
+        return ItemError;
+    }
+    return rooted_owner.get();
+}
+
+Item map_literal_spread(Item owner, Item source) {
+    TypeId source_type = get_type_id(source);
+    if (source_type != LMD_TYPE_MAP && source_type != LMD_TYPE_VMAP &&
+            source_type != LMD_TYPE_ELEMENT) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "map literal spread requires a map-like value or element");
+        return ItemError;
+    }
+
+    RootFrame roots(4);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_source(roots, source);
+    Rooted<Item> rooted_key(roots, ItemNull);
+    Rooted<Item> rooted_value(roots, ItemNull);
+    SymbolKeyList* keys = item_keys(rooted_source.get());
+    int64_t key_count = symbol_key_list_len(keys);
+    for (int64_t index = 0; index < key_count; index++) {
+        Symbol* symbol = symbol_key_list_at(keys, index);
+        rooted_key.set((Item){.item = y2it(symbol)});
+        if (source_type == LMD_TYPE_VMAP) {
+            // item_keys reifies VMap text keys as Symbols, while HashMap VMaps
+            // retain String keys. Re-enter through the VMap name seam so a
+            // spread does not turn every reified field into null.
+            rooted_value.set(vmap_get_by_str(rooted_source.get().vmap, symbol->chars));
+        } else {
+            rooted_value.set(fn_index(rooted_source.get(), rooted_key.get()));
+        }
+        // A spread contributes each selected field to the fresh literal.
+        cow_capture_value(rooted_value.get());
+        if (get_type_id(rooted_value.get()) == LMD_TYPE_ERROR ||
+                get_type_id(map_literal_put(rooted_owner.get(), rooted_key.get(),
+                    rooted_value.get())) == LMD_TYPE_ERROR) {
+            symbol_key_list_free(keys);
+            return ItemError;
+        }
+    }
+    symbol_key_list_free(keys);
+    return rooted_owner.get();
 }

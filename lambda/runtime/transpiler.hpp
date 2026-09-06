@@ -57,7 +57,6 @@ String* heap_create_name(const char* name);
 Symbol* heap_create_symbol(const char* symbol, size_t len);
 Symbol* heap_create_symbol(const char* symbol);
 void heap_destroy();
-void free_item(Item item, bool clear_entry);
 void expand_list(List *list, Arena* arena = nullptr);
 
 extern "C" {
