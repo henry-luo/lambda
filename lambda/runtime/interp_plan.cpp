@@ -1816,13 +1816,15 @@ static void interp_scan_satellite_node(AstNode* node, void* opaque) {
         return;
     case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_INDEX_ASSIGN_STAM:
-    case AST_NODE_ASSIGN_STAM:
-    case AST_NODE_VAR_STAM:
     case AST_NODE_OBJECT_TYPE:
     case AST_NODE_VIEW:
-        // Procedural writes (including a local var) and indexed/member stores
-        // need the T0 frame's replacement channel. A satellite has no safe
-        // publication path for those roots (D3.3.1 / D5.2).
+        // Indexed/member stores need the T0 frame's replacement channel. A
+        // satellite has no safe publication path for those roots (D3.3.1 /
+        // D5.2). T21-3 / D8.1.1v6: a local `var` declaration and a plain
+        // rebinding assignment are NOT such roots -- a promoted body owns its
+        // whole activation, and its locals are MIR registers with the same
+        // GC root slots the eager module compiler gives them; refusing them
+        // pinned nearly every procedural body (hyphen, sum, tak) to T0.
         sc->ok = false;
         return;
     case AST_NODE_MATCH_EXPR:
@@ -1914,14 +1916,21 @@ bool interp_satellite_supported(const AstFuncNode* fn) {
         TypeId tid = contract ? contract->type_id : LMD_TYPE_ANY;
         bool structured_contract = contract && tid == LMD_TYPE_TYPE &&
             contract->kind != TYPE_KIND_SIMPLE;
-        if (tid == LMD_TYPE_ANY || tid == LMD_TYPE_ARRAY ||
+        if (tid == LMD_TYPE_ARRAY ||
                 tid == LMD_TYPE_ARRAY_NUM || tid == LMD_TYPE_MAP ||
                 tid == LMD_TYPE_ELEMENT ||
                 tid == LMD_TYPE_VMAP || structured_contract) {
-            // Broad/aggregate parameters need the full interpreter's Item
+            // Aggregate/structured parameters need the full interpreter's Item
             // contract. The satellite ABI's raw carrier specialization can
             // otherwise turn typed arrays, structured contracts, or map state
             // into a valid-looking but incorrect value (D2.2.2, D5.2).
+            // T21-3 / D8.1.1v6: a plain `any` parameter is NOT such a case --
+            // the satellite is entered through its boxed `_b` wrapper, an
+            // `any` parameter has no raw carrier to mis-decode, and a lane
+            // the body alone infers for it is guarded by the wrapper's exact
+            // shape test with the boxed slow body behind it. Pinning every
+            // untyped `pn f(x)` to T0 was what kept the shipped auto tier
+            // interpreting the hot loops of most untyped scripts.
             return false;
         }
     }

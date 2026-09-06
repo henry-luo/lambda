@@ -1081,6 +1081,14 @@ typedef struct FnParamEvidence {
     bool used_as_container;
     TypeId container_store_type;
     bool container_store_conflict;
+    // T21-2a: some subscript on this parameter uses a key the call-site
+    // typer cannot prove int (a string key, an untyped call result). An
+    // inferred ArrayNum witness would lower that subscript through the
+    // int-key lane, so the witness is withheld.
+    bool container_key_dynamic;
+    // T21-2e: some subscript on this parameter is a store target; a string
+    // lane is immutable, so the inferred string witness is withheld.
+    bool container_stored;
     bool compared_with_non_numeric;
     bool param_reassigned;
 } FnParamEvidence;

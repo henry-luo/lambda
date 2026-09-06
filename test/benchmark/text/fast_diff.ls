@@ -82,10 +82,12 @@ pn main() {
         }
         round = round + 1
     }
-    if (checksum == 0) {
-        print("fast_diff: FAIL\n")
-    } else {
+    // 748544 is the checksum every engine port must reproduce; a FAIL marker
+    // makes the runner exclude a wrong result instead of timing it (T21-5)
+    if (checksum == 748544) {
         print("fast_diff: CHECKSUM:" ++ checksum ++ "\n")
+    } else {
+        print("fast_diff: FAIL checksum=" ++ checksum ++ "\n")
     }
     print("__TIMING__:" ++ ((clock() - t0) * 1000.0) ++ "\n")
 }

@@ -1130,6 +1130,7 @@ void array_limit_inplace(Array* arr, int64_t n);  // limit to first n items in-p
 void array_limit_last_inplace(Array* arr, int64_t n);  // limit to last n items in-place
 Array* array_spreadable();  // constructs a spreadable empty array
 void array_push(Array* arr, Item item);  // push item to array
+void array_push_argument(Array* arr, Item item);  // verbatim positional append (dynamic-call args)
 // S9.3.1 capturing append for Lambda literals/comprehensions; array_push is raw.
 void array_push_capture(Array* arr, Item item);
 void array_push_spread(Array* arr, Item item);      // push item, spreading if spreadable array

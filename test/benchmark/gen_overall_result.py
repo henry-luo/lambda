@@ -498,8 +498,10 @@ def write_report(args, data):
         when = f" on {started}" if started else ""
         runs_text = f", {record['source_runs']} run(s)" if record.get("source_runs") else ""
         note = f" {record['note']}" if record.get("note") else ""
+        commit = record.get("source_lambda_commit")
+        commit_text = f" on Lambda commit `{commit[:10]}`" if commit else ""
         w(f"- **Separately measured:** {merged_labels} measured{when}{runs_text} "
-          f"from `{record.get('source')}`.{note}")
+          f"from `{record.get('source')}`{commit_text}.{note}")
     if "mir_typed" in engines:
         w("- **MIR columns:** untyped and typed; `*` means the typed column reuses the untyped result because no typed source exists")
     w()

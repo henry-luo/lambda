@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "description": "An unannotated `var` on a native scalar lane that a later assignment widens (an int local receiving a float) is boxed at its declaration, the one point dominating every read and write. The cascade used to switch the binding to a fresh boxed register at the assignment inside an `if` arm or a loop body; that register was undefined on every path skipping the assignment (f(false); fft's first outer iteration, where the inner `while (m >= 2 and j >= m)` never runs before `j = j + m`) while earlier reads kept the stale native register -- the GC root held garbage and fn_add received a non-Item (`unknown add type: 144`), which intermittently sent r7rs/fft into a multi-gigabyte vector operation. With `j` boxed from its declaration the float subtraction is fn_sub and the comparison fn_ge; no native dsub may consume the binding.",
+  "checks": [
+    {
+      "in_func": "_f_#",
+      "expect": [
+        "call\tfn_sub_p, fn_sub"
+      ],
+      "forbid": [
+        "dsub\t"
+      ]
+    },
+    {
+      "in_func": "_g_#",
+      "expect": [
+        "call\tfn_sub_p, fn_sub",
+        "call\tfn_ge_p, fn_ge"
+      ],
+      "forbid": [
+        "dsub\t"
+      ]
+    }
+  ]
+}
