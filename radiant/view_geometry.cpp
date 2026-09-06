@@ -2,6 +2,9 @@
 
 #include "../lib/tagged.hpp"
 
+static void view_geometry_pane_scroll(ViewBlock* block, float* out_x,
+                                      float* out_y, void* context);
+
 static void view_geometry_resolve_scroll(
         ViewBlock* block, ViewGeometryScrollResolver resolve_scroll,
         void* context, float* out_x, float* out_y) {
@@ -44,8 +47,8 @@ static RdtLogicalPoint view_geometry_map_chain(
     return point;
 }
 
-void view_geometry_pane_scroll(ViewBlock* block, float* out_x, float* out_y,
-                               void*) {
+static void view_geometry_pane_scroll(ViewBlock* block, float* out_x,
+                                      float* out_y, void*) {
     float x = 0.0f;
     float y = 0.0f;
     if (block && block->scroller && block->scroll()->pane) {
@@ -151,6 +154,105 @@ RdtLogicalPoint view_geometry_local_to_window(
         point, viewport_root, document_offset, resolve_scroll, context);
 }
 
+static bool view_geometry_find_document_offset(
+        View* view, DomDocument* target_document, RdtLogicalPoint parent_origin,
+        ViewGeometryScrollResolver resolve_scroll, void* context,
+        RdtLogicalPoint* out_offset) {
+    if (!view || !target_document) return false;
+
+    RdtLogicalPoint child_origin = view_geometry_child_node_origin(
+        view, parent_origin, resolve_scroll, context);
+    if (view->is_block() && view->is_element()) {
+        ViewBlock* block = lam::view_require_block(view);
+        DomDocument* embedded_document = block->embed && block->embedp()->doc
+            ? block->embedp()->doc : nullptr;
+        if (embedded_document == target_document) {
+            if (out_offset) *out_offset = child_origin;
+            return true;
+        }
+        if (embedded_document && embedded_document->view_tree &&
+            embedded_document->view_tree->root &&
+            view_geometry_find_document_offset(
+                embedded_document->view_tree->root, target_document,
+                child_origin, resolve_scroll, context, out_offset)) {
+            return true;
+        }
+    }
+
+    if (!view->is_element()) return false;
+    DomElement* element = lam::dom_require_element(view);
+    for (DomNode* child = element->first_child; child;
+         child = child->next_sibling) {
+        View* child_view = static_cast<View*>(child);
+        if (!child_view->view_type) continue;
+        if (view_geometry_find_document_offset(
+                child_view, target_document, child_origin, resolve_scroll,
+                context, out_offset)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+RdtLogicalPoint view_geometry_document_viewport_offset(
+        DomDocument* root_document, DomDocument* target_document,
+        ViewGeometryScrollResolver resolve_scroll, void* context) {
+    RdtLogicalPoint offset = {0.0f, 0.0f};
+    if (!root_document || !target_document || root_document == target_document ||
+        !root_document->view_tree || !root_document->view_tree->root) {
+        return offset;
+    }
+    view_geometry_find_document_offset(root_document->view_tree->root,
+                                       target_document, offset,
+                                       resolve_scroll, context, &offset);
+    return offset;
+}
+
+bool view_geometry_find_text_at(View* view, RdtLogicalPoint point,
+                                RdtLogicalPoint origin,
+                                bool include_trailing_edges,
+                                ViewGeometryTextHit* out_hit) {
+    if (out_hit) *out_hit = {};
+    if (!view) return false;
+    if (view->is_text()) {
+        DomText* text = lam::dom_require_text(view);
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            float width = view_geometry_text_rect_width(text, rect);
+            float left = origin.x + rect->x;
+            float top = origin.y + rect->y;
+            float right = left + width;
+            float bottom = top + rect->height;
+            bool inside_x = point.x >= left &&
+                (include_trailing_edges ? point.x <= right : point.x < right);
+            bool inside_y = point.y >= top &&
+                (include_trailing_edges ? point.y <= bottom : point.y < bottom);
+            if (!inside_x || !inside_y) continue;
+            if (out_hit) {
+                out_hit->text = text;
+                out_hit->rect = rect;
+                out_hit->local_x = point.x - left;
+            }
+            return true;
+        }
+        return false;
+    }
+    if (!view->is_element()) return false;
+
+    RdtLogicalPoint child_origin = view_geometry_child_content_origin(
+        view, origin);
+    DomElement* element = lam::dom_require_element(view);
+    for (DomNode* child = element->first_child; child;
+         child = child->next_sibling) {
+        View* child_view = static_cast<View*>(child);
+        if (!child_view->view_type) continue;
+        if (view_geometry_find_text_at(child_view, point, child_origin,
+                                       include_trailing_edges, out_hit)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool view_geometry_rect_contains_point(Rect rect, RdtLogicalPoint point) {
     return rect.width > 0.0f && rect.height > 0.0f &&
         rect.x <= point.x && point.x < rect.x + rect.width &&
@@ -171,16 +273,6 @@ float view_geometry_point_rect_distance(Rect rect, RdtLogicalPoint point) {
         : point.y > rect.y + rect.height ? point.y - (rect.y + rect.height)
         : 0.0f;
     return dx + dy;
-}
-
-Rect view_geometry_intersect_rect(Rect first, Rect second) {
-    float right = min(first.x + first.width, second.x + second.width);
-    float bottom = min(first.y + first.height, second.y + second.height);
-    first.x = max(first.x, second.x);
-    first.y = max(first.y, second.y);
-    first.width = max(0.0f, right - first.x);
-    first.height = max(0.0f, bottom - first.y);
-    return first;
 }
 
 Bound view_geometry_intersect_bound_rect(Bound bound, Rect rect) {

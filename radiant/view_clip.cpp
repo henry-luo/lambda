@@ -11,7 +11,7 @@ static int clip_floor_to_scanline(float value) {
     return (int)floorf(value); // INT_CAST_OK: raster scanline bounds are integer pixel columns.
 }
 
-bool clip_point_in_rounded_rect(float px, float py,
+static bool clip_point_in_rounded_rect(float px, float py,
     float rx, float ry, float rw, float rh,
     float r_tl, float r_tr, float r_br, float r_bl) {
     if (px < rx || px > rx + rw || py < ry || py > ry + rh) return false;
@@ -34,7 +34,7 @@ bool clip_point_in_rounded_rect(float px, float py,
     return true;
 }
 
-void clip_scanline_rounded_rect(
+static void clip_scanline_rounded_rect(
     float rx, float ry, float rw, float rh,
     float r_tl, float r_tr, float r_br, float r_bl,
     float y, float* out_left, float* out_right) {
@@ -88,21 +88,21 @@ void clip_scanline_rounded_rect(
     }
 }
 
-bool clip_point_in_circle(float px, float py, float cx, float cy, float r) {
+static bool clip_point_in_circle(float px, float py, float cx, float cy, float r) {
     float dx = px - cx, dy = py - cy;
     return dx * dx + dy * dy <= r * r;
 }
 
-bool clip_point_in_ellipse(float px, float py, float cx, float cy, float rx, float ry) {
+static bool clip_point_in_ellipse(float px, float py, float cx, float cy, float rx, float ry) {
     float dx = (px - cx) / rx, dy = (py - cy) / ry;
     return dx * dx + dy * dy <= 1.0f;
 }
 
-bool clip_point_in_inset(float px, float py, float ix, float iy, float iw, float ih) {
+static bool clip_point_in_inset(float px, float py, float ix, float iy, float iw, float ih) {
     return px >= ix && px <= ix + iw && py >= iy && py <= iy + ih;
 }
 
-bool clip_point_in_polygon(float px, float py, const float* vx, const float* vy, int count) {
+static bool clip_point_in_polygon(float px, float py, const float* vx, const float* vy, int count) {
     bool inside = false;
     for (int i = 0, j = count - 1; i < count; j = i++) {
         if (((vy[i] > py) != (vy[j] > py)) &&
@@ -132,7 +132,7 @@ bool clip_point_in_shape(ClipShape* cs, float px, float py) {
     }
 }
 
-void clip_scanline_circle(float cx, float cy, float r,
+static void clip_scanline_circle(float cx, float cy, float r,
     float y, float* out_left, float* out_right) {
     float dy = y - cy;
     float d2 = r * r - dy * dy;
@@ -146,7 +146,7 @@ void clip_scanline_circle(float cx, float cy, float r,
     }
 }
 
-void clip_scanline_ellipse(float cx, float cy, float rx, float ry,
+static void clip_scanline_ellipse(float cx, float cy, float rx, float ry,
     float y, float* out_left, float* out_right) {
     float dy = (y - cy) / ry;
     float d2 = 1.0f - dy * dy;
@@ -160,7 +160,7 @@ void clip_scanline_ellipse(float cx, float cy, float rx, float ry,
     }
 }
 
-void clip_scanline_polygon(const float* vx, const float* vy, int count,
+static void clip_scanline_polygon(const float* vx, const float* vy, int count,
     float y, float* out_left, float* out_right) {
     float x_min = 1e9f, x_max = -1e9f;
     int crossings = 0;
@@ -181,7 +181,7 @@ void clip_scanline_polygon(const float* vx, const float* vy, int count,
     }
 }
 
-bool clip_shape_rect_inside(ClipShape* cs, float x, float y, float w, float h) {
+static bool clip_shape_rect_inside(ClipShape* cs, float x, float y, float w, float h) {
     if (!cs || cs->type == CLIP_SHAPE_NONE) return true;
     return clip_point_in_shape(cs, x, y) &&
            clip_point_in_shape(cs, x + w, y) &&

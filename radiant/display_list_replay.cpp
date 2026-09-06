@@ -1,6 +1,4 @@
 #include "render.hpp"
-
-#include "render.hpp"
 #include "../lib/log.h"
 
 static bool dl_replay_item_intersects_dirty(const DisplayReplayDirtyClip* dirty_clip,

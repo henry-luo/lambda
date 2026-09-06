@@ -1,6 +1,4 @@
 #include "render.hpp"
-
-#include "render.hpp"
 #include <string.h>
 
 static Bound dl_replay_clip_at_offset(const Bound* clip, const ImageSurface* surface,

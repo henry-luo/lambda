@@ -1,6 +1,4 @@
 #include "render.hpp"
-
-#include "render.hpp"
 #include <string.h>
 
 void dl_replay_shadow_clip_init(DisplayReplayShadowClip* clip) {

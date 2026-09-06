@@ -513,45 +513,6 @@ extern "C" bool dom_selection_resolve_layout(DomSelection* selection) {
 // Public — hit testing
 // ---------------------------------------------------------------------------
 
-// Find the deepest text node whose layout box contains (vx, vy).
-// Tree walk uses absolute coords accumulated as we descend.
-static DomText* hit_test_text_at(View* node, float vx, float vy,
-                                 float abs_x, float abs_y,
-                                 TextRect** out_rect, float* out_local_x) {
-    if (!node) return NULL;
-    DomText* found = NULL;
-
-    if (node->is_text()) {
-        DomText* t = lam::dom_require_text(node);
-        for (TextRect* r = t->rect; r; r = r->next) {
-            float rx = abs_x + r->x;
-            float ry = abs_y + r->y;
-            float rect_width = view_geometry_text_rect_width(t, r);
-            if (vx >= rx && vx <= rx + rect_width &&
-                vy >= ry && vy <= ry + r->height) {
-                if (out_rect) *out_rect = r;
-                if (out_local_x) *out_local_x = vx - rx;
-                return t;
-            }
-        }
-        return NULL;
-    }
-
-    // Element: descend into children, accumulating block offsets.
-    if (node->is_element()) {
-        DomElement* el = lam::dom_require_element(node);
-        RdtLogicalPoint child_origin = view_geometry_child_content_origin(
-            node, {abs_x, abs_y});
-        for (DomNode* c = static_cast<DomNode*>(el->first_child); c; c = c->next_sibling) {
-            DomText* t = hit_test_text_at(static_cast<View*>(c), vx, vy,
-                                          child_origin.x, child_origin.y,
-                                          out_rect, out_local_x);
-            if (t) { found = t; break; }
-        }
-    }
-    return found;
-}
-
 typedef struct EditableBoundaryHit {
     DomText* text;
     TextRect* rect;
@@ -1074,9 +1035,12 @@ static int byte_offset_for_x(DomText* text, const TextRect* r, float local_x) {
 extern "C" DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float vy) {
     DomBoundary b = { NULL, 0 };
     if (!root_view) return b;
-    TextRect* rect = NULL;
-    float local_x = 0;
-    DomText* t = hit_test_text_at(root_view, vx, vy, 0, 0, &rect, &local_x);
+    ViewGeometryTextHit text_hit = {};
+    view_geometry_find_text_at(root_view, {vx, vy}, {0.0f, 0.0f}, true,
+                               &text_hit);
+    TextRect* rect = text_hit.rect;
+    float local_x = text_hit.local_x;
+    DomText* t = text_hit.text;
     if (t && rect && is_vertical_selection_writing_mode(
             effective_writing_mode_for_node(static_cast<DomNode*>(t)))) {
         VerticalWritingBoundaryHit vertical_hit = { NULL, 0, 0.0f, false };

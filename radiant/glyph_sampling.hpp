@@ -152,19 +152,21 @@ static inline void glyph_draw_transformed_coverage_bitmap(ImageSurface* surface,
     if (bottom > surface_bottom) bottom = surface_bottom;
     if (left >= right || top >= bottom) return;
 
-    float det = transform->e11 * transform->e22 - transform->e12 * transform->e21;
-    if (fabsf(det) < 0.000001f) return;
-    float inv_det = 1.0f / det;
+    RdtMatrix inverse = {};
+    if (!rdt_matrix_inverse(transform, &inverse)) return;
 
     // sample destination coverage so full-page and tiled replay rasterize transforms identically.
     for (int dst_y = top; dst_y < bottom; dst_y++) {
         int local_y = (int)((float)dst_y - surface_origin_y);
         uint8_t* row_pixels = (uint8_t*)surface->pixels + local_y * surface->pitch;
         for (int dst_x = left; dst_x < right; dst_x++) {
-            float dx = (float)dst_x + 0.5f - transform->e13;
-            float dy = (float)dst_y + 0.5f - transform->e23;
-            float src_abs_x = ( transform->e22 * dx - transform->e12 * dy) * inv_det;
-            float src_abs_y = (-transform->e21 * dx + transform->e11 * dy) * inv_det;
+            float src_abs_x = 0.0f;
+            float src_abs_y = 0.0f;
+            if (!rdt_matrix_project_point(
+                    &inverse, (float)dst_x + 0.5f, (float)dst_y + 0.5f,
+                    &src_abs_x, &src_abs_y)) {
+                continue;
+            }
             float local_src_x = src_abs_x - (float)x - 0.5f;
             float local_src_y = src_abs_y - (float)y - 0.5f;
             uint32_t intensity = glyph_sample_coverage_bilinear(bitmap, local_src_y, local_src_x);
