@@ -927,6 +927,12 @@ static inline bool is_valid_function(Function* fn) {
 typedef enum LambdaDynamicCallMode {
     LAMBDA_DYNAMIC_CALL_FUNCTION,
     LAMBDA_DYNAMIC_CALL_PROCEDURE,
+    // T21-3b (CW33, D8.1.1v6): a function-mode call whose caller has already
+    // published the borrowed `var` homes in Context::mir_var_homes, so a
+    // signature with untyped `var` parameters is dispatchable -- the callee
+    // (generated prologue or interp_call) consumes the cells and writes the
+    // final parameter values back through them.
+    LAMBDA_DYNAMIC_CALL_BORROWED,
 } LambdaDynamicCallMode;
 
 static Item lambda_dynamic_call_error(LambdaErrorCode code, const char* caller,
@@ -981,7 +987,7 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
     if (fn->arity > LAMBDA_MAX_FUNCTION_ARGS) {
         return lambda_dynamic_argument_limit_error(caller, fn->arity, "function arity");
     }
-    if (mode == LAMBDA_DYNAMIC_CALL_FUNCTION &&
+    if ((mode == LAMBDA_DYNAMIC_CALL_FUNCTION || mode == LAMBDA_DYNAMIC_CALL_BORROWED) &&
             !lambda_dynamic_abi_is_core(fn->entry_abi) &&
             fn->entry_abi != FN_ENTRY_ABI_HOST_ADAPTER) {
         // Procedure methods are boxed entries too; ordinary object.method()
@@ -1017,7 +1023,8 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
     int fixed = fn->arity;
     bool variadic = false;
     if (signature && signature->type_id == LMD_TYPE_FUNC) {
-        if (lambda_dynamic_signature_has_var_parameter(signature)) {
+        if (lambda_dynamic_signature_has_var_parameter(signature) &&
+                mode != LAMBDA_DYNAMIC_CALL_BORROWED) {
             return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
                 "dynamic dispatch of a function with `var` parameters is deferred");
         }
@@ -1130,7 +1137,8 @@ static Item lambda_dynamic_invoke_native(Function* fn, const Item* args,
 }
 
 static Item lambda_dynamic_invoke_by_count(Function* fn, const Item* args,
-        int count, uint64_t* result_home, const char* caller) {
+        int count, uint64_t* result_home, const char* caller,
+        LambdaDynamicCallMode mode) {
     if (fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER) {
         return lambda_dynamic_invoke_host_adapter(fn, args, count, caller);
     }
@@ -1140,7 +1148,11 @@ static Item lambda_dynamic_invoke_by_count(Function* fn, const Item* args,
         // the ordinary generated boxed ABI, while a cold/pinned definition
         // must keep the exact interpreter call path (D8.1.1v2 §5.3).
         if (!interp_promote_function_if_hot(fn)) {
-            return interp_call(fn, args, count);
+            // the borrowed mode's homes are consumed by the interpreted
+            // prologue the way the generated prologue consumes them
+            return mode == LAMBDA_DYNAMIC_CALL_BORROWED
+                ? interp_call_borrowed(fn, args, count)
+                : interp_call(fn, args, count);
         }
     }
     // This is the Core boxed ABI dispatch; hosted native callbacks use the
@@ -1215,7 +1227,7 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
     if (!needs_adapter) {
         Function* rooted_fn = (Function*)(uintptr_t)source_words[0];
         return lambda_dynamic_invoke_by_count(rooted_fn, source_items, actual,
-            result_home, caller);
+            result_home, caller, mode);
     }
 
     RootSpan adapter_roots((size_t)physical);
@@ -1249,7 +1261,7 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
     }
     Function* rooted_fn = (Function*)(uintptr_t)source_words[0];
     return lambda_dynamic_invoke_by_count(rooted_fn,
-        (Item*)(void*)adapter_words, physical, result_home, caller);
+        (Item*)(void*)adapter_words, physical, result_home, caller, mode);
 }
 
 Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
@@ -1344,6 +1356,15 @@ Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home) {
     List args = {.length = 2, .items = values};
     return lambda_dynamic_call(fn, &args, result_home,
         LAMBDA_DYNAMIC_CALL_FUNCTION, "fn_call2");
+}
+
+// T21-3b: the borrowed-call entry -- the caller has published the `var`
+// homes (CW33 cells) before calling; see LAMBDA_DYNAMIC_CALL_BORROWED.
+Item fn_call_borrowed_into(Function* fn, List* args, uint64_t* result_home) {
+    Item invalid = lambda_dynamic_public_non_function_error(fn, "fn_call_borrowed");
+    if (invalid.item != ITEM_NULL) return invalid;
+    return lambda_dynamic_call(fn, args, result_home, LAMBDA_DYNAMIC_CALL_BORROWED,
+        "fn_call_borrowed_into");
 }
 
 Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result_home) {
@@ -7889,6 +7910,28 @@ Item cow_capture_value(Item value) {
     return cow_mark_shared(value);
 }
 
+// CW34 (COW §11.11): bind a read-modify-write handle. `value` was just read
+// from `root` through `count` intermediate keys (at most two). The handle
+// may alias the place -- no share-mark, so its writes land in place and the
+// store-back is a no-op -- only while EVERY container on that spine is
+// unshared: an outside observer of the root or of an intermediate level would
+// see the in-place writes. A static or immortal link counts as shared. Any
+// other spine takes the ordinary snapshot bind. No allocation happens here:
+// the marks are bits and fn_index on a container is a read.
+Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item key2) {
+    Item current = root;
+    for (int64_t link = 0; ; link++) {
+        Container* container = cow_item_container(current);
+        if (!container || container->is_static || container->is_immortal ||
+                (container->cow_state & COW_STATE_SHARED)) {
+            return cow_bind_var(value);
+        }
+        if (link >= count) break;
+        current = fn_index(current, link == 0 ? key1 : key2);
+    }
+    return value;
+}
+
 // A one-level clone marks the source's children shared because two maps now
 // reference them. When the pre-image is UNIQUE, though, the caller is about to
 // replace it at its only binding, so it dies in the same step and no second
@@ -9633,7 +9676,11 @@ Element* elmt_literal_begin(TypeElmt* type) {
     if (!type) return NULL;
     // Reuse the ordinary element allocator so UI-mode literals retain their
     // DomElement representation while their attribute shape grows at runtime.
-    return elmt_with_tl(type->type_index, context ? context->type_list : NULL);
+    // The literal's TypeElmt is passed directly: its type_index belongs to the
+    // DEFINING module's type list, and the active context->type_list is the
+    // running script's, so an index lookup here handed every module-defined
+    // computed-key/spread element literal a foreign type (graph/* crashes).
+    return elmt_with_type(type);
 }
 
 Item map_literal_put(Item owner, Item key, Item value) {

@@ -220,8 +220,22 @@ ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     return array_num_new_with_extra(elem_type, length, 0);
 }
 
+static ArrayNum* array_num_new_with_extra_init(ArrayNumElemType elem_type,
+        int64_t length, int64_t extra, bool zeroed);
+
 ArrayNum* array_num_new_with_extra(ArrayNumElemType elem_type, int64_t length,
                                    int64_t extra) {
+    return array_num_new_with_extra_init(elem_type, length, extra, true);
+}
+
+// lanes left uninitialized: the caller writes all `length` elements before
+// any read or GC safepoint (fill, the varargs fill helpers)
+ArrayNum* array_num_new_uninit(ArrayNumElemType elem_type, int64_t length) {
+    return array_num_new_with_extra_init(elem_type, length, 0, false);
+}
+
+static ArrayNum* array_num_new_with_extra_init(ArrayNumElemType elem_type, int64_t length,
+                                               int64_t extra, bool zeroed) {
     if (length < 0 || extra < 0 || length > INT64_MAX - extra) return NULL;
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!arr) return NULL;
@@ -240,7 +254,7 @@ ArrayNum* array_num_new_with_extra(ArrayNumElemType elem_type, int64_t length,
         return arr;
     }
     if (bytes > 0) {
-        void* data = heap_data_alloc(bytes);
+        void* data = zeroed ? heap_data_alloc(bytes) : heap_data_alloc_uninit(bytes);
         arr = rooted_arr.get();
         arr->data = data;
     }
@@ -257,7 +271,7 @@ static bool array_num_prepare_fill(ArrayNum* arr, ArrayNumElemType elem_type,
     arr->set_elem_type(elem_type);
     size_t bytes;
     if (!lam::checked_mul((size_t)count, elem_size, &bytes)) return false;
-    arr->data = heap_data_alloc(bytes);
+    arr->data = heap_data_alloc_uninit(bytes);  // every lane is written by the varargs fill
     if (!arr->data) return false;
     arr->length = count;
     arr->capacity = count;
@@ -2524,10 +2538,11 @@ Item map_get_by_name_id(Container* owner, TypeMap* map_type, void* map_data,
                                     is_found);
 }
 
-Element* elmt(int64_t type_index) {
-    ArrayList* type_list = (ArrayList*)context->type_list;
-    TypeElmt *elmt_type = (TypeElmt*)(type_list->data[type_index]);
-
+// allocate an element under an already-resolved type; the type_index entry
+// points (elmt / elmt_with_tl) resolve through a module type list first, while
+// a computed-key literal (elmt_literal_begin) already holds the TypeElmt* and
+// must not re-resolve its index against whichever module's list is active
+Element* elmt_with_type(TypeElmt* elmt_type) {
     if (context->ui_mode && context->arena) {
         // ui_mode: allocate fat DomElement on result arena
         DomElement* dom = DomElement::create_in(context->arena);
@@ -2543,6 +2558,11 @@ Element* elmt(int64_t type_index) {
     e->type_id = LMD_TYPE_ELEMENT;
     e->type = elmt_type;
     return e;
+}
+
+Element* elmt(int64_t type_index) {
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    return elmt_with_type((TypeElmt*)(type_list->data[type_index]));
 }
 
 // MIR Direct module-type-list-aware wrapper for elmt.

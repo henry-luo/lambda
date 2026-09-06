@@ -254,6 +254,8 @@ extern "C" {
 // the caller has already rooted; the result is re-homed into the caller's
 // number extent before this returns.
 Item interp_call(Function* fn, const Item* args, int argc);
+// T21-3b: the caller published CW33 `var` homes (borrowed dispatch mode)
+Item interp_call_borrowed(Function* fn, const Item* args, int argc);
 #ifdef __cplusplus
 }
 #endif

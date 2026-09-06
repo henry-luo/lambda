@@ -862,6 +862,12 @@ they land and open this track only if collection share is still ≥10% on any
 row. gcbench (3.03x — the one row where even C2MIR is slow, allocation *is*
 the workload) parks here too.
 
+**Status (2026-09-06):** gate met on havlak after T21-1..4 (27 nursery
+collections, ~45% of the run in the collector) and closed by the nursery
+trigger pacing recorded in `vibe/impl/Lambda_Impl_Tune21.md` §T21-4
+(havlak 0.50x, havlak2 0.41x); T21-1a had already paced the object trigger.
+Remaining allocation-*volume* items stay with T20-1/T20-4.
+
 ### T20-6 — The v34 annotation-tax ledger (categorical-bar cleanup)
 
 At Result34 time, binarytrees typed was **2.10x its own untyped row** (19.0 vs

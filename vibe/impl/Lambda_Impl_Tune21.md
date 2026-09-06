@@ -343,6 +343,93 @@ correct) — a T0 `var`-param write-back regression on the `c` array.
   its dump (mir-check), COW semantic fixtures unchanged, poison sweep.
 - **T21-1e crypto_sha1 and W4** — attribute first (§2.7), then fix. Do not
   guess; the site is likely one level away from the obvious file (Tune19 §8.3).
+  **Investigation (2026-09-06): the specified mechanism has no remaining
+  target; the real copies come from two idioms it does not cover — needs a
+  ruling before code.** Evidence on `temp/lambda_t33_final.exe`:
+  - puzzle already meets the gate: its dump has no `_cow` call at all (six
+    raw `fn_array_set`), 0.89 ms — T21-2d/CW33 got there first.
+  - richards (AWFY) and deltablue2, the T21-4 rows that pointed here, spend
+    ~4% and <2% of samples in COW helpers (`cow_path_set_raw` 22 +
+    `cow_prepare_write` 18 of ~1000); the spine emitter already skips the
+    reinstall when a link did not move. Their cost is the untyped map field
+    protocol (`fn_map_set` 111, `fn_index` 83, shape walks ~190) — T20-1.
+  - `COW_EXEC_PROFILE=1` over the suite (real one-level copies, not call
+    sites): cd/cd2 **220k array copies / 88 MB** + 132k map copies; splay
+    **607k map copies / 40 MB**; havlak **205k array + 40k map copies /
+    38 MB**; crypto_aes **277k `array[num]` copies / 53 MB**; jetstream
+    deltablue 16k copies of 3.8 KB arrays / 61 MB; awfy deltablue 49k / 5 MB;
+    richards 23k map copies / 1.7 MB (with 1.75 M unique mutations — the
+    nested-path port works as designed). Estimated share of the row at
+    ~0.3 µs per small copy: havlak ~30%, splay ~25%, crypto_aes ~17%,
+    deltablue ~7%, cd ~6%, richards <2%.
+  - The two idioms: **(A) read-modify-write through a handle** — `var l =
+    a.l0; … l[i] = c; a.l0 = l` (cd/havlak `arr_set`, splay's node
+    handles, deltablue's `p_vars`/`constraints`): the bind marks the level
+    shared (`cow_bind_var`), the write copies it, the store-back captures the
+    copy (marks it again), and the mark is monotonic (D4.4.1), so every later
+    call copies every level — `marks ≈ copies, unique = 0` is the signature.
+    **(B) functional rebinding through a mutated plain parameter** — `st =
+    SubBytes(st)` with `pn SubBytes(s) { s[i] = …; return s }` (crypto_aes):
+    CW29's callee-side entry mark plus one copy per call, although the
+    caller's `st` dies at the rebind.
+  - Neither is "a container created in this activation that never escaped":
+    in (A) the level was read out of `a`, in (B) the container is the
+    caller's. Both elisions are compile-time exclusivity proofs of a new
+    kind: (A) = lower the bind as a CW25-style **path borrow** when the body
+    stores `l` back to the same path with no intervening read of `a` and no
+    other escape of `l` (the store-back then vanishes — richards' nested
+    path port does this by hand); (B) = a **moved argument**: at `x = f(x)`
+    with `x` an unmarked local dead after the call, pass ownership so the
+    callee skips its CW29 entry mark (an ABI signal the callee must see,
+    since CW29 placed the mark callee-side). D4.4.1's sanctioned extensions
+    (saturating counts / GC-refresh) do not help (A): at the write the field
+    still observes the old level, so the copy is required until the
+    store-back is proven. Options and the rows each unlocks are in the
+    2026-09-06 session summary; **ruling needed (CW34/CW35 candidates)
+    before any of this lands** — S9.1.2/S9.1.3 make both observable
+    unless the proof holds, so they are semantics work, not oracle edits.
+
+  **Implementation status (2026-09-06, later): (A) ratified as CW34 and
+  landed** (`vibe/Lambda_Design_Runtime_COW.md` §11.11; **D4.4.4**, spec
+  1.46.0). The static shape is decided once in `build_ast`
+  (`lambda_ast_lower_rmw_borrows` at FUNCTION_END → `NameEntry::
+  cow_borrow_lowered` on the handle, `AstAssignNode::cow_borrow_release` on
+  every store-back); the runtime spine test `cow_bind_rmw_handle` takes the
+  borrow only when root and intermediate links are unshared; MIR models the
+  handle as `cow_marked` (bit-consulting stores) and T0 calls the same
+  helper. Fixtures: `test/lambda/proc/cow_rmw_borrow.ls` (nine shapes,
+  golden byte-identical on three tiers and to the pre-CW34 build) and the
+  emission pin `test/mir/lambda/cw34_rmw_borrow` (arr_set: two
+  `cow_bind_rmw_handle`, no `cow_bind_var`/`cow_capture_value`).
+  `COW_EXEC_PROFILE` copies per run: **havlak arrays 204 687 → 41 168**,
+  awfy deltablue arrays 48 960 → 38 880; cd, splay and jetstream deltablue
+  unchanged — cd's root arrives through a plain-parameter chain (the copies
+  are S9.1.3's), splay's rotations have no store-back, jetstream deltablue
+  writes through plain parameters (see §11.11 "Not covered").
+  Two **pre-existing JIT defects** surfaced by the probe (present on the
+  pre-CW34 binary, T0 correct) — **both fixed 2026-09-07**
+  (`test/lambda/proc/jit_tail_if_push_error.ls`, golden tier-agreed):
+  (1) a `pn` body whose tail `if` needed boxing (braced arms, a `null` arm
+  against an index read) returned `null`: `transpile_if`'s proc-mode
+  `proc_discard` treated the tail `if` as a discarded statement; the content
+  lowering now sets `preserve_proc_if_result` around a proc block's tail
+  `if` (S16.4.1v3, S12.1.2 — the tail is the block's value, braced or not).
+  (2) `push(vals, k)` on a numeric-array handle fails softly ("expected a
+  growable array"); the COW push/splice arm republished `pn_push_cow`'s
+  ERROR Item as the binding, so `t.vals = vals` stored the error and
+  `len(vals)`'s argument boundary handed it to the native return lane →
+  `inf`. The arm now publishes the helper result only when it is not an
+  error and keeps the boxed owner otherwise (S7.4.1/S7.4.5: a sys-func
+  failure is a value the statement discards, as T0 already did).
+  Measured (release, interleaved ×5, `temp/lambda_t33_final.exe` →
+  `temp/lambda_t34_final.exe`): **havlak 110.7 → 70.8 ms (0.64x)**,
+  **havlak2 114.0 → 74.6 ms (0.65x)**; deltablue/deltablue2 0.99/0.98; cd,
+  cd2, splay, json, json2, richards, hashmap, crypto_aes, nbody, gcbench2,
+  binarytrees, matmul, brainfuck, quicksort, permute, towers 0.99–1.02.
+  Gates: `auto`/`jit`/`interp` sweeps 0 regressions (755 scripts, the new
+  fixture included); `make test-lambda-baseline` green with the emission
+  pin; `make interp-sweep` partition regenerated.
+  (B) — the moved argument for `x = f(x)` — remains open for its own ruling.
 
 ### T21-2 — Untyped lane parity (the biggest lever)
 
@@ -725,10 +812,54 @@ matmul are pre-existing T0 divergences — matmul's `sum=0` is already in the
 T21-1 ledger). `make interp-sweep` and `make test-lambda-baseline` under the
 unset AUTO default: see the closing summary below the table.
 
-*Next for the auto tier* (unchanged design items, now the whole residual):
-indexed/member stores in a promoted body (nbody, levenshtein), `var`
-parameters (quicksort, permute — CW33's home-transport ABI for satellites),
-and the once-called-`main` hot loop (the secondary item above).
+**T21-3b (2026-09-06, landed): satellite write-back for indexed stores and
+untyped `var` parameters** (impl `vibe/impl/Lambda_Impl_Ast_Interp (done).md`
+§3.0.58; design §5.2.1 "Write-back across the tier boundary"; D8.1.1v6 text
+extended in place). Indexed/member stores are simply admitted by the scan (a
+promoted activation owns its registers; module stores go to the shared slab;
+a store through an untyped `var` parameter is published by the CW33
+epilogue). Untyped `var` parameters cross both tier edges through the CW33
+home-transport cells: T0 publishes its frame-slot addresses and calls the
+promoted callee through the new borrowed dispatch mode
+(`fn_call_borrowed_into`), and a satellite's dynamic call publishes its
+rooted slots and reloads them, with `interp_call_borrowed` consuming the
+cells on the interpreted side. Typed `var` parameters (raw-lane ABI, no
+home) stay pinned. A `var` local passed to an untyped `var` parameter is
+bound boxed at declaration — which also fixed a pre-existing eager-JIT
+divergence (`pn bump(var n) { n = n + 1 }` left an int-lane caller local
+unchanged).
+
+| Row (untyped) | JIT e2e | auto before (t27) | auto after (t30) | after/JIT | note |
+|---|---:|---:|---:|---:|---|
+| larceny/quicksort | 16.7 | 128.4 | **31.5** | 1.88x | `var` array params promote; rest = boxed satellite indexing |
+| awfy/permute | 14.3 | 27.9 | **14.4** | 1.00x | parity |
+| kostya/levenshtein | 31.2 | 305.7 | **216.8** | 6.9x | `levenshtein` now promotes (was pinned by its indexed stores); the satellite's `any`-param body indexes boxed — satellite call-site specialization is the residual, not write-back |
+| beng/nbody | 62.8 | 1017.8 | 1018.7 | 16.2x | **correction:** `advance`/`energy` take typed `float[]` parameters — pinned by the aggregate-contract rule D8.1.1v6 keeps, not by indexed stores |
+| hyphen, sum, tak, fib, primes, queens, towers, sieve, mbrot, binarytrees | ≈ | ≈ | ≈ | 0.87–1.6x | unchanged |
+
+(ms, wall clock, median of 3, release `temp/lambda_t30_final.exe`, quiet.)
+Gates: `auto`/`jit`/`interp` sweeps over `test/lambda` 0 regressions (753/754
+scripts, incl. the two new fixtures); release goldens: jit 111/113 (cd2_orig,
+nbody stale), auto 108/113 (the same two plus the pre-existing fasta,
+spectralnorm, matmul T0 divergences) — identical sets to before;
+`test/lambda/proc/interp_var_writeback.ls` exact on all tiers.
+
+⚠ Found on the way (not a satellite defect): the 15:54 merge of remote master
+brought upstream `ecca6370a` ("dynamic attr `[expr]:val`"), whose
+`elmt_literal_begin` resolved a computed-key/spread element literal's
+`type_index` against the *running script's* type list instead of the defining
+module's — 50 `graph/*` scripts segfaulted in `fn_map_set` on every tier
+(and `make release` failed on a write-only counter in `lambda-error.cpp`).
+Both fixed here (`elmt_with_type`, `depth` reused); fixture
+`test/lambda/elmt_literal_module.ls`. Lesson: a block of same-tier-everywhere
+regressions after a `git log` merge is the merge, not the branch under test.
+
+*Next for the auto tier*: satellite call-site specialization (levenshtein,
+quicksort residual — the satellite lowers an `any` parameter boxed where the
+eager module compiler would have witnessed an int/array lane through its
+prepass), typed aggregate parameters (nbody, ray2, array1 — the v6
+aggregate-contract pin), and the once-called-`main` hot loop (the secondary
+item above).
 
 `interp_satellite_supported` ([interp_plan.cpp:1874](../../lambda/runtime/interp_plan.cpp))
 refuses promotion when any parameter's contract is `any`, array, map, element,
@@ -815,6 +946,88 @@ The other three rows are design items this track deliberately does not
 slice: richards/deltablue need CW30-style sharing analysis so a `var`-borrowed
 root can take the guarded store (T21-1d), havlak needs the allocation-rate
 work (T20-5), and the map-get statics are T20-1's remaining shape-walk cost.
+
+**Implementation status (2026-09-06, later): the T20-5 slice for havlak
+landed — nursery trigger pacing.** The 27 collections were all *nursery*
+(data-zone) threshold collections: the trigger was a fixed 3 MB of
+data-buffer churn (`GC_DATA_ZONE_THRESHOLD`), every collection marks the
+whole object heap, and havlak's live graph grows through the run (21k → 65k
+objects), so it paid a full mark per 3 MB of worklist growth. The existing
+productivity rule in `gc_collect` never grew the nursery because each cycle
+freed ≥ 75% of it — the rule only spaces *unproductive* collections. T21-1a's
+object-pressure pacing did not apply either (that trigger's floor is 16 MB of
+object bytes; havlak peaks at ~5 MB).
+
+The fix (`gc_heap.c`): `gc_data_alloc`'s trigger now times the cycle and
+paces `gc_threshold` by the same 10% time budget as the object trigger,
+through a shared `gc_paced_floor` (×2 while the collector's share of the
+mutator time since the previous nursery collection exceeds 10%, ×4 above
+50%, cap `GC_DATA_ZONE_THRESHOLD_CAP` = the productivity rule's 256 MB).
+**The cost that is paced is the mark phase only** (`gc->tune.mark_nanos`
+delta across the callback), not the whole cycle: marking is the fixed
+per-collection cost a larger nursery amortizes, whereas compaction and the
+reset `memset` scale with the nursery itself, so a total-cost share never
+converges for a churn-heavy script with a tiny live set — the first cut
+paced on total cost ran brainfuck's nursery to the 256 MB cap (+100 MB RSS,
+714 → 17 collections, no speedup) while havlak was already at 5. On the
+mark-cost rule brainfuck stays at 3 MB / 714 collections (its marks cost
+0.5 µs), cd and deltablue stay put, havlak grows to 48 MB.
+`LAMBDA_GC_STATS=1` now also prints `collections`, `data_threshold` and
+`object_threshold` at exit.
+
+| Row | collections before → after | JIT ms before → after (interleaved ×5) | peak RSS |
+|---|---:|---:|---:|
+| awfy/havlak | 27 → 5 (mark 40 → 16 ms) | 606 → **304 (0.50x)** | 65 → 99 MB |
+| awfy/havlak2 | 27 → 5 | 811 → **331 (0.41x)** | |
+| gcbench2 | 5 → 6 | 432 → 406 (0.94) | |
+| brainfuck / brainfuck2 | 714 → 714 | 0.97 / 1.00 | 195 → 196 MB |
+| cd / cd2, deltablue / deltablue2, fast_diff, crypto_aes, gcbench, splay, hashmap, raytrace3d, cube3d, binarytrees, json, richards, levenshtein, nbody | unchanged | 0.95–1.03 (five rows first read 1.05–1.09 and re-read 0.98–1.03 at ×7) | |
+
+Gates: `auto`/`jit`/`interp` sweeps 0 regressions; `make test-lambda-baseline`
+green (includes the forced-GC stress corpus). Dev doc
+`doc/dev/lambda/LR_08_Memory_and_GC.md` §5 re-verified (both triggers, both
+rules). Binaries `temp/lambda_t32_final.exe` / `temp/lambda_t32_debug.exe`
+(control `temp/lambda_t30_final.exe`).
+
+*Residual on havlak* (now mutator-bound): `array_push`/`expand_list` growth
+churn of the worklists and the `fill(16/32, null)` slabs of its 3-level
+indexed arrays — allocation *volume*, T20-4/T20-1 material; brainfuck's 714
+cheap collections are the nursery reset (`memset` of the churn) and a sweep
+per 3 MB — a lazy-zeroing nursery is the lever there, not pacing.
+
+**Implementation status (2026-09-06, later still): lazy-zeroing nursery
+landed (brainfuck).** `gc_data_zone_reset` no longer memsets the reused
+nursery; `gc_data_alloc` meets the zeroed contract at allocation time
+(cache-warm, right before the caller touches the buffer), so every existing
+`heap_data_alloc`/`heap_data_calloc` caller is unchanged and no audit was
+needed — `heap_data_calloc`'s own memset was a third zeroing pass and is gone.
+A caller that writes every byte before any read or GC safepoint takes the new
+`gc_data_alloc_uninit` → `heap_data_alloc_uninit` → `array_num_new_uninit`
+chain: `fill`'s int/uint64/float/bool lanes and the varargs `array_*_fill`
+helpers (the `ArrayNum` constructor is one `array_num_new_with_extra_init`
+with a `zeroed` flag). brainfuck's tape (`fill(30000, 0)` per `run_bf`,
+10 000 calls = 2.4 GB of nursery churn = its 714 collections) was zeroed at
+reset, zeroed by calloc, then written by fill; it is now written once.
+
+| Row | JIT ms t32 → t33 (interleaved ×5) |
+|---|---:|
+| kostya/brainfuck | 312 → **287 (0.92x)** |
+| kostya/brainfuck2 | 462 → **433 (0.94x)** |
+| kostya/matmul | 35.8 → **31.0 (0.87x)** (fill-built matrices) |
+| beng/binarytrees | 17.2 → 15.1 (0.88x) |
+| havlak, cd, fast_diff, gcbench, gcbench2, json, hashmap, splay, nbody, fasta, sieve, richards, cube3d, deltablue | 0.96–1.04 |
+
+Gates: `auto`/`jit`/`interp` sweeps 0 regressions; forced-GC stress corpus
+102/102; `fill` probe (int/float/bool/string/empty/2^53−1 lanes) identical to
+the previous build on both tiers; `make test-lambda-baseline` green. Binaries
+`temp/lambda_t33_final.exe` / `temp/lambda_t33_debug.exe`.
+
+*Residual on brainfuck* (714 collections still, 0.4 ms each): each cycle
+compacts the one live 240 KB tape nursery→tenured (`gc_data_zone_copy`) and
+sweeps the object heap; **the tenured data zone is never reclaimed** (only
+destroyed with the heap), so 714 dead tape copies = the 195 MB peak RSS. A
+tenured collection (or not promoting a buffer that survives exactly one
+cycle) is the next lever — memory first, time second.
 
 ### T21-5 — Benchmark and report hygiene (small, do first)
 
