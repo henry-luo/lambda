@@ -1,11 +1,11 @@
 # Lambda DOM Default Actions — the UA behavior ledger
 
-> **Status**: **normative for default-action placement and status** (2026-09-06). The architecture is decided (ES5, ES10, ES15, ES20, ES30–ES33); what this document adds is the complete per-event ledger and the gap inventory that drives it.
+> **Status**: **normative for default-action placement and status** (2026-09-06). The architecture is decided (ES5, ES10, ES15, ES20, ES30–ES34); what this document adds is the complete per-event ledger and the gap inventory that drives it.
 > **Role**: this is the **single source of truth for what Radiant does after an event is dispatched** — which UA default actions exist, where each half lives, and which are still missing. Every other doc that names a default action points here rather than restating it. Absorbs and replaces Appendix B of `vibe/Lambda_Design_DOM_State.md` (deleted there 2026-08-28).
 > **Scope**: default actions and activation behavior for HTML documents under Radiant — the pointer, keyboard, editing, focus, clipboard, drag, composition, form, and navigation families. Event *dispatch* mechanism is in scope only where a missing dispatch is what makes a default action unreachable.
 > **Companion docs**: `vibe/Lambda_Design_DOM_State.md` (the behavior-template architecture and the ES/ESO ledgers this doc extends), `vibe/Lambda_Design_DOM_Pkg.md` (layering and placement policy), `doc/dev/radiant/RAD_15_Events_Input.md`, `RAD_17_Interaction_State.md`, `RAD_19_Form_Controls.md`.
 > **Formal anchors**: S12.1.3 (reactive templates: body = pure `fn`, mutation only in `on` handlers), S12.2.2 (element mutation), S9.1.4 (state lives in view state), S7.6/S7.10 (error discharge and the sys-func contract), D4.5.1v3 (the Radiant memory seam).
-> **Ledger series**: this doc extends the DOM-State area's existing `ES#` (decisions) and `ESO#` (open issues) series per `doc/Doc_Convention.md` §4 — it mints no new series. **ES30** is minted in §2.4, **ES31** in §2.5, **ES32** in §2.8, and **ES33** in §2.9; ESO48–ESO62 are minted below; ESO63–ESO69 (and ES22–ES29, F17–F21) are minted in `vibe/Lambda_Design_DOM_Dispatch.md`. ESO70–ESO71 are minted in §6; **ES30's value-operation and pointer-capture extension is §2.6 (F20)**, which mints ESO72–ESO74, and **§2.7 is the selectedness consolidation (F21)**, which mints ESO75. New open issues start at **ESO76**.
+> **Ledger series**: this doc extends the DOM-State area's existing `ES#` (decisions) and `ESO#` (open issues) series per `doc/Doc_Convention.md` §4 — it mints no new series. **ES30** is minted in §2.4, **ES31** in §2.5, **ES32** in §2.8, **ES33** in §2.9, and **ES34** in §2.10; ESO48–ESO62 are minted below; ESO63–ESO69 (and ES22–ES29, F17–F21) are minted in `vibe/Lambda_Design_DOM_Dispatch.md`. ESO70–ESO71 are minted in §6; **ES30's value-operation and pointer-capture extension is §2.6 (F20)**, which mints ESO72–ESO74, and **§2.7 is the selectedness consolidation (F21)**, which mints ESO75. New open issues start at **ESO76**.
 
 ---
 
@@ -384,7 +384,48 @@ remain native geometry mechanisms rather than input policy.
 | `scrollbarpress` | Receives `evt.scrollbarPart`, a native geometry classification; package maps it to `pageLeft`, `pageRight`, `pageBackward`, `pageForward`, or `drag`. |
 | `dom.scroll_operation(node, operation)` | The shared keyboard/wheel/scrollbar request seam. Native validates the current event boundary and applies the named operation only to current live layout state. |
 
-### 2.10 Status vocabulary
+### 2.10 Overlay execution and dismissal policy (ES34)
+
+**Ruling (user direction, 2026-09-06).** `lambda/package/dom/menu.ls`
+owns every **context-menu decision after the popup opens**: physical row 0–4
+maps to the shared `deleteByCut`, `copy`, `insertFromPaste`,
+`deleteContentForward`, or `selectAll` command vocabulary, and every selected,
+stale, disabled, outside, or Escape path closes the menu there. The ordinary,
+cancelable `contextmenu` event remains the opening gate: author cancellation
+still suppresses it before `menu.open_for` chooses a target and enable mask.
+Native owns only overlay storage, popup geometry/paint, hit containment, and
+the physical row index. This follows S12.1.3: the behavior decision is an `on`
+handler; S9.1.4 and D4.5.1v3 retain the document-owned transient overlay state,
+renderer, and geometry in Radiant.
+
+`dom.keyboard_command` is deliberately the single edit/clipboard execution
+waist for both keyboard shortcuts and a context-menu row. It validates the
+live canonical target and selection, performs platform clipboard I/O, routes
+the edit through the existing `beforeinput`/applier path, and repaints; it has
+no context-menu action switch. `dom.close_context_menu` is the paired storage
+waist and only clears the document overlay state.
+
+An open `<select>` follows the same split: native determines whether a release
+is outside both the select anchor and its popup, then the select's
+`form.ls` `dropdowndismiss` handler chooses `dom.set_dropdown_open(~, false)`.
+The close waist may resolve the select's document state without an event
+context, but an open still requires a live event context and the normal package
+open policy. Thus no native action or native outside-close fallback remains.
+
+`contextmenudismiss` and `dropdowndismiss` are deliberately context-free.
+Neither overlay is a DOM subtree with a dispatchable target, and legacy modal
+cleanup ran even when an unrelated underlying pointer/key event was canceled.
+This is cleanup policy, not an author-observable default action; the ordinary
+author `contextmenu` remains cancelable at the opening boundary.
+
+| Hook / waist | Contract |
+| --- | --- |
+| `contextmenuaction` | Receives `evt.context_menu_item`, the native physical row index 0–4. `menu.ls` maps it to the shared command vocabulary, then closes the overlay even when the item was disabled or stale. |
+| `contextmenudismiss` | A context-free document behavior hook for outside press and Escape; `menu.ls` closes the menu. |
+| `dropdowndismiss` | A context-free behavior hook on the open `<select>` after native containment says the release missed both anchor and popup; `form.ls` closes that select. |
+| `dom.keyboard_command(node, name)` | Executes a package-selected keyboard or context-menu command against the live canonical target; it makes no policy decision from physical input. |
+
+### 2.11 Status vocabulary
 
 | Mark | Meaning |
 | --- | --- |
@@ -434,8 +475,10 @@ Verified against the tree at 2026-09-06 (`event.cpp`, `lambda/package/dom/*.ls`,
 | `mousedown` | UI Events; cancelable | begin selection, focus change, drag preparation | for an ordinary content hit, after author cancellation and element-local press behavior settle, behavior-only `mousepress` reaches `mouse.ls`; it chooses mouse focus plus `select` / `extend` / word / line / all. Native resolves live hit/caret geometry, owns selection and drag state, emits selection events, and paints. A scrollbar hit instead reaches `scrollbarpress` (ES33), and never changes document focus or selection. Link navigation never runs here; only an uncancelled `click` may reach package-owned activation. A slider's ordinary handler may claim its press and capture the pointer without preventing this stage (F20) | ✅ dispatch · ✅ default (ES32 / ES33) |
 | `mouseup` / `click` | UI Events; cancelable; canceling `click` cancels **activation behavior** | element-specific activation (HTML) | trusted and synthetic entries reach one package activation stage for checkbox / radio / `<select>` open-close and popover. Cancellation settles before the package write, so no cross-realm checkedness restore is needed. Label association lookup stays native (`for=` is not an ancestor walk); the dispatch is retargeted | 🟡 — per element, see §3.9 |
 | dropdown option click | no spec event — the popup overlay is not DOM | — | native geometry resolves the row; behavior-only **`optioncommit`** carries the index; `form.ls` commits and closes (F2c). One commit path shared by pointer, Enter, and the test harness | ✅ |
+| open `<select>` popup outside release | no spec event — the popup overlay is not DOM | dismiss the open picker | native verifies that the release misses both anchor and popup; behavior-only **`dropdowndismiss`** lets the owning `<select>` in `form.ls` close it (ES34) | ✅ |
 | `dblclick` | UI Events; cancelable | UA convention: word selection | `mouse.ls` maps the final press's click count to `selectWord`; triple-or-higher maps to line/all selection. The final primary click still emits `dblclick` (detail 2) to `ondblclick` / EventTarget listeners without a second selection action | ✅ (ES32) |
-| `contextmenu` | UI Events; cancelable | show the UA context menu | right-button press emits a cancelable `contextmenu` before the F10 hook. `preventDefault()` suppresses the package popup; otherwise `menu.ls` decides target + enable mask and native paints it | ✅ |
+| `contextmenu` | UI Events; cancelable | show the UA context menu | right-button press emits a cancelable `contextmenu` before the F10 hook. `preventDefault()` suppresses the package popup; otherwise `menu.ls` decides target + enable mask, action mapping, and dismissal while native paints/hit-tests it | ✅ (ES34) |
+| context-menu item press / outside press / Escape | no spec event — the popup overlay is not DOM | execute an item or dismiss the menu | native reports only a physical row or outside containment; behavior-only `contextmenuaction` / `contextmenudismiss` route to `menu.ls`, which executes the shared command or closes the overlay (ES34) | ✅ |
 | `mousemove` / `over` / `out` / `enter` / `leave` | UI Events | none | dispatched; hover state native; hot-path gate keeps the package out of per-frame dispatch | ✅ |
 | `wheel` | UI Events; cancelable | scroll | author `WheelEvent` dispatch runs first; an uncancelled gesture reaches `scrollwheel` and `scroll.ls` chooses the `wheel` operation. Native then applies only the current target/iframe scroll chain, clamp, state/event/observer, and paint mechanism. **Ctrl+wheel zoom not implemented** (browser-chrome level; noted, not tracked) | ✅ (ES33) |
 | scrollbar press / drag | UA scrollbar chrome; no DOM event | page in the track direction or drag the thumb | native hit testing supplies `scrollbarPart`; `scroll.ls` maps it through `scrollbarpress`. Native keeps handle geometry, range clamp, and per-frame pointer conversion; the initial page write emits `scroll` | ✅ (ES33) |
@@ -504,7 +547,7 @@ The `click` row of §3.3, expanded. This is the table to check before claiming "
 | `input[type=checkbox]` | toggle checkedness, clear indeterminate, fire `input` + `change` | `form.ls` (F1) | ✅ |
 | `input[type=radio]` | select, clear the group, fire `input` + `change` | `form.ls` incl. the group walk (F1) | ✅ |
 | `label` | retarget activation to the labeled control | native association lookup + retargeted dispatch (F1b) | ✅ |
-| `select` | open/close the picker | `form.ls` open/close (F2) + native overlay + `optioncommit` (F2c). A listbox has no picker: the same handler selects a row instead (F21) | ✅ |
+| `select` | open/close the picker | `form.ls` owns open/close (F2), `optioncommit` (F2c), and `dropdowndismiss` after a native outside-containment check (ES34). A listbox has no picker: the same handler selects a row instead (F21) | ✅ |
 | `option` in a listbox (`size>1` or `multiple`) | select / extend / toggle selection | `form.ls` owns it on the `<select>`, reading `evt.target` for the row: plain click replaces, Ctrl/Cmd toggles, Shift extends from the anchor, arrows navigate and skip disabled rows, Ctrl/Cmd+A takes everything (F21, §2.7). Selectedness is the one node bit, so the painter, `option.selected`, `:selected` and submission agree | ✅ |
 | `input[type=submit]` / `input[type=image]`, `button[type=submit]` (and bare `<button>`) | submit the form owner | `form.ls` activation handlers → `submit.ls`; native click/keyboard and JS click share the package-only dispatch seam | 🟡 (POST transport open) |
 | `input[type=reset]`, `button[type=reset]` | reset the form owner | `form.ls` activation handlers → cancelable reset waist | ✅ |
@@ -540,6 +583,9 @@ Radiant-internal seams. No JS listener can observe them; each exists because the
 | `domedit` | `beforeinput`'s **default action** on contenteditable (Input Events: "update the DOM as described by the inputType") | **yes** — ordinary dispatch offers it only after an uncanceled `beforeinput` |
 | `execcommand` | the deprecated command surface, one rule set with the keyboard path (F14.1) | per command |
 | `contextmenu` (hook) | showing the UA context menu (F10) | **yes** — runs only after an uncanceled DOM `contextmenu` (§3.3) |
+| `contextmenuaction` | execute a physical native context-menu row through the package command mapping (ES34) | n/a — the popup row is not a DOM target; native consumes its press before underlying dispatch |
+| `contextmenudismiss` | dismiss an open context menu on outside press or Escape (ES34) | **no** — context-free modal cleanup, so an unrelated underlying cancellation cannot leave the overlay stranded |
+| `dropdowndismiss` | dismiss an open `<select>` popup on an outside release (ES34) | **no** — context-free modal cleanup after native anchor/popup containment |
 
 The suppression column is the §1.2 distinction made operational: a **default action** must die with `preventDefault` (or edits double-apply), a **translation** must survive it (or JS editors go deaf). Each direction of that mistake has been made once and is recorded in DOM_State §3.15/§3.16.
 

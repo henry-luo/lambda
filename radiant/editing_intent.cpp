@@ -22,7 +22,8 @@ InputIntent::InputIntent()
       history_sel_start(0),
       history_sel_end(0),
       option_index(-1),
-      command(nullptr) {}
+      command(nullptr),
+      context_menu_item(-1) {}
 
 InputIntent::~InputIntent() {
     // paste/drop intents may own payload copies; scope cleanup keeps every
@@ -51,6 +52,7 @@ bool input_intent_clone(const InputIntent* source, InputIntent* destination) {
     destination->composition_caret = source->composition_caret;
     destination->option_index = source->option_index;
     destination->command = source->command;
+    destination->context_menu_item = source->context_menu_item;
     if (source->data) {
         destination->owned_data = mem_strdup(source->data, MEM_CAT_TEMP);
         if (!destination->owned_data) goto fail;
@@ -82,6 +84,7 @@ static void input_intent_reset(InputIntent* intent) {
     intent->is_composing = false;
     intent->composition_caret = 0;
     intent->command = nullptr;
+    intent->context_menu_item = -1;
 }
 
 typedef struct InputIntentName {

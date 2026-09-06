@@ -487,6 +487,10 @@ typedef struct InputIntent {
     // legacy surface is not the WHATWG beforeinput vocabulary, so it gets its
     // own field rather than being folded into `type`.
     const char* command;
+    // ES34: the native context-menu overlay resolves only a physical row. The
+    // package maps this stable item index to a command and owns dismissal.
+    // -1 for every other intent.
+    int context_menu_item;
 } InputIntent;
 
 typedef InputIntent EditingIntent;
@@ -523,6 +527,10 @@ extern "C" bool radiant_dispatch_behavior_scrollbar_press(struct EventContext* e
 extern "C" void radiant_scroll_operation_request(const char* operation);
 extern "C" bool radiant_dispatch_behavior_mouse_press(struct EventContext* evcon,
                                                          View* target);
+extern "C" bool radiant_dispatch_behavior_context_menu_action(
+    struct EventContext* evcon, View* target, const InputIntent* intent);
+extern "C" bool radiant_dispatch_behavior_context_menu_dismiss(View* target);
+extern "C" bool radiant_dispatch_behavior_dropdown_dismiss(View* target);
 extern "C" uint64_t radiant_mouse_focus_epoch(void);
 extern "C" View* radiant_mouse_focus_target(void);
 extern "C" void radiant_mouse_focus_request(View* target);
@@ -1983,35 +1991,13 @@ void context_menu_close(DocState* state);
 // Returns true if (x,y) is inside the menu rect.
 bool context_menu_hover(DocState* state, float x, float y);
 
-// Mouse-up hit test; if the cursor is over an enabled item, executes the
-// command against `context_menu_target` and closes the menu. Returns true
-// if the click landed inside the menu rect (whether or not it triggered
-// an action).
-bool context_menu_click(DocState* state, float x, float y);
-
-typedef bool (*ContextMenuReplaceFn)(void* user, DomElement* elem,
-                                     DocState* state,
-                                     uint32_t start, uint32_t end);
-typedef bool (*ContextMenuPasteFn)(void* user, DomElement* elem,
-                                   DocState* state,
-                                   const char* text, uint32_t len);
-typedef bool (*ContextMenuSelectAllFn)(void* user, DomElement* elem,
-                                       DocState* state);
-
-struct ContextMenuEditHooks {
-    ContextMenuReplaceFn cut_selection;
-    ContextMenuReplaceFn delete_selection;
-    ContextMenuPasteFn paste_text;
-    ContextMenuSelectAllFn select_all;
-    void* user;
-};
-
-bool context_menu_click_with_hooks(DocState* state, float x, float y,
-                                   const ContextMenuEditHooks* hooks);
-
 // True iff (x,y) is inside the popup. Used to keep clicks inside the menu
 // from being routed to the underlying view.
 bool context_menu_contains(DocState* state, float x, float y);
+
+// Resolve a physical popup row. The package owns the row's command and the
+// resulting cleanup; -1 means that (x,y) is not a menu item.
+int context_menu_item_at(DocState* state, float x, float y);
 
 // Whether a given item should render disabled. Wraps the per-item rules
 // (Cut/Copy/Delete need a non-empty selection; Paste needs clipboard text).
