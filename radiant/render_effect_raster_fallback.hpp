@@ -20,6 +20,25 @@ typedef struct RenderEffectRasterImage {
     float height;
 } RenderEffectRasterImage;
 
+typedef struct RenderEffectRasterFallback {
+    bool active;
+    int nested_depth;
+    PaintEffectGroup group;
+    PaintList paint_list;
+} RenderEffectRasterFallback;
+
+static inline void render_effect_raster_begin(
+        RenderEffectRasterFallback* fallback, const PaintEffectGroup* group,
+        PaintGlyphRunRasterLowerFn lowerer) {
+    if (!fallback || !group) return;
+    fallback->active = true;
+    fallback->nested_depth = 0;
+    fallback->group = *group;
+    paint_list_clear(&fallback->paint_list);
+    paint_ir_register_glyph_run_raster_lowerer(lowerer);
+    paint_begin_effect_group(&fallback->paint_list, group);
+}
+
 static inline bool render_effect_raster_bounds(const Bound* bounds,
                                                float viewport_width,
                                                float viewport_height,

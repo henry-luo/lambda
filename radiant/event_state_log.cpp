@@ -471,12 +471,7 @@ static void build_node_path(const DomNode* node, char* buf, size_t buf_sz) {
     if (!node) return;
 
     const DomNode* chain[64];
-    int depth = 0;
-    const DomNode* cur = node;
-    while (cur && depth < 64) {
-        chain[depth++] = cur;
-        cur = cur->parent;
-    }
+    int depth = event_node_ancestor_chain(node, chain, 64);
 
     size_t pos = 0;
     for (int i = depth - 1; i >= 0; i--) {
@@ -513,9 +508,9 @@ void event_state_log_node_stable_id(const DomNode* node, char* buf, size_t buf_s
     buf[0] = '\0';
     if (!node) return;
 
-    const DomElement* el = node->as_element();
-    if (el && el->id && el->id[0]) {
-        snprintf(buf, buf_sz, "id:%s", el->id);
+    const char* author_id = event_node_author_id(node);
+    if (author_id) {
+        snprintf(buf, buf_sz, "id:%s", author_id);
     } else if (node->source_line > 0) {
         snprintf(buf, buf_sz, "src:line=%d:%s", node->source_line, node->node_name());
     } else {
@@ -555,7 +550,8 @@ void event_state_log_write_node_ref(JsonWriter* w, const char* key,
         }
 
         const DomElement* el = node->as_element();
-        if (el && el->id && el->id[0]) jw_kv_str(w, "author_id", el->id);
+        const char* author_id = event_node_author_id(node);
+        if (author_id) jw_kv_str(w, "author_id", author_id);
         if (el && el->class_count > 0) {
             jw_key(w, "classes");
             jw_arr_begin(w);

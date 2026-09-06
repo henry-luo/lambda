@@ -1,9 +1,7 @@
 #include "view.hpp"
 #include "render.hpp"
 #include "radiant.hpp"
-#include "render.hpp"
 #include "event.hpp"
-#include "render.hpp"
 
 #include "../lib/image.h"
 #include "../lib/log.h"

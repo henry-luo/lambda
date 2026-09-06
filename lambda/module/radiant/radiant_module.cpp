@@ -1176,6 +1176,21 @@ RADIANT_C_API Item fn_radiant_focus_set(Item node_item, Item from_keyboard_item)
     return radiant_bool_item(true);
 }
 
+// Mouse policy chooses the focus target in Lambda, but the state-machine
+// transition must run after that behavior hook returns so focus/blur ordering
+// remains at the originating mousedown boundary.
+RADIANT_C_API Item fn_radiant_mouse_focus(Item node_item) {
+    DomElement* elem = nullptr;
+    if (!radiant_item_is_missing(node_item)) {
+        elem = radiant_dom_element_from_item(node_item, "MOUSE_FOCUS");
+        if (!elem || !is_view_programmatically_focusable((View*)elem)) {
+            return radiant_bool_item(false);
+        }
+    }
+    radiant_mouse_focus_request((View*)elem);
+    return radiant_bool_item(true);
+}
+
 RADIANT_C_API Item fn_radiant_scroll_into_view(Item node_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "SCROLL_INTO_VIEW");
     if (!elem) return radiant_bool_item(false);
@@ -2275,6 +2290,18 @@ RADIANT_C_API Item fn_radiant_caret_operation(Item node_item, Item op_item,
     return (Item){.item = b2it(1)};
 }
 
+// The package maps a primary press to a named selection operation. The event
+// path below resolves the point and applies it after the behavior hook returns.
+RADIANT_C_API Item fn_radiant_pointer_selection(Item node_item, Item op_item) {
+    if (!radiant_dom_node_from_item(node_item, "POINTER_SELECTION")) {
+        return (Item){.item = b2it(0)};
+    }
+    const char* op = fn_to_cstr(op_item);
+    if (!op || !*op) return (Item){.item = b2it(0)};
+    radiant_pointer_selection_request(op);
+    return (Item){.item = b2it(1)};
+}
+
 // ESO48: key choice stays in the package; native resolves the live scrollport,
 // range and geometry after this behavior-only request returns.
 RADIANT_C_API Item fn_radiant_scroll_operation(Item node_item, Item op_item) {
@@ -2615,8 +2642,8 @@ RADIANT_C_API Item fn_radiant_set_range_from_point(Item node_item, Item x_item, 
     if (!view->is_block()) return (Item){.item = b2it(0)};
     ViewBlock* block = lam::view_require_block(view);
 
-    float abs_x = 0.0f, abs_y = 0.0f;
-    view_to_absolute_position(view, block->x, block->y, 0.0f, 0.0f, &abs_x, &abs_y);
+    RdtLogicalPoint origin = view_geometry_local_to_block_document(
+        view, {block->x, block->y});
     // render_range centres the thumb on the value, so the usable track is
     // shorter than the box by one thumb and the pointer addresses the thumb's
     // centre, not its left edge.
@@ -2626,7 +2653,7 @@ RADIANT_C_API Item fn_radiant_set_range_from_point(Item node_item, Item x_item, 
     float point_x = 0.0f;
     if (!radiant_item_to_float(x_item, &point_x)) return (Item){.item = b2it(0)};
     (void)y_item;   // a horizontal slider's value depends on x alone
-    float fraction = (point_x - abs_x - thumb / 2.0f) / track;
+    float fraction = (point_x - origin.x - thumb / 2.0f) / track;
     if (fraction < 0.0f) fraction = 0.0f;
     if (fraction > 1.0f) fraction = 1.0f;
 
@@ -3156,10 +3183,12 @@ RADIANT_PROVIDE_ENGINE_3(set_state, fn_radiant_set_state)
 RADIANT_PROVIDE_ENGINE_1(request_change, fn_radiant_request_change)
 RADIANT_PROVIDE_ENGINE_1(focused, fn_radiant_focused)
 RADIANT_PROVIDE_ENGINE_2(focus_set, fn_radiant_focus_set)
+RADIANT_PROVIDE_ENGINE_1(mouse_focus, fn_radiant_mouse_focus)
 RADIANT_PROVIDE_ENGINE_1(activate_popover, fn_radiant_activate_popover)
 RADIANT_PROVIDE_ENGINE_1(keyboard_click, fn_radiant_keyboard_click)
 RADIANT_PROVIDE_ENGINE_2(keyboard_command, fn_radiant_keyboard_command)
 RADIANT_PROVIDE_ENGINE_3(caret_operation, fn_radiant_caret_operation)
+RADIANT_PROVIDE_ENGINE_2(pointer_selection, fn_radiant_pointer_selection)
 RADIANT_PROVIDE_ENGINE_1(clear_ime_preedit, fn_radiant_clear_ime_preedit)
 RADIANT_PROVIDE_ENGINE_0(clipboard_text, fn_radiant_clipboard_text)
 RADIANT_PROVIDE_ENGINE_1(context_menu_target, fn_radiant_context_menu_target)
@@ -3191,7 +3220,7 @@ extern bool is_view_focusable(View* view);
 
 extern "C" Item dom_engine_is_focusable(Item node_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "IS_FOCUSABLE");
-    return radiant_bool_item(elem && is_view_focusable((View*)elem));
+    return radiant_bool_item(elem && is_view_programmatically_focusable((View*)elem));
 }
 
 // The flag-carrying dispatch seam (F32). radiant.dispatch keeps its name-only

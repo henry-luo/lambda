@@ -795,14 +795,9 @@ static bool capture_underlying_display(DomElement* element,
 }
 
 static void animation_update_layout_bounds(AnimationInstance* animation, View* target) {
-    float x = target->x;
-    float y = target->y;
-    for (ViewElement* parent = target->parent_view(); parent; parent = parent->parent_view()) {
-        x += parent->x;
-        y += parent->y;
-    }
-    animation->bounds[0] = x;
-    animation->bounds[1] = y;
+    RdtLogicalPoint origin = view_geometry_node_document_origin(target);
+    animation->bounds[0] = origin.x;
+    animation->bounds[1] = origin.y;
     animation->bounds[2] = target->width;
     animation->bounds[3] = target->height;
 }

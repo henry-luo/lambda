@@ -13,6 +13,7 @@ import caret: lambda.package.dom.caret
 import keymap: lambda.package.dom.keymap
 import scroll: lambda.package.dom.scroll
 import focus: lambda.package.dom.focus
+import mouse: lambda.package.dom.mouse
 import dom_edit: lambda.package.dom.dom_edit
 import commands: lambda.package.dom.commands
 import submit: lambda.package.dom.submit
@@ -300,6 +301,9 @@ pn listbox_move(select, options, key, active) {
 // being used, and no other realm needs to see them.
 view <select> state dropdown_open, listbox_anchor: -1, listbox_active: -1 {}
 on init(evt) { aria.reflect(~) }
+// ES34: native overlay geometry identifies an outside release, while the
+// control's package policy owns the close transition.
+on dropdowndismiss(evt) { dom.set_dropdown_open(~, false) }
 on click(evt) {
     if (dom.get_state(~, "disabled")) { return 'pass' }
     // A listbox has no dropdown: the click selects a row instead (ESO72). The
@@ -542,19 +546,34 @@ on resetactivation(evt) { submit.reset(tree.form_of(~)) }
 // Composition events bubble from the focused control, so the ancestor walk
 // reaches <body> and this template claims them there.
 view <body> state ime_composing, context_menu_open {}
+// The ordinary mousedown has already settled author cancellation and any
+// element-local press behavior (such as range capture). This hook chooses the
+// remaining document-wide focus and selection default action.
+on mousepress(evt) { mouse.press(~, evt) }
 // S12.1.3: clipboard/select-all key policy is a cancelable package default;
 // the native waist owns only event, selection/edit, and clipboard mechanism.
 on keydown(evt) { keymap.run_shortcut(~, evt) }
 // F10: the context menu is document-scoped state, the same cardinality argument
 // ES18 made for the IME session — one menu per document, not one per control.
 on contextmenu(evt) { menu.open_for(~) }
+// ES34: the popup is not a DOM subtree, so its row and dismissal decisions are
+// behavior-only document defaults rather than synthetic author events.
+on contextmenuaction(evt) { menu.run_item(~, evt) }
+on contextmenudismiss(evt) { menu.dismiss(~) }
 // F9: keyboard caret navigation. Document-scoped for the same reason — one
 // caret per document, not one per control.
 on caretkey(evt) { caret.navigate(~, evt) }
+// ES35: retained only as the old non-form no-text-mutation compatibility path.
+on textinputfallback(evt) { caret.text_input_fallback(~, evt) }
 // F11: key -> edit intent, one rule set for both surfaces.
 on keyintent(evt) { keymap.resolve(~, evt) }
 // ESO48: runs only after keydown, caret, and activation have all declined.
 on scrollkey(evt) { scroll.navigate(~, evt) }
+// ES33: public wheel cancellation settles before this one package decision.
+on scrollwheel(evt) { scroll.wheel(evt) }
+// ES33: native reports only the scrollbar hit part; scroll.ls selects paging
+// or a thumb drag without bringing layout geometry into the package.
+on scrollbarpress(evt) { scroll.scrollbar_press(evt) }
 // ES30: Tab order belongs to the package; native sends focus events and applies
 // the scroll request after this policy handler chooses the target.
 on focuskey(evt) { focus.navigate(~, evt) }

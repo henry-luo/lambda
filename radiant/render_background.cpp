@@ -116,7 +116,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     // paint area would clip the transformed content (e.g. translateX causes half-circles).
     Bound orig_clip = rdcon->block.clip;
     if (!rdcon->has_transform) {
-        rdcon->block.clip = render_geometry_intersect_bound_rect(orig_clip, paint_rect);
+        rdcon->block.clip = view_geometry_intersect_bound_rect(orig_clip, paint_rect);
     }
 
     Corner orig_radius = {};

@@ -1095,20 +1095,34 @@ static void append_json_format_field(StrBuf* buf, int indent, const char* key,
     append_json_comma_newline(buf, comma);
 }
 
-// absolute descendants do not move with a DOM ancestor that is outside their containing block.
-static bool absolute_scroll_container_is_in_positioned_chain(
-        ViewBlock* scroll_container, ViewBlock* containing_block) {
-    if (!scroll_container || !containing_block) return false;
-    for (ViewElement* current = containing_block; current; current = current->parent_view()) {
-        if (!current->is_block()) continue;
-        ViewBlock* current_block = lam::view_require_block(current);
-        if (current_block == scroll_container) return true;
-        if (current_block->position &&
-            current_block->positionp()->position == CSS_VALUE_FIXED) {
-            break;
-        }
-    }
-    return false;
+static void append_zero_layout_json(StrBuf* buf, int indent) {
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "\"layout\": {\n");
+    append_json_format_field(buf, indent + 2, "x", true, "0.0");
+    append_json_format_field(buf, indent + 2, "y", true, "0.0");
+    append_json_format_field(buf, indent + 2, "width", true, "0.0");
+    append_json_format_field(buf, indent + 2, "height", false, "0.0");
+}
+
+static bool view_block_has_position(ViewBlock* block, CssEnum position) {
+    return block && block->position && block->positionp()->position == position;
+}
+
+static ViewBlock* view_document_root_block(View* view) {
+    DomElement* owner = view && view->is_element()
+        ? view->as_element() : view ? view->parent_view() : nullptr;
+    DomDocument* doc = owner ? owner->doc : nullptr;
+    View* root = doc && doc->view_tree ? doc->view_tree->root : nullptr;
+    return root && root->is_block() ? lam::view_require_block(root) : nullptr;
+}
+
+static void subtract_block_scroll(ViewBlock* block, float* x, float* y) {
+    if (!block || !block->scroller || !block->scroll()->pane) return;
+    float scroll_x = 0.0f;
+    float scroll_y = 0.0f;
+    scroll_state_resolve_view_geometry(block, &scroll_x, &scroll_y, nullptr);
+    *x -= scroll_x;
+    *y -= scroll_y;
 }
 
 /**
@@ -1126,46 +1140,34 @@ static bool absolute_scroll_container_is_in_positioned_chain(
 static void calculate_absolute_position(View* view, TextRect* rect, float* out_x, float* out_y) {
     float abs_x = rect ? rect->x : view->x;
     float abs_y = rect ? rect->y : view->y;
-    ViewBlock* positioned_block = view->is_block() ? lam::view_require_block(view) : nullptr;
-    bool is_fixed = false;
-    bool is_absolute = false;
-    bool has_fixed_ancestor = false;
-    bool has_positioned_ancestor_coordinate = false;
-    ViewBlock* absolute_containing_block = nullptr;
-
-    if (view->is_block()) {
-        ViewBlock* block = lam::view_require_block(view);
-        if (block->position) {
-            is_fixed = (block->positionp()->position == CSS_VALUE_FIXED);
-            is_absolute = (block->positionp()->position == CSS_VALUE_ABSOLUTE);
-        }
-    }
+    ViewBlock* block = view->is_block() ? lam::view_require_block(view) : nullptr;
+    bool is_fixed = view_block_has_position(block, CSS_VALUE_FIXED);
+    bool is_absolute = view_block_has_position(block, CSS_VALUE_ABSOLUTE);
+    ViewBlock* root = view_document_root_block(view);
 
     // Calculate absolute position by traversing up the parent chain
     // For fixed elements: position is already relative to viewport (root at 0,0)
     //   so we don't add any parent positions
     // For absolute elements: position is relative to containing block, so we need
     //   to add the containing block's absolute position
-        // For all other elements: accumulate parent positions normally
+    // For all other elements: accumulate parent positions normally
     if (is_fixed) {
         // Fixed: position already relative to viewport, nothing to add
     } else if (is_absolute) {
-        // Absolute: position is relative to containing block
-        // Need to get the containing block's absolute position
-
         ViewBlock* cb = find_positioned_containing_block(
             lam::view_require_element(view));
         ViewBlock* spanner_cb = nullptr;
         if (multicol_find_spanner_containing_block(
-                positioned_block, &spanner_cb)) {
+                block, &spanner_cb)) {
             // CSS Multicol §6.1: a spanner bypasses positioned ancestors
             // between itself and the multicol container.
             cb = spanner_cb;
         }
-        absolute_containing_block = cb;
-
         if (cb) {
-            // Add containing block's position
+            float cb_abs_x = 0.0f;
+            float cb_abs_y = 0.0f;
+            calculate_absolute_position(
+                static_cast<View*>(cb), nullptr, &cb_abs_x, &cb_abs_y);
             float cb_x = cb->x;
             float cb_y = cb->y;
             if (cb->view_type == RDT_VIEW_INLINE) {
@@ -1174,68 +1176,27 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                     const FragmentUnion* split = cb_span->fragment_union(FRAGMENT_UNION_INLINE_CB);
                     // CSS Position 3 §4.1: absolute descendants use the first
                     // inline fragment, not the union's visible DOM rectangle.
-                    if (positioned_block && (positioned_block->positionp()->has_left || positioned_block->positionp()->has_right)) {
+                    if (block && (block->positionp()->has_left || block->positionp()->has_right)) {
                         cb_x = split->min_x;
                     }
-                if (positioned_block && positioned_block->positionp()->has_top &&
-                    !positioned_block->positionp()->has_bottom) {
+                    if (block->positionp()->has_top &&
+                        !block->positionp()->has_bottom) {
                         cb_y = split->min_y;
                     }
                 }
             }
-            abs_x += cb_x;
-            abs_y += cb_y;
-
-            // Now get containing block's absolute position based on its positioning
-            if (cb->positionp()->position == CSS_VALUE_FIXED) {
-                // Fixed: already relative to viewport, done
-                has_fixed_ancestor = true;
-            } else if (cb->positionp()->position == CSS_VALUE_ABSOLUTE) {
-                // Absolute containing block: recursively find ITS containing block chain
-                ViewBlock* current = cb;
-                while (true) {
-                    ViewBlock* cb_cb = find_positioned_containing_block(
-                        reinterpret_cast<ViewElement*>(current));
-
-                    if (!cb_cb) break;  // Reached root
-
-                    abs_x += cb_cb->x;
-                    abs_y += cb_cb->y;
-
-                    if (cb_cb->positionp()->position == CSS_VALUE_FIXED) {
-                        has_fixed_ancestor = true;
-                        break;
-                    }
-                    if (cb_cb->positionp()->position != CSS_VALUE_ABSOLUTE) {
-                        // Relative: continue with normal DOM walk
-                        ViewElement* parent = cb_cb->parent_view();
-                        while (parent) {
-                            if (parent->is_block()) {
-                                abs_x += parent->x;
-                                abs_y += parent->y;
-                            }
-                            parent = parent->parent_view();
-                        }
-                        break;
-                    }
-                    current = cb_cb;
-                }
-            } else {
-                // Relative: containing block is in normal flow, walk up DOM
-                ViewElement* parent = cb->parent_view();
-                while (parent) {
-                    if (parent->is_block()) {
-                        abs_x += parent->x;
-                        abs_y += parent->y;
-                        if (parent->position &&
-                            parent->positionp()->position == CSS_VALUE_FIXED) {
-                            has_fixed_ancestor = true;
-                            break;
-                        }
-                    }
-                    parent = parent->parent_view();
-                }
+            abs_x += cb_abs_x + cb_x - cb->x;
+            abs_y += cb_abs_y + cb_y - cb->y;
+            // The recursive containing-block position includes ancestor scroll,
+            // while this absolute descendant must additionally move with the
+            // containing block's own scroll only when it is a DOM ancestor.
+            for (View* parent = view->parent; parent; parent = parent->parent) {
+                if (parent != static_cast<View*>(cb)) continue;
+                if (cb != root) subtract_block_scroll(cb, &abs_x, &abs_y);
+                break;
             }
+        } else if (root) {
+            subtract_block_scroll(root, &abs_x, &abs_y);
         }
         // If no positioned ancestor, containing block is root (at 0,0), nothing to add
     } else {
@@ -1247,8 +1208,8 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
         while (parent) {
             if (parent->is_block()) {
                 ViewBlock* parent_block = lam::view_require_block(parent);
-                if (parent_block->position &&
-                    parent_block->positionp()->position == CSS_VALUE_ABSOLUTE) {
+                if (view_block_has_position(parent_block, CSS_VALUE_ABSOLUTE) ||
+                    view_block_has_position(parent_block, CSS_VALUE_FIXED)) {
                     float parent_abs_x = 0.0f;
                     float parent_abs_y = 0.0f;
                     // an in-flow descendant inherits an absolute ancestor's
@@ -1258,75 +1219,22 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                         &parent_abs_x, &parent_abs_y);
                     abs_x += parent_abs_x;
                     abs_y += parent_abs_y;
-                    has_positioned_ancestor_coordinate = true;
+                    if (parent_block != root) {
+                        subtract_block_scroll(parent_block, &abs_x, &abs_y);
+                    }
                     break;
                 }
-                abs_x += parent->x;  abs_y += parent->y;
-
-                // If parent is fixed, its position is relative to viewport (root at 0,0)
-                // so we can stop here
-                if (parent_block->position &&
-                    parent_block->positionp()->position == CSS_VALUE_FIXED) {
-                    has_fixed_ancestor = true;
-                    break;
-                }
-
-            }
-            parent = parent->parent_view();
-        }
-    }
-
-    if (!is_fixed) {
-        ViewElement* parent = view->parent_view();
-        while (parent) {
-            if (parent->is_block()) {
-                ViewBlock* parent_block = lam::view_require_block(parent);
-                bool is_root_scroller = parent_block->doc &&
-                    parent_block->doc->view_tree &&
-                    parent_block->doc->view_tree->root == static_cast<View*>(parent_block);
-                bool scroll_affects_absolute = !is_absolute ||
-                    absolute_scroll_container_is_in_positioned_chain(
-                        parent_block, absolute_containing_block);
-                if (scroll_affects_absolute && !is_root_scroller &&
-                    parent_block->scroller && parent_block->scroll_mut()->pane) {
-                    // visual rects for descendants move by ancestor element scroll; abspos containing-block math is separate above.
-                    DocState* state = parent_block->doc ? parent_block->doc->state : NULL;
-                    float scroll_x = 0.0f, scroll_y = 0.0f;
-                    scroll_state_get_position_for_view(state, static_cast<View*>(parent_block),
-                        parent_block->scroll()->pane, &scroll_x, &scroll_y, NULL, NULL);
-                    abs_x -= scroll_x;
-                    abs_y -= scroll_y;
-                }
-                if (parent_block->position &&
-                    parent_block->positionp()->position == CSS_VALUE_FIXED) {
-                    break;
-                }
-                if (parent_block->position &&
-                    parent_block->positionp()->position == CSS_VALUE_ABSOLUTE) {
-                    break;
+                abs_x += parent->x;
+                abs_y += parent->y;
+                if (parent_block != root) {
+                    subtract_block_scroll(parent_block, &abs_x, &abs_y);
                 }
             }
             parent = parent->parent_view();
         }
-
-        DomElement* doc_owner = view->is_element() ? view->as_element() : nullptr;
-        for (ViewElement* parent = view->parent_view(); !doc_owner && parent; parent = parent->parent_view()) {
-            doc_owner = parent;
-        }
-        DomDocument* doc = doc_owner ? doc_owner->doc : nullptr;
-        ViewBlock* root_block = doc && doc->view_tree && doc->view_tree->root &&
-            doc->view_tree->root->is_block()
-            ? lam::view_require_block(doc->view_tree->root)
-            : nullptr;
-        if (!has_fixed_ancestor && !has_positioned_ancestor_coordinate &&
-            root_block && root_block->scroller && root_block->scroll_mut()->pane) {
+        if (!parent && root) {
             // root scroll moves the viewport for every non-fixed box; element scroll remains paint-time only.
-            DocState* state = root_block->doc ? root_block->doc->state : NULL;
-            float scroll_x = 0.0f, scroll_y = 0.0f;
-            scroll_state_get_position_for_view(state, static_cast<View*>(root_block),
-                root_block->scroll()->pane, &scroll_x, &scroll_y, NULL, NULL);
-            abs_x -= scroll_x;
-            abs_y -= scroll_y;
+            subtract_block_scroll(root, &abs_x, &abs_y);
         }
     }
 
@@ -1354,26 +1262,18 @@ static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix) {
     return true;
 }
 
-static void apply_matrix_to_bounds(const RdtMatrix* matrix, float* x, float* y, float* width, float* height) {
-    float x0 = *x, y0 = *y;
-    float x1 = *x + *width, y1 = *y;
-    float x2 = *x, y2 = *y + *height;
-    float x3 = *x + *width, y3 = *y + *height;
-
-    radiant::transform_point(x0, y0, *matrix);
-    radiant::transform_point(x1, y1, *matrix);
-    radiant::transform_point(x2, y2, *matrix);
-    radiant::transform_point(x3, y3, *matrix);
-
-    float min_x = fminf(fminf(x0, x1), fminf(x2, x3));
-    float max_x = fmaxf(fmaxf(x0, x1), fmaxf(x2, x3));
-    float min_y = fminf(fminf(y0, y1), fminf(y2, y3));
-    float max_y = fmaxf(fmaxf(y0, y1), fmaxf(y2, y3));
-
-    *x = min_x;
-    *y = min_y;
-    *width = max_x - min_x;
-    *height = max_y - min_y;
+static void apply_matrix_to_bounds(const RdtMatrix* matrix, float* x,
+                                   float* y, float* width, float* height) {
+    float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+    if (!rdt_matrix_project_rect_bounds(matrix, *x, *y,
+                                        *x + *width, *y + *height,
+                                        &left, &top, &right, &bottom)) {
+        return;
+    }
+    *x = left;
+    *y = top;
+    *width = right - left;
+    *height = bottom - top;
 }
 
 static void apply_css_transforms_to_bounds(View* view, float* x, float* y, float* width, float* height) {
@@ -1629,8 +1529,7 @@ static void append_text_fragment_json_with_vertical_prefix(
     ViewText* text, StrBuf* buf, int indent, TextRect* rect,
     TextRect* previous_rect, bool include_text_info);
 static bool text_has_visible_rect(ViewText* text);
-static bool text_in_vertical_fragmented_block(ViewText* text);
-static bool text_in_horizontal_fragmented_block(ViewText* text);
+static bool text_in_fragmented_block(ViewText* text, bool vertical);
 
 static bool text_white_space_preserves_segment_break(ViewText* text) {
     CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
@@ -2316,12 +2215,7 @@ static void print_display_none_json(ViewElement* elem, StrBuf* buf, int indent) 
         append_class_list_json(buf, elem->get_attribute("class"));
         strbuf_append_str(buf, ",\n");
     }
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"layout\": {\n");
-    append_json_format_field(buf, indent + 4, "x", true, "0.0");
-    append_json_format_field(buf, indent + 4, "y", true, "0.0");
-    append_json_format_field(buf, indent + 4, "width", true, "0.0");
-    append_json_format_field(buf, indent + 4, "height", false, "0.0");
+    append_zero_layout_json(buf, indent + 2);
     append_json_after_object(buf, indent + 2, "computed", "{\n");
     append_json_string_field(buf, indent + 4, "display", "none", false);
     strbuf_append_char_n(buf, ' ', indent + 2);
@@ -2380,12 +2274,7 @@ static void print_unrendered_dom_json(DomElement* element, StrBuf* buf, int inde
         append_element_selector_json(element, buf, tag_name);
         strbuf_append_str(buf, ",\n");
     }
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"layout\": {\n");
-    append_json_format_field(buf, indent + 4, "x", true, "0.0");
-    append_json_format_field(buf, indent + 4, "y", true, "0.0");
-    append_json_format_field(buf, indent + 4, "width", true, "0.0");
-    append_json_format_field(buf, indent + 4, "height", false, "0.0");
+    append_zero_layout_json(buf, indent + 2);
     append_json_after_object(buf, indent + 2, "children", "[\n");
 
     bool first_child = true;
@@ -3055,7 +2944,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
 }
 
 // JSON generation for text nodes
-static bool text_in_vertical_fragmented_block(ViewText* text) {
+static bool text_in_fragmented_block(ViewText* text, bool vertical) {
     if (!text) return false;
     for (ViewElement* ancestor = text->parent_view(); ancestor;
          ancestor = ancestor->parent_view()) {
@@ -3063,22 +2952,7 @@ static bool text_in_vertical_fragmented_block(ViewText* text) {
         if (!block || !block->is_element() || !block->block()) continue;
         DomElement* element = block->as_element();
         if (element->layout_fragments_count() > 1 &&
-            layout_block_inline_axis_is_vertical(block)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool text_in_horizontal_fragmented_block(ViewText* text) {
-    if (!text) return false;
-    for (ViewElement* ancestor = text->parent_view(); ancestor;
-         ancestor = ancestor->parent_view()) {
-        ViewBlock* block = lam::view_as_block(ancestor);
-        if (!block || !block->is_element() || !block->block()) continue;
-        DomElement* element = block->as_element();
-        if (element->layout_fragments_count() > 1 &&
-            !layout_block_inline_axis_is_vertical(block)) {
+            layout_block_inline_axis_is_vertical(block) == vertical) {
             return true;
         }
     }
@@ -3117,7 +2991,7 @@ static bool text_rect_is_collapsed_whitespace(ViewText* text, TextRect* rect) {
         // cssom range extraction omits collapsed whitespace-only fragments in
         // a fragmented vertical inline, even when the line cursor gave
         // the fragment a physical width.
-        return text_in_vertical_fragmented_block(text);
+        return text_in_fragmented_block(text, true);
     }
     return rect->width <= 0.0f;
 }
@@ -3134,7 +3008,7 @@ static bool text_has_visible_rect(ViewText* text) {
 
 static int text_json_leading_whitespace_start(ViewText* text, TextRect* rect) {
     if (!text || !rect || rect != text->rect ||
-        !text_in_vertical_fragmented_block(text) || !text->text_data()) {
+        !text_in_fragmented_block(text, true) || !text->text_data()) {
         return rect ? rect->start_index : 0;
     }
     int start = max(rect->start_index, 0);
@@ -3172,7 +3046,7 @@ static bool text_json_is_collapsible_whitespace_node(DomNode* node) {
 
 static int text_json_preceding_whitespace(
     ViewText* text, char* buffer, int capacity) {
-    bool in_vertical_context = text_in_vertical_fragmented_block(text);
+    bool in_vertical_context = text_in_fragmented_block(text, true);
     if (!text || !buffer || capacity <= 0 ||
         !in_vertical_context) return 0;
     View* runs[32] = {};
@@ -3261,7 +3135,7 @@ static void append_text_fragment_json_with_vertical_prefix(
             content_length += copy_length;
         }
     }
-    if (text_in_vertical_fragmented_block(text) &&
+    if (text_in_fragmented_block(text, true) &&
         text_json_is_only_visible_rect(text, rect) &&
         text_data &&
         fragment.width > 0.0f && fragment.height > 0.0f) {
@@ -3297,9 +3171,22 @@ struct TextJsonLinePosition {
     int last_char;
 };
 
+static void sort_text_json_lines_by_y(TextJsonLinePosition* lines,
+                                      int line_count) {
+    for (int i = 1; i < line_count; i++) {
+        TextJsonLinePosition current = lines[i];
+        int j = i - 1;
+        while (j >= 0 && lines[j].y > current.y) {
+            lines[j + 1] = lines[j];
+            j--;
+        }
+        lines[j + 1] = current;
+    }
+}
+
 static bool print_horizontal_fragmented_text_json(ViewText* text,
                                                    StrBuf* buf, int indent) {
-    if (!text_in_horizontal_fragmented_block(text) || !text->text_data() ||
+    if (!text_in_fragmented_block(text, false) || !text->text_data() ||
         text->length >= 2048) return false;
 
     TextRect* visible_rects[2048];
@@ -3340,15 +3227,7 @@ static bool print_horizontal_fragmented_text_json(ViewText* text,
                 lines[line_index].last_char, end);
         }
     }
-    for (int i = 1; i < line_count; i++) {
-        TextJsonLinePosition current = lines[i];
-        int j = i - 1;
-        while (j >= 0 && lines[j].y > current.y) {
-            lines[j + 1] = lines[j];
-            j--;
-        }
-        lines[j + 1] = current;
-    }
+    sort_text_json_lines_by_y(lines, line_count);
 
     unsigned char* data = text->text_data();
     int source_length = (int)text->length; // INT_CAST_OK: source byte length for JSON ranges
@@ -3470,7 +3349,7 @@ static bool text_json_append_vertical_char_positions(
 
 static bool print_vertical_rtl_fragmented_text_json(ViewText* text,
                                                      StrBuf* buf, int indent) {
-    if (!text_in_vertical_fragmented_block(text)) return false;
+    if (!text_in_fragmented_block(text, true)) return false;
     TextJsonCharPosition positions[2048];
     TextRect* visible_rects[2048];
     int position_count = 0;
@@ -3498,15 +3377,7 @@ static bool print_vertical_rtl_fragmented_text_json(ViewText* text,
         }
         lines[line_index].last_char = i;
     }
-    for (int i = 1; i < line_count; i++) {
-        TextJsonLinePosition current = lines[i];
-        int j = i - 1;
-        while (j >= 0 && lines[j].y > current.y) {
-            lines[j + 1] = lines[j];
-            j--;
-        }
-        lines[j + 1] = current;
-    }
+    sort_text_json_lines_by_y(lines, line_count);
 
     bool emitted = false;
     unsigned char* data = text->text_data();

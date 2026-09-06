@@ -1,6 +1,5 @@
 #include "render.hpp"
 #include "view.hpp"
-#include "render.hpp"
 #include "event.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
@@ -78,13 +77,11 @@ void LottiePlayer::finish(AnimationInstance* anim) {
 }
 
 void lottie_animation_tick(AnimationInstance* anim, float t) {
-    LottiePlayer* lp = anim ? (LottiePlayer*)anim->state : nullptr;
-    if (lp) lp->tick(anim, t);
+    animation_player_tick<LottiePlayer>(anim, t);
 }
 
 void lottie_animation_finish(AnimationInstance* anim) {
-    LottiePlayer* lp = anim ? (LottiePlayer*)anim->state : nullptr;
-    if (lp) lp->finish(anim);
+    animation_player_finish<LottiePlayer>(anim);
 }
 
 // ============================================================================
@@ -108,8 +105,8 @@ static AnimationInstance* lottie_player_register(LottiePlayer* lp,
     inst->fill_mode = ANIM_FILL_NONE;
     inst->play_state = ANIM_PLAY_RUNNING;
     inst->timing.type = TIMING_LINEAR;
-    inst->tick = lottie_animation_tick;
-    inst->on_finish = lottie_animation_finish;
+    inst->tick = animation_player_tick<LottiePlayer>;
+    inst->on_finish = animation_player_finish<LottiePlayer>;
 
     inst->bounds[0] = 0;
     inst->bounds[1] = 0;

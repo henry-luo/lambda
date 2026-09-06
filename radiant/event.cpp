@@ -759,43 +759,12 @@ static Item call_template_event_handler(TemplateHandlerEntry* entry,
     return handler.typed((Context*)context, model_item, event_item);
 }
 
-static bool pdf_text_run_metrics(ViewText* text, float* out_width, bool* out_copy_space) {
-    if (out_width) *out_width = 0.0f;
-    if (out_copy_space) *out_copy_space = false;
-    if (!text || !text->parent || !text->parent->is_element()) return false;
-
-    DomElement* elem = lam::dom_require_element(text->parent);
-    const char* cls = elem->get_attribute("class");
-    if (!cls || !strstr(cls, "pdf-text-run")) return false;
-
-    const char* width_attr = elem->get_attribute("data-pdf-width");
-    float width = width_attr ? (float)str_to_double_default(width_attr, strlen(width_attr), 0.0) : 0.0f;
-    if (width <= 0.0f) return false;
-
-    const char* copy_attr = elem->get_attribute("data-pdf-copy-space");
-    if (out_width) *out_width = width;
-    if (out_copy_space) *out_copy_space = copy_attr && strcmp(copy_attr, "1") == 0;
-    return true;
-}
-
-static int pdf_visible_end_offset(ViewText* text, TextRect* rect, bool copy_space) {
-    int end_offset = rect ? rect->start_index + max(rect->length, 0) : 0;
-    if (!copy_space || !text || !rect || end_offset <= rect->start_index) return end_offset;
-    unsigned char* data = text->text_data();
-    if (data && data[end_offset - 1] == ' ') return end_offset - 1;
-    return end_offset;
-}
-
 static float pdf_text_run_visible_natural_width(FontBox* font, TextRect* rect, bool copy_space) {
     float width = rect ? rect->width : 0.0f;
     if (copy_space && font && font->style) {
         width -= font->style->space_width;
     }
     return width > 0.0f ? width : (rect ? rect->width : 0.0f);
-}
-
-static float pdf_text_run_visible_natural_width(EventContext* evcon, TextRect* rect, bool copy_space) {
-    return pdf_text_run_visible_natural_width(evcon ? &evcon->font : NULL, rect, copy_space);
 }
 
 static void target_stacking_view(EventContext* evcon, View* view) {
@@ -909,7 +878,7 @@ void target_text_view(EventContext* evcon, ViewText* text) {
     float pdf_width = 0.0f;
     bool pdf_copy_space = false;
     float rect_width = text_rect->width;
-    if (pdf_text_run_metrics(text, &pdf_width, &pdf_copy_space)) {
+    if (view_geometry_pdf_text_metrics(text, &pdf_width, &pdf_copy_space)) {
         rect_width = pdf_width;
     }
     float rect_right = x + rect_width;
@@ -1432,20 +1401,7 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
     // fire as inline view first
     fire_inline_event(evcon, lam::view_require_element(block));
     if (block->scroller && block->scroll_mut()->pane) {
-        if (evcon->event.type == RDT_EVENT_SCROLL) {
-            if (scrollpane_scroll(evcon, block, block->scroll()->pane)) {
-                // Native wheel scrolling mutates the pane outside JS; dispatch
-                // the non-bubbling element scroll event that virtualizers observe.
-                radiant_dispatch_simple_event(evcon, static_cast<View*>(block),
-                                              "scroll", false, false);
-            }
-        }
-        else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN &&
-            scroll_state_is_hovered_for_view(event_view_owner_state(static_cast<View*>(block)),
-                                             static_cast<View*>(block))) {
-            scrollpane_mouse_down(evcon, block);
-        }
-        else if (evcon->event.type == RDT_EVENT_MOUSE_UP) {
+        if (evcon->event.type == RDT_EVENT_MOUSE_UP) {
             scrollpane_mouse_up(evcon, block);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_DRAG &&
@@ -1454,6 +1410,40 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
             scrollpane_drag(evcon, block);
         }
     }
+}
+
+// The package selects `wheel`; this helper retains only the live pane walk,
+// clamped mutation, non-bubbling scroll notification, and repaint mechanism.
+static bool apply_wheel_scroll_to_stack(EventContext* evcon, ArrayList* stack) {
+    if (!evcon || !stack) return false;
+    bool changed = false;
+    for (int i = 0; i < stack->length; i++) {
+        View* view = static_cast<View*>(stack->data[i]);
+        if (!view || !view->is_block()) continue;
+        ViewBlock* block = lam::view_require_block(view);
+        if (!block->scroller || !block->scroll()->pane) continue;
+        if (scrollpane_scroll(evcon, block, block->scroll()->pane)) {
+            radiant_dispatch_simple_event(evcon, static_cast<View*>(block),
+                                          "scroll", false, false);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+static bool apply_wheel_scroll_operation(EventContext* evcon, View* target) {
+    if (!evcon || !target) return false;
+    ArrayList* target_list = build_view_stack(evcon, target);
+    bool changed = apply_wheel_scroll_to_stack(evcon, target_list);
+    arraylist_free(target_list);
+
+    // An embedded document's wheel chain continues at its iframe container.
+    if (evcon->iframe_container) {
+        ArrayList* parent_list = build_view_stack(evcon, evcon->iframe_container);
+        if (apply_wheel_scroll_to_stack(evcon, parent_list)) changed = true;
+        arraylist_free(parent_list);
+    }
+    return changed;
 }
 
 void fire_events(EventContext* evcon, ArrayList* target_list) {
@@ -1854,7 +1844,8 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
                                    Item existing_event = ItemNull) {
     RootFrame roots(1);
     Rooted<Item> event_root(roots, existing_event);
-    if (!radiant_dom_event_is(event_root.get())) {
+    bool created_event = !radiant_dom_event_is(event_root.get());
+    if (created_event) {
         event_root.set(radiant_dom_event_create(event_name ? event_name : "",
                                                 event_record_bubbles(event_name),
                                                 event_record_is_cancelable(event_name),
@@ -1868,11 +1859,25 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     MarkBuilder builder(doc->input);
     DomEventPayloadBuilder mb(event_root.get());
     mb.put("type", event_name);
+    // Behavior-only hooks have no preceding JS dispatch to set their target.
+    // Seed it on a freshly created record so package policy sees the real hit
+    // target in Lambda-only and JS-backed documents alike.
+    if (created_event && target) {
+        Item target_item = radiant_dom_wrap_node(target);
+        mb.put("target", target_item);
+        mb.put("srcElement", target_item);
+    }
 
     // Emitted outside the intent-type guard: an option commit carries no edit
     // intent, only the index the geometry resolved.
     if (intent && intent->option_index >= 0) {
         mb.put("option_index", (int64_t)intent->option_index);
+    }
+
+    // ES34: the overlay identifies a physical context-menu row only. Its
+    // command mapping belongs to the dom package, alongside execution policy.
+    if (intent && intent->context_menu_item >= 0) {
+        mb.put("context_menu_item", (int64_t)intent->context_menu_item);
     }
 
     // F14.1: an execCommand names a legacy command, not a WHATWG input type, so
@@ -1987,6 +1992,41 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         mb.put("y", (double)evcon->event.mouse_button.y);
     }
 
+    // Package mouse policy needs the same standard MouseEvent decision inputs
+    // in a Lambda-only document that a JS-backed event already exposes.
+    if (evcon && (strcmp(event_name, "mousedown") == 0 ||
+                  strcmp(event_name, "mousepress") == 0 ||
+                  strcmp(event_name, "scrollbarpress") == 0 ||
+                  strcmp(event_name, "mouseup") == 0 ||
+                  strcmp(event_name, "click") == 0 ||
+                  strcmp(event_name, "dblclick") == 0)) {
+        const MouseButtonEvent* mouse = &evcon->event.mouse_button;
+        mb.put("button", (int64_t)mouse->button);
+        mb.put("detail", (int64_t)mouse->clicks);
+        mb.put("shiftKey", (mouse->mods & RDT_MOD_SHIFT) != 0);
+        mb.put("ctrlKey",  (mouse->mods & RDT_MOD_CTRL) != 0);
+        mb.put("altKey",   (mouse->mods & RDT_MOD_ALT) != 0);
+        mb.put("metaKey",  (mouse->mods & RDT_MOD_SUPER) != 0);
+    }
+
+    // `scrollwheel` is behavior-only, after the public WheelEvent has had its
+    // cancellation chance. Expose the same CSS-pixel deltas to package policy
+    // without giving it a mutable scroll offset or live layout geometry.
+    if (evcon && strcmp(event_name, "scrollwheel") == 0) {
+        const ScrollEvent* scroll = &evcon->event.scroll;
+        mb.put("deltaX", -(double)scroll->xoffset * 100.0);
+        mb.put("deltaY", -(double)scroll->yoffset * 100.0);
+    }
+
+    // The scrollbar part is a geometry result. The package alone maps this
+    // stable vocabulary to paging versus thumb-drag operations.
+    if (evcon && strcmp(event_name, "scrollbarpress") == 0 && target &&
+        target->is_block()) {
+        ViewBlock* block = lam::view_require_block(target);
+        mb.put("scrollbarPart", scrollpane_press_part_name(
+            scrollpane_press_part(evcon, block)));
+    }
+
     // InputIntent owns an input event's data. The native RdtEvent union can
     // still hold the preceding key code when a deletion emits `input`, so it
     // must not be decoded as a character.
@@ -2072,7 +2112,8 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
 
     bool event_uses_hit_source_pos = evcon &&
         (strcmp(event_name, "mousedown") == 0 || strcmp(event_name, "mousemove") == 0 ||
-         strcmp(event_name, "mouseup") == 0 || strcmp(event_name, "click") == 0);
+         strcmp(event_name, "mouseup") == 0 || strcmp(event_name, "click") == 0 ||
+         strcmp(event_name, "mousepress") == 0);
 
     // R7 step 3b — attach SourcePos / SourceSelection for editor handlers.
     // The editor's `mod_source_pos` shapes are:
@@ -2738,6 +2779,7 @@ static bool event_is_hot_path(const char* event_name) {
            strcmp(event_name, "pointermove") == 0 ||
            strcmp(event_name, "scroll") == 0 ||
            strcmp(event_name, "wheel") == 0 ||
+           strcmp(event_name, "scrollwheel") == 0 ||
            strcmp(event_name, "dragmove") == 0 ||
            strcmp(event_name, "dragover") == 0;
 }
@@ -2861,21 +2903,33 @@ extern "C" void radiant_dispatch_author_template_participant(void* dom_node,
 // a press anywhere else still starts a selection exactly as before.
 // Answers the control and the selection so the caller can arm the drag with the
 // range it will move.
+static DomElement* radiant_text_drag_control_at(EventContext* evcon,
+                                                DocState* state, View* target,
+                                                bool require_writable) {
+    if (!evcon || !evcon->ui_context || !state || !target) return nullptr;
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface) ||
+        !editing_surface_is_text_control(&surface) || !surface.owner) {
+        return nullptr;
+    }
+    DomElement* elem = surface.owner;
+    if (form_control_is_disabled(state, static_cast<View*>(elem)) ||
+        (require_writable &&
+         form_control_is_readonly(state, static_cast<View*>(elem)))) {
+        return nullptr;
+    }
+    return elem;
+}
+
 static bool radiant_text_drag_source_at(EventContext* evcon, DocState* state,
                                         View* target, float x, float y,
                                         DomElement** out_elem,
                                         uint32_t* out_start, uint32_t* out_end,
                                         uint32_t* out_press) {
-    if (!evcon || !evcon->ui_context || !state || !target) return false;
-    EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface) || !surface.owner) {
-        return false;
-    }
-    DomElement* elem = surface.owner;
     // A read-only control still allows dragging text out; a disabled one is
     // inert, and an empty selection has nothing to drag.
-    if (form_control_is_disabled(state, static_cast<View*>(elem))) return false;
+    DomElement* elem = radiant_text_drag_control_at(evcon, state, target, false);
+    if (!elem) return false;
     uint32_t sel_start = 0, sel_end = 0;
     form_control_get_selection(state, static_cast<View*>(elem), &sel_start, &sel_end, nullptr);
     if (sel_end <= sel_start) return false;
@@ -2902,17 +2956,8 @@ static bool radiant_text_drag_source_at(EventContext* evcon, DocState* state,
 static bool radiant_text_drop_target_at(EventContext* evcon, DocState* state,
                                         View* target, float x, float y,
                                         DomElement** out_elem, uint32_t* out_offset) {
-    if (!evcon || !evcon->ui_context || !state || !target) return false;
-    EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface) || !surface.owner) {
-        return false;
-    }
-    DomElement* elem = surface.owner;
-    if (form_control_is_disabled(state, static_cast<View*>(elem)) ||
-        form_control_is_readonly(state, static_cast<View*>(elem))) {
-        return false;
-    }
+    DomElement* elem = radiant_text_drag_control_at(evcon, state, target, true);
+    if (!elem) return false;
     uint32_t offset = 0;
     if (!editing_geometry_text_control_offset_for_point(evcon->ui_context, elem,
                                                         x, y, &offset)) {
@@ -3110,14 +3155,21 @@ extern "C" bool radiant_select_dropdown_is_open(void* dom_node) {
 
 extern "C" bool radiant_select_set_dropdown_open(void* dom_node, bool open) {
     EmitHandlerContext* ctx = g_emit_handler_ctx;
-    if (!ctx || !ctx->evcon || !dom_node) return false;
-    DocState* state = event_context_target_state(ctx->evcon);
+    if (!dom_node) return false;
+    DomNode* node = static_cast<DomNode*>(dom_node);
+    if (!node->is_element()) return false;
+    DomElement* elem = node->as_element();
+    DocState* state = ctx && ctx->evcon
+        ? event_context_target_state(ctx->evcon)
+        : (elem && elem->doc ? (DocState*)elem->doc->state : nullptr);
     if (!state) return false;
-    View* view = static_cast<View*>(static_cast<DomNode*>(dom_node));
+    View* view = static_cast<View*>(node);
     if (!open) {
+        // Overlay dismissal is behavior-only, so it has no event context.
         if (state->open_dropdown == view) doc_state_close_dropdown(state, view);
         return true;
     }
+    if (!ctx || !ctx->evcon) return false;
     // canonical popup state permits one open dropdown at a time
     if (state->open_dropdown && state->open_dropdown != view) {
         doc_state_close_dropdown(state, state->open_dropdown);
@@ -3130,7 +3182,11 @@ extern "C" bool radiant_select_set_dropdown_open(void* dom_node, bool open) {
 // package's `dispatch()` primitive (ES6). The event enters the normal pipeline
 // as a fresh event, so anything it triggers is dispatched in a quiescent state
 // rather than nested inside the handler that raised it.
-extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* event_name) {
+static bool radiant_dispatch_event_from_script_impl(void* dom_node,
+                                                    const char* event_name,
+                                                    bool bubbles,
+                                                    bool cancelable,
+                                                    bool report_flags) {
     if (!dom_node || !event_name || !event_name[0]) return false;
     EmitHandlerContext* ctx = g_emit_handler_ctx;
     if (!ctx || !ctx->evcon) {
@@ -3138,11 +3194,24 @@ extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* e
         return false;
     }
     View* view = static_cast<View*>(static_cast<DomNode*>(dom_node));
+    bool ok = radiant_dispatch_simple_event(
+        ctx->evcon, view, event_name, bubbles, cancelable);
+    if (report_flags) {
+        log_debug("dispatch-from-script: '%s' (bubbles=%d cancelable=%d) -> %s",
+                  event_name, bubbles ? 1 : 0, cancelable ? 1 : 0,
+                  ok ? "dispatched" : "no listener");
+    } else {
+        log_debug("dispatch-from-script: '%s' -> %s",
+                  event_name, ok ? "dispatched" : "no listener");
+    }
+    return ok;
+}
+
+extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* event_name) {
     // `input` and `change` are the notifications a control emits after its own
     // state settles: they bubble and are not cancelable (HTML 4.10.5).
-    bool ok = radiant_dispatch_simple_event(ctx->evcon, view, event_name, true, false);
-    log_debug("dispatch-from-script: '%s' -> %s", event_name, ok ? "dispatched" : "no listener");
-    return ok;
+    return radiant_dispatch_event_from_script_impl(
+        dom_node, event_name, true, false, false);
 }
 
 // The same dispatch, told what kind of event it is. The name-only entry above
@@ -3166,17 +3235,8 @@ extern "C" bool radiant_dispatch_event_with_flags_from_script(void* dom_node,
                                                               const char* event_name,
                                                               bool bubbles,
                                                               bool cancelable) {
-    if (!dom_node || !event_name || !event_name[0]) return false;
-    EmitHandlerContext* ctx = g_emit_handler_ctx;
-    if (!ctx || !ctx->evcon) {
-        log_error("dispatch(): no active event context — only callable from a handler");
-        return false;
-    }
-    View* view = static_cast<View*>(static_cast<DomNode*>(dom_node));
-    bool ok = radiant_dispatch_simple_event(ctx->evcon, view, event_name, bubbles, cancelable);
-    log_debug("dispatch-from-script: '%s' (bubbles=%d cancelable=%d) -> %s",
-              event_name, bubbles ? 1 : 0, cancelable ? 1 : 0, ok ? "dispatched" : "no listener");
-    return ok;
+    return radiant_dispatch_event_from_script_impl(
+        dom_node, event_name, bubbles, cancelable, true);
 }
 
 // F4: package submission policy uses this as the cancelable event waist. The
@@ -3436,12 +3496,28 @@ static __thread uint64_t s_caret_op_epoch = 0;
 static __thread char s_caret_op_name[32];
 static __thread bool s_caret_op_extend = false;
 
+// Mousedown follows the same request/resolve shape as caret navigation: the
+// package chooses a focus target and selection operation, then native applies
+// them at the event boundary where it can preserve focus/selection ordering.
+static __thread uint64_t s_mouse_focus_epoch = 0;
+static __thread View* s_mouse_focus_target = nullptr;
+static __thread uint64_t s_pointer_selection_epoch = 0;
+static __thread char s_pointer_selection_operation[32];
+
 // ESO48 follows the same request/resolve seam as caret navigation: policy
 // names an operation in Lambda, then native resolves the current scrollport.
 static __thread uint64_t s_scroll_op_epoch = 0;
 static __thread char s_scroll_op_name[32];
 
 extern "C" uint64_t radiant_caret_operation_epoch(void) { return s_caret_op_epoch; }
+extern "C" uint64_t radiant_mouse_focus_epoch(void) { return s_mouse_focus_epoch; }
+extern "C" View* radiant_mouse_focus_target(void) { return s_mouse_focus_target; }
+extern "C" uint64_t radiant_pointer_selection_epoch(void) {
+    return s_pointer_selection_epoch;
+}
+extern "C" const char* radiant_pointer_selection_operation(void) {
+    return s_pointer_selection_operation;
+}
 
 // F11: the key-intent epoch, same pattern as the caret one.
 static __thread uint64_t s_key_intent_epoch = 0;
@@ -3483,6 +3559,18 @@ extern "C" void radiant_caret_operation_request(const char* operation, bool exte
     snprintf(s_caret_op_name, sizeof(s_caret_op_name), "%s", operation);
     s_caret_op_extend = extend;
     s_caret_op_epoch++;
+}
+
+extern "C" void radiant_mouse_focus_request(View* target) {
+    s_mouse_focus_target = target;
+    s_mouse_focus_epoch++;
+}
+
+extern "C" void radiant_pointer_selection_request(const char* operation) {
+    if (!operation) return;
+    snprintf(s_pointer_selection_operation, sizeof(s_pointer_selection_operation), "%s",
+             operation);
+    s_pointer_selection_epoch++;
 }
 
 extern "C" void radiant_scroll_operation_request(const char* operation) {
@@ -3596,10 +3684,81 @@ extern "C" bool radiant_dispatch_behavior_caret_key(EventContext* evcon, View* t
     return dispatch_behavior_handler(evcon, target, "caretkey", intent, nullptr);
 }
 
+// S12.1.3: document-wide policy starts at the body so a first interaction with
+// static text, a tabindex widget, or a scrollbar can install the package even
+// when the innermost hit has no behavior template of its own.
+static bool dispatch_behavior_document_policy(EventContext* evcon, View* target,
+                                              const char* event_name,
+                                              const InputIntent* intent = nullptr) {
+    DomDocument* doc = event_context_target_document(evcon);
+    DomElement* body = radiant_document_body_element(doc);
+    if (!body || !radiant_dom_package_ensure(doc, static_cast<View*>(body))) {
+        return false;
+    }
+    return dispatch_behavior_handler(evcon, target, event_name, intent, nullptr);
+}
+
+// Behavior-only after the cancelable mousedown and any element-local press
+// default. The body hook owns document-wide focus and selection policy without
+// letting a slider's claimed mousedown hide that policy from the ancestor.
+extern "C" bool radiant_dispatch_behavior_mouse_press(EventContext* evcon,
+                                                        View* target) {
+    return dispatch_behavior_document_policy(evcon, target, "mousepress");
+}
+
+// ES35: the historical non-form text callback has no DOM text applier. Keep
+// its deliberately incomplete outcome package-owned; the caret-operation waist
+// remains the only native path that resolves and commits the live geometry.
+extern "C" bool radiant_dispatch_behavior_text_input_fallback(
+    EventContext* evcon, View* target, const InputIntent* intent) {
+    return dispatch_behavior_document_policy(evcon, target,
+                                             "textinputfallback", intent);
+}
+
+// ES34: overlay geometry resolves only a menu row. Mapping that row to a
+// command and closing the popup are document policy, routed through the same
+// generic command waist keyboard shortcuts already use.
+extern "C" bool radiant_dispatch_behavior_context_menu_action(
+    EventContext* evcon, View* target, const InputIntent* intent) {
+    return dispatch_behavior_document_policy(evcon, target,
+                                             "contextmenuaction", intent);
+}
+
+// Overlay dismissal has no DOM target of its own. It intentionally ignores an
+// unrelated underlying pointer/key cancellation, matching the old modal popup
+// behavior while making the cleanup decision package-owned.
+extern "C" bool radiant_dispatch_behavior_context_menu_dismiss(View* target) {
+    return dispatch_behavior_handler(nullptr, target, "contextmenudismiss",
+                                     nullptr, nullptr);
+}
+
+extern "C" bool radiant_dispatch_behavior_dropdown_dismiss(View* target) {
+    return dispatch_behavior_handler(nullptr, target, "dropdowndismiss",
+                                     nullptr, nullptr);
+}
+
 extern "C" bool radiant_dispatch_behavior_scroll_key(EventContext* evcon,
                                                      View* target,
                                                      const InputIntent* intent) {
     return dispatch_behavior_handler(evcon, target, "scrollkey", intent, nullptr);
+}
+
+// Wheel and scrollbar input use the same document-scoped loader as mousepress:
+// no arbitrary content hit may prevent a static document's first scroll
+// gesture from installing its package default.
+static bool dispatch_behavior_scroll_input(EventContext* evcon, View* target,
+                                           const char* event_name) {
+    return dispatch_behavior_document_policy(evcon, target, event_name);
+}
+
+extern "C" bool radiant_dispatch_behavior_scroll_wheel(EventContext* evcon,
+                                                         View* target) {
+    return dispatch_behavior_scroll_input(evcon, target, "scrollwheel");
+}
+
+extern "C" bool radiant_dispatch_behavior_scrollbar_press(EventContext* evcon,
+                                                            View* target) {
+    return dispatch_behavior_scroll_input(evcon, target, "scrollbarpress");
 }
 
 static ViewBlock* keyboard_scrollport_from_view(DomDocument* doc, View* start) {
@@ -4225,35 +4384,6 @@ static uint32_t dispatch_form_text_paste(EventContext* evcon, DomElement* elem,
     return ok ? len : 0;
 }
 
-static bool dispatch_context_menu_cut(void* user, DomElement* elem,
-                                      DocState* state,
-                                      uint32_t start, uint32_t end) {
-    EventContext* evcon = (EventContext*)user;
-    if (!evcon || !elem || !state) return false;
-    return dispatch_form_text_replace(evcon, elem, state, static_cast<View*>(elem),
-                                      start, end, nullptr, 0,
-                                      INPUT_INTENT_DELETE_BY_CUT);
-}
-
-static bool dispatch_context_menu_delete(void* user, DomElement* elem,
-                                         DocState* state,
-                                         uint32_t start, uint32_t end) {
-    EventContext* evcon = (EventContext*)user;
-    if (!evcon || !elem || !state) return false;
-    return dispatch_form_text_replace(evcon, elem, state, static_cast<View*>(elem),
-                                      start, end, nullptr, 0,
-                                      INPUT_INTENT_DELETE_CONTENT_FORWARD);
-}
-
-static bool dispatch_context_menu_paste(void* user, DomElement* elem,
-                                        DocState* state,
-                                        const char* text, uint32_t len) {
-    EventContext* evcon = (EventContext*)user;
-    if (!evcon || !elem || !state) return false;
-    return dispatch_form_text_paste(evcon, elem, state, static_cast<View*>(elem),
-                                    text, len) > 0;
-}
-
 static void dispatch_selectstart(EventContext* evcon, View* target);
 
 static bool dispatch_form_selection_byte_range(DomElement* elem, DocState* state,
@@ -4329,24 +4459,32 @@ static bool dispatch_form_copy_selection(EventContext* evcon, DomElement* elem,
     return true;
 }
 
-static bool dispatch_form_cut_selection(EventContext* evcon, DomElement* elem,
-                                        DocState* state, View* target) {
+// Cut and Delete differ only in clipboard side effects; both erase the live
+// selected byte range through the same beforeinput/applier mechanism.
+static bool dispatch_form_delete_selection(EventContext* evcon, DomElement* elem,
+                                           DocState* state, View* target,
+                                           InputIntentType input_type) {
     if (!evcon || !elem || !state || !target) return false;
-    bool editable = !form_control_is_user_readonly(state, static_cast<View*>(elem));
-    if (!editable) return false;
+    if (form_control_is_user_readonly(state, static_cast<View*>(elem))) return false;
 
     uint32_t start = 0;
     uint32_t end = 0;
-    if (!dispatch_form_selection_byte_range(elem, state, target,
-                                            &start, &end)) {
-        return false;
-    }
-    if (!dispatch_form_copy_selection(evcon, elem, state, target, "form cut")) {
+    if (!dispatch_form_selection_byte_range(elem, state, target, &start, &end)) {
         return false;
     }
     return dispatch_form_text_replace(evcon, elem, state, target,
-                                      start, end, nullptr, 0,
-                                      INPUT_INTENT_DELETE_BY_CUT);
+                                      start, end, nullptr, 0, input_type);
+}
+
+static bool dispatch_form_cut_selection(EventContext* evcon, DomElement* elem,
+                                        DocState* state, View* target) {
+    if (!evcon || !elem || !state || !target) return false;
+    if (form_control_is_user_readonly(state, static_cast<View*>(elem))) return false;
+    if (!dispatch_form_copy_selection(evcon, elem, state, target, "form cut")) {
+        return false;
+    }
+    return dispatch_form_delete_selection(evcon, elem, state, target,
+                                          INPUT_INTENT_DELETE_BY_CUT);
 }
 
 static const char* form_control_live_value(DomElement* elem, uint32_t* out_len) {
@@ -4387,13 +4525,6 @@ static bool dispatch_form_select_all(EventContext* evcon, DomElement* elem,
     event_log_editing_selection(state, &surface, &intent, "selectAll",
                                 0, value_len);
     return true;
-}
-
-static bool dispatch_context_menu_select_all(void* user, DomElement* elem,
-                                             DocState* state) {
-    EventContext* evcon = (EventContext*)user;
-    if (!evcon || !elem || !state) return false;
-    return dispatch_form_select_all(evcon, elem, state, static_cast<View*>(elem));
 }
 
 static bool dispatch_form_caret_collapse(EventContext* evcon, DomElement* elem,
@@ -5860,14 +5991,12 @@ static bool dom_js_compute_absolute_bound(DomNode* node, DomJsDirtyBound* bound)
     if (!node || !bound) return false;
 
     bound->node = node;
-    bound->x = node->x;
-    bound->y = node->y;
+    RdtLogicalPoint origin = view_geometry_node_document_origin(
+        static_cast<View*>(node));
+    bound->x = origin.x;
+    bound->y = origin.y;
     bound->width = node->width;
     bound->height = node->height;
-    for (DomNode* parent = node->parent; parent; parent = parent->parent) {
-        bound->x += parent->x;
-        bound->y += parent->y;
-    }
     bound->valid = bound->width > 0.0f && bound->height > 0.0f;
     return bound->valid;
 }
@@ -6739,6 +6868,25 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
     };
     return radiant_dispatch_built_event(evcon, target, build_pointer_event_item,
         &args, true, dispatched, true, type);
+}
+
+static bool radiant_dispatch_button_mouse_event(
+        EventContext* evcon, View* target, const char* type,
+        double x, double y, const MouseButtonEvent* event,
+        int buttons, int detail) {
+    return event && radiant_dispatch_mouse_event(
+        evcon, target, type, x, y, event->button, buttons,
+        event_mod_ctrl(event->mods), event_mod_shift(event->mods),
+        event_mod_alt(event->mods), event_mod_super(event->mods), detail);
+}
+
+static bool radiant_dispatch_button_pointer_event(
+        EventContext* evcon, View* target, const char* type,
+        double x, double y, const MouseButtonEvent* event, int buttons) {
+    return event && radiant_dispatch_pointer_event(
+        evcon, target, type, x, y, event->button, buttons,
+        event_mod_ctrl(event->mods), event_mod_shift(event->mods),
+        event_mod_alt(event->mods), event_mod_super(event->mods), "mouse");
 }
 
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
@@ -7836,6 +7984,7 @@ static bool dispatch_package_keyboard_command(EventContext* evcon,
     InputIntentType type = input_intent_type_from_name(name);
     if (type != INPUT_INTENT_INSERT_FROM_PASTE &&
         type != INPUT_INTENT_DELETE_BY_CUT &&
+        type != INPUT_INTENT_DELETE_CONTENT_FORWARD &&
         type != INPUT_INTENT_COPY &&
         type != INPUT_INTENT_SELECT_ALL) {
         return false;
@@ -7859,6 +8008,10 @@ static bool dispatch_package_keyboard_command(EventContext* evcon,
             case INPUT_INTENT_DELETE_BY_CUT:
                 handled = dispatch_form_cut_selection(evcon, elem, state, control);
                 break;
+            case INPUT_INTENT_DELETE_CONTENT_FORWARD:
+                handled = dispatch_form_delete_selection(
+                    evcon, elem, state, control, INPUT_INTENT_DELETE_CONTENT_FORWARD);
+                break;
             case INPUT_INTENT_INSERT_FROM_PASTE:
                 handled = dispatch_form_keyboard_paste(evcon, state, control);
                 break;
@@ -7872,7 +8025,9 @@ static bool dispatch_package_keyboard_command(EventContext* evcon,
     View* rich_target = rich_keyboard_target_from_selection(state, target,
                                                             &surface);
     if (rich_target) {
-        if (type != INPUT_INTENT_SELECT_ALL) {
+        if (type == INPUT_INTENT_INSERT_FROM_PASTE ||
+            type == INPUT_INTENT_DELETE_BY_CUT ||
+            type == INPUT_INTENT_COPY) {
             const char* event_name = type == INPUT_INTENT_INSERT_FROM_PASTE
                 ? "paste" : (type == INPUT_INTENT_DELETE_BY_CUT ? "cut" : "copy");
             if (radiant_dispatch_clipboard_event(evcon, rich_target, event_name)) {
@@ -8052,14 +8207,14 @@ static void select_open_dropdown(UiContext* uicon, DocState* state,
     float visual_width = 0.0f, visual_height = 0.0f;
     view_get_visual_bounds(select_view, &visual_x, &visual_y,
                            &visual_width, &visual_height);
-    float doc_x = 0.0f, doc_y = 0.0f;
-    radiant_document_viewport_offset(uicon, select->doc, &doc_x, &doc_y);
+    RdtLogicalPoint document_offset = view_geometry_document_viewport_offset(
+        uicon->document, select->doc, scroll_state_resolve_view_geometry);
 
     // Popup state stays in the top-level logical viewport. Rendering performs
     // the sole logical-to-surface conversion, so event hit-testing never needs
     // to know the monitor scale.
-    doc_state_set_dropdown_geometry(state, doc_x + visual_x,
-        doc_y + visual_y + visual_height, state->dropdown_width,
+    doc_state_set_dropdown_geometry(state, document_offset.x + visual_x,
+        document_offset.y + visual_y + visual_height, state->dropdown_width,
         state->dropdown_height);
     calculate_dropdown_dimensions(select, state, visual_width);
 }
@@ -8176,39 +8331,37 @@ static bool editing_key_may_emit_text(const KeyEvent* key_event) {
     }
 }
 
-/**
- * Close dropdown if clicking outside
- */
-static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float mouse_y) {
+// Native supplies only the overlay/anchor containment test. The package owns
+// the outside-click dismissal so opening, committing, Escape, and dismissal
+// remain one <select> policy surface.
+static bool dropdown_click_is_outside(EventContext* evcon, float mouse_x, float mouse_y) {
     DocState* state = nullptr;
     ViewBlock* select = event_open_dropdown_select(evcon, &state);
-    if (!select) return;
+    if (!select) return false;
 
     float select_abs_x = 0.0f, select_abs_y = 0.0f;
     float select_w = 0.0f, select_h = 0.0f;
     view_get_visual_bounds(static_cast<View*>(select), &select_abs_x,
                            &select_abs_y, &select_w, &select_h);
-    float doc_x = 0.0f, doc_y = 0.0f;
-    radiant_document_viewport_offset(evcon->ui_context, select->doc,
-                                     &doc_x, &doc_y);
-    select_abs_x += doc_x;
-    select_abs_y += doc_y;
+    RdtLogicalPoint document_offset = view_geometry_document_viewport_offset(
+        evcon->ui_context->document, select->doc,
+        scroll_state_resolve_view_geometry);
+    select_abs_x += document_offset.x;
+    select_abs_y += document_offset.y;
 
     // Check if click is on the select itself (toggle handled elsewhere)
     if (mouse_x >= select_abs_x && mouse_x <= select_abs_x + select_w &&
         mouse_y >= select_abs_y && mouse_y <= select_abs_y + select_h) {
-        return;  // Click on the select box itself; the <select> behavior template owns opening/closing it
+        return false;  // The <select> click behavior owns its own toggle.
     }
 
     // Check if click is on dropdown popup
     if (mouse_x >= state->dropdown_x && mouse_x <= state->dropdown_x + state->dropdown_width &&
         mouse_y >= state->dropdown_y && mouse_y <= state->dropdown_y + state->dropdown_height) {
-        return;  // Click on dropdown, let handle_dropdown_option_click deal with it
+        return false;  // optioncommit handles a popup-row hit.
     }
 
-    // Click outside - close dropdown
-    log_debug("close_dropdown_if_outside: closing dropdown");
-    doc_state_close_dropdown(state, static_cast<View*>(select));
+    return true;
 }
 
 /**
@@ -8279,23 +8432,6 @@ bool is_view_programmatically_focusable(View* view) {
     // A negative tabindex excludes sequential focus only; HTMLElement.focus()
     // must still accept the target so keyboard events reach modal-style widgets.
     return elem->get_attribute("tabindex") != NULL;
-}
-
-static View* mouse_focus_target(View* hit) {
-    for (View* view = hit; view; view = view->parent) {
-        if (is_view_programmatically_focusable(view)) return view;
-    }
-    // Generated widget internals can be hit-tested through a visual child
-    // whose View parent is not its DOM parent; follow the DOM chain so a
-    // tabindex handle still receives the browser's mouse-focus default.
-    for (DomNode* node = hit ? static_cast<DomNode*>(hit) : nullptr;
-         node; node = node->parent) {
-        if (node->is_element() &&
-            is_view_programmatically_focusable(static_cast<View*>(node))) {
-            return static_cast<View*>(node);
-        }
-    }
-    return nullptr;
 }
 
 static bool prepare_previous_focus_blur(EventContext* evcon,
@@ -8888,44 +9024,6 @@ bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source) {
     return executed;
 }
 
-/**
- * Calculate absolute window position from view-relative coordinates.
- * Walks up the parent chain accumulating block positions.
- * @param view The view whose coordinate system the position is relative to
- * @param rel_x X coordinate relative to view's parent block
- * @param rel_y Y coordinate relative to view's parent block
- * @param iframe_offset_x Additional X offset for iframe content
- * @param iframe_offset_y Additional Y offset for iframe content
- * @param out_abs_x Output: absolute X in window coordinates
- * @param out_abs_y Output: absolute Y in window coordinates
- */
-void view_to_absolute_position(View* view, float rel_x, float rel_y,
-    float iframe_offset_x, float iframe_offset_y,
-    float* out_abs_x, float* out_abs_y) {
-
-    float abs_x = rel_x;
-    float abs_y = rel_y;
-
-    // Walk up from view's parent to accumulate block positions
-    View* parent = view->parent;
-    while (parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK ||
-            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-            parent->view_type == RDT_VIEW_LIST_ITEM) {
-            abs_x += (lam::view_require_block(parent))->x;
-            abs_y += (lam::view_require_block(parent))->y;
-        }
-        parent = parent->parent;
-    }
-
-    // Add iframe offset
-    abs_x += iframe_offset_x;
-    abs_y += iframe_offset_y;
-
-    *out_abs_x = abs_x;
-    *out_abs_y = abs_y;
-}
-
 struct EventTextRun {
     unsigned char* end;
     int visible_end_offset;
@@ -8936,8 +9034,10 @@ struct EventTextRun {
 
 static EventTextRun event_text_run(ViewText* text, TextRect* rect) {
     EventTextRun run = {0};
-    run.is_pdf = pdf_text_run_metrics(text, &run.pdf_width, &run.pdf_copy_space);
-    run.visible_end_offset = pdf_visible_end_offset(text, rect, run.pdf_copy_space);
+    run.is_pdf = view_geometry_pdf_text_metrics(
+        text, &run.pdf_width, &run.pdf_copy_space);
+    run.visible_end_offset = view_geometry_pdf_visible_end_offset(
+        text, rect, run.pdf_copy_space);
     int end_offset = run.is_pdf
         ? run.visible_end_offset : rect->start_index + max(rect->length, 0);
     run.end = text->text_data() + end_offset;
@@ -8968,112 +9068,118 @@ static bool event_text_glyph_advance(FontBox* font, unsigned char* p, unsigned c
     return true;
 }
 
+static float event_text_x_for_offset(FontBox* font, ViewText* text,
+                                     TextRect* rect, int byte_offset,
+                                     EventTextRun run) {
+    unsigned char* data = text->text_data();
+    unsigned char* current = data + rect->start_index;
+    int current_offset = rect->start_index;
+    float x = rect->x;
+    bool has_space = false;
+    while (current < run.end && current_offset < byte_offset) {
+        float advance = 0.0f;
+        int bytes = 1;
+        bool has_advance = event_text_glyph_advance(
+            font, current, run.end, &has_space, &bytes, &advance);
+        current += bytes;
+        current_offset += bytes;
+        if (has_advance) x += advance;
+    }
+    if (run.is_pdf && run.pdf_width > 0.0f) {
+        float natural_width = pdf_text_run_visible_natural_width(
+            font, rect, run.pdf_copy_space);
+        if (natural_width > 0.0f) {
+            if (byte_offset >= run.visible_end_offset) return rect->x + run.pdf_width;
+            x = rect->x + (x - rect->x) * run.pdf_width / natural_width;
+        }
+    }
+    return x;
+}
+
+static int event_text_offset_for_x(UiContext* uicon, FontBox* font,
+                                   ViewText* text, TextRect* rect,
+                                   float target_x, float block_x) {
+    if (!text || !rect || !font || !font->style) {
+        return rect ? rect->start_index : 0;
+    }
+    EventTextRun run = event_text_run(text, rect);
+    float x = block_x + rect->x;
+    if (run.is_pdf && run.pdf_width > 0.0f) {
+        float natural_width = pdf_text_run_visible_natural_width(
+            font, rect, run.pdf_copy_space);
+        float local_x = target_x - x;
+        if (local_x <= 0.0f) return rect->start_index;
+        if (local_x >= run.pdf_width) return run.visible_end_offset;
+        if (natural_width > 0.0f) {
+            target_x = x + local_x * natural_width / run.pdf_width;
+        }
+    }
+
+    unsigned char* current = text->text_data() + rect->start_index;
+    int byte_offset = rect->start_index;
+    while (current < run.end &&
+           (is_space(*current) || *current == '\n' ||
+            *current == '\r' || *current == '\t')) {
+        current++;
+        byte_offset++;
+    }
+
+    float raster_scale = ui_context_raster_scale(uicon);
+    float letter_spacing = font->style->letter_spacing;
+    float word_spacing = font->style->word_spacing;
+    bool has_space = false;
+    while (current < run.end) {
+        if (*current == '\n' || *current == '\r') break;
+        float advance = 0.0f;
+        int bytes = 1;
+        if (is_space(*current)) {
+            if (has_space) {
+                current++;
+                byte_offset++;
+                continue;
+            }
+            has_space = true;
+            advance = font->style->space_width + word_spacing;
+        } else {
+            has_space = false;
+            uint32_t codepoint;
+            bytes = str_utf8_decode(
+                (const char*)current, (size_t)(run.end - current), &codepoint);
+            if (bytes <= 0) {
+                bytes = 1;
+                codepoint = *current;
+            }
+            FontStyleDesc style = font_style_desc_from_prop(font->style);
+            LoadedGlyph* glyph = font_load_glyph(
+                font_box_handle(font), &style, codepoint, false);
+            if (!glyph) {
+                current += bytes;
+                byte_offset += bytes;
+                continue;
+            }
+            advance = glyph->advance_x / raster_scale;
+        }
+        unsigned char* next = current + bytes;
+        if (next < run.end && *next != '\n' && *next != '\r') {
+            advance += letter_spacing;
+        }
+        if (target_x < x + advance / 2.0f) return byte_offset;
+        x += advance;
+        current = next;
+        byte_offset += bytes;
+    }
+    return byte_offset;
+}
+
 /**
  * Calculate character offset from mouse click position within a text rect
  * Returns the byte offset closest to the click position, aligned to UTF-8 character boundaries
  */
 int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     TextRect* rect, float mouse_x, float mouse_y) {
-    unsigned char* str = text->text_data();
-    float x = evcon->block.x + rect->x;
-
-    unsigned char* p = str + rect->start_index;
-    EventTextRun run = event_text_run(text, rect);
-    unsigned char* end = run.end;
-    int byte_offset = rect->start_index;  // track byte offset for return value
-
-    float raster_scale = ui_context_raster_scale(evcon->ui_context);
-
-    // Get letter-spacing and word-spacing from font style (same as used in layout)
-    float letter_spacing = evcon->font.style ? evcon->font.style->letter_spacing : 0.0f;
-    float word_spacing = evcon->font.style ? evcon->font.style->word_spacing : 0.0f;
-
-    bool has_space = false;
-
-    if (run.is_pdf && run.pdf_width > 0.0f) {
-        float visible_width = pdf_text_run_visible_natural_width(evcon, rect, run.pdf_copy_space);
-        if (visible_width > 0.0f) {
-            float local_pdf_x = mouse_x - x;
-            if (local_pdf_x <= 0.0f) return rect->start_index;
-            if (local_pdf_x >= run.pdf_width) return run.visible_end_offset;
-            mouse_x = x + local_pdf_x * visible_width / run.pdf_width;
-        }
-    }
-
-    log_debug("calculate_char_offset: mouse_x=%.1f, start x=%.1f, rect.width=%.1f, rect.length=%d, block.x=%.1f, rect.x=%.1f",
-              mouse_x, x, rect->width, rect->length, evcon->block.x, rect->x);
-
-    // Skip leading collapsed whitespace (spaces, tabs, newlines at the start)
-    // These characters don't contribute to visual width but are part of the text
-    while (p < end && (is_space(*p) || *p == '\n' || *p == '\r' || *p == '\t')) {
-        p++;
-        byte_offset++;
-    }
-
-    while (p < end) {
-        float wd = 0;
-        int bytes = 1;  // number of bytes for current character
-
-        // Skip newlines and carriage returns - they don't have visual width
-        if (*p == '\n' || *p == '\r') {
-            // At end of visual content - treat rest as trailing whitespace
-            break;
-        }
-        if (is_space(*p)) {
-            if (has_space) {
-                // Consecutive spaces are collapsed - skip without adding width
-                p++;
-                byte_offset++;
-                continue;
-            }
-            has_space = true;
-            wd = evcon->font.style->space_width + word_spacing;
-            bytes = 1;  // spaces are always single byte
-        } else {
-            has_space = false;
-            // Decode UTF-8 codepoint to handle multi-byte characters
-            uint32_t codepoint;
-            bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
-            if (bytes <= 0) {
-                // Invalid UTF-8 sequence, skip single byte
-                bytes = 1;
-                codepoint = *p;
-            }
-            // Use font_load_glyph to match layout calculation
-            FontStyleDesc _sd = font_style_desc_from_prop(evcon->font.style);
-            LoadedGlyph* glyph = font_load_glyph(font_box_handle(&evcon->font), &_sd, codepoint, false);
-            if (!glyph) {
-                log_error("Could not load codepoint U+%04X", codepoint);
-                p += bytes;
-                byte_offset += bytes;
-                continue;
-            }
-            wd = glyph->advance_x / raster_scale;
-        }
-
-        // Add letter-spacing (applied after each character except the last)
-        unsigned char* next_p = p + bytes;
-        if (next_p < end && *next_p != '\n' && *next_p != '\r') {
-            wd += letter_spacing;
-        }
-
-        float char_mid = x + wd / 2.0f;
-
-        // If mouse is before the midpoint of this character, return current byte offset
-        // (caret should be placed before this character)
-        if (mouse_x < char_mid) {
-            log_debug("calculate_char_offset: matched at byte_offset %d", byte_offset);
-            return byte_offset;
-        }
-
-        x += wd;
-        p += bytes;
-        byte_offset += bytes;
-    }
-
-    log_debug("calculate_char_offset: end of text, returning byte_offset=%d", byte_offset);
-    // Mouse is after all characters - return end offset
-    return byte_offset;
+    (void)mouse_y;
+    return event_text_offset_for_x(
+        evcon->ui_context, &evcon->font, text, rect, mouse_x, evcon->block.x);
 }
 
 /**
@@ -9083,47 +9189,20 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
  */
 void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
     TextRect* rect, int target_offset, float* out_x, float* out_y, float* out_height) {
-
-    unsigned char* str = text->text_data();
-    float x = rect->x;  // relative to block
-    float y = rect->y;
-
-    unsigned char* p = str + rect->start_index;
     EventTextRun run = event_text_run(text, rect);
-    unsigned char* end = run.end;
-    int byte_offset = rect->start_index;  // track byte offset
     float raster_scale = ui_context_raster_scale(evcon->ui_context);
-    bool has_space = false;
 
     // Debug: log initial state
     log_debug("[CALC-POS] target_offset=%d, rect->x=%.1f, rect->start_index=%d, raster_scale=%.1f, y_ppem=%d",
         target_offset, rect->x, rect->start_index, raster_scale,
         font_box_handle(&evcon->font) ? (int)font_handle_get_physical_size_px(font_box_handle(&evcon->font)) : -1);
 
-    while (p < end && byte_offset < target_offset) {
-        float wd = 0;
-        int bytes;
-        bool has_advance = event_text_glyph_advance(
-            &evcon->font, p, end, &has_space, &bytes, &wd);
-        if (!has_advance) { p += bytes; byte_offset += bytes; continue; }
-        x += wd;
-        p += bytes;
-        byte_offset += bytes;
-    }
-    if (run.is_pdf && run.pdf_width > 0.0f) {
-        float visible_width = pdf_text_run_visible_natural_width(evcon, rect, run.pdf_copy_space);
-        if (visible_width > 0.0f) {
-            if (target_offset >= run.visible_end_offset) {
-                x = rect->x + run.pdf_width;
-            } else {
-                x = rect->x + (x - rect->x) * run.pdf_width / visible_width;
-            }
-        }
-    }
+    float x = event_text_x_for_offset(
+        &evcon->font, text, rect, target_offset, run);
     log_debug("[CALC-POS] final x=%.1f for target_offset=%d", x, target_offset);
 
     *out_x = x;
-    *out_y = y;
+    *out_y = rect->y;
     *out_height = rect->height;  // use rect height as caret height
 }
 
@@ -9168,33 +9247,7 @@ static float event_glyph_x_resolver(UiContext* uicon, ViewText* text,
     if (text->font) setup_font(uicon, &fbox, text->font);
     if (!font_box_handle(&fbox) || !fbox.style) return rect->x;
 
-    unsigned char* str = text->text_data();
-    unsigned char* p = str + rect->start_index;
-    unsigned char* end = str + rect_end_offset;
-    int byte_off = rect->start_index;
-    float x = rect->x;
-    bool has_space = false;
-
-    while (p < end && byte_off < byte_offset) {
-        float wd = 0;
-        int bytes;
-        bool has_advance = event_text_glyph_advance(
-            &fbox, p, end, &has_space, &bytes, &wd);
-        if (!has_advance) { p += bytes; byte_off += bytes; continue; }
-        x += wd;
-        p += bytes;
-        byte_off += bytes;
-    }
-    if (run.is_pdf && run.pdf_width > 0.0f) {
-        float visible_width = pdf_text_run_visible_natural_width(&fbox, rect, run.pdf_copy_space);
-        if (visible_width > 0.0f) {
-            if (byte_offset >= run.visible_end_offset) {
-                return rect->x + run.pdf_width;
-            }
-            return rect->x + (x - rect->x) * run.pdf_width / visible_width;
-        }
-    }
-    return x;
+    return event_text_x_for_offset(&fbox, text, rect, byte_offset, run);
 }
 
 // Static registration: hooks the resolver into dom_range_resolver.cpp at
@@ -9213,79 +9266,17 @@ static int event_byte_offset_for_x_resolver(UiContext* uicon, ViewText* text,
     if (!text || !rect) return rect ? rect->start_index : 0;
     if (rect->length <= 0) return rect->start_index;
     if (target_local_x <= rect->x) return rect->start_index;
-    EventTextRun run = event_text_run(text, rect);
-    float target_x = target_local_x;
-
-    if (run.is_pdf && run.pdf_width > 0.0f) {
-        if (target_x >= rect->x + run.pdf_width) return run.visible_end_offset;
-    } else if (target_x >= rect->x + rect->width) {
-        return rect->start_index + rect->length;
-    }
-
     FontBox fbox;
     memset(&fbox, 0, sizeof(fbox));
     if (text->font) setup_font(uicon, &fbox, text->font);
     if (!font_box_handle(&fbox) || !fbox.style) return rect->start_index;
-
-    unsigned char* str = text->text_data();
-    unsigned char* p = str + rect->start_index;
-    unsigned char* end = run.end;
-    int byte_off = rect->start_index;
-    float x = rect->x;
-    bool has_space = false;
-
-    if (run.is_pdf && run.pdf_width > 0.0f) {
-        float visible_width = pdf_text_run_visible_natural_width(&fbox, rect, run.pdf_copy_space);
-        if (visible_width > 0.0f) {
-            target_x = rect->x + (target_x - rect->x) * visible_width / run.pdf_width;
-        }
-    }
-
-    while (p < end) {
-        float wd = 0;
-        int bytes;
-        bool has_advance = event_text_glyph_advance(
-            &fbox, p, end, &has_space, &bytes, &wd);
-        if (!has_advance) { p += bytes; byte_off += bytes; continue; }
-        // Caret goes BEFORE this glyph if target_local_x is left of the midpoint.
-        if (target_x < x + wd / 2.0f) return byte_off;
-        x += wd;
-        p += bytes;
-        byte_off += bytes;
-    }
-    return run.is_pdf ? run.visible_end_offset : rect->start_index + rect->length;
+    return event_text_offset_for_x(
+        uicon, &fbox, text, rect, target_local_x, 0.0f);
 }
 
 __attribute__((constructor))
 static void register_event_byte_offset_for_x_resolver() { // UNUSED_FUNCTION_OK: process constructor installs the DOM range resolver
     dom_range_set_byte_offset_for_x_resolver(event_byte_offset_for_x_resolver);
-}
-
-/**
- * Find the TextRect containing a given character offset
- * Returns the TextRect that contains the offset, or the last rect if offset is beyond all rects
- */
-TextRect* find_text_rect_for_offset(ViewText* text, int char_offset) {
-    if (!text || !text->rect) return nullptr;
-
-    TextRect* rect = text->rect;
-    TextRect* prev_rect = rect;
-
-    while (rect) {
-        int rect_start = rect->start_index;
-        int rect_end = rect->start_index + rect->length;
-
-        // Check if offset is within this rect
-        if (char_offset >= rect_start && char_offset <= rect_end) {
-            return rect;
-        }
-
-        prev_rect = rect;
-        rect = rect->next;
-    }
-
-    // If offset is beyond all rects, return the last one
-    return prev_rect;
 }
 
 static bool text_point_inside_existing_selection(DocState* state, View* view, int char_offset) {
@@ -9344,7 +9335,7 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
         }
 
         // Find the TextRect containing the current offset
-        TextRect* rect = find_text_rect_for_offset(text, caret_offset);
+        TextRect* rect = view_geometry_text_rect_for_offset(text, caret_offset);
         if (!rect) {
             log_debug("[CARET-VISUAL] Could not find rect for offset %d", caret_offset);
             return;
@@ -9830,26 +9821,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 // Calculate the correct block position for the drag target view
                 // by walking up ITS parent chain
-                float sel_block_x = 0, sel_block_y = 0;
-                View* parent = text->parent;
-                while (parent) {
-                    if (parent->view_type == RDT_VIEW_BLOCK ||
-                        parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-                        parent->view_type == RDT_VIEW_LIST_ITEM) {
-                        sel_block_x += (lam::view_require_block(parent))->x;
-                        sel_block_y += (lam::view_require_block(parent))->y;
-                    }
-                    parent = parent->parent;
-                }
-
-                // Add the iframe offset that was stored when selection started
-                sel_block_x += selection_iframe_offset_x;
-                sel_block_y += selection_iframe_offset_y;
+                RdtLogicalPoint selection_origin =
+                    view_geometry_local_to_block_document(
+                        static_cast<View*>(text),
+                        {selection_iframe_offset_x, selection_iframe_offset_y});
 
                 // Save evcon.block and temporarily set it to the selection view's block position
                 BlockBlot saved_block = evcon.block;
-                evcon.block.x = sel_block_x;
-                evcon.block.y = sel_block_y;
+                evcon.block.x = selection_origin.x;
+                evcon.block.y = selection_origin.y;
 
                 // Pick the TextRect whose vertical band best matches mouse_y. For
                 // multi-line wrapped text the chain `text->rect -> next -> next ...`
@@ -9868,7 +9848,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // through that gap directly below the anchor x and the
                 // recomputed offset would equal the anchor offset -> selection
                 // visually disappears for one frame.
-                float rel_y = motion->y - sel_block_y;
+                float rel_y = motion->y - selection_origin.y;
                 TextRect* picked = rect;
                 bool in_gap = false;
                 int gap_offset = -1;
@@ -9947,7 +9927,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                       &caret_x, &caret_y, &caret_height);
 
                 log_debug("[CARET DRAG] char_offset=%d, calc pos: (%.1f, %.1f) height=%.1f, sel_block: (%.1f, %.1f)",
-                    char_offset, caret_x, caret_y, caret_height, sel_block_x, sel_block_y);
+                    char_offset, caret_x, caret_y, caret_height,
+                    selection_origin.x, selection_origin.y);
 
                 // Restore evcon.block and evcon.font
                 evcon.block = saved_block;
@@ -10041,27 +10022,26 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             uicon->mouse_state.is_mouse_down = event->type == RDT_EVENT_MOUSE_DOWN;
         }
 
-        // F8 (Radiant_Design_Form_Input.md §3.10): native context menu
-        // hit-testing. Runs before any focus / drag work so a click inside
-        // the popup or its dismissal doesn't reach underlying views.
+        // ES34: native context-menu hit-testing runs before focus/drag work so
+        // an overlay click cannot reach the underlying view. It reports only
+        // the physical row; the package maps it to a command and cleans up.
         if (event->type == RDT_EVENT_MOUSE_DOWN && state && state->context_menu_target) {
             float mxp = (float)btn_event->x;
             float myp = (float)btn_event->y;
             if (context_menu_contains(state, mxp, myp)) {
                 if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
-                    ContextMenuEditHooks hooks;
-                    hooks.cut_selection = dispatch_context_menu_cut;
-                    hooks.delete_selection = dispatch_context_menu_delete;
-                    hooks.paste_text = dispatch_context_menu_paste;
-                    hooks.select_all = dispatch_context_menu_select_all;
-                    hooks.user = &evcon;
-                    context_menu_click_with_hooks(state, mxp, myp, &hooks);
+                    InputIntent intent;
+                    intent.context_menu_item = context_menu_item_at(state, mxp, myp);
+                    if (intent.context_menu_item >= 0) {
+                        radiant_dispatch_behavior_context_menu_action(
+                            &evcon, state->context_menu_target, &intent);
+                    }
                 }
                 break;
             }
-            // Click outside the open menu always dismisses it; we then
-            // continue with normal handling so the new click still works.
-            context_menu_close(state);
+            // The package chooses the dismissal, then this click continues to
+            // its ordinary target so the newly addressed control still works.
+            radiant_dispatch_behavior_context_menu_dismiss(state->context_menu_target);
         }
         // F10: a right click first emits the ordinary cancelable DOM event, so
         // an author can install a custom menu. Only an unclaimed default reaches
@@ -10069,11 +10049,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         if (event->type == RDT_EVENT_MOUSE_DOWN &&
             btn_event->button == GLFW_MOUSE_BUTTON_RIGHT &&
             state && evcon.target && evcon.target->is_element()) {
-            bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
-                "contextmenu", btn_event->x, btn_event->y,
-                btn_event->button, 0,
-                event_mod_ctrl(btn_event->mods), event_mod_shift(btn_event->mods),
-                event_mod_alt(btn_event->mods), event_mod_super(btn_event->mods), 0);
+            bool prevented = radiant_dispatch_button_mouse_event(
+                &evcon, evcon.target, "contextmenu", btn_event->x,
+                btn_event->y, btn_event, 0, 0);
             if (!prevented) {
                 state->pending_context_menu_target = evcon.target;
                 state->pending_context_menu_x = (float)btn_event->x;
@@ -10095,43 +10073,75 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Set :active state
             update_active_state(&evcon, evcon.target, true);
 
-            bool pointer_prevented = radiant_dispatch_pointer_event(
-                &evcon, evcon.target, "pointerdown",
-                btn_event->x, btn_event->y, btn_event->button,
-                1 << btn_event->button,
-                event_mod_ctrl(btn_event->mods),
-                event_mod_shift(btn_event->mods),
-                event_mod_alt(btn_event->mods),
-                event_mod_super(btn_event->mods), "mouse");
+            bool pointer_prevented = radiant_dispatch_button_pointer_event(
+                &evcon, evcon.target, "pointerdown", btn_event->x,
+                btn_event->y, btn_event, 1 << btn_event->button);
             if (pointer_prevented) evcon.default_prevented = true;
             // Dispatch through JS EventTarget before native defaults so
             // preventDefault() can suppress focus/caret default actions.
             {
-                bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
-                    "mousedown", btn_event->x, btn_event->y,
-                    btn_event->button, 1 << btn_event->button,
-                    event_mod_ctrl(btn_event->mods),
-                    event_mod_shift(btn_event->mods),
-                    event_mod_alt(btn_event->mods),
-                    event_mod_super(btn_event->mods),
-                    1);
+                bool prevented = radiant_dispatch_button_mouse_event(
+                    &evcon, evcon.target, "mousedown", btn_event->x,
+                    btn_event->y, btn_event, 1 << btn_event->button, 1);
                 if (prevented) evcon.default_prevented = true;
             }
 
-            // Update focus if target is focusable (mouse-triggered focus).
-            // A canceled mousedown suppresses the browser focus default action;
-            // toolbar controls use this to keep text-control selection active.
-            // Hit testing commonly lands on a button's text child; browser
-            // mouse focus belongs to the nearest focusable ancestor instead.
-            View* mouse_focus = mouse_focus_target(evcon.target);
-            if (!evcon.default_prevented && mouse_focus) {
-                update_focus_state(&evcon, mouse_focus, false);  // from_keyboard=false
-            } else if (!evcon.default_prevented) {
-                DomElement* rich_host = rich_editable_from_target(evcon.target);
-                if (rich_host && is_view_focusable(static_cast<View*>(rich_host))) {
-                    update_focus_state(&evcon, static_cast<View*>(rich_host), false);
+            // A scrollbar hit has its own package-selected default. It never
+            // enters mousepress: clicking browser chrome must not clear focus
+            // or begin a document selection behind the scrollbar.
+            ViewBlock* scrollbar_press_block = nullptr;
+            if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+                evcon.target->is_block()) {
+                ViewBlock* target_block = lam::view_require_block(evcon.target);
+                if (scrollpane_press_part(&evcon, target_block) !=
+                    SCROLLBAR_PRESS_NONE) {
+                    scrollbar_press_block = target_block;
                 }
             }
+            if (!evcon.default_prevented && scrollbar_press_block) {
+                uint64_t scroll_epoch = s_scroll_op_epoch;
+                radiant_dispatch_behavior_scrollbar_press(&evcon, evcon.target);
+                if (s_scroll_op_epoch != scroll_epoch &&
+                    scrollpane_apply_press_operation(&evcon, scrollbar_press_block,
+                                                      s_scroll_op_name)) {
+                    radiant_dispatch_simple_event(&evcon,
+                        static_cast<View*>(scrollbar_press_block),
+                        "scroll", false, false);
+                }
+            }
+
+            // S12.1.3: after author cancellation and element-local defaults
+            // settle, the package chooses mouse focus and selection policy.
+            // Native consumes only the named requests, preserving the focus
+            // state-machine and live selection geometry at this event boundary.
+            uint64_t mouse_focus_epoch = radiant_mouse_focus_epoch();
+            uint64_t pointer_selection_epoch = radiant_pointer_selection_epoch();
+            if (!evcon.default_prevented && !scrollbar_press_block) {
+                radiant_dispatch_behavior_mouse_press(&evcon, evcon.target);
+            }
+            if (!evcon.default_prevented && !scrollbar_press_block &&
+                radiant_mouse_focus_epoch() != mouse_focus_epoch) {
+                update_focus_state(&evcon, radiant_mouse_focus_target(), false);
+            }
+
+            const char* pointer_selection_operation = nullptr;
+            if (!evcon.default_prevented && !scrollbar_press_block &&
+                radiant_pointer_selection_epoch() != pointer_selection_epoch) {
+                pointer_selection_operation = radiant_pointer_selection_operation();
+            }
+            bool pointer_selection_start = pointer_selection_operation &&
+                strcmp(pointer_selection_operation, "select") == 0;
+            bool pointer_selection_extend = pointer_selection_operation &&
+                strcmp(pointer_selection_operation, "extend") == 0;
+            bool pointer_selection_word = pointer_selection_operation &&
+                strcmp(pointer_selection_operation, "selectWord") == 0;
+            bool pointer_selection_line = pointer_selection_operation &&
+                strcmp(pointer_selection_operation, "selectLine") == 0;
+            bool pointer_selection_all = pointer_selection_operation &&
+                strcmp(pointer_selection_operation, "selectAll") == 0;
+            bool pointer_selection_requested = pointer_selection_start ||
+                pointer_selection_extend || pointer_selection_word ||
+                pointer_selection_line || pointer_selection_all;
 
             // A click that lands in an empty / non-text editable element (an
             // empty <li>, an empty <p>, a block holding only an image) resolves
@@ -10139,7 +10149,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // so the element is focusable/typable, before the text-snapping and
             // host-last-text fallbacks below (which would jump to a neighbour).
             bool placed_element_caret = false;
-            if (!evcon.default_prevented) {
+            if (pointer_selection_start && !evcon.default_prevented) {
                 DomDocument* mdoc = event_context_target_document(&evcon);
                 View* mroot = (mdoc && mdoc->view_tree)
                     ? static_cast<View*>(mdoc->view_tree->root) : nullptr;
@@ -10163,7 +10173,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
             }
 
-            if (!placed_element_caret && !evcon.default_prevented &&
+            if (pointer_selection_start && !placed_element_caret && !evcon.default_prevented &&
                 evcon.target->view_type != RDT_VIEW_TEXT &&
                 !is_view_focusable(evcon.target)) {
                 DomElement* rich_host = rich_editable_from_target(evcon.target);
@@ -10223,7 +10233,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Handle click in text - position caret or start selection.
             // This is a mousedown default action, so a canceled mousedown must
             // leave the existing text-control selection intact.
-            if (!placed_element_caret &&
+            if (pointer_selection_requested && !placed_element_caret &&
                 !evcon.default_prevented && evcon.target->view_type == RDT_VIEW_TEXT &&
                 evcon.target_text_rect && text_target_allows_caret(evcon.target)) {
                 ViewText* text = lam::view_require_text(evcon.target);
@@ -10253,9 +10263,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 log_debug("CLICK IN TEXT at offset %d (target=%p)", char_offset, evcon.target);
 
-                bool mouse_down_in_selection = btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
-                    event->mouse_button.clicks == 1 &&
-                    !(event->mouse_button.mods & RDT_MOD_SHIFT) &&
+                bool mouse_down_in_selection = pointer_selection_start &&
                     text_point_inside_existing_selection(state, evcon.target, char_offset);
 
                 if (mouse_down_in_selection) {
@@ -10265,25 +10273,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
                 } else {
 
-                bool shift_extending = (event->mouse_button.mods & RDT_MOD_SHIFT) &&
+                bool shift_extending = pointer_selection_extend &&
                     selection_has_projection(state);
                 if (!shift_extending) {
                     // Set caret at clicked position for a fresh placement. A
                     // shift-click must preserve the existing collapsed
                     // selection anchor so state_store_selection_extend_to_offset() can use it.
-                    View* focused = focus_get(state);
-                    if (focused && focused->is_element()) {
-                        DomElement* focused_elem = lam::dom_require_element(focused);
-                        DomNode* target_node = static_cast<DomNode*>(evcon.target);
-                        DomNode* focused_node = static_cast<DomNode*>(focused);
-                        if (tc_is_text_control(focused_elem) &&
-                            !dom_node_is_descendant_of(target_node, focused_node)) {
-                            // plain document text clicks must transfer caret ownership
-                            // away from the focused text control before StateStore
-                            // refresh preserves that control's selection shadow.
-                            update_focus_state(&evcon, NULL, false);
-                        }
-                    }
                     collapse_active_text_control_selection_for_rich_target(state, evcon.target);
                     state_store_caret_collapse_to_view_offset(state, evcon.target, char_offset);
                 }
@@ -10302,27 +10297,21 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     log_debug("CARET VISUAL: x=%.1f y=%.1f height=%.1f iframe_offset=(%.1f,%.1f)",
                         caret_x, caret_y, caret_height,
                         caret_iframe_offset_x, caret_iframe_offset_y);
-                    float render_x = caret_x;
-                    float render_y = caret_y;
-                    for (View* render_parent = text->parent; render_parent; render_parent = render_parent->parent) {
-                        if (render_parent->view_type == RDT_VIEW_BLOCK ||
-                            render_parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-                            render_parent->view_type == RDT_VIEW_LIST_ITEM) {
-                            render_x += render_parent->x;
-                            render_y += render_parent->y;
-                        }
-                    }
-                    render_x += caret_iframe_offset_x;
-                    render_y += caret_iframe_offset_y;
+                    RdtLogicalPoint render_point =
+                        view_geometry_local_to_block_document(
+                            static_cast<View*>(text),
+                            {caret_x + caret_iframe_offset_x,
+                             caret_y + caret_iframe_offset_y});
                     log_info("[CARET FINAL] mouse=(%.1f,%.1f) local=(%.1f,%.1f) render=(%.1f,%.1f) offset=%d block=(%.1f,%.1f) rect=(%.1f,%.1f %.1fx%.1f)",
                         btn_event->x, btn_event->y, caret_x, caret_y,
-                        render_x, render_y, char_offset, evcon.block.x, evcon.block.y,
+                        render_point.x, render_point.y, char_offset,
+                        evcon.block.x, evcon.block.y,
                         rect->x, rect->y, rect->width, rect->height);
                 }
 #endif
 
                 // Start new selection if shift not pressed, otherwise extend
-                if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                if (!pointer_selection_extend) {
                     SmTransitionGuard sm_guard(state, SM_FAMILY_SELECTION,
                         SM_EV_UI_START_POINTER_SELECTION, evcon.target);
                     dispatch_selectstart(&evcon, evcon.target);
@@ -10343,25 +10332,27 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     selection_project_focus_visual(state, caret_x, caret_y, caret_height);
                 }
 
-                if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                if (pointer_selection_line) {
                     const char* text_buf = (const char*)text->text_data();
                     uint32_t text_len = text_buf ? (uint32_t)strlen(text_buf) : 0;
                     uint32_t click_off = char_offset < 0 ? 0 : (uint32_t)char_offset;
                     if (click_off > text_len) click_off = text_len;
-                    if (event->mouse_button.clicks >= 3) {
-                        uint32_t start = te_line_start(text_buf, text_len, click_off);
-                        uint32_t end = te_line_end(text_buf, text_len, click_off);
+                    uint32_t start = te_line_start(text_buf, text_len, click_off);
+                    uint32_t end = te_line_end(text_buf, text_len, click_off);
+                    te_apply_byte_range(state, evcon.target, start, end);
+                    dispatch_rich_selection_snapshot(&evcon, state, evcon.target,
+                        "selectLine", nullptr);
+                } else if (pointer_selection_word) {
+                    const char* text_buf = (const char*)text->text_data();
+                    uint32_t text_len = text_buf ? (uint32_t)strlen(text_buf) : 0;
+                    uint32_t click_off = char_offset < 0 ? 0 : (uint32_t)char_offset;
+                    if (click_off > text_len) click_off = text_len;
+                    uint32_t start = te_word_start(text_buf, text_len, click_off);
+                    uint32_t end = te_word_end(text_buf, text_len, click_off);
+                    if (start != end) {
                         te_apply_byte_range(state, evcon.target, start, end);
                         dispatch_rich_selection_snapshot(&evcon, state, evcon.target,
-                            "selectLine", nullptr);
-                    } else if (event->mouse_button.clicks == 2) {
-                        uint32_t start = te_word_start(text_buf, text_len, click_off);
-                        uint32_t end = te_word_end(text_buf, text_len, click_off);
-                        if (start != end) {
-                            te_apply_byte_range(state, evcon.target, start, end);
-                            dispatch_rich_selection_snapshot(&evcon, state, evcon.target,
-                                "selectWord", nullptr);
-                        }
+                            "selectWord", nullptr);
                     }
                 }
 
@@ -10370,7 +10361,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Restore font
                 evcon.font = saved_font;
                 evcon.need_repaint = true;
-            } else if (!evcon.default_prevented && evcon.target->is_element()) {
+            } else if (pointer_selection_requested && !evcon.default_prevented &&
+                       evcon.target->is_element()) {
                 DomElement* target_elem = lam::dom_require_element(evcon.target);
 
                 // Text input form controls: place caret inside the input
@@ -10403,7 +10395,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // (RDT_EVENT_MOUSE_MOVE with is_selecting=true) hits
                     // the single-line input drag-selection branch and
                     // mirrors the result back into form->selection_*.
-                    if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                    if (!pointer_selection_extend) {
                         dispatch_form_selection_start(&evcon, target_elem, state,
                             evcon.target, (uint32_t)char_offset, "mouseDown");
                     } else if (selection_has_projection(state)) {
@@ -10414,9 +10406,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // F2 (Radiant_Design_Form_Input.md §3.4): dblclick =>
                     // word selection, tripleclick (or higher) => select-all
                     // for single-line <input>.
-                    if (event->mouse_button.clicks >= 3) {
+                    if (pointer_selection_all) {
                         dispatch_form_select_all(&evcon, target_elem, state, evcon.target);
-                    } else if (event->mouse_button.clicks == 2) {
+                    } else if (pointer_selection_word) {
                         dispatch_form_select_word(
                             &evcon, target_elem, state, evcon.target, char_offset);
                     }
@@ -10433,7 +10425,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     int char_offset = (int)click_boundary.offset; // INT_CAST_OK: StateStore selection API uses int offsets.
 
                     // Start/extend textarea selection
-                    if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                    if (!pointer_selection_extend) {
                         dispatch_form_selection_start(&evcon, target_elem, state,
                             evcon.target, (uint32_t)char_offset, "mouseDown");
                     } else if (selection_has_projection(state)) {
@@ -10444,7 +10436,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     log_debug("TEXTAREA CARET: offset=%d", char_offset);
                     // F2: dblclick selects the word, tripleclick selects the
                     // logical line in <textarea>.
-                    if (event->mouse_button.clicks >= 3) {
+                    if (pointer_selection_line) {
                         const char* select_value = target_elem->form
                             ? target_elem->form->current_value : nullptr;
                         uint32_t select_len = target_elem->form
@@ -10454,7 +10446,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         uint32_t end = te_line_end(select_value, select_len, click_off);
                         dispatch_form_selection_range(&evcon, target_elem, state,
                             evcon.target, start, end, "selectLine");
-                    } else if (event->mouse_button.clicks == 2) {
+                    } else if (pointer_selection_word) {
                         dispatch_form_select_word(
                             &evcon, target_elem, state, evcon.target, char_offset);
                     }
@@ -10538,13 +10530,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // act on one that was already open when the click arrived.
             View* dropdown_open_at_press = state ? state->open_dropdown : nullptr;
             if (evcon.target) {
-                bool pointer_up_prevented = radiant_dispatch_pointer_event(
-                    &evcon, evcon.target, "pointerup",
-                    btn_event->x, btn_event->y, btn_event->button, 0,
-                    event_mod_ctrl(btn_event->mods),
-                    event_mod_shift(btn_event->mods),
-                    event_mod_alt(btn_event->mods),
-                    event_mod_super(btn_event->mods), "mouse");
+                bool pointer_up_prevented = radiant_dispatch_button_pointer_event(
+                    &evcon, evcon.target, "pointerup", btn_event->x,
+                    btn_event->y, btn_event, 0);
                 if (pointer_up_prevented) evcon.default_prevented = true;
             }
             // Dispatch the JS 'mouseup' event through the EventTarget pipeline
@@ -10554,14 +10542,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // drag-reorder using window.addEventListener('mouseup') — never ran
             // under `view`. It bubbles to document/window like mousedown does.
             if (evcon.target) {
-                bool up_prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
-                    "mouseup", btn_event->x, btn_event->y,
-                    btn_event->button, 1 << btn_event->button,
-                    event_mod_ctrl(btn_event->mods),
-                    event_mod_shift(btn_event->mods),
-                    event_mod_alt(btn_event->mods),
-                    event_mod_super(btn_event->mods),
-                    1);
+                bool up_prevented = radiant_dispatch_button_mouse_event(
+                    &evcon, evcon.target, "mouseup", btn_event->x,
+                    btn_event->y, btn_event, 1 << btn_event->button, 1);
                 if (up_prevented) evcon.default_prevented = true;
             }
 
@@ -10743,8 +10726,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // Option was selected, done - skip other click handlers
                     dropdown_handled = true;
                 } else {
-                    // Check if clicking outside dropdown - close it
-                    close_dropdown_if_outside(&evcon, (float)mouse_x, (float)mouse_y);
+                    // Native resolves containment; the <select> template owns
+                    // whether an outside release closes its open popup.
+                    if (dropdown_click_is_outside(&evcon, (float)mouse_x,
+                                                  (float)mouse_y)) {
+                        radiant_dispatch_behavior_dropdown_dismiss(
+                            static_cast<View*>(state->open_dropdown));
+                    }
                     dropdown_handled = true;  // Still handled - don't re-open dropdown
                 }
             }
@@ -10762,14 +10750,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 bool click_on_disabled_control = click_target_is_disabled_control(
                     state, evcon.target);
                 if (evcon.target && !click_on_disabled_control) {
-                    bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
-                        "click", mouse_x, mouse_y,
-                        btn_event->button, 0,
-                        event_mod_ctrl(btn_event->mods),
-                        event_mod_shift(btn_event->mods),
-                        event_mod_alt(btn_event->mods),
-                        event_mod_super(btn_event->mods),
-                        1);
+                    bool prevented = radiant_dispatch_button_mouse_event(
+                        &evcon, evcon.target, "click", mouse_x, mouse_y,
+                        btn_event, 0, 1);
                     if (prevented) evcon.default_prevented = true;
                 }
                 // The final primary click in a double-click carries the same
@@ -10778,11 +10761,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // already used the click count on mousedown; this dispatch adds
                 // no second selection policy.
                 if (evcon.target && btn_event->clicks == 2) {
-                    radiant_dispatch_mouse_event(&evcon, evcon.target,
-                        "dblclick", mouse_x, mouse_y,
-                        btn_event->button, 0,
-                        event_mod_ctrl(btn_event->mods), event_mod_shift(btn_event->mods),
-                        event_mod_alt(btn_event->mods), event_mod_super(btn_event->mods), 2);
+                    radiant_dispatch_button_mouse_event(
+                        &evcon, evcon.target, "dblclick", mouse_x, mouse_y,
+                        btn_event, 0, 2);
                 }
 
                 // Handle click on <video> element — play/pause toggle + seek bar
@@ -10977,18 +10958,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 log_debug("wheel default suppressed by preventDefault()");
                 break;
             }
-            // build stack of views from root to target view
-            ArrayList* target_list = build_view_stack(&evcon, evcon.target);
-
-            // fire event to views in the stack (inside iframe if applicable)
-            fire_events(&evcon, target_list);
-            arraylist_free(target_list);
-
-            // Propagate scroll to iframe container (the outer iframe block handles scrolling)
-            if (evcon.iframe_container) {
-                ArrayList* parent_list = build_view_stack(&evcon, evcon.iframe_container);
-                fire_events(&evcon, parent_list);
-                arraylist_free(parent_list);
+            // S12.1.3: after author WheelEvent listeners settle, the package
+            // decides whether this physical gesture has a scrolling default.
+            // The chosen request leaves target/range/scroll-chain resolution
+            // to native layout state.
+            uint64_t scroll_epoch = s_scroll_op_epoch;
+            radiant_dispatch_behavior_scroll_wheel(&evcon, evcon.target);
+            if (s_scroll_op_epoch != scroll_epoch &&
+                strcmp(s_scroll_op_name, "wheel") == 0) {
+                apply_wheel_scroll_operation(&evcon, evcon.target);
             }
         } else {
             log_debug("No target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
@@ -11000,9 +10978,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         DocState* state = event_context_target_state(&evcon);
         if (!state) break;
 
-        // F8: Esc closes the native context menu before any other handler.
+        // ES34: Esc remains modal-overlay precedence, but the package now
+        // owns the teardown rather than native event code.
         if (state->context_menu_target && key_event->key == RDT_KEY_ESCAPE) {
-            context_menu_close(state);
+            radiant_dispatch_behavior_context_menu_dismiss(state->context_menu_target);
             evcon.need_repaint = true;
             break;
         }
@@ -11486,17 +11465,23 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         if (!is_form_input && focused && caret_has_projection(state)) {
-            // Delete any existing selection first
-            if (selection_has(state)) {
-                // TODO: delete selected text
-                state_store_selection_clear(state);
+            // ES35: rich/form appliers declined this callback. The old fallback
+            // never changed text; `textinputfallback` now decides whether its
+            // selection-collapse plus character advance remains appropriate.
+            InputIntent intent;
+            char utf8_buf[5];
+            if (input_intent_from_text_input(text_event->codepoint, &intent,
+                                             utf8_buf, sizeof(utf8_buf))) {
+                uint64_t caret_epoch_before = radiant_caret_operation_epoch();
+                radiant_dispatch_behavior_text_input_fallback(&evcon, focused, &intent);
+                if (radiant_caret_operation_epoch() != caret_epoch_before) {
+                    EditingControllerHooks controller_hooks = editing_controller_hooks();
+                    editing_controller_apply_caret_operation(
+                        &evcon, state, &controller_hooks,
+                        radiant_caret_operation_name(),
+                        radiant_caret_operation_extend());
+                }
             }
-
-            // TODO: insert character at caret position
-            // This requires access to the text content of the focused element
-
-            // Move caret forward
-            state_store_caret_move(state, 1);
         }
         evcon.need_repaint = true;
         break;

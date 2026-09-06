@@ -94,11 +94,6 @@
         },
         {
           "file": "radiant/layout_debug.cpp",
-          "start": "static const char* category_name(",
-          "end": "static const char* bucket_name("
-        },
-        {
-          "file": "radiant/layout_debug.cpp",
           "start": "static const char* bucket_name(",
           "end": "void layout_debug_init("
         },
@@ -168,7 +163,7 @@
         {
           "file": "radiant/layout_flex.cpp",
           "start": "static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* line) {",
-          "end": "static float flex_line_outer_main_size("
+          "end": "static int flex_line_auto_margin_count("
         }
       ]
     },
@@ -186,7 +181,7 @@
         {
           "file": "radiant/layout_flex.cpp",
           "start": "void reposition_baseline_items(",
-          "end": "bool is_main_axis_horizontal("
+          "end": "static int create_flex_lines("
         },
         {
           "file": "radiant/layout_flex.cpp",
@@ -196,11 +191,6 @@
         {
           "file": "radiant/layout_flex.cpp",
           "start": "static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* line) {",
-          "end": "static float flex_line_outer_main_size("
-        },
-        {
-          "file": "radiant/layout_flex.cpp",
-          "start": "static float flex_line_outer_main_size(",
           "end": "static int flex_line_auto_margin_count("
         },
         {
@@ -394,32 +384,17 @@
         {
           "file": "radiant/resolve_css_style.cpp",
           "start": "case CSS_PROPERTY_BACKDROP_FILTER: {",
-          "end": "case CSS_PROPERTY_COLUMN_COUNT: {"
+          "end": "case CSS_PROPERTY_COLUMN_COUNT:"
         },
         {
           "file": "radiant/resolve_css_style.cpp",
           "start": "case CSS_PROPERTY_LIST_STYLE: {",
-          "end": "case CSS_PROPERTY_COUNTER_RESET: {"
+          "end": "case CSS_PROPERTY_COUNTER_RESET:"
         },
         {
           "file": "radiant/resolve_css_style.cpp",
           "start": "case CSS_PROPERTY_BACKGROUND: {",
           "end": "case CSS_PROPERTY_GRID_GAP:"
-        },
-        {
-          "file": "radiant/resolve_css_style.cpp",
-          "start": "case CSS_PROPERTY_TEXT_DECORATION: {",
-          "end": "case CSS_PROPERTY_TEXT_DECORATION_LINE:"
-        },
-        {
-          "file": "radiant/resolve_css_style.cpp",
-          "start": "case CSS_PROPERTY_BORDER_STYLE: {",
-          "end": "case CSS_PROPERTY_BORDER_COLOR: {"
-        },
-        {
-          "file": "radiant/resolve_css_style.cpp",
-          "start": "case CSS_PROPERTY_BORDER_COLOR: {",
-          "end": "case CSS_PROPERTY_BORDER_RADIUS: {"
         },
         {
           "file": "radiant/resolve_css_style.cpp",
@@ -429,7 +404,7 @@
         {
           "file": "radiant/resolve_css_style.cpp",
           "start": "case CSS_PROPERTY_FLEX: {",
-          "end": "case CSS_PROPERTY_ANIMATION: {"
+          "end": "case CSS_PROPERTY_LIST_STYLE_TYPE:"
         }
       ]
     },
@@ -478,7 +453,7 @@
         {
           "file": "radiant/layout_flex_multipass.cpp",
           "start": "static void flex_normalize_direct_br_boxes(",
-          "end": "static float flex_border_box_height_constraint("
+          "end": "static void flex_normalize_break_item_boxes("
         }
       ]
     },
@@ -603,9 +578,9 @@
           "end": "static bool block_has_auto_content_image_set("
         },
         {
-          "file": "radiant/resolve_css_style.cpp",
+          "file": "radiant/css_display.cpp",
           "start": "static bool css_content_value_has_image_url(",
-          "end": "DisplayValue resolve_display_value("
+          "end": "bool css_display_contents_suppresses_element("
         }
       ]
     },
@@ -766,23 +741,6 @@
       ]
     },
     {
-      "id": "editable_boundary_rect_scan_prologues",
-      "modules": ["radiant"],
-      "reason": "The general editable-boundary scorer and the text-edge scorer inspect the same TextRect geometry, but apply different vertical penalties, tie-breaking, and boundary policies; sharing only the scan prologue would add indirection without sharing the algorithms.",
-      "regions": [
-        {
-          "file": "radiant/dom_range_resolver.cpp",
-          "start": "static void find_editable_boundary_hit(",
-          "end": "static void find_text_edge_boundary_hit("
-        },
-        {
-          "file": "radiant/dom_range_resolver.cpp",
-          "start": "static void find_text_edge_boundary_hit(",
-          "end": "static bool is_non_caret_container_element("
-        }
-      ]
-    },
-    {
       "id": "outer_shadow_parameter_contracts",
       "modules": ["radiant"],
       "reason": "The outer-shadow builder, compositor, retained-image producer, and public declaration intentionally share a long geometry parameter contract; Lizard reports their signatures, not duplicated executable bodies.",
@@ -853,16 +811,6 @@
         },
         {
           "file": "radiant/cmd_layout.cpp",
-          "start": " * Recursively collect <link rel=\"stylesheet\"> references from HTML",
-          "end": "static void parse_inline_style_children("
-        },
-        {
-          "file": "radiant/cmd_layout.cpp",
-          "start": "static void collect_inline_styles_impl(",
-          "end": "    collect_inline_styles_impl(elem, engine, base_path, pool,"
-        },
-        {
-          "file": "radiant/cmd_layout.cpp",
           "start": "static void collect_stylesheets_in_document_order(",
           "end": "void collect_inline_styles_from_dom("
         }
@@ -875,40 +823,13 @@
       "regions": [
         {
           "file": "radiant/cmd_layout.cpp",
-          "start": "DomDocument* load_markdown_doc(",
-          "end": "DomDocument* load_wiki_doc("
+          "start": "DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool) {",
+          "end": "DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool) {"
         },
         {
           "file": "radiant/cmd_layout.cpp",
-          "start": "DomDocument* load_wiki_doc(",
-          "end": "DomDocument* load_latex_doc("
-        }
-      ]
-    },
-    {
-      "id": "independent_block_inline_edge_predicates",
-      "modules": ["radiant"],
-      "reason": "The before/after and any/content predicates scan inline/block edges with different stopping and visibility rules; Lizard reports only their identical child-loop setup.",
-      "regions": [
-        {
-          "file": "radiant/layout_block.cpp",
-          "start": "static bool has_any_inline_before_first_block(",
-          "end": "static bool has_any_inline_after_last_block("
-        },
-        {
-          "file": "radiant/layout_block.cpp",
-          "start": "static bool has_any_inline_after_last_block(",
-          "end": "static bool has_inline_content_before_first_block("
-        },
-        {
-          "file": "radiant/layout_block.cpp",
-          "start": "static bool has_inline_content_before_first_block(",
-          "end": "static bool has_inline_content_after_last_block("
-        },
-        {
-          "file": "radiant/layout_block.cpp",
-          "start": "static bool has_inline_content_after_last_block(",
-          "end": "static ViewBlock* find_line_clamped_descendant_in_view("
+          "start": "DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool) {",
+          "end": "DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool) {"
         }
       ]
     },
@@ -968,13 +889,13 @@
       "regions": [
         {
           "file": "radiant/resolve_css_style.cpp",
-          "start": "// rgb() and rgba() functions",
-          "end": "// hsl() and hsla() functions"
+          "start": "        if (str_ieq_const(func->name, strlen(func->name), \"rgb\") || str_ieq_const(func->name, strlen(func->name), \"rgba\")) {",
+          "end": "        else if (str_ieq_const(func->name, strlen(func->name), \"hsl\") || str_ieq_const(func->name, strlen(func->name), \"hsla\")) {"
         },
         {
           "file": "radiant/resolve_css_style.cpp",
-          "start": "// hsl() and hsla() functions",
-          "end": "static Color get_current_color("
+          "start": "        else if (str_ieq_const(func->name, strlen(func->name), \"hsl\") || str_ieq_const(func->name, strlen(func->name), \"hsla\")) {",
+          "end": "// Get the CSS currentColor value for the element being styled."
         }
       ]
     },

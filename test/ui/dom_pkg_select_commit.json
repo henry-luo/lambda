@@ -152,6 +152,44 @@
         "selector": ".sel"
       },
       "equals": "a"
+    },
+    {
+      "type": "log",
+      "message": "--- an outside release dismisses an open popup through the select template ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".sel"
+      }
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": ".sel"
+      },
+      "open_dropdown": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".sel",
+        "offset_x": 100,
+        "offset_y": 5
+      }
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": ".sel"
+      },
+      "open_dropdown": false
     }
   ]
 }

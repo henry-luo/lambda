@@ -1847,7 +1847,6 @@ void radiant_stack_free_custom_layout_paint(RadiantStackPaintList* list);
 Rect render_geometry_adjust_box_rect(Rect rect, CssEnum box, float scale,
                                      const BorderProp* border,
                                      const Spacing* padding);
-Bound render_geometry_intersect_bound_rect(Bound bound, Rect rect);
 IRect render_geometry_clip_to_pixel_bounds(Bound clip,
                                            const ImageSurface* surface);
 bool render_geometry_pixel_bounds_empty(IRect bounds);
@@ -1858,9 +1857,6 @@ Rect render_geometry_block_border_rect(const BlockBlot* parent_block,
 Rect render_geometry_block_content_rect(const BlockBlot* parent_block,
                                         const ViewBlock* block,
                                         float scale);
-Rect render_geometry_expand_rect(Rect rect, float expand);
-Bound render_geometry_rect_to_bound(Rect rect);
-bool render_geometry_bounds_intersect(Bound a, Bound b);
 float render_geometry_filter_effect_expand(const FilterProp* filter);
 float render_geometry_block_visual_overflow(const ViewBlock* block);
 bool render_geometry_transform_matrix(const TransformProp* transform,
@@ -2550,10 +2546,7 @@ AnimationInstance* gif_animation_create(AnimationScheduler* scheduler,
                                          double start_time,
                                          Pool* pool);
 
-// Tick callback for GIF animation (called by scheduler).
 void gif_animation_tick(AnimationInstance* anim, float t);
-
-// Finish callback for GIF animation.
 void gif_animation_finish(AnimationInstance* anim);
 
 // Check if an image source (file path or URL) is an animated GIF (>1 frame).
@@ -2622,10 +2615,7 @@ AnimationInstance* lottie_player_create_from_data(AnimationScheduler* scheduler,
                                                    double start_time,
                                                    Pool* pool);
 
-// Tick callback for Lottie animation (called by scheduler).
 void lottie_animation_tick(AnimationInstance* anim, float t);
-
-// Finish callback for Lottie animation.
 void lottie_animation_finish(AnimationInstance* anim);
 
 // Detect if a file path looks like a Lottie file (by extension).
@@ -2635,6 +2625,20 @@ bool lottie_detect_by_path(const char* path);
 bool lottie_detect_by_content(const unsigned char* data, size_t length);
 
 #ifdef __cplusplus
+}
+
+// Media players share the scheduler callback contract; keep the state cast in
+// one typed trampoline so each player only implements its own tick and finish.
+template <typename Player>
+static void animation_player_tick(AnimationInstance* anim, float t) {
+    Player* player = anim ? static_cast<Player*>(anim->state) : nullptr;
+    if (player) player->tick(anim, t);
+}
+
+template <typename Player>
+static void animation_player_finish(AnimationInstance* anim) {
+    Player* player = anim ? static_cast<Player*>(anim->state) : nullptr;
+    if (player) player->finish(anim);
 }
 #endif
 

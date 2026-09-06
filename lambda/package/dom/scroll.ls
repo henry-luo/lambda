@@ -1,9 +1,9 @@
-// Keyboard document-scroll policy (ESO48, ES30).
+// Scroll default-action policy (ESO48, ES33).
 //
-// The package decides whether an unclaimed key is a line, page, or boundary
-// scroll. Native owns the live nearest scrollport, range clamp, scroll event,
-// geometry observers, and paint; a policy handler never receives pixels or a
-// mutable scroll offset.
+// The package decides whether an unclaimed input means a line, page, boundary,
+// wheel, or scrollbar action. Native owns the live scroll chain, hit geometry,
+// range clamp, drag conversion, scroll events, observers, and paint; policy
+// never receives a mutable scroll offset.
 import dom
 
 fn operation_for(key, shift, alt, ctrl, meta) {
@@ -27,4 +27,35 @@ pub pn navigate(body, evt) {
     let op = operation_for(evt.key, evt.shift, evt.alt, evt.ctrl, evt.meta);
     if (op == null) { 'pass' }
     else { dom.scroll_operation(body, op) }
+}
+
+// The public WheelEvent has already had its cancellation chance. A zero delta
+// is not a scroll gesture; every non-zero physical delta is handed back to the
+// native scroll chain through one semantic request.
+pub pn wheel(evt) {
+    if (evt.deltaX == 0 and evt.deltaY == 0) { 'pass' }
+    else { dom.scroll_operation(evt.target, "wheel") }
+}
+
+// Native has classified the pointer against the painted scrollbar geometry.
+// This is the entire scrollbar decision table: the package picks semantic
+// paging versus thumb dragging, while native supplies dimensions, clamping,
+// state storage, and the hot drag loop.
+fn scrollbar_operation(part) {
+    if (part == "horizontalBefore") { "pageLeft" }
+    else if (part == "horizontalThumb") { "drag" }
+    else if (part == "horizontalAfter") { "pageRight" }
+    else if (part == "verticalBefore") { "pageBackward" }
+    else if (part == "verticalThumb") { "drag" }
+    else if (part == "verticalAfter") { "pageForward" }
+    else { null }
+}
+
+pub pn scrollbar_press(evt) {
+    if (evt.button != 0) { 'pass' }
+    else {
+        let op = scrollbar_operation(evt.scrollbarPart);
+        if (op == null) { 'pass' }
+        else { dom.scroll_operation(evt.target, op) }
+    }
 }

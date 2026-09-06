@@ -1478,6 +1478,24 @@ extern double g_grid_layout_time;
 extern double g_block_layout_time;
 extern int64_t g_block_layout_count;
 
+static void layout_block_restore_parent_context(LayoutContext* lycon,
+                                                const BlockContext& block,
+                                                const FontBox& font,
+                                                const Linebox& line) {
+    lycon->block = block;
+    lycon->font = font;
+    lycon->line = line;
+}
+
+static double layout_block_record_elapsed(
+        high_resolution_clock::time_point start) {
+    double elapsed = duration<double, std::milli>(
+        high_resolution_clock::now() - start).count();
+    g_block_layout_time += elapsed;
+    g_block_layout_count++;
+    return elapsed;
+}
+
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
@@ -8877,14 +8895,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             }
         }
         // CSS 2.1 §10.3.3: Re-resolve auto margins after shrink-to-fit changed the
-        if (block->bound && !is_float &&
-            block->display.outer != CSS_VALUE_INLINE_BLOCK &&
-            block->display.outer != CSS_VALUE_INLINE &&
-            (block->boundary()->margin.left_type == CSS_VALUE_AUTO || block->boundary()->margin.right_type == CSS_VALUE_AUTO)) {
-            float margin_available = pa_block->content_width - bfc_available_width_reduction;
-            layout_resolve_auto_margins_after_width_change(
-                block, margin_available, is_float);
-        }
+        layout_resolve_auto_margins_after_width_change(
+            block, pa_block->content_width - bfc_available_width_reduction,
+            is_float);
     }
     bool details_needs_default_summary = layout_details_needs_default_summary(block);
     bool closed_details_contents = details_needs_default_summary &&
@@ -8905,17 +8918,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         lycon->block.advance_y = max(lycon->block.advance_y, line_height);
     }
     layout_block_inner_content(lycon, block);
-    if (block->bound && !is_float &&
-        block->display.outer != CSS_VALUE_INLINE_BLOCK &&
-        block->display.outer != CSS_VALUE_INLINE &&
-        (block->boundary()->margin.left_type == CSS_VALUE_AUTO ||
-         block->boundary()->margin.right_type == CSS_VALUE_AUTO)) {
-        // Multipass content can finalize an auto width after initial positioning;
-        // resolve block auto margins against that final border-box width.
-        float margin_available = pa_block->content_width - bfc_available_width_reduction;
-        layout_resolve_auto_margins_after_width_change(
-            block, margin_available, is_float);
-    }
+    // Multipass content can finalize an auto width after initial positioning;
+    // resolve block auto margins against that final border-box width.
+    layout_resolve_auto_margins_after_width_change(
+        block, pa_block->content_width - bfc_available_width_reduction,
+        is_float);
     if (block_justify_self_positions && block_justify_self_axis == LAYOUT_AXIS_X) {
         float available_width = max(
             pa_block->content_width - bfc_available_width_reduction, 0.0f);
@@ -9349,14 +9356,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         layout_set_view_geometry(block, 0.0f, 0.0f, 0.0f, 0.0f);
         block->content_width = 0.0f;
         block->content_height = 0.0f;
-        lycon->block = pa_block;
-        lycon->font = pa_font;
-        lycon->line = pa_line;
+        layout_block_restore_parent_context(lycon, pa_block, pa_font, pa_line);
         log_leave();
-        auto t_block_end = high_resolution_clock::now();
-        g_block_layout_time += duration<double, std::milli>(
-            t_block_end - t_block_start).count();
-        g_block_layout_count++;
+        layout_block_record_elapsed(t_block_start);
         return;
     }
     if (display.inner == RDT_DISPLAY_REPLACED &&
@@ -9395,11 +9397,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         radiant::layout_pass_cache_get(lycon, dom_elem, known_dims, &cached_size, "BLOCK")) {
         block->width = cached_size.width;
         block->height = cached_size.height;
-        lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
+        layout_block_restore_parent_context(lycon, pa_block, pa_font, pa_line);
         log_leave();
-        auto t_block_end = high_resolution_clock::now();
-        g_block_layout_time += duration<double, std::milli>(t_block_end - t_block_start).count();
-        g_block_layout_count++;
+        layout_block_record_elapsed(t_block_start);
         return;
     }
     if (!has_custom_layout && lycon->run_mode == radiant::RunMode::ComputeSize) {
@@ -9410,11 +9410,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             block->height = block->block()->given_height;
             log_info("%s BLOCK EARLY BAILOUT: Both dimensions known (%.1fx%.1f), skipping full layout", elmt->source_loc(),
                      block->width, block->height);
-            lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
+            layout_block_restore_parent_context(lycon, pa_block, pa_font, pa_line);
             log_leave();
-            auto t_block_end = high_resolution_clock::now();
-            g_block_layout_time += duration<double, std::milli>(t_block_end - t_block_start).count();
-            g_block_layout_count++;
+            layout_block_record_elapsed(t_block_start);
             return;
         }
     }
@@ -10484,10 +10482,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         radiant::layout_pass_cache_store(lycon, dom_elem, known_dims, result, "BLOCK");
     }
     log_leave();
-    auto t_block_end = high_resolution_clock::now();
-    double block_ms = duration<double, std::milli>(t_block_end - t_block_start).count();
-    g_block_layout_time += block_ms;
-    g_block_layout_count++;
+    double block_ms = layout_block_record_elapsed(t_block_start);
     if (block_ms > 50.0) {
         log_warn("SLOW BLOCK: %s took %.0fms (count=%d)", elmt->source_loc(), block_ms, layout_block_count);
     }

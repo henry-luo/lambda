@@ -61,13 +61,11 @@ void GifAnimation::finish(AnimationInstance* anim) {
 }
 
 void gif_animation_tick(AnimationInstance* anim, float t) {
-    GifAnimation* ga = anim ? (GifAnimation*)anim->state : nullptr;
-    if (ga) ga->tick(anim, t);
+    animation_player_tick<GifAnimation>(anim, t);
 }
 
 void gif_animation_finish(AnimationInstance* anim) {
-    GifAnimation* ga = anim ? (GifAnimation*)anim->state : nullptr;
-    if (ga) ga->finish(anim);
+    animation_player_finish<GifAnimation>(anim);
 }
 
 // ============================================================================
@@ -116,8 +114,8 @@ AnimationInstance* gif_animation_create(AnimationScheduler* scheduler,
     inst->fill_mode = ANIM_FILL_NONE;
     inst->play_state = ANIM_PLAY_RUNNING;
     inst->timing.type = TIMING_LINEAR;
-    inst->tick = gif_animation_tick;
-    inst->on_finish = gif_animation_finish;
+    inst->tick = animation_player_tick<GifAnimation>;
+    inst->on_finish = animation_player_finish<GifAnimation>;
 
     // Bounds: use the image surface dimensions (will be updated by layout)
     inst->bounds[0] = 0;

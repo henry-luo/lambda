@@ -31,15 +31,6 @@ Rect render_geometry_adjust_box_rect(Rect rect, CssEnum box, float scale,
     return out;
 }
 
-Bound render_geometry_intersect_bound_rect(Bound bound, Rect rect) {
-    Bound out = bound;
-    out.left = max(out.left, rect.x);
-    out.top = max(out.top, rect.y);
-    out.right = min(out.right, rect.x + rect.width);
-    out.bottom = min(out.bottom, rect.y + rect.height);
-    return out;
-}
-
 IRect render_geometry_clip_to_pixel_bounds(Bound clip,
                                            const ImageSurface* surface) {
     int left = max(0, render_geometry_pixel_coord(clip.left));
@@ -81,27 +72,6 @@ Rect render_geometry_block_content_rect(const BlockBlot* parent_block,
     return render_geometry_adjust_box_rect(rect, CSS_VALUE_CONTENT_BOX, scale,
                                            block->boundary()->border,
                                            &block->boundary()->padding);
-}
-
-Rect render_geometry_expand_rect(Rect rect, float expand) {
-    if (expand <= 0.0f) return rect;
-    rect.x -= expand;
-    rect.y -= expand;
-    rect.width += expand * 2.0f;
-    rect.height += expand * 2.0f;
-    if (rect.width < 0.0f) rect.width = 0.0f;
-    if (rect.height < 0.0f) rect.height = 0.0f;
-    return rect;
-}
-
-Bound render_geometry_rect_to_bound(Rect rect) {
-    Bound bound = {rect.x, rect.y, rect.x + rect.width, rect.y + rect.height};
-    return bound;
-}
-
-bool render_geometry_bounds_intersect(Bound a, Bound b) {
-    return a.left < b.right && a.right > b.left &&
-           a.top < b.bottom && a.bottom > b.top;
 }
 
 static float render_geometry_absf(float value) {
@@ -156,15 +126,6 @@ float render_geometry_block_visual_overflow(const ViewBlock* block) {
     return overflow;
 }
 
-static bool render_geometry_matrix_is_identity(const RdtMatrix* matrix) {
-    return matrix &&
-        fabsf(matrix->e11 - 1.0f) < 0.00001f && fabsf(matrix->e12) < 0.00001f &&
-        fabsf(matrix->e13) < 0.00001f && fabsf(matrix->e21) < 0.00001f &&
-        fabsf(matrix->e22 - 1.0f) < 0.00001f && fabsf(matrix->e23) < 0.00001f &&
-        fabsf(matrix->e31) < 0.00001f && fabsf(matrix->e32) < 0.00001f &&
-        fabsf(matrix->e33 - 1.0f) < 0.00001f;
-}
-
 bool render_geometry_transform_matrix(const TransformProp* transform,
                                       float x, float y, float width, float height,
                                       RdtMatrix* out_matrix) {
@@ -178,5 +139,5 @@ bool render_geometry_transform_matrix(const TransformProp* transform,
     // Export backends must use the screen path's origin composition and preserve scale(0).
     *out_matrix = radiant::compute_transform_matrix(
         transform->functions, width, height, origin_x, origin_y);
-    return !render_geometry_matrix_is_identity(out_matrix);
+    return !rdt_matrix_is_identity(out_matrix);
 }

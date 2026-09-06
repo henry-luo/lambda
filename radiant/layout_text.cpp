@@ -3602,6 +3602,18 @@ static void record_line_break_opportunity(LayoutContext* lycon,
     capture_line_metrics(&lycon->line.last_space_metrics, &lycon->line);
 }
 
+static int decode_text_codepoint_or_byte(const unsigned char* cursor,
+                                         const unsigned char* end,
+                                         uint32_t* codepoint) {
+    int bytes = str_utf8_decode(
+        (const char*)cursor, (size_t)(end - cursor), codepoint);
+    if (bytes <= 0) {
+        *codepoint = *cursor;
+        bytes = 1;
+    }
+    return bytes;
+}
+
 static bool output_break_at_last_space(LayoutContext* lycon, DomNode* text_node,
                                        ViewText* text_view, TextRect* rect,
                                        unsigned char** cursor,
@@ -3645,12 +3657,8 @@ static bool output_break_at_last_space(LayoutContext* lycon, DomNode* text_node,
             uint32_t continuation_cp = 0;
             int continuation_bytes = 0;
             if (continuation < text_end && *continuation) {
-                continuation_bytes = str_utf8_decode((const char*)continuation,
-                    (size_t)(text_end - continuation), &continuation_cp);
-                if (continuation_bytes <= 0) {
-                    continuation_cp = *continuation;
-                    continuation_bytes = 1;
-                }
+                continuation_bytes = decode_text_codepoint_or_byte(
+                    continuation, text_end, &continuation_cp);
                 text_len = (int)(continuation + continuation_bytes - text_start - rect->start_index);
                 *soft_hyphen_leading_width =
                     measure_current_glyph_advance(lycon, continuation_cp, trim_cjk_spacing);
@@ -3675,13 +3683,8 @@ static bool output_break_at_last_space(LayoutContext* lycon, DomNode* text_node,
         const unsigned char* continuation = lycon->line.last_space + 1;
         if (continuation < text_end && *continuation) {
             uint32_t continuation_cp = 0;
-            int continuation_bytes = str_utf8_decode(
-                (const char*)continuation,
-                (size_t)(text_end - continuation), &continuation_cp);
-            if (continuation_bytes <= 0) {
-                continuation_cp = *continuation;
-                continuation_bytes = 1;
-            }
+            int continuation_bytes = decode_text_codepoint_or_byte(
+                continuation, text_end, &continuation_cp);
             text_len = (int)(continuation + continuation_bytes - text_start - rect->start_index);
             *soft_hyphen_leading_width = measure_current_glyph_advance(
                 lycon, continuation_cp, trim_cjk_spacing);

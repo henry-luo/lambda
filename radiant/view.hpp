@@ -305,6 +305,16 @@ static inline RdtMatrix rdt_matrix_identity(void) {
     return m;
 }
 
+static inline bool rdt_matrix_is_identity(const RdtMatrix* matrix,
+                                          float epsilon = 0.00001f) {
+    return matrix &&
+        fabsf(matrix->e11 - 1.0f) < epsilon && fabsf(matrix->e12) < epsilon &&
+        fabsf(matrix->e13) < epsilon && fabsf(matrix->e21) < epsilon &&
+        fabsf(matrix->e22 - 1.0f) < epsilon && fabsf(matrix->e23) < epsilon &&
+        fabsf(matrix->e31) < epsilon && fabsf(matrix->e32) < epsilon &&
+        fabsf(matrix->e33 - 1.0f) < epsilon;
+}
+
 // multiply two 3x3 affine matrices: result = a * b
 static inline RdtMatrix rdt_matrix_multiply(const RdtMatrix* a, const RdtMatrix* b) {
     RdtMatrix r;
@@ -326,6 +336,82 @@ static inline void rdt_matrix_transform_point(const RdtMatrix* m,
     if (!m || !out_x || !out_y) return;
     *out_x = m->e11 * x + m->e12 * y + m->e13;
     *out_y = m->e21 * x + m->e22 * y + m->e23;
+}
+
+static inline bool rdt_matrix_inverse(const RdtMatrix* matrix,
+                                      RdtMatrix* out_inverse) {
+    if (!matrix || !out_inverse) return false;
+    float determinant = matrix->e11 * (matrix->e22 * matrix->e33 -
+        matrix->e23 * matrix->e32) -
+        matrix->e12 * (matrix->e21 * matrix->e33 -
+        matrix->e23 * matrix->e31) +
+        matrix->e13 * (matrix->e21 * matrix->e32 -
+        matrix->e22 * matrix->e31);
+    if (fabsf(determinant) < 0.000001f) return false;
+    float reciprocal = 1.0f / determinant;
+    RdtMatrix inverse = {
+        (matrix->e22 * matrix->e33 - matrix->e23 * matrix->e32) * reciprocal,
+        (matrix->e13 * matrix->e32 - matrix->e12 * matrix->e33) * reciprocal,
+        (matrix->e12 * matrix->e23 - matrix->e13 * matrix->e22) * reciprocal,
+        (matrix->e23 * matrix->e31 - matrix->e21 * matrix->e33) * reciprocal,
+        (matrix->e11 * matrix->e33 - matrix->e13 * matrix->e31) * reciprocal,
+        (matrix->e13 * matrix->e21 - matrix->e11 * matrix->e23) * reciprocal,
+        (matrix->e21 * matrix->e32 - matrix->e22 * matrix->e31) * reciprocal,
+        (matrix->e12 * matrix->e31 - matrix->e11 * matrix->e32) * reciprocal,
+        (matrix->e11 * matrix->e22 - matrix->e12 * matrix->e21) * reciprocal
+    };
+    *out_inverse = inverse;
+    return true;
+}
+
+static inline bool rdt_matrix_project_point(const RdtMatrix* matrix,
+                                            float x, float y,
+                                            float* out_x, float* out_y) {
+    if (!matrix || !out_x || !out_y) return false;
+    float w = matrix->e31 * x + matrix->e32 * y + matrix->e33;
+    // Existing visual-bounds callers treat an edge-on homogeneous point as
+    // affine rather than emitting an unbounded box.
+    if (fabsf(w) < 0.0001f) w = 1.0f;
+    *out_x = (matrix->e11 * x + matrix->e12 * y + matrix->e13) / w;
+    *out_y = (matrix->e21 * x + matrix->e22 * y + matrix->e23) / w;
+    return true;
+}
+
+static inline bool rdt_matrix_unproject_affine_point(
+        const RdtMatrix* matrix, float x, float y,
+        float* out_x, float* out_y) {
+    if (!matrix || !out_x || !out_y) return false;
+    float determinant = matrix->e11 * matrix->e22 -
+        matrix->e21 * matrix->e12;
+    if (fabsf(determinant) < 0.000001f) return false;
+    // Preserve the offset-first arithmetic used by SVG edge hit tests.
+    float dx = x - matrix->e13;
+    float dy = y - matrix->e23;
+    *out_x = (matrix->e22 * dx - matrix->e12 * dy) / determinant;
+    *out_y = (-matrix->e21 * dx + matrix->e11 * dy) / determinant;
+    return true;
+}
+
+static inline bool rdt_matrix_project_rect_bounds(
+        const RdtMatrix* matrix, float left, float top,
+        float right, float bottom, float* out_left, float* out_top,
+        float* out_right, float* out_bottom) {
+    if (!matrix || !out_left || !out_top || !out_right || !out_bottom) {
+        return false;
+    }
+    float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+    float x2 = 0.0f, y2 = 0.0f, x3 = 0.0f, y3 = 0.0f;
+    if (!rdt_matrix_project_point(matrix, left, top, &x0, &y0) ||
+        !rdt_matrix_project_point(matrix, right, top, &x1, &y1) ||
+        !rdt_matrix_project_point(matrix, right, bottom, &x2, &y2) ||
+        !rdt_matrix_project_point(matrix, left, bottom, &x3, &y3)) {
+        return false;
+    }
+    *out_left = LMB_MIN(LMB_MIN(x0, x1), LMB_MIN(x2, x3));
+    *out_right = LMB_MAX(LMB_MAX(x0, x1), LMB_MAX(x2, x3));
+    *out_top = LMB_MIN(LMB_MIN(y0, y1), LMB_MIN(y2, y3));
+    *out_bottom = LMB_MAX(LMB_MAX(y0, y1), LMB_MAX(y2, y3));
+    return true;
 }
 
 static inline void rdt_matrix_transform_rect_bounds(const RdtMatrix* m,
@@ -1132,8 +1218,6 @@ typedef struct {
 typedef struct {
     Color color; // background color
     char* image; // background image path
-    char* repeat; // repeat behavior (legacy string, use repeat_x/repeat_y when set)
-    char* position; // positioning of background image (legacy string)
     // Background-size: auto | <length> | <percentage> | cover | contain
     CssEnum bg_size_type;   // CSS_VALUE_AUTO (default), CSS_VALUE_COVER, CSS_VALUE_CONTAIN, or 0 for explicit
     float bg_size_width;    // explicit width (px or %)
@@ -2064,6 +2148,82 @@ struct ViewBlock : ViewSpan {
     // ViewBlock* last_child;
 };
 
+// ===== view geometry =====
+
+// Coordinate walks accept a resolver because StateStore-backed callers must
+// read canonical scroll state, while dependency-light DOM tests use the pane
+// mirror. Both paths otherwise share exactly the same coordinate contract.
+typedef void (*ViewGeometryScrollResolver)(ViewBlock* block,
+                                           float* out_x, float* out_y,
+                                           void* context);
+
+typedef struct ViewGeometryTextHit {
+    DomText* text;
+    TextRect* rect;
+    float local_x;
+} ViewGeometryTextHit;
+
+RdtLogicalPoint view_geometry_node_document_origin(View* view);
+RdtLogicalPoint view_geometry_local_to_block_document(
+    View* view, RdtLogicalPoint local);
+RdtLogicalPoint view_geometry_node_viewport_origin(
+    View* view, ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_local_to_block_viewport(
+    View* view, RdtLogicalPoint local,
+    ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_block_viewport_to_local(
+    View* view, RdtLogicalPoint point,
+    ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_child_content_origin(
+    View* view, RdtLogicalPoint parent_origin,
+    ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_child_node_origin(
+    View* view, RdtLogicalPoint parent_origin,
+    ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_apply_external_viewport(
+    RdtLogicalPoint point, ViewBlock* viewport_root,
+    RdtLogicalPoint document_offset,
+    ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_local_to_window(
+    View* view, RdtLogicalPoint local, ViewBlock* viewport_root,
+    RdtLogicalPoint document_offset,
+    ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_document_viewport_offset(
+    DomDocument* root_document, DomDocument* target_document,
+    ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+bool view_geometry_find_text_at(View* view, RdtLogicalPoint point,
+                                RdtLogicalPoint origin,
+                                bool include_trailing_edges,
+                                ViewGeometryTextHit* out_hit);
+
+bool view_geometry_rect_contains_point(Rect rect, RdtLogicalPoint point);
+bool view_geometry_rect_contains_rect(Rect outer, Rect inner, float epsilon);
+float view_geometry_point_rect_distance(Rect rect, RdtLogicalPoint point);
+Bound view_geometry_intersect_bound_rect(Bound bound, Rect rect);
+Rect view_geometry_expand_rect(Rect rect, float expand);
+Bound view_geometry_rect_to_bound(Rect rect);
+bool view_geometry_bounds_intersect(Bound first, Bound second);
+RdtLogicalPoint view_geometry_text_rect_document_origin(View* view,
+                                                        TextRect* rect);
+bool view_geometry_pdf_text_metrics(DomText* text, float* out_width,
+                                    bool* out_copy_space);
+int view_geometry_pdf_visible_end_offset(DomText* text, TextRect* rect,
+                                         bool copy_space);
+float view_geometry_text_rect_width(DomText* text, TextRect* rect);
+TextRect* view_geometry_text_rect_for_offset(
+    DomText* text, int byte_offset, int* out_line = nullptr,
+    bool clamp_to_last = true);
+float view_geometry_interpolate_text_x(DomText* text, TextRect* rect,
+                                       int byte_offset, bool pdf_metrics);
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct TableProp {
     // Table layout algorithm mode
@@ -2700,25 +2860,7 @@ struct ClipShape {
 
 #define RDT_MAX_CLIP_SHAPES 8
 
-bool clip_point_in_rounded_rect(float px, float py,
-    float rx, float ry, float rw, float rh,
-    float r_tl, float r_tr, float r_br, float r_bl);
-void clip_scanline_rounded_rect(
-    float rx, float ry, float rw, float rh,
-    float r_tl, float r_tr, float r_br, float r_bl,
-    float y, float* out_left, float* out_right);
-bool clip_point_in_circle(float px, float py, float cx, float cy, float r);
-bool clip_point_in_ellipse(float px, float py, float cx, float cy, float rx, float ry);
-bool clip_point_in_inset(float px, float py, float ix, float iy, float iw, float ih);
-bool clip_point_in_polygon(float px, float py, const float* vx, const float* vy, int count);
 bool clip_point_in_shape(ClipShape* cs, float px, float py);
-void clip_scanline_circle(float cx, float cy, float r,
-    float y, float* out_left, float* out_right);
-void clip_scanline_ellipse(float cx, float cy, float rx, float ry,
-    float y, float* out_left, float* out_right);
-void clip_scanline_polygon(const float* vx, const float* vy, int count,
-    float y, float* out_left, float* out_right);
-bool clip_shape_rect_inside(ClipShape* cs, float x, float y, float w, float h);
 bool clip_shapes_rect_inside(ClipShape** shapes, int depth,
     float x, float y, float w, float h);
 void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,

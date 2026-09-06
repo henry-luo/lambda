@@ -1,8 +1,6 @@
 #include "render.hpp"
 #include "layout.hpp"
-#include "render.hpp"
 #include "event.hpp"
-#include "render.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
