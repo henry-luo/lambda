@@ -8183,14 +8183,14 @@ static void select_open_dropdown(UiContext* uicon, DocState* state,
     float visual_width = 0.0f, visual_height = 0.0f;
     view_get_visual_bounds(select_view, &visual_x, &visual_y,
                            &visual_width, &visual_height);
-    float doc_x = 0.0f, doc_y = 0.0f;
-    radiant_document_viewport_offset(uicon, select->doc, &doc_x, &doc_y);
+    RdtLogicalPoint document_offset = view_geometry_document_viewport_offset(
+        uicon->document, select->doc, scroll_state_resolve_view_geometry);
 
     // Popup state stays in the top-level logical viewport. Rendering performs
     // the sole logical-to-surface conversion, so event hit-testing never needs
     // to know the monitor scale.
-    doc_state_set_dropdown_geometry(state, doc_x + visual_x,
-        doc_y + visual_y + visual_height, state->dropdown_width,
+    doc_state_set_dropdown_geometry(state, document_offset.x + visual_x,
+        document_offset.y + visual_y + visual_height, state->dropdown_width,
         state->dropdown_height);
     calculate_dropdown_dimensions(select, state, visual_width);
 }
@@ -8319,11 +8319,11 @@ static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float 
     float select_w = 0.0f, select_h = 0.0f;
     view_get_visual_bounds(static_cast<View*>(select), &select_abs_x,
                            &select_abs_y, &select_w, &select_h);
-    float doc_x = 0.0f, doc_y = 0.0f;
-    radiant_document_viewport_offset(evcon->ui_context, select->doc,
-                                     &doc_x, &doc_y);
-    select_abs_x += doc_x;
-    select_abs_y += doc_y;
+    RdtLogicalPoint document_offset = view_geometry_document_viewport_offset(
+        evcon->ui_context->document, select->doc,
+        scroll_state_resolve_view_geometry);
+    select_abs_x += document_offset.x;
+    select_abs_y += document_offset.y;
 
     // Check if click is on the select itself (toggle handled elsewhere)
     if (mouse_x >= select_abs_x && mouse_x <= select_abs_x + select_w &&

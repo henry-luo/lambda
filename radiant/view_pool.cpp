@@ -1262,26 +1262,18 @@ static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix) {
     return true;
 }
 
-static void apply_matrix_to_bounds(const RdtMatrix* matrix, float* x, float* y, float* width, float* height) {
-    float x0 = *x, y0 = *y;
-    float x1 = *x + *width, y1 = *y;
-    float x2 = *x, y2 = *y + *height;
-    float x3 = *x + *width, y3 = *y + *height;
-
-    radiant::transform_point(x0, y0, *matrix);
-    radiant::transform_point(x1, y1, *matrix);
-    radiant::transform_point(x2, y2, *matrix);
-    radiant::transform_point(x3, y3, *matrix);
-
-    float min_x = fminf(fminf(x0, x1), fminf(x2, x3));
-    float max_x = fmaxf(fmaxf(x0, x1), fmaxf(x2, x3));
-    float min_y = fminf(fminf(y0, y1), fminf(y2, y3));
-    float max_y = fmaxf(fmaxf(y0, y1), fmaxf(y2, y3));
-
-    *x = min_x;
-    *y = min_y;
-    *width = max_x - min_x;
-    *height = max_y - min_y;
+static void apply_matrix_to_bounds(const RdtMatrix* matrix, float* x,
+                                   float* y, float* width, float* height) {
+    float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+    if (!rdt_matrix_project_rect_bounds(matrix, *x, *y,
+                                        *x + *width, *y + *height,
+                                        &left, &top, &right, &bottom)) {
+        return;
+    }
+    *x = left;
+    *y = top;
+    *width = right - left;
+    *height = bottom - top;
 }
 
 static void apply_css_transforms_to_bounds(View* view, float* x, float* y, float* width, float* height) {

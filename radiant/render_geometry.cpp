@@ -126,15 +126,6 @@ float render_geometry_block_visual_overflow(const ViewBlock* block) {
     return overflow;
 }
 
-static bool render_geometry_matrix_is_identity(const RdtMatrix* matrix) {
-    return matrix &&
-        fabsf(matrix->e11 - 1.0f) < 0.00001f && fabsf(matrix->e12) < 0.00001f &&
-        fabsf(matrix->e13) < 0.00001f && fabsf(matrix->e21) < 0.00001f &&
-        fabsf(matrix->e22 - 1.0f) < 0.00001f && fabsf(matrix->e23) < 0.00001f &&
-        fabsf(matrix->e31) < 0.00001f && fabsf(matrix->e32) < 0.00001f &&
-        fabsf(matrix->e33 - 1.0f) < 0.00001f;
-}
-
 bool render_geometry_transform_matrix(const TransformProp* transform,
                                       float x, float y, float width, float height,
                                       RdtMatrix* out_matrix) {
@@ -148,5 +139,5 @@ bool render_geometry_transform_matrix(const TransformProp* transform,
     // Export backends must use the screen path's origin composition and preserve scale(0).
     *out_matrix = radiant::compute_transform_matrix(
         transform->functions, width, height, origin_x, origin_y);
-    return !render_geometry_matrix_is_identity(out_matrix);
+    return !rdt_matrix_is_identity(out_matrix);
 }

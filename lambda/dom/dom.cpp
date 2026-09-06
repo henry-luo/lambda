@@ -11196,17 +11196,9 @@ static Item dom_svg_matrix_operation(Item callee, Item this_value, Item* args,
         return dom_svg_make_matrix(rdt_matrix_multiply(&matrix, &right));
     }
     case JS_SVG_MATRIX_INVERSE: {
-        float determinant = matrix.e11 * matrix.e22 - matrix.e21 * matrix.e12;
-        if (fabsf(determinant) < 0.000001f)
+        RdtMatrix inverse = {};
+        if (!rdt_matrix_inverse(&matrix, &inverse))
             return dom_raise_type_error("SVGMatrix is not invertible");
-        float reciprocal = 1.0f / determinant;
-        RdtMatrix inverse = {
-            matrix.e22 * reciprocal, -matrix.e12 * reciprocal,
-            (matrix.e12 * matrix.e23 - matrix.e22 * matrix.e13) * reciprocal,
-            -matrix.e21 * reciprocal, matrix.e11 * reciprocal,
-            (matrix.e21 * matrix.e13 - matrix.e11 * matrix.e23) * reciprocal,
-            0, 0, 1
-        };
         return dom_svg_make_matrix(inverse);
     }
     case JS_SVG_MATRIX_TRANSLATE: {
@@ -11782,20 +11774,6 @@ static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
         matrix = rdt_matrix_multiply(&layout_transform, &matrix);
     }
     return matrix;
-}
-
-static bool dom_svg_matrix_unproject_point(const RdtMatrix* matrix,
-                                              float x, float y,
-                                              float* local_x,
-                                              float* local_y) {
-    if (!matrix || !local_x || !local_y) return false;
-    float determinant = matrix->e11 * matrix->e22 - matrix->e21 * matrix->e12;
-    if (fabsf(determinant) < 0.000001f) return false;
-    float dx = x - matrix->e13;
-    float dy = y - matrix->e23;
-    *local_x = (matrix->e22 * dx - matrix->e12 * dy) / determinant;
-    *local_y = (-matrix->e21 * dx + matrix->e11 * dy) / determinant;
-    return true;
 }
 
 static const float JS_DOM_SVG_STROKE_HIT_AIM_SLOP_PX = 3.0f;
@@ -12547,8 +12525,8 @@ static JsDomSvgShapeHit dom_svg_basic_shape_hit_viewport_point(DomElement* elem,
     RdtMatrix screen_ctm = dom_svg_ctm(elem, true);
     float local_x = 0.0f;
     float local_y = 0.0f;
-    if (!dom_svg_matrix_unproject_point(&screen_ctm, viewport_x, viewport_y,
-                                            &local_x, &local_y)) {
+    if (!rdt_matrix_unproject_affine_point(&screen_ctm, viewport_x, viewport_y,
+                                           &local_x, &local_y)) {
         return result;
     }
     float scale_x = hypotf(screen_ctm.e11, screen_ctm.e21);
@@ -12593,8 +12571,8 @@ static JsDomSvgShapeHit dom_svg_bounds_hit_viewport_point(DomElement* elem,
     RdtMatrix screen_ctm = dom_svg_ctm(elem, true);
     float local_x = 0.0f;
     float local_y = 0.0f;
-    if (!dom_svg_matrix_unproject_point(&screen_ctm, viewport_x, viewport_y,
-                                            &local_x, &local_y)) {
+    if (!rdt_matrix_unproject_affine_point(&screen_ctm, viewport_x, viewport_y,
+                                           &local_x, &local_y)) {
         return result;
     }
     float left = 0.0f;
@@ -12638,7 +12616,7 @@ static JsDomSvgShapeHit dom_svg_reference_hit_viewport_point(DomElement* referen
     if (dom_svg_is_basic_shape(reference)) {
         float local_x = 0.0f;
         float local_y = 0.0f;
-        if (!dom_svg_matrix_unproject_point(reference_ctm, viewport_x, viewport_y,
+        if (!rdt_matrix_unproject_affine_point(reference_ctm, viewport_x, viewport_y,
                                                 &local_x, &local_y)) {
             return result;
         }
@@ -12684,7 +12662,7 @@ static JsDomSvgShapeHit dom_svg_use_hit_viewport_point(DomElement* elem,
     JsDomSvgBounds bounds = dom_svg_bounds_for_element(reference);
     float local_x = 0.0f;
     float local_y = 0.0f;
-    if (bounds.valid && dom_svg_matrix_unproject_point(&reference_ctm, viewport_x,
+    if (bounds.valid && rdt_matrix_unproject_affine_point(&reference_ctm, viewport_x,
             viewport_y, &local_x, &local_y)) {
         result.bounding_box = local_x >= bounds.left && local_x <= bounds.right &&
             local_y >= bounds.top && local_y <= bounds.bottom;
@@ -12793,7 +12771,7 @@ static bool dom_svg_point_is_within_viewports(DomElement* elem, float x, float y
         float local_x = 0.0f;
         float local_y = 0.0f;
         RdtMatrix ctm = dom_svg_ctm(current, true);
-        if (!dom_svg_matrix_unproject_point(&ctm, x, y, &local_x, &local_y)) {
+        if (!rdt_matrix_unproject_affine_point(&ctm, x, y, &local_x, &local_y)) {
             return false;
         }
         float left = 0.0f;
@@ -12925,22 +12903,6 @@ static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
     return (int64_t)value;
 }
 
-static bool dom_text_contains_point(DomText* text,
-                                       float abs_x,
-                                       float abs_y,
-                                       float px,
-                                       float py) {
-    if (!text) return false;
-    for (TextRect* rect = text->rect; rect; rect = rect->next) {
-        if (view_geometry_rect_contains_point(
-                {abs_x + rect->x, abs_y + rect->y, rect->width, rect->height},
-                {px, py})) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static bool dom_element_from_point_skips_subtree(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
     return _is_tag(elem, "head") ||
@@ -13026,8 +12988,10 @@ static DomElement* dom_element_from_point_walk(DomNode* node,
     float node_y = abs_y + node->y;
 
     if (node->is_text()) {
-        return dom_text_contains_point(node->as_text(), abs_x, abs_y,
-            px, py) && node->parent && node->parent->is_element()
+        ViewGeometryTextHit hit = {};
+        return view_geometry_find_text_at(
+            static_cast<View*>(node), {px, py}, {abs_x, abs_y}, false, &hit) &&
+            node->parent && node->parent->is_element()
             ? node->parent->as_element() : nullptr;
     }
     if (!node->is_element()) return nullptr;

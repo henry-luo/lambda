@@ -5181,16 +5181,6 @@ static void svg_subscene_serialize_element(StrBuf* out, Element* root,
     strbuf_append_char(out, '>');
 }
 
-static bool svg_subscene_matrix_is_identity(const RdtMatrix* matrix) {
-    if (!matrix) return true;
-    return fabsf(matrix->e11 - 1.0f) < 1e-5f &&
-           fabsf(matrix->e12) < 1e-5f &&
-           fabsf(matrix->e13) < 1e-5f &&
-           fabsf(matrix->e21) < 1e-5f &&
-           fabsf(matrix->e22 - 1.0f) < 1e-5f &&
-           fabsf(matrix->e23) < 1e-5f;
-}
-
 static void svg_subscene_append_color_attr(StrBuf* out, const char* name, Color color) {
     strbuf_append_char(out, ' ');
     strbuf_append_str(out, name);
@@ -5212,7 +5202,7 @@ static bool render_svg_subscene_to_svg(const PaintSvgSubscene* subscene,
 
     svg_subscene_indent(out, indent_level);
     strbuf_append_str(out, "<g");
-    if (!svg_subscene_matrix_is_identity(&subscene->transform)) {
+    if (!rdt_matrix_is_identity(&subscene->transform)) {
         const RdtMatrix* m = &subscene->transform;
         strbuf_append_format(out, " transform=\"matrix(%.6g %.6g %.6g %.6g %.6g %.6g)\"",
                              m->e11, m->e21, m->e12, m->e22, m->e13, m->e23);

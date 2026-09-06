@@ -53,90 +53,6 @@ static bool editing_geometry_range_intersects_text_control_descendant(
     return false;
 }
 
-static void editing_geometry_viewport_xy(View* view, float* out_x, float* out_y) {
-    RdtLogicalPoint point = view_geometry_node_viewport_origin(
-        view, scroll_state_resolve_view_geometry);
-    if (out_x) *out_x = point.x;
-    if (out_y) *out_y = point.y;
-}
-
-static bool editing_geometry_find_document_offset(View* view,
-                                                  DomDocument* target_doc,
-                                                  float base_x,
-                                                  float base_y,
-                                                  float* out_x,
-                                                  float* out_y) {
-    if (!view || !target_doc) return false;
-
-    // Descendant viewports and ordinary children share the same scrolled
-    // content origin; omitting this made nested-document overlays drift when
-    // any outer ancestor, rather than only the iframe itself, was scrolled.
-    RdtLogicalPoint child_origin = view_geometry_child_node_origin(
-        view, {base_x, base_y}, scroll_state_resolve_view_geometry);
-
-    if (view->is_block() &&
-        view->is_element()) {
-        ViewBlock* block = lam::view_require_block(view);
-        if (block->embed && block->embedp()->doc) {
-            DomDocument* embed_doc = block->embedp()->doc;
-            if (embed_doc == target_doc) {
-                if (out_x) *out_x = child_origin.x;
-                if (out_y) *out_y = child_origin.y;
-                return true;
-            }
-            if (embed_doc->view_tree && embed_doc->view_tree->root &&
-                editing_geometry_find_document_offset(
-                    embed_doc->view_tree->root, target_doc,
-                    child_origin.x, child_origin.y, out_x, out_y)) {
-                return true;
-            }
-        }
-    }
-
-    if (!view->is_element()) return false;
-    DomElement* elem = lam::dom_require_element(view);
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        View* child_view = static_cast<View*>(child);
-        if (!child_view->view_type) continue;
-        if (editing_geometry_find_document_offset(child_view, target_doc,
-                                                  child_origin.x, child_origin.y,
-                                                  out_x, out_y)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void radiant_document_viewport_offset(UiContext* uicon,
-                                      DomDocument* target_doc,
-                                      float* out_x,
-                                      float* out_y) {
-    if (out_x) *out_x = 0.0f;
-    if (out_y) *out_y = 0.0f;
-    if (!uicon || !target_doc || !uicon->document ||
-        uicon->document == target_doc ||
-        !uicon->document->view_tree ||
-        !uicon->document->view_tree->root) {
-        return;
-    }
-
-    float doc_x = 0.0f, doc_y = 0.0f;
-    if (editing_geometry_find_document_offset(uicon->document->view_tree->root,
-                                              target_doc, 0.0f, 0.0f,
-                                              &doc_x, &doc_y)) {
-        if (out_x) *out_x = doc_x;
-        if (out_y) *out_y = doc_y;
-    }
-}
-
-static void editing_geometry_text_block_abs_xy(ViewText* text, float* out_x, float* out_y) {
-    RdtLogicalPoint point = view_geometry_local_to_block_viewport(
-        static_cast<View*>(text), {0.0f, 0.0f},
-        scroll_state_resolve_view_geometry);
-    if (out_x) *out_x = point.x;
-    if (out_y) *out_y = point.y;
-}
-
 static bool editing_geometry_text_metrics(UiContext* uicon, ViewBlock* block,
                                           const char* value, uint32_t limit,
                                           float* out_width) {
@@ -422,12 +338,13 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
             : (uint32_t)strlen(value))
         : 0;
 
-    float abs_x = 0.0f, abs_y = 0.0f;
-    editing_geometry_viewport_xy(static_cast<View*>(block), &abs_x, &abs_y);
-    float doc_x = 0.0f, doc_y = 0.0f;
-    radiant_document_viewport_offset(uicon, elem->doc, &doc_x, &doc_y);
-    abs_x += doc_x;
-    abs_y += doc_y;
+    RdtLogicalPoint absolute = view_geometry_node_viewport_origin(
+        static_cast<View*>(block), scroll_state_resolve_view_geometry);
+    RdtLogicalPoint document_offset = view_geometry_document_viewport_offset(
+        uicon ? uicon->document : nullptr, elem->doc,
+        scroll_state_resolve_view_geometry);
+    float abs_x = absolute.x + document_offset.x;
+    float abs_y = absolute.y + document_offset.y;
 
     EditingTextControlMetrics metrics = editing_geometry_text_control_metrics(elem, block);
     float border = metrics.border;
@@ -536,14 +453,14 @@ static void editing_collect_rich_text_extents(DomNode* node,
         if (!text || dom_text_utf16_length(text) == 0) return;
         ViewText* text_view = lam::view_as<RDT_VIEW_TEXT>(text);
         if (!text_view) return;
-        float text_x = 0.0f;
-        float text_y = 0.0f;
-        editing_geometry_text_block_abs_xy(text_view, &text_x, &text_y);
-        (void)text_x;
+        RdtLogicalPoint text_origin = view_geometry_local_to_block_viewport(
+            static_cast<View*>(text_view), {0.0f, 0.0f},
+            scroll_state_resolve_view_geometry);
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             if (rect->height <= 0.0f) continue;
             editing_rich_text_extents_add_rect(extents, text,
-                text_y + rect->y, text_y + rect->y + rect->height);
+                text_origin.y + rect->y,
+                text_origin.y + rect->y + rect->height);
         }
         return;
     }
@@ -561,11 +478,10 @@ static bool editing_mac_padding_boundary_for_point(const EditingSurface* surface
                                                    DomBoundary* out) {
     if (!surface || !surface->owner || !out) return false;
     View* owner_view = static_cast<View*>(surface->owner);
-    float owner_x = 0.0f;
-    float owner_y = 0.0f;
-    editing_geometry_viewport_xy(owner_view, &owner_x, &owner_y);
-    if (vx < owner_x || vx >= owner_x + owner_view->width ||
-        vy < owner_y || vy >= owner_y + owner_view->height) {
+    RdtLogicalPoint owner_origin = view_geometry_node_viewport_origin(
+        owner_view, scroll_state_resolve_view_geometry);
+    if (vx < owner_origin.x || vx >= owner_origin.x + owner_view->width ||
+        vy < owner_origin.y || vy >= owner_origin.y + owner_view->height) {
         return false;
     }
 
@@ -810,9 +726,10 @@ bool editing_geometry_dom_text_boundary_from_point(UiContext* uicon,
     if (!uicon || !text || !rect) return false;
 
     ViewText* view_text = static_cast<ViewText*>(text);
-    float block_x = 0.0f;
-    editing_geometry_text_block_abs_xy(view_text, &block_x, nullptr);
-    float local_x = vx - block_x;
+    RdtLogicalPoint block_origin = view_geometry_local_to_block_viewport(
+        static_cast<View*>(view_text), {0.0f, 0.0f},
+        scroll_state_resolve_view_geometry);
+    float local_x = vx - block_origin.x;
     int byte_offset = dom_range_byte_offset_for_x(uicon, view_text, rect, local_x);
     if (byte_offset < 0) byte_offset = 0;
     return editing_geometry_dom_text_boundary_from_byte_offset(text,

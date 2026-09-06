@@ -1206,13 +1206,6 @@ typedef void (*EditingGeometryRectCb)(float x, float y, float w, float h,
 void editing_boundary_clear(EditingBoundary* out);
 void editing_caret_rect_clear(EditingCaretRect* out);
 
-// Resolve a document's logical viewport origin into the top-level logical
-// viewport. The top-level document itself resolves to (0, 0).
-void radiant_document_viewport_offset(UiContext* uicon,
-                                      DomDocument* target_doc,
-                                      float* out_x,
-                                      float* out_y);
-
 bool editing_geometry_surface_contains_boundary(const EditingSurface* surface,
                                                 const EditingBoundary* boundary);
 
