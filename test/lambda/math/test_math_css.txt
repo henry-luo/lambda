@@ -12,16 +12,18 @@ true
 true
 "36. stylesheet default keeps available size font:"
 true
-"37. stylesheet katex uses KaTeX math:"
+"37. stylesheet styles MathLive delimiter recipe:"
 true
-"38. stylesheet katex uses KaTeX typewriter:"
+"38. stylesheet katex uses KaTeX math:"
 true
-"39. stylesheet katex omits local main font:"
+"39. stylesheet katex uses KaTeX typewriter:"
 true
-"40. wrap tag:"
+"40. stylesheet katex omits local main font:"
+true
+"41. wrap tag:"
 'span'
-"41. wrap has style child:"
+"42. wrap has style child:"
 'style'
-"42. wrap has content:"
+"43. wrap has content:"
 'span'
 "===== ALL CSS TESTS DONE ====="
