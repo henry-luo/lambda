@@ -242,7 +242,6 @@ extern "C" void dom_install_option_constructor(void) {
     log_debug("dom_install_option_constructor: installed Option");
 }
 
-
 // ---------------------------------------------------------------------------
 // Window-level publications
 // ---------------------------------------------------------------------------

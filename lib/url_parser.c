@@ -494,7 +494,7 @@ UrlError url_parse_into(const char* input, Url* url) {
 
         // Fragment goes to end of string
         size_t fragment_len = strlen(fragment_start);
-        if (fragment_len > 0 && fragment_len < 4096) {  // Reasonable limit for URL fragments
+        if (fragment_len < 4096) {  // preserve an explicitly empty fragment
             char* fragment_buf = mem_alloc(fragment_len + 2, MEM_CAT_TEMP); // +1 for '#', +1 for '\0'
             if (fragment_buf) {
                 fragment_buf[0] = '#';
@@ -979,13 +979,8 @@ UrlError url_handle_fragment_only_relative(const char* input, const Url* base_ur
     result->search = url_string_clone(base_url->search);
 
     // Set new fragment
-    if (strlen(input) > 1) {
-        url_free_string(result->hash);
-        result->hash = url_create_string(input);
-    } else {
-        url_free_string(result->hash);
-        result->hash = NULL;
-    }
+    url_free_string(result->hash);
+    result->hash = url_create_string(input);
 
     return URL_OK;
 }

@@ -6879,16 +6879,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             float pref_width = cell_width > 0.0f ? cell_width : widths.max_width;
             if (cell_width == 0.0f) {
                 cell_width = pref_width;
-            } else if (!table->tb->border_collapse && !cell_width_is_table_relative &&
-                       min_width < cell_width) {
-                min_width = cell_width;
             }
             if (should_prevent_wrapping(tcell) && pref_width < min_width) {
                 pref_width = min_width;
                 cell_width = min_width;
             }
-            // CSS 2.1 §17.5.2.2: a specified cell width cannot reduce its
-            // min-content contribution, or unbreakable content overflows a column.
+            // CSS Tables 3 §3.8.2: a cell width contributes to outer max-content;
+            // outer min-content remains content/min-width based.
             if (pref_width < min_width) pref_width = min_width;
             if (cell_width < min_width) cell_width = min_width;
             tcell->td->intrinsic_width = pref_width;

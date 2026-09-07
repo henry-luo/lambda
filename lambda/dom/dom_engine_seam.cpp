@@ -46,3 +46,6 @@ DOM_ENGINE_WEAK void dom_engine_reconcile_dom_mutations(UiContext* u, DomDocumen
 DOM_ENGINE_WEAK void dom_engine_sync_pseudo_state(void* v, uint32_t f, bool set) {
     (void)v; (void)f; (void)set;
 }
+DOM_ENGINE_WEAK bool dom_engine_set_image_source(DomElement* e, const char* s) {
+    (void)e; (void)s; return false;
+}

@@ -1006,6 +1006,12 @@ struct DomElement : DomNode {
 
 };
 
+// Generated layout nodes share the live sibling chain but are not DOM element
+// children for CSS structural pseudo-classes.
+static inline bool dom_is_css_element_child(const DomNode* node) {
+    return node && node->is_element() && !node->as_element()->is_synthetic();
+}
+
 // Live selectedness belongs to the DOM node, not to a particular scripting
 // guest.  Rendering and every guest must observe the same native state.
 inline bool dom_option_is_selected(DomElement* option) {

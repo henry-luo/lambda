@@ -86,6 +86,20 @@ static inline Item js_string_key(const char* s) {
     return js_name_item(s);
 }
 
+extern "C" void dom_attribute_collection_expose_named(Item collection,
+                                                        Item name, Item attr) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY ||
+            get_type_id(name) != LMD_TYPE_STRING) return;
+    String* name_string = it2s(name);
+    if (!name_string || name_string->len == 0 ||
+            (name_string->len == 6 && strncmp(name_string->chars, "length", 6) == 0)) {
+        return;
+    }
+    // NamedNodeMap's supported property names are observable alongside its
+    // indexed face; the array companion map is the current DOM carrier.
+    js_set_key_default(collection, name, attr);
+}
+
 static void dom_refresh_live_child_collections_for_mutation(DomNode* target,
                                                                DomNode* parent);
 static void dom_refresh_live_form_collections_for_mutation(DomNode* target,
@@ -331,6 +345,12 @@ static inline DomJsMutationKind dom_style_mutation_kind(CssPropertyCode prop_id)
 }
 
 static DomDocument* dom_node_owner_document(DomNode* node) {
+    if (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (elem && elem->doc) return elem->doc;
+        }
+    }
     for (DomNode* cur = node; cur; cur = cur->parent) {
         if (cur->is_element()) {
             DomElement* elem = cur->as_element();
@@ -934,6 +954,7 @@ static void reset_dom_wrapper_cache(); // forward declaration
 static void reset_foreign_document_cache(); // forward declaration
 static void reset_live_dom_collections(); // forward declaration
 static void reset_pending_iframe_loads();
+static void _schedule_image_load(DomElement* image);
 // Phase 6E: text-control helpers are shared with Radiant event/render paths
 // (radiant/event.hpp is already included at the top of this file).
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
@@ -2726,6 +2747,10 @@ struct JsDomForeignDocumentRuntimeState {
     DomNodeRef pending_iframe_refs[16] = {};
     DomDocument* pending_iframe_docs[16] = {};
     int pending_iframe_load_count = 0;
+    DomElement* pending_image_loads[16] = {};
+    DomNodeRef pending_image_refs[16] = {};
+    DomDocument* pending_image_docs[16] = {};
+    int pending_image_load_count = 0;
     bool iframe_load_drain_scheduled = false;
 };
 
@@ -2745,6 +2770,10 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_foreign_document_state_ensure, (), (dom_r
 #define s_pending_iframe_refs (dom_foreign_document_rt_state->pending_iframe_refs)
 #define s_pending_iframe_docs (dom_foreign_document_rt_state->pending_iframe_docs)
 #define s_pending_iframe_load_count (dom_foreign_document_rt_state->pending_iframe_load_count)
+#define s_pending_image_loads (dom_foreign_document_rt_state->pending_image_loads)
+#define s_pending_image_refs (dom_foreign_document_rt_state->pending_image_refs)
+#define s_pending_image_docs (dom_foreign_document_rt_state->pending_image_docs)
+#define s_pending_image_load_count (dom_foreign_document_rt_state->pending_image_load_count)
 #define s_iframe_load_drain_scheduled (dom_foreign_document_rt_state->iframe_load_drain_scheduled)
 
 extern "C" bool dom_doc_has_browsing_context(void* doc) {
@@ -2940,14 +2969,10 @@ static Item lookup_foreign_doc_wrapper(DomDocument* doc) {
 }
 
 static Item dom_owner_document_from_node(DomNode* node) {
-    DomNode* element_node = node;
-    while (element_node && !element_node->is_element()) element_node = element_node->parent;
-    if (element_node) {
-        DomDocument* owner = element_node->as_element()->doc;
-        if (owner && owner != _js_current_document) {
-            Item wrapper = lookup_foreign_doc_wrapper(owner);
-            if (wrapper.item != ITEM_NULL) return wrapper;
-        }
+    DomDocument* owner = dom_node_owner_document(node);
+    if (owner && owner != _js_current_document) {
+        Item wrapper = lookup_foreign_doc_wrapper(owner);
+        if (wrapper.item != ITEM_NULL) return wrapper;
     }
     return js_get_document_object_value();
 }
@@ -3345,6 +3370,17 @@ extern "C" Item dom_window_prompt(Item message_item, Item default_item) {
 // gate their async work on `iframe.onload`. We schedule a setTimeout(0)
 // drain that fires `load` on each pending iframe in insertion order.
 // ----------------------------------------------------------------------------
+static void _dispatch_pending_load(DomElement* element, DomDocument* owner_doc,
+                                   DomNodeRef ref) {
+    if (element) {
+        Item ev = js_create_event("load", /*bubbles=*/false, /*cancelable=*/false);
+        dom_dispatch_event(dom_wrap_element(element), ev);
+    }
+    if (owner_doc && ref.address) {
+        dom_node_unpin(owner_doc, ref, DOM_NODE_PIN_EVENT_QUEUE);
+    }
+}
+
 static Item _iframe_load_drain(Item this_val, Item* args, int argc) {
     (void)this_val; (void)args; (void)argc;
     if (!dom_foreign_document_state_get()) return ItemNull;
@@ -3361,9 +3397,26 @@ static Item _iframe_load_drain(Item this_val, Item* args, int argc) {
         s_pending_iframe_docs[i] = nullptr;
         s_pending_iframe_refs[i] = {nullptr, 0};
         if (!ifr) continue;
-        Item ev = js_create_event("load", /*bubbles=*/false, /*cancelable=*/false);
-        dom_dispatch_event(dom_wrap_element(ifr), ev);
-        dom_node_unpin(owner_doc, ref, DOM_NODE_PIN_EVENT_QUEUE);
+        _dispatch_pending_load(ifr, owner_doc, ref);
+        bool known = false;
+        for (int d = 0; d < sweep_doc_count; d++) {
+            if (sweep_docs[d] == owner_doc) {
+                known = true;
+                break;
+            }
+        }
+        if (owner_doc && !known) sweep_docs[sweep_doc_count++] = owner_doc;
+    }
+    int image_count = s_pending_image_load_count;
+    s_pending_image_load_count = 0;
+    for (int i = 0; i < image_count; i++) {
+        DomElement* image = s_pending_image_loads[i];
+        s_pending_image_loads[i] = nullptr;
+        DomDocument* owner_doc = s_pending_image_docs[i];
+        DomNodeRef ref = s_pending_image_refs[i];
+        s_pending_image_docs[i] = nullptr;
+        s_pending_image_refs[i] = {nullptr, 0};
+        _dispatch_pending_load(image, owner_doc, ref);
         bool known = false;
         for (int d = 0; d < sweep_doc_count; d++) {
             if (sweep_docs[d] == owner_doc) {
@@ -3397,6 +3450,26 @@ static void _schedule_iframe_load(DomElement* iframe) {
     }
 }
 
+static void _schedule_image_load(DomElement* image) {
+    if (!image || !dom_foreign_document_state_ensure()) return;
+    for (int i = 0; i < s_pending_image_load_count; i++) {
+        if (s_pending_image_loads[i] == image) return;
+    }
+    if (s_pending_image_load_count >= 16) return;
+    DomNodeRef ref = dom_node_ref((DomNode*)image);
+    if (!image->doc || !dom_node_ref_validate(image->doc, ref) ||
+        !dom_node_pin(image->doc, ref, DOM_NODE_PIN_EVENT_QUEUE)) return;
+    int pending_index = s_pending_image_load_count++;
+    s_pending_image_loads[pending_index] = image;
+    s_pending_image_refs[pending_index] = ref;
+    s_pending_image_docs[pending_index] = image->doc;
+    if (!s_iframe_load_drain_scheduled) {
+        s_iframe_load_drain_scheduled = true;
+        Item cb = js_new_native_this_span_function(_iframe_load_drain);
+        dom_schedule_task(cb);
+    }
+}
+
 static void reset_pending_iframe_loads() {
     if (!dom_foreign_document_state_get()) return;
     for (int i = 0; i < s_pending_iframe_load_count; i++) {
@@ -3409,6 +3482,16 @@ static void reset_pending_iframe_loads() {
     memset(s_pending_iframe_refs, 0, sizeof(s_pending_iframe_refs));
     memset(s_pending_iframe_docs, 0, sizeof(s_pending_iframe_docs));
     s_pending_iframe_load_count = 0;
+    for (int i = 0; i < s_pending_image_load_count; i++) {
+        if (s_pending_image_docs[i] && s_pending_image_refs[i].address) {
+            dom_node_unpin(s_pending_image_docs[i], s_pending_image_refs[i],
+                           DOM_NODE_PIN_EVENT_QUEUE);
+        }
+    }
+    memset(s_pending_image_loads, 0, sizeof(s_pending_image_loads));
+    memset(s_pending_image_refs, 0, sizeof(s_pending_image_refs));
+    memset(s_pending_image_docs, 0, sizeof(s_pending_image_docs));
+    s_pending_image_load_count = 0;
     s_iframe_load_drain_scheduled = false;
 }
 
@@ -5201,8 +5284,10 @@ static int64_t dom_headless_dimension(DomElement* elem, bool width_axis) {
     collect_text_content((DomNode*)elem, text);
     size_t text_len = text ? text->length : 0;
     if (text) strbuf_free(text);
-    if (width_axis) return text_len > 0 ? (int64_t)text_len : 1;
-    return 1;
+    // CSSOM View reports zero for an empty auto-sized box; callers such as
+    // Raphael use zero to select their own replaced-content fallback size.
+    if (width_axis) return text_len > 0 ? (int64_t)text_len : 0;
+    return 0;
 }
 
 static int64_t dom_geometry_dimension(DomElement* elem, bool width_axis) {
@@ -7700,6 +7785,16 @@ static void dom_reinit_behavior_if_constraint_attr(DomElement* elem,
     }
 }
 
+static void _after_image_src_set(DomElement* elem, const char* attr_name,
+                                 const char* attr_value) {
+    // Image decoding belongs to the host engine; DOM schedules `load` only
+    // after the engine has accepted the new source and attached its surface.
+    if (!_is_tag(elem, "img") || strcasecmp(attr_name, "src") != 0) return;
+    if (dom_engine_set_image_source(elem, attr_value)) {
+        _schedule_image_load(elem);
+    }
+}
+
 extern "C" void dom_after_set_attribute(void* elem_ptr,
                                            const char* attr_name,
                                            const char* attr_value) {
@@ -7712,6 +7807,7 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
         if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
     }
     _select_refresh_cached_selected_options_for_node((DomNode*)elem);
+    _after_image_src_set(elem, attr_name, attr_value);
 }
 
 extern "C" void dom_after_remove_attribute(void* elem_ptr,
@@ -8978,7 +9074,7 @@ static bool dom_get_textlike_property(DomNode* node, Item elem_item,
         return true;
     }
     if (strcmp(prop, "ownerDocument") == 0) {
-        *result = dom_owner_document_from_node(node->parent);
+        *result = dom_owner_document_from_node(node);
         return true;
     }
     if (is_text) {
@@ -9297,25 +9393,31 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         arr->items = nullptr;
         arr->length = 0;
         arr->capacity = 0;
-        Item arr_item = (Item){.array = arr};
+        RootFrame roots(4);
+        Rooted<Item> arr_root(roots, (Item){.array = arr});
+        Rooted<Item> pair_root(roots, ItemNull);
+        Rooted<Item> name_root(roots, ItemNull);
+        Rooted<Item> value_root(roots, ItemNull);
         int attr_count = 0;
         const char** attr_names = elem->attribute_names(&attr_count);
         for (int i = 0; attr_names && i < attr_count; i++) {
             const char* name = attr_names[i];
             if (dom_is_internal_attr(name)) continue;
             const char* value = elem->get_attribute(name);
-            Item pair = js_new_object();
-            Item name_item = js_name_item(name);
-            Item value_item = js_name_item(value ? value : "");
+            pair_root.set(js_new_object());
+            name_root.set(js_name_item(name));
+            value_root.set(js_name_item(value ? value : ""));
             // Attr exposes both legacy name/value and Node nodeName/nodeValue;
             // sanitizers iterate the latter aliases from element.attributes.
-            dom_realm_set_cstr(pair, "nodeName", name_item);
-            dom_realm_set_cstr(pair, "nodeValue", value_item);
-            dom_realm_set_cstr(pair, "name", name_item);
-            dom_realm_set_cstr(pair, "value", value_item);
-            js_array_push(arr_item, pair);
+            dom_realm_set_cstr(pair_root.get(), "nodeName", name_root.get());
+            dom_realm_set_cstr(pair_root.get(), "nodeValue", value_root.get());
+            dom_realm_set_cstr(pair_root.get(), "name", name_root.get());
+            dom_realm_set_cstr(pair_root.get(), "value", value_root.get());
+            js_array_push(arr_root.get(), pair_root.get());
+            dom_attribute_collection_expose_named(arr_root.get(),
+                name_root.get(), pair_root.get());
         }
-        return arr_item;
+        return arr_root.get();
     }
 
     // ownerDocument — returns the document proxy for any element.
@@ -10612,7 +10714,9 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
 
     // v12b: innerHTML setter — parse HTML and replace children
     if (prop_id == JS_DOM_PROP_INNER_HTML) {
-        const char* html_str = fn_to_cstr(value);
+        // innerHTML is a DOMString setter; numeric assignments must become
+        // text markup instead of being treated as an empty path string.
+        const char* html_str = dom_to_dom_string_cstr(value);
         if (!html_str) return ItemNull;
         dom_replace_inner_html(elem, html_str, true);
         return value;
@@ -14561,6 +14665,40 @@ extern "C" Item dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
+static bool dom_selector_contains_generic_pseudo(const CssSelector* selector) {
+    if (!selector) return false;
+    for (size_t i = 0; i < selector->compound_selector_count; i++) {
+        CssCompoundSelector* compound = selector->compound_selectors[i];
+        if (!compound) continue;
+        for (size_t j = 0; j < compound->simple_selector_count; j++) {
+            CssSimpleSelector* simple = compound->simple_selectors[j];
+            if (!simple) continue;
+            if (simple->type == CSS_SELECTOR_PSEUDO_GENERIC ||
+                simple->type == CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC) {
+                return true;
+            }
+            for (size_t k = 0; k < simple->function_selector_count; k++) {
+                if (dom_selector_contains_generic_pseudo(
+                        simple->function_selectors[k])) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+static bool dom_selector_group_contains_generic_pseudo(
+        const CssSelectorGroup* group) {
+    if (!group) return false;
+    for (size_t i = 0; i < group->selector_count; i++) {
+        if (dom_selector_contains_generic_pseudo(group->selectors[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 extern "C" Item dom_element_operation_impl(Item elem_item,
         JubeDomElementOperation operation, Item* args, int argc) {
     DomNode* node = (DomNode*)dom_unwrap_element(elem_item);
@@ -14758,6 +14896,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
             if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
         }
         _select_refresh_cached_selected_options_for_node((DomNode*)elem);
+        _after_image_src_set(elem, attr_name, attr_val);
         dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                                elem->parent, attr_name, old_value);
         return ItemNull;
@@ -14889,6 +15028,9 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) return dom_throw_syntax_error("Invalid selector");
+        if (dom_selector_group_contains_generic_pseudo(selector_group)) {
+            return dom_throw_syntax_error("Invalid selector");
+        }
 
         SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
         // CSS Selectors defines :scope relative to the Element query receiver.
@@ -14915,6 +15057,9 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         arr->capacity = 0;
 
         if (!selector_group) return dom_throw_syntax_error("Invalid selector");
+        if (dom_selector_group_contains_generic_pseudo(selector_group)) {
+            return dom_throw_syntax_error("Invalid selector");
+        }
 
         SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
         // Keep :scope anchored to this Element for relative selector queries.
@@ -14939,6 +15084,9 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) return dom_throw_syntax_error("Invalid selector");
+        if (dom_selector_group_contains_generic_pseudo(selector_group)) {
+            return dom_throw_syntax_error("Invalid selector");
+        }
 
         SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
         MatchResult result;
@@ -14955,6 +15103,9 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) return dom_throw_syntax_error("Invalid selector");
+        if (dom_selector_group_contains_generic_pseudo(selector_group)) {
+            return dom_throw_syntax_error("Invalid selector");
+        }
 
         SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
         MatchResult mresult;
@@ -16238,6 +16389,10 @@ extern "C" void dom_foreign_documents_release_context(void) {
 #undef s_pending_iframe_refs
 #undef s_pending_iframe_docs
 #undef s_pending_iframe_load_count
+#undef s_pending_image_loads
+#undef s_pending_image_refs
+#undef s_pending_image_docs
+#undef s_pending_image_load_count
 #undef s_iframe_load_drain_scheduled
 
 extern "C" void dom_foreign_documents_destroy_context(JsRuntimeState* runtime_state) {
@@ -16246,6 +16401,7 @@ extern "C" void dom_foreign_documents_destroy_context(JsRuntimeState* runtime_st
         (JsDomForeignDocumentRuntimeState*)runtime_state->dom_foreign_document_state;
     dom_destroy_context_state(&runtime_state->dom_foreign_document_state,
         state->foreign_doc_cache_count || state->doc_with_window_count ||
-        state->iframe_cache_count || state->pending_iframe_load_count,
+        state->iframe_cache_count || state->pending_iframe_load_count ||
+        state->pending_image_load_count,
         "js-dom-foreign-document");
 }

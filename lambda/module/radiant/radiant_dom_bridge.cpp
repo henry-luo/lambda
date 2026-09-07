@@ -607,8 +607,11 @@ static int64_t radiant_dom_script_visible_element_child_count(DomElement* elem) 
 }
 
 static Item radiant_dom_attributes_item(DomElement* elem) {
-    Item arr_item = radiant_dom_array_item();
-    Array* arr = arr_item.array;
+    RootFrame roots(4);
+    Rooted<Item> arr_root(roots, radiant_dom_array_item());
+    Rooted<Item> pair_root(roots, ItemNull);
+    Rooted<Item> name_root(roots, ItemNull);
+    Rooted<Item> value_root(roots, ItemNull);
 
     int attr_count = 0;
     const char** attr_names = elem->attribute_names(&attr_count);
@@ -616,22 +619,24 @@ static Item radiant_dom_attributes_item(DomElement* elem) {
         const char* name = attr_names[i];
         if (radiant_dom_is_internal_attr(name)) continue;
         const char* value = elem->get_attribute(name);
-        Item pair = radiant_host_api->value->new_object();
-        Item name_item = radiant_dom_string_item(name);
-        Item value_item = radiant_dom_string_item(value);
-        radiant_host_api->value->property_set(pair,
-            (Item){.item = s2it(heap_create_name("name"))}, name_item);
-        radiant_host_api->value->property_set(pair,
-            (Item){.item = s2it(heap_create_name("value"))}, value_item);
+        pair_root.set(radiant_host_api->value->new_object());
+        name_root.set(radiant_dom_string_item(name));
+        value_root.set(radiant_dom_string_item(value));
+        radiant_host_api->value->property_set(pair_root.get(),
+            (Item){.item = s2it(heap_create_name("name"))}, name_root.get());
+        radiant_host_api->value->property_set(pair_root.get(),
+            (Item){.item = s2it(heap_create_name("value"))}, value_root.get());
         // Attr is a Node: sanitizers consume nodeName/nodeValue even when the
         // bridge represents NamedNodeMap entries as lightweight objects.
-        radiant_host_api->value->property_set(pair,
-            (Item){.item = s2it(heap_create_name("nodeName"))}, name_item);
-        radiant_host_api->value->property_set(pair,
-            (Item){.item = s2it(heap_create_name("nodeValue"))}, value_item);
-        array_push(arr, pair);
+        radiant_host_api->value->property_set(pair_root.get(),
+            (Item){.item = s2it(heap_create_name("nodeName"))}, name_root.get());
+        radiant_host_api->value->property_set(pair_root.get(),
+            (Item){.item = s2it(heap_create_name("nodeValue"))}, value_root.get());
+        radiant_host_api->value->array_push(arr_root.get(), pair_root.get());
+        dom_attribute_collection_expose_named(arr_root.get(),
+            name_root.get(), pair_root.get());
     }
-    return arr_item;
+    return arr_root.get();
 }
 
 static bool radiant_dom_label_contains_control(DomElement* label,
@@ -1523,6 +1528,19 @@ RADIANT_C_API bool radiant_dom_is_node(Item item) {
     return false;
 }
 
+static Item radiant_dom_owner_document_item(DomNode* node) {
+    if (!node) return ItemNull;
+    DomDocument* doc = node->is_element() ? node->as_element()->doc : nullptr;
+    if (!doc) {
+        // detached character nodes have no parent from which the bridge can
+        // infer provenance; resolve the canonical owner-document wrapper.
+        Item owner_item = dom_owner_document_for_node((void*)node);
+        doc = (DomDocument*)dom_document_from_item(owner_item);
+        if (!doc) return owner_item;
+    }
+    return radiant_dom_document_item(doc);
+}
+
 static bool radiant_dom_get_character_data_property(DomNode* node,
         const char* content, int64_t length, int64_t node_type,
         const char* node_name, const char* prop, Item* out) {
@@ -1573,9 +1591,7 @@ static bool radiant_dom_get_character_data_property(DomNode* node,
         return true;
     }
     if (strcmp(prop, "ownerDocument") == 0) {
-        DomNode* parent = node->parent;
-        DomDocument* doc = (parent && parent->is_element()) ? parent->as_element()->doc : nullptr;
-        *out = doc ? radiant_dom_document_item(doc) : dom_owner_document_for_node((void*)node);
+        *out = radiant_dom_owner_document_item(node);
         return true;
     }
     return false;
@@ -1854,6 +1870,9 @@ static int radiant_dom_reflected_string_set(Item receiver, Item value, Item* out
     if (!elem || !out) return 0;
     const char* text = dom_to_attribute_cstr(value);
     elem->set_attribute(attribute, text ? text : "");
+    if (strcasecmp(attribute, "src") == 0 && radiant_dom_is_tag(elem, "img")) {
+        dom_after_set_attribute((void*)elem, attribute, text ? text : "");
+    }
     dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = value;
     return 1;
@@ -1884,6 +1903,33 @@ RADIANT_REFLECT_STRING(radiant_dom_m4b_form_target, "formtarget", "")
 RADIANT_REFLECT_STRING(radiant_dom_m4b_wrap, "wrap", "soft")
 
 #undef RADIANT_REFLECT_STRING
+
+extern "C" bool dom_engine_set_image_source(DomElement* element,
+                                                const char* source) {
+    if (!element || !source || !radiant_dom_is_tag(element, "img") ||
+        !element->doc) return false;
+    UiContext* uicon = (UiContext*)element->doc->js.host_ui_context;
+    if (!uicon) return false;
+
+    DomDocument* saved_document = uicon->document;
+    uicon->document = element->doc;
+    ImageSurface* surface = load_image(uicon, source);
+    uicon->document = saved_document;
+    if (!surface) return false;
+
+    if (!element->embed) {
+        if (element->doc->view_tree) {
+            element->ensure_embed(element->doc->view_tree);
+        } else if (element->doc->document_pool) {
+            element->embed = (EmbedProp*)pool_calloc(
+                element->doc->document_pool, sizeof(EmbedProp));
+            if (element->embed) *element->embed = EMBED_PROP_DEFAULT;
+        }
+    }
+    if (!element->embed) return false;
+    element->embed->img = surface;
+    return true;
+}
 
 RADIANT_C_API int radiant_dom_m4b_href_get(Item receiver, Item* out) {
     DomElement* elem = radiant_dom_member_elem(receiver);
@@ -2492,13 +2538,7 @@ RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_node_type_any, node_type)
 RADIANT_C_API int radiant_dom_member_owner_document_any(Item receiver, Item* out) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
     if (!node || !out) return 0;
-    if (node->is_element() && node->as_element()->doc) {
-        *out = radiant_dom_document_item(node->as_element()->doc);
-        return 1;
-    }
-    DomNode* parent = node->parent;
-    DomDocument* doc = (parent && parent->is_element()) ? parent->as_element()->doc : nullptr;
-    *out = doc ? radiant_dom_document_item(doc) : ItemNull;
+    *out = radiant_dom_owner_document_item(node);
     return 1;
 }
 RADIANT_DOM_MEMBER_FROM_CATALOG(radiant_dom_member_first_child_any, first_child)

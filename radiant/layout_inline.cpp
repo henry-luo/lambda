@@ -527,6 +527,71 @@ static DomNode* inline_next_participating_child(DomNode* node) {
     return nullptr;
 }
 
+// Find the last block exposed by an inline wrapper; trailing inline content
+// breaks adjacency with the next split block.
+static bool inline_wrapper_last_block(DomElement* wrapper,
+                                      DomElement** last_block) {
+    if (!wrapper || !last_block) return false;
+    *last_block = nullptr;
+    bool has_content = false;
+    for (DomNode* child = wrapper->first_child; child; child = child->next_sibling) {
+        if (child->is_comment() || inline_edge_whitespace_can_collapse(child)) continue;
+        if (child->is_text()) {
+            if (layout_dom_text_has_non_whitespace(
+                    lam::dom_as<DOM_NODE_TEXT>(child))) {
+                has_content = true;
+                *last_block = nullptr;
+            }
+            continue;
+        }
+        if (!child->is_element()) continue;
+        DomElement* element = lam::dom_as<DOM_NODE_ELEMENT>(child);
+        InlineOutOfFlowKind kind = inline_out_of_flow_kind(element);
+        if (kind.floated || kind.positioned ||
+            layout_display_is_none(resolve_display_value(element))) {
+            continue;
+        }
+        if (inline_child_is_block_split(child)) {
+            has_content = true;
+            *last_block = element;
+            continue;
+        }
+        DisplayValue display = resolve_display_value(element);
+        if (display.outer == CSS_VALUE_INLINE) {
+            DomElement* nested_last = nullptr;
+            bool nested_content = inline_wrapper_last_block(element, &nested_last);
+            if (!nested_content) continue;
+            has_content = true;
+            *last_block = nested_last;
+            continue;
+        }
+        has_content = true;
+        *last_block = nullptr;
+    }
+    return has_content;
+}
+
+static DomElement* inline_previous_wrapper_block(DomElement* inline_elem) {
+    if (!inline_elem) return nullptr;
+    for (DomNode* sibling = inline_elem->prev_sibling; sibling;
+         sibling = sibling->prev_sibling) {
+        if (sibling->is_comment() || inline_edge_whitespace_can_collapse(sibling)) continue;
+        if (!sibling->is_element()) return nullptr;
+        DomElement* element = lam::dom_as<DOM_NODE_ELEMENT>(sibling);
+        InlineOutOfFlowKind kind = inline_out_of_flow_kind(element);
+        if (kind.floated || kind.positioned ||
+            layout_display_is_none(resolve_display_value(element))) {
+            continue;
+        }
+        DisplayValue display = resolve_display_value(element);
+        if (display.outer != CSS_VALUE_INLINE) return nullptr;
+        DomElement* last_block = nullptr;
+        if (!inline_wrapper_last_block(element, &last_block)) continue;
+        return last_block;
+    }
+    return nullptr;
+}
+
 static bool view_is_collapsed_whitespace_text(View* view, ViewSpan* span) {
     if (!view || view->view_type != RDT_VIEW_TEXT) return false;
     if (view->width > 0.0f) return false;
@@ -1806,6 +1871,29 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                 if (child_block && child_block->bound && container_node &&
                     container_node->is_element()) {
                     ViewBlock* container = lam::view_as_block(container_node);
+                    if (!had_block_child_before && !visible_inline_before_first_block &&
+                        container && !block_context_establishes_bfc(container) &&
+                        !layout_block_is_out_of_flow_positioned(child_block)) {
+                        DomElement* previous_elem = inline_previous_wrapper_block(inline_elem);
+                        ViewBlock* previous_block = lam::view_as_block(previous_elem);
+                        if (previous_block && previous_block->bound &&
+                            !layout_block_is_out_of_flow_positioned(previous_block) &&
+                            !block_context_establishes_bfc(previous_block) &&
+                            !previous_block->boundary()->clearance_in_margin_chain &&
+                            !child_block->boundary()->clearance_in_margin_chain) {
+                            // CSS 2.1 §9.2.1.1/§8.3.1: block boxes split out of
+                            // adjacent inline wrappers remain adjoining siblings.
+                            float previous_mb = previous_block->boundary()->margin.bottom;
+                            float current_mt = child_block->boundary()->margin.top;
+                            float collapsed = layout_collapse_margins(previous_mb, current_mt);
+                            float collapse_amount = previous_mb + current_mt - collapsed;
+                            if (collapse_amount != 0.0f) {
+                                child_block->y -= collapse_amount;
+                                child_block->boundary_mut()->margin.top -= collapse_amount;
+                                lycon->block.advance_y -= collapse_amount;
+                            }
+                        }
+                    }
                     if (container && !block_context_establishes_bfc(container) &&
                         !layout_inline_has_prior_in_flow_content(inline_elem) &&
                         !block_context_establishes_bfc(child_block)) {

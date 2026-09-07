@@ -891,8 +891,12 @@ bool selector_matcher_matches_structural(SelectorMatcher* matcher,
             return is_root;
         }
 
-        case CSS_SELECTOR_PSEUDO_EMPTY:
-            return element->first_child == NULL;
+        case CSS_SELECTOR_PSEUDO_EMPTY: {
+            for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+                if (!child->is_element() || !child->as_element()->is_synthetic()) return false;
+            }
+            return true;
+        }
 
         case CSS_SELECTOR_PSEUDO_FIRST_CHILD:
             return element->is_first_child();
@@ -910,7 +914,7 @@ bool selector_matcher_matches_structural(SelectorMatcher* matcher,
                 DomElement* parent = static_cast<DomElement*>(element->parent);
                 DomNode* sibling_node = parent->first_child;
                 while (sibling_node) {
-                    if (sibling_node->is_element()) {
+                    if (dom_is_css_element_child(sibling_node)) {
                         DomElement* sibling = static_cast<DomElement*>(sibling_node);
                         if (selector_matcher_same_tag(sibling, element)) {
                             return sibling == element;
@@ -929,7 +933,7 @@ bool selector_matcher_matches_structural(SelectorMatcher* matcher,
                 DomNode* sibling_node = parent->first_child;
                 DomElement* last_of_type = NULL;
                 while (sibling_node) {
-                    if (sibling_node->is_element()) {
+                    if (dom_is_css_element_child(sibling_node)) {
                         DomElement* sibling = static_cast<DomElement*>(sibling_node);
                         if (selector_matcher_same_tag(sibling, element)) {
                             last_of_type = sibling;
@@ -948,7 +952,7 @@ bool selector_matcher_matches_structural(SelectorMatcher* matcher,
                 DomElement* parent = static_cast<DomElement*>(element->parent);
                 DomNode* sibling_node = parent->first_child;
                 while (sibling_node) {
-                    if (sibling_node->is_element()) {
+                    if (dom_is_css_element_child(sibling_node)) {
                         DomElement* sibling = static_cast<DomElement*>(sibling_node);
                         if (selector_matcher_same_tag(sibling, element)) {
                             count++;

@@ -1063,7 +1063,11 @@ static float calculate_static_line_x(BlockContext* pa_block, Linebox* pa_line,
         float avail_right = 0.0f;
         if (positioned_static_line_bounds(pa_block, pa_line, &avail_left, &avail_right)) {
             CssEnum ta = pa_block->text_align;
-            if (ta == CSS_VALUE_CENTER) {
+            // css position: the hypothetical inline child contributes to an
+            // auto-width inline-block, leaving no free space to center here.
+            bool shrink_to_fit_parent = pa_block->establishing_element &&
+                layout_is_shrink_to_fit_width(pa_block->establishing_element);
+            if (ta == CSS_VALUE_CENTER && !shrink_to_fit_parent) {
                 line_x = (avail_left + avail_right) / 2.0f;
             } else if ((ta == CSS_VALUE_RIGHT && static_direction == TD_LTR) ||
                        (ta == CSS_VALUE_LEFT && static_direction == TD_RTL) ||
@@ -1733,7 +1737,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
 }
 // CSS 2.1 §10.5: For absolutely positioned elements, percentage heights resolve
-void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
+void re_resolve_abs_children_vertical(ViewBlock* containing_block,
+                                      bool resolve_inset_stretch) {
     if (!containing_block->position || !containing_block->positionp()->first_abs_child) return;
     // Compute containing block's padding box height (CSS 2.1 §10.1)
     LayoutContainingBlock cb = layout_containing_block_for_view(containing_block);
@@ -1782,7 +1787,8 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
         }
 
         bool is_form_control = child->form_control();
-        if (child->position && child->positionp()->has_top && child->positionp()->has_bottom &&
+        if (resolve_inset_stretch && child->position &&
+            child->positionp()->has_top && child->positionp()->has_bottom &&
             positioned_axis_is_auto(child, false) &&
             (!positioned_element_is_replaced(child) || is_form_control)) {
             BoxEdges margin = layout_boundary_margin_edges(child->bound);
@@ -1810,7 +1816,7 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
         }
 
         if (child->position && child->positionp()->first_abs_child) {
-            re_resolve_abs_children_vertical(child);
+            re_resolve_abs_children_vertical(child, resolve_inset_stretch);
         }
 
         child = child->position ? child->positionp()->next_abs_sibling : nullptr;
@@ -2415,6 +2421,11 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             block->x = vertical_static_x;
         }
     }
+    if (block->position && block->positionp()->first_abs_child) {
+        // CSS 2.1 §10.5: resolve descendant percentages after this auto-sized
+        // absolute containing block has its used height from in-flow content.
+        re_resolve_abs_children_vertical(block, false);
+    }
     LayoutContainingBlock final_cb = layout_absolute_containing_block(lycon, cb);
     float final_offset_x = 0.0f;
     float final_offset_y = 0.0f;
@@ -2537,6 +2548,7 @@ void layout_shift_static_positioned_abs_descendants(ViewElement* root, float del
                 (child_block->positionp()->position == CSS_VALUE_ABSOLUTE ||
                  child_block->positionp()->position == CSS_VALUE_FIXED);
             if (is_abs_fixed) {
+                float before_x = child_block->x;
                 if (delta_x != 0.0f &&
                     !child_block->positionp()->has_left &&
                     !child_block->positionp()->has_right) {
