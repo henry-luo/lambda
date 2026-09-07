@@ -24,6 +24,7 @@ pub fn display_context() {
         array_text_scripts: false,
         compact_prime: false,
         matrix_cell: false,
+        text_embedded: false,
         frac_gstyle: null
     }
 }
@@ -43,6 +44,7 @@ pub fn text_context() {
         array_text_scripts: false,
         compact_prime: false,
         matrix_cell: false,
+        text_embedded: false,
         frac_gstyle: null
     }
 }

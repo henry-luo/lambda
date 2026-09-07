@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.49.0 (2026-09-07)
+**Spec version:** 1.50.0 (2026-09-07)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -745,6 +745,16 @@ that carries them.
 - **D4.3.3** Precise closure-env tracing via `closure_field_count`; VMap
   traces and finalizes through vtable callbacks that are allocation-free
   and never re-enter script. [GC2 §8, JA6]
+- **D4.3.4** A shaped field whose declared lane is `null` is traced
+  **conservatively**: the collector marks the eight-byte word it holds when
+  that word is a managed object. The store path upgrades a `null` field to
+  a container pointer in place (the same-width fast path of `fn_map_set`),
+  and a literal shape shared by every instance of its site keeps `null` for
+  the others, so the declared lane says nothing about the word; a `null`
+  lane that follows a nine-byte `any` lane also sits at an offset the
+  eight-byte word sweep never visits. Decided 2026-09-07 after splay's right
+  subtrees were freed while linked on every tier (D4.3.1's precise trace had
+  a hole, not the roots). A real `null` is zero and marks nothing.
 
 ### D4.4 COW implementation
 
@@ -1816,6 +1826,7 @@ slice; no formal semantic ruling or document semver changes.
 | D4.2.4 | Ref-counting not implemented; shared-allocator census (Mem_Heap §15 Q7) pending. |
 | D4.2.5v2 | R1a landed 2026-08-10 (release default `MEMTRACK_MODE_OFF`, measured: primes2 825→155 ms). R3a removed the historical Pool side index, and R7 landed the Pool-owned boundary-tag/free-list hot path with no global mutex or registry call on block operations. STATS counters-only (R2), the `stack_alloc` split (MP-18), and independent release-performance evidence remain pending. |
 | D4.3.2v2 | GC size classes and data-zone policy are retained; backing storage is owned by MemVmRegion and released by the owning GC heap. |
+| D4.3.4 | Decided 2026-09-07: `gc_trace_shape_field` marks a `null`-typed lane's word conservatively (`gc_mark_possible_item`). Found through DO30: the auto tier's fast splay figure came from collections that freed the linked right subtrees (17k of 420k objects traced); reproduced deterministically on every tier with `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`; pin `test/mir/lambda/gc_splay_null_lane` under the forced-collection stress sweep. The companion robustness fix keeps `fn_map_set`'s same-width retag from typing a shared literal shape's field as `error`. |
 | D4.5.1v3 | Radiant and Lambda keep distinct policies over memtrack/VM ownership; legacy Pool/Arena backend wording is superseded; v3 records batch-only arena lifetime (two variants, D4.1.4). |
 | D4.4.3 | COW Stage 1 landed 2026-07-23; Stage 2 (exclusivity faces, view confinement, module-`var` rule, snapshot iteration) deferred, designed. |
 | D4.4.4 | Decided 2026-09-06 (CW34, `vibe/Lambda_Design_Runtime_COW.md` §11.11): read-modify-write handle borrows — tier-shared static shape in `build_ast`, runtime spine test `cow_bind_rmw_handle`; havlak's array copies 205k → 41k per run. Fixtures `test/lambda/proc/cow_rmw_borrow.ls`, `test/mir/lambda/cw34_rmw_borrow`. |
@@ -2028,15 +2039,18 @@ Numbered `DO#` (design-open); each links to its record.
   T0's; the auto tier matches it). Closing it is CW33's typed
   `Container**` half on the raw entry (COW doc §11.10), not a satellite
   matter.
-- **DO30** Eager inference slower than boxed bodies on splay. With
-  D8.1.1v9's module-wide call-site inference the auto tier compiles splay
-  exactly as the eager tier does and runs it in 446 ms; the uninferred
-  one-definition satellites of D8.1.1v8 ran the same script in 256 ms
-  (`LAMBDA_TIER=jit` has always been ~450 ms). The eager lowering gives
-  `splay_find(tree, key)` a float `key` lane and `next_random` /
-  `insert_new_node` native float returns; whatever that costs (boundary
-  boxing, guard misses or the shape hints) is an eager-tier matter, not a
-  satellite one -- the tier that used to hide it no longer does.
+- **DO30** *(closed 2026-09-07 — misattributed)* "Eager inference slower
+  than boxed bodies on splay." The 256 ms auto figure that the cluster
+  (446 ms, the eager tier's own time) seemed to lose came from the
+  one-definition satellites' run under-tracing the tree: their `right`
+  links sat in `null`-typed lanes at offset 17 and were freed while linked
+  (collections traced 17k of 420k objects), so the collector's marks were
+  cheap and wrong. The inference side was tested and rejected: not
+  counting a comparison against an untyped member read as numeric use kept
+  splay's `key` boxed, changed nothing on the eager tier (1.03) and cost
+  binarytrees 1.24x and gcbench 1.26x. The defect is D4.3.4's rule; with it
+  every tier traces the whole tree and the auto tier runs splay at the
+  eager tier's time by right.
 
 ## Appendix C — Decision-Record Index
 

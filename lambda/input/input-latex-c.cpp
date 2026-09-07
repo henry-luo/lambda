@@ -1023,14 +1023,43 @@ private:
                                 bool* found) {
         if (found) *found = false;
         size_t name_len = strlen(name);
-        for (size_t i = from; i + 5 + name_len < length_; i++) {
-            if (!starts_with(source_, length_, i, "\\end{")) continue;
-            size_t name_start = i + 5;
-            if (memcmp(source_ + name_start, name, name_len) == 0 && source_[name_start + name_len] == '}') {
+        size_t nested_depth = 0;
+        for (size_t i = from; i < length_;) {
+            if (source_[i] != '\\') {
+                i++;
+                continue;
+            }
+            char command[96];
+            char full[104];
+            size_t after_command = latex_scan_command(source_, length_, i, command,
+                                                       sizeof(command), full, sizeof(full));
+            if (after_command == 0 ||
+                (strcmp(command, "begin") != 0 && strcmp(command, "end") != 0) ||
+                after_command >= length_ || source_[after_command] != '{') {
+                i++;
+                continue;
+            }
+            size_t env_begin = 0;
+            size_t env_end = 0;
+            size_t after_group = latex_scan_group_end(source_, length_, after_command, '{', '}',
+                                                       &env_begin, &env_end);
+            if (after_group == 0) {
+                i = after_command;
+                continue;
+            }
+            bool matching_name = env_end - env_begin == name_len &&
+                memcmp(source_ + env_begin, name, name_len) == 0;
+            if (matching_name && strcmp(command, "begin") == 0) {
+                // same-name list environments must close from the inside out.
+                nested_depth++;
+            } else if (matching_name && nested_depth > 0) {
+                nested_depth--;
+            } else if (matching_name) {
                 if (body_end) *body_end = i;
                 if (found) *found = true;
-                return name_start + name_len + 1;
+                return after_group;
             }
+            i = after_group;
         }
         return length_;
     }

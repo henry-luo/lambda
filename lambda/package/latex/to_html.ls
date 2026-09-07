@@ -66,12 +66,21 @@ fn serialize_element(el) {
     } else if (is_void_element(tag)) {
         "<" ++ tag ++ serialize_attrs(el) ++ ">"
     } else {
-        let children_html = serialize_children(el)
+        let children_html = serialize_math_relation_children(el)
         let close = if (tag == "svg" and el.preserveAspectRatio == "none") " >" else ">"
         // MathLive's SVG accent serializer leaves a space before `>` for
         // preserveAspectRatio="none"; keep it so stretchy accent snapshots compare exactly.
         "<" ++ tag ++ serialize_attrs(el) ++ close ++ children_html ++ "</" ++ tag ++ ">"
     }
+}
+
+// MathLive serializes top-level `<`/`>` relations raw inside lm_cmr spans.
+// Keep that snapshot contract while the element tree retains printable glyphs
+// for the direct Radiant view path.
+fn serialize_math_relation_children(el) {
+    if (el.math_raw_relation == true and el[0] is string and
+            (el[0] == "<" or el[0] == ">")) string(el[0])
+    else serialize_children(el)
 }
 
 fn is_transparent_math_boundary(el) {
@@ -116,6 +125,7 @@ fn format_attr(key, val) {
     if (string(key) == "math_data_attrs") {
         format_data_attrs(val)
     }
+    else if (string(key) == "math_raw_relation") { "" }
     else if (val is bool) {
         if (val == true) { " " ++ key }
         else { "" }

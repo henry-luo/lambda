@@ -51,18 +51,17 @@ pub fn box_cls(cls, height, depth, width, box_type) =>
 pub fn box_styled(cls, style, height, depth, width, box_type) =>
     ml_box_full(<span class: cls, style: style>, height, depth, width, box_type, 0.0, 0.0, height)
 
-// create a box from a text string (leaf node). The element keeps `text`
-// verbatim (which may carry the U+E000/U+E001 `<`/`>` raw-emit sentinels),
-// while metric lookups use the de-sentinelized form so heights/widths come
-// from the real `<`/`>` glyph metrics.
-pub fn text_box(text, cls, box_type) {
+// create a box from a text string (leaf node). Raw relation metadata is kept
+// separate from its printable `<`/`>` glyph so direct element consumers do
+// not receive serializer-only placeholders.
+pub fn text_box(text, cls, box_type, raw_relation = false) {
     let mt = metric_text(text)
     let h = text_height_for(mt, cls)
     let d = text_depth_for(mt, cls)
     let h_exact = text_height_exact_for(mt, cls)
     let d_exact = text_depth_exact_for(mt, cls)
     let bx = {
-            element: text_element(text, cls),
+            element: text_element(text, cls, raw_relation),
             height: if (h_exact != null) h_exact else h,
             depth: if (d_exact != null) d_exact else d,
             width: met.DEFAULT_CHAR_WIDTH * float(len(text)),
@@ -90,7 +89,7 @@ fn with_sup_min_shift(bx) => {
     sup_min_shift_base: true
 }
 
-// Map the raw-emit sentinels back to their real glyphs for metric lookup.
+// Preserve compatibility with raw SVG markup sentinels during metric lookup.
 fn metric_text(text) {
     if (text == "\u{E000}") "<"
     else if (text == "\u{E001}") ">"
@@ -284,16 +283,16 @@ fn text_depth_for(text, cls) {
     } else text_depth(text)
 }
 
-fn text_element(text, cls) {
+fn text_element(text, cls, raw_relation) {
     let style = text_style(text, cls)
     if (cls and style != null) {
-        <span class: cls, style: style, text>
+        <span class: cls, style: style, math_raw_relation: raw_relation, text>
     } else if (cls) {
-        <span class: cls, text>
+        <span class: cls, math_raw_relation: raw_relation, text>
     } else if (style != null) {
-        <span style: style, text>
+        <span style: style, math_raw_relation: raw_relation, text>
     } else {
-        <span text>
+        <span math_raw_relation: raw_relation, text>
     }
 }
 

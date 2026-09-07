@@ -1592,6 +1592,20 @@ static void gc_trace_shape_field(gc_heap_t* gc, void* field_type,
                                  int64_t byte_size) {
     if (!field_type) return;
     uint8_t lane = (uint8_t)lambda_shape_field_storage_type_id(field_type);
+    if (lane == LMD_TYPE_NULL_ && byte_offset >= 0 &&
+            byte_offset + (int64_t)sizeof(uint64_t) <= byte_size) {
+        // A `null`-typed lane is an eight-byte slot that the store path
+        // upgrades IN PLACE to a container pointer (fn_map_set's same-width
+        // fast path; a shared literal shape keeps `null` for its other
+        // instances), so the declared lane says nothing about the word. The
+        // word sweep below does not cover it either when the field follows a
+        // nine-byte `any` lane (splay's `{key: any, left: null, right: null}`
+        // put `right` at offset 17): the linked child was never marked and
+        // was freed while still reachable. Mark the word conservatively; a
+        // real null is zero and marks nothing.
+        gc_mark_possible_item(gc, *(uint64_t*)((uint8_t*)data_ptr + byte_offset));
+        return;
+    }
     // only trace Item-typed lanes (containers, strings, etc.); inline values
     // (bool, int, undefined) hold no GC pointer
     if (lane < LMD_TYPE_INT64_ || lane == LMD_TYPE_BOOL_ ||

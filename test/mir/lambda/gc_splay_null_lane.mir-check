@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "GC regression pin for the null-lane upgrade (splay reduced to 40 nodes). The value of this fixture is the forced-collection stress sweep (test_mir_gc_stress_gtest: LAMBDA_GC_FORCE_EVERY=1 + LAMBDA_GC_POISON_FREED=1 on every tier), which failed on every tier before gc_trace_shape_field marked a null-typed lane's word conservatively; the emission check only pins that the node literal is lowered as a typed map literal rather than a generic map_put chain.",
+  "checks": [
+    {
+      "in_func": "_create_node_#",
+      "forbid": [
+        "call\tfn_map_set_p, fn_map_set"
+      ]
+    }
+  ]
+}
