@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM designMode editing host</title>
+<style>
+  #surface { border: 1px solid #777; min-height: 28px; padding: 6px; }
+  #out { margin-top: 8px; white-space: pre-wrap; }
+</style>
+<div id="surface">seedtext</div>
+<button id="bold">bold</button>
+<button id="off">off</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var out = document.getElementById('out');
+  document.designMode = 'on';
+  out.textContent = document.designMode;
+  function keepSelection(event) { event.preventDefault(); }
+  ['bold', 'off'].forEach(function(id) {
+    document.getElementById(id).addEventListener('mousedown', keepSelection);
+  });
+  document.getElementById('bold').addEventListener('click', function() {
+    out.textContent = document.designMode + ':' +
+      document.execCommand('bold', false, '') + '|' + surface.innerHTML;
+  });
+  document.getElementById('off').addEventListener('click', function() {
+    document.designMode = 'off';
+    out.textContent = document.designMode + ':' +
+      document.execCommand('bold', false, '') + '|' + surface.innerHTML;
+  });
+</script>

@@ -187,12 +187,31 @@ static DomElement* parent_element(DomElement* element) {
         ? static_cast<DomElement*>(element->parent) : nullptr;
 }
 
+static bool format_legacy_font_color(DomElement* element, CssPropertyCode id,
+                                     int pseudo_type, char* out, size_t out_size) {
+    if (!element || id != CSS_PROPERTY_COLOR || pseudo_type != 0 ||
+        element->tag() != MARKUP_NAME_FONT) {
+        return false;
+    }
+    const char* value = element->get_attribute("color");
+    CssColor color = {};
+    if (!value || !css_parse_color(value, &color) || color.type == CSS_COLOR_CURRENT) {
+        return false;
+    }
+    return format_color(out, out_size, rgba_color(color.r, color.g, color.b, color.a));
+}
+
 static bool serialize_decl_recursive(DomElement* element, CssPropertyCode id,
                                      int pseudo_type, int depth,
                                      char* out, size_t out_size) {
     if (!element || depth > 16) return false;
     CssDeclaration* declaration = computed_decl(element, id, pseudo_type);
     const CssValue* value = declaration ? declaration->value : nullptr;
+    // Legacy presentational attributes participate before inherited color is
+    // consulted, including for dynamic computed-style reads without layout.
+    if (!value && format_legacy_font_color(element, id, pseudo_type, out, out_size)) {
+        return true;
+    }
     // The specified-style tree keeps shorthands intact for CSSOM mutation.
     // Resolve their winning physical component before serializing a longhand.
     const CssValue* shorthand_value = computed_spacing_side_value(

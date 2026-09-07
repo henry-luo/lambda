@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable document settings</title>
+<div id="surface" contenteditable="true" tabindex="0">seed</div>
+<button id="initial">initial</button>
+<button id="style">style</button>
+<button id="legacy">legacy</button>
+<button id="separator">separator</button>
+<div id="out"></div>
+<script>
+  var out = document.getElementById('out');
+  function report(tag) {
+    out.textContent = tag + ':' +
+      document.queryCommandSupported('styleWithCSS') + ':' +
+      document.queryCommandState('styleWithCSS') + ':' +
+      document.queryCommandValue('defaultParagraphSeparator');
+  }
+  ['initial', 'style', 'legacy', 'separator'].forEach(function(id) {
+    document.getElementById(id).addEventListener('click', function() {
+      if (id === 'style') {
+        out.textContent = 'style:' + document.execCommand('styleWithCSS', false, true) + ':' +
+          document.queryCommandState('styleWithCSS');
+      } else if (id === 'legacy') {
+        out.textContent = 'legacy:' + document.execCommand('useCSS', false, true) + ':' +
+          document.queryCommandState('styleWithCSS');
+      } else if (id === 'separator') {
+        out.textContent = 'separator:' + document.execCommand('defaultParagraphSeparator', false, 'p') + ':' +
+          document.queryCommandValue('defaultParagraphSeparator');
+      } else report('initial');
+    });
+  });
+</script>

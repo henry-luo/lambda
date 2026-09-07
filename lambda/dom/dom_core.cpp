@@ -25,6 +25,7 @@
 #include "dom_events.h"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
+#include "../input/css/css_style.hpp"
 #include "../io/mark_builder.hpp"
 #include "../js/js_runtime.h"
 #include <climits>
@@ -140,6 +141,9 @@ extern "C" __attribute__((weak)) void dom_engine_bind_host(const void* host_api)
 #define DOM_ENGINE_SEAM_4(name) \
     extern "C" __attribute__((weak)) Item dom_engine_##name(Item a, Item b, Item c, Item d) { \
         (void)a; (void)b; (void)c; (void)d; return ItemNull; }
+#define DOM_ENGINE_SEAM_5(name) \
+    extern "C" __attribute__((weak)) Item dom_engine_##name(Item a, Item b, Item c, Item d, Item e) { \
+        (void)a; (void)b; (void)c; (void)d; (void)e; return ItemNull; }
 #define DOM_ENGINE_SEAM_1(name) \
     extern "C" __attribute__((weak)) Item dom_engine_##name(Item a) { \
         (void)a; return ItemNull; }
@@ -161,25 +165,39 @@ DOM_ENGINE_SEAM_3(caret_operation)
 DOM_ENGINE_SEAM_2(pointer_selection)
 DOM_ENGINE_SEAM_1(clear_ime_preedit)
 DOM_ENGINE_SEAM_0(clipboard_text)
+DOM_ENGINE_SEAM_2(edit_selection_text)
+DOM_ENGINE_SEAM_2(edit_selection_html)
+DOM_ENGINE_SEAM_4(edit_clipboard_write)
 DOM_ENGINE_SEAM_1(context_menu_target)
-DOM_ENGINE_SEAM_2(edit_insert_at_boundary)
-DOM_ENGINE_SEAM_1(edit_insert_break)
+DOM_ENGINE_SEAM_3(edit_insert_at_boundary)
+DOM_ENGINE_SEAM_2(edit_insert_break)
+DOM_ENGINE_SEAM_2(edit_select_host)
 DOM_ENGINE_SEAM_4(edit_replace_range)
-DOM_ENGINE_SEAM_1(edit_split_block)
+DOM_ENGINE_SEAM_4(edit_split_block)
 DOM_ENGINE_SEAM_2(key_intent)
 DOM_ENGINE_SEAM_3(navigation_destination)
 DOM_ENGINE_SEAM_2(open_context_menu)
 DOM_ENGINE_SEAM_1(request_navigation)
-DOM_ENGINE_SEAM_2(set_caret)
+DOM_ENGINE_SEAM_3(set_caret)
 DOM_ENGINE_SEAM_3(set_ime_preedit)
 DOM_ENGINE_SEAM_3(set_password_reveal)
 DOM_ENGINE_SEAM_1(tc_value)
 DOM_ENGINE_SEAM_1(ime_preedit)
 DOM_ENGINE_SEAM_1(tc_selection_start)
 DOM_ENGINE_SEAM_1(tc_selection_end)
-DOM_ENGINE_SEAM_1(edit_node)
-DOM_ENGINE_SEAM_1(edit_start)
-DOM_ENGINE_SEAM_1(edit_end)
+DOM_ENGINE_SEAM_2(edit_node)
+DOM_ENGINE_SEAM_2(edit_start)
+DOM_ENGINE_SEAM_2(edit_end)
+DOM_ENGINE_SEAM_2(edit_start_container)
+DOM_ENGINE_SEAM_2(edit_end_container)
+DOM_ENGINE_SEAM_2(edit_epoch)
+DOM_ENGINE_SEAM_2(edit_begin_transaction)
+DOM_ENGINE_SEAM_2(edit_abort_transaction)
+DOM_ENGINE_SEAM_2(edit_retain_delta)
+DOM_ENGINE_SEAM_4(edit_replay_delta)
+DOM_ENGINE_SEAM_2(edit_release_delta)
+DOM_ENGINE_SEAM_1(edit_session)
+DOM_ENGINE_SEAM_2(set_edit_session)
 DOM_ENGINE_SEAM_1(is_focusable)
 DOM_ENGINE_SEAM_4(dispatch_event)
 DOM_ENGINE_SEAM_1(keyboard_click)
@@ -189,14 +207,14 @@ DOM_ENGINE_SEAM_1(focus_candidates)
 DOM_ENGINE_SEAM_1(check_validity)
 DOM_ENGINE_SEAM_1(close_context_menu)
 DOM_ENGINE_SEAM_1(custom_validity)
-DOM_ENGINE_SEAM_1(dom_delete_dom_range)
-DOM_ENGINE_SEAM_1(dom_edit_text)
-DOM_ENGINE_SEAM_2(dom_insert_html)
-DOM_ENGINE_SEAM_2(dom_range_format)
-DOM_ENGINE_SEAM_2(dom_replace_dom_range)
-DOM_ENGINE_SEAM_4(dom_replace_range)
-DOM_ENGINE_SEAM_4(dom_unwrap_range)
-DOM_ENGINE_SEAM_4(dom_wrap_range)
+DOM_ENGINE_SEAM_2(dom_delete_dom_range)
+DOM_ENGINE_SEAM_2(dom_edit_text)
+DOM_ENGINE_SEAM_4(dom_merge_adjacent_blocks)
+DOM_ENGINE_SEAM_3(dom_insert_html)
+DOM_ENGINE_SEAM_3(dom_replace_dom_range)
+DOM_ENGINE_SEAM_5(dom_replace_range)
+DOM_ENGINE_SEAM_5(dom_unwrap_range)
+DOM_ENGINE_SEAM_5(dom_wrap_range)
 DOM_ENGINE_SEAM_1(dropdown_open)
 DOM_ENGINE_SEAM_1(embedded_document_root)
 DOM_ENGINE_SEAM_1(embedding_element)
@@ -278,8 +296,7 @@ extern "C" Item dom_core_create_node(Item doc, Item type, Item name, Item data) 
     switch (kind) {
     case DOM_NODE_ELEMENT: {
         if (!tag) return ItemNull;
-        Item backing = builder.element(tag).final();
-        DomElement* elem = dom_element_create(document, tag, backing.element);
+        DomElement* elem = (DomElement*)dom_create_backed_element_bridge(document, tag);
         return elem ? dom_wrap_element(elem) : ItemNull;
     }
     case DOM_NODE_TEXT: {
@@ -299,6 +316,15 @@ extern "C" Item dom_core_create_node(Item doc, Item type, Item name, Item data) 
     default:
         return ItemNull;
     }
+}
+
+extern "C" void* dom_create_backed_element_bridge(void* document_ptr,
+                                                    const char* tag) {
+    DomDocument* document = (DomDocument*)document_ptr;
+    if (!document || !document->input || !tag || !tag[0]) return nullptr;
+    MarkBuilder builder(document->input);
+    Item backing = builder.element(tag).final();
+    return backing.element ? dom_element_create(document, tag, backing.element) : nullptr;
 }
 // Property WRITES through the realm-shared protocol (D7.4.4). These were kept
 // out of the Lambda face because they faulted with no JS realm (ESO81); the
@@ -605,9 +631,21 @@ extern "C" Item dom_core_selection_boundaries(Item s) {
 extern "C" Item dom_get_computed_style(Item elem_item, Item pseudo_item);
 extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name);
 extern "C" Item dom_core_computed_style(Item n, Item prop) {
-    Item style = dom_get_computed_style(n, ItemNull);
-    return get_type_id(style) == LMD_TYPE_NULL ? ItemNull
-         : dom_computed_style_get_property(style, prop);
+    // The style wrapper is heap-managed. Root both operands and the temporary
+    // across the nested core calls: a Lambda package call may allocate while
+    // resolving a property, unlike the JS-only fast path (D5.3.3).
+    RootFrame roots(3);
+    Rooted<Item> node(roots, n);
+    Rooted<Item> property(roots, prop);
+    Rooted<Item> style(roots, dom_get_computed_style(node.get(), ItemNull));
+    if (get_type_id(style.get()) == LMD_TYPE_NULL) return ItemNull;
+    return dom_computed_style_get_property(style.get(), property.get());
+}
+
+extern "C" Item dom_core_css_color_valid(Item value) {
+    const char* source = dom_cstr_or_null(value);
+    CssColor color = {};
+    return (Item){.item = b2it(source && css_parse_color(source, &color))};
 }
 
 // --- listeners: the void-returning core entries under the uniform shape

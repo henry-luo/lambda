@@ -49,6 +49,11 @@ typedef enum RadiantDocumentOperation {
     RADIANT_DOCUMENT_CREATE_TREE_WALKER,
     RADIANT_DOCUMENT_CREATE_EVENT,
     RADIANT_DOCUMENT_EXEC_COMMAND,
+    RADIANT_DOCUMENT_QUERY_COMMAND_SUPPORTED,
+    RADIANT_DOCUMENT_QUERY_COMMAND_ENABLED,
+    RADIANT_DOCUMENT_QUERY_COMMAND_STATE,
+    RADIANT_DOCUMENT_QUERY_COMMAND_INDETERM,
+    RADIANT_DOCUMENT_QUERY_COMMAND_VALUE,
 } RadiantDocumentOperation;
 
 RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
@@ -175,6 +180,7 @@ RADIANT_C_API Item fn_radiant_next_element_sibling(Item node_item);
 RADIANT_C_API Item fn_radiant_focus_candidates(Item root_item);
 RADIANT_C_API Item fn_radiant_focused(Item node_item);
 RADIANT_C_API Item fn_radiant_focus_set(Item node_item, Item from_keyboard_item);
+RADIANT_C_API Item fn_radiant_clear_editing_focus(Item node_item);
 RADIANT_C_API Item fn_radiant_mouse_focus(Item node_item);
 RADIANT_C_API Item fn_radiant_scroll_into_view(Item node_item);
 RADIANT_C_API Item fn_radiant_embedding_element(Item node_item);

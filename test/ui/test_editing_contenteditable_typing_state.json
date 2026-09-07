@@ -1,0 +1,13 @@
+{
+  "name": "Contenteditable collapsed format state feeds the shared text plan",
+  "html": "test/html/editable-dom-typing-state.html",
+  "viewport": {"width": 640, "height": 140},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_typing_state ==="},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 2, "end": 2},
+    {"type": "click", "target": {"selector": "#bold"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "bold:true:true|seed"},
+    {"type": "click", "target": {"selector": "#insert"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "insert:true|se<b>X</b>ed"}
+  ]
+}

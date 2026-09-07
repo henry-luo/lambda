@@ -1,0 +1,11 @@
+{
+  "name": "Contenteditable selectAll uses the generic Selection mechanism",
+  "html": "test/html/editable-dom-select-all.html",
+  "viewport": {"width": 640, "height": 120},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_select_all ==="},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 2, "end": 3},
+    {"type": "click", "target": {"selector": "#select"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "true|seedtext"}
+  ]
+}

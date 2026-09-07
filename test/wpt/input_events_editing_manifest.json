@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "corpus": "web-platform-tests",
+  "upstream_revision": "4ea2132b9a14ad4baf33677ad1723789dd183d6b",
+  "root": "ref/wpt",
+  "inventory": "selected",
+  "runner": "test_wpt_contenteditable_gtest.exe",
+  "entries": [
+    {
+      "path": "input-events/input-events-exec-command.html",
+      "sha256": "a5caaafabf767745953aa9577e6d401b9c5e63ea589a8aeec1b2216a51683d23",
+      "family": "command-events",
+      "kind": "automated-dom",
+      "disposition": "required",
+      "runner": "test_wpt_contenteditable_gtest.exe"
+    }
+  ]
+}

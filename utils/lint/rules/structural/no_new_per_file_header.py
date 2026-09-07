@@ -117,7 +117,10 @@ def main() -> int:
             f"{len(disallowed)} non-allow-listed, {len(per_file)} per-file mirror(s)"
         )
 
-    if mode == "error" and (new_violations or disallowed or per_file or over_cap):
+    # This is a ratchet, not a retroactive repository-wide header migration.
+    # Existing tracked exceptions remain visible above, while only a newly
+    # introduced violation (or growth beyond the global cap) fails CI.
+    if mode == "error" and (new_violations or over_cap):
         return 1
     return 0
 

@@ -1,18 +1,28 @@
 # Radiant Editable Support — Detailed Implementation Plan
 
 **Date:** 2026-07-29
-**Status:** Implemented — verification complete
+**Status:** Phase 1 implemented — verification complete; retained as its
+implementation record
 **Design contract:** [Radiant_Design_Editable.md](Radiant_Design_Editable.md)
-**Scope:** migrate `contenteditable` input to a notification/action/notification
-gate, add deterministic per-document action routing, provide the minimum
-DOM-compatible text/composition action needed by real editors, retain Radiant
-template editing on the same gate, and prove the result with CodeMirror 6,
-ProseMirror, and Editor.js end-to-end tests.
+**Historical Phase-1 scope:** migrate `contenteditable` input to a
+notification/action/notification gate, add deterministic per-document action
+routing, provide the minimum DOM-compatible text/composition action needed by
+real editors, retain Radiant template editing on the same gate, and prove the
+result with CodeMirror 6, ProseMirror, and Editor.js end-to-end tests.
+
+> **Phase boundary (D7.2.5).** This file records the implemented Phase-1 gate
+> and its then-current capability limits through Phase 8. Section 20 of the
+> [design contract](Radiant_Design_Editable.md) supersedes its “no full UA
+> default” and “no `execCommand`” decisions. New UA editing policy, commands,
+> normalization, and history belong to the shipped Lambda DOM behavior
+> package; they must not be added to the native Phase-1 handler. The active
+> Phase-9 work breakdown is
+> [Radiant_Impl_Editable2.md](Radiant_Impl_Editable2.md).
 
 This document is an execution plan. The design contract remains authoritative
 for product scope and semantics. When implementation evidence changes a
 capability assumption, update the capability manifest and the design contract
-before widening the native action.
+before widening package policy or the native mechanism waist.
 
 ---
 

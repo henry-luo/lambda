@@ -592,6 +592,14 @@ static bool dt_record_string_type_is(Item record, const char* type, size_t type_
         strncmp(s->chars, type, type_len) == 0;
 }
 
+// InputEvent exposes a frozen snapshot of its transfer payload. Clipboard and
+// drag events keep their mutable DataTransfer, but listener writes must not
+// rewrite an edit that has already committed (D7.2.5).
+static bool dt_is_read_only(Item dt) {
+    Item read_only = dom_realm_get_cstr(dt, "__read_only");
+    return get_type_id(read_only) == LMD_TYPE_BOOL && it2b(read_only);
+}
+
 // Lowercase and copy in-place. Returns false if input does not fit.
 static bool dt_normalize_format(Item type_item, char* out, size_t out_cap) {
     if (get_type_id(type_item) != LMD_TYPE_STRING) return false;
@@ -695,6 +703,7 @@ extern "C" Item js_dt_items_add(Item data_arg, Item type_arg) {
     if (get_type_id(items) != LMD_TYPE_ARRAY) return ItemNull;
     Item dt = dom_realm_get_cstr(items, "_owner");
     if (get_type_id(dt) != LMD_TYPE_MAP) return ItemNull;
+    if (dt_is_read_only(dt)) return ItemNull;
     Item rec_arr = dom_realm_get_cstr(dt, "_items");
     if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return ItemNull;
 
@@ -755,6 +764,7 @@ extern "C" Item js_dt_items_remove(Item idx_arg) {
     if (get_type_id(items) != LMD_TYPE_ARRAY) return ItemNull;
     Item dt = dom_realm_get_cstr(items, "_owner");
     if (get_type_id(dt) != LMD_TYPE_MAP) return ItemNull;
+    if (dt_is_read_only(dt)) return ItemNull;
     Item rec_arr = dom_realm_get_cstr(dt, "_items");
     if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return ItemNull;
 
@@ -774,6 +784,7 @@ extern "C" Item js_dt_items_clear(void) {
     if (get_type_id(items) != LMD_TYPE_ARRAY) return ItemNull;
     Item dt = dom_realm_get_cstr(items, "_owner");
     if (get_type_id(dt) != LMD_TYPE_MAP) return ItemNull;
+    if (dt_is_read_only(dt)) return ItemNull;
     Item rec_arr = dom_realm_get_cstr(dt, "_items");
     if (get_type_id(rec_arr) == LMD_TYPE_ARRAY) rec_arr.array->length = 0;
     dt_recompute_views(dt);
@@ -793,6 +804,7 @@ extern "C" Item js_dt_files_item(Item idx_arg) {
 extern "C" Item js_dt_set_data(Item type_item, Item data_item) {
     Item dt = dom_realm_receiver();
     if (get_type_id(dt) != LMD_TYPE_MAP) return ItemNull;
+    if (dt_is_read_only(dt)) return ItemNull;
     char tbuf[256];
     if (!dt_normalize_format(type_item, tbuf, sizeof(tbuf))) return ItemNull;
     Item value = data_item;
@@ -843,6 +855,7 @@ extern "C" Item js_dt_get_data(Item type_item) {
 extern "C" Item js_dt_clear_data(Item format_item) {
     Item dt = dom_realm_receiver();
     if (get_type_id(dt) != LMD_TYPE_MAP) return ItemNull;
+    if (dt_is_read_only(dt)) return ItemNull;
     Item rec_arr = dom_realm_get_cstr(dt, "_items");
     if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return ItemNull;
     Array* a = rec_arr.array;
@@ -958,6 +971,13 @@ extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
         js_array_push(rec_arr, record);
     }
     dt_recompute_views(dt);
+    return dt;
+}
+
+extern "C" Item js_data_transfer_new_read_only_with_strings(const char* text_plain,
+                                                              const char* text_html) {
+    Item dt = js_data_transfer_new_with_strings(text_plain, text_html);
+    dom_realm_set_cstr(dt, "__read_only", (Item){.item = ITEM_TRUE});
     return dt;
 }
 

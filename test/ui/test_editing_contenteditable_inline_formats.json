@@ -1,0 +1,14 @@
+{
+  "name": "Contenteditable subscript and superscript share the format planner",
+  "html": "test/html/editable-dom-inline-formats.html",
+  "viewport": {"width": 640, "height": 160},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_inline_formats ==="},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 0, "end": 3},
+    {"type": "click", "target": {"selector": "#sub"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "sub:true:true|<sub>sub</sub>sup"},
+    {"type": "set_editing_selection", "target": {"selector": "#supface"}, "start": 0, "end": 3},
+    {"type": "click", "target": {"selector": "#sup"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "sup:true:true|<sup>sup</sup>"}
+  ]
+}

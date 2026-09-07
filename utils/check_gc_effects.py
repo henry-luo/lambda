@@ -39,14 +39,17 @@ SKIP_SOURCE_PARTS = {
 # or generated code.  Adding an entry is a security-relevant review action.
 VERIFIED_EXTERNAL_LEAVES = {
     "abort",
+    "assert",
     # Process configuration and teardown registration are C-runtime calls.
     # They neither invoke a registered callback synchronously nor enter the
     # Lambda heap, so they are safe leaves for a NO_GC import path.
     "atexit",
     "d2it",
     "fmod",
+    "floor",
     "getenv",
     "isnan",
+    "isfinite",
     "k2it",
     "l2it",
     "__builtin_memcpy",
@@ -89,14 +92,24 @@ VERIFIED_READER_METHODS = {
     "get_safe_binary",
     "get_safe_string",
     "get_uint64",
+    "get_elem_type",
     "is_inline_int64",
     "type_id",
+}
+
+# Pending-pair resolution is emitted only by the MIR materialization path. Its
+# runtime `AutoAssertNoGC` guard proves the no-GC boundary dynamically, while
+# its number-stack error fallback is intentionally not a general callee path.
+# Expanding it lexically would misclassify the intrinsic and hide the emitter's
+# required pending-pair calling convention.
+DYNAMICALLY_GUARDED_NO_GC = {
+    "lambda_item_resolve_pending",
 }
 
 # Function-like language constructs and local RAII variable construction that
 # the lexical call extractor can otherwise mistake for an indirect call.
 NON_CALL_TOKENS = {
-    "alignas", "alignof", "asm", "catch", "decltype", "do", "for", "if",
+    "alignas", "alignof", "asm", "catch", "decltype", "defined", "do", "for", "if",
     "no_gc", "return", "sizeof", "static_assert", "switch", "while",
 }
 
@@ -189,6 +202,64 @@ def matching_right(text: str, left: int, opening: str, closing: str) -> int:
     return -1
 
 
+def macro_arguments(text: str, open_paren: int) -> list[str]:
+    """Split one macro invocation without treating nested expressions as args."""
+    close_paren = matching_right(text, open_paren, "(", ")")
+    if close_paren < 0:
+        return []
+    arguments: list[str] = []
+    start = open_paren + 1
+    paren_depth = bracket_depth = brace_depth = 0
+    for index in range(start, close_paren):
+        char = text[index]
+        if char == "(":
+            paren_depth += 1
+        elif char == ")":
+            paren_depth -= 1
+        elif char == "[":
+            bracket_depth += 1
+        elif char == "]":
+            bracket_depth -= 1
+        elif char == "{":
+            brace_depth += 1
+        elif char == "}":
+            brace_depth -= 1
+        elif (char == "," and paren_depth == 0 and bracket_depth == 0 and
+              brace_depth == 0):
+            arguments.append(text[start:index])
+            start = index + 1
+    arguments.append(text[start:close_paren])
+    return arguments
+
+
+def forward_expression_bodies(
+        clean: str, path: Path, newline_offsets: list[int]) -> list[FunctionBody]:
+    """Expose JS_FORWARD_*_EXPRESSION wrappers to the lexical call graph.
+
+    The wrappers expand to an ordinary return-only function. Treating the
+    macro as opaque made audited NO_GC imports look undefined and hid the
+    expression they actually execute.
+    """
+    result: list[FunctionBody] = []
+    pattern = re.compile(r"\bJS_FORWARD(?:_STATIC)?_EXPRESSION\s*\(")
+    for match in pattern.finditer(clean):
+        open_paren = clean.find("(", match.start(), match.end())
+        arguments = macro_arguments(clean, open_paren)
+        if len(arguments) != 4:
+            continue
+        name_match = re.fullmatch(r"\s*([A-Za-z_]\w*)\s*", arguments[1])
+        if not name_match:
+            continue
+        name = name_match.group(1)
+        name_offset = clean.find(name, open_paren, matching_right(
+            clean, open_paren, "(", ")"))
+        if name_offset < 0:
+            continue
+        line = bisect_right(newline_offsets, name_offset) + 1
+        result.append(FunctionBody(name, path, line, arguments[3]))
+    return result
+
+
 def function_bodies(path: Path) -> list[FunctionBody]:
     source = path.read_text(encoding="utf-8", errors="replace")
     clean = strip_comments_and_literals(source)
@@ -257,6 +328,7 @@ def function_bodies(path: Path) -> list[FunctionBody]:
             continue
         line = bisect_right(newline_offsets, name_start) + 1
         result.append(FunctionBody(name, path, line, clean[brace + 1:body_end]))
+    result.extend(forward_expression_bodies(clean, path, newline_offsets))
     return result
 
 
@@ -360,6 +432,13 @@ def main() -> int:
             errors.append(f"unresolved audited function: {' -> '.join(path_to_name)}")
             continue
         for function in bodies:
+            if function.name in DYNAMICALLY_GUARDED_NO_GC:
+                if "AutoAssertNoGC" not in function.body:
+                    errors.append(
+                        f"missing dynamic NO_GC guard: {' -> '.join(path_to_name)} "
+                        f"at {relative(function.path)}:{function.line}"
+                    )
+                continue
             direct, members = extract_calls(function.body)
             for member in sorted(members - VERIFIED_READER_METHODS):
                 errors.append(

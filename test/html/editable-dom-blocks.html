@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable block formatting</title>
+<div id="surface" contenteditable="true" tabindex="0"><p class="lead">item</p></div>
+<button id="format">format</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var out = document.getElementById('out');
+  document.getElementById('format').addEventListener('mousedown', function(event) {
+    event.preventDefault();
+  });
+  document.getElementById('format').addEventListener('click', function() {
+    out.textContent = document.execCommand('formatBlock', false, '<h1>') +
+      '|' + surface.innerHTML;
+  });
+</script>

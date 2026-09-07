@@ -1,0 +1,9 @@
+{
+  "name": "RTE selection updates do not append a null heading child",
+  "html": "test/ui/rte_prototype.ls",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "click", "target": {"text": "basic functionality"}},
+    {"type": "assert_text", "target": {"selector": "#doc h1"}, "equals": "Simple Markdown Test"}
+  ]
+}

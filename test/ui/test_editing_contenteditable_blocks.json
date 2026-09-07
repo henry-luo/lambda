@@ -1,0 +1,11 @@
+{
+  "name": "Contenteditable formatBlock uses a package-selected generic node conversion",
+  "html": "test/html/editable-dom-blocks.html",
+  "viewport": {"width": 640, "height": 140},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_blocks ==="},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 0, "end": 4},
+    {"type": "click", "target": {"selector": "#format"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "true|<h1 class=\"lead\">item</h1>"}
+  ]
+}

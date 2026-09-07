@@ -1,0 +1,39 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable command queries</title>
+<style>
+  #surface { border: 1px solid #777; min-height: 28px; padding: 6px; }
+  #out { margin-top: 8px; white-space: pre-wrap; }
+</style>
+<div id="surface" contenteditable="true" tabindex="0">seedtext</div>
+<button id="support">support</button>
+<button id="before">before</button>
+<button id="apply">apply</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var out = document.getElementById('out');
+  function keepSelection(event) { event.preventDefault(); }
+  ['support', 'before', 'apply'].forEach(function(id) {
+    document.getElementById(id).addEventListener('mousedown', keepSelection);
+  });
+  function report(tag) {
+    out.textContent = tag + ':' +
+      document.queryCommandSupported('bold') + ':' +
+      document.queryCommandEnabled('bold') + ':' +
+      document.queryCommandState('bold') + ':' +
+      document.queryCommandIndeterm('bold') + ':' +
+      document.queryCommandValue('bold');
+  }
+  document.getElementById('support').addEventListener('click', function() {
+    out.textContent = 'support:' + document.queryCommandSupported('bold') + ':' +
+      document.queryCommandSupported('notACommand');
+  });
+  document.getElementById('before').addEventListener('click', function() {
+    report('before');
+  });
+  document.getElementById('apply').addEventListener('click', function() {
+    document.execCommand('bold', false, '');
+    report('after');
+  });
+</script>
