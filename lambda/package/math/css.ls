@@ -141,7 +141,18 @@ pub fn get_stylesheet(options = null) {
     ".lm_nulldelimiter{display:inline-block;width:0.12em}" ++
     ".lm_rule{display:inline-block;border:solid 0;position:relative;box-sizing:border-box}" ++
     ".lm_mtable{display:inline-flex;flex-direction:column;vertical-align:middle}" ++
-    ".lm_error{color:#bc2612}"
+    ".lm_error{color:#bc2612}" ++
+    // MathLive's table cell is a relative containing block for zero-height
+    // positioned rows; their overflow must not participate in row sizing.
+    ".lm_vlist-t{display:inline-table;table-layout:fixed;border-collapse:collapse}" ++
+    ".lm_vlist-t2{margin-right:-2px}" ++
+    ".lm_vlist-r{display:table-row}" ++
+    ".lm_vlist{display:table-cell;vertical-align:bottom;position:relative}" ++
+    ".lm_vlist-s{display:table-cell;vertical-align:bottom;width:2px;min-width:2px}" ++
+    ".lm_vlist>span{display:block;height:0;position:relative}" ++
+    ".lm_vlist>span>span{display:inline-block}" ++
+    ".lm_vlist>span>.lm_pstrut{overflow:hidden;width:0}" ++
+    ".lm_pstrut{display:inline-block}"
     s
 }
 
