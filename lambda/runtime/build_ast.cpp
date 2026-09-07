@@ -4033,7 +4033,13 @@ static void lint_condition_at_line(Transpiler* tp, int line, AstNode* cond,
         return;
     }
 
-    TypeId cond_type = cond->type ? cond->type->type_id : LMD_TYPE_ANY;
+    Type* cond_contract = boundary_unwrap_type(cond->type);
+    // An occurrence or union contract (`bool?` from a total indexed read,
+    // `a[i] and b[j]`) carries the meta TypeId but describes a scalar value;
+    // only a simple-kind container (or a type value) is always truthy.
+    if (boundary_type_is_extended(cond_contract, TYPE_KIND_UNARY) ||
+            boundary_type_is_extended(cond_contract, TYPE_KIND_BINARY)) return;
+    TypeId cond_type = cond_contract ? cond_contract->type_id : LMD_TYPE_ANY;
     if (is_container_type_id(cond_type)) {
         // containers are truthy by design, so a container condition is almost always a missing scalar predicate.
         log_warn("lambda_condition_lint: line %d: %s condition has container type %s, which is always truthy; use len(...), any(...), all(...), or an explicit comparison",

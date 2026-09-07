@@ -1,0 +1,23 @@
+{
+  "name": "Contenteditable undo/redo retains and coalesces package text deltas",
+  "html": "test/html/editable-dom-history.html",
+  "viewport": {"width": 640, "height": 140},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_history ==="},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 2, "end": 2},
+    {"type": "click", "target": {"selector": "#insert"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "insert:true:true:false|seAed"},
+    {"type": "click", "target": {"selector": "#insert"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "insert:true:true:false|seAAed"},
+    {"type": "click", "target": {"selector": "#undo"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "undo:true:false:true|seed"},
+    {"type": "click", "target": {"selector": "#redo"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "redo:true:true:false|seAAed"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "click", "target": {"selector": "#report"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "report:true:false:true|seed"},
+    {"type": "key_combo", "key": "z", "mods_str": "super+shift"},
+    {"type": "click", "target": {"selector": "#report"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "report:true:true:false|seAAed"}
+  ]
+}

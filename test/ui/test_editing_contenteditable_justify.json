@@ -1,0 +1,11 @@
+{
+  "name": "Contenteditable justify composes a package-owned style step",
+  "html": "test/html/editable-dom-justify.html",
+  "viewport": {"width": 640, "height": 140},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_justify ==="},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 0, "end": 4},
+    {"type": "click", "target": {"selector": "#justify"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "true|<p style=\"color:blue;text-align: center;\">item</p>"}
+  ]
+}

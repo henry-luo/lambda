@@ -7,12 +7,11 @@ below form controls, contenteditable hosts, JS DOM events, Lambda
 `edit <...>` templates, and future rich text editor features.
 **Scope:** Unified editing authority across contenteditable hosts, form text
 controls (`<input>`/`<textarea>`), and Lambda editor templates. This is the
-canonical successor to both Radiant_Design_Content_Editable.md (the rich
-contenteditable strategy) and Radiant_Design_Editing.md (the form+rich
-unification).
-**Supersedes / updates:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md)
-for the implementation strategy. The older document remains useful for the
-web-platform contract and WPT background.
+canonical successor to the earlier CE1 rich-contenteditable strategy and
+Radiant_Design_Editing.md (the form+rich unification).
+**Historical predecessor:** the removed CE1 record is consolidated in
+[Radiant_Design_Editable.md](../radiant/Radiant_Design_Editable.md) §17.2.
+The current editable-host design and capability contract live there as well.
 **Supersedes (selection + transaction model):**
 [Radiant_Design_Editing.md](Radiant_Design_Editing.md) is **phased out** as the
 canonical design. Editing 2 is now the canonical editing design. Editing.md's

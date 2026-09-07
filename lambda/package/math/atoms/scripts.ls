@@ -22,6 +22,7 @@ pub fn render(node, context, render_fn) {
     if (is_sequence_script_base(base))
         render_sequence_base_scripts(node, context, render_fn)
     else {
+    let is_mathop = base != null and base is element and name(base) == 'mathop'
     let is_big_op = base != null and base is element and name(base) == 'command' and
         base.name != null and sym.is_limit_op(string(base.name))
     // Integral-family operators (\int, \oint, \iint, etc.) use SIDE limits
@@ -30,7 +31,9 @@ pub fn render(node, context, render_fn) {
     let cmd_name = if (is_big_op) string(base.name) else ""
     let is_integral = is_integral_op(cmd_name)
 
-    if (is_big_op and is_integral)
+    if (is_mathop and node.modifier == "limits")
+        render_mathop_limits(base, node, context, render_fn)
+    else if (is_big_op and is_integral)
         // Integrals place their limits to the SIDE (lm_msubsup adjacent to the
         // symbol) in both inline AND display mode — MathLive never stacks
         // integral limits by default.
@@ -42,6 +45,15 @@ pub fn render(node, context, render_fn) {
     else
         render_scripts(node, context, render_fn)
     }
+}
+
+fn render_mathop_limits(base, node, context, render_fn) {
+    let body = if (base.body != null) render_fn(base.body, context)
+        else box.text_box("", css.CMR, "mop")
+    let op_box = box.with_class(body, css.OP_GROUP)
+    let lower = if (node.sub != null) render_fn(node.sub, ctx.sub_context(context)) else null
+    let upper = if (node.sup != null) render_fn(node.sup, ctx.sup_context(context)) else null
+    make_limits_stack(op_box, lower, upper, false)
 }
 
 fn is_sequence_script_base(base) {

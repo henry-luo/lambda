@@ -667,6 +667,23 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
         // matching the boxed wrapper rather than rejecting it as `int`.
         return value;
     }
+    if (parameter_type && parameter_type->is_var_param && parameter->declared_type &&
+            get_type_id(value) == LMD_TYPE_ARRAY_NUM) {
+        // S9.1.3: a `var` parameter is the sharing construct -- it borrows the
+        // caller's container, so the `any[]` boundary may not hand it a widened
+        // COPY: the callee's writes would land in the copy and the widening is
+        // O(n) on every call (typed hashmap's `int_slot_set(var slots: array)`
+        // converted a 10k-element field per store and never finished). MIR
+        // admits the packed carrier in place under the open contract (D3.2.1,
+        // fn_array_set widens a lane on demand); only an N-D/view carrier still
+        // needs the boundary, because scalar indexing would flatten a row.
+        Type* element = ast_declared_array_element(parameter->declared_type);
+        ArrayNum* packed = value.array_num;
+        if (element && element->type_id == LMD_TYPE_ANY && packed &&
+                !packed->is_ndim && !packed->is_view) {
+            return value;
+        }
+    }
     return interp_coerce_declared_binding(f, value, parameter->declared_type,
         boundary ? boundary : "declared parameter binding");
 }
@@ -5426,6 +5443,28 @@ static bool interp_whole_script_publish_function(Script* script,
     return true;
 }
 
+bool interp_publish_satellite_member(Script* script, AstFuncNode* def, void* entry) {
+    if (!script || !def || !def->analysis || !entry) return false;
+    NameEntry* decl = def->analysis->decl_entry;
+    LambdaModuleState* state = interp_module_state(script);
+    if (!decl || !state || !decl->storage_assigned ||
+            decl->binding_storage != BINDING_STORAGE_MODULE || decl->slot < 0) {
+        return false;
+    }
+    Item value = lambda_module_var_at(state, (uint32_t)decl->slot);
+    if (get_type_id(value) != LMD_TYPE_FUNC) return false;
+    Function* fn = value.function;
+    if (!fn || fn->def != def || fn->def_module != script || fn->closure_env ||
+            fn->method) return false;
+    FnPromotionCell* cell = &def->analysis->promotion;
+    if (fn->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
+        interp_upgrade_function_entry(fn, def, entry);
+    }
+    cell->state = FN_PROMOTION_COMPILED;
+    cell->boxed_entry = entry;
+    return true;
+}
+
 static int interp_whole_script_publish_module_functions(Script* script) {
     if (!script || !script->interp_whole_script_poc_active || !script->ast_root) {
         return 0;
@@ -5558,6 +5597,31 @@ static bool interp_whole_script_compile(InterpState* st, Script* script,
     return true;
 }
 
+// D8.1.1v7: does this body own a loop statement (not counting nested
+// definitions, which promote on their own)?
+static void interp_loop_scan_visit(AstNode* node, void* opaque) {
+    bool* found = (bool*)opaque;
+    if (!node || *found) return;
+    switch (node->node_type) {
+    case AST_NODE_LOOP: case AST_NODE_FOR_EXPR:
+    case AST_NODE_FOR_OF_STAM: case AST_NODE_FOR_IN_STAM:
+        *found = true;
+        return;
+    case AST_NODE_FUNC: case AST_NODE_PROC: case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC:
+        return;
+    default:
+        interp_visit_children(node, interp_loop_scan_visit, opaque);
+        return;
+    }
+}
+
+static bool interp_body_has_loop(AstNode* body) {
+    bool found = false;
+    interp_loop_scan_visit(body, &found);
+    return found;
+}
+
 static bool interp_promote_function(Function* fn, bool count_entry) {
     if (!fn || fn->entry_abi != FN_ENTRY_ABI_LAMBDA_INTERPRETED ||
             lambda_tier_selected() != LAMBDA_TIER_AUTO) {
@@ -5585,7 +5649,16 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
         return false;
     }
     if (count_entry && cell->call_count != UINT32_MAX) cell->call_count++;
-    if (cell->call_count < interp_jit_threshold() &&
+    if (cell->loop_bodied == 0) {
+        cell->loop_bodied = def->body && interp_body_has_loop(def->body) ? 2 : 1;
+    }
+    // D8.1.1v7: a loop-bodied procedure is hot by construction at its first
+    // entry -- a once-called `main` that owns the workload's loop (mandelbrot,
+    // matmul, navier_stokes: 50-150x Node end-to-end) never reached the entry
+    // threshold, and back-edge promotion only takes effect at the NEXT entry.
+    bool loop_first_entry = cell->loop_bodied == 2 && count_entry;
+    if (!loop_first_entry &&
+            cell->call_count < interp_jit_threshold() &&
             cell->backedge_count < interp_jit_backedge_threshold() &&
             cell->tail_edge_count < interp_jit_threshold()) return false;
     if (interp_whole_script_poc_enabled()) {

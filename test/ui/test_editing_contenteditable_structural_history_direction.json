@@ -1,0 +1,16 @@
+{
+  "name": "Contenteditable structural history restores backward selection direction",
+  "html": "test/html/editable-dom-structural-history-direction.html",
+  "viewport": {"width": 640, "height": 140},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_structural_history_direction ==="},
+    {"type": "click", "target": {"selector": "#select"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "select:true:4:0|bold"},
+    {"type": "click", "target": {"selector": "#bold"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "bold:true:4:0|<b>bold</b>"},
+    {"type": "click", "target": {"selector": "#undo"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "undo:true:4:0|bold"},
+    {"type": "click", "target": {"selector": "#redo"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "redo:true:4:0|<b>bold</b>"}
+  ]
+}

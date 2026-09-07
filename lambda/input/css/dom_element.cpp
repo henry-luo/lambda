@@ -24,6 +24,7 @@
 #include "../../io/mark_builder.hpp" // For MarkBuilder
 
 void element_dom_map_remove(HashMap* map, Element* elem);
+static void dom_element_clear_synthetic_attributes(DomElement* element);
 
 bool dom_document_owns_node_storage(DomDocument* doc, const void* storage) {
     if (!doc || !storage) return false;
@@ -121,7 +122,7 @@ static DomText* dom_text_from_fat_string(DomDocument* doc, String* string_value)
     return candidate;
 }
 
-static DomText* dom_find_text_child(DomElement* parent, String* string_value) {
+DomText* dom_find_text_child(DomElement* parent, String* string_value) {
     if (!parent || !string_value) return nullptr;
     for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
         if (!child->is_text()) continue;
@@ -424,6 +425,7 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
         element->last_child = nullptr;
         dom_element_release_cached_id(element);
         dom_element_release_cached_classes(element);
+        dom_element_clear_synthetic_attributes(element);
         if (element->tag_name) pool_free(element->doc->document_pool, (void*)element->tag_name);
         element->tag_name = nullptr;
         if (element->specified_style_shared()) {
@@ -677,6 +679,7 @@ void dom_element_release_retired_storage(DomElement* element) {
     }
     dom_element_release_cached_id(element);
     dom_element_release_cached_classes(element);
+    dom_element_clear_synthetic_attributes(element);
     CssCustomProp* variable = element->css_variables;
     while (variable) {
         CssCustomProp* next = variable->next;
@@ -712,12 +715,151 @@ static const char* lowercase_attr_name(const char* name, char* buf, size_t buf_s
     return buf;
 }
 
+static void dom_element_clear_synthetic_attributes(DomElement* element) {
+    if (!element || !element->ext || !element->doc ||
+        !element->doc->document_pool) {
+        return;
+    }
+    DomElementExt* data = element->ext;
+    for (int i = 0; i < data->synthetic_attribute_count; i++) {
+        pool_free(element->doc->document_pool,
+                  (void*)data->synthetic_attributes[i].name);
+        pool_free(element->doc->document_pool,
+                  (void*)data->synthetic_attributes[i].value);
+    }
+    pool_free(element->doc->document_pool, data->synthetic_attributes);
+    data->synthetic_attributes = nullptr;
+    data->synthetic_attribute_count = 0;
+    data->synthetic_attribute_capacity = 0;
+}
+
+static int dom_element_find_synthetic_attribute(DomElement* element,
+                                                const char* lower_name) {
+    if (!element || !element->ext || !lower_name) return -1;
+    DomElementExt* data = element->ext;
+    for (int i = 0; i < data->synthetic_attribute_count; i++) {
+        const char* candidate = data->synthetic_attributes[i].name;
+        if (candidate && strcmp(candidate, lower_name) == 0) return i;
+    }
+    return -1;
+}
+
+static bool dom_element_set_synthetic_attribute(DomElement* element,
+                                                const char* lower_name,
+                                                const char* value) {
+    if (!element || !element->doc || !element->doc->document_pool ||
+        !lower_name || !value) {
+        return false;
+    }
+    DomElementExt* data = element->ensure_ext();
+    if (!data) return false;
+    int index = dom_element_find_synthetic_attribute(element, lower_name);
+    if (index >= 0) {
+        char* next_value = pool_strdup(element->doc->document_pool, value);
+        if (!next_value) return false;
+        pool_free(element->doc->document_pool,
+                  (void*)data->synthetic_attributes[index].value);
+        data->synthetic_attributes[index].value = next_value;
+        return true;
+    }
+    if (data->synthetic_attribute_count == data->synthetic_attribute_capacity) {
+        int next_capacity = data->synthetic_attribute_capacity == 0 ? 4
+                          : data->synthetic_attribute_capacity * 2;
+        DomSyntheticAttribute* attrs =
+            static_cast<DomSyntheticAttribute*>(pool_realloc(
+                element->doc->document_pool, data->synthetic_attributes,
+                (size_t)next_capacity * sizeof(DomSyntheticAttribute)));
+        if (!attrs) return false;
+        data->synthetic_attributes = attrs;
+        data->synthetic_attribute_capacity = next_capacity;
+    }
+    char* name_copy = pool_strdup(element->doc->document_pool, lower_name);
+    char* value_copy = pool_strdup(element->doc->document_pool, value);
+    if (!name_copy || !value_copy) {
+        pool_free(element->doc->document_pool, name_copy);
+        pool_free(element->doc->document_pool, value_copy);
+        return false;
+    }
+    data->synthetic_attributes[data->synthetic_attribute_count++] = {
+        name_copy, value_copy
+    };
+    return true;
+}
+
+static bool dom_element_remove_synthetic_attribute(DomElement* element,
+                                                   const char* lower_name) {
+    int index = dom_element_find_synthetic_attribute(element, lower_name);
+    if (index < 0 || !element || !element->ext || !element->doc ||
+        !element->doc->document_pool) {
+        return false;
+    }
+    DomElementExt* data = element->ext;
+    pool_free(element->doc->document_pool,
+              (void*)data->synthetic_attributes[index].name);
+    pool_free(element->doc->document_pool,
+              (void*)data->synthetic_attributes[index].value);
+    for (int i = index + 1; i < data->synthetic_attribute_count; i++) {
+        data->synthetic_attributes[i - 1] = data->synthetic_attributes[i];
+    }
+    data->synthetic_attribute_count--;
+    return true;
+}
+
 static bool dom_element_clear_inline_style_declarations(DomElement* element) {
     if (!element || !element->specified_style) {
         return false;
     }
     if (!style_epoch_ensure_owned(element)) return false;
     return style_tree_remove_inline_declarations(element->specified_style);
+}
+
+static void dom_element_attribute_did_set(DomElement* element,
+                                          const char* lower_name,
+                                          const char* value) {
+    if (!element || !element->doc || !lower_name || !value) return;
+    if (strcmp(lower_name, "id") == 0) {
+        dom_element_release_cached_id(element);
+        const char* id_attr = element->get_attribute("id");
+        if (id_attr) {
+            dom_element_retain_id(element, lam::promote_to_pool(
+                element->doc->document_pool, id_attr));
+        }
+    } else if (strcmp(lower_name, "class") == 0) {
+        dom_element_release_cached_classes(element);
+        if (value[0] != '\0') {
+            char* class_copy = pool_strdup(element->doc->document_pool, value);
+            if (class_copy) {
+                str_copy(class_copy, strlen(value) + 1, value, strlen(value));
+                char* token = strtok(class_copy, " \t\n\r");
+                while (token) {
+                    if (token[0] != '\0') {
+                        dom_element_add_cached_class(element, token);
+                    }
+                    token = strtok(nullptr, " \t\n\r");
+                }
+                pool_free(element->doc->document_pool, class_copy);
+            }
+        }
+    } else if (strcmp(lower_name, "style") == 0) {
+        dom_element_clear_inline_style_declarations(element);
+        if (value[0] != '\0') dom_element_apply_inline_style(element, value);
+    }
+    element->style_version++;
+    element->set_needs_style_recompute(true);
+}
+
+static void dom_element_attribute_did_remove(DomElement* element,
+                                             const char* lower_name) {
+    if (!element || !lower_name) return;
+    if (strcmp(lower_name, "id") == 0) {
+        dom_element_release_cached_id(element);
+    } else if (strcmp(lower_name, "class") == 0) {
+        dom_element_release_cached_classes(element);
+    } else if (strcmp(lower_name, "style") == 0) {
+        dom_element_clear_inline_style_declarations(element);
+    }
+    element->style_version++;
+    element->set_needs_style_recompute(true);
 }
 
 bool DomElement::set_attribute(const char* name, const char* value) {
@@ -757,49 +899,7 @@ bool DomElement::set_attribute(const char* name, const char* value) {
                 return false;
             }
 
-            // Handle special attributes
-            if (strcmp(lower_name, "id") == 0) {
-                // Cache ID for fast access
-                dom_element_release_cached_id(element);
-                ElementReader reader(backing);
-                const char* id_attr = reader.get_attr_string("id");
-                if (id_attr) {
-                    dom_element_retain_id(element, lam::promote_to_pool(
-                        element->doc->document_pool, id_attr));
-                }
-            } else if (strcmp(lower_name, "class") == 0) {
-                // Parse space-separated classes
-                dom_element_release_cached_classes(element);
-
-                // Parse and add each class
-                if (value && strlen(value) > 0) {
-                    char* class_copy = pool_strdup(element->doc->document_pool, value);
-                    if (class_copy) {
-                        str_copy(class_copy, strlen(value) + 1, value, strlen(value));
-
-                        // Split by spaces and add each class
-                        char* token = strtok(class_copy, " \t\n\r");
-                        while (token) {
-                            if (strlen(token) > 0) {
-                                dom_element_add_cached_class(element, token);
-                            }
-                            token = strtok(nullptr, " \t\n\r");
-                        }
-                        pool_free(element->doc->document_pool, class_copy);
-                    }
-                }
-            } else if (strcmp(lower_name, "style") == 0) {
-                // Setting the style attribute replaces the previous inline declaration block.
-                dom_element_clear_inline_style_declarations(element);
-                if (value[0] != '\0') {
-                    dom_element_apply_inline_style(element, value);
-                }
-            }
-
-            // Invalidate style cache
-            element->style_version++;
-            element->set_needs_style_recompute(true);
-
+            dom_element_attribute_did_set(element, lower_name, value);
             return true;
         }
 
@@ -807,8 +907,12 @@ bool DomElement::set_attribute(const char* name, const char* value) {
         return false;
     }
 
-    // No native element - log warning
-    log_warn("dom_element_set_attribute: element is synthetic or has no input context");
+    if (element->is_synthetic() &&
+        dom_element_set_synthetic_attribute(element, lower_name, value)) {
+        dom_element_attribute_did_set(element, lower_name, value);
+        return true;
+    }
+    log_warn("dom_element_set_attribute: element has no mutable attribute storage");
     return false;
 }
 
@@ -849,6 +953,11 @@ const char* DomElement::get_attribute(const char* name) {
         if (string_value) return string_value->chars;
     }
 
+    int synthetic_index = dom_element_find_synthetic_attribute(element, lower_name);
+    if (synthetic_index >= 0) {
+        return element->ext->synthetic_attributes[synthetic_index].value;
+    }
+
     return nullptr;
 }
 
@@ -883,21 +992,15 @@ bool DomElement::remove_attribute(const char* name) {
                 return false;
             }
 
-            // Clear cached fields
-            if (strcmp(lower_name, "id") == 0) {
-                dom_element_release_cached_id(element);
-            } else if (strcmp(lower_name, "class") == 0) {
-                dom_element_release_cached_classes(element);
-            } else if (strcmp(lower_name, "style") == 0) {
-                dom_element_clear_inline_style_declarations(element);
-            }
-
-            // Invalidate style cache
-            element->style_version++;
-            element->set_needs_style_recompute(true);
-
+            dom_element_attribute_did_remove(element, lower_name);
             return true;
         }
+    }
+
+    if (element->is_synthetic() &&
+        dom_element_remove_synthetic_attribute(element, lower_name)) {
+        dom_element_attribute_did_remove(element, lower_name);
+        return true;
     }
 
     return false;
@@ -922,8 +1025,7 @@ bool DomElement::has_attribute(const char* name) {
         ElementReader reader(dom_element_to_element(element));
         return reader.has_attr(lower_name);
     }
-
-    return false;
+    return dom_element_find_synthetic_attribute(element, lower_name) >= 0;
 }
 
 bool DomElement::has_attribute(NameId name_id) {
@@ -939,7 +1041,24 @@ const char** DomElement::attribute_names(int* count) {
     }
 
     *count = 0;
-    if (element->is_synthetic()) return nullptr;
+    if (element->is_synthetic()) {
+        DomElementExt* data = element->ext;
+        int attr_count = data ? data->synthetic_attribute_count : 0;
+        if (attr_count == 0) return nullptr;
+        if (attr_count > data->attribute_names_capacity) {
+            const char** names = (const char**)pool_realloc(
+                element->doc->document_pool, (void*)data->attribute_names_cache,
+                attr_count * sizeof(const char*));
+            if (!names) return nullptr;
+            data->attribute_names_cache = names;
+            data->attribute_names_capacity = attr_count;
+        }
+        for (int i = 0; i < attr_count; i++) {
+            data->attribute_names_cache[i] = data->synthetic_attributes[i].name;
+        }
+        *count = attr_count;
+        return data->attribute_names_cache;
+    }
 
     Element* backing = dom_element_to_element(element);
     ElementReader reader(backing);

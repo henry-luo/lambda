@@ -1,0 +1,14 @@
+{
+  "name": "Contenteditable format values use generic wrappers and attributes",
+  "html": "test/html/editable-dom-format-values.html",
+  "viewport": {"width": 640, "height": 160},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_format_values ==="},
+    {"type": "set_editing_selection", "target": {"selector": "#font"}, "start": 0, "end": 4},
+    {"type": "click", "target": {"selector": "#font-name"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "font:true:serif|<font face=\"serif\">seed</font>"},
+    {"type": "set_editing_selection", "target": {"selector": "#css"}, "start": 0, "end": 4},
+    {"type": "click", "target": {"selector": "#style-bold"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "css:true:true|<span style=\"font-weight:bold;\">seed</span>"}
+  ]
+}

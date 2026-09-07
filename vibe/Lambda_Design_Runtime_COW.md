@@ -909,6 +909,18 @@ publishes straight through the address (`*home = value`), covering rebinds
 and mid-body detaches with no entry resolution; the wide-scalar capture/box
 split across the number extent stays.
 
+**Typed half on the boxed edges — implemented 2026-09-07 (D8.1.1v8).** The
+boxed `_b` wrapper is the adapter the table above names: for a typed `var`
+position it consumes the `Item*` home cell, runs the callee-prologue prepare
+(`cow_prepare_write`, once -- only when a home was transported, since a
+replacement without a home cannot be published), admits the container under the declared
+contract, hands the raw entry the container (in-place writes), and re-stores
+the boxed container through the home on return; a generated dynamic caller
+transports every `var` position and reloads typed ones keeping their raw
+descriptor. The native direct entry still takes the raw container, not
+`Container**`, so a REBIND of a typed `var` parameter is published only by
+T0 (the auto tier pins such bodies; the eager tier loses it -- DO29).
+
 **The prologue prepare is NOT unconditional — the chain-root rule.** The
 first cut prepared every homed arg; cd2_orig then computed collisions=0.
 Root cause: a prepare at a **mid-chain** borrow — a `var`-param re-borrow,

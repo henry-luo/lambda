@@ -1,0 +1,46 @@
+{
+  canonical: ["formatBold", "formatBold", "formatFontName"],
+  descriptor: {
+    name: "bold",
+    family: "format",
+    tag: "b",
+    history: "format"
+  },
+  font_name: {
+    name: "fontname",
+    family: "format",
+    tag: "font",
+    attribute: "face"
+  },
+  structural: {
+    indent: "formatIndent",
+    clipboard: "insertFromPaste",
+    clipboard_family: "paste"
+  },
+  history: {
+    undo: "historyUndo",
+    undo_family: "history_undo",
+    redo: "redo"
+  },
+  platform: {
+    replacement: "inserttext",
+    composition: "composition",
+    composition_family: "composition"
+  },
+  plan: {
+    family: "format",
+    step: "wrap_range",
+    before: 2,
+    history: "format"
+  },
+  result: {
+    claimed: true,
+    changed: true,
+    recorded: true,
+    history: "format",
+    api_input: true,
+    api_type: "formatBold",
+    api_data: null,
+    verdict: 'prevent-default'
+  }
+}

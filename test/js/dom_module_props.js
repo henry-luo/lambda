@@ -141,8 +141,7 @@ console.log(docTextB.parentNode === null);
 document.adoptNode(docTextA);
 console.log(docTextA.parentNode === null);
 console.log(document.elementFromPoint(0, 0) !== null);
-// execCommand is package-owned and exposed on every document; queryCommand*
-// remain unsupported until their command-state surface is implemented.
+// The package owns legacy command execution and all query surfaces.
 console.log(typeof document.execCommand === "function");
 console.log(typeof document.queryCommandSupported === "undefined");
 console.log(typeof document.queryCommandEnabled === "undefined");

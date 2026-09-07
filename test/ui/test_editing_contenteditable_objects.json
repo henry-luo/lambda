@@ -1,0 +1,18 @@
+{
+  "name": "Contenteditable object commands use generic wrappers and fragments",
+  "html": "test/html/editable-dom-objects.html",
+  "viewport": {"width": 640, "height": 180},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_objects ==="},
+    {"type": "set_editing_selection", "target": {"selector": "#link"}, "start": 0, "end": 4},
+    {"type": "click", "target": {"selector": "#create"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "create:true|<a href=\"/next\">link</a>"},
+    {"type": "click", "target": {"selector": "#unlink"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "unlink:true|link"},
+    {"type": "set_editing_selection", "target": {"selector": "#image"}, "start": 0, "end": 0},
+    {"type": "click", "target": {"selector": "#image-command"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "image:true|<img src=\"/pic.png\">tail"},
+    {"type": "click", "target": {"selector": "#rule"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "rule:true|<img src=\"/pic.png\"><hr>tail"}
+  ]
+}

@@ -16,9 +16,9 @@ pub fn render_box(node, context, render_fn) {
     let content_box = if (node.content != null) render_fn(node.content, context)
         else box.text_box("", null, "ord")
 
-    if (cmd == "\\llap") render_lap(content_box, "right")
-    else if (cmd == "\\rlap") render_lap(content_box, "left")
-    else if (cmd == "\\clap") render_lap(content_box, "center")
+    if (cmd == "\\llap" or cmd == "\\mathllap") render_lap(content_box, "right")
+    else if (cmd == "\\rlap" or cmd == "\\mathrlap") render_lap(content_box, "left")
+    else if (cmd == "\\clap" or cmd == "\\mathclap") render_lap(content_box, "center")
     else if (cmd == "\\bbox") render_bbox(content_box, node)
     else render_bordered(content_box)
 }
@@ -38,7 +38,8 @@ fn render_bordered(content_box) {
 }
 
 fn render_bbox(content_box, node) {
-    let opts = if (node.options != null) string(node.options) else ""
+    let opts = if (node.options_raw != null) string(node.options_raw)
+        else if (node.options != null) string(node.options) else ""
     let spec = bbox_spec(opts)
     let children = box.elements_of(content_box)
     let outer_style = "display:inline-block;position:relative;line-height:0;padding-left:" ++
@@ -72,10 +73,18 @@ fn fmt_bbox_dim(v) {
 }
 
 fn bbox_spec(opts) {
-    let padding = if (contains(opts, "4em")) 4.0 else 0.3
-    let box_style = bbox_style(opts)
+    let compact = bbox_compact(opts, 0, "")
+    let padding = if (contains(compact, "4em")) 4.0 else 0.3
+    let box_style = bbox_style(compact)
     if (padding >= 4.0) bbox_large_spec(padding, box_style)
     else bbox_normal_spec(padding, box_style)
+}
+
+fn bbox_compact(text, i, acc) {
+    if (i >= len(text)) acc
+    else (let ch = slice(text, i, i + 1),
+          let next = if (ch == " " or ch == "\n" or ch == "\t" or ch == "\r") acc else acc ++ ch,
+          bbox_compact(text, i + 1, next))
 }
 
 fn bbox_large_spec(padding, box_style) => {

@@ -174,7 +174,7 @@ More is built than commonly assumed — a full WPT checkout is vendored and four
 | `test_wpt_dom_ranges_gtest` | `ref/wpt/dom/ranges/` | Range boundary and mutation behavior |
 | `test_wpt_html_reflection_gtest` | curated `ref/wpt/html/dom/` | attribute ↔ IDL reflection |
 
-- **`test/editing/` is NOT WPT** — it is a complete mirror of Chromium Blink `web_tests/editing/` (2,751 HTML tests, BSD-3-Clause, pinned upstream commit in its `MANIFEST`), with a `RUNNABLE` allowlist (~649 entries) gating the default run. It exercises selection/caret/deleting/inserting via `assert_selection.js` and is tracked in `vibe/editing/Chrome_Editing_Tests_Adaptation.md` + `vibe/editing/Radiant_Design_Content_Editable3.md` (CE3). Note its `execCommand/` subdirectory is a §3.1 non-goal and stays out of `RUNNABLE`.
+- The CE3 `test/editing/` raw Chromium-corpus link and native conformance lane are retired. Its source-model-safe scenarios survive as the normal editor-model fixtures under `test/editor-js/test/tier_f_chromium/`; they do not target legacy `execCommand` behavior. See `vibe/editing/Chrome_Editing_Tests_Adaptation.md` and `vibe/radiant/Radiant_Design_Editable.md` §17.2.
 
 ### 4.2 Suite mapping — supported surface (§1) and roadmap gates (§2)
 
@@ -205,7 +205,7 @@ Suites marked ✅ already have a runner; ◻ = vendored in `ref/wpt/`, runner st
 | `clipboard-apis/` | ✅ | §1.4 |
 | `css/css-syntax/`, html5lib | ✅ | parser conformance |
 
-**Explicitly skipped suites (non-goals, §3):** `editing/` (the execCommand conformance suite — distinct from the Blink corpus in `test/editing/`), `shadow-dom/`, `custom-elements/`, `websockets/`, `workers/`, `IndexedDB/`.
+**Explicitly skipped suites (non-goals, §3):** `editing/` (the `execCommand` conformance suite), `shadow-dom/`, `custom-elements/`, `websockets/`, `workers/`, `IndexedDB/`.
 
 Practical notes: (a) new runners should clone the `test_wpt_selection_gtest.cpp` pattern — recursive discovery, helper-script allowlist, shim injection, stdout result parsing; (b) full-tree runs are a non-goal — WPT is ~50k tests, most irrelevant to Radiant; curated per-suite runners with pinned pass/fail baselines (like `wpt_form_baseline.txt`) are the model; (c) Radiant's WebDriver endpoint (RAD_23, `Radiant_WebDriver.md`) is the eventual transport if we ever want upstream `wptrunner` integration, but the in-process gtest runners are cheaper and are the committed path.
 

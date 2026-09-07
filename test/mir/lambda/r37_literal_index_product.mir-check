@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "Result37 (cube3d 1.20x, T21-1b window): an index product with a literal factor below 2^26 is in range exactly when the other factor is below 2^27 in magnitude -- one add and one unsigned compare -- instead of the double-lane check (two i2d, dmul, two double compares) the branch-free path fell to when the loop counter had no counted-loop proof.",
+  "checks": [
+    {
+      "in_func": "_mul4_#",
+      "forbid": [
+        "dlt\t{{r}}, {{r}}, 9007199254740992",
+        "mulo\t"
+      ],
+      "expect_seq": [
+        { "pattern": "add\t{{r}}, {{r}}, 134217728" },
+        { "pattern": "ult\t{{r}}, {{r}}, 268435456" }
+      ]
+    }
+  ]
+}

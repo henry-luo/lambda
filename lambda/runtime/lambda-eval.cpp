@@ -8409,19 +8409,40 @@ Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
     if (!contract || contract->type_id != LMD_TYPE_MAP) {
         return lambda_type_error(value, expected, boundary);
     }
-    RootFrame roots(3);
+    RootFrame roots(6);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_path(roots, path);
     Rooted<Item> rooted_value(roots, value);
     if (!lambda_type_matches(rooted_owner.get(), contract)) {
         return lambda_type_error(rooted_owner.get(), contract, boundary);
     }
-    Item write_result = cow_path_set_inplace(rooted_owner.get(), rooted_path.get(),
-        rooted_value.get());
-    if (get_type_id(write_result) == LMD_TYPE_ERROR) return write_result;
-    if (!lambda_type_matches(rooted_owner.get(), contract)) {
+    // Validate and coerce on a detached candidate FIRST: a rejected nested
+    // write must leave the caller's record untouched (writing 3.5 into an
+    // `int` field in place and then failing the post-check left the lane
+    // holding float bits -- proc_type_numeric_structural_admission read
+    // `inf`), and the candidate's post-check is also where numeric structural
+    // admission converts the stored value (3 -> 3.0 into a `float` field).
+    Rooted<Item> rooted_candidate(roots, cow_clone_one_level(rooted_owner.get()));
+    if (get_type_id(rooted_candidate.get()) == LMD_TYPE_ERROR ||
+            rooted_candidate.get().item == rooted_owner.get().item) {
         return lambda_type_error(rooted_owner.get(), contract, boundary);
     }
+    Item staged = cow_path_set(rooted_candidate.get(), rooted_path.get(),
+        rooted_value.get());
+    if (get_type_id(staged) == LMD_TYPE_ERROR) return staged;
+    Rooted<Item> rooted_converted(roots,
+        lambda_type_check(rooted_candidate.get(), contract, boundary));
+    if (get_type_id(rooted_converted.get()) == LMD_TYPE_ERROR) return rooted_converted.get();
+    // then land the COERCED leaf in the caller's own record through the same path
+    Rooted<Item> rooted_leaf(roots, rooted_converted.get());
+    for (int64_t i = 0; i < rooted_path.get().array->length; i++) {
+        Item key = rooted_path.get().array->items[i];
+        rooted_leaf.set(fn_index(rooted_leaf.get(), key));
+        if (get_type_id(rooted_leaf.get()) == LMD_TYPE_ERROR) return rooted_leaf.get();
+    }
+    Item write_result = cow_path_set_inplace(rooted_owner.get(), rooted_path.get(),
+        rooted_leaf.get());
+    if (get_type_id(write_result) == LMD_TYPE_ERROR) return write_result;
     return rooted_owner.get();
 }
 
@@ -9569,7 +9590,10 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             // Avoids map_rebuild_for_type_change which allocates from data zone and
             // can trigger GC compaction that corrupts field data at scale.
             // Safe for JS constructor objects (non-pooled shapes).
-            if (field_type == LMD_TYPE_NULL) {
+            // An error is never a field contract: retagging a SHARED literal
+            // shape to `error` here made every later literal at that site
+            // fail its own construction ("unknown map storage type error").
+            if (field_type == LMD_TYPE_NULL && value_type != LMD_TYPE_ERROR) {
                 int old_bsz = type_info[field_type].byte_size;
                 int new_bsz = type_info[value_type].byte_size;
                 if (old_bsz == new_bsz) {

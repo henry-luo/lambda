@@ -84,9 +84,12 @@ static Color parse_html_color(const char* color_str) {
     result.r = 0; result.g = 0; result.b = 0; result.a = 255;
     if (!color_str || !*color_str) return result;
 
-    uint8_t r, g, b, a;
-    if (color_parse_hex(color_str, &r, &g, &b, &a)) {
-        result.r = r; result.g = g; result.b = b; result.a = a;
+    CssColor color = {};
+    if (css_parse_color(color_str, &color) && color.type != CSS_COLOR_CURRENT) {
+        result.r = color.r;
+        result.g = color.g;
+        result.b = color.b;
+        result.a = color.a;
     }
     return result;
 }

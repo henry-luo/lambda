@@ -19,3 +19,4 @@
 #
 # format: <script>	node:<first unsupported kind>
 test/lambda/proc/proc_stack_frame.ls	node:AST_NODE_PROC
+test/lambda/proc/typed_var_record_store.ls	node:AST_NODE_INDEX_ASSIGN_STAM

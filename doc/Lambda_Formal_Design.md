@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.46.0 (2026-09-06)
+**Spec version:** 1.50.0 (2026-09-07)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -745,6 +745,16 @@ that carries them.
 - **D4.3.3** Precise closure-env tracing via `closure_field_count`; VMap
   traces and finalizes through vtable callbacks that are allocation-free
   and never re-enter script. [GC2 §8, JA6]
+- **D4.3.4** A shaped field whose declared lane is `null` is traced
+  **conservatively**: the collector marks the eight-byte word it holds when
+  that word is a managed object. The store path upgrades a `null` field to
+  a container pointer in place (the same-width fast path of `fn_map_set`),
+  and a literal shape shared by every instance of its site keeps `null` for
+  the others, so the declared lane says nothing about the word; a `null`
+  lane that follows a nine-byte `any` lane also sits at an offset the
+  eight-byte word sweep never visits. Decided 2026-09-07 after splay's right
+  subtrees were freed while linked on every tier (D4.3.1's precise trace had
+  a hole, not the roots). A real `null` is zero and marks nothing.
 
 ### D4.4 COW implementation
 
@@ -1125,6 +1135,21 @@ loosely across the corpus — context disambiguates, and we live with it.
   keeping `lambda.math` for the built-in math module. A package path names
   exactly one thing: no path may be both a built-in module and a shipped
   package. [S17.2.1, S17.2.2, S16.10.1v2]
+- **D7.2.5*** **Full user-agent editing policy belongs to the shipped Lambda
+  DOM behavior package, never to Radiant's native implementation.** Radiant
+  owns the platform-input gate and standard DOM mechanisms—editing-host
+  recognition,
+  events, Selection/Range, clipboard/composition transport, observation,
+  geometry, and checked generic DOM mutation primitives. The behavior package
+  (currently sourced under `lambda/package/dom`) owns uncanceled
+  `contenteditable` default actions, structural normalization, editing
+  history, `designMode`, and the complete
+  `execCommand`/`queryCommand*` compatibility surface. User input and legacy
+  commands lower through one package operation model, so cancellation,
+  command state, mutation, history, and selection cannot drift between entry
+  points. Its conformance gates are the applicable automated WPT
+  contenteditable/editing suites and the pinned Chromium editing corpus.
+  [D7.2.1–D7.2.3, D7.3.5, D7.5.3; Radiant_Design_Editable §20]
 
 ### D7.3 Jube modules: the module system
 
@@ -1231,7 +1256,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1v6*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+- **D8.1.1v9*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
   parser → the shared typed AST → **tiered execution**. The parser reduces
   directly into the retained `AstNode` graph; no Lambda CST or replacement
   syntax tree is retained. The default file/module path is the C parser, while
@@ -1241,7 +1266,11 @@ loosely across the corpus — context disambiguates, and we live with it.
   the shipped Lambda script policy is **AUTO**: each definition starts in T0,
   and an eligible hot definition may promote to its P2 boxed MIR satellite.
   Ordinary interpreted entries promote at `LAMBDA_JIT_THRESHOLD` (**5** by
-  default). A direct, validated self-tail edge also increments the
+  default); *(v7, 2026-09-07)* a procedure whose body owns a loop statement
+  promotes at its **first** entry -- it is hot by construction, and a
+  once-called `main` that owns the workload's loop never reached the entry
+  threshold while back-edge promotion only takes effect at the next entry.
+  A direct, validated self-tail edge also increments the
   definition-site call and tail-edge counters; at the same threshold it may
   synchronously publish the eligible satellite and transfer to its ordinary
   boxed entry with the rooted next-call arguments. This is a tail-entry
@@ -1265,10 +1294,42 @@ loosely across the corpus — context disambiguates, and we live with it.
   stores the final parameter value back through them; the dispatcher accepts
   such signatures only in the borrowed-call mode (`fn_call_borrowed_into`). A
   `var` local passed to an untyped `var` parameter is bound boxed at its
-  declaration so it owns the root slot the transport needs. P2 still fails
-  closed for aggregate/structured parameter contracts, typed `var` parameters
-  (the raw-lane ABI carries no home), nested definitions, indirect Lambda
-  calls, object-field identifiers, and match expressions. Two invariants this
+  declaration so it owns the root slot the transport needs. *(v7: aggregate
+  and structured VALUE parameter contracts -- `float[]`, records, maps -- are
+  admitted: the boxed `_b` wrapper admits each argument under the declared
+  contract exactly as the eager module compiler's wrapper does before the raw
+  entry sees it.)* *(v8, 2026-09-07)* A typed `var` parameter (`var x:
+  float[]`, `var p: Rec`) is admitted too. On every boxed edge -- T0 →
+  satellite, and a satellite's dynamic call -- its position travels through
+  the same CW33 home cells; the boxed `_b` wrapper consumes the cell and,
+  when a home WAS transported, prepares the container once (un-share-at-
+  borrow, S9.2.2: the CW33 callee-prologue prepare placed in the adapter, a
+  byte-test no-op when the container is unique; without a home there is
+  nothing to store a replacement back through, so the container passes
+  through as before), admits it under the declared contract, hands the raw
+  entry the container to write in place, and stores the admitted container
+  back through the home on return; a satellite caller reloads its register
+  from the slot and keeps the raw descriptor, since a typed `var` position is
+  invariant (S9.2.1). What the raw entry cannot publish is a REBIND of the
+  parameter, so a body that assigns to a typed `var` parameter stays in T0,
+  and so does every satellite that would call it directly: T0 publishes the
+  rebind through the home, a raw argument would not be reloaded. P2 still
+  fails closed for such rebinding bodies, nested definitions, indirect Lambda
+  calls, object-field identifiers, and match expressions. *(v9, 2026-09-07)*
+  A satellite image is a **cluster**, not a single definition: the promoted
+  target together with every module-level definition reachable from it
+  through direct calls that is itself promotable and not yet compiled or
+  pinned (bounded, 64 definitions), defined in module order. Calls among
+  cluster members are direct native edges, and the image's call-site
+  inference collects from the module's complete retained AST, so a member's
+  parameters take the lanes the eager tier would give them (a T0 caller that
+  passes something else meets the wrapper's exact-shape guard). Each member's
+  boxed entry is published to its T0 function when the image links; a callee
+  that is already compiled keeps its own entry and stays a dynamic target,
+  as do pinned and unsupported bodies. A satellite reads module bindings and
+  interned constants with the eager tier's inline loads from the owner's
+  slab state (re-read from the state at every use), no longer through a
+  per-read accessor call. Two invariants this
   admission exposed: a satellite that interns literals into its module's const
   list must rebind the module state's static image afterwards, and a
   dynamic-call argument list is built by verbatim positional append, never by
@@ -1765,6 +1826,7 @@ slice; no formal semantic ruling or document semver changes.
 | D4.2.4 | Ref-counting not implemented; shared-allocator census (Mem_Heap §15 Q7) pending. |
 | D4.2.5v2 | R1a landed 2026-08-10 (release default `MEMTRACK_MODE_OFF`, measured: primes2 825→155 ms). R3a removed the historical Pool side index, and R7 landed the Pool-owned boundary-tag/free-list hot path with no global mutex or registry call on block operations. STATS counters-only (R2), the `stack_alloc` split (MP-18), and independent release-performance evidence remain pending. |
 | D4.3.2v2 | GC size classes and data-zone policy are retained; backing storage is owned by MemVmRegion and released by the owning GC heap. |
+| D4.3.4 | Decided 2026-09-07: `gc_trace_shape_field` marks a `null`-typed lane's word conservatively (`gc_mark_possible_item`). Found through DO30: the auto tier's fast splay figure came from collections that freed the linked right subtrees (17k of 420k objects traced); reproduced deterministically on every tier with `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`; pin `test/mir/lambda/gc_splay_null_lane` under the forced-collection stress sweep. The companion robustness fix keeps `fn_map_set`'s same-width retag from typing a shared literal shape's field as `error`. |
 | D4.5.1v3 | Radiant and Lambda keep distinct policies over memtrack/VM ownership; legacy Pool/Arena backend wording is superseded; v3 records batch-only arena lifetime (two variants, D4.1.4). |
 | D4.4.3 | COW Stage 1 landed 2026-07-23; Stage 2 (exclusivity faces, view confinement, module-`var` rule, snapshot iteration) deferred, designed. |
 | D4.4.4 | Decided 2026-09-06 (CW34, `vibe/Lambda_Design_Runtime_COW.md` §11.11): read-modify-write handle borrows — tier-shared static shape in `build_ast`, runtime spine test `cow_bind_rmw_handle`; havlak's array copies 205k → 41k per run. Fixtures `test/lambda/proc/cow_rmw_borrow.ls`, `test/mir/lambda/cw34_rmw_borrow`. |
@@ -1776,13 +1838,14 @@ slice; no formal semantic ruling or document semver changes.
 | D6.1.3 | `may_await` analysis exists; the `may_defect` split does not — `may_return_error` is overloaded and the missing-analysis polarity is currently "trusted clean" (wrong direction; one half of the measured O1 divergence). |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
+| D7.2.5 | Implemented 2026-09-07. The shipped `lambda/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
 | D7.4.1v2 | Native-module POC 1 remains unstarted; the engine-owned Promise VMap is designed by JR7/Tune7 but not yet implemented. |
 | D7.4.3 | Hosted-language layering: `lang-python` is the landed DSO reference chain, but Python is currently statically linked and its ten follow-up ADRs (Lang_Hosting §17) are unwritten. |
 | D7.4.4 | Implemented in DOM4 (2026-08-14): `host_ops`, `legacy_ops`, `JubeHostObjectOps`, and the vmap `string_key_item` re-materialization shim were removed; record-owned hooks are the only host-object protocol and the ABI is version 4. |
 | D7.4.5 | Direction only; implementation deferred past DOM4 (user ruling 2026-08-13: DOM4 settles vmap first; the runtime is likely not ready for new carriers). `varray` and `velmt` do not exist: DOM collections are materialized Arrays with companion-map decoration and a 4096-entry issued-collection cache refreshed per mutation (dom.cpp); Radiant `Velmt` handles are struct-copied into VMap payloads with strcmp projection. varray + collection conversion = future Jube stage; DOM-node carrier move to velmt = DOM4 OQ9 (DOM5-scale). |
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
-| D8.1.1v6 | Revised 2026-09-06: satellite admission widened to plain `any` parameters, bodies with local `var`/rebinding statements and indexed/member stores, and untyped `var` parameters (write-back through the CW33 home transport on both tier edges, borrowed-call dispatch mode; aggregate contracts and typed `var` parameters stay pinned); satellites rebind the module's static const image after interning, and dynamic-call arguments append verbatim. Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for aggregate/structured parameter contracts, typed `var` parameters, nested definitions, indirect Lambda calls, object-field identifiers, match expressions, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
+| D8.1.1v9 | Revised 2026-09-07 (v9): a satellite image co-compiles the target's direct-callee cluster in module order (direct native edges among members, module-wide call-site inference, every member's boxed entry published; compiled/pinned/unsupported callees stay dynamic) -- diviter 20 s → 349 ms, richards 786 → 620 ms, deltablue 464 → 348 ms auto e2e, each at eager parity; DO30 records splay. Revised 2026-09-07 (v8): typed `var` parameters are admitted to satellites -- every `var` position travels through the CW33 home cells on the boxed edges, the `_b` wrapper prepares, admits and stores the container back through the home, and a satellite's dynamic edge transports and reloads typed positions keeping their raw descriptor; a body that rebinds a typed `var` parameter, and every satellite that would call it directly, stays in T0 (navier_stokes, nbody2, json2 promote; DO29 records the eager tier's own rebind loss). Revised 2026-09-07 (v7): a loop-bodied procedure promotes at its first entry (once-called `main` loops: mandelbrot 5.5 s → 0.8 s, matmul 3.2 s → 56 ms auto e2e on the debug build); aggregate/structured value-parameter contracts are admitted to satellites (nbody2, pnpoly2, deriv2, ray2, array1); a satellite's read of an annotated `string[]` module binding takes the generic index path because the T0-initialized slab carries the boundary's native carrier (DO28). Revised 2026-09-06: satellite admission widened to plain `any` parameters, bodies with local `var`/rebinding statements and indexed/member stores, and untyped `var` parameters (write-back through the CW33 home transport on both tier edges, borrowed-call dispatch mode; aggregate contracts and typed `var` parameters stay pinned); satellites rebind the module's static const image after interning, and dynamic-call arguments append verbatim. Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for bodies that rebind a typed `var` parameter (and their direct satellite callers), nested definitions, indirect Lambda calls, object-field identifiers, match expressions, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
 | D8.1.2v2 | Decided 2026-08-24 with D8.1.1v4. `grammar-lambda.js` remains the complete Tree-sitter syntax oracle/editor/bindings grammar; `grammar.js` and generated `parser.c` are reference artifacts regenerated by the normal grammar target and are never hand-edited. The production Lambda parser is maintained in `lambda/runtime/parser/` and is built through the generated build configuration. |
 | D8.1.3v10 | Revised 2026-08-29: normal JavaScript and TypeScript source admission uses the first-party C lexer and hybrid recursive-descent/Pratt parser, reducing directly to the retained `JsAstNode` graph. The vendored JS/TS Tree-sitter grammar archives remain unchanged but link only into `lambda-cst` for differential acceptance checks; normal Lambda, runtime, test, and release targets do not link either archive. The LambdaJS AST tier includes the synchronous ES-module slice under the same Runtime/EvalContext/heap/event loop/module registry as Lambda. Registry-owned namespace placeholders, hoisted function declaration instantiation before dependency traversal, strict private slabs, live import reads, and registry propagation preserve the admitted default/named/namespace imports, default/named/namespace/non-ambiguous-star exports, named/star re-exports, `import.meta.url`, dynamic `import()`, and circular function imports without a JS-private module cache. Lambda `.ls` imports use that descriptor and their public boxed function values cross the common JS call kernel through the existing Lambda boxed dynamic-call ABI with retained `TypeFunc` metadata. The two languages retain their own semantic walkers and activation records; no second runtime, EvalContext, stack owner, heap, or module registry is created. Top-level await/async module evaluation, generators/async functions, ambiguous star exports, shared T0/T1 environments, continuations, and AUTO policy remain pending. `JS_EXECUTION_BACKEND=ast` remains explicit and fail-closed, and the default remains MIR. Status and focused gates: `vibe/jube/JS_Grammar_Parser.md`, `vibe/Lambda_Design_JS_Interpreter.md`, and `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
 | D8.2.1–D8.2.3 | The physical Lambda/JS foundation is substantially shared (`AstNodeType`, many layouts/aliases, `FnAnalysis`, and `MirEmitter`), but structural convergence is incomplete. P1a (2026-08-28) moved Lambda iterator `for` to `AST_NODE_FOR_EXPR`/`AstForNode`; P1b moved Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode`; P1c folded assignment/declaration-wrapper storage; P1d (2026-08-28) promotes condition loops to one `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` and retires the old while/do/C-style tags, while iterator clauses use `AST_NODE_FOR_CLAUSE`. P1e (2026-08-29) retires the duplicated JavaScript core-child rows and leaves only extension layouts in `js_ast_children.cpp`; Python remains the later guest acceptance test. |
@@ -1955,6 +2018,40 @@ Numbered `DO#` (design-open); each links to its record.
   reconstruction reuses the old buffer when the declared prefix is a
   compatible superset, and how extras are carried. Undesigned. [OB18]
 
+- **DO28** Tier carrier divergence for annotated module bindings: the eager
+  module init keeps a trusted `let T: string[] = [...]` literal as a boxed
+  Array-of-Items, while T0's declaration boundary (`lambda_type_check` via
+  `interp_coerce_declared_array`) rebuilds a pointer-lane element contract
+  into its native carrier. Unobservable within a tier (P6), it surfaced when a
+  satellite decoded the T0 slab value with the eager assumption (base642 on
+  the auto tier read every table element as null). The read now takes the
+  generic path under a satellite; the representation choice itself is open --
+  one carrier per declared contract at the shared boundary would retire the
+  guard (D2.6.2, D3.2.1).
+- **DO29** Typed `var` parameter rebind on the eager tier. D8.1.1v8 keeps
+  T0 semantics on the auto tier by pinning a body that rebinds a typed `var`
+  parameter (and its direct satellite callers), because the raw entry has no
+  home to publish through. The eager whole-module tier (`LAMBDA_TIER=jit`)
+  has the same gap on its direct native edge -- the caller passes the raw
+  container and never reloads, so `pn rebind(var x: float[]) { x = fill(2,
+  v) }` leaves the caller's binding unchanged where T0 publishes the new
+  array (fixture `test/lambda/proc/interp_typed_var_rebind.ls`, golden is
+  T0's; the auto tier matches it). Closing it is CW33's typed
+  `Container**` half on the raw entry (COW doc §11.10), not a satellite
+  matter.
+- **DO30** *(closed 2026-09-07 — misattributed)* "Eager inference slower
+  than boxed bodies on splay." The 256 ms auto figure that the cluster
+  (446 ms, the eager tier's own time) seemed to lose came from the
+  one-definition satellites' run under-tracing the tree: their `right`
+  links sat in `null`-typed lanes at offset 17 and were freed while linked
+  (collections traced 17k of 420k objects), so the collector's marks were
+  cheap and wrong. The inference side was tested and rejected: not
+  counting a comparison against an untyped member read as numeric use kept
+  splay's `key` boxed, changed nothing on the eager tier (1.03) and cost
+  binarytrees 1.24x and gcbench 1.26x. The defect is D4.3.4's rule; with it
+  every tier traces the whole tree and the auto tier runs splay at the
+  eager tier's time by right.
+
 ## Appendix C — Decision-Record Index
 
 | Section | Records | Where argued |
@@ -1984,7 +2081,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
 | D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md` |
-| D7.2 | RG14; DF15; ER-D2; MC1 | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md` |
+| D7.2 | RG14; DF15; ER-D2; MC1; UA editing | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20 |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md` |
 | D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12; JSI1–JSI13 | `Lambda_Design_Unified_AST.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |

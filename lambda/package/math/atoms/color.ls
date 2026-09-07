@@ -40,7 +40,9 @@ fn render_foreground(node, context, color, render_fn) {
 
 fn render_colorbox(node, context, bg_color, render_fn) {
     let content_ctx = ctx.derive(context, {colorbox_content: true})
-    let content_box = if (node.content != null) render_fn(node.content, content_ctx)
+    // An unbraced payload is text-mode; grouped content retains math atoms.
+    let content_box = if (node.content is string) box.text_box(string(node.content), css.TEXT, "mord")
+        else if (node.content != null) render_fn(node.content, content_ctx)
         else box.text_box("", null, "ord")
     with_background(content_box, bg_color)
 }
@@ -107,12 +109,14 @@ let xcolor_colors = {
 
 // extract and resolve color from node
 fn resolve_color(node) {
-    let raw = if (node.color != null) get_color_text(node.color) else "black"
+    let raw = if (node.color_raw != null) string(node.color_raw)
+        else if (node.color != null) get_color_text(node.color) else "black"
     resolve_named_color(raw)
 }
 
 fn resolve_background_color(node) {
-    let raw = if (node.color != null) get_color_text(node.color) else "black"
+    let raw = if (node.color_raw != null) string(node.color_raw)
+        else if (node.color != null) get_color_text(node.color) else "black"
     resolve_background_raw(raw)
 }
 
@@ -151,7 +155,7 @@ fn concat_children(el, i, n, acc) {
 // map named LaTeX colors to CSS colors
 fn resolve_named_color(raw) {
     let compact = remove_spaces(raw, 0, "")
-    let lower_raw = lower_ascii(raw)
+    let lower_raw = lower_ascii(trim(raw))
     let lower = lower_ascii(compact)
     if (len(compact) > 0 and slice(compact, 0, 1) == "#") normalize_hex(compact)
     else if (contains(compact, "!")) normalize_named_mix(compact)
@@ -225,9 +229,10 @@ fn normalize_hex(raw) {
 }
 
 fn normalize_rgb_text(raw) {
-    let numbers = collect_rgb_numbers(raw, 0, "", [])
-    let well_formed = starts_with(lower_ascii(raw), "rgb(") and ends_with(raw, ")") and len(numbers) == 3 and
-        not contains(raw, ".") and not contains(raw, "-")
+    let compact = remove_spaces(raw, 0, "")
+    let numbers = collect_rgb_numbers(compact, 0, "", [])
+    let well_formed = starts_with(lower_ascii(compact), "rgb(") and ends_with(compact, ")") and len(numbers) == 3 and
+        not contains(compact, ".") and not contains(compact, "-")
     let split = if (well_formed) {r: int(numbers[0]), g: int(numbers[1]), b: int(numbers[2])}
         else split_rgb_digits(collect_digits(raw, 0, ""))
     if (well_formed and split != null) "#" ++ hex_byte(split.r) ++ hex_byte(split.g) ++ hex_byte(split.b)

@@ -512,6 +512,21 @@ static inline void dom_record_mutation_detail(DomJsMutationKind kind,
     }
 }
 
+// A host may retain generic DOM observations while applying an atomic edit
+// transaction. The core stays usable without Radiant: its weak default simply
+// publishes mutations immediately.
+extern "C" __attribute__((weak)) bool dom_edit_transaction_defer_mutation(
+        DomDocument* document, DomJsMutationKind kind, DomNode* target,
+        DomNode* parent, const char* attribute_name, const char* old_value) {
+    (void)document;
+    (void)kind;
+    (void)target;
+    (void)parent;
+    (void)attribute_name;
+    (void)old_value;
+    return false;
+}
+
 // Helper: increment DOM mutation counter on current document and record the
 // mutation shape for future incremental cascade/layout decisions.
 static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_UNKNOWN,
@@ -522,6 +537,11 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     parent = dom_mutation_source_parent(parent);
     DomDocument* doc = dom_mutation_document(target, parent);
     if (!doc) return;
+
+    if (dom_edit_transaction_defer_mutation(doc, kind, target, parent,
+                                            attribute_name, old_value)) {
+        return;
+    }
 
     doc->js.mutation_count++;
     doc->js.mutation_sequence++;
@@ -2664,35 +2684,38 @@ JS_FORWARD_ITEM(dom_document_proxy_get_property, (Item prop_name),
 // NOTE: Must use map_put directly instead of dom_realm_set to avoid
 // infinite recursion (dom_realm_set dispatches back here for DOM resources).
 extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
-    if (get_type_id(prop_name) == LMD_TYPE_STRING) {
-        String* s = it2s(prop_name);
-        if ((s && s->len == 4 && strncmp(s->chars, "href", 4) == 0) ||
-            (s && s->len == 8 && strncmp(s->chars, "location", 8) == 0) ||
-            (s && s->len == 4 && strncmp(s->chars, "hash", 4) == 0) ||
-            (s && s->len == 6 && strncmp(s->chars, "search", 6) == 0) ||
-            (s && s->len == 8 && strncmp(s->chars, "pathname", 8) == 0)) {
+    const char* prop = fn_to_cstr(prop_name);
+    if (prop) {
+        if (strcmp(prop, "href") == 0 || strcmp(prop, "location") == 0 ||
+            strcmp(prop, "hash") == 0 || strcmp(prop, "search") == 0 ||
+            strcmp(prop, "pathname") == 0) {
             // Location writes share the module-owned same-document history
             // machine; this prevents URL reflection and traversal from diverging.
             js_history_set_location(value);
             return value;
         }
-        if (s && s->len == 5 && strncmp(s->chars, "title", 5) == 0) {
+        if (strcmp(prop, "title") == 0) {
             // Store title as a static value (proxy map lacks TypeMap for map_put)
             js_document_title_value = value;
             return value;
         }
         // Allow setting defaultView (used by preamble: document.defaultView = window)
-        if (s && s->len == 11 && strncmp(s->chars, "defaultView", 11) == 0) {
+        if (strcmp(prop, "defaultView") == 0) {
             js_document_default_view = value;
             return value;
         }
-        if (s && s->len == 5 && strncmp(s->chars, "fonts", 5) == 0) {
+        if (strcmp(prop, "fonts") == 0) {
             js_document_fonts_value = value;
             return value;
         }
-        if (s && s->len == 10 && strncmp(s->chars, "designMode", 10) == 0) {
+        if (strcmp(prop, "designMode") == 0) {
             const char* mode = dom_to_attr_cstr(value);
-            js_document_design_mode = (mode && strcasecmp(mode, "on") == 0);
+            DomDocument* document = _js_current_document
+                ? _js_current_document : _js_main_document;
+            // This binding only performs IDL coercion. The behavior package
+            // canonicalizes the string and chooses the host transition; an
+            // unavailable package deliberately leaves native editing disabled.
+            if (document && mode) radiant_dom_set_design_mode(document, mode);
             return value;
         }
     }
@@ -3077,21 +3100,6 @@ static DomDocument* create_foreign_html_doc(const char* title) {
     return fd;
 }
 
-static DomElement* document_body_element(DomDocument* doc) {
-    if (!doc || !doc->root) return nullptr;
-    DomNode* child = doc->root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            DomElement* el = child->as_element();
-            if (el->tag_name && strcmp(el->tag_name, "body") == 0) {
-                return el;
-            }
-        }
-        child = child->next_sibling;
-    }
-    return nullptr;
-}
-
 static void clear_element_children_for_navigation(DomElement* elem) {
     if (!elem) return;
     while (elem->first_child) {
@@ -3106,7 +3114,7 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
     if (!iframe || !doc || !doc->root) return;
     const char* srcdoc = iframe->get_attribute("srcdoc");
     if (!srcdoc || !*srcdoc) return;
-    DomElement* body = document_body_element(doc);
+    DomElement* body = dom_document_body_element(doc);
     if (!body || !doc->document_pool || !doc->node_arena || !doc->input) return;
 
     Html5Parser* parser = html5_fragment_parser_create(
@@ -3146,7 +3154,7 @@ static void replace_iframe_srcdoc_document(DomElement* iframe,
     // An embedded document loaded through src must remain intact; only the
     // presence of the srcdoc attribute selects the replacement navigation.
     if (!iframe->get_attribute("srcdoc")) return;
-    DomElement* body = document_body_element(doc);
+    DomElement* body = dom_document_body_element(doc);
     if (!body) return;
     // Parsed iframes can already own an empty embedded document before a
     // later srcdoc assignment; appending without replacing left queries in
@@ -5752,6 +5760,8 @@ extern "C" bool dom_exec_insert_html(DomDocument* doc, const char* html_str) {
 
 extern "C" bool dom_engine_exec_command(void* document, const char* command,
                                         const char* value);
+extern Item radiant_dom_query_command(void* document, const char* query_kind,
+                                      const char* command);
 
 // F14.1/ES20: `document.execCommand` is now a thin dispatch into the dom
 // package's command set. It used to implement exactly one command here —
@@ -5781,6 +5791,29 @@ extern "C" Item dom_document_exec_command_bridge(Item command_item,
     mem_free(stable_command);
     mem_free(stable_value);
     return (Item){.item = b2it(handled ? 1 : 0)};
+}
+
+// D7.2.5: DOM only coerces the public queryCommand* arguments and forwards
+// them to the package behavior boundary.  Command support/state stays out of
+// this IDL bridge, so execution and every query share one package registry.
+extern "C" Item dom_document_query_command_bridge(Item command_item,
+                                                    Item kind_item) {
+    JS_ROOTS(roots,
+        command_root, command_item,
+        kind_root, kind_item);
+    const char* command = fn_to_cstr(command_root.get());
+    const char* kind = fn_to_cstr(kind_root.get());
+    if (!command || !*command || !kind || !*kind) return ItemNull;
+    char* stable_command = mem_strdup(command, MEM_CAT_JS_RUNTIME);
+    char* stable_kind = mem_strdup(kind, MEM_CAT_JS_RUNTIME);
+    Item result = ItemNull;
+    if (stable_command && stable_kind) {
+        result = radiant_dom_query_command(dom_get_document(), stable_kind,
+                                           stable_command);
+    }
+    mem_free(stable_kind);
+    mem_free(stable_command);
+    return result;
 }
 
 // ============================================================================
@@ -6021,7 +6054,7 @@ extern "C" Item dom_document_create_event_bridge(Item interface_name) {
 }
 
 static bool dom_append_document_text(DomDocument* doc, const char* text) {
-    DomElement* body = document_body_element(doc);
+    DomElement* body = dom_document_body_element(doc);
     if (!body) return false;
 
     const char* cursor = text;
@@ -6089,7 +6122,28 @@ extern "C" Item dom_document_default_view_bridge(void* doc_ptr) {
     return ItemNull;
 }
 JS_FORWARD_ITEM(dom_document_implementation_bridge, (void), dom_get_implementation, ())
-JS_FORWARD_EXPRESSION(Item, dom_document_design_mode_bridge, (void), (js_name_item(js_document_design_mode ? "on" : "off")))
+static Item dom_document_design_mode_value(DomDocument* document) {
+    return js_name_item(document && document->design_mode ? "on" : "off");
+}
+
+// The behavior package determines designMode compatibility semantics. This
+// bridge writes its canonical Boolean to the active document without selecting
+// a host, focus target, or editing action (D7.2.5).
+extern "C" Item dom_document_set_design_mode_bridge(Item enabled_item) {
+    DomDocument* document = _js_current_document
+        ? _js_current_document : _js_main_document;
+    if (!document || get_type_id(enabled_item) != LMD_TYPE_BOOL) {
+        return (Item){.item = ITEM_FALSE};
+    }
+    bool enabled = it2b(enabled_item);
+    document->design_mode = enabled;
+    js_document_design_mode = enabled;
+    return (Item){.item = ITEM_TRUE};
+}
+
+JS_FORWARD_EXPRESSION(Item, dom_document_design_mode_bridge, (void),
+    (dom_document_design_mode_value(_js_current_document
+        ? _js_current_document : _js_main_document)))
 
 extern "C" Item dom_document_active_element_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
@@ -6108,7 +6162,7 @@ extern "C" Item dom_document_active_element_bridge(void* doc_ptr) {
         dom_node_is_connected((DomNode*)js_document_active_element)) {
         return dom_wrap_element(js_document_active_element);
     }
-    DomElement* body = document_body_element(doc);
+    DomElement* body = dom_document_body_element(doc);
     if (body) return dom_wrap_element(body);
     return root ? dom_wrap_element(root) : ItemNull;
 }
@@ -6592,7 +6646,7 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
     // exposes the IDL state; editing-host default actions still land in the
     // command engine phases.
     if (prop_id == JS_DOM_PROP_DESIGN_MODE) {
-        return dom_document_design_mode_bridge();
+        return dom_document_design_mode_value(doc_arg);
     }
 
     // activeElement — currently focused element, or <body> as default per spec.
@@ -10087,7 +10141,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = i2it(parsed)};
         return (Item){.item = i2it(dom_default_tab_index(elem))};
     }
-    // CE-4 (Radiant_Design_Content_Editable.md §7): inputMode/enterKeyHint
+    // Radiant_Design_Editable.md §13: inputMode/enterKeyHint
     // are enumerated reflected attributes. The IDL getter canonicalises the
     // value (lowercase, one of the listed keywords) and returns "" for
     // missing/unknown — matches HTML spec "reflect ... limited to known
@@ -10127,7 +10181,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         }
         return js_name_item(out);
     }
-    // CE-1 / CE-4 (Radiant_Design_Content_Editable.md §4.2 + §10):
+    // Radiant_Design_Editable.md §13:
     // contentEditable returns "true"/"false"/"plaintext-only"/"inherit".
     // isContentEditable is the computed property — walks ancestors honouring
     // inheritance and ="false" islands.
@@ -10555,7 +10609,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         return value;
     }
 
-    // CE-1 / CE-4 (Radiant_Design_Content_Editable.md §4.2):
+    // Radiant_Design_Editable.md §13:
     // contentEditable setter validates per HTML spec. Empty string maps to
     // "inherit" (attribute removed). Invalid values are a SyntaxError — we
     // log and ignore; the proper raise will be wired through the JS
@@ -13665,6 +13719,35 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
         log_error("dom_insert_backed_text: inline insert changed backing identity");
         return false;
     }
+    String* inserted_string = parent_backing->items[insert_index].get_string();
+    if (!inserted_string) {
+        log_error("dom_insert_backed_text: inserted backing child is not text");
+        return false;
+    }
+    // MarkEditor may either clone the String or reuse it. Both paths can
+    // relink a fresh wrapper, which must be replaced by the preserved live
+    // node before completing this move; otherwise the same text is linked
+    // twice after a retained transaction restore (D5.3.3).
+    DomText* relinked = dom_find_text_child(parent, inserted_string);
+    if (text->parent != (DomNode*)parent && !relinked) {
+        log_error("dom_insert_backed_text: missing relinked text wrapper");
+        return false;
+    }
+    if (text->native_string != inserted_string) {
+        if (text->owns_native_string()) {
+            pool_free(parent->doc->document_pool, text->native_string);
+        }
+        text->native_string = inserted_string;
+        text->text = inserted_string->chars;
+        text->length = inserted_string->len;
+        text->set_owns_native_string(false);
+    }
+    if (relinked && relinked != text) {
+        if (!((DomNode*)parent)->insert_before(text, relinked) ||
+            !((DomNode*)parent)->remove_child(relinked)) {
+            return false;
+        }
+    }
     if (text->parent != (DomNode*)parent) {
         // MarkEditor can update the backing list before the wrapper relink;
         // complete the DOM-side link without creating a second Mark string.
@@ -13980,6 +14063,11 @@ extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         _select_ask_for_reset(elem);
     }
     _select_refresh_cached_selected_options_for_node((DomNode*)elem);
+    log_debug("dom-edit tree trace: append parent=%s first=%s",
+              elem->tag_name ? elem->tag_name : "?",
+              elem->first_child && elem->first_child->is_element()
+                  ? elem->first_child->as_element()->tag_name
+                  : elem->first_child && elem->first_child->is_text() ? "#text" : "null");
     dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, child_node, (DomNode*)elem);
     if (child_node->is_element()) {
         DomElement* ce = child_node->as_element();
@@ -14049,6 +14137,11 @@ extern "C" Item dom_insert_before_bridge(void* parent_ptr, Item new_child_arg,
     if (!dom_insert_before_child(elem, new_child, ref_child)) {
         return ItemNull;
     }
+    log_debug("dom-edit tree trace: insert parent=%s first=%s",
+              elem->tag_name ? elem->tag_name : "?",
+              elem->first_child && elem->first_child->is_element()
+                  ? elem->first_child->as_element()->tag_name
+                  : elem->first_child && elem->first_child->is_text() ? "#text" : "null");
     return new_child_arg;
 }
 
@@ -14113,7 +14206,7 @@ extern "C" Item dom_document_open_bridge(void* doc_ptr) {
                       exc ? exc : "?");
         }
     }
-    DomElement* body = document_body_element(doc);
+    DomElement* body = dom_document_body_element(doc);
     if (body) {
         clear_element_children_for_navigation(body);
         dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,

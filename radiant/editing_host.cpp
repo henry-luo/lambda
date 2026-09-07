@@ -1,5 +1,5 @@
 // editing_host.cpp — central `contenteditable` lookup + IDL.
-// See vibe/radiant/Radiant_Design_Content_Editable.md §4.
+// See vibe/radiant/Radiant_Design_Editable.md §7.
 
 #include "event.hpp"
 
@@ -62,10 +62,12 @@ bool editing_host_lookup(const DomNode* node, EditingHost* out) {
     // query node lives inside a false-island within the host.
     const DomNode* p = node->is_text() ? node->parent : node;
     bool saw_false_below_host = false;
+    DomDocument* document = nullptr;
 
     while (p) {
         if (p->is_element()) {
             DomElement* e = const_cast<DomElement*>(p->as_element());
+            if (!document && e) document = e->doc;
             CeClass c = classify_ce_attr(e);
             if (c.is_host) {
                 if (out) {
@@ -82,6 +84,21 @@ bool editing_host_lookup(const DomNode* node, EditingHost* out) {
             }
         }
         p = p->parent;
+    }
+
+    // designMode makes the document body the rich editing host, but explicit
+    // contenteditable hosts above returned first and retain their own mode.
+    if (document && document->design_mode) {
+        DomElement* body = dom_document_body_element(document);
+        if (!body) body = document->root;
+        if (body) {
+            if (out) {
+                out->host = body;
+                out->mode = EditingHost::Rich;
+                out->target_in_false_island = saw_false_below_host;
+            }
+            return true;
+        }
     }
     return false;
 }

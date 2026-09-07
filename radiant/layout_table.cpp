@@ -953,6 +953,8 @@ static float measure_cell_content_block_extent(ViewTableCell* tcell) {
     return max(generic_extent - layout_box_metrics(tcell).pad_border_h, 0.0f);
 }
 
+static float table_cell_hypothetical_child_y(View* child);
+
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
     // Table rows use the table block axis; in vertical writing that is physical x.
     if (table_grid_uses_vertical_inline_axis(get_parent_table(tcell))) {
@@ -1056,8 +1058,10 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             }
             ViewElement* block = lam::view_require_element(child);
             float child_height = block->height;
-            float child_top = child->y;
-            float child_bottom = child->y + child_height;
+            // CSS 2.1 §9.4.3: relative offsets paint outside normal flow and
+            // must not expand the row that contains the vlist's zero-height row.
+            float child_top = table_cell_hypothetical_child_y(child);
+            float child_bottom = child_top + child_height;
             if (child->view_type == RDT_VIEW_INLINE_BLOCK &&
                 table_empty_inline_atomic_line_top(
                     lycon, tcell, lam::view_require_block(child), &child_top)) {
@@ -1779,7 +1783,7 @@ static TableCellContentExtent table_cell_vertical_bounds(LayoutContext* lycon,
         }
         ViewBlock* child_block = lam::view_as_block(child);
         float child_top = table_cell_hypothetical_child_y(child);
-            if (include_margins && (child->view_type == RDT_VIEW_BLOCK ||
+        if (include_margins && (child->view_type == RDT_VIEW_BLOCK ||
                                 child->view_type == RDT_VIEW_LIST_ITEM ||
                                 child->view_type == RDT_VIEW_INLINE_BLOCK ||
                                 child->view_type == RDT_VIEW_TABLE)) {
@@ -1788,7 +1792,7 @@ static TableCellContentExtent table_cell_vertical_bounds(LayoutContext* lycon,
             if (block->bound) child_top -= block->boundary()->margin.top;
         }
         if (child_top < bounds.min_y) bounds.min_y = child_top;
-        float child_bottom = child->y + child->height;
+        float child_bottom = child_top + child->height;
         if (child_bottom > bounds.max_y) bounds.max_y = child_bottom;
         bounds.has_content = true;
     });

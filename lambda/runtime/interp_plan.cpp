@@ -1285,7 +1285,39 @@ static uint32_t plan_need(AstNode* node) {
         AstCallNode* c = (AstCallNode*)node;
         uint32_t fn = plan_need(c->function);
         uint32_t args = 1 + plan_need_max_siblings(c->argument);
-        return fn > args ? fn : args;
+        uint32_t best = fn > args ? fn : args;
+        // CW25 place borrow (`f(var m.rows[i])`): eval_call holds the prepared
+        // root, the key path and the segment key it is evaluating -- three
+        // scratch homes above the callee slot -- while each segment key runs.
+        // Budgeting only the flat call shape overflowed the frame on typed
+        // hashmap's `int_slot_set(hm.values, …)` ("scratch overflow depth=7
+        // cap=7") once T0 admitted this argument shape.
+        if (node->node_type == AST_NODE_CALL_EXPR) {
+            AstFuncNode* direct = ast_direct_call_function(c);
+            TypeFunc* signature = direct && ((AstNode*)direct)->type &&
+                    ((AstNode*)direct)->type->type_id == LMD_TYPE_FUNC
+                ? (TypeFunc*)((AstNode*)direct)->type : NULL;
+            if (signature && ast_type_func_has_var_parameter(signature)) {
+                NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+                AstNode* borrow_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+                if (ast_direct_call_var_parameter_entries(c, signature, borrowed,
+                        borrow_args)) {
+                    for (int index = 0; index < LAMBDA_MAX_FUNCTION_ARGS; index++) {
+                        if (borrowed[index] || !borrow_args[index]) continue;
+                        AstCowPath place = {};
+                        if (!ast_collect_cow_path(&place, borrow_args[index])) continue;
+                        uint32_t keys = 0;
+                        for (int seg = 0; seg < place.count; seg++) {
+                            uint32_t key = plan_need(place.segment[seg]);
+                            if (key > keys) keys = key;
+                        }
+                        uint32_t borrow = 1 + 3 + keys;
+                        if (borrow > best) best = borrow;
+                    }
+                }
+            }
+        }
+        return best;
     }
     case AST_NODE_HANDLER_EXPR:
     case AST_NODE_HANDLER_STAM: {
@@ -1467,6 +1499,20 @@ static uint32_t plan_need(AstNode* node) {
     case AST_NODE_VARIABLE_DECLARATOR: {
         AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
         uint32_t need = plan_need(declarator->init);
+        if (declarator->entry && declarator->entry->cow_borrow_lowered) {
+            // CW34: the read-modify-write bind keeps the root, the read value
+            // and up to two intermediate keys in scratch while it re-evaluates
+            // the path keys for the spine test (cow_bind_rmw_handle).
+            AstCowPath place = {};
+            uint32_t keys = 0;
+            if (ast_collect_cow_path(&place, declarator->init)) {
+                for (int seg = 0; seg + 1 < place.count; seg++) {
+                    uint32_t key = plan_need(place.segment[seg]);
+                    if (key > keys) keys = key;
+                }
+            }
+            if (4 + keys > need) need = 4 + keys;
+        }
         return declarator->declared_type && need < 1 ? 1 : need;
     }
     case AST_NODE_PARAM: {
@@ -1847,16 +1893,49 @@ bool interp_satellite_import_supported(const NameEntry* entry) {
 
 // T21-3b (D8.1.1v6): an untyped `var` parameter crosses a tier boundary
 // through the CW33 home-transport cells (Context::mir_var_homes) -- the
-// satellite prologue and epilogue already implement the generated side, and
-// T0 now sets/consumes the same cells around its calls. A typed `var`
-// parameter has no transport (the raw-lane ABI carries no home), so it stays
-// pinned.
-static bool interp_var_parameters_transportable(const TypeFunc* signature) {
-    for (TypeParam* param = signature ? signature->param : NULL;
-            param; param = param->next) {
-        if (param->is_var_param && param->full_type) return false;
+// satellite prologue and epilogue implement the generated side, and T0
+// sets/consumes the same cells around its calls. D8.1.1v8: a TYPED `var`
+// parameter (`var x: float[]`, `var p: Rec`) is admitted too. Its raw-lane
+// ABI has no home, so the callee's writes reach the caller only in place
+// (exactly the eager direct edge's contract: the caller detaches a shared
+// root, the callee writes raw); the boxed wrapper consumes the cell T0
+// published and stores the admitted container back through it, so a
+// carrier admission (an Item array coerced to its packed `T[]`) is
+// visible to the T0 binding as well. What the raw entry cannot publish is
+// a REBIND of the parameter, which T0 does publish through the home, so a
+// body that assigns to a typed `var` parameter stays pinned (scan below).
+
+static void interp_typed_var_rebind_visit(AstNode* node, void* opaque) {
+    bool* found = (bool*)opaque;
+    if (!node || *found) return;
+    switch (node->node_type) {
+    case AST_NODE_ASSIGN_STAM: {
+        NameEntry* target = ((AstAssignNode*)node)->target_entry;
+        if (target && target->is_var_param && target->declared_type) {
+            *found = true;
+            return;
+        }
+        break;
     }
-    return true;
+    case AST_NODE_FUNC: case AST_NODE_PROC: case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC:
+        return;
+    default:
+        break;
+    }
+    interp_visit_children(node, interp_typed_var_rebind_visit, opaque);
+}
+
+// scanned once per definition (FnPromotionCell::typed_var_rebind)
+static bool interp_fn_rebinds_typed_var_param(const AstFuncNode* fn) {
+    if (!fn || !fn->analysis) return false;
+    FnPromotionCell* cell = &fn->analysis->promotion;
+    if (cell->typed_var_rebind == 0) {
+        bool found = false;
+        interp_typed_var_rebind_visit(fn->body, &found);
+        cell->typed_var_rebind = found ? 2 : 1;
+    }
+    return cell->typed_var_rebind == 2;
 }
 
 static void interp_scan_satellite_node(AstNode* node, void* opaque) {
@@ -1895,10 +1974,10 @@ static void interp_scan_satellite_node(AstNode* node, void* opaque) {
         TypeFunc* signature = direct && ((AstNode*)direct)->type &&
                 ((AstNode*)direct)->type->type_id == LMD_TYPE_FUNC
             ? (TypeFunc*)((AstNode*)direct)->type : NULL;
-        if (signature && ast_type_func_has_var_parameter(signature) &&
-                !interp_var_parameters_transportable(signature)) {
-            // A typed `var` parameter has no home transport, so the satellite
-            // could not preserve the caller's write-back slot for it.
+        if (direct && interp_fn_rebinds_typed_var_param(direct)) {
+            // D8.1.1v8: the callee rebinds a typed `var` parameter, which
+            // only a T0 caller can observe (this satellite's raw argument
+            // would not be reloaded), so this body stays in T0 with it.
             sc->ok = false;
             return;
         }
@@ -1958,37 +2037,28 @@ bool interp_satellite_supported(const AstFuncNode* fn) {
     if (fn->is_async || fn->analysis->may_await || fn->analysis->needs_task_context) {
         return false;
     }
-    TypeFunc* signature = (TypeFunc*)((AstNode*)fn)->type;
-    if (ast_type_func_has_var_parameter(signature) &&
-            !interp_var_parameters_transportable(signature)) {
-        // A typed `var` parameter has no CW33 home transport; untyped ones
-        // write back through the cells T0 sets before entering the satellite.
+    if (interp_fn_rebinds_typed_var_param(fn)) {
+        // D8.1.1v8: a typed `var` parameter has no CW33 home under the raw
+        // ABI, so a rebind (`x = fill(...)`) could not reach the caller;
+        // T0 publishes it, so the body keeps T0 semantics by staying there.
         return false;
     }
+    TypeFunc* signature = (TypeFunc*)((AstNode*)fn)->type;
     for (TypeParam* param = signature ? signature->param : NULL;
             param; param = param->next) {
         Type* contract = param->contract_type ? param->contract_type :
             (Type*)param;
         TypeId tid = contract ? contract->type_id : LMD_TYPE_ANY;
-        bool structured_contract = contract && tid == LMD_TYPE_TYPE &&
-            contract->kind != TYPE_KIND_SIMPLE;
-        if (tid == LMD_TYPE_ARRAY ||
-                tid == LMD_TYPE_ARRAY_NUM || tid == LMD_TYPE_MAP ||
-                tid == LMD_TYPE_ELEMENT ||
-                tid == LMD_TYPE_VMAP || structured_contract) {
-            // Aggregate/structured parameters need the full interpreter's Item
-            // contract. The satellite ABI's raw carrier specialization can
-            // otherwise turn typed arrays, structured contracts, or map state
-            // into a valid-looking but incorrect value (D2.2.2, D5.2).
-            // T21-3 / D8.1.1v6: a plain `any` parameter is NOT such a case --
-            // the satellite is entered through its boxed `_b` wrapper, an
-            // `any` parameter has no raw carrier to mis-decode, and a lane
-            // the body alone infers for it is guarded by the wrapper's exact
-            // shape test with the boxed slow body behind it. Pinning every
-            // untyped `pn f(x)` to T0 was what kept the shipped auto tier
-            // interpreting the hot loops of most untyped scripts.
-            return false;
-        }
+        // D8.1.1v7: aggregate and structured VALUE parameters (`float[]`,
+        // `Rec`, `map`) are admitted. The v5 pin argued the satellite's raw
+        // carrier specialization could mis-decode them, but a satellite is
+        // entered through its boxed `_b` wrapper, which admits each argument
+        // under the declared contract exactly as the eager module compiler's
+        // wrapper does before the raw entry sees it (D2.2.2, D3.2.1); the
+        // pin kept nbody2, pnpoly2, gcbench2, deriv2, ray2 and array1 in T0
+        // at 9-110x their JIT time. A typed `var` parameter stays pinned
+        // above (no CW33 home under the raw-lane ABI).
+        (void)contract; (void)tid;
     }
     // Keep the satellite admission gate aligned with the complete T0
     // capability scanner. The old satellite-only walk checked nested
@@ -1997,7 +2067,11 @@ bool interp_satellite_supported(const AstFuncNode* fn) {
     // that silently dropped layout/PDF/editor state (D8.1.1v4).
     ScanCtx full_scan = {true, AST_NODE_NULL};
     interp_scan_visit(fn->body, &full_scan);
-    if (!full_scan.ok) return false;
+    if (!full_scan.ok) {
+        log_debug("interp-tier: satellite scan refused function='%s' node=%d",
+            fn->name ? fn->name->chars : "<anonymous>", (int)full_scan.reject);
+        return false;
+    }
     SatelliteScanCtx sc = {true};
     interp_scan_satellite_node((AstNode*)fn->body, &sc);
     return sc.ok;

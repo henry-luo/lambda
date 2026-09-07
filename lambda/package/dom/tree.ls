@@ -91,7 +91,9 @@ pub fn tc_set_value(node, value) { dom.set_state(node, "value", value) }
 // Where an edit would land in a contenteditable host: the resolved node and the
 // offsets within it. Null when there is no editing position at all, so callers
 // test one thing instead of three.
-pub fn edit_range(host) {
-    let node = dom.edit_node(host);
-    if (node == null) null else { node: node, start: dom.edit_start(host), end: dom.edit_end(host) }
+pub fn edit_range(host, token) {
+    let node = dom.edit_node(host, token);
+    if (node == null) null else {
+        node: node, start: dom.edit_start(host, token), end: dom.edit_end(host, token)
+    }
 }

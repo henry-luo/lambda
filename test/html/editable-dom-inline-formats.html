@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable subscript and superscript</title>
+<div id="surface" contenteditable="true" tabindex="0">subsup</div>
+<div id="supface" contenteditable="true" tabindex="0">sup</div>
+<button id="sub">sub</button>
+<button id="sup">sup</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var supface = document.getElementById('supface');
+  var out = document.getElementById('out');
+  ['sub', 'sup'].forEach(function(id) {
+    document.getElementById(id).addEventListener('mousedown', function(event) {
+      event.preventDefault();
+    });
+  });
+  document.getElementById('sub').addEventListener('click', function() {
+    out.textContent = 'sub:' + document.execCommand('subscript', false, '') + ':' +
+      document.queryCommandState('subscript') + '|' + surface.innerHTML;
+  });
+  document.getElementById('sup').addEventListener('click', function() {
+    out.textContent = 'sup:' + document.execCommand('superscript', false, '') + ':' +
+      document.queryCommandState('superscript') + '|' + supface.innerHTML;
+  });
+</script>

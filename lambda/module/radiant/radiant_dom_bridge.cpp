@@ -137,6 +137,7 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_create_tree_walker_bridge radiant_host_api->dom_catalog->create_tree_walker
 #define dom_document_create_event_bridge radiant_host_api->realm->document_create_event_bridge
 #define dom_document_exec_command_bridge radiant_host_api->dom_catalog->exec_command
+#define dom_document_query_command_bridge radiant_host_api->dom_catalog->query_command
 
 static const int RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE = 4096;
 static const char s_radiant_dom_vmap_type_marker = 0;
@@ -3118,10 +3119,8 @@ RADIANT_C_API int radiant_dom_document_prototype(Item object, Item* out) {
 
 static Item radiant_dom_create_element_item(DomDocument* doc, const char* tag,
                                              const char* namespace_uri) {
-    if (!doc || !doc->input || !tag) return ItemNull;
-    MarkBuilder builder(doc->input);
-    Item elem_item = builder.element(tag).final();
-    DomElement* elem = dom_element_create(doc, tag, elem_item.element);
+    if (!doc || !tag) return ItemNull;
+    DomElement* elem = (DomElement*)dom_create_backed_element_bridge(doc, tag);
     if (elem && namespace_uri && namespace_uri[0]) {
         elem->set_attribute("__lambda_ns_uri", namespace_uri);
     }
@@ -3206,6 +3205,23 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
         Item command = argc >= 1 ? args[0] : radiant_dom_undefined_item();
         Item value = argc >= 3 ? args[2] : radiant_dom_string_item("");
         *out = dom_document_exec_command_bridge(command, value);
+        return 1;
+    }
+
+    if (operation == RADIANT_DOCUMENT_QUERY_COMMAND_SUPPORTED ||
+        operation == RADIANT_DOCUMENT_QUERY_COMMAND_ENABLED ||
+        operation == RADIANT_DOCUMENT_QUERY_COMMAND_STATE ||
+        operation == RADIANT_DOCUMENT_QUERY_COMMAND_INDETERM ||
+        operation == RADIANT_DOCUMENT_QUERY_COMMAND_VALUE) {
+        const char* query_kind = operation == RADIANT_DOCUMENT_QUERY_COMMAND_SUPPORTED
+            ? "supported"
+            : operation == RADIANT_DOCUMENT_QUERY_COMMAND_ENABLED ? "enabled"
+            : operation == RADIANT_DOCUMENT_QUERY_COMMAND_STATE ? "state"
+            : operation == RADIANT_DOCUMENT_QUERY_COMMAND_INDETERM ? "indeterm"
+            : "value";
+        Item command = argc >= 1 ? args[0] : radiant_dom_undefined_item();
+        *out = dom_document_query_command_bridge(
+            command, radiant_dom_string_item(query_kind));
         return 1;
     }
 

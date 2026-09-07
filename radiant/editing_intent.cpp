@@ -23,6 +23,9 @@ InputIntent::InputIntent()
       history_sel_end(0),
       option_index(-1),
       command(nullptr),
+      edit_invocation_id(0),
+      edit_query_kind(nullptr),
+      edit_plaintext_only(false),
       context_menu_item(-1) {}
 
 InputIntent::~InputIntent() {
@@ -52,6 +55,9 @@ bool input_intent_clone(const InputIntent* source, InputIntent* destination) {
     destination->composition_caret = source->composition_caret;
     destination->option_index = source->option_index;
     destination->command = source->command;
+    destination->edit_invocation_id = source->edit_invocation_id;
+    destination->edit_query_kind = source->edit_query_kind;
+    destination->edit_plaintext_only = source->edit_plaintext_only;
     destination->context_menu_item = source->context_menu_item;
     if (source->data) {
         destination->owned_data = mem_strdup(source->data, MEM_CAT_TEMP);
@@ -84,6 +90,9 @@ static void input_intent_reset(InputIntent* intent) {
     intent->is_composing = false;
     intent->composition_caret = 0;
     intent->command = nullptr;
+    intent->edit_invocation_id = 0;
+    intent->edit_query_kind = nullptr;
+    intent->edit_plaintext_only = false;
     intent->context_menu_item = -1;
 }
 
@@ -154,12 +163,12 @@ const char* input_intent_type_name(InputIntentType type) {
 }
 
 bool input_intent_is_dispatchable(InputIntentType type) {
-    // Formatting intents occupy one contiguous non-beforeinput enum range.
+    // Formatting is ordinary rich-edit input. The old exclusion meant Cmd+B
+    // and equivalent package actions mutated without their InputEvent pair.
     return type != INPUT_INTENT_COMPOSITION_START &&
         type != INPUT_INTENT_INSERT_IMAGE &&
         type != INPUT_INTENT_SELECT_ALL &&
-        type != INPUT_INTENT_COPY &&
-        (type < INPUT_INTENT_FORMAT_UNLINK || type > INPUT_INTENT_FORMAT_OUTDENT);
+        type != INPUT_INTENT_COPY;
 }
 
 

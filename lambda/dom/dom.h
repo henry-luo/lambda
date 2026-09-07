@@ -144,6 +144,17 @@ bool dom_activate_popover(void* popover, int action);
  * @return Item wrapping the element, or ITEM_NULL if dom_elem is NULL
  */
 Item dom_wrap_element(void* dom_elem);
+
+// Insert through the Mark-aware DOM mutation path. Native clients that create
+// detached DOM nodes must use these bridges so the view tree and the backing
+// Lambda Element stay in lockstep (D5.3.3).
+Item dom_append_child_bridge(void* parent, Item child);
+Item dom_remove_child_bridge(void* parent, Item child);
+Item dom_insert_before_bridge(void* parent, Item new_child, Item reference_child);
+
+// Create a detached element with a real Mark backing. Editing and bridge
+// clients must not use a synthetic layout-only element for persisted DOM work.
+void* dom_create_backed_element_bridge(void* document, const char* tag);
 // Document behind a node wrapper or the document proxy (ESO93). Returns DomDocument*.
 void* dom_document_from_item(Item item);
 

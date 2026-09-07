@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "corpus": "web-platform-tests",
+  "upstream_revision": "4ea2132b9a14ad4baf33677ad1723789dd183d6b",
+  "root": "ref/wpt/contenteditable",
+  "inventory": "directory",
+  "runner": "test_wpt_contenteditable_gtest.exe",
+  "entries": [
+    {
+      "path": "META.yml",
+      "sha256": "c19870c8f40cd63b0a68009c21d694a0a3cf89ccb37d862f19d6e18b863f674e",
+      "disposition": "metadata"
+    },
+    {
+      "path": "WEB_FEATURES.yml",
+      "sha256": "c9040c5b15ca7b7e50e06f9db2342fd540cddbeb00f63a851635f8a81610e0c2",
+      "disposition": "metadata"
+    },
+    {
+      "path": "plaintext-only.html",
+      "sha256": "0996587ca52d7158b34deb452098eb8aa9c44ca6a76cac48e6f5acfaf4b76907",
+      "disposition": "automated-dom",
+      "runner": "test_wpt_contenteditable_gtest.exe"
+    },
+    {
+      "path": "select-text-change-crash.html",
+      "sha256": "349d8cab2cfdc1a17c60c79038594bca9314d71c9e90e894e1426b638c164545",
+      "disposition": "automated-crash",
+      "runner": "test_wpt_contenteditable_gtest.exe"
+    },
+    {
+      "path": "synthetic-height-ref.html",
+      "sha256": "bcaad6e01294cb7ab130fa283ba447f99e6605ecdfcf6a6198f0b79fc62766f6",
+      "disposition": "reference-only"
+    },
+    {
+      "path": "synthetic-height.html",
+      "sha256": "1652a93e400fd87dc831c2c8ad6b40519f0acd210e7969e60da920dfa592895a",
+      "disposition": "visual-unautomated",
+      "reference": "synthetic-height-ref.html",
+      "reason": "Requires a pixel-comparison path; it is deliberately visible in the inventory rather than silently excluded."
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "Disabled DOM behavior package leaves contenteditable mutation unavailable",
+  "html": "test/html/editable-dom-package-disabled.html",
+  "viewport": {"width": 640, "height": 140},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_package_disabled ==="},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 4, "end": 4},
+    {"type": "type_physical", "target": {"selector": "#surface"}, "text": "X"},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "seed"},
+    {"type": "click", "target": {"selector": "#api"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "false:1|seed"}
+  ]
+}

@@ -398,7 +398,7 @@ void event_state_log_document(EventStateLog* log, const char* sub_type /* e.g. "
 
 
 
-// CE-3 (Radiant_Design_Content_Editable.md §6.2): complete §6.2 inputType
+// Radiant_Design_Editable.md §13: complete inputType
 // coverage. Entries marked "consumer-issued only" are NOT synthesized by
 // Radiant; they exist so consumers can emit them through the same dispatcher.
 typedef enum InputIntentType {
@@ -487,6 +487,15 @@ typedef struct InputIntent {
     // legacy surface is not the WHATWG beforeinput vocabulary, so it gets its
     // own field rather than being folded into `type`.
     const char* command;
+    // D7.2.5: a synchronous contenteditable capability id.  It is zero for
+    // ordinary event traffic and is never inferred from document-global state.
+    uint64_t edit_invocation_id;
+    // Query kind is independent of the legacy command spelling.  The package
+    // receives both so execution and queries read the same descriptor row.
+    const char* edit_query_kind;
+    // Captured editing-host mode. Plaintext-only is a package policy fact, not
+    // a native command branch (D7.2.5).
+    bool edit_plaintext_only;
     // ES34: the native context-menu overlay resolves only a physical row. The
     // package maps this stable item index to a command and owns dismissal.
     // -1 for every other intent.
@@ -634,6 +643,45 @@ typedef struct DomBoundary {
     DomNode* node;
     uint32_t offset;
 } DomBoundary;
+
+// A synchronous package edit is an explicit capability, not ambient document
+// state.  Its opaque id crosses the Lambda behavior boundary; every generic
+// edit primitive validates the id, document, host, and live boundaries before
+// touching the tree.  Keeping active invocations on the document also makes a
+// nested execCommand independent of the invocation it interrupted.
+typedef struct DomEditInvocation {
+    uint64_t id;
+    DocState* state;
+    DomElement* host;
+    bool plaintext_only;
+    DomBoundary start;
+    DomBoundary end;
+    // Captured after author notification. Each successful generic mutation
+    // advances this to its own committed DOM epoch; a foreign write invalidates
+    // the remaining package capability before it can apply a stale plan.
+    uint64_t mutation_epoch;
+    // Created lazily by the first generic mutation. A declined invocation
+    // owns no transaction or allocation, while an applied one has one owner
+    // for its inverse journal until selection commit (D7.2.5).
+    struct DomMutationTransaction* transaction;
+    DomText* text;
+    uint32_t text_start;
+    uint32_t text_end;
+    DomNode* caret_node;
+    uint32_t caret_offset;
+    // Capture the live Selection direction independently of the ordered Range
+    // endpoints. Generic split/wrap/unwrap operations use it when they map a
+    // selected text run into replacement nodes (D7.2.5).
+    bool selection_was_backward;
+    bool changed;
+    bool selection_changed;
+    bool selection_has_extent;
+    bool failed;
+    DomBoundary selection_anchor;
+    DomBoundary selection_focus;
+    bool active;
+    struct DomEditInvocation* next;
+} DomEditInvocation;
 
 typedef enum DomBoundaryOrder {
     DOM_BOUNDARY_BEFORE   = -1,
@@ -861,44 +909,75 @@ void      dom_selection_remove_all_ranges(DomSelection* s);
 // Boundary mutation (spec methods)
 bool dom_selection_collapse(DomSelection* s, DomNode* node, uint32_t offset, const char** out_exception);
 
-// F13: the DOM-range waist. `_set_pending` hands the resolved range to the
-// package edit; `_epoch` reports whether the package applied it.
-void dom_edit_set_pending_range(DocState* state, DomElement* host,
-                                struct DomText* text,
-                                uint32_t start_u16, uint32_t end_u16,
-                                DomNode* boundary_node, uint32_t boundary_offset);
-void dom_edit_set_pending_range_end(DocState* state, DomNode* boundary_node,
-                                    uint32_t boundary_offset);
-// Prepare the live DOM boundary pair that a package command will consume.
-// Resolution stays native geometry; the package still chooses the action.
-bool dom_edit_prepare_pending_range(DocState* state, DomElement* host,
-                                    DomBoundary start, DomBoundary end);
-void dom_edit_clear_pending_range(DocState* state);
-// Insert text at the stashed boundary, creating a text node when there is none.
-// A different operation from a range replacement, and named as one.
-bool dom_edit_insert_at_boundary_u16(DocState* state, const char* text_data,
-                                     uint32_t* out_caret_u16);
+// D7.2.5: the package receives an explicit edit invocation.  These helpers
+// are generic DOM/Selection mechanisms; none accepts a command or inputType.
+bool dom_edit_invocation_begin(DocState* state, DomElement* host,
+                               DomBoundary start, DomBoundary end,
+                               DomEditInvocation* invocation);
+void dom_edit_invocation_end(DomEditInvocation* invocation);
+DomEditInvocation* dom_edit_invocation_lookup(DocState* state,
+                                              DomElement* receiver,
+                                              uint64_t id);
+// Resolves a target from its explicit capability for document-scoped package
+// handlers. The caller must still prove it belongs to the same document.
+DomEditInvocation* dom_edit_invocation_lookup_document(DocState* state,
+                                                        uint64_t id);
+// Opens the generic DOM transaction for a validated invocation. Package plans
+// may then compose core tree/attribute primitives without a command-shaped
+// native operation (D7.2.5).
+bool dom_edit_invocation_begin_transaction(DomEditInvocation* invocation);
+bool dom_edit_invocation_abort_transaction(DomEditInvocation* invocation);
+bool dom_edit_invocation_commit_selection(DomEditInvocation* invocation);
+// A retained DOM delta is a generic identity-preserving transaction snapshot.
+// The package owns grouping and stack policy; native code only assigns an
+// opaque document-local handle and replays it through the transaction waist
+// (D7.2.5, D5.3.3).
+uint64_t dom_edit_invocation_retain_delta(DomEditInvocation* invocation);
+bool dom_edit_invocation_replay_delta(DomEditInvocation* invocation,
+                                      uint64_t delta_id, bool undo);
+bool dom_edit_release_retained_delta(DocState* state, DomElement* host,
+                                     uint64_t delta_id);
+void dom_edit_discard_retained_deltas(DocState* state);
+// The package session is an opaque document-owned value, but an edit
+// transaction must restore its previous root if a later DOM step fails
+// (D7.2.5, D5.3.3). This records only the root identity, never its schema.
+bool dom_edit_transaction_snapshot_edit_session(DocState* state);
+bool dom_edit_invocation_replace_range_u16(DomEditInvocation* invocation,
+                                           struct DomText* text,
+                                           uint32_t start_u16,
+                                           uint32_t end_u16,
+                                           const char* replacement,
+                                           uint32_t* out_caret_u16);
 bool dom_edit_replace_range_u16(DocState* state, struct DomText* text,
                                 uint32_t start_u16, uint32_t end_u16,
                                 const char* replacement, uint32_t* out_caret_u16);
-bool dom_edit_set_caret_u16(DocState* state, uint32_t caret_u16);
-// F14.1: the formatting half of the waist. Wrapping and unwrapping are the
-// first structural operations here; which tag a command uses, and whether it
-// toggles on or off, stays in the package.
-bool dom_edit_range_in_format(DocState* state, const char* tag);
-bool dom_edit_wrap_range_u16(DocState* state, uint32_t start_u16,
+bool dom_edit_set_caret_u16(DomEditInvocation* invocation, uint32_t caret_u16);
+bool dom_edit_insert_at_boundary_u16(DomEditInvocation* invocation,
+                                     const char* text_data,
+                                     uint32_t* out_caret_u16);
+// F14.1: wrapping and unwrapping are generic structural operations.  Package
+// policy identifies the wrapper; the waist validates and mutates it.
+bool dom_edit_wrap_range_u16(DomEditInvocation* invocation, uint32_t start_u16,
                              uint32_t end_u16, const char* tag);
-bool dom_edit_unwrap_range_u16(DocState* state, uint32_t start_u16,
-                               uint32_t end_u16, const char* tag);
-bool dom_edit_insert_html(DocState* state, const char* html);
-bool dom_edit_replace_pending_range(DocState* state, const char* replacement);
-bool dom_edit_delete_pending_range(DocState* state);
-bool dom_edit_insert_paragraph(DocState* state);
-bool dom_edit_insert_line_break(DocState* state);
-struct DomNode* dom_edit_caret_node(void);
-uint32_t dom_edit_caret_offset_u16(void);
-uint64_t dom_edit_apply_epoch(void);
+bool dom_edit_unwrap_range_u16(DomEditInvocation* invocation, uint32_t start_u16,
+                               uint32_t end_u16, DomElement* format);
+bool dom_edit_insert_html(DomEditInvocation* invocation, const char* html);
+bool dom_edit_replace_range(DomEditInvocation* invocation, const char* replacement);
+bool dom_edit_delete_range(DomEditInvocation* invocation);
+bool dom_edit_merge_adjacent_blocks(DomEditInvocation* invocation,
+                                    DomElement* start_block,
+                                    DomElement* end_block);
+bool dom_edit_insert_paragraph(DomEditInvocation* invocation,
+                               DomElement* source, const char* tag);
+bool dom_edit_insert_line_break(DomEditInvocation* invocation);
+bool dom_edit_select_host(DomEditInvocation* invocation);
 bool radiant_dispatch_behavior_dom_edit(View* target, const InputIntent* intent);
+bool radiant_dispatch_behavior_edit_query(View* target,
+                                          const InputIntent* intent,
+                                          Item* out_result);
+Item radiant_dom_query_command(void* document, const char* query_kind,
+                               const char* command);
+bool radiant_dom_set_design_mode(void* document, const char* value);
 // F4: form activation is a behavior-only default action. The JS click pass
 // uses the same claim/dispatch seam so native and script-created clicks cannot
 // submit or reset twice.
@@ -911,6 +990,14 @@ bool radiant_keyboard_command_from_package(void* dom_node, const char* name);
 // F14.1: `document.execCommand` reaches the package's command set through here.
 bool radiant_dom_exec_command(void* document, const char* command,
                               const char* value);
+// D7.2.5: an API command result carries its event facts from the DOM package.
+// This emits its post-commit `input` notification without re-entering a UA
+// default action or selecting a command/inputType in native code.
+bool radiant_dispatch_api_edit_input(struct DomDocument* document,
+                                     struct DomElement* target,
+                                     const InputIntent* intent,
+                                     const char* input_type,
+                                     const char* data);
 bool dom_selection_extend(DomSelection* s, DomNode* node, uint32_t offset, const char** out_exception);
 bool dom_selection_set_base_and_extent(DomSelection* s,
                                        DomNode* anchor_node, uint32_t anchor_offset,
@@ -993,6 +1080,12 @@ void dom_mutation_text_split(DocState* state, DomText* original,
 // remove `next` from its parent.
 void dom_mutation_text_merge(DocState* state, DomText* prev,
                              DomText* next, uint32_t prev_u16_len);
+
+// Generic mutation transactions defer only the observable selection resync;
+// Range endpoints still track every individual DOM step for a correct commit
+// or journal rollback (D7.2.5).
+bool dom_mutation_transaction_active(DocState* state);
+void dom_mutation_transaction_resync(DocState* state);
 
 // ============================================================================
 // Phase 4 — Range mutation methods (WHATWG DOM §5.5)
@@ -1092,8 +1185,8 @@ struct DomBoundary dom_boundary_move(struct DomBoundary b,
 
 // ===== editing host =====
 
-// EditingHost — central recognition + lookup of `contenteditable` editing
-// hosts. See vibe/radiant/Radiant_Design_Content_Editable.md §4.
+// EditingHost — central recognition + lookup of contenteditable and
+// designMode editing hosts. See vibe/radiant/Radiant_Design_Editable.md §7.
 //
 // One concept, one resolver: replaces the ad-hoc `contenteditable` reads
 // that used to live in event.cpp (focus / hit-test) and dom_range.cpp
@@ -1101,7 +1194,7 @@ struct DomBoundary dom_boundary_move(struct DomBoundary b,
 
 
 struct EditingHost {
-    // Nearest ancestor element with contenteditable="true"|""|"plaintext-only".
+    // Nearest contenteditable host, or the designMode document body.
     // nullptr if `node` is not inside any editing host.
     DomElement* host;
 
@@ -2355,24 +2448,24 @@ typedef struct EditingCompositionState {
 typedef struct EditingInteractionState {
     EditingSurface active_surface;
     bool has_active_surface;
-    // F13: the text-node range an editing dispatch resolved to, stashed for
-    // `radiant.dom_edit_range` to read during the `domedit` dispatch. Native
-    // still does the resolution — element-offset-to-child, edge-text descent,
-    // host containment — because that is geometry over the tree, not policy.
-    // Offsets are UTF-16 here, as the DOM stores them; the waist converts.
-    struct DomText* pending_dom_edit_text;
-    uint32_t pending_dom_edit_start;
-    uint32_t pending_dom_edit_end;
-    // F13.4: the raw boundary, kept even when the range did not resolve to a
-    // text node — that is exactly the case where one has to be created, and it
-    // is the only editing operation the range waist structurally cannot express.
-    DomNode* pending_dom_edit_boundary_node;
-    uint32_t pending_dom_edit_boundary_offset;
-    // F14.2: retain both raw endpoints for structural edits. A cross-node
-    // delete or replacement cannot be reduced to the single text node above.
-    DomNode* pending_dom_edit_range_end_node;
-    uint32_t pending_dom_edit_range_end_offset;
-    DomElement* pending_dom_edit_host;
+    // Active package invocations are a short-lived capability list.  The
+    // package receives the id explicitly in its event record, so nesting never
+    // overwrites a range or result belonging to an outer operation.
+    DomEditInvocation* dom_edit_invocations;
+    uint64_t next_dom_edit_invocation_id;
+    // The generic DOM transaction is document-owned while an invocation is
+    // applying. It is not an edit payload channel and permits no nested write.
+    struct DomMutationTransaction* dom_mutation_transaction;
+    // Generic retained transaction deltas are document-owned mechanism state.
+    // Package history retains only their opaque ids and owns every grouping,
+    // invalidation, and pruning decision (D7.2.5).
+    struct DomRetainedMutation* dom_edit_retained_mutations;
+    uint64_t next_dom_edit_retained_delta_id;
+    // The behavior package owns this immutable session value. Native code only
+    // retains its exact GC root for the lifetime of this document (D7.2.5,
+    // D5.3.3); it must never inspect command, history, or typing-state fields.
+    uint64_t dom_edit_session_root;
+    bool dom_edit_session_rooted;
     bool pointer_selecting;
     bool selection_extending;
     EditingDragMode drag_mode;
@@ -2440,6 +2533,8 @@ typedef struct DocState {
     uint32_t state_batch_depth; // suppresses assertions during this document's batch mutation
     uint32_t pseudo_state_batch_depth; // coalesces full stylesheet recascades
     bool pseudo_state_restyle_pending;
+    bool hover_styles_active; // previous hover transition matched a :hover rule
+    SelectorMatcher* hover_matcher; // document-pool matcher reused across pointer transitions
     uint32_t text_control_history_guard; // undo/redo recursion guard for this document
     const char* text_edit_history_input_type; // ambient inputType for document history pushes
     uint32_t transition_depth;     // nonzero while state_machine.cpp applies a transition

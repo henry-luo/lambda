@@ -1,0 +1,23 @@
+{
+  "name": "Contenteditable undo and redo restore generic structural DOM deltas",
+  "html": "test/html/editable-dom-structural-history.html",
+  "viewport": {"width": 640, "height": 140},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_structural_history ==="},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 0, "end": 4},
+    {"type": "click", "target": {"selector": "#bold"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "bold:true:true:false|<b>bold</b>"},
+    {"type": "click", "target": {"selector": "#undo"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "undo:true:false:true|bold"},
+    {"type": "click", "target": {"selector": "#redo"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "redo:true:true:false|<b>bold</b>"},
+    {"type": "click", "target": {"selector": "#undo"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "undo:true:false:true|bold"},
+    {"type": "click", "target": {"selector": "#bold"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "bold:true:true:false|<b>bold</b>"},
+    {"type": "click", "target": {"selector": "#author"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "author:true:true:false|<b>authored</b>"},
+    {"type": "click", "target": {"selector": "#undo"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "undo:true:false:false|<b>authored</b>"}
+  ]
+}
