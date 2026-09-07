@@ -23,8 +23,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+  mathlive_to_lambda_classes,
+  render_lambda_math,
+} from './lambda_math_renderer.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -167,7 +170,7 @@ function applyClassRename(html) {
   // Match Lambda's class convention: ML__ → lm_, and the unprefixed `ML-X`
   // group classes that MathLive uses (`ML-mord`, etc.) → `lm_X` family.
   // Lambda emits `lm_mord` / `lm_mathit` etc. directly.
-  return html.replace(/ML__/g, 'lm_');
+  return mathlive_to_lambda_classes(html);
 }
 
 // ---------------------------------------------------------------------------
@@ -175,53 +178,11 @@ function applyClassRename(html) {
 // ---------------------------------------------------------------------------
 
 function renderLambda(formula, displayMode, lambdaPath) {
-  fs.mkdirSync(TEMP_DIR, { recursive: true });
-  const scriptPath = path.join(TEMP_DIR, 'diff_harness_one.ls');
-  const script = buildLambdaScript(formula, displayMode);
-  fs.writeFileSync(scriptPath, script);
-
-  const result = spawnSync(lambdaPath, ['--no-log', scriptPath], {
-    cwd: PROJECT_ROOT,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
+  return render_lambda_math(formula, {
+    display: displayMode,
+    lambda: lambdaPath,
+    script: path.join(TEMP_DIR, 'diff_harness_one.ls'),
   });
-  if (result.status !== 0) {
-    const detail = (result.stderr || '').trim().slice(0, 1000);
-    throw new Error(
-      `lambda.exe exited ${result.status ?? result.signal}: ${detail}`
-    );
-  }
-  const out = result.stdout.trim();
-  try {
-    const parsed = out.startsWith('"') && out.endsWith('"')
-      ? JSON.parse(out.slice(1, -1))
-      : JSON.parse(out);
-    if (parsed && typeof parsed.html === 'string') return parsed;
-    return { html: String(parsed), error: 'no-error' };
-  } catch (err) {
-    throw new Error(
-      `could not parse Lambda JSON output: ${err.message}\n${out.slice(0, 1000)}`
-    );
-  }
-}
-
-function buildLambdaScript(formula, displayMode) {
-  const lit = JSON.stringify(formula);
-  const fn = displayMode ? 'render_display' : 'render_inline';
-  return `import math_pkg: lambda.package.math.math
-import html_ser: lambda.package.latex.to_html
-
-let formula = ${lit}
-let parsed = parse(formula, {type: "math", flavor: "latex"}) ^ { ^ }
-let result = if (parsed is error) {
-    {formula: formula, error: string(parsed), html: ""}
-} else {
-    let rendered = math_pkg.${fn}(parsed)
-    let html = html_ser.to_html(rendered)
-    {formula: formula, error: "no-error", html: html}
-}
-format(result, "json")
-`;
 }
 
 // ---------------------------------------------------------------------------

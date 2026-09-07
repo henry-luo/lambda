@@ -27,7 +27,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { spawn, execSync } from 'child_process';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 // ES module __dirname equivalent
@@ -40,6 +40,10 @@ import { compareHTML } from './comparators/html_comparator.js';
 import { compareDVI, validateDVI } from './comparators/dvi_comparator.js';
 import { compareASTToMathML } from './comparators/mathml_comparator.js';
 import { compareASTToMathLive } from './comparators/mathlive_ast_comparator.js';
+import {
+    lambda_to_mathlive_classes,
+    render_lambda_math
+} from '../lambda/mathlive/lambda_math_renderer.mjs';
 
 // Configuration
 const CONFIG = {
@@ -90,7 +94,9 @@ function parseArgs() {
         suite: 'all',
         test: null,
         group: null,
-        compare: 'all',
+        // The script-level math API exposes the tree-sitter AST, not the
+        // retired CLI's MathLive-shaped AST. HTML is the stable package API.
+        compare: 'html',
         tolerance: CONFIG.dviTolerance,
         verbose: false,
         json: false,
@@ -360,7 +366,8 @@ function loadTestData(testPath) {
 }
 
 /**
- * Run Lambda's LaTeX math typesetter on an expression
+ * Render one expression through Lambda's supported script-level math API.
+ * The retired `lambda.exe math --output-*` CLI cannot produce test artifacts.
  */
 async function runLambdaParser(latex, options = {}) {
     const lambdaExe = path.join(PROJECT_ROOT, 'lambda.exe');
@@ -375,96 +382,30 @@ async function runLambdaParser(latex, options = {}) {
         };
     }
 
-    return new Promise((resolve) => {
+    try {
         const tempDir = path.join(PROJECT_ROOT, 'temp', 'math_tests');
-        if (!fs.existsSync(tempDir)) {
-            fs.mkdirSync(tempDir, { recursive: true });
-        }
-
         const testId = Math.random().toString(36).substring(7);
-        const astFile = path.join(tempDir, `${testId}.ast.json`);
-        const htmlFile = path.join(tempDir, `${testId}.html`);
-        const dviFile = path.join(tempDir, `${testId}.dvi`);
-
-        // Build Lambda command
-        const args = [
-            'math',
-            latex,
-            '--output-ast', astFile,
-            '--output-html', htmlFile,
-            '--output-dvi', dviFile
-        ];
-
-        const child = spawn(lambdaExe, args, {
-            cwd: PROJECT_ROOT,
-            timeout: 10000 // 10 second timeout
+        const result = render_lambda_math(latex, {
+            display: true,
+            lambda: lambdaExe,
+            script: path.join(tempDir, `${testId}.ls`)
         });
-
-        let stdout = '';
-        let stderr = '';
-
-        child.stdout.on('data', (data) => {
-            stdout += data.toString();
-        });
-
-        child.stderr.on('data', (data) => {
-            stderr += data.toString();
-        });
-
-        child.on('close', (code) => {
-            if (code !== 0) {
-                resolve({
-                    ast: null,
-                    html: null,
-                    dvi: null,
-                    error: `Lambda exited with code ${code}: ${stderr || stdout}`
-                });
-                return;
-            }
-
-            // Read output files
-            const result = {
-                ast: null,
-                html: null,
-                dvi: null,
-                error: null
-            };
-
-            try {
-                if (fs.existsSync(astFile)) {
-                    const astContent = fs.readFileSync(astFile, 'utf-8');
-                    result.ast = JSON.parse(astContent);
-                }
-
-                if (fs.existsSync(htmlFile)) {
-                    result.html = fs.readFileSync(htmlFile, 'utf-8');
-                }
-
-                if (fs.existsSync(dviFile)) {
-                    result.dvi = dviFile; // Return path to DVI file
-                }
-
-                // Clean up temp files
-                if (fs.existsSync(astFile)) fs.unlinkSync(astFile);
-                if (fs.existsSync(htmlFile)) fs.unlinkSync(htmlFile);
-                // Keep DVI for comparison if needed
-
-            } catch (err) {
-                result.error = `Failed to read output files: ${err.message}`;
-            }
-
-            resolve(result);
-        });
-
-        child.on('error', (err) => {
-            resolve({
-                ast: null,
-                html: null,
-                dvi: null,
-                error: `Failed to spawn Lambda: ${err.message}`
-            });
-        });
-    });
+        return {
+            ast: result.ast ?? null,
+            html: result.html ?? null,
+            // The static math package has no DVI writer. Keep this explicit so
+            // scoring redistributes the retired DVI weight to AST and HTML.
+            dvi: null,
+            error: result.error === 'no-error' ? null : result.error
+        };
+    } catch (err) {
+        return {
+            ast: null,
+            html: null,
+            dvi: null,
+            error: `Failed to render Lambda math script: ${err.message}`
+        };
+    }
 }
 
 /**
@@ -644,20 +585,22 @@ async function runExtendedTest(testInfo, options) {
                 let katexScore = null;
                 let lambdaScore = null;
 
+                const comparableHtml = lambda_to_mathlive_classes(lambdaOutput.html);
+
                 if (fs.existsSync(refMathLiveHtml)) {
                     const refHtml = fs.readFileSync(refMathLiveHtml, 'utf-8');
-                    mathLiveScore = compareHTML(lambdaOutput.html, refHtml, 'mathlive');
+                    mathLiveScore = compareHTML(comparableHtml, refHtml, 'mathlive');
                 }
 
                 if (fs.existsSync(refKatexHtml)) {
                     const refHtml = fs.readFileSync(refKatexHtml, 'utf-8');
-                    katexScore = compareHTML(lambdaOutput.html, refHtml, 'katex');
+                    katexScore = compareHTML(comparableHtml, refHtml, 'katex');
                 }
 
                 // Also check Lambda's own reference for consistency testing
                 if (fs.existsSync(refLambdaHtml)) {
                     const refHtml = fs.readFileSync(refLambdaHtml, 'utf-8');
-                    lambdaScore = compareHTML(lambdaOutput.html, refHtml, 'lambda');
+                    lambdaScore = compareHTML(comparableHtml, refHtml, 'lambda');
                 }
 
                 // Take best score if we have both MathLive and KaTeX
@@ -865,19 +808,23 @@ async function runBaselineTest(testInfo, options) {
         let katexScore = null;
         let lambdaScore = null;
 
-        if (fs.existsSync(refMathLiveHtml)) {
-            const refHtml = fs.readFileSync(refMathLiveHtml, 'utf-8');
-            mathLiveScore = compareHTML(lambdaOutput.html, refHtml, 'mathlive');
-        }
+    const comparableHtml = lambdaOutput.html
+        ? lambda_to_mathlive_classes(lambdaOutput.html)
+        : null;
 
-        if (fs.existsSync(refKatexHtml)) {
-            const refHtml = fs.readFileSync(refKatexHtml, 'utf-8');
-            katexScore = compareHTML(lambdaOutput.html, refHtml, 'katex');
-        }
+    if (comparableHtml && fs.existsSync(refMathLiveHtml)) {
+        const refHtml = fs.readFileSync(refMathLiveHtml, 'utf-8');
+        mathLiveScore = compareHTML(comparableHtml, refHtml, 'mathlive');
+    }
 
-        if (fs.existsSync(refLambdaHtml)) {
-            const refHtml = fs.readFileSync(refLambdaHtml, 'utf-8');
-            lambdaScore = compareHTML(lambdaOutput.html, refHtml, 'lambda');
+    if (comparableHtml && fs.existsSync(refKatexHtml)) {
+        const refHtml = fs.readFileSync(refKatexHtml, 'utf-8');
+        katexScore = compareHTML(comparableHtml, refHtml, 'katex');
+    }
+
+    if (comparableHtml && fs.existsSync(refLambdaHtml)) {
+        const refHtml = fs.readFileSync(refLambdaHtml, 'utf-8');
+        lambdaScore = compareHTML(comparableHtml, refHtml, 'lambda');
         }
 
         if (mathLiveScore && katexScore) {
@@ -900,8 +847,9 @@ async function runBaselineTest(testInfo, options) {
         htmlResult = { passRate: 0, differences: [{ issue: 'Lambda did not produce HTML' }] };
     }
 
-    // Calculate weighted score using extended test formula
-    const weightedScore = calculateTestScore(astResult, htmlResult, dviResult, 'all');
+    // Use the selected active comparison contract. The default HTML contract
+    // matches the script-level static renderer, not the retired CLI artifacts.
+    const weightedScore = calculateTestScore(astResult, htmlResult, dviResult, options.compare);
 
     // Pass if DVI is 100% OR weighted score is 100%
     const weightedPasses = Math.round(weightedScore.overall) >= 100;
@@ -961,13 +909,14 @@ function printResults(results, options) {
 
     // Baseline results
     if (baselineResults.length > 0) {
-        console.log('📂 Baseline Tests (DVI 100% OR Weighted 100%)');
+        console.log('📂 Baseline Tests (HTML 100%)');
         console.log('--------------------------------------------------------------------------------');
 
         for (const result of baselineResults) {
             const icon = result.status === 'passed' ? '✅' :
                         result.status === 'skipped' ? '⏭️' : '❌';
-            const dviScore = result.score.dvi ? result.score.dvi.passRate.toFixed(1) : 'N/A';
+            const htmlScore = result.score.breakdown?.html?.rate;
+            const scoreText = htmlScore != null ? htmlScore.toFixed(1) : 'N/A';
 
             // Show which criterion passed
             let passMethod = '';
@@ -975,11 +924,11 @@ function printResults(results, options) {
                 if (result.score.passedViaDVI) {
                     passMethod = ' (DVI)';
                 } else if (result.score.passedViaWeighted) {
-                    passMethod = ' (Weighted)';
+                    passMethod = ' (HTML)';
                 }
             }
 
-            console.log(`  ${icon} ${result.name.padEnd(30)} DVI: ${dviScore}%${passMethod}`);
+            console.log(`  ${icon} ${result.name.padEnd(30)} HTML: ${scoreText}%${passMethod}`);
 
             if (options.verbose && result.score.dvi?.differences?.length > 0) {
                 for (const diff of result.score.dvi.differences.slice(0, 3)) {
@@ -1010,13 +959,11 @@ function printResults(results, options) {
                             result.status === 'skipped' ? '⏭️' : '❌';
 
                 // Show component scores if available
-                const ast = result.score.breakdown?.ast?.rate ?? 'N/A';
                 const html = result.score.breakdown?.html?.rate ?? 'N/A';
-                const dvi = result.score.breakdown?.dvi?.rate ?? 'N/A';
                 const overall = result.score.overall;
 
                 if (options.verbose) {
-                    console.log(`     ${icon} ${result.name.padEnd(25)} AST: ${String(ast).padStart(5)}%  HTML: ${String(html).padStart(5)}%  DVI: ${String(dvi).padStart(5)}%  → ${overall.toFixed(1)}%`);
+                    console.log(`     ${icon} ${result.name.padEnd(25)} HTML: ${String(html).padStart(5)}%  → ${overall.toFixed(1)}%`);
                 } else {
                     console.log(`     ${icon} ${result.name.padEnd(25)} → ${overall.toFixed(1)}%`);
                 }
@@ -1061,20 +1008,16 @@ function printResults(results, options) {
     // Component averages
     const validResults = results.filter(r => r.score.breakdown);
     if (validResults.length > 0) {
-        const astAvg = validResults.reduce((sum, r) => sum + (r.score.breakdown?.ast?.rate || 0), 0) / validResults.length;
         const htmlAvg = validResults.reduce((sum, r) => sum + (r.score.breakdown?.html?.rate || 0), 0) / validResults.length;
-        const dviAvg = validResults.reduce((sum, r) => sum + (r.score.breakdown?.dvi?.rate || 0), 0) / validResults.length;
 
         console.log('');
-        console.log('  Component Averages:');
-        console.log(`    AST:  ${astAvg.toFixed(1)}%  (target: 95%)`);
+        console.log('  HTML Average:');
         console.log(`    HTML: ${htmlAvg.toFixed(1)}%  (target: 90%)`);
-        console.log(`    DVI:  ${dviAvg.toFixed(1)}%  (target: 80%)`);
     }
 
     const overallAvg = results.reduce((sum, r) => sum + r.score.overall, 0) / totalTests;
     console.log('');
-    console.log(`  Weighted Average Score: ${overallAvg.toFixed(1)}%`);
+    console.log(`  Overall HTML Score: ${overallAvg.toFixed(1)}%`);
     console.log('================================================================================');
     console.log('');
 }

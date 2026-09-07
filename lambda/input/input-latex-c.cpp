@@ -148,6 +148,16 @@ private:
         }
         if (source_[position_] == '{') return parse_group();
         if (ascii_ && source_[position_] == '(') return parse_paren_script_group();
+        if (!ascii_) {
+            // TeX takes precisely one token for an unbraced argument: in
+            // `\\frac57`, 5 is the numerator and 7 is the denominator.
+            // parse_primary() would consume the full numeric or word run.
+            if (source_[position_] == '\\') return parse_command();
+            if (isdigit((unsigned char)source_[position_]) || isalpha((unsigned char)source_[position_])) {
+                return builder_.createStringItem(source_ + position_++, 1);
+            }
+            return parse_punctuation_or_operator();
+        }
         return parse_primary();
     }
 
@@ -186,7 +196,11 @@ private:
         }
         if (isalpha((unsigned char)c)) {
             size_t start = position_++;
-            while (position_ < length_ && isalpha((unsigned char)source_[position_])) position_++;
+            // TeX math makes each bare letter its own ordinary atom. ASCII
+            // math keeps multi-letter identifiers (for example, `alpha`).
+            if (ascii_) {
+                while (position_ < length_ && isalpha((unsigned char)source_[position_])) position_++;
+            }
             return builder_.createStringItem(source_ + start, position_ - start);
         }
         return parse_punctuation_or_operator();
@@ -255,8 +269,10 @@ private:
             Item bottom = parse_script_arg();
             ElementBuilder elem = builder_.element("binomial");
             elem.attr("cmd", builder_.createStringItem(full));
-            if (item_present(top)) elem.attr("top", top);
-            if (item_present(bottom)) elem.attr("bottom", bottom);
+            // Fraction rendering shares the numerator/denominator contract for
+            // bar and no-bar forms; `top`/`bottom` left binomials empty.
+            if (item_present(top)) elem.attr("numer", top);
+            if (item_present(bottom)) elem.attr("denom", bottom);
             return elem.final();
         }
         if (strcmp(name, "sqrt") == 0) {
@@ -393,14 +409,34 @@ private:
                                 bool* found) {
         if (found) *found = false;
         size_t name_len = strlen(name);
-        for (size_t i = from; i + 5 + name_len < length_; i++) {
+        size_t recovery_end = 0;
+        size_t recovery_body_end = 0;
+        for (size_t i = from; i + 5 < length_; i++) {
             if (source_[i] != '\\' || !starts_with(source_, length_, i, "\\end{")) continue;
             size_t name_start = i + 5;
-            if (memcmp(source_ + name_start, name, name_len) == 0 && source_[name_start + name_len] == '}') {
+            size_t end_name_start = 0;
+            size_t end_name_end = 0;
+            size_t after_end = latex_scan_group_end(source_, length_, i + 4, '{', '}',
+                                                     &end_name_start, &end_name_end);
+            if (after_end != 0 && recovery_end == 0) {
+                // MathLive recovers an unmatched environment by ending at the
+                // first closing environment token rather than consuming it as
+                // ordinary math content.
+                recovery_body_end = i;
+                recovery_end = after_end;
+            }
+            if (name_start + name_len < length_ &&
+                memcmp(source_ + name_start, name, name_len) == 0 &&
+                source_[name_start + name_len] == '}') {
                 if (body_end) *body_end = i;
                 if (found) *found = true;
                 return name_start + name_len + 1;
             }
+        }
+        if (recovery_end != 0) {
+            if (body_end) *body_end = recovery_body_end;
+            if (found) *found = true;
+            return recovery_end;
         }
         return length_;
     }
