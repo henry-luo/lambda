@@ -63,6 +63,14 @@ CssEnum render_text_inherited_transform(ViewText* text_view) {
     return get_text_transform_from_node(text_view->parent);
 }
 
+static inline uint32_t render_text_resolve_mathlive_fallback_glyph(uint32_t codepoint) {
+    // MathLive's private negation slash is not present in Lambda's document
+    // fonts, and Times draws its parallel relation as diagonal strokes.
+    if (codepoint == 0xE020) return 0x2215;
+    if (codepoint == 0x2225) return 0x2016;
+    return codepoint;
+}
+
 char* render_text_create_export_segment(const unsigned char* text,
                                         const TextRect* text_rect,
                                         CssEnum text_transform,
@@ -106,18 +114,30 @@ char* render_text_create_export_segment(const unsigned char* text,
                 codepoint, text_transform, is_word_start, transformed_codepoints);
             is_word_start = false;
             for (int i = 0; i < transformed_count; i++) {
-                uint32_t transformed = transformed_codepoints[i];
+                uint32_t transformed = render_text_resolve_mathlive_fallback_glyph(
+                    transformed_codepoints[i]);
                 if (transformed != 0) dst += utf8_encode(transformed, dst);
             }
             src += bytes;
         }
     } else {
         while (src < src_end) {
-            if (src[0] == 0xC2 && src + 1 < src_end && src[1] == 0xAD) {
-                src += 2;
-            } else {
-                *dst++ = (char)*src++;
+            uint32_t codepoint = *src;
+            int bytes = 1;
+            if (codepoint >= 128) {
+                bytes = str_utf8_decode((const char*)src, (size_t)(src_end - src), &codepoint);
+                if (bytes <= 0) bytes = 1;
             }
+            if (codepoint != 0x00AD) {
+                uint32_t exported = render_text_resolve_mathlive_fallback_glyph(codepoint);
+                if (exported == codepoint) {
+                    memcpy(dst, src, (size_t)bytes);
+                    dst += bytes;
+                } else {
+                    dst += utf8_encode(exported, dst);
+                }
+            }
+            src += bytes;
         }
     }
 
@@ -346,7 +366,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 is_word_start = false;
 
                 for (int tti = 0; tti < tt_count; tti++) {
-                    uint32_t render_cp = tt_out[tti];
+                    uint32_t render_cp = render_text_resolve_mathlive_fallback_glyph(tt_out[tti]);
                     if (render_cp == 0) continue;
                     if (text_codepoint_has_zero_advance(render_cp)) continue;
 

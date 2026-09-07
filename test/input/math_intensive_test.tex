@@ -17,6 +17,9 @@ Inline fractions $\frac{1}{2}$ and $\frac{a+b}{c+d}$.
 
 Powers and subscripts: $x^2$, $y_i$, $z^{a+b}$, $w_{i,j}$.
 
+Nested structures $\frac{1+\frac{1}{x}}{\sqrt{1+x^2}}$ and
+$\left(\frac{a}{b}\right)^{n+1}$.
+
 \section{Display Mathematics}
 
 \begin{equation}
@@ -41,6 +44,68 @@ $\sum_{i=1}^n i^2$, $\prod_{i=1}^n i$, $\int_0^1 x dx$
 
 $\lim_{x \to 0} \frac{\sin x}{x} = 1$
 
+\begin{equation}
+\sum_{k=0}^{n} \binom{n}{k} x^k y^{n-k} = (x+y)^n
+\end{equation}
+
+\begin{equation}
+\int_{-\infty}^{\infty} e^{-x^2}\,dx = \sqrt{\pi}
+\end{equation}
+
+\section{Relations and Decorations}
+
+Ordered relations $a < b \leq c \neq d \geq e > f$ and quantified
+statements $\forall \epsilon > 0,\ \exists \delta > 0$.
+
+\begin{equation}
+\overline{z} = a - bi, \qquad \vec{v} = \widehat{i} + \widehat{j}
+\end{equation}
+
+\begin{equation}
+\left\langle \frac{u}{\|u\|}, \frac{v}{\|v\|} \right\rangle
+= \frac{u \cdot v}{\|u\|\,\|v\|}
+\end{equation}
+
+\section{Delimited Groups and Functions}
+
+Trigonometric and logarithmic functions $\sin \theta$, $\cos \theta$,
+$\tan \theta$, $\log x$, $\ln x$, and $\exp(x)$.
+
+\begin{equation}
+\left[\sum_{r=0}^{m} \frac{(-1)^r}{r!}\right]^2
+= \left(\frac{1-e^{-m}}{1+e^{-m}}\right)
+\end{equation}
+
+\begin{equation}
+\left\lceil \frac{x}{2} \right\rceil
++ \left\lfloor \frac{x}{2} \right\rfloor
+= \begin{cases}
+x & \text{if } x \text{ is even} \\
+x+1 & \text{if } x \text{ is odd}
+\end{cases}
+\end{equation}
+
+\begin{equation}
+\underbrace{a_1 + a_2 + \cdots + a_n}_{\text{finite series}}
+= \sum_{r=1}^{n} a_r
+\end{equation}
+
+\section{Calculus and Vector Groups}
+
+\begin{equation}
+\frac{\partial^2 f}{\partial x\,\partial y}
+= \nabla \cdot \vec{F} + \nabla \times \vec{G}
+\end{equation}
+
+\begin{equation}
+\oint_C \left(P\,dx + Q\,dy\right)
+= \iint_D \left(\frac{\partial Q}{\partial x} - \frac{\partial P}{\partial y}\right)\,dA
+\end{equation}
+
+\begin{equation}
+\lim_{h \to 0}\frac{f(x+h)-f(x)}{h} = f'(x)
+\end{equation}
+
 \section{Matrices}
 
 \begin{equation}
@@ -51,12 +116,48 @@ A = \begin{pmatrix}
 \end{pmatrix}
 \end{equation}
 
+\begin{equation}
+B = \begin{bmatrix}
+\frac{1}{2} & -x & \sqrt{y} \\
+a_1 & a_2 & a_n \\
+0 & 1 & \infty
+\end{bmatrix}
+\end{equation}
+
+\begin{equation}
+\det \begin{vmatrix}
+a & b \\
+c & d
+\end{vmatrix} = ad - bc
+\end{equation}
+
 \section{Cases}
 
 \begin{equation}
 |x| = \begin{cases}
-x & \text{if } x \geq 0 \\
+x & \text{if } x > 0 \\
+0 & \text{if } x = 0 \\
 -x & \text{if } x < 0
+\end{cases}
+\end{equation}
+
+\begin{equation}
+f(x) = \begin{cases}
+x^2 & \text{if } x > 1 \\
+\frac{1}{1+x^2} & \text{if } -1 \leq x \leq 1 \\
+x^3 & \text{if } x < -1
+\end{cases}
+\end{equation}
+
+\begin{equation}
+h(t) = \begin{cases}
+\sqrt{t} & \text{if } t \geq 0 \\
+\sqrt{-t} & \text{if } t < 0
+\end{cases}
+\qquad
+\begin{cases}
+1 & \text{for a true proposition} \\
+0 & \text{for a false proposition}
 \end{cases}
 \end{equation}
 

@@ -3966,6 +3966,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block);
 void adjust_line_for_floats(LayoutContext* lycon);
 void layout_clear_element(LayoutContext* lycon, ViewBlock* block);
 void re_resolve_abs_children_vertical(ViewBlock* containing_block);
+void re_resolve_abs_descendant_widths(View* root);
 void layout_finalize_static_positioned_abs_descendants(ViewBlock* root);
 void layout_shift_static_positioned_abs_descendants(ViewElement* root, float delta_x, float delta_y);
 

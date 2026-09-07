@@ -380,7 +380,10 @@ fn render_command(node, context) {
     let cmd_text = get_text(node)
     let name_str = if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
          slice(cmd_text, 1, len(cmd_text)) else cmd_text
-    if (name_str == "ne" or name_str == "neq") {
+    if (name_str == "|") {
+        // A bare double vertical bar is a delimiter command, not an unknown symbol.
+        box.text_box("∥", css.CMR, "mord")
+    } else if (name_str == "ne" or name_str == "neq") {
         render_not_overlay("=")
     } else if (name_str == "coloneq") {
         box.with_class(box.text_box("≔", css.CMR, "mop"), css.OP_GROUP)
