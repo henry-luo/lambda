@@ -14,9 +14,9 @@
  *
  * SCU10: drafts grow from the document. The builder embeds no field-count
  * limit; its draft arrays live in the shape pool's arena (Input lifetime, no
- * per-builder free), doubling as fields are added. Each draft keeps the full
- * `Type*` contract beside the `TypeId` the pool keys identity on (D3.4.2), so
- * a future contract-aware pool needs no builder change.
+ * per-builder free), doubling as fields are added. A draft carries only what
+ * the pool keys identity on (D3.4.2); a contract-carrying draft waits for the
+ * contract-aware pool of SCUO1 rather than being written ahead of a producer.
  *
  * USAGE:
  *   ShapeBuilder builder = shape_builder_init_map(pool);
@@ -27,7 +27,6 @@
 typedef struct ShapeFieldDraft {
     const char* name;   // must remain valid until finalization
     TypeId type_id;     // pool identity key
-    Type* contract;     // full semantic contract (type_info[type_id].type when only an id is known)
 } ShapeFieldDraft;
 
 typedef struct ShapeBuilder {
@@ -65,7 +64,7 @@ ShapeBuilder shape_builder_init_element(ShapePool* pool, const char* element_nam
 // ========== Field Management ==========
 
 /**
- * Add field/attribute to builder by TypeId (contract = type_info[type].type)
+ * Add field/attribute to builder
  *
  * @param builder Builder to add field to
  * @param name Field name (must remain valid until finalization)
@@ -73,13 +72,6 @@ ShapeBuilder shape_builder_init_element(ShapePool* pool, const char* element_nam
  * @return true on success, false on allocation failure
  */
 bool shape_builder_add_field(ShapeBuilder* builder, const char* name, TypeId type);
-
-/**
- * Add field/attribute with its full semantic contract. The pool keys identity
- * on the contract's TypeId (D3.4.2); the contract itself is retained in the
- * draft.
- */
-bool shape_builder_add_field_typed(ShapeBuilder* builder, const char* name, Type* contract);
 
 /**
  * Remove field by name (for editing existing shapes)
@@ -95,14 +87,6 @@ bool shape_builder_remove_field(ShapeBuilder* builder, const char* name);
  */
 bool shape_builder_has_field(ShapeBuilder* builder, const char* name);
 
-/**
- * Get field type by name
- *
- * @param out_type Output parameter for field type (optional)
- * @return true if found, false otherwise
- */
-bool shape_builder_get_field_type(ShapeBuilder* builder, const char* name, TypeId* out_type);
-
 // ========== Import/Export ==========
 
 /**
@@ -110,11 +94,6 @@ bool shape_builder_get_field_type(ShapeBuilder* builder, const char* name, TypeI
  * Clears current builder content and imports all fields from shape
  */
 void shape_builder_import_shape(ShapeBuilder* builder, ShapeEntry* shape);
-
-/**
- * Clear all fields from builder
- */
-void shape_builder_clear(ShapeBuilder* builder);
 
 // ========== Finalization ==========
 
@@ -136,11 +115,6 @@ ShapeEntry* shape_builder_finalize(ShapeBuilder* builder);
  * Get current field count
  */
 size_t shape_builder_field_count(ShapeBuilder* builder);
-
-/**
- * Check if builder is empty
- */
-bool shape_builder_is_empty(ShapeBuilder* builder);
 
 #ifdef __cplusplus
 }

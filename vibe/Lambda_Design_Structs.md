@@ -5,7 +5,7 @@
 > [`Lambda_Proposal_Struct_Clean_Up.md`](Lambda_Proposal_Struct_Clean_Up.md)
 > (the parent proposal; its census and rules SCU1–SCU6 are assumed). It
 > extends the parent's `SCU` ledger series with **SCU7–SCU17** and opens
-> **SCUO1–SCUO5**. Nothing here revises a formal ruling; every item
+> **SCUO1–SCUO6**. Nothing here revises a formal ruling; every item
 > *implements* one that already stands. The one item that would need a
 > revision (the contiguous `Shape` layout, parent §4.4/§4.7) is deliberately
 > out of scope and parked as SCUO1.
@@ -616,6 +616,73 @@ before any code moves.
 
 ---
 
+## 6a. Legacy retired after the five items (2026-09-07)
+
+A survey of the runtime after the items landed. Everything below was verified
+unreachable before deletion; the sweep's two near-misses are recorded because
+they are the trap this kind of pass walks into.
+
+**Made dead by the items:**
+
+- `lambda_shape_field_storage_type_id()` — the collector's C projection. The
+  GC now reads the stored descriptor through `lambda_shape_entry_lane()`
+  (SCU9), leaving this with no caller.
+- `CachedShape.last` and `CachedShape.ref_count` — written at interning, never
+  read; the arena owns every entry for the pool's lifetime. Deleting `last`
+  also removes an O(n) tail walk per newly interned shape.
+- `ShapeFieldDraft.contract` and `shape_builder_add_field_typed()` — written
+  and never read, because the pool keys identity on `TypeId` (D3.4.2). SCU10's
+  substance is the unbounded arena-backed draft; the contract-carrying draft
+  belongs with the contract-aware pool (SCUO1), not ahead of it.
+- `shape_builder_get_field_type()`, `shape_builder_clear()`,
+  `shape_builder_is_empty()`, `shape_pool_print_stats()` — zero callers.
+
+**Older residue the items exposed:**
+
+- `FN_ERROR_LANE_PAIR` — a shape-4 error rides the companion transport, so the
+  lane enum never needed a value for it. Definition only.
+- `FN_RETURN_HOME_ERROR` — the retired v2 convention donated a home per lane;
+  only a hosted guest still asks, and only for its value lane. Definition only.
+- `JitReturnLane.may_use_scalar_return_home`,
+  `JitCallMetadata.scalar_return_home_arg_index` and
+  `JitCallMetadata.scalar_home_lane_mask` — a call site never donates a scalar
+  home. All three were written and never read. `MirFunctionPlan`'s identically
+  named mask stays: a hosted guest FRAME does accept one (D5.2.1v3).
+- `fn_call_boxed_0..8` (the nine context-less boxed trampolines) — superseded
+  by the `_into` forms the JIT actually emits (`fn_call_boxed_%d_into`). They
+  called `fp` with no `Context*` first argument, so they could not have invoked
+  today's `_b` wrappers correctly had anything reached them.
+- `container_tail_reserved()` — a stub returning 0 whose own comment says the
+  companion no longer occupies an elements slot. No callers.
+- `fn_typeset_latex()` and `range_get()` — declarations in `lambda.h` with no
+  definition and no caller.
+
+**Checked and deliberately kept:**
+
+- The collector's `LMD_TYPE_*_` alias block. Five entries are unreferenced, but
+  the block is a documented mirror of the authoritative enum ("so TypeId
+  reordering cannot desynchronize GC tracing"), not a use-driven list.
+- `unwrap_simple_type_type()` (build_ast) versus
+  `type_field_unwrap_simple_decl()` (core). They look like duplicates and are
+  not: build_ast stops at `is_global_simple_type`, a strict superset of
+  `type_is_global_meta_type`, so merging them would change where the walk ends.
+- `ArrayBuffer.isView` — the JIT import row `js_arraybuffer_is_view` matches no
+  emitter and its function is referenced only by its own header, yet the
+  builtin works at runtime. Something wires it by a path plain grep does not
+  see. Verified by running it rather than by reading.
+- `fn_call_boxed_N_into` for N ≥ 1 — invisible to a name sweep because the JIT
+  builds the name with a format string. The same trap as above.
+
+**Gates for the retirement pass:** `make build` and `make build-test` clean;
+Lambda baseline 4143/4143; mark-editor 42/42; MIR emission ratchets 77/77 and
+21/21; Radiant baseline 8100/8462 with one failure, `dom_pkg_listbox`. That
+case reproduces identically (25/26 assertions) on unmodified HEAD after a full
+pristine rebuild with the cache cleared, so it is not this work. It passed
+26/26 earlier in the same session, before the merge that landed after the
+struct commit brought in the remote DOM work (`dom.cpp` +208 lines,
+`radiant_dom_bridge.cpp` +90, `dom_element.cpp`, `selector_matcher.cpp`); the
+merge itself was not bisected.
+
 ## 7. Open issues
 
 - **SCUO1 — Contiguous `Shape`/`ShapeField[]` and descriptor-aware
@@ -634,6 +701,11 @@ before any code moves.
 - **SCUO4 — `MirTranspiler`/`VarEntry`/`NameEntry` ratchet.** From
   2026-09-07, no new fact field without a named canonical owner. The
   split itself (parent §9.1/§9.3) waits for the D8.1.1 tuning to settle.
+- **SCUO6 — `MarkEditor` shape rebuilds drop `T?` contracts.** A rebuild
+  routes through `ShapeBuilder`, which projects each field to its `TypeId`
+  before the pool interns it, so an `int?` field returns as `TYPE_TYPE`. This
+  predates the clean-up (the old builder held the same bare `TypeId` array) and
+  is fixed by the contract-aware pool of SCUO1, not before it.
 - **SCUO5 — `TypeType` deletion.** Pull forward as its own small change
   after item 1, because the resolver's `LMD_TYPE_TYPE` unwrap
   (`contract_unwrap_type`) is exactly the code that disappears with it.

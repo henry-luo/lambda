@@ -56,12 +56,13 @@ typedef enum FnEntryKind {
     FN_ENTRY_NATIVE_BODY,
     FN_ENTRY_RESUME,
 } FnEntryKind;
+// Where a fallible entry's error travels when it is not carried in the value
+// itself. A shape-4 native return puts it on the second MIR result; that is a
+// property of the SHAPE and its companion transport, so it needs no lane value
+// of its own (the retired FN_ERROR_LANE_PAIR duplicated FnReturnShape).
 typedef enum FnErrorLane {
     FN_ERROR_LANE_NONE = 0,
     FN_ERROR_LANE_CONTEXT_ITEM,
-    // Return-value convention v3 (RV9): the error travels as the second MIR
-    // result of a shape-4 native return, `ItemNull` meaning "no error".
-    FN_ERROR_LANE_PAIR,
 } FnErrorLane;
 // Return-value convention v3 (RV1, `vibe/Lambda_Design_Compiling_Return_Value.md`,
 // formal spec D5.2.1v3 / D8.4.2v3). The shape is a pure function of the
@@ -97,7 +98,9 @@ static inline bool fn_return_shape_is_pair(FnReturnShape shape) {
 static inline bool fn_return_shape_may_be_pending(FnReturnShape shape) {
     return shape == RETURN_SHAPE_ITEM_SCALAR;
 }
+// The retired v2 convention donated a caller home per lane. Only a hosted
+// guest ABI still requests one, and only for its value lane (D5.2.1v3), so
+// the error-lane bit has no producer.
 enum {
     FN_RETURN_HOME_NORMAL = 1u << 0,
-    FN_RETURN_HOME_ERROR = 1u << 1,
 };
