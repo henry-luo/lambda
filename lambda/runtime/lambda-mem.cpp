@@ -661,8 +661,11 @@ extern "C" void* heap_calloc_class(size_t size, TypeId type_id, int cls) {
 }
 
 // allocate variable-size data (items[], data buffers) from the GC data zone
-// these are bump-allocated, not individually freeable — reclaimed at GC
-extern "C" void* heap_data_alloc(size_t size) {
+// these are bump-allocated, not individually freeable — reclaimed at GC.
+// Zeroed: the nursery is dirty after a reset and gc_data_alloc zeroes at
+// allocation; heap_data_alloc_uninit skips that pass for a caller that
+// writes every byte before any read or GC safepoint.
+static void* heap_data_alloc_impl(size_t size, bool zeroed) {
     if (!context || !context->heap) {
         log_error("heap_data_alloc: context=%p — called before runtime init", (void*)context);
         return NULL;
@@ -672,7 +675,7 @@ extern "C" void* heap_data_alloc(size_t size) {
         log_error("heap_data_alloc: gc=%p heap=%p — gc is null", (void*)gc, (void*)context->heap);
         return NULL;
     }
-    void* ptr = gc_data_alloc(gc, size);
+    void* ptr = zeroed ? gc_data_alloc(gc, size) : gc_data_alloc_uninit(gc, size);
     if (!ptr) {
         log_error("heap_data_alloc: failed to allocate %zu bytes from data zone (gc=%p)", size, (void*)gc);
         return NULL;
@@ -680,11 +683,18 @@ extern "C" void* heap_data_alloc(size_t size) {
     return ptr;
 }
 
-// allocate zeroed variable-size data from the GC data zone
+extern "C" void* heap_data_alloc(size_t size) {
+    return heap_data_alloc_impl(size, true);
+}
+
+extern "C" void* heap_data_alloc_uninit(size_t size) {
+    return heap_data_alloc_impl(size, false);
+}
+
+// allocate zeroed variable-size data from the GC data zone (heap_data_alloc
+// already zeroes; kept as the explicit spelling at map/object data sites)
 extern "C" void* heap_data_calloc(size_t size) {
-    void* ptr = heap_data_alloc(size);
-    if (ptr) memset(ptr, 0, size);
-    return ptr;
+    return heap_data_alloc(size);
 }
 
 extern "C" void heap_retag_container(Container* object, TypeId expected,

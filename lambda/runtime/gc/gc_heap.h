@@ -272,6 +272,8 @@ typedef struct gc_heap {
     // charged a full mark for every threshold's worth of short-lived objects.
     uint64_t object_pressure_last_end_ns;   // when the last pressure collection returned
     uint64_t object_pressure_last_cost_ns;  // how long that collection took
+    uint64_t data_pressure_last_end_ns;     // when the last nursery-threshold collection returned
+    uint64_t data_pressure_last_cost_ns;    // mark-phase cost of that collection
     int collecting;                 // re-entrancy guard (1 = GC in progress)
     gc_collect_callback_t collect_callback;  // called when threshold exceeded
 
@@ -424,6 +426,9 @@ void gc_heap_pool_free(gc_heap_t* gc, void* ptr);
  * @return pointer to zeroed memory, or NULL on failure
  */
 void* gc_data_alloc(gc_heap_t* gc, size_t size);
+// same allocation without the zero fill: the caller must write every byte
+// before any read or GC safepoint (the nursery is dirty after a reset)
+void* gc_data_alloc_uninit(gc_heap_t* gc, size_t size);
 
 /**
  * Check if a pointer is managed by this GC heap (object zone, data zone, or large objects).

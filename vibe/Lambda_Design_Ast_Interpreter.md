@@ -242,6 +242,43 @@ Gates: the auto-tier differential over all 751 `test/lambda` scripts is
 exact against the pre-widening binary; forced `jit`/`interp` sweeps
 unchanged; `make test-lambda-baseline` green under the unset AUTO default.
 
+**Write-back across the tier boundary (T21-3b, same day).** The two rules
+that then still pinned most procedural code -- indexed/member stores and
+`var` parameters -- were the last "the satellite has no replacement
+channel" cases. Indexed and member stores need none: a store through a local
+or a value parameter replaces a register the satellite roots itself, and a
+store through a module binding goes to the shared slab. `var` parameters
+reuse the CW33 home transport the generated code already had for its own
+direct calls, extended to both tier edges:
+
+- *T0 → satellite.* `eval_call`'s `var` branch counts the entry (so a
+  `var`-parameter function can promote at all), and when the callee is
+  promoted it publishes the address of each borrowed frame slot in
+  `Context::mir_var_homes`, prepares chain-root borrows exactly as the
+  interpreted callee prologue would, and invokes the boxed entry through the
+  new borrowed-call dispatch mode (`fn_call_borrowed_into`); the satellite's
+  existing epilogue stores the final parameter value back through the cell.
+  Legacy entry-channel borrows (view-state or object-field bindings without a
+  slot) keep the interpreted path.
+- *Satellite → callee (T0 or satellite).* The dynamic-call emitter, when the
+  direct callee is known to have untyped `var` parameters, pre-detaches a
+  shared root before evaluating arguments (as the direct edge does), publishes
+  each rooted binding's slot address after the arguments are evaluated,
+  calls through the borrowed mode, and reloads the bindings afterwards.
+  `interp_call` consumes the cells -- read, then clear, as the generated
+  prologue does -- and treats each as a chain-root borrow, so an interpreted
+  callee prepares through the home and writes back at return.
+- *Declaration rule.* A `var` local passed to an untyped `var` parameter is
+  bound boxed at its declaration (`mir_binding_borrowed_as_var_argument`):
+  the transport needs a rooted boxed home, and the reload publishes the
+  binding as `any`, so the same one-register-per-binding argument as the
+  widening scan applies. This also fixed a pre-existing JIT divergence:
+  `pn bump(var n) { n = n + 1 }` on an int-lane local left `n` unchanged
+  because the lane binding had no root slot to transport.
+
+Still pinned: typed `var` parameters (the raw-lane ABI has no home) and the
+other v5 rules. Committed differential: `test/lambda/proc/interp_var_writeback.ls`.
+
 ### 5.3 Entry swap and consistency
 
 On successful compile: write `boxed_entry`, then `state = COMPILED` (release-store; per-context single-threaded anyway). Existing `Function` values created before promotion still carry `entry_abi = LAMBDA_INTERPRETED`; `lambda_dynamic_call`'s interpreted arm consults the def-site cell first and, on `COMPILED`, invokes natively and upgrades the value's `ptr`/`entry_abi` in place (write-once upgrade; unobservable, S1.6). Compile failure sets `PINNED_INTERP` and logs — a compile error at promotion time on a script that passed build is a bug to fix, never a silent behavioral fork; execution continues interpreted. Generated code is never modified after link (DI14); a hot-reload (§7) makes old satellites unreachable rather than editing them.

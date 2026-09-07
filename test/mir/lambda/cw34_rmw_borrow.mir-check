@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "description": "CW34 (COW §11.11): `var l0 = a.l0` / `var c1 = l0[i0]` in a read-modify-write region bind through cow_bind_rmw_handle -- a borrow when the runtime spine is unshared -- instead of the S9.1.2 snapshot bind (cow_bind_var / cow_mark_shared), and the store-backs `l0[i0] = c1` / `a.l0 = l0` carry no cow_capture_value mark: the only capture left in the body is the legitimate S9.3.1 one on `c1[i1] = val` (a named parameter value stored into a container). With the snapshot bind every call copied every level (cd/havlak arr_set: 220k/205k copies per run).",
+  "checks": [
+    {
+      "in_func": "_arr_set_#",
+      "forbid": [
+        "call\tcow_bind_var",
+        "call\tcow_mark_shared"
+      ],
+      "expect_seq": [
+        { "pattern": "call\tcow_bind_rmw_handle" },
+        { "pattern": "call\tcow_bind_rmw_handle" }
+      ],
+      "count": {
+        "call\tcow_capture_value": {"max": 1}
+      }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.45.0 (2026-09-06)
+**Spec version:** 1.46.0 (2026-09-06)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -763,6 +763,17 @@ that carries them.
 - **D4.4.3** All copy paths precisely root source/replacement/owner chain
   and reload after possible GC; forced-GC stress is a permanent gate.
   Exclusivity checks and view-borrow confinement are Stage 2.* [CW20]
+- **D4.4.4** A read-modify-write place copy — `var l = root.path`, written
+  through, stored back to the same path in the same statement list, dead
+  afterwards, with the root otherwise unobserved in between — is bound as a
+  **borrow** of its place (no share-mark; the store-back stores the pointer
+  it holds and skips capture) when every container on the spine from the
+  root to the leaf's parent is unshared at the bind; a shared, static or
+  immortal link keeps the snapshot bind. The root must be a `var` local or
+  `var` parameter. The static shape is decided once for both tiers; the
+  spine test is a runtime byte test. Observably identical under P6; an error
+  exit leaves the partial writes visible through the root, as for a `var`
+  parameter. [CW34]
 
 ### D4.5 The Radiant seam
 
@@ -1242,14 +1253,26 @@ loosely across the corpus — context disambiguates, and we live with it.
   parameter has no raw carrier to mis-decode, and a lane the body alone infers
   for it is guarded by the wrapper's exact shape test with the boxed slow body
   behind it. A promoted body owns its whole activation, so local `var`
-  declarations and plain rebinding assignments are promotable too. P2 still
-  fails closed for aggregate/structured parameter contracts, `var` parameters
-  (no mutable-borrow write-back channel), indexed/member stores, nested
-  definitions, indirect Lambda calls, object-field identifiers, and match
-  expressions. Two invariants this admission exposed: a satellite that interns
-  literals into its module's const list must rebind the module state's static
-  image afterwards, and a dynamic-call argument list is built by verbatim
-  positional append, never by content-splicing push.
+  declarations, plain rebinding assignments, and indexed/member stores are
+  promotable too (a store through a local or a value parameter replaces a
+  register the satellite roots itself; through a module binding it reaches the
+  shared slab). An untyped `var` parameter crosses the tier boundary through
+  the CW33 home transport (`Context::mir_var_homes`): T0 publishes the
+  address of its frame slot and prepares chain-root borrows before entering a
+  satellite, the satellite publishes its rooted slot address before a dynamic
+  call (pre-detaching a shared root, as the direct edge does), and each callee
+  -- the generated prologue/epilogue or `interp_call` -- consumes the cells and
+  stores the final parameter value back through them; the dispatcher accepts
+  such signatures only in the borrowed-call mode (`fn_call_borrowed_into`). A
+  `var` local passed to an untyped `var` parameter is bound boxed at its
+  declaration so it owns the root slot the transport needs. P2 still fails
+  closed for aggregate/structured parameter contracts, typed `var` parameters
+  (the raw-lane ABI carries no home), nested definitions, indirect Lambda
+  calls, object-field identifiers, and match expressions. Two invariants this
+  admission exposed: a satellite that interns literals into its module's const
+  list must rebind the module state's static image afterwards, and a
+  dynamic-call argument list is built by verbatim positional append, never by
+  content-splicing push.
   `LAMBDA_TIER=interp` pins the run to T0, while `LAMBDA_TIER=jit` explicitly
   selects eager whole-module **MIR Direct** (`transpile-mir.cpp`) → MIR JIT
   (**T1**). The REPL and legacy inspection tools
@@ -1744,6 +1767,7 @@ slice; no formal semantic ruling or document semver changes.
 | D4.3.2v2 | GC size classes and data-zone policy are retained; backing storage is owned by MemVmRegion and released by the owning GC heap. |
 | D4.5.1v3 | Radiant and Lambda keep distinct policies over memtrack/VM ownership; legacy Pool/Arena backend wording is superseded; v3 records batch-only arena lifetime (two variants, D4.1.4). |
 | D4.4.3 | COW Stage 1 landed 2026-07-23; Stage 2 (exclusivity faces, view confinement, module-`var` rule, snapshot iteration) deferred, designed. |
+| D4.4.4 | Decided 2026-09-06 (CW34, `vibe/Lambda_Design_Runtime_COW.md` §11.11): read-modify-write handle borrows — tier-shared static shape in `build_ast`, runtime spine test `cow_bind_rmw_handle`; havlak's array copies 205k → 41k per run. Fixtures `test/lambda/proc/cow_rmw_borrow.ls`, `test/mir/lambda/cw34_rmw_borrow`. |
 | D4.6 | Name identity is a PROPOSAL (rev 5): W1/W2 integer schemes can start now; W4 stage 3 blocked on the MIR-cache reconciliation (NI §8). |
 | D4.7 | Const pool / MarkPack is a DRAFT (rev 4): baked-pointer census verified against emitters 2026-07-31; phases CP-P0..P4 not started. |
 | D5.2.2v3 | Generated-function caller homes are deleted. The retained `MirScalarHomeBinding` coloring is payload ownership for C/helper and hosted-language boundaries, not an alternate function-return ABI. Per-source mutable-binding storage and loop back-edge reclaim remain unimplemented (DO24); they are independent of companion-lane transport. |
@@ -1758,7 +1782,7 @@ slice; no formal semantic ruling or document semver changes.
 | D7.4.5 | Direction only; implementation deferred past DOM4 (user ruling 2026-08-13: DOM4 settles vmap first; the runtime is likely not ready for new carriers). `varray` and `velmt` do not exist: DOM collections are materialized Arrays with companion-map decoration and a 4096-entry issued-collection cache refreshed per mutation (dom.cpp); Radiant `Velmt` handles are struct-copied into VMap payloads with strcmp projection. varray + collection conversion = future Jube stage; DOM-node carrier move to velmt = DOM4 OQ9 (DOM5-scale). |
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
-| D8.1.1v6 | Revised 2026-09-06: satellite admission widened to plain `any` parameters and to bodies with local `var`/rebinding statements (both enter through the boxed wrapper; aggregate contracts, `var` parameters, indexed/member stores stay pinned); satellites rebind the module's static const image after interning, and dynamic-call arguments append verbatim. Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for aggregate/structured signatures, mutable/index writes, object-field identifiers, indirect/`var` calls, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
+| D8.1.1v6 | Revised 2026-09-06: satellite admission widened to plain `any` parameters, bodies with local `var`/rebinding statements and indexed/member stores, and untyped `var` parameters (write-back through the CW33 home transport on both tier edges, borrowed-call dispatch mode; aggregate contracts and typed `var` parameters stay pinned); satellites rebind the module's static const image after interning, and dynamic-call arguments append verbatim. Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for aggregate/structured parameter contracts, typed `var` parameters, nested definitions, indirect Lambda calls, object-field identifiers, match expressions, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
 | D8.1.2v2 | Decided 2026-08-24 with D8.1.1v4. `grammar-lambda.js` remains the complete Tree-sitter syntax oracle/editor/bindings grammar; `grammar.js` and generated `parser.c` are reference artifacts regenerated by the normal grammar target and are never hand-edited. The production Lambda parser is maintained in `lambda/runtime/parser/` and is built through the generated build configuration. |
 | D8.1.3v10 | Revised 2026-08-29: normal JavaScript and TypeScript source admission uses the first-party C lexer and hybrid recursive-descent/Pratt parser, reducing directly to the retained `JsAstNode` graph. The vendored JS/TS Tree-sitter grammar archives remain unchanged but link only into `lambda-cst` for differential acceptance checks; normal Lambda, runtime, test, and release targets do not link either archive. The LambdaJS AST tier includes the synchronous ES-module slice under the same Runtime/EvalContext/heap/event loop/module registry as Lambda. Registry-owned namespace placeholders, hoisted function declaration instantiation before dependency traversal, strict private slabs, live import reads, and registry propagation preserve the admitted default/named/namespace imports, default/named/namespace/non-ambiguous-star exports, named/star re-exports, `import.meta.url`, dynamic `import()`, and circular function imports without a JS-private module cache. Lambda `.ls` imports use that descriptor and their public boxed function values cross the common JS call kernel through the existing Lambda boxed dynamic-call ABI with retained `TypeFunc` metadata. The two languages retain their own semantic walkers and activation records; no second runtime, EvalContext, stack owner, heap, or module registry is created. Top-level await/async module evaluation, generators/async functions, ambiguous star exports, shared T0/T1 environments, continuations, and AUTO policy remain pending. `JS_EXECUTION_BACKEND=ast` remains explicit and fail-closed, and the default remains MIR. Status and focused gates: `vibe/jube/JS_Grammar_Parser.md`, `vibe/Lambda_Design_JS_Interpreter.md`, and `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
 | D8.2.1–D8.2.3 | The physical Lambda/JS foundation is substantially shared (`AstNodeType`, many layouts/aliases, `FnAnalysis`, and `MirEmitter`), but structural convergence is incomplete. P1a (2026-08-28) moved Lambda iterator `for` to `AST_NODE_FOR_EXPR`/`AstForNode`; P1b moved Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode`; P1c folded assignment/declaration-wrapper storage; P1d (2026-08-28) promotes condition loops to one `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` and retires the old while/do/C-style tags, while iterator clauses use `AST_NODE_FOR_CLAUSE`. P1e (2026-08-29) retires the duplicated JavaScript core-child rows and leaves only extension layouts in `js_ast_children.cpp`; Python remains the later guest acceptance test. |
