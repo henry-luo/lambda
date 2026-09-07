@@ -572,7 +572,7 @@ fn small_op_metrics(text) {
 
 fn render_class_command(node, context) {
     if (len(node) >= 2) {
-        let class_name = arg_raw_text(node[0])
+        let class_name = if (node.arg0_raw != null) string(node.arg0_raw) else arg_raw_text(node[0])
         let content_box = render_node(node[1], context)
         let children = box.elements_of(content_box)
         wrap_content_element(
@@ -587,7 +587,8 @@ fn render_class_command(node, context) {
 
 fn render_css_id_command(node, context) {
     if (len(node) >= 2) {
-        let id_name = normalize_css_id(arg_raw_text(node[0]))
+        let raw_id = if (node.arg0_raw != null) string(node.arg0_raw) else arg_raw_text(node[0])
+        let id_name = normalize_css_id(raw_id)
         let content_box = render_node(node[1], context)
         let children = box.elements_of(content_box)
         wrap_content_element(
@@ -602,7 +603,8 @@ fn render_css_id_command(node, context) {
 
 fn render_html_data_command(node, context) {
     if (len(node) >= 2) {
-        let attrs = parse_html_data_attrs(arg_raw_text(node[0]))
+        let raw_attrs = if (node.arg0_raw != null) string(node.arg0_raw) else arg_raw_text(node[0])
+        let attrs = parse_html_data_attrs(raw_attrs)
         let content_box = render_node(node[1], context)
         let children = box.elements_of(content_box)
         wrap_content_element(
@@ -1561,7 +1563,7 @@ fn accent_visual_text_width_at(text, i, acc) {
 }
 
 fn accent_visual_char_width(ch) {
-    let font = if ((ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z"))
+    let font = if (contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", ch))
         "Math-Italic" else "Main-Regular"
     let m = met.get_character_metrics(ch, font)
     if (m == null or m.default) null else m.width
@@ -3520,6 +3522,10 @@ fn ml_box_with_suppress_depth(bx) => {
 fn plain_text(node) {
     if (node is string) string(node)
     else if (node is symbol) string(node)
+    // Leaf parser atoms store their spelling in attributes, not child slots.
+    // Preserve that spelling when a renderer needs a source-like text view.
+    else if (node is element and (name(node) == 'operator' or name(node) == 'relation' or
+        name(node) == 'punctuation' or name(node) == 'raw_math_text')) get_text(node)
     else if (node is element) plain_text_element(node, 0, "")
     else string(node)
 }

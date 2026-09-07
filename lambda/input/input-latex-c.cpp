@@ -479,6 +479,10 @@ private:
             Item options = ItemNull;
             skip_space();
             if (position_ < length_ && source_[position_] == '[') options = parse_brack_group();
+            size_t color_begin = 0;
+            size_t color_end = 0;
+            bool has_color_source = position_ < length_ && source_[position_] == '{' &&
+                latex_scan_group_end(source_, length_, position_, '{', '}', &color_begin, &color_end) != 0;
             Item color = parse_script_arg();
             Item content = ItemNull;
             if (strcmp(name, "textcolor") == 0 || strcmp(name, "colorbox") == 0) content = parse_color_content();
@@ -487,19 +491,27 @@ private:
             elem.attr("cmd", builder_.createStringItem(full));
             if (item_present(options)) elem.attr("options", options);
             if (item_present(color)) elem.attr("color", color);
+            // Color syntax is CSS-like data, so preserve punctuation and spaces
+            // separately from its parsed math subtree.
+            if (has_color_source) elem.attr("color_raw", builder_.createStringItem(source_ + color_begin, color_end - color_begin));
             if (item_present(content)) elem.attr("content", content);
             return elem.final();
         }
         if (is_box_command(name)) {
             Item options = ItemNull;
             skip_space();
+            size_t options_begin = 0;
+            size_t options_end = 0;
+            bool has_options_source = false;
             if (strcmp(name, "bbox") == 0 && position_ < length_ && source_[position_] == '[') {
+                has_options_source = latex_scan_group_end(source_, length_, position_, '[', ']', &options_begin, &options_end) != 0;
                 options = parse_brack_group();
             }
             Item content = parse_optional_script_arg();
             ElementBuilder elem = builder_.element("box_command");
             elem.attr("cmd", builder_.createStringItem(full));
             if (item_present(options)) elem.attr("options", options);
+            if (has_options_source) elem.attr("options_raw", builder_.createStringItem(source_ + options_begin, options_end - options_begin));
             if (item_present(content)) elem.attr("content", content);
             return elem.final();
         }
@@ -577,10 +589,22 @@ private:
         }
         ElementBuilder elem = builder_.element("command");
         elem.attr("name", builder_.createStringItem(name));
+        bool preserves_raw_args = strcmp(name, "class") == 0 ||
+            strcmp(name, "cssId") == 0 || strcmp(name, "htmlData") == 0;
+        size_t arg_index = 0;
         for (;;) {
             skip_space();
             if (position_ < length_ && source_[position_] == '{') {
+                size_t arg_begin = 0;
+                size_t arg_end = 0;
+                bool has_arg_source = preserves_raw_args &&
+                    latex_scan_group_end(source_, length_, position_, '{', '}', &arg_begin, &arg_end) != 0;
                 elem.child(parse_group());
+                if (has_arg_source && arg_index == 0)
+                    elem.attr("arg0_raw", builder_.createStringItem(source_ + arg_begin, arg_end - arg_begin));
+                else if (has_arg_source && arg_index == 1)
+                    elem.attr("arg1_raw", builder_.createStringItem(source_ + arg_begin, arg_end - arg_begin));
+                arg_index++;
             } else if (position_ < length_ && source_[position_] == '[') {
                 elem.child(parse_brack_group());
             } else break;
