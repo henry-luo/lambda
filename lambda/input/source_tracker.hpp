@@ -13,20 +13,28 @@ namespace lambda {
 // Handles UTF-8 multi-byte characters correctly
 class SourceTracker {
 private:
-    static const size_t MAX_LINE_STARTS = 100000;  // Max tracked lines (100K)
-
     const char* source_;        // Source text (not owned)
     size_t source_len_;         // Total length of source
     const char* current_;       // Current position
 
     SourceLocation location_;   // Current location
 
-    // Line start positions for fast context extraction
-    size_t line_starts_[MAX_LINE_STARTS];
+    // Line start positions for fast context extraction. Grown from the
+    // document (SCU16): a tracker never embeds a maximum-document table, so
+    // `sizeof(SourceTracker)` is independent of the line count and an
+    // InputContext can live on the stack.
+    size_t* line_starts_;       // memtrack-owned, capacity line_cap_
+    size_t line_cap_;           // allocated slots
     size_t line_count_;         // Number of lines tracked
 
     // Track if we've built the line index
     bool line_index_built_;
+    // Set once a line-start allocation failed; context extraction beyond the
+    // recorded lines then reports empty text instead of guessing.
+    bool line_index_failed_;
+
+    // Append one line start; false (and logs once) when memory is exhausted.
+    bool pushLineStart(size_t offset);
 
     // Reusable buffer for extract operations
     StrBuf* extract_buf_;

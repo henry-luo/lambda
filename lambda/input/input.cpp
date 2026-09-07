@@ -57,17 +57,17 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
         // generated identity may cross this construction seam.
         shape_entry->name_id = string_is_pooled(key) ? name_ref_id(key) : NAME_ID_NONE;
         shape_entry->key_kind = property_key_kind(key);
-        shape_entry->type = type_info[type_id].type;
+        shape_entry_set_type(shape_entry, type_info[type_id].type);
     } else {
         // no key, for nested map
         log_debug("alloc_shape_entry: null key for nested map, type_id=%d", type_id);
         shape_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
         shape_entry->name = NULL;
-        shape_entry->type = type_info[type_id].type;
+        shape_entry_set_type(shape_entry, type_info[type_id].type);
     }
     if (prev_entry) {
         prev_entry->next = shape_entry;
-        int prev_size = prev_entry->type ? type_info[prev_entry->type->type_id].byte_size : (int)sizeof(Item);
+        int prev_size = prev_entry->type ? shape_entry_storage_size(prev_entry) : (int)sizeof(Item);
         shape_entry->byte_offset = prev_entry->byte_offset + prev_size;
     }
     else { shape_entry->byte_offset = 0; }
@@ -263,6 +263,7 @@ static ShapeEntry* clone_shape_entries(Pool* pool, ShapeEntry* source,
         if (!dst) return NULL;
         dst->name = src->name;
         dst->type = src->type;
+        dst->storage = *shape_entry_storage(src);
         dst->byte_offset = src->byte_offset;
         dst->next = NULL;
         dst->ns = src->ns;
@@ -437,7 +438,7 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
     child->shape = first;
     child->last = added;
     child->length = parent->length + 1;
-    child->byte_size = added->byte_offset + type_info[type_id].byte_size;
+    child->byte_size = added->byte_offset + shape_entry_storage_size(added);
     child->has_spread = parent->has_spread;  // prefix clone keeps any nameless spread slot
     child->has_named_shape = parent->has_named_shape;
     child->is_trusted_contract = false;

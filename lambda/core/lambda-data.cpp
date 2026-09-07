@@ -1441,7 +1441,10 @@ bool item_deep_equal(Item a, Item b) {
 // unrelated TU broke two test binaries at dyld load time (Tune19 §12.9).
 // ---------------------------------------------------------------------------
 
-TypeId type_field_storage_type_id(const Type* type) {
+// The TypeId that decodes a packed slot when the field is not a nullable
+// native lane. This is the generic arm of the resolver below; nothing else
+// may call it.
+static TypeId classify_storage_domain(const Type* type) {
     if (!type) return LMD_TYPE_NULL;
     type = type_field_unwrap_simple_decl((Type*)type);
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY &&
@@ -1455,14 +1458,22 @@ TypeId type_field_storage_type_id(const Type* type) {
                 lambda_num_sized_is_integer(type_num_sized_kind(base))) {
             return LMD_TYPE_NUM_SIZED;
         }
-        if (base && lambda_type_id_has_pointer_lane(base->type_id)) return base->type_id;
-        // TB1: `T[]?`. An occurrence's own type_id is LMD_TYPE_TYPE, so the
-        // pointer-lane test above cannot see it; the VALUE is an Array or
-        // ArrayNum, both Container* whose pointee self-describes.
+        // TB1: `T[]?`. An occurrence's own type_id is LMD_TYPE_TYPE, which the
+        // pointer-lane list below also admits (as the `type` value lane), so
+        // the occurrence must be recognised FIRST: the VALUE is an Array or
+        // ArrayNum, both Container* whose pointee self-describes. Testing the
+        // pointer lane first decoded an `int[]?` field as a Type* Item.
         if (base && base->type_id == LMD_TYPE_TYPE &&
                 base->kind == TYPE_KIND_UNARY &&
                 ((const TypeUnary*)base)->op == OPERATOR_REPEAT) {
             return LMD_TYPE_ARRAY;
+        }
+        // only a simple `type` contract (or a global meta-type) is the Type*
+        // pointer lane; structured LMD_TYPE_TYPE carriers stay boxed
+        if (base && lambda_type_id_has_pointer_lane(base->type_id) &&
+                (base->type_id != LMD_TYPE_TYPE || base->kind == TYPE_KIND_SIMPLE ||
+                 type_is_global_meta_type(base))) {
+            return base->type_id;
         }
     }
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY &&
@@ -1534,37 +1545,210 @@ TypeId type_field_storage_type_id(const Type* type) {
     return type->type_id;
 }
 
-// C-linkage view of the same classifier for consumers that cannot see Type*
-// (the collector's shape walk decodes packed field storage from raw offsets).
+// ---------------------------------------------------------------------------
+// Contract walks promoted from lambda/runtime/type_contract.cpp (SCU7): the
+// resolver needs them and it must live in the core library.
+// ---------------------------------------------------------------------------
+
+bool lambda_type_accepts_error(Type* type) {
+    type = type_field_unwrap_simple_decl(type);
+    if (!type || type_is_any_without_error(type)) return false;
+    if (type->type_id == LMD_TYPE_ANY || type->type_id == LMD_TYPE_ERROR) return true;
+    if (!lambda_type_is_union(type)) return false;
+    TypeBinary* binary = (TypeBinary*)type;
+    return lambda_type_accepts_error(binary->left) || lambda_type_accepts_error(binary->right);
+}
+
+bool lambda_type_accepts_null(Type* type) {
+    type = type_field_unwrap_simple_decl(type);
+    if (!type || type_is_any_without_null(type)) return false;
+    if (type->type_id == LMD_TYPE_ANY || type->type_id == LMD_TYPE_NULL) return true;
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
+        TypeUnary* unary = (TypeUnary*)type;
+        if (unary->op == OPERATOR_OPTIONAL) return true;
+    }
+    if (!lambda_type_is_union(type)) return false;
+    TypeBinary* binary = (TypeBinary*)type;
+    return lambda_type_accepts_null(binary->left) || lambda_type_accepts_null(binary->right);
+}
+
+Type* lambda_type_nullable_lane_base(Type* type, bool* nullable) {
+    type = type_field_unwrap_simple_decl(type);
+    if (!type || !nullable) return NULL;
+    *nullable = false;
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_PARAM) {
+        TypeParam* parameter = (TypeParam*)type;
+        Type* full = parameter->contract_type ? parameter->contract_type :
+            parameter->full_type;
+        return full && full != type
+            ? lambda_type_nullable_lane_base(full, nullable) : NULL;
+    }
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_CONSTRAINED) {
+        TypeConstrained* constrained = (TypeConstrained*)type;
+        return lambda_type_nullable_lane_base(constrained->base, nullable);
+    }
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
+        TypeUnary* unary = (TypeUnary*)type;
+        if (unary->op == OPERATOR_OPTIONAL) {
+            *nullable = true;
+            return type_field_unwrap_simple_decl(unary->operand);
+        }
+    }
+    if (!lambda_type_is_union(type)) return type;
+
+    TypeBinary* binary = (TypeBinary*)type;
+    Type* left = type_field_unwrap_simple_decl(binary->left);
+    Type* right = type_field_unwrap_simple_decl(binary->right);
+    if (left && left->type_id == LMD_TYPE_NULL && right &&
+            !lambda_type_accepts_error(right)) {
+        *nullable = true;
+        return right;
+    }
+    if (right && right->type_id == LMD_TYPE_NULL && left &&
+            !lambda_type_accepts_error(left)) {
+        *nullable = true;
+        return left;
+    }
+    return NULL;
+}
+
+// ---------------------------------------------------------------------------
+// SCU7: the one total storage resolver (D2.6.1, D3.4.6).
+//
+// Arm 1 is the native-lane table: a payload with a raw register/slot form.
+// It is exactly the set the JIT and the array boundary already treated as
+// native, so `native` reproduces the old predicate bit for bit. Arm 2 is the
+// generic packed-slot classification (formerly type_field_storage_type_id)
+// that every non-native field takes; its TypeId decodes the slot.
+// ---------------------------------------------------------------------------
+static uint8_t lane_kind_for_domain(TypeId domain) {
+    switch (domain) {
+    case LMD_TYPE_INT: return LANE_STORAGE_INT;
+    case LMD_TYPE_BOOL:
+    case LMD_TYPE_UNDEFINED: return LANE_STORAGE_BOOL;
+    case LMD_TYPE_FLOAT: return LANE_STORAGE_FLOAT64;
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64: return LANE_STORAGE_SIZED_I64;
+    case LMD_TYPE_ANY: return LANE_STORAGE_TYPED_ITEM;
+    // dynamic `null` slots hold a raw Item; compact sized ints store their Item
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_NUM_SIZED: return LANE_STORAGE_ITEM;
+    default:
+        // every remaining family is a pointer word (containers, strings,
+        // datetime, error, type, function, raw pointer)
+        return LANE_STORAGE_POINTER;
+    }
+}
+
+LaneStorageDesc lambda_lane_storage_desc_for(Type* type) {
+    LaneStorageDesc desc = {};
+    if (!type) {
+        // D1.9: a missing contract is a programming error, never a guessed lane
+        log_error("lane-storage: null contract has no storage descriptor");
+        return desc;
+    }
+    Type* semantic = type_field_unwrap_simple_decl(type);
+    bool nullable = false;
+    Type* base = lambda_type_nullable_lane_base(semantic, &nullable);
+    desc.semantic_contract = semantic;
+    desc.base_contract = base ? base : semantic;
+    desc.nullable = nullable ? 1 : 0;
+
+    // arm 1: native lanes
+    if (base && base->type_id != LMD_TYPE_ANY && base->type_id != LMD_TYPE_NULL &&
+            base->type_id != LMD_TYPE_ERROR && base->type_id != LMD_TYPE_TYPE) {
+        switch (base->type_id) {
+        case LMD_TYPE_INT:
+            desc.kind = LANE_STORAGE_INT; desc.byte_size = (uint8_t)sizeof(int64_t); break;
+        case LMD_TYPE_BOOL:
+            desc.kind = LANE_STORAGE_BOOL; desc.byte_size = (uint8_t)sizeof(uint8_t); break;
+        case LMD_TYPE_FLOAT:
+            desc.kind = LANE_STORAGE_FLOAT64; desc.byte_size = (uint8_t)sizeof(double); break;
+        case LMD_TYPE_NUM_SIZED:
+            if (nullable && base != &TYPE_NUM_SIZED &&
+                    lambda_num_sized_is_integer(type_num_sized_kind(base))) {
+                desc.kind = LANE_STORAGE_SIZED_I64; desc.byte_size = (uint8_t)sizeof(int64_t);
+            }
+            break;
+        case LMD_TYPE_INT64:
+        case LMD_TYPE_UINT64:
+            if (nullable) { desc.kind = LANE_STORAGE_ITEM; desc.byte_size = (uint8_t)sizeof(Item); }
+            break;
+        default:
+            if (lambda_type_id_has_pointer_lane(base->type_id)) {
+                desc.kind = LANE_STORAGE_POINTER; desc.byte_size = (uint8_t)sizeof(void*);
+            }
+            break;
+        }
+        if (desc.kind != LANE_STORAGE_INVALID) {
+            desc.native = 1;
+            desc.value_domain = base->type_id;
+            return desc;
+        }
+    }
+
+    // arm 2: generic packed slot, decoded by TypeId
+    TypeId domain = classify_storage_domain(semantic);
+    desc.value_domain = domain;
+    desc.kind = lane_kind_for_domain(domain);
+    desc.byte_size = (uint8_t)type_info[domain].byte_size;
+    desc.native = 0;
+    return desc;
+}
+
+TypeId type_field_storage_type_id(const Type* type) {
+    if (!type) return LMD_TYPE_NULL;
+    return (TypeId)lambda_lane_storage_desc_for((Type*)type).value_domain;
+}
+
+// C-linkage view of the same projection for consumers that cannot see Type*.
 extern "C" TypeId lambda_shape_field_storage_type_id(const void* field_type) {
     return type_field_storage_type_id((const Type*)field_type);
+}
+
+// ---------------------------------------------------------------------------
+// SCU9: the descriptor lives on the ShapeEntry.
+// ---------------------------------------------------------------------------
+void shape_entry_set_type(ShapeEntry* entry, Type* type) {
+    if (!entry) return;
+    entry->type = type;
+    entry->storage = type ? lambda_lane_storage_desc_for(type) : LaneStorageDesc{};
+}
+
+const LaneStorageDesc* shape_entry_storage(const ShapeEntry* entry) {
+    static const LaneStorageDesc null_desc = {};
+    if (!entry) return &null_desc;
+    if (entry->storage.kind == LANE_STORAGE_INVALID && entry->type) {
+        // A constructor bypassed shape_entry_set_type. Repair in place so the
+        // readers stay coherent, and say so: this is a missed site, not a
+        // supported path. `kind` is written last so a concurrent reader never
+        // sees a half-filled record as valid.
+        LaneStorageDesc derived = lambda_lane_storage_desc_for(entry->type);
+        ShapeEntry* mutable_entry = (ShapeEntry*)entry;
+        uint8_t kind = derived.kind;
+        derived.kind = LANE_STORAGE_INVALID;
+        mutable_entry->storage = derived;
+        mutable_entry->storage.kind = kind;
+        log_debug("shape-entry-storage: lazily derived descriptor for field %.*s",
+            entry->name ? (int)entry->name->length : 6,
+            entry->name ? entry->name->str : "<anon>");
+    }
+    return &entry->storage;
+}
+
+extern "C" void lambda_shape_entry_lane(const void* shape_entry, uint8_t* kind,
+        uint8_t* nullable, uint8_t* value_domain) {
+    const LaneStorageDesc* desc = shape_entry_storage((const ShapeEntry*)shape_entry);
+    if (kind) *kind = desc->kind;
+    if (nullable) *nullable = desc->nullable;
+    if (value_domain) *value_domain = desc->value_domain;
 }
 
 bool shape_entry_uses_native_lane(const ShapeEntry* field,
         LaneStorageDesc* out) {
     if (!field || !field->type || !out) return false;
-    Type* semantic = type_field_unwrap_simple_decl(field->type);
-    Type* base = NULL;
-    if (semantic->type_id == LMD_TYPE_TYPE && semantic->kind == TYPE_KIND_UNARY &&
-            ((TypeUnary*)semantic)->op == OPERATOR_OPTIONAL) {
-        base = ((TypeUnary*)semantic)->operand;
-    } else if (semantic->type_id == LMD_TYPE_TYPE && semantic->kind == TYPE_KIND_BINARY &&
-            ((TypeBinary*)semantic)->op == OPERATOR_UNION) {
-        TypeBinary* binary = (TypeBinary*)semantic;
-        if (binary->left && binary->left->type_id == LMD_TYPE_NULL) base = binary->right;
-        else if (binary->right && binary->right->type_id == LMD_TYPE_NULL) base = binary->left;
-    }
-    if (!base) return false;
-    base = type_field_unwrap_simple_decl(base);
-    *out = {};
-    out->semantic_contract = semantic; out->base_contract = base; out->nullable = 1;
-    if (base->type_id == LMD_TYPE_INT) { out->kind = LANE_STORAGE_INT; out->byte_size = 8; }
-    else if (base->type_id == LMD_TYPE_BOOL) { out->kind = LANE_STORAGE_BOOL; out->byte_size = 1; }
-    else if (base->type_id == LMD_TYPE_FLOAT) { out->kind = LANE_STORAGE_FLOAT64; out->byte_size = 8; }
-    else if (base->type_id == LMD_TYPE_NUM_SIZED && base != &TYPE_NUM_SIZED &&
-            lambda_num_sized_is_integer(type_num_sized_kind(base))) { out->kind = LANE_STORAGE_SIZED_I64; out->byte_size = 8; }
-    else if (base->type_id == LMD_TYPE_INT64 || base->type_id == LMD_TYPE_UINT64) { out->kind = LANE_STORAGE_ITEM; out->byte_size = 8; }
-    else if (lambda_type_id_has_pointer_lane(base->type_id)) { out->kind = LANE_STORAGE_POINTER; out->byte_size = (uint8_t)sizeof(void*); }
-    else return false;
+    const LaneStorageDesc* desc = shape_entry_storage(field);
+    if (!lane_desc_is_nullable_native(desc)) return false;
+    *out = *desc;
     return true;
 }

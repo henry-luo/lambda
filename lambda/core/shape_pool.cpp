@@ -1,6 +1,7 @@
 #include "shape_pool.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/string.h"
 #include "../../lib/ref_counted_pool.hpp"
@@ -92,7 +93,7 @@ static ShapeSignature create_signature(const char** field_names, TypeId* field_t
     // Calculate byte_size (sum of field sizes)
     sig.byte_size = 0;
     for (size_t i = 0; i < field_count; i++) {
-        sig.byte_size += type_info[field_types[i]].byte_size;
+        sig.byte_size += lambda_lane_storage_size(type_info[field_types[i]].type);
     }
     
     return sig;
@@ -158,7 +159,7 @@ static void initialize_shape_entry(ShapeEntry* entry, StrView* name_view,
         ? typemap_name_hash(entry->name->str, (int)entry->name->length) : 0;
     entry->name_id = NAME_ID_NONE;
     entry->key_kind = NAME_KEY_STRING;
-    entry->type = type_info[field_type].type;
+    shape_entry_set_type(entry, type_info[field_type].type);
     entry->byte_offset = byte_offset;
     entry->next = next;
     entry->ns = NULL;
@@ -194,7 +195,7 @@ static ShapeEntry* create_shape_chain(Arena* arena, const char** field_names,
         if (prev) prev->next = entry;
         
         prev = entry;
-        byte_offset += type_info[field_types[i]].byte_size;
+        byte_offset += entry->storage.byte_size;
     }
     return first;
 }
@@ -204,9 +205,31 @@ static CachedShape* lookup_cached_shape(ShapePool* pool, ShapeSignature* signatu
     bool is_element, const char* element_name) {
     // Build a non-owning probe so duplicate lookups do not consume arena space.
     ShapeEntry* probe_shape = NULL;
+    // SCU10: no field-count cap. Small probes stay on the stack; a wide shape
+    // (a document element with hundreds of attributes) takes a heap scratch
+    // block instead of overrunning the frame.
+    const size_t probe_stack_limit = 32 * 1024;
+    bool probe_on_heap = field_count * (sizeof(ShapeEntry) + sizeof(StrView)) > probe_stack_limit;
+    ShapeEntry* heap_entries = NULL;
+    StrView* heap_names = NULL;
     if (field_count > 0) {
-        ShapeEntry* probe_entries = LAMBDA_ALLOCA(field_count, ShapeEntry);
-        StrView* probe_names = LAMBDA_ALLOCA(field_count, StrView);
+        ShapeEntry* probe_entries;
+        StrView* probe_names;
+        if (probe_on_heap) {
+            heap_entries = (ShapeEntry*)mem_alloc(field_count * sizeof(ShapeEntry), MEM_CAT_INPUT_OTHER);
+            heap_names = (StrView*)mem_alloc(field_count * sizeof(StrView), MEM_CAT_INPUT_OTHER);
+            if (!heap_entries || !heap_names) {
+                log_error("shape_pool: probe allocation failed for %zu fields", field_count);
+                if (heap_entries) mem_free(heap_entries);
+                if (heap_names) mem_free(heap_names);
+                return NULL;
+            }
+            probe_entries = heap_entries;
+            probe_names = heap_names;
+        } else {
+            probe_entries = LAMBDA_ALLOCA(field_count, ShapeEntry);
+            probe_names = LAMBDA_ALLOCA(field_count, StrView);
+        }
         int64_t byte_offset = 0;
         for (size_t i = 0; i < field_count; i++) {
             const char* name = field_names[i];
@@ -214,7 +237,7 @@ static CachedShape* lookup_cached_shape(ShapePool* pool, ShapeSignature* signatu
             initialize_shape_entry(&probe_entries[i], name_view, name,
                 field_types[i], byte_offset, i + 1 < field_count
                     ? &probe_entries[i + 1] : NULL);
-            byte_offset += type_info[field_types[i]].byte_size;
+            byte_offset += probe_entries[i].storage.byte_size;
         }
         probe_shape = probe_entries;
     }
@@ -225,15 +248,19 @@ static CachedShape* lookup_cached_shape(ShapePool* pool, ShapeSignature* signatu
     probe_cached.element_name = element_name;
     ShapePoolEntry search_entry = {*signature, &probe_cached};
 
+    CachedShape* result = NULL;
     for (ShapePool* current = pool; current; current = current->parent) {
         const ShapePoolEntry* found = (const ShapePoolEntry*)hashmap_get(
             current->shapes, &search_entry);
         if (found) {
             log_debug("Shape found in current pool: hash=%lx", signature->hash);
-            return found->cached;
+            result = found->cached;
+            break;
         }
     }
-    return NULL;
+    if (heap_entries) mem_free(heap_entries);
+    if (heap_names) mem_free(heap_names);
+    return result;
 }
 
 ShapeEntry* shape_pool_get_map_shape(ShapePool* pool, const char** field_names, 
@@ -241,12 +268,6 @@ ShapeEntry* shape_pool_get_map_shape(ShapePool* pool, const char** field_names,
     if (!pool || !field_names || !field_types || field_count == 0) {
         return NULL;
     }
-    // safety check
-    if (field_count > SHAPE_POOL_MAX_CHAIN_LENGTH) {
-        log_warn("Shape too large (%zu fields), max is %d", field_count, SHAPE_POOL_MAX_CHAIN_LENGTH);
-        return NULL;
-    }
-    
     // Calculate signature
     ShapeSignature signature = create_signature(field_names, field_types, field_count);
     
@@ -309,10 +330,6 @@ ShapeEntry* shape_pool_get_element_shape(
     size_t signature_count = attr_count + 1;
     
     // Safety check
-    if (signature_count > SHAPE_POOL_MAX_CHAIN_LENGTH) {
-        log_warn("Element shape too large (%zu fields), max is %d", signature_count, SHAPE_POOL_MAX_CHAIN_LENGTH);
-        return NULL;
-    }
     
     // Build signature with element name + attributes
     const char** sig_names = LAMBDA_ALLOCA(signature_count, const char*);

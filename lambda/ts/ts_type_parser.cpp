@@ -309,9 +309,9 @@ struct TsDirectTypeParser {
                 unary->kind = TYPE_KIND_UNARY;
                 unary->op = OPERATOR_OPTIONAL;
                 unary->operand = member_type;
-                entry->type = (Type*)unary;
+                shape_entry_set_type(entry, (Type*)unary);
             } else {
-                entry->type = member_type;
+                shape_entry_set_type(entry, member_type);
             }
             if (previous) previous->next = entry;
             else object->shape = entry;

@@ -824,8 +824,7 @@ static void jm_seed_default_parameter_bindings(JsMirTranspiler* mt,
 
 static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
         JsFuncCollected* fc, int param_count, bool has_captures) {
-    MirScalarReturnMode scalar_return_mode = em_scalar_return_mode_for_class(
-        JM_JS_FACT(fc, boxed_return_scalar_class));
+    ScalarReturnClass scalar_return_mode = JM_JS_FACT(fc, boxed_return_scalar_class);
     int call_param_count = param_count + (has_captures ? 1 : 0);
     // P2.5: C-reachable wrappers publish lane 2 through Context.  A dynamic
     // callback therefore needs no caller-donated number-stack address.
@@ -877,11 +876,8 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
     mt->em.frame.plan.entry_mode = MIR_ENTRY_CHECKED;
     FnVariantAnalysis* public_variant = fn_analysis_variant(jm_function_analysis(fc),
         FN_ENTRY_PUBLIC_WRAPPER);
-    mt->em.frame.plan.return_shape = public_variant
-        ? public_variant->result.shape : RETURN_SHAPE_ITEM_SCALAR;
-    mt->em.frame.plan.companion = public_variant
-        ? public_variant->result.companion : em_companion_transport(
-            RETURN_SHAPE_ITEM_SCALAR, /*c_reachable=*/true);
+    em_plan_bind_return(&mt->em.frame.plan,
+        public_variant ? &public_variant->result : NULL, /*c_reachable=*/true);
 
     MIR_reg_t* args = call_param_count > 0
         ? LAMBDA_ALLOCA(call_param_count, MIR_reg_t) : NULL;
@@ -1142,7 +1138,7 @@ static void jm_begin_resumable_state_machine(JsMirTranspiler* mt,
     mt->resumable_locals = NULL;
     if (reset_eval_local_frame) mt->eval_local_frame_reg = 0;
 
-    jm_begin_function_frame(mt, MIR_T_I64, true, MIR_SCALAR_RETURN_DYNAMIC,
+    jm_begin_function_frame(mt, MIR_T_I64, true, SCALAR_RETURN_DYNAMIC,
         MIR_reg(mt->ctx, "ctx", func), false);
     mt->em.frame.plan.entry_kind = FN_ENTRY_RESUME;
     jm_push_scope(mt);
@@ -1287,7 +1283,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->func_error_lane_label = 0;    // reset — native func needs its own exception label
 
         jm_begin_function_frame(mt, native_ret_type, false,
-            MIR_SCALAR_RETURN_NONE, MIR_reg(mt->ctx, "ctx", native_func), true);
+            SCALAR_RETURN_NONE, MIR_reg(mt->ctx, "ctx", native_func), true);
         mt->em.frame.plan.entry_kind = FN_ENTRY_NATIVE_BODY;
         mt->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
         jm_push_scope(mt);
@@ -1856,8 +1852,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     }
 
     // --- Generate boxed version (original or wrapper) ---
-    MirScalarReturnMode body_scalar_mode = em_scalar_return_mode_for_class(
-        JM_JS_FACT(fc, boxed_return_scalar_class));
+    ScalarReturnClass body_scalar_mode = JM_JS_FACT(fc, boxed_return_scalar_class);
     int total_params = param_count + (has_captures ? 1 : 0) + 1;
     MIR_var_t* params = LAMBDA_ALLOCA(total_params, MIR_var_t);
     char** param_names_arr = LAMBDA_ALLOCA(total_params, char*);
@@ -1958,9 +1953,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_reg(mt->ctx, "ctx", func), true);
     mt->em.frame.plan.entry_kind = FN_ENTRY_BOXED_BODY;
     mt->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
-    mt->em.frame.plan.return_shape = body_variant
-        ? body_variant->result.shape : RETURN_SHAPE_ITEM_SCALAR;
-    mt->em.frame.plan.companion = body_companion;
+    em_plan_bind_return(&mt->em.frame.plan,
+        body_variant ? &body_variant->result : NULL, /*c_reachable=*/false);
     if (has_captures) {
         MIR_reg_t closure_env_reg = MIR_reg(mt->ctx, closure_env_param_name, func);
         jm_create_gc_root_slot(mt, closure_env_reg);

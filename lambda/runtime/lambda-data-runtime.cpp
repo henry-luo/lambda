@@ -24,7 +24,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args);
 void set_fields_items(TypeMap *map_type, void* map_data, const Item* values,
                       int value_count);
 Item typeditem_to_item(TypedItem *titem);
-RetItem fn_input1(Item url);
+Item fn_input1(Item url);
 
 Item push_k(DateTime val) {
     // Datetime must be heap-owned because this active-runtime constructor can

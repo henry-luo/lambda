@@ -427,9 +427,9 @@ static void js_test262_hot_context_destroy(Runtime* runtime, EvalContext* batch_
     heap_discard_unfinalized();
     eval_context_shutdown(batch_context);
     memset(batch_context, 0, sizeof(EvalContext));
-    runtime->heap = NULL;
-    runtime->name_pool = NULL;
-    runtime->type_list = NULL;
+    runtime_set_heap(runtime, NULL);
+    runtime_set_name_pool(runtime, NULL);
+    runtime_set_type_list(runtime, NULL);
 }
 
 static bool js_test262_hot_context_recycle(Runtime* runtime,

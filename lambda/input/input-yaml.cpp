@@ -6,6 +6,8 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/str.h"
 #include "../../lib/log.h"
+#include "../../lib/hashmap.h"
+#include "../../lib/arena.h"
 
 using namespace lambda;
 
@@ -46,9 +48,9 @@ static void yaml_rtrim_line_space(StrBuf* sb, size_t min_len = 0) {
     sb->str[len] = '\0';
 }
 
-// anchor entry
+// anchor entry: name is Input-arena owned (stable for the parse)
 struct AnchorEntry {
-    char name[256];
+    const char* name;
     Item value;
 };
 
@@ -61,10 +63,24 @@ struct YamlParser {
     int line;
     int col;
 
-    AnchorEntry anchors[256];
-    int anchor_count;
+    // name -> AnchorEntry, grown from the document (SCU16): a document may
+    // define any number of anchors and every alias must resolve. Created on
+    // the first anchor; freed by the parse entry's guard.
+    struct hashmap* anchors;
     int tag;
 };
+
+// SCU16 size budget: no embedded anchor table
+static_assert(sizeof(YamlParser) < 256, "YamlParser must not embed document-sized tables");
+
+static uint64_t anchor_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const AnchorEntry* e = (const AnchorEntry*)item;
+    return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
+}
+
+static int anchor_compare(const void* a, const void* b, void*) {
+    return strcmp(((const AnchorEntry*)a)->name, ((const AnchorEntry*)b)->name);
+}
 
 struct YamlCursor {
     int pos;
@@ -269,24 +285,24 @@ static bool is_doc_end_at(YamlParser* p, int pos) {
 // ============================================================================
 
 static void store_anchor(YamlParser* p, const char* name, Item value) {
-    for (int i = 0; i < p->anchor_count; i++) {
-        if (strcmp(p->anchors[i].name, name) == 0) {
-            p->anchors[i].value = value;
+    if (!p->anchors) {
+        p->anchors = hashmap_new(sizeof(AnchorEntry), 16, 0, 0,
+            anchor_hash, anchor_compare, NULL, NULL);
+        if (!p->anchors) {
+            p->ctx->addError("yaml: anchor table allocation failed");
             return;
         }
     }
-    if (p->anchor_count >= 256) return;
-    AnchorEntry& a = p->anchors[p->anchor_count++];
-    strncpy(a.name, name, sizeof(a.name) - 1);
-    a.name[sizeof(a.name) - 1] = '\0';
-    a.value = value;
+    // redefinition overwrites: a later &name shadows the earlier one
+    AnchorEntry entry = { name, value };
+    hashmap_set(p->anchors, &entry);
 }
 
 static Item resolve_alias(YamlParser* p, const char* name) {
-    for (int i = p->anchor_count - 1; i >= 0; i--) {
-        if (strcmp(p->anchors[i].name, name) == 0) {
-            return p->anchors[i].value;
-        }
+    if (p->anchors) {
+        AnchorEntry probe = { name, ITEM_NULL };
+        const AnchorEntry* found = (const AnchorEntry*)hashmap_get(p->anchors, &probe);
+        if (found) return found->value;
     }
     log_debug("yaml: unresolved alias *%s", name);
     return p->ctx->builder.createNull();
@@ -623,30 +639,27 @@ static bool is_anchor_char(char c) {
     return true;
 }
 
+// Copy the anchor/alias name at the cursor into the Input arena. Names are
+// unbounded, and arena ownership keeps a pending anchor name valid across
+// the nested node parse that may itself see further anchors (the old static
+// buffer was clobbered by that nesting).
+static const char* scan_anchor_name(YamlParser* p) {
+    int start = p->pos;
+    while (!at_end(p) && is_anchor_char(peek(p))) advance(p);
+    return arena_strndup(p->ctx->builder.arena(), p->src + start, (size_t)(p->pos - start));
+}
+
 static const char* parse_anchor(YamlParser* p) {
     if (peek(p) != '&') return NULL;
     advance(p);
-    static char name[256];
-    int i = 0;
-    while (!at_end(p) && is_anchor_char(peek(p)) && i < 254) {
-        name[i++] = peek(p);
-        advance(p);
-    }
-    name[i] = '\0';
+    const char* name = scan_anchor_name(p);
     skip_spaces(p);
     return name;
 }
 
 static Item parse_alias(YamlParser* p) {
     advance(p); // skip *
-    char name[256];
-    int i = 0;
-    while (!at_end(p) && is_anchor_char(peek(p)) && i < 254) {
-        name[i++] = peek(p);
-        advance(p);
-    }
-    name[i] = '\0';
-    return resolve_alias(p, name);
+    return resolve_alias(p, scan_anchor_name(p));
 }
 
 // ============================================================================
@@ -2280,10 +2293,15 @@ void parse_yaml(Input *input, const char* yaml_str) {
     parser.len = strlen(yaml_str);
     parser.line = 1;
     parser.col = 0;
-    parser.anchor_count = 0;
+    parser.anchors = NULL;
     parser.tag = TAG_NONE;
 
     YamlParser* p = &parser;
+    // the anchor index is parse-scoped; release it on every exit path
+    struct AnchorGuard {
+        YamlParser* p;
+        ~AnchorGuard() { if (p->anchors) hashmap_free(p->anchors); }
+    } anchor_guard{p};
 
     // skip BOM
     if (p->len >= 3 && (unsigned char)p->src[0] == 0xEF &&

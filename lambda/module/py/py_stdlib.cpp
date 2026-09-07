@@ -34,7 +34,7 @@
 extern "C" double pn_clock(void);
 
 // Lambda parse/format wrappers
-extern "C" Item fn_parse2_mir(Item, Item);
+extern "C" Item fn_parse2(Item, Item);
 
 // =========================================================================
 // Helper: create a name item (symbol/key) for dict keys
@@ -812,7 +812,7 @@ static Item py_json_loads(Item s) {
     if (!str) return ItemNull;
     // use Lambda's parse function with "json" format specifier
     Item json_sym = mk_str("json");
-    return fn_parse2_mir(s, json_sym);
+    return fn_parse2(s, json_sym);
 }
 
 // json.dumps(obj, indent=None)

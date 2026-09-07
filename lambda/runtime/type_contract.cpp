@@ -5,16 +5,11 @@
 #include <mpdecimal.h>
 #include <stdio.h>
 
-static Type* contract_unwrap_type(Type* type) {
-    while (type && type->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(type) &&
-            type->kind == TYPE_KIND_SIMPLE) {
-        // The three global meta-types are compact Type values; inspect `kind`
-        // only after excluding them so contract analysis never reads past them.
-        Type* inner = ((TypeType*)type)->type;
-        if (!inner) break;
-        type = inner;
-    }
-    return type;
+// One spelling of the simple-TypeType unwrap: the core header's
+// type_field_unwrap_simple_decl (the three global meta-types are compact Type
+// values; it inspects `kind` only after excluding them).
+static inline Type* contract_unwrap_type(Type* type) {
+    return type_field_unwrap_simple_decl(type);
 }
 
 static Type* canonical_contract_base(Type* type, int depth) {
@@ -229,20 +224,15 @@ LambdaWideResultProof lambda_type_wide_result_proof(TypeId type_id) {
 
 static bool contract_storage_desc_equal(const ShapeEntry* left,
         const ShapeEntry* right) {
-    LaneStorageDesc left_lane = {};
-    LaneStorageDesc right_lane = {};
-    bool left_native = shape_entry_uses_native_lane(left, &left_lane);
-    bool right_native = shape_entry_uses_native_lane(right, &right_lane);
-    if (left_native != right_native) return false;
-    if (left_native) {
-        return left_lane.kind == right_lane.kind &&
-            left_lane.byte_size == right_lane.byte_size &&
-            left_lane.nullable == right_lane.nullable &&
-            left_lane.base_contract == right_lane.base_contract;
+    // one stored descriptor per field (SCU9): compare the records
+    const LaneStorageDesc* l = shape_entry_storage(left);
+    const LaneStorageDesc* r = shape_entry_storage(right);
+    if (l->kind != r->kind || l->byte_size != r->byte_size ||
+            l->nullable != r->nullable || l->native != r->native ||
+            l->value_domain != r->value_domain) {
+        return false;
     }
-    return shape_entry_storage_type_id(left) == shape_entry_storage_type_id(right) &&
-        type_info[shape_entry_storage_type_id(left)].byte_size ==
-            type_info[shape_entry_storage_type_id(right)].byte_size;
+    return !lane_desc_is_nullable_native(l) || l->base_contract == r->base_contract;
 }
 
 static bool contract_semantics_equal(const Type* left, const Type* right) {
@@ -412,11 +402,6 @@ void lambda_type_format_name(const Type* type, char* buffer, size_t capacity) {
     lambda_type_format_name_inner(type, buffer, capacity, 0);
 }
 
-static bool contract_is_union(Type* type) {
-    return type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY &&
-        ((TypeBinary*)type)->op == OPERATOR_UNION;
-}
-
 static uint8_t contract_top_exclusions(Type* type) {
     if (type == &TYPE_ANY) return 0;
     if (type == &TYPE_ANY_NO_ERROR) return LAMBDA_TYPE_EXCLUDE_ERROR;
@@ -454,122 +439,20 @@ static bool contract_same_atomic_type(Type* left, Type* right) {
 static bool contract_union_contains(Type* haystack, Type* needle) {
     haystack = contract_unwrap_type(haystack);
     if (contract_same_atomic_type(haystack, needle)) return true;
-    if (!contract_is_union(haystack)) return false;
+    if (!lambda_type_is_union(haystack)) return false;
     TypeBinary* binary = (TypeBinary*)haystack;
     return contract_union_contains(binary->left, needle) ||
         contract_union_contains(binary->right, needle);
 }
 
-bool lambda_type_accepts_error(Type* type) {
-    type = contract_unwrap_type(type);
-    if (!type || type_is_any_without_error(type)) return false;
-    if (type->type_id == LMD_TYPE_ANY || type->type_id == LMD_TYPE_ERROR) return true;
-    if (!contract_is_union(type)) return false;
-    TypeBinary* binary = (TypeBinary*)type;
-    return lambda_type_accepts_error(binary->left) || lambda_type_accepts_error(binary->right);
-}
-
-bool lambda_type_accepts_null(Type* type) {
-    type = contract_unwrap_type(type);
-    if (!type || type_is_any_without_null(type)) return false;
-    if (type->type_id == LMD_TYPE_ANY || type->type_id == LMD_TYPE_NULL) return true;
-    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
-        TypeUnary* unary = (TypeUnary*)type;
-        if (unary->op == OPERATOR_OPTIONAL) return true;
-    }
-    if (!contract_is_union(type)) return false;
-    TypeBinary* binary = (TypeBinary*)type;
-    return lambda_type_accepts_null(binary->left) || lambda_type_accepts_null(binary->right);
-}
-
-static Type* contract_nullable_lane_base(Type* type, bool* nullable) {
-    type = contract_unwrap_type(type);
-    if (!type || !nullable) return NULL;
-    *nullable = false;
-    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_PARAM) {
-        TypeParam* parameter = (TypeParam*)type;
-        Type* full = parameter->contract_type ? parameter->contract_type :
-            parameter->full_type;
-        return full && full != type
-            ? contract_nullable_lane_base(full, nullable) : NULL;
-    }
-    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_CONSTRAINED) {
-        TypeConstrained* constrained = (TypeConstrained*)type;
-        return contract_nullable_lane_base(constrained->base, nullable);
-    }
-    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
-        TypeUnary* unary = (TypeUnary*)type;
-        if (unary->op == OPERATOR_OPTIONAL) {
-            *nullable = true;
-            return contract_unwrap_type(unary->operand);
-        }
-    }
-    if (!contract_is_union(type)) return type;
-
-    TypeBinary* binary = (TypeBinary*)type;
-    Type* left = contract_unwrap_type(binary->left);
-    Type* right = contract_unwrap_type(binary->right);
-    if (left && left->type_id == LMD_TYPE_NULL && right &&
-            !lambda_type_accepts_error(right)) {
-        *nullable = true;
-        return right;
-    }
-    if (right && right->type_id == LMD_TYPE_NULL && left &&
-            !lambda_type_accepts_error(left)) {
-        *nullable = true;
-        return left;
-    }
-    return NULL;
-}
-
+// Native-lane projection of the one resolver (SCU8): true exactly when the
+// contract has a raw register/slot representation the JIT may address.
 bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out) {
     if (!out) return false;
     *out = {};
-
-    Type* semantic = contract_unwrap_type(type);
-    bool nullable = false;
-    Type* base = contract_nullable_lane_base(semantic, &nullable);
-    if (!semantic || !base || base->type_id == LMD_TYPE_ANY ||
-            base->type_id == LMD_TYPE_NULL || base->type_id == LMD_TYPE_ERROR ||
-            base->type_id == LMD_TYPE_TYPE) {
-        return false;
-    }
-
-    LaneStorageDesc desc = {};
-    desc.semantic_contract = semantic;
-    desc.base_contract = base;
-    desc.nullable = nullable ? 1 : 0;
-    switch (base->type_id) {
-    case LMD_TYPE_INT:
-        desc.kind = LANE_STORAGE_INT;
-        desc.byte_size = (uint8_t)sizeof(int64_t);
-        break;
-    case LMD_TYPE_BOOL:
-        desc.kind = LANE_STORAGE_BOOL;
-        desc.byte_size = (uint8_t)sizeof(uint8_t);
-        break;
-    case LMD_TYPE_FLOAT:
-        desc.kind = LANE_STORAGE_FLOAT64;
-        desc.byte_size = (uint8_t)sizeof(double);
-        break;
-    case LMD_TYPE_NUM_SIZED:
-        if (!nullable || base == &TYPE_NUM_SIZED ||
-                !lambda_num_sized_is_integer(type_num_sized_kind(base))) return false;
-        desc.kind = LANE_STORAGE_SIZED_I64;
-        desc.byte_size = (uint8_t)sizeof(int64_t);
-        break;
-    case LMD_TYPE_INT64:
-    case LMD_TYPE_UINT64:
-        if (!nullable) return false;
-        desc.kind = LANE_STORAGE_ITEM;
-        desc.byte_size = (uint8_t)sizeof(Item);
-        break;
-    default:
-        if (!lambda_type_id_has_pointer_lane(base->type_id)) return false;
-        desc.kind = LANE_STORAGE_POINTER;
-        desc.byte_size = (uint8_t)sizeof(void*);
-        break;
-    }
+    if (!type) return false;
+    LaneStorageDesc desc = lambda_lane_storage_desc_for(type);
+    if (!desc.native) return false;
     *out = desc;
     return true;
 }
@@ -595,7 +478,7 @@ bool lambda_type_has_proven_error(Type* type) {
     type = contract_unwrap_type(type);
     if (!type || type->type_id == LMD_TYPE_ANY) return false;
     if (type->type_id == LMD_TYPE_ERROR) return true;
-    if (!contract_is_union(type)) return false;
+    if (!lambda_type_is_union(type)) return false;
     TypeBinary* binary = (TypeBinary*)type;
     return lambda_type_has_proven_error(binary->left) ||
         lambda_type_has_proven_error(binary->right);
@@ -656,7 +539,7 @@ Type* lambda_type_remove_exclusions(Pool* pool, Type* type, uint8_t exclusions) 
             return lambda_type_remove_exclusions(pool, unary->operand, exclusions);
         }
     }
-    if (!contract_is_union(type)) return type;
+    if (!lambda_type_is_union(type)) return type;
 
     TypeBinary* binary = (TypeBinary*)type;
     Type* left = lambda_type_remove_exclusions(pool, binary->left, exclusions);

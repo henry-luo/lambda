@@ -4673,12 +4673,12 @@ static AstNode* build_ns_attr_map_from_parts(Transpiler* tp, StrView attr_name,
     name_view->str = key_node->name->chars;
     name_view->length = key_node->name->len;
     entry->name = name_view;
-    entry->type = val_expr->type;
+    shape_entry_set_type(entry, val_expr->type);
     entry->byte_offset = 0;
 
     map_type->shape = entry;
     map_type->length = 1;
-    map_type->byte_size = type_info[type_field_storage_type_id(val_expr->type)].byte_size;
+    map_type->byte_size = entry->storage.byte_size;
 
     arraylist_append(tp->type_list, map_type);
     map_type->type_index = tp->type_list->length - 1;
@@ -4710,12 +4710,11 @@ static void merge_ns_attr_maps(Transpiler* tp, AstNode* dst_item, AstNode* src_i
     while (last_entry && last_entry->next) last_entry = last_entry->next;
     if (last_entry) {
         // update byte_offset for merged entries
-        int byte_offset = last_entry->byte_offset +
-            type_info[shape_entry_storage_type_id(last_entry)].byte_size;
+        int byte_offset = last_entry->byte_offset + shape_entry_storage_size(last_entry);
         ShapeEntry* src_entry = src_type->shape;
         while (src_entry) {
             src_entry->byte_offset = byte_offset;
-            byte_offset += type_info[shape_entry_storage_type_id(src_entry)].byte_size;
+            byte_offset += shape_entry_storage_size(src_entry);
             src_entry = src_entry->next;
         }
         last_entry->next = src_type->shape;
@@ -4811,7 +4810,7 @@ ShapeEntry* append_shape_entry_typed(Transpiler* tp, String* pooled_name, Type* 
     name_view->length = pooled_name->len;
     ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
     shape_entry->name = name_view;
-    shape_entry->type = field_type;
+    shape_entry_set_type(shape_entry, field_type);
     shape_entry->byte_offset = byte_offset;
     if (!*shape) *shape = shape_entry;
     else (*prev_entry)->next = shape_entry;
@@ -4964,7 +4963,7 @@ static ShapeEntry* build_map_shape_entry(Transpiler* tp, TypeMap* owner, AstNode
             field_type = ((TypeType*)field_type)->type;
         }
     }
-    shape_entry->type = field_type;
+    shape_entry_set_type(shape_entry, field_type);
     if (!shape_entry->name && !(field_type->type_id == LMD_TYPE_MAP ||
                                 field_type->type_id == LMD_TYPE_ANY)) {
         if (normalize_type) {
@@ -5064,8 +5063,7 @@ AstNode* build_map_from_items(Transpiler* tp, SourceSpan span,
         prev_entry = shape_entry;
 
         type->length++;
-        byte_offset += (!is_spread) ?
-            type_info[type_field_storage_type_id(field_type)].byte_size : sizeof(void*);
+        byte_offset += (!is_spread) ? shape_entry->storage.byte_size : sizeof(void*);
         raw_item = next_item;
     }
     type->byte_size = byte_offset;
@@ -7582,7 +7580,7 @@ static void direct_object_copy_base(LambdaDirectAstSink* sink,
     for (ShapeEntry* parent = base->shape; parent; parent = parent->next) {
         ShapeEntry* entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
         entry->name = parent->name;
-        entry->type = parent->type;
+        shape_entry_set_type(entry, parent->type);
         entry->byte_offset = sink->object_byte_offset;
         if (!sink->object_type->shape) sink->object_type->shape = entry;
         else sink->object_shape_tail->next = entry;
@@ -7670,7 +7668,7 @@ static void direct_object_add_field(LambdaDirectAstSink* sink,
     field_name->str = field->name->chars;
     field_name->length = field->name->len;
     shape->name = field_name;
-    shape->type = field_type;
+    shape_entry_set_type(shape, field_type);
     shape->default_value = default_value;
     shape->byte_offset = sink->object_byte_offset;
     if (!sink->object_type->shape) sink->object_type->shape = shape;
@@ -9362,8 +9360,7 @@ AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
                 else prev_shape->next = shape;
                 prev_shape = shape;
                 type->length++;
-                byte_offset += spread ? (int)sizeof(void*) :
-                    (int)type_info[type_field_storage_type_id(item->type)].byte_size;
+                byte_offset += spread ? (int)sizeof(void*) : shape->storage.byte_size;
             }
         }
         raw = next;

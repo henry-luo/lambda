@@ -2197,7 +2197,6 @@ static Bool function_eq(Function* a, Function* b, int depth) {
     if (a == b) return BOOL_TRUE;
     if (!a || !b) return BOOL_FALSE;
     if (a->ptr != b->ptr || a->arity != b->arity || a->entry_abi != b->entry_abi ||
-            a->returns_ret_item != b->returns_ret_item ||
             a->has_kwargs != b->has_kwargs ||
             a->is_generator != b->is_generator ||
             a->is_coroutine != b->is_coroutine ||
@@ -3746,8 +3745,8 @@ static bool input_schema_prepare_name_parent(Type* schema_type, NamePool* name_p
     return ok;
 }
 
-RetItem fn_input2(Item target_item, Item type) {
-    GUARD_ERROR_RI2(target_item, type);
+Item fn_input2(Item target_item, Item type) {
+    GUARD_ERROR2(target_item, type);
 
     // Dry-run mode: return fabricated input data
     if (g_dry_run) {
@@ -3767,7 +3766,7 @@ RetItem fn_input2(Item target_item, Item type) {
             }
         }
         String* result_str = heap_strcpy((char*)content, strlen(content));
-        return ri_ok({.item = s2it(result_str)});
+        return {.item = s2it(result_str)};
     }
     String *type_str = NULL, *flavor_str = NULL;
     Type* schema_type = NULL;
@@ -3778,7 +3777,7 @@ RetItem fn_input2(Item target_item, Item type) {
         set_runtime_error(ERR_TYPE_MISMATCH,
             "input target must be a string, symbol, or path, got type: %s",
             get_type_name(target_type_id));
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // Convert target Item to Target struct
@@ -3786,7 +3785,7 @@ RetItem fn_input2(Item target_item, Item type) {
     Target* target = item_to_target(target_item.item, cwd);
     if (!target) {
         set_runtime_error(ERR_INVALID_URL, "input: failed to resolve target");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     log_debug("fn_input2: target scheme=%d, type=%d", target->scheme, target->type);
@@ -3820,7 +3819,7 @@ RetItem fn_input2(Item target_item, Item type) {
                     "input type option must be a string or symbol, got type: %s",
                     get_type_name(type_value_type));
                 target_free(target);
-                return item_to_ri(ItemError);
+                return ItemError;
             }
         }
 
@@ -3838,7 +3837,7 @@ RetItem fn_input2(Item target_item, Item type) {
                     "input flavor option must be a string or symbol, got type: %s",
                     get_type_name(flavor_value_type));
                 target_free(target);
-                return item_to_ri(ItemError);
+                return ItemError;
             }
         }
 
@@ -3846,8 +3845,8 @@ RetItem fn_input2(Item target_item, Item type) {
             "schema", &is_found);
         if (is_found && input_schema.item && input_schema._type_id != LMD_TYPE_NULL) {
             if (get_type_id(input_schema) != LMD_TYPE_TYPE) {
-                return item_to_ri(lambda_type_error(input_schema, &TYPE_TYPE,
-                    "input schema option"));
+                return lambda_type_error(input_schema, &TYPE_TYPE,
+                    "input schema option");
             }
             schema_type = input_schema.type;
         }
@@ -3857,14 +3856,14 @@ RetItem fn_input2(Item target_item, Item type) {
             "input format must be a string, symbol, map, or null, got type: %s",
             get_type_name(type_id));
         target_free(target);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // Check if context is properly initialized
     if (!context) {
         set_runtime_error(ERR_INVALID_STATE, "input: runtime context is not initialized");
         target_free(target);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // Pre-register exact schema fields before parsing so known Input names hit
@@ -3874,7 +3873,7 @@ RetItem fn_input2(Item target_item, Item type) {
             context->name_pool)) {
         set_runtime_error(ERR_OUT_OF_MEMORY, "input: failed to prepare schema names");
         target_free(target);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     log_debug("input type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
@@ -3894,7 +3893,7 @@ RetItem fn_input2(Item target_item, Item type) {
     } else if (input->parse_failed) {
         set_input_parse_error("input", input, type_str);
         target_free(target);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
     target_free(target);
 
@@ -3903,13 +3902,13 @@ RetItem fn_input2(Item target_item, Item type) {
     if (schema_type && result.item) {
         // Keep input schema admission on the shared TE-10 boundary so its
         // conversion and validator-path diagnostics cannot diverge from bindings.
-        return item_to_ri(lambda_type_check(result, schema_type, "input schema"));
+        return lambda_type_check(result, schema_type, "input schema");
     }
-    return input ? ri_ok(result) : item_to_ri(ItemError);
+    return input ? result : ItemError;
 }
 
 // declared extern "C" to allow calling from C code (path.c)
-extern "C" RetItem fn_input1(Item url) {
+extern "C" Item fn_input1(Item url) {
     return fn_input2(url, ItemNull);
 }
 
@@ -3918,8 +3917,8 @@ extern "C" RetItem fn_input1(Item url) {
 // 2nd arg can be a format symbol ('json, 'yaml, etc.) or an options map like input().
 extern "C" Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
 
-RetItem fn_parse2(Item str_item, Item type) {
-    GUARD_ERROR_RI2(str_item, type);
+Item fn_parse2(Item str_item, Item type) {
+    GUARD_ERROR2(str_item, type);
 
     // first arg must be a string
     TypeId str_type = get_type_id(str_item);
@@ -3927,12 +3926,12 @@ RetItem fn_parse2(Item str_item, Item type) {
         set_runtime_error(ERR_TYPE_MISMATCH,
             "parse: 1st argument must be a string, got type: %s",
             get_type_name(str_type));
-        return item_to_ri(ItemError);
+        return ItemError;
     }
     String* str = str_item.get_safe_string();
     if (!str) {
         set_runtime_error(ERR_INVALID_STATE, "parse: string value is unavailable");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // parse the 2nd argument (format symbol or options map) - same logic as fn_input2
@@ -3960,7 +3959,7 @@ RetItem fn_parse2(Item str_item, Item type) {
                 set_runtime_error(ERR_TYPE_MISMATCH,
                     "parse: type option must be a string or symbol, got type: %s",
                     get_type_name(type_value_type));
-                return item_to_ri(ItemError);
+                return ItemError;
             }
         }
 
@@ -3974,7 +3973,7 @@ RetItem fn_parse2(Item str_item, Item type) {
                 set_runtime_error(ERR_TYPE_MISMATCH,
                     "parse: flavor option must be a string or symbol, got type: %s",
                     get_type_name(flavor_value_type));
-                return item_to_ri(ItemError);
+                return ItemError;
             }
         }
     }
@@ -3982,7 +3981,7 @@ RetItem fn_parse2(Item str_item, Item type) {
         set_runtime_error(ERR_TYPE_MISMATCH,
             "parse: 2nd argument must be a format symbol or options map, got type: %s",
             get_type_name(type_id));
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // create a dummy URL for the parser infrastructure (no actual file)
@@ -3990,7 +3989,7 @@ RetItem fn_parse2(Item str_item, Item type) {
     if (!dummy_url) {
         set_runtime_error(ERR_INVALID_STATE,
             "parse: failed to initialize the in-memory parser URL");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
@@ -4000,18 +3999,18 @@ RetItem fn_parse2(Item str_item, Item type) {
         set_runtime_error(ERR_OUT_OF_MEMORY,
             "parse: failed to initialize parser for format '%s'",
             type_str ? type_str->chars : "auto");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
     // ItemNull is a valid parsed value, so only the explicit parser status or
     // an error root may convert this result into the non-admissive error path.
     if (input->parse_failed || get_type_id(input->root) == LMD_TYPE_ERROR) {
         set_input_parse_error("parse", input, type_str);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
-    return ri_ok(input->root);
+    return input->root;
 }
 
-RetItem fn_parse1(Item str_item) {
+Item fn_parse1(Item str_item) {
     return fn_parse2(str_item, ItemNull);
 }
 
@@ -4068,98 +4067,6 @@ Item fn_parse_html_fragment1(Item str_item) {
         return ItemError;
     }
     return input->root;
-}
-
-// MIR JIT wrappers: RetItem-returning functions adapted to return Item only.
-// RetItem is a 16-byte struct which has ABI issues with MIR's i64 return type.
-// These wrappers extract .value, converting errors to ItemError.
-extern "C" Item fn_parse1_mir(Item str_item) {
-    RetItem ri = fn_parse1(str_item);
-    return ri.err ? ItemError : ri.value;
-}
-
-extern "C" Item fn_parse2_mir(Item str_item, Item type) {
-    RetItem ri = fn_parse2(str_item, type);
-    return ri.err ? ItemError : ri.value;
-}
-
-extern "C" Item fn_input1_mir(Item url) {
-    RetItem ri = fn_input1(url);
-    return ri.err ? ItemError : ri.value;
-}
-
-extern "C" Item fn_input2_mir(Item url, Item options) {
-    RetItem ri = fn_input2(url, options);
-    return ri.err ? ItemError : ri.value;
-}
-
-// Procedural function wrappers (pn_* functions also return RetItem)
-extern "C" Item pn_cmd1_mir(Item cmd) {
-    RetItem ri = pn_cmd1(cmd);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_cmd2_mir(Item cmd, Item args) {
-    RetItem ri = pn_cmd2(cmd, args);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_fetch_mir(Item url, Item options) {
-    RetItem ri = pn_fetch(url, options);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_output2_mir(Item source, Item target) {
-    RetItem ri = pn_output2(source, target);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_output3_mir(Item source, Item target, Item options) {
-    RetItem ri = pn_output3(source, target, options);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_io_copy_mir(Item src, Item dst) {
-    RetItem ri = pn_io_copy(src, dst);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_io_read_mir(Item target) {
-    return ri_to_item(pn_io_read(target));
-}
-extern "C" Item pn_io_move_mir(Item src, Item dst) {
-    RetItem ri = pn_io_move(src, dst);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_io_delete_mir(Item path) {
-    RetItem ri = pn_io_delete(path);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_io_mkdir_mir(Item path) {
-    RetItem ri = pn_io_mkdir(path);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_io_touch_mir(Item path) {
-    RetItem ri = pn_io_touch(path);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_io_symlink_mir(Item target, Item link) {
-    RetItem ri = pn_io_symlink(target, link);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_io_chmod_mir(Item path, Item mode) {
-    RetItem ri = pn_io_chmod(path, mode);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_io_rename_mir(Item old_path, Item new_path) {
-    RetItem ri = pn_io_rename(old_path, new_path);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_io_fetch1_mir(Item target) {
-    RetItem ri = pn_io_fetch1(target);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_io_fetch2_mir(Item target, Item options) {
-    RetItem ri = pn_io_fetch2(target, options);
-    return ri.err ? ItemError : ri.value;
-}
-extern "C" Item pn_output_append_mir(Item source, Item target) {
-    RetItem ri = pn_output_append(source, target);
-    return ri.err ? ItemError : ri.value;
 }
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool *pool);
@@ -8205,7 +8112,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     int64_t new_size = 0;
     for (ShapeEntry* entry = old_type->shape; entry; entry = entry->next) {
         old_count++;
-        new_size += type_info[shape_entry_storage_type_id(entry)].byte_size;
+        new_size += shape_entry_storage_size(entry);
     }
     TypeId value_type = get_type_id(value);
     new_size += type_info[value_type].byte_size;
@@ -8240,7 +8147,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
         *entry = *old;
         entry->byte_offset = offset;
         entry->next = NULL;
-        int size = type_info[shape_entry_storage_type_id(old)].byte_size;
+        int size = shape_entry_storage_size(old);
         memcpy((char*)new_data + offset, (char*)map->data + old->byte_offset, (size_t)size);
         offset += size;
         if (last) last->next = entry;
@@ -8905,7 +8812,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         // Retain an unchanged field's full contract. Replacing `number` or a
         // union with its LMD_TYPE_TYPE carrier makes the packed Item look like
         // a Type* and corrupts it on the next validation read.
-        ne->type = field_contract;
+        shape_entry_set_type(ne, field_contract);
         bool fixed_slot = field_index < fixed_slot_count;
         ne->byte_offset = fixed_slot ? e->byte_offset : byte_offset;
         ne->next = NULL;
@@ -8922,7 +8829,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         last = ne;
         prev = ne;
         if (!fixed_slot) {
-            byte_offset += type_info[type_field_storage_type_id(field_contract)].byte_size;
+            byte_offset += ne->storage.byte_size;
         }
         field_index++;
         e = e->next;
@@ -8982,7 +8889,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         } else {
             // unchanged field — copy the bytes across unchanged
             int sz = field_index < fixed_slot_count ? (int)sizeof(void*) :
-                type_info[shape_entry_storage_type_id(old_e)].byte_size;
+                shape_entry_storage_size(old_e);
             memcpy(new_field, old_field, sz);
         }
         field_index++;
@@ -9594,11 +9501,11 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             // shape to `error` here made every later literal at that site
             // fail its own construction ("unknown map storage type error").
             if (field_type == LMD_TYPE_NULL && value_type != LMD_TYPE_ERROR) {
-                int old_bsz = type_info[field_type].byte_size;
-                int new_bsz = type_info[value_type].byte_size;
+                int old_bsz = shape_entry_storage_size(entry);
+                int new_bsz = lambda_lane_storage_size(type_info[value_type].type);
                 if (old_bsz == new_bsz) {
                     map_field_store(field_ptr, value, value_type);
-                    entry->type = type_info[value_type].type;
+                    shape_entry_set_type(entry, type_info[value_type].type);
                     return ItemNull;
                 }
             }
@@ -9632,8 +9539,8 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                     // shaped (constructor) objects always use 8-byte slots, but
                     // regular map_put objects use type_info byte sizes which
                     // differ for UNDEFINED(1)/BOOL(1) vs pointer types(8).
-                    int old_bsz = type_info[field_type].byte_size;
-                    int new_bsz = type_info[value_type].byte_size;
+                    int old_bsz = shape_entry_storage_size(entry);
+                    int new_bsz = lambda_lane_storage_size(type_info[value_type].type);
                     if (old_bsz != new_bsz) {
                         // fall through to map_rebuild_for_type_change
                     } else {
@@ -9644,7 +9551,7 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                         // The T→NULL downgrade is gated on this instance owning
                         // the shape — see shape_entry_retag_is_safe.
                         if (shape_entry_retag_is_safe(map_type, value_type)) {
-                            entry->type = type_info[value_type].type;
+                            shape_entry_set_type(entry, type_info[value_type].type);
                         }
                         return ItemNull;
                     }
@@ -9658,7 +9565,7 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             if (typemap_entry_uses_fixed_slot(map_type, entry)) {
                 map_field_store(field_ptr, value, value_type);
                 if (shape_entry_retag_is_safe(map_type, value_type)) {
-                    entry->type = type_info[value_type].type;
+                    shape_entry_set_type(entry, type_info[value_type].type);
                 }
                 return ItemNull;
             }

@@ -800,7 +800,7 @@ static bool js_props_store_raw_data_slot(Item target, ShapeEntry* entry, Item va
     }
 
     if (shape_entry_retag_is_safe((TypeMap*)target.map->type, value_type)) {
-        entry->type = type_info[value_type].type;
+        shape_entry_set_type(entry, type_info[value_type].type);
     }
     return true;
 }

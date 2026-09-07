@@ -65,7 +65,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
 
     Runtime* runtime = doc->js.runtime;
     EvalContext* pump_ctx = runtime_get_eval_context(runtime);
-    if (!pump_ctx || !runtime->heap || !runtime->name_pool) return false;
+    if (!pump_ctx || !runtime_heap(runtime) || !runtime_name_pool(runtime)) return false;
     Context* saved_input_ctx = input_context;
     // Promise and timer callbacks allocate during the host pump just like event
     // listeners do. The pump may initialize a fresh host thread, but it cannot

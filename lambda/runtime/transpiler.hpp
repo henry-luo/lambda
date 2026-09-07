@@ -92,13 +92,11 @@ struct Runtime {
     const char* import_base_dir; // override import base directory for main script (NULL = use script's directory)
     bool use_mir_direct; // all executable Lambda paths use MIR Direct
 
-    // Retained execution state (persistent across script evaluations).
-    // The GC heap and name_pool are created on first evaluation
-    // and reused for subsequent evaluations / event handler invocations.
-    // Destroyed by runtime_cleanup().
-    Heap* heap;
-    NamePool* name_pool;
-    ArrayList* type_list;
+    // SCU14 (D5.4.1): the retained heap, name pool, type list and scheduler
+    // are owned by the canonical EvalContext below and reached through the
+    // runtime_heap()/runtime_name_pool()/runtime_type_list()/
+    // runtime_scheduler() accessors. Runtime is a controller, not a second
+    // owner; the old mirrored fields are gone.
 
     // Phase 5: unified DOM — when ui_mode is true, elmt()/list_push()/elmt_fill()
     // allocate fat DomElement/DomText on result_arena instead of the GC heap.
@@ -112,11 +110,12 @@ struct Runtime {
     int mir_cache_misses;
     int mir_cache_compiles;
     int mir_cache_invalidations;
-    LambdaScheduler* scheduler;
     // Canonical runtime-owned execution state.  Runners, callbacks, and guest
     // bridges bind this stable object through TLS; none embeds it on a stack.
+    // It is the one owner of the isolate's heap, name pool, type list and
+    // scheduler (SCU14/SCU15: the JS bootstrap path binds this same context,
+    // so the separate bootstrap context is retired).
     EvalContext* eval_context;
-    EvalContext* js_bootstrap_context;
     bool js_runtime_used;
     bool no_task_drain;
 };
@@ -229,6 +228,39 @@ void runtime_init(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);
 void runtime_reset_heap(Runtime* runtime);  // reset heap between independent evaluations
 EvalContext* runtime_get_eval_context(Runtime* runtime);
+
+// SCU14 (D5.4.1): isolate resources live on the canonical EvalContext. Reads
+// never create the context; a write materializes it, because publishing a
+// resource is what makes a runtime an isolate.
+static inline Heap* runtime_heap(const Runtime* runtime) {
+    return runtime && runtime->eval_context ? runtime->eval_context->heap : NULL;
+}
+static inline NamePool* runtime_name_pool(const Runtime* runtime) {
+    return runtime && runtime->eval_context ? runtime->eval_context->name_pool : NULL;
+}
+static inline ArrayList* runtime_type_list(const Runtime* runtime) {
+    return runtime && runtime->eval_context
+        ? (ArrayList*)runtime->eval_context->type_list : NULL;
+}
+static inline LambdaScheduler* runtime_scheduler(const Runtime* runtime) {
+    return runtime && runtime->eval_context ? runtime->eval_context->scheduler : NULL;
+}
+static inline void runtime_set_heap(Runtime* runtime, Heap* heap) {
+    EvalContext* owner = runtime_get_eval_context(runtime);
+    if (owner) owner->heap = heap;
+}
+static inline void runtime_set_name_pool(Runtime* runtime, NamePool* name_pool) {
+    EvalContext* owner = runtime_get_eval_context(runtime);
+    if (owner) owner->name_pool = name_pool;
+}
+static inline void runtime_set_type_list(Runtime* runtime, ArrayList* type_list) {
+    EvalContext* owner = runtime_get_eval_context(runtime);
+    if (owner) owner->type_list = type_list;
+}
+static inline void runtime_set_scheduler(Runtime* runtime, LambdaScheduler* scheduler) {
+    EvalContext* owner = runtime_get_eval_context(runtime);
+    if (owner) owner->scheduler = scheduler;
+}
 void runtime_register_script(Runtime* runtime, Script* script);
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index);
 bool runtime_type_list_is_script_owned(Runtime* runtime);

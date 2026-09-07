@@ -2,6 +2,6 @@ true
 1
 js-microtask
 immediate 8
-reject Lambda procedure failed
+reject sleep requires a running task and non-negative duration
 worker 6
 await 8

@@ -130,7 +130,7 @@ bool js_activate_runtime_name_pool(void) {
         return false;
     }
     context->name_pool = dynamic;
-    if (context->runtime) context->runtime->name_pool = dynamic;
+    if (context->runtime) runtime_set_name_pool(context->runtime, dynamic);
     return true;
 }
 
@@ -346,9 +346,9 @@ static void js_mir_destroy_unowned_eval_context(Runtime* runtime,
         }
         js_runtime_state_destroy_context();
         if (runtime) {
-            runtime->heap = NULL;
-            runtime->name_pool = NULL;
-            runtime->type_list = NULL;
+            runtime_set_heap(runtime, NULL);
+            runtime_set_name_pool(runtime, NULL);
+            runtime_set_type_list(runtime, NULL);
         }
     }
 }
@@ -387,8 +387,8 @@ extern "C" bool js_prepare_eval_context(Runtime* runtime,
     if (reusing_context) {
         js_context = context;
         if (!context->type_list) {
-            context->type_list = runtime && runtime->type_list
-                ? runtime->type_list
+            context->type_list = runtime && runtime_type_list(runtime)
+                ? runtime_type_list(runtime)
                 : arraylist_new(64);
         }
     } else {
@@ -1115,7 +1115,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // In preamble mode, also stash the heap so the caller can retain it
     // for interactive event handler compilation (needs heap for reusing_context).
     if (runtime) {
-        runtime->type_list = result_type_list;
+        runtime_set_type_list(runtime, result_type_list);
     }
 
     // In hot-reload batch mode, skip deferred MIR cleanup — accumulated contexts
@@ -1248,7 +1248,7 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
                                           const JsPreambleState* base_preamble,
                                           const JsPreambleState* compiled_state,
                                           bool retain_unit_state) {
-    if (!runtime || !runtime->heap || !base_preamble || !compiled_state ||
+    if (!runtime || !runtime_heap(runtime) || !base_preamble || !compiled_state ||
             !compiled_state->entry_func) {
         return ItemError;
     }
@@ -1547,9 +1547,10 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
             return ItemNull;
         }
 
-        // The canonical context owns the bootstrap heap through runner setup.
+        // The canonical context owns the bootstrap heap through runner setup
+        // (SCU15: `context` IS runtime_get_eval_context here, so nothing else
+        // records it).
         runtime_context_publish_owners(runtime, context);
-        runtime->js_bootstrap_context = context;
 
         // Create Input context for JS runtime
         Input* js_input = Input::create(context->pool);

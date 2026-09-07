@@ -10,7 +10,6 @@ struct ShapeEntry;
 
 // Configuration
 #define SHAPE_POOL_INITIAL_CAPACITY 128
-#define SHAPE_POOL_MAX_CHAIN_LENGTH 64  // Safety limit for signature calculation
 
 // Shape signature - uniquely identifies a shape structure
 typedef struct ShapeSignature {

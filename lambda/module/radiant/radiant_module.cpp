@@ -733,7 +733,7 @@ static Item radiant_layout_context_item(const CustomLayoutContext* context) {
 static Heap* radiant_custom_layout_heap(const CustomLayoutContext* layout_context) {
     Runtime* runtime = (layout_context && layout_context->parent && layout_context->parent->doc)
         ? layout_context->parent->doc->lambda_runtime : nullptr;
-    if (runtime && runtime->heap) return runtime->heap;
+    if (runtime && runtime_heap(runtime)) return runtime_heap(runtime);
     return ::context ? ::context->heap : nullptr;
 }
 
@@ -853,15 +853,15 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
     Context* saved_input_context = input_context;
     Runtime* runtime = (context->parent && context->parent->doc)
         ? context->parent->doc->lambda_runtime : nullptr;
-    if (runtime && runtime->heap) {
+    if (runtime && runtime_heap(runtime)) {
         callback_context = runtime_get_eval_context(runtime);
         if (!callback_context) {
             g_radiant_velmt_active_pass_id = previous_pass_id;
             return false;
         }
-        callback_context->heap = runtime->heap;
-        callback_context->name_pool = runtime->name_pool;
-        callback_context->pool = runtime->heap->pool;
+        callback_context->heap = runtime_heap(runtime);
+        callback_context->name_pool = runtime_name_pool(runtime);
+        callback_context->pool = runtime_heap(runtime)->pool;
         callback_context->type_info = type_info;
         // Retained callbacks borrow their Runtime-owned side stack rather
         // than fabricating an activation-local context.

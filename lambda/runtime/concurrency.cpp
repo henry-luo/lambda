@@ -1508,99 +1508,99 @@ extern "C" Item lambda_task_scope_unwind(LambdaTaskScope* base, bool error_exit)
     return ItemNull;
 }
 
-extern "C" RetItem pn_send(Item handle, Item message) {
+extern "C" Item pn_send(Item handle, Item message) {
     LambdaTask* target = lambda_task_from_handle(handle);
     LambdaTask* sender = lambda_current_task();
     LambdaSendStatus status = lambda_task_send(sender, target, message);
-    if (status == LAMBDA_SEND_OK) return ri_ok(ItemNull);
+    if (status == LAMBDA_SEND_OK) return ItemNull;
     if (status == LAMBDA_SEND_FULL) {
         LambdaError* error = err_create_heap(ERR_MAILBOX_FULL, "task mailbox full", NULL);
-        return ri_err(error);
+        return err2it_or_error(error);
     }
     LambdaError* error = err_create_heap(ERR_INVALID_OPERATION,
         status == LAMBDA_SEND_CLOSED ? "cannot send to completed task" : "invalid task handle", NULL);
-    return ri_err(error);
+    return err2it_or_error(error);
 }
 
-extern "C" RetItem pn_receive(void) {
+extern "C" Item pn_receive(void) {
     LambdaTask* task = lambda_current_task();
-    if (!task) return ri_err(err_create_heap(ERR_INVALID_STATE,
+    if (!task) return err2it_or_error(err_create_heap(ERR_INVALID_STATE,
         "receive requires a running task", NULL));
     Item resumed = ItemNull;
-    if (lambda_task_take_resume_value(task, &resumed)) return item_to_ri(resumed);
+    if (lambda_task_take_resume_value(task, &resumed)) return resumed;
     if (task->cancel_requested && !task->cleanup_masked) {
-        return ri_err(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
+        return err2it_or_error(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
     }
     Item message = ItemNull;
-    if (lambda_task_mailbox_receive(task, &message)) return ri_ok(message);
+    if (lambda_task_mailbox_receive(task, &message)) return message;
     task->park_kind = LAMBDA_PARK_RECEIVE;
     lambda_task_park(task);
-    return ri_ok((Item){.item = ITEM_TASK_SUSPENDED});
+    return (Item){.item = ITEM_TASK_SUSPENDED};
 }
 
-static RetItem wait_handle(Item handle, uint64_t timeout_ms) {
+static Item wait_handle(Item handle, uint64_t timeout_ms) {
     LambdaTask* waiter = lambda_current_task();
     LambdaTask* target = lambda_task_from_handle(handle);
     if (!waiter || !target || waiter->scheduler != target->scheduler) {
-        return ri_err(err_create_heap(ERR_INVALID_OPERATION, "invalid task handle", NULL));
+        return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION, "invalid task handle", NULL));
     }
     Item resumed = ItemNull;
-    if (lambda_task_take_resume_value(waiter, &resumed)) return item_to_ri(resumed);
+    if (lambda_task_take_resume_value(waiter, &resumed)) return resumed;
     if (waiter->cancel_requested && !waiter->cleanup_masked) {
-        return ri_err(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
+        return err2it_or_error(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
     }
-    if (target->state == LAMBDA_TASK_DONE) return item_to_ri(target->result);
+    if (target->state == LAMBDA_TASK_DONE) return target->result;
     LambdaTask* targets[1] = {target};
     waiter->park_kind = LAMBDA_PARK_WAIT;
     if (!task_wait_targets(waiter, targets, 1, false, timeout_ms)) {
-        return ri_err(err_create_heap(ERR_INVALID_STATE, "failed to wait for task", NULL));
+        return err2it_or_error(err_create_heap(ERR_INVALID_STATE, "failed to wait for task", NULL));
     }
-    return ri_ok((Item){.item = ITEM_TASK_SUSPENDED});
+    return (Item){.item = ITEM_TASK_SUSPENDED};
 }
 
-extern "C" RetItem pn_wait1(Item handle) {
+extern "C" Item pn_wait1(Item handle) {
     if (promise_is && promise_wait && promise_is(handle)) {
-        return item_to_ri(promise_wait(handle, lambda_current_task()));
+        return promise_wait(handle, lambda_current_task());
     }
     return wait_handle(handle, 0);
 }
 
-extern "C" RetItem pn_wait2(Item handle, Item timeout_ms) {
+extern "C" Item pn_wait2(Item handle, Item timeout_ms) {
     if (promise_is && promise_is(handle)) {
-        return ri_err(err_create_heap(ERR_INVALID_OPERATION,
+        return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
             "wait timeout is not supported for JavaScript Promises", NULL));
     }
     int64_t value = -1;
     task_read_milliseconds(timeout_ms, &value);
-    if (value < 0) return ri_err(err_create_heap(ERR_INVALID_OPERATION,
+    if (value < 0) return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
         "wait timeout must be a non-negative integer", NULL));
     return wait_handle(handle, (uint64_t)value);
 }
 
-extern "C" RetItem pn_select(Item handles, Item timeout_ms) {
+extern "C" Item pn_select(Item handles, Item timeout_ms) {
     LambdaTask* waiter = lambda_current_task();
     if (!waiter || get_type_id(handles) != LMD_TYPE_ARRAY || !handles.array) {
-        return ri_err(err_create_heap(ERR_INVALID_OPERATION,
+        return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
             "select requires an array of task handles", NULL));
     }
     Item resumed = ItemNull;
-    if (lambda_task_take_resume_value(waiter, &resumed)) return item_to_ri(resumed);
+    if (lambda_task_take_resume_value(waiter, &resumed)) return resumed;
     int count = (int)handles.array->length;
-    if (count <= 0) return ri_err(err_create_heap(ERR_INVALID_OPERATION,
+    if (count <= 0) return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
         "select requires at least one task handle", NULL));
     LambdaTask** targets = (LambdaTask**)mem_calloc((size_t)count,
         sizeof(LambdaTask*), MEM_CAT_EVAL);
-    if (!targets) return ri_err(err_create_heap(ERR_OUT_OF_MEMORY, "select allocation failed", NULL));
+    if (!targets) return err2it_or_error(err_create_heap(ERR_OUT_OF_MEMORY, "select allocation failed", NULL));
     for (int i = 0; i < count; i++) {
         targets[i] = lambda_task_from_handle(handles.array->items[i]);
         if (!targets[i] || targets[i]->scheduler != waiter->scheduler) {
             mem_free(targets);
-            return ri_err(err_create_heap(ERR_INVALID_OPERATION, "invalid task handle", NULL));
+            return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION, "invalid task handle", NULL));
         }
         if (targets[i]->state == LAMBDA_TASK_DONE) {
             Item result = targets[i]->handle;
             mem_free(targets);
-            return ri_ok(result);
+            return result;
         }
     }
     int64_t timeout = 0;
@@ -1609,22 +1609,22 @@ extern "C" RetItem pn_select(Item handles, Item timeout_ms) {
     bool parked = task_wait_targets(waiter, targets, count, true,
         timeout > 0 ? (uint64_t)timeout : 0);
     mem_free(targets);
-    return parked ? ri_ok((Item){.item = ITEM_TASK_SUSPENDED})
-                  : ri_err(err_create_heap(ERR_INVALID_STATE, "failed to select tasks", NULL));
+    return parked ? (Item){.item = ITEM_TASK_SUSPENDED}
+                  : err2it_or_error(err_create_heap(ERR_INVALID_STATE, "failed to select tasks", NULL));
 }
 
-extern "C" RetItem pn_sleep(Item duration_ms) {
+extern "C" Item pn_sleep(Item duration_ms) {
     LambdaTask* task = lambda_current_task();
     int64_t value = -1;
     task_read_milliseconds(duration_ms, &value);
-    if (!task || value < 0) return ri_err(err_create_heap(ERR_INVALID_OPERATION,
+    if (!task || value < 0) return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
         "sleep requires a running task and non-negative duration", NULL));
     Item resumed = ItemNull;
-    if (lambda_task_take_resume_value(task, &resumed)) return item_to_ri(resumed);
+    if (lambda_task_take_resume_value(task, &resumed)) return resumed;
     if (task->cancel_requested && !task->cleanup_masked) {
-        return ri_err(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
+        return err2it_or_error(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
     }
-    if (value == 0) return ri_ok(ItemNull);
+    if (value == 0) return ItemNull;
     task->park_kind = LAMBDA_PARK_SLEEP;
     lambda_task_park(task);
     if (!task_timer_start(task, (uint64_t)value, false)) {
@@ -1632,14 +1632,14 @@ extern "C" RetItem pn_sleep(Item duration_ms) {
         // without enqueueing a duplicate runnable entry.
         task->state = LAMBDA_TASK_RUNNABLE;
         task->park_kind = LAMBDA_PARK_NONE;
-        return ri_err(err_create_heap(ERR_INVALID_STATE, "failed to start sleep timer", NULL));
+        return err2it_or_error(err_create_heap(ERR_INVALID_STATE, "failed to start sleep timer", NULL));
     }
-    return ri_ok((Item){.item = ITEM_TASK_SUSPENDED});
+    return (Item){.item = ITEM_TASK_SUSPENDED};
 }
 
-extern "C" RetItem pn_io_read(Item target) {
+extern "C" Item pn_io_read(Item target) {
     LambdaTask* task = lambda_current_task();
-    if (!task) return ri_err(err_create_heap(ERR_INVALID_STATE,
+    if (!task) return err2it_or_error(err_create_heap(ERR_INVALID_STATE,
         "io.read requires a running task", NULL));
 
     LambdaFileRead* read = task->file_read;
@@ -1655,19 +1655,19 @@ extern "C" RetItem pn_io_read(Item target) {
             file_read_release(read);
             if (task->cancel_requested && !task->cleanup_masked) {
                 mem_free(bytes);
-                return ri_err(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
+                return err2it_or_error(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
             }
             if (error) {
                 mem_free(bytes);
                 LambdaErrorCode code = error == UV_ENOENT
                     ? ERR_FILE_NOT_FOUND
                     : (error == UV_EACCES ? ERR_FILE_ACCESS_DENIED : ERR_FILE_READ_ERROR);
-                return ri_err(err_create_heap(code, uv_strerror(error), NULL));
+                return err2it_or_error(err_create_heap(code, uv_strerror(error), NULL));
             }
             String* string = heap_strcpy(bytes ? bytes : "", length > 0 ? length : 0);
             mem_free(bytes);
-            return string ? ri_ok((Item){.item = s2it(string)})
-                          : ri_err(err_create_heap(ERR_OUT_OF_MEMORY,
+            return string ? (Item){.item = s2it(string)}
+                          : err2it_or_error(err_create_heap(ERR_OUT_OF_MEMORY,
                                 "io.read result allocation failed", NULL));
         }
         if (has_resume && task->cancel_requested && !task->cleanup_masked) {
@@ -1677,19 +1677,19 @@ extern "C" RetItem pn_io_read(Item target) {
         }
         task->park_kind = LAMBDA_PARK_FILE_READ;
         lambda_task_park(task);
-        return ri_ok((Item){.item = ITEM_TASK_SUSPENDED});
+        return (Item){.item = ITEM_TASK_SUSPENDED};
     }
 
     if (task->cancel_requested && !task->cleanup_masked) {
-        return ri_err(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
+        return err2it_or_error(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
     }
     StrBuf* path = lambda_get_local_path_from_item(target);
-    if (!path) return ri_err(err_create_heap(ERR_INVALID_OPERATION,
+    if (!path) return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
         "io.read requires a local file target", NULL));
     read = (LambdaFileRead*)mem_calloc(1, sizeof(LambdaFileRead), MEM_CAT_EVAL);
     if (!read) {
         strbuf_free(path);
-        return ri_err(err_create_heap(ERR_OUT_OF_MEMORY,
+        return err2it_or_error(err_create_heap(ERR_OUT_OF_MEMORY,
             "io.read request allocation failed", NULL));
     }
     read->task = task;
@@ -1698,7 +1698,7 @@ extern "C" RetItem pn_io_read(Item target) {
     strbuf_free(path);
     if (!read->path) {
         file_read_release(read);
-        return ri_err(err_create_heap(ERR_OUT_OF_MEMORY,
+        return err2it_or_error(err_create_heap(ERR_OUT_OF_MEMORY,
             "io.read path allocation failed", NULL));
     }
     read->request.data = read;
@@ -1707,7 +1707,7 @@ extern "C" RetItem pn_io_read(Item target) {
     if (status < 0) {
         uv_fs_req_cleanup(&read->request);
         file_read_release(read);
-        return ri_err(err_create_heap(ERR_FILE_READ_ERROR,
+        return err2it_or_error(err_create_heap(ERR_FILE_READ_ERROR,
             uv_strerror(status), NULL));
     }
     task->file_read = read;
@@ -1715,7 +1715,7 @@ extern "C" RetItem pn_io_read(Item target) {
     lambda_task_park(task);
     log_debug("concurrency io.read: parked task=%llu path=%s",
         (unsigned long long)task->id, read->path);
-    return ri_ok((Item){.item = ITEM_TASK_SUSPENDED});
+    return (Item){.item = ITEM_TASK_SUSPENDED};
 }
 
 extern "C" Item pn_self(void) {
@@ -1739,27 +1739,4 @@ extern "C" Item fn_to_promise(Item handle) {
 }
 
 // MIR imports use an Item return because the platform ABI for the two-word
-// RetItem struct is not stable across MIR's generated-call boundary.
-extern "C" Item pn_send_mir(Item handle, Item message) {
-    return ri_to_item(pn_send(handle, message));
-}
-
-extern "C" Item pn_receive_mir(void) {
-    return ri_to_item(pn_receive());
-}
-
-extern "C" Item pn_wait1_mir(Item handle) {
-    return ri_to_item(pn_wait1(handle));
-}
-
-extern "C" Item pn_wait2_mir(Item handle, Item timeout_ms) {
-    return ri_to_item(pn_wait2(handle, timeout_ms));
-}
-
-extern "C" Item pn_select_mir(Item handles, Item timeout_ms) {
-    return ri_to_item(pn_select(handles, timeout_ms));
-}
-
-extern "C" Item pn_sleep_mir(Item duration_ms) {
-    return ri_to_item(pn_sleep(duration_ms));
-}
+// Item struct is not stable across MIR's generated-call boundary.

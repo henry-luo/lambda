@@ -14,6 +14,7 @@
 #include "markup_common.hpp"
 #include "format_adapter.hpp"
 #include "../input-context.hpp"
+#include "../../../lib/hashmap.h"
 #include "../../io/mark_builder.hpp"
 
 // Forward declaration for HTML5 parser
@@ -48,16 +49,10 @@ struct ParseConfig {
  * The label is normalized (case-insensitive, whitespace collapsed).
  */
 struct LinkDefinition {
-    char label[256];     // normalized label (lowercase, whitespace collapsed)
-    char url[1024];      // destination URL
-    char title[512];     // optional title
+    const char* label;   // normalized label (case-folded, whitespace collapsed); Input-arena owned
+    const char* url;     // destination URL, unescaped; "" when empty; Input-arena owned
+    const char* title;   // optional title, unescaped; "" when absent; Input-arena owned
     bool has_title;
-
-    LinkDefinition() : has_title(false) {
-        label[0] = '\0';
-        url[0] = '\0';
-        title[0] = '\0';
-    }
 };
 
 /**
@@ -122,9 +117,6 @@ struct ParserState {
     }
 };
 
-// Maximum number of link definitions per document
-constexpr int MAX_LINK_DEFINITIONS = 256;
-
 /**
  * MarkupParser - Main parser class for lightweight markup
  *
@@ -147,8 +139,10 @@ public:
     // Parsing state
     ParserState state;
 
-    // Link reference definitions
-    LinkDefinition link_defs_[MAX_LINK_DEFINITIONS];
+    // Link reference definitions, keyed by normalized label. Grown from the
+    // document (SCU16): no fixed per-document limit and no silent drop of the
+    // definition that would have exceeded one. Created on first definition.
+    struct hashmap* link_defs_;
     int link_def_count_;
 
     // HTML5 fragment parser for accumulating HTML content
@@ -303,7 +297,10 @@ public:
      * - Collapsing whitespace to single space
      * - Trimming leading/trailing whitespace
      */
-    static void normalizeLabel(const char* label, size_t len, char* out, size_t out_size);
+    // Returns a memtrack-owned normalized label (caller frees), NULL when the
+    // label normalizes to nothing. Unbounded: a label longer than any fixed
+    // buffer must still compare unequal to a different long label.
+    static char* normalizeLabel(const char* label, size_t len);
 
     /**
      * Add a link reference definition
@@ -336,6 +333,10 @@ private:
     // Free line memory
     void freeLines();
 };
+
+// SCU16 size budget: the parser's fixed footprint is independent of the
+// document's line and link-definition counts.
+static_assert(sizeof(MarkupParser) < 16 * 1024, "MarkupParser fixed footprint must stay under 16 KiB");
 
 // ============================================================================
 // MarkupParser Heap Factory (audited boundary)

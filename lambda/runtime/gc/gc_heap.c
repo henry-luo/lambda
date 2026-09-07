@@ -1578,21 +1578,22 @@ static void gc_trace_data_words(gc_heap_t* gc, void* data_ptr, int64_t byte_size
 //
 // D3.4.1 makes the packed layout an ABI: every reader must decode the same
 // bytes the store path wrote, and D3.4.6/D2.6.1 put the one shared descriptor
-// resolver in charge of which lane that is. So the lane is classified through
-// lambda_shape_field_storage_type_id, NOT through ShapeEntry::type->type_id: a
-// non-simple `type` contract (`T?`, a union, a constrained or occurrence type)
-// has type_id LMD_TYPE_TYPE yet set_field_value stores it in the TypedItem
-// `any` lane. Reading that lane as an eight-byte container pointer marked
-// nothing, and the conservative gc_trace_data_words sweep could not cover it
-// either: a TypedItem payload starts at byte_offset + 1 and so never lands on
-// an eight-byte stride. A container reachable only through such a field was
-// collected while still live.
-static void gc_trace_shape_field(gc_heap_t* gc, void* field_type,
+// resolver in charge of which lane that is. SCU9 stores that descriptor on the
+// ShapeEntry, so the collector reads it (lambda_shape_entry_lane) and never
+// classifies from Type::type_id: a non-simple `type` contract (`T?`, a union,
+// a constrained or occurrence type) has type_id LMD_TYPE_TYPE yet lives in
+// whatever lane the store path chose. Reading such a slot as an eight-byte
+// container pointer marked nothing, and the conservative gc_trace_data_words
+// sweep could not cover it either: a TypedItem payload starts at
+// byte_offset + 1 and so never lands on an eight-byte stride. A container
+// reachable only through such a field was collected while still live.
+static void gc_trace_shape_field(gc_heap_t* gc, const void* shape_entry,
                                  int64_t byte_offset, void* data_ptr,
                                  int64_t byte_size) {
-    if (!field_type) return;
-    uint8_t lane = (uint8_t)lambda_shape_field_storage_type_id(field_type);
-    if (lane == LMD_TYPE_NULL_ && byte_offset >= 0 &&
+    if (!shape_entry) return;
+    uint8_t kind = 0, nullable = 0, domain = 0;
+    lambda_shape_entry_lane(shape_entry, &kind, &nullable, &domain);
+    if (kind == LANE_STORAGE_ITEM && domain == LMD_TYPE_NULL_ && byte_offset >= 0 &&
             byte_offset + (int64_t)sizeof(uint64_t) <= byte_size) {
         // A `null`-typed lane is an eight-byte slot that the store path
         // upgrades IN PLACE to a container pointer (fn_map_set's same-width
@@ -1606,14 +1607,14 @@ static void gc_trace_shape_field(gc_heap_t* gc, void* field_type,
         gc_mark_possible_item(gc, *(uint64_t*)((uint8_t*)data_ptr + byte_offset));
         return;
     }
-    // only trace Item-typed lanes (containers, strings, etc.); inline values
-    // (bool, int, undefined) hold no GC pointer
-    if (lane < LMD_TYPE_INT64_ || lane == LMD_TYPE_BOOL_ ||
-        lane == LMD_TYPE_UNDEFINED_) return;
+    // inline lanes (int, bool, float, raw integer words) hold no GC pointer
+    if (kind == LANE_STORAGE_INT || kind == LANE_STORAGE_BOOL ||
+        kind == LANE_STORAGE_FLOAT64 || kind == LANE_STORAGE_SIZED_I64 ||
+        kind == LANE_STORAGE_INVALID) return;
     if (byte_offset < 0 || byte_offset >= byte_size) return;
     uint8_t* field_ptr = (uint8_t*)data_ptr + byte_offset;
 
-    if (lane == LMD_TYPE_ANY_) {
+    if (kind == LANE_STORAGE_TYPED_ITEM) {
         // TypedItem's packed value follows its one-byte runtime TypeId.
         uint8_t stored_type = *(uint8_t*)(field_ptr + LAMBDA_GC_OFF_TYPED_ITEM_TYPE_ID);
         if (stored_type < LMD_TYPE_INT64_ || stored_type == LMD_TYPE_BOOL_ ||
@@ -1625,15 +1626,22 @@ static void gc_trace_shape_field(gc_heap_t* gc, void* field_type,
         return;
     }
 
+    if (byte_offset + (int64_t)sizeof(uint64_t) > byte_size) return;
     uint64_t val = *(uint64_t*)field_ptr;
     if (!val) return;
-    if (lane >= LMD_TYPE_RANGE_) {
+    if (kind == LANE_STORAGE_ITEM) {
+        // a boxed Item word (nullable int64/uint64, compact sized ints): the
+        // tag says whether it references anything
+        gc_mark_item(gc, val);
+        return;
+    }
+    // LANE_STORAGE_POINTER
+    if (domain >= LMD_TYPE_RANGE_) {
         // container pointer stored directly
         gc_mark_item(gc, val);
-    } else if (lane == LMD_TYPE_STRING_ || lane == LMD_TYPE_SYMBOL_ ||
-               lane == LMD_TYPE_DECIMAL_ || lane == LMD_TYPE_INT64_ ||
-               lane == LMD_TYPE_FLOAT_ || lane == LMD_TYPE_DTIME_ ||
-               lane == LMD_TYPE_COMPLEX_) {
+    } else if (domain == LMD_TYPE_STRING_ || domain == LMD_TYPE_SYMBOL_ ||
+               domain == LMD_TYPE_DECIMAL_ || domain == LMD_TYPE_DTIME_ ||
+               domain == LMD_TYPE_COMPLEX_ || domain == LMD_TYPE_BINARY_) {
         // these are stored as raw pointers in the data buffer
         gc_mark_object_ptr(gc, (void*)(uintptr_t)val);
     }
@@ -1646,8 +1654,7 @@ static void gc_trace_shape_fields(gc_heap_t* gc, void* type_ptr, void* data_ptr,
                                   int64_t byte_size) {
     uint8_t* shape = (uint8_t*)*(void**)((uint8_t*)type_ptr + LAMBDA_GC_OFF_TYPE_MAP_SHAPE);
     while (shape) {
-        gc_trace_shape_field(gc,
-            *(void**)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_TYPE),
+        gc_trace_shape_field(gc, shape,
             *(int64_t*)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_BYTE_OFFSET),
             data_ptr, byte_size);
         shape = (uint8_t*)*(void**)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_NEXT);

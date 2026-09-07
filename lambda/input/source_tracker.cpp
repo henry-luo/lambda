@@ -1,6 +1,7 @@
 #include "source_tracker.hpp"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
+#include "../../lib/memtrack.h"
 #include <cstring>
 
 namespace lambda {
@@ -10,31 +11,50 @@ SourceTracker::SourceTracker(const char* source, size_t len)
     , source_len_(len)
     , current_(source)
     , location_(0, 1, 1)
-    , line_count_(1)
+    , line_starts_(nullptr)
+    , line_cap_(0)
+    , line_count_(0)
     , line_index_built_(false)
+    , line_index_failed_(false)
     , extract_buf_(strbuf_new_cap(256))
 {
-    line_starts_[0] = 0;  // Line 1 starts at offset 0
+    pushLineStart(0);  // Line 1 starts at offset 0
 }
 
 SourceTracker::~SourceTracker() {
     strbuf_free(extract_buf_);
+    if (line_starts_) mem_free(line_starts_);
+}
+
+bool SourceTracker::pushLineStart(size_t offset) {
+    if (line_index_failed_) return false;
+    if (line_count_ == line_cap_) {
+        // Size the first block from the source so small documents allocate
+        // once; grow geometrically afterwards.
+        size_t new_cap = line_cap_ ? line_cap_ * 2 : (source_len_ / 40 + 16);
+        size_t* grown = (size_t*)mem_realloc(line_starts_, new_cap * sizeof(size_t),
+            MEM_CAT_INPUT_OTHER);
+        if (!grown) {
+            log_error("SourceTracker: line index allocation failed at %zu lines", line_count_);
+            line_index_failed_ = true;
+            return false;
+        }
+        line_starts_ = grown;
+        line_cap_ = new_cap;
+    }
+    line_starts_[line_count_++] = offset;
+    return true;
 }
 
 void SourceTracker::buildLineIndex() {
     if (line_index_built_) return;
 
-    line_count_ = 1;
-    line_starts_[0] = 0;
+    line_count_ = 0;
+    pushLineStart(0);
 
     for (size_t i = 0; i < source_len_; ++i) {
         if (source_[i] == '\n') {
-            if (line_count_ < MAX_LINE_STARTS) {
-                line_starts_[line_count_++] = i + 1;
-            } else {
-                log_warn("SourceTracker: exceeded max line tracking limit (%zu lines)", MAX_LINE_STARTS);
-                break;
-            }
+            if (!pushLineStart(i + 1)) break;
         }
     }
 
@@ -61,14 +81,7 @@ bool SourceTracker::advance(size_t count) {
             location_.column = 1;
 
             // Track line start for context extraction
-            if (!line_index_built_) {
-                if (line_count_ < MAX_LINE_STARTS) {
-                    line_starts_[line_count_++] = location_.offset;
-                } else if (line_count_ == MAX_LINE_STARTS) {
-                    log_warn("SourceTracker: exceeded max line tracking limit (%zu lines)", MAX_LINE_STARTS);
-                    line_count_++;  // prevent repeated warnings
-                }
-            }
+            if (!line_index_built_) pushLineStart(location_.offset);
         } else if (!isUtf8Continuation((unsigned char)c)) {
             // Only increment column for non-continuation bytes
             location_.column++;
@@ -155,8 +168,8 @@ const char* SourceTracker::getContextLine() {
 void SourceTracker::reset() {
     current_ = source_;
     location_ = SourceLocation(0, 1, 1);
-    line_count_ = 1;
-    line_starts_[0] = 0;
+    line_count_ = 0;
+    pushLineStart(0);
     line_index_built_ = false;
 }
 

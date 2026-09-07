@@ -274,12 +274,17 @@ struct MirRootWriteBackResult {
     int block_count;
 };
 
-enum MirScalarReturnMode {
-    MIR_SCALAR_RETURN_NONE,
-    MIR_SCALAR_RETURN_FLOAT,
-    MIR_SCALAR_RETURN_INT64,
-    MIR_SCALAR_RETURN_UINT64,
-    MIR_SCALAR_RETURN_DYNAMIC,
+// SCU11: the boxed-return scalar fact is ScalarReturnClass (value_rep.h),
+// the same enum the published FnReturnAnalysis carries. The emitter-local
+// ScalarReturnClass that mirrored it value for value is gone.
+
+// Which return lane a body publishes: none (plain boxed/native), a scalar
+// companion (shape 2), or a shape-4 error lane. Shared by every emitter so a
+// body and its wrappers cannot spell the lane differently.
+enum MirReturnLaneKind {
+    RETURN_LANE_NONE = 0,
+    RETURN_LANE_SCALAR = 1,
+    RETURN_LANE_ERROR = 2,
 };
 struct MirRootBinding {
     MIR_reg_t reg;
@@ -392,10 +397,14 @@ struct MirScalarHomeFixup {
 struct MirFunctionPlan {
     FnEntryKind entry_kind;
     MirEntryMode entry_mode;
-    MirScalarReturnMode scalar_return_mode;
+    ScalarReturnClass scalar_return_mode;
     // Foreign hosted compilers may still request an explicit result-owner
     // slot. Generated Lambda/JS entries always leave this zero.
     uint8_t scalar_home_lane_mask;
+    // SCU11 (RV10): the published return contract this body was emitted
+    // against. `return_shape`/`companion` below are its cached projection and
+    // are written ONLY by em_plan_bind_return; no emission site assigns them.
+    const FnReturnAnalysis* abi;
     // v3 (RV1/RV10): the shape this body returns in. Callee-side emission reads
     // it; it must agree with the descriptor published in FnReturnAnalysis.
     FnReturnShape return_shape;
@@ -428,7 +437,7 @@ struct MirFrameState {
     // the watermark even though the frame owns no scalar homes — otherwise a
     // resolve inside a loop grows the number stack without bound.
     bool number_extent_dirty;
-    MirScalarReturnMode scalar_return_mode;
+    ScalarReturnClass scalar_return_mode;
     MIR_type_t return_type;
     MIR_reg_t runtime;
     MIR_reg_t root_base;
@@ -449,7 +458,7 @@ struct MirFrameState {
     MIR_reg_t pending_live_companion;
     MIR_reg_t error_return_reg;
     MIR_reg_t incoming_scalar_home;
-    int return_lane_kind;
+    MirReturnLaneKind return_lane_kind;
     int root_slot_count;
     // Fixed suffix slots (for example JavaScript's prerooted argument span)
     // are appended after semantic root coloring. They are part of the
@@ -934,45 +943,23 @@ static inline int em_gc_new_home(MirEmitter* em) {
 }
 
 // Boxed scalar returns need a lifetime policy that is independent of their
-// machine return type. Both Lambda and LambdaJS use this enum so Item encoding
-// changes cannot make their return epilogues drift apart.
-static inline MirScalarReturnMode em_scalar_return_mode_for_type(TypeId type_id) {
+// machine return type. Both Lambda and LambdaJS use this classification so
+// Item encoding changes cannot make their return epilogues drift apart.
+static inline ScalarReturnClass em_scalar_return_class_for_type(TypeId type_id) {
     // The NONE decision lives in lambda_type_id_may_be_wide_scalar() so the
     // C-side sys-func metadata fallback shares exactly this answer.
     if (!lambda_type_id_may_be_wide_scalar(type_id)) {
-        return MIR_SCALAR_RETURN_NONE;
+        return SCALAR_RETURN_NONE;
     }
     switch (type_id) {
     case LMD_TYPE_FLOAT:
-        return MIR_SCALAR_RETURN_FLOAT;
+        return SCALAR_RETURN_F64;
     case LMD_TYPE_INT64:
-        return MIR_SCALAR_RETURN_INT64;
+        return SCALAR_RETURN_I64;
     case LMD_TYPE_UINT64:
-        return MIR_SCALAR_RETURN_UINT64;
+        return SCALAR_RETURN_U64;
     default:
-        return MIR_SCALAR_RETURN_DYNAMIC;  // ANY
-    }
-}
-
-static inline MirScalarReturnMode em_scalar_return_mode_for_class(
-        ScalarReturnClass scalar_class) {
-    switch (scalar_class) {
-    case SCALAR_RETURN_I64: return MIR_SCALAR_RETURN_INT64;
-    case SCALAR_RETURN_U64: return MIR_SCALAR_RETURN_UINT64;
-    case SCALAR_RETURN_F64: return MIR_SCALAR_RETURN_FLOAT;
-    case SCALAR_RETURN_DYNAMIC: return MIR_SCALAR_RETURN_DYNAMIC;
-    default: return MIR_SCALAR_RETURN_NONE;
-    }
-}
-
-static inline ScalarReturnClass em_scalar_return_class_for_type(
-        TypeId type_id) {
-    switch (em_scalar_return_mode_for_type(type_id)) {
-    case MIR_SCALAR_RETURN_INT64: return SCALAR_RETURN_I64;
-    case MIR_SCALAR_RETURN_UINT64: return SCALAR_RETURN_U64;
-    case MIR_SCALAR_RETURN_FLOAT: return SCALAR_RETURN_F64;
-    case MIR_SCALAR_RETURN_DYNAMIC: return SCALAR_RETURN_DYNAMIC;
-    default: return SCALAR_RETURN_NONE;
+        return SCALAR_RETURN_DYNAMIC;  // ANY
     }
 }
 
@@ -983,11 +970,11 @@ static inline ScalarReturnClass em_scalar_return_class_for_type(
 // entry). `boxed_scalar_mode` is the same signature-derived fact the v2 home
 // protocol already gates on, so v3 shape selection is no weaker than v2's.
 static inline FnReturnShape em_return_shape(bool native_return, bool can_raise,
-        MirScalarReturnMode boxed_scalar_mode) {
+        ScalarReturnClass boxed_scalar_mode) {
     if (native_return) {
         return can_raise ? RETURN_SHAPE_NATIVE_ERROR : RETURN_SHAPE_NATIVE;
     }
-    return boxed_scalar_mode != MIR_SCALAR_RETURN_NONE
+    return boxed_scalar_mode != SCALAR_RETURN_NONE
         ? RETURN_SHAPE_ITEM_SCALAR : RETURN_SHAPE_ITEM;
 }
 
@@ -1076,6 +1063,28 @@ static inline FnCompanionTransport em_companion_transport(FnReturnShape shape,
     #else
         return c_reachable ? FN_COMPANION_CONTEXT_SLOT : FN_COMPANION_RESULT_REG;
     #endif
+}
+
+// SCU11 (RV10): the ONE writer of a plan's return shape and companion. A body
+// is bound to its published FnReturnAnalysis; an entry with no analysis yet
+// (a forward target, a synthetic wrapper) falls back to the universal shape 2
+// with the transport its reachability dictates. No emission site assigns
+// `plan.return_shape` or `plan.companion` directly.
+static inline void em_plan_bind_return(MirFunctionPlan* plan,
+        const FnReturnAnalysis* abi, bool c_reachable) {
+    plan->abi = abi;
+    plan->return_shape = abi ? abi->shape : RETURN_SHAPE_ITEM_SCALAR;
+    plan->companion = abi ? abi->companion
+        : em_companion_transport(RETURN_SHAPE_ITEM_SCALAR, c_reachable);
+}
+
+// A hosted guest body (Jube) that accepts a caller-donated scalar home is
+// exactly one that may return a wide scalar: the universal pair shape. The
+// guest keeps the transport its own frame setup selected, so only the shape
+// is bound here. This is the second and last writer of `plan.return_shape`.
+static inline void em_plan_bind_hosted_pair(MirFunctionPlan* plan) {
+    plan->abi = NULL;
+    plan->return_shape = RETURN_SHAPE_ITEM_SCALAR;
 }
 
 // RV10's single-source-of-truth defence, enforced rather than documented.
@@ -1311,10 +1320,10 @@ static inline MIR_reg_t em_emit_bits_double(MirEmitter* em, MIR_reg_t bits_reg) 
 }
 
 static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
-                                                   MirScalarReturnMode mode,
+                                                   ScalarReturnClass mode,
                                                    MIR_reg_t item,
                                                    MIR_reg_t target_home) {
-    if (mode == MIR_SCALAR_RETURN_NONE) return item;
+    if (mode == SCALAR_RETURN_NONE) return item;
     // Classify the result in MIR so packed values pass through while only
     // frame-backed scalar encodings call the adopter; doing this in every
     // build keeps the ownership protocol and emitted MIR identical.
@@ -1398,7 +1407,7 @@ static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
 
 // Adopt a temporary boxed scalar before restoring its source number extent.
 static inline MIR_reg_t em_adopt_scalar_item(MirEmitter* em,
-                                             MirScalarReturnMode mode,
+                                             ScalarReturnClass mode,
                                              MIR_reg_t item,
                                              MIR_reg_t runtime,
                                              size_t number_top_offset,
@@ -3958,8 +3967,7 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
         abort();
     }
     em_enforce_argument_ownership(em, &resolved.call, nargs, arg_ops);
-    MirScalarReturnMode scalar_mode = em_scalar_return_mode_for_class(
-        resolved.call.normal_result.scalar_class);
+    ScalarReturnClass scalar_mode = resolved.call.normal_result.scalar_class;
     // RV14a: the whole snapshot / home / classify / restore sequence below
     // exists for one hazard — the callee left a wide payload above our
     // pre-call watermark, and the restore is about to reclaim it. A callee
@@ -3997,7 +4005,7 @@ static inline MIR_reg_t em_call_with_args(MirEmitter* em,
     MIR_reg_t scalar_home = 0;
     int scalar_home_id = 0;
     if (!em->helper_results_skip_rehome &&
-            scalar_mode != MIR_SCALAR_RETURN_NONE && !callee_preserves_watermark &&
+            scalar_mode != SCALAR_RETURN_NONE && !callee_preserves_watermark &&
             em->frame.active && em->frame.number_base) {
         scalar_home_id = em_scalar_home_new(em);
         scalar_home = em_materialize_frame_ref(em,
@@ -4180,6 +4188,7 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
     metadata.scalar_home_lane_mask = 0;
     // RV10: read the callee's shape, never derive one here. An unknown callee
     // is assumed to speak the universal pair shape (§6).
+    metadata.abi = variant ? &variant->result : NULL;
     metadata.return_shape = variant ? variant->result.shape
         : RETURN_SHAPE_ITEM_SCALAR;
     em_enforce_argument_ownership(em, &metadata, nargs, physical_ops);

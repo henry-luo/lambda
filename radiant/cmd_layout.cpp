@@ -3681,10 +3681,10 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
 
     Input* script_output = run_script_mir(runtime, script_source, script_filepath, false);
 
-    if (runtime->heap) {
-        layout_context->heap = runtime->heap;
-        layout_context->name_pool = runtime->name_pool;
-        layout_context->pool = runtime->heap->pool;
+    if (runtime_heap(runtime)) {
+        layout_context->heap = runtime_heap(runtime);
+        layout_context->name_pool = runtime_name_pool(runtime);
+        layout_context->pool = runtime_heap(runtime)->pool;
         if (runtime->ui_mode && runtime->result_arena) {
             layout_context->ui_mode = true;
             layout_context->arena = runtime->result_arena;

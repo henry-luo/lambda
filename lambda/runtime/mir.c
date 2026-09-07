@@ -180,7 +180,6 @@ bool jit_import_get_metadata(const char* name, JitImportMetadata* metadata) {
             }
             switch (info->c_ret_type) {
             case C_RET_ITEM:
-            case C_RET_RETITEM:
                 metadata->ret_class = JIT_VALUE_BOXED_ITEM;
                 // RV14a, type-driven: `C_RET_ITEM` says only "a boxed Item
                 // comes back", which made every sys func pay the wide-scalar
