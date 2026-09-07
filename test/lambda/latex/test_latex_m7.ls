@@ -38,6 +38,8 @@ let html = latex.render_file_to_html("test/input/test_latex_m7.tex")
 "14. has toprule:"; contains(html, "latex-toprule")
 "15. has midrule:"; contains(html, "latex-midrule")
 "16. has bottomrule:"; contains(html, "latex-bottomrule")
+"16a. table splits alignment tabs:"; contains(html, "<td>Name</td><td>Score</td><td>Grade</td>")
+"16b. table omits placement option:"; contains(html, "[h]") == false
 
 // ---- autoref checks ----
 "17. has Section autoref:"; contains(html, "Section")
