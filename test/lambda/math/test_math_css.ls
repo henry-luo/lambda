@@ -49,16 +49,17 @@ let ss = css.get_stylesheet()
 "34. stylesheet default uses local main font:"; contains(ss, "Computer Modern Serif")
 "35. stylesheet default uses local typewriter font:"; contains(ss, "Computer Modern Typewriter")
 "36. stylesheet default keeps available size font:"; contains(ss, "font-family:KaTeX_Size1")
+"37. stylesheet styles MathLive delimiter recipe:"; contains(ss, ".delim-size4{font-family:KaTeX_Size4")
 
 let katex_ss = css.get_stylesheet({font_option: "katex"})
-"37. stylesheet katex uses KaTeX math:"; contains(katex_ss, ".lm_mathit{font-family:KaTeX_Math")
-"38. stylesheet katex uses KaTeX typewriter:"; contains(katex_ss, ".lm_tt{font-family:KaTeX_Typewriter")
-"39. stylesheet katex omits local main font:"; not contains(katex_ss, "Computer Modern Serif")
+"38. stylesheet katex uses KaTeX math:"; contains(katex_ss, ".lm_mathit{font-family:KaTeX_Math")
+"39. stylesheet katex uses KaTeX typewriter:"; contains(katex_ss, ".lm_tt{font-family:KaTeX_Typewriter")
+"40. stylesheet katex omits local main font:"; not contains(katex_ss, "Computer Modern Serif")
 
 // ---- wrap_standalone() ----
 let wrapped = css.wrap_standalone(<span "x">)
-"40. wrap tag:"; name(wrapped)
-"41. wrap has style child:"; name(wrapped[0])
-"42. wrap has content:"; name(wrapped[1])
+"41. wrap tag:"; name(wrapped)
+"42. wrap has style child:"; name(wrapped[0])
+"43. wrap has content:"; name(wrapped[1])
 
 "===== ALL CSS TESTS DONE ====="

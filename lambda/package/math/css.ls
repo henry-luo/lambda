@@ -131,6 +131,12 @@ pub fn get_stylesheet(options = null) {
     ".lm_delim-size2{font-family:" ++ families.size2 ++ "}" ++
     ".lm_delim-size3{font-family:" ++ families.size3 ++ "}" ++
     ".lm_delim-size4{font-family:" ++ families.size4 ++ "}" ++
+    // MathLive's stacked recipes use these unprefixed classes.  Keep them on
+    // the matching Size fonts so their component glyph metrics match the vlist.
+    ".delim-size1{font-family:" ++ families.size1 ++ "}" ++
+    ".delim-size2{font-family:" ++ families.size2 ++ "}" ++
+    ".delim-size3{font-family:" ++ families.size3 ++ "}" ++
+    ".delim-size4{font-family:" ++ families.size4 ++ "}" ++
     ".lm_accent-body{font-family:" ++ families.main ++ "}" ++
     ".lm_accent-combining-char{left:0.24em;position:relative}" ++
     ".lm_negativethinspace{display:inline-block;margin-left:-0.16667em;height:0.71em}" ++
@@ -166,10 +172,6 @@ pub fn get_stylesheet(options = null) {
     ".lm_vlist>span{display:block;height:0;position:relative}" ++
     ".lm_vlist>span>span{display:inline-block}" ++
     ".lm_vlist>span>.lm_pstrut{overflow:hidden;width:0}" ++
-    // Lambda's raster fallback lacks MathLive's Size4 delimiter metrics. In a
-    // two-piece VList, scale each 1.81em delimiter glyph to its declared box
-    // height so the top and bottom pieces retain their intended overlap.
-    ".lm_delim-mult .lm_vlist>span:first-child:nth-last-child(2)>span:last-child,.lm_delim-mult .lm_vlist>span:last-child:nth-child(2)>span:last-child{font-size:181%;height:1em!important}" ++
     // Center the vlist row, but keep its direct content wrapper's inline flow.
     ".lm_center{text-align:center}.lm_center>span{text-align:left}" ++
     ".lm_pstrut{display:inline-block}"
