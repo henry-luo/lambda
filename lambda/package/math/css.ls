@@ -118,7 +118,8 @@ pub fn get_stylesheet(options = null) {
     ".lm_bold{font-weight:700}" ++
     ".lm_it{font-style:italic}" ++
     ".lm_mfrac{display:inline-block}" ++
-    ".lm_frac-line{display:block;height:1px;min-height:1px;background:currentColor;margin:0.1em 0}" ++
+    // Fraction rules are empty inline-blocks in MathLive's vlist; fill the cell.
+    ".lm_frac-line{display:block;width:100%;height:1px;min-height:1px;background:currentColor;margin:0.1em 0}" ++
     ".lm_sqrt{display:inline-block}" ++
     ".lm_sqrt-sign{display:inline-block;position:relative}" ++
     ".lm_sqrt-line{display:inline-block;height:1px;width:100%;background:currentColor}" ++
@@ -141,7 +142,20 @@ pub fn get_stylesheet(options = null) {
     ".lm_nulldelimiter{display:inline-block;width:0.12em}" ++
     ".lm_rule{display:inline-block;border:solid 0;position:relative;box-sizing:border-box}" ++
     ".lm_mtable{display:inline-flex;flex-direction:column;vertical-align:middle}" ++
-    ".lm_error{color:#bc2612}"
+    ".lm_error{color:#bc2612}" ++
+    // MathLive's table cell is a relative containing block for zero-height
+    // positioned rows; their overflow must not participate in row sizing.
+    ".lm_vlist-t{display:inline-table;table-layout:fixed;border-collapse:collapse}" ++
+    ".lm_vlist-t2{margin-right:-2px}" ++
+    ".lm_vlist-r{display:table-row}" ++
+    ".lm_vlist{display:table-cell;vertical-align:bottom;position:relative}" ++
+    ".lm_vlist-s{display:table-cell;vertical-align:bottom;width:2px;min-width:2px}" ++
+    ".lm_vlist>span{display:block;height:0;position:relative}" ++
+    ".lm_vlist>span>span{display:inline-block}" ++
+    ".lm_vlist>span>.lm_pstrut{overflow:hidden;width:0}" ++
+    // Center the vlist row, but keep its direct content wrapper's inline flow.
+    ".lm_center{text-align:center}.lm_center>span{text-align:left}" ++
+    ".lm_pstrut{display:inline-block}"
     s
 }
 

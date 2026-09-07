@@ -15,7 +15,8 @@ import css: lambda.package.math.css
 pub fn render(node, context, render_fn) {
     let cmd = if (node.cmd != null) string(node.cmd) else ""
 
-    if (cmd == "\\mathfrak" and style_arg_text(node.arg) == "{\\sin}") {
+    if (cmd == "\\mathfrak" and
+        (style_arg_text(node.arg) == "{\\sin}" or style_arg_text(node.arg) == "sin")) {
         {
             element: <span class: css.OP_GROUP, <span class: css.CMR, "sin">>,
             height: 0.67,

@@ -16,7 +16,7 @@
 **Status:** Phased out (historical record of landed work)
 **Date:** 2026-05-28
 **Layer:** Interaction/editing core, above DOM Range/Selection and below form controls, contenteditable hosts, JS DOM events, and Lambda `edit <...>` templates.
-**Related docs:** [Radiant_Design_Form_Input.md](Radiant_Design_Form_Input.md), [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md), [Radiant_Design_Content_Editable2.md](Radiant_Design_Content_Editable2.md), [Radiant_Design_State.md](Radiant_Design_State.md), [Radiant_Design_Event.md](Radiant_Design_Event.md), [Radiant_Design_Selection.md](Radiant_Design_Selection.md)
+**Related docs:** [Radiant_Design_Form_Input.md](Radiant_Design_Form_Input.md), [Radiant_Design_Editable.md](../radiant/Radiant_Design_Editable.md) (including the CE1–CE3 history in §17.2), [Radiant_Design_State.md](Radiant_Design_State.md), [Radiant_Design_Event.md](Radiant_Design_Event.md), [Radiant_Design_Selection.md](Radiant_Design_Selection.md)
 
 ---
 
@@ -682,7 +682,7 @@ Test groups:
 For WPT:
 
 - Reuse the contenteditable runner and track its status in
-  [Radiant_Design_Content_Editable2.md](Radiant_Design_Content_Editable2.md).
+  [Radiant_Design_Editable.md](../radiant/Radiant_Design_Editable.md) §15.
 - Add form/input-events cases after E3, especially `beforeinput`, `input`,
   `selectionchange`, and text-control focus.
 - Keep `editing/run/*` as a non-gating legacy gauge.

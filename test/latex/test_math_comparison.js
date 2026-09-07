@@ -27,7 +27,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { spawn, execSync } from 'child_process';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 // ES module __dirname equivalent
@@ -40,6 +40,12 @@ import { compareHTML } from './comparators/html_comparator.js';
 import { compareDVI, validateDVI } from './comparators/dvi_comparator.js';
 import { compareASTToMathML } from './comparators/mathml_comparator.js';
 import { compareASTToMathLive } from './comparators/mathlive_ast_comparator.js';
+import {
+    lambda_to_mathlive_classes,
+    mathlive_expected_error,
+    render_mathlive_markup,
+    render_lambda_math
+} from '../lambda/mathlive/lambda_math_renderer.mjs';
 
 // Configuration
 const CONFIG = {
@@ -90,7 +96,9 @@ function parseArgs() {
         suite: 'all',
         test: null,
         group: null,
-        compare: 'all',
+        // The script-level math API exposes the tree-sitter AST, not the
+        // retired CLI's MathLive-shaped AST. HTML is the stable package API.
+        compare: 'html',
         tolerance: CONFIG.dviTolerance,
         verbose: false,
         json: false,
@@ -294,7 +302,7 @@ function parseTexFile(testPath) {
         // Remove comments (lines starting with %)
         const lines = content.split('\n');
         const cleanLines = lines.filter(line => !line.trim().startsWith('%'));
-        const cleanContent = cleanLines.join('\n');
+        const cleanContent = stripCommandDefinitions(cleanLines.join('\n'));
 
         // Pattern for display math: \[...\] or $$...$$
         const displayMathRegex = /\\\[([\s\S]*?)\\\]|\$\$([\s\S]*?)\$\$/g;
@@ -311,10 +319,15 @@ function parseTexFile(testPath) {
             }
         }
 
-        // Pattern for inline math: $...$  (but not $$)
-        const inlineMathRegex = /(?<!\$)\$(?!\$)([\s\S]*?)(?<!\$)\$(?!\$)/g;
-        while ((match = inlineMathRegex.exec(cleanContent)) !== null) {
-            const latex = match[1].trim();
+        // Inline `$...$` may itself contain text-mode math switches, such as
+        // `\textcolor{blue}{$x$}`.  A non-greedy regexp terminates at that
+        // inner dollar, so scan balanced braces and accept a terminator only
+        // at the outer math depth.
+        let inlineStart = -1;
+        let braceDepth = 0;
+        let recoveryEnd = -1;
+        const appendInlineExpression = (end) => {
+            const latex = cleanContent.slice(inlineStart, end).trim();
             if (latex && !latex.includes('\\begin{document}') && !latex.includes('\\end{document}')) {
                 expressions.push({
                     index: index++,
@@ -322,7 +335,33 @@ function parseTexFile(testPath) {
                     latex: latex
                 });
             }
+        };
+        for (let i = 0; i < cleanContent.length; i++) {
+            const ch = cleanContent[i];
+            const escaped = i > 0 && cleanContent[i - 1] === '\\';
+            if (inlineStart < 0) {
+                if (ch === '$' && !escaped && cleanContent[i - 1] !== '$' && cleanContent[i + 1] !== '$') {
+                    inlineStart = i + 1;
+                    braceDepth = 0;
+                    recoveryEnd = -1;
+                }
+                continue;
+            }
+            if (!escaped && ch === '{') braceDepth++;
+            else if (!escaped && ch === '}' && braceDepth > 0) braceDepth--;
+            else if (!escaped && ch === '$' && cleanContent[i - 1] !== '$' && cleanContent[i + 1] !== '$') {
+                if (braceDepth === 0) {
+                    appendInlineExpression(i);
+                    inlineStart = -1;
+                } else {
+                    // Preserve MathLive's malformed-input recovery: if an
+                    // outer formula never balances, its final nested dollar
+                    // still delimits the recoverable formula fragment.
+                    recoveryEnd = i;
+                }
+            }
         }
+        if (inlineStart >= 0 && recoveryEnd >= inlineStart) appendInlineExpression(recoveryEnd);
 
         // Pattern for \(...\) inline math
         const inlineParenRegex = /\\\(([\s\S]*?)\\\)/g;
@@ -346,6 +385,47 @@ function parseTexFile(testPath) {
     }
 }
 
+function stripCommandDefinitions(content) {
+    // Macro bodies are source declarations, not document math. In particular,
+    // `$#2$` in a two-argument macro must not enter the rendering corpus.
+    const definitions = /\\(?:re)?newcommand\b/g;
+    let result = '';
+    let cursor = 0;
+    let match;
+    while ((match = definitions.exec(content)) !== null) {
+        const start = match.index;
+        let end = match.index + match[0].length;
+        while (/\s/.test(content[end] || '')) end++;
+        if (content[end] === '*') end++;
+        while (/\s/.test(content[end] || '')) end++;
+        end = skipDelimitedTexArgument(content, end, '{', '}');
+        while (/\s/.test(content[end] || '')) end++;
+        while (content[end] === '[') {
+            end = skipDelimitedTexArgument(content, end, '[', ']');
+            while (/\s/.test(content[end] || '')) end++;
+        }
+        end = skipDelimitedTexArgument(content, end, '{', '}');
+        result += content.slice(cursor, start);
+        cursor = end;
+        definitions.lastIndex = end;
+    }
+    return result + content.slice(cursor);
+}
+
+function skipDelimitedTexArgument(content, start, open, close) {
+    if (content[start] !== open) return start;
+    let depth = 0;
+    for (let i = start; i < content.length; i++) {
+        if (content[i] === '\\') {
+            i++;
+            continue;
+        }
+        if (content[i] === open) depth++;
+        else if (content[i] === close && --depth === 0) return i + 1;
+    }
+    return content.length;
+}
+
 /**
  * Load test data - handles both .tex and .json files
  */
@@ -360,7 +440,8 @@ function loadTestData(testPath) {
 }
 
 /**
- * Run Lambda's LaTeX math typesetter on an expression
+ * Render one expression through Lambda's supported script-level math API.
+ * The retired `lambda.exe math --output-*` CLI cannot produce test artifacts.
  */
 async function runLambdaParser(latex, options = {}) {
     const lambdaExe = path.join(PROJECT_ROOT, 'lambda.exe');
@@ -375,96 +456,35 @@ async function runLambdaParser(latex, options = {}) {
         };
     }
 
-    return new Promise((resolve) => {
+    try {
         const tempDir = path.join(PROJECT_ROOT, 'temp', 'math_tests');
-        if (!fs.existsSync(tempDir)) {
-            fs.mkdirSync(tempDir, { recursive: true });
-        }
-
         const testId = Math.random().toString(36).substring(7);
-        const astFile = path.join(tempDir, `${testId}.ast.json`);
-        const htmlFile = path.join(tempDir, `${testId}.html`);
-        const dviFile = path.join(tempDir, `${testId}.dvi`);
-
-        // Build Lambda command
-        const args = [
-            'math',
-            latex,
-            '--output-ast', astFile,
-            '--output-html', htmlFile,
-            '--output-dvi', dviFile
-        ];
-
-        const child = spawn(lambdaExe, args, {
-            cwd: PROJECT_ROOT,
-            timeout: 10000 // 10 second timeout
+        const result = render_lambda_math(latex, {
+            display: true,
+            lambda: lambdaExe,
+            script: path.join(tempDir, `${testId}.ls`)
         });
+        return {
+            ast: result.ast ?? null,
+            html: result.html ?? null,
+            // The static math package has no DVI writer. Keep this explicit so
+            // scoring redistributes the retired DVI weight to AST and HTML.
+            dvi: null,
+            error: result.error === 'no-error' ? null : result.error
+        };
+    } catch (err) {
+        return {
+            ast: null,
+            html: null,
+            dvi: null,
+            error: `Failed to render Lambda math script: ${err.message}`
+        };
+    }
+}
 
-        let stdout = '';
-        let stderr = '';
-
-        child.stdout.on('data', (data) => {
-            stdout += data.toString();
-        });
-
-        child.stderr.on('data', (data) => {
-            stderr += data.toString();
-        });
-
-        child.on('close', (code) => {
-            if (code !== 0) {
-                resolve({
-                    ast: null,
-                    html: null,
-                    dvi: null,
-                    error: `Lambda exited with code ${code}: ${stderr || stdout}`
-                });
-                return;
-            }
-
-            // Read output files
-            const result = {
-                ast: null,
-                html: null,
-                dvi: null,
-                error: null
-            };
-
-            try {
-                if (fs.existsSync(astFile)) {
-                    const astContent = fs.readFileSync(astFile, 'utf-8');
-                    result.ast = JSON.parse(astContent);
-                }
-
-                if (fs.existsSync(htmlFile)) {
-                    result.html = fs.readFileSync(htmlFile, 'utf-8');
-                }
-
-                if (fs.existsSync(dviFile)) {
-                    result.dvi = dviFile; // Return path to DVI file
-                }
-
-                // Clean up temp files
-                if (fs.existsSync(astFile)) fs.unlinkSync(astFile);
-                if (fs.existsSync(htmlFile)) fs.unlinkSync(htmlFile);
-                // Keep DVI for comparison if needed
-
-            } catch (err) {
-                result.error = `Failed to read output files: ${err.message}`;
-            }
-
-            resolve(result);
-        });
-
-        child.on('error', (err) => {
-            resolve({
-                ast: null,
-                html: null,
-                dvi: null,
-                error: `Failed to spawn Lambda: ${err.message}`
-            });
-        });
-    });
+async function compareMathLiveHtml(lambdaHtml, latex, display) {
+    const expectedHtml = await render_mathlive_markup(latex, { display });
+    return compareHTML(lambda_to_mathlive_classes(lambdaHtml), expectedHtml, 'mathlive');
 }
 
 /**
@@ -579,17 +599,41 @@ async function runExtendedTest(testInfo, options) {
         };
     }
 
+    if (!testData.expressions || testData.expressions.length === 0) {
+        // A file without an extractable delimiter expression is not a renderer
+        // case; macro bodies such as `$#2$` are declarations, not document math.
+        return {
+            name: testInfo.file,
+            suite: testInfo.suite,
+            status: 'skipped',
+            reason: 'no extractable math expression',
+            score: { overall: 0 }
+        };
+    }
+
     const expressionResults = [];
 
     for (const expr of (testData.expressions || [])) {
         // Run Lambda to get output
         const lambdaOutput = await runLambdaParser(expr.latex);
 
-        if (lambdaOutput.error) {
+        if (lambdaOutput.error && lambdaOutput.error !== 'no-error') {
+            const expectedError = mathlive_expected_error(expr.latex);
+            if (expectedError === lambdaOutput.error) {
+                expressionResults.push({
+                    latex: expr.latex,
+                    type: expr.type,
+                    score: calculateTestScore(null, { passRate: 100, error: expectedError }, null, options.compare),
+                    ast: null,
+                    html: { passRate: 100, error: expectedError },
+                    dvi: null
+                });
+                continue;
+            }
             expressionResults.push({
                 latex: expr.latex,
                 type: expr.type,
-                error: lambdaOutput.error,
+                error: `${lambdaOutput.error} (MathLive: ${expectedError || 'no error contract'})`,
                 score: { overall: 0 }
             });
             continue;
@@ -635,48 +679,11 @@ async function runExtendedTest(testInfo, options) {
         // HTML comparison with cross-reference
         let htmlResult = null;
         if (options.compare === 'all' || options.compare === 'html') {
-            const refMathLiveHtml = path.join(REFERENCE_DIR, `${refBaseName}.mathlive.html`);
-            const refKatexHtml = path.join(REFERENCE_DIR, `${refBaseName}.katex.html`);
-            const refLambdaHtml = path.join(REFERENCE_DIR, `${refBaseName}.lambda.html`);
-
             if (lambdaOutput.html) {
-                let mathLiveScore = null;
-                let katexScore = null;
-                let lambdaScore = null;
-
-                if (fs.existsSync(refMathLiveHtml)) {
-                    const refHtml = fs.readFileSync(refMathLiveHtml, 'utf-8');
-                    mathLiveScore = compareHTML(lambdaOutput.html, refHtml, 'mathlive');
-                }
-
-                if (fs.existsSync(refKatexHtml)) {
-                    const refHtml = fs.readFileSync(refKatexHtml, 'utf-8');
-                    katexScore = compareHTML(lambdaOutput.html, refHtml, 'katex');
-                }
-
-                // Also check Lambda's own reference for consistency testing
-                if (fs.existsSync(refLambdaHtml)) {
-                    const refHtml = fs.readFileSync(refLambdaHtml, 'utf-8');
-                    lambdaScore = compareHTML(lambdaOutput.html, refHtml, 'lambda');
-                }
-
-                // Take best score if we have both MathLive and KaTeX
-                if (mathLiveScore && katexScore) {
-                    htmlResult = {
-                        passRate: Math.max(mathLiveScore.passRate, katexScore.passRate),
-                        bestReference: mathLiveScore.passRate >= katexScore.passRate ? 'mathlive' : 'katex',
-                        mathliveScore: mathLiveScore.passRate,
-                        katexScore: katexScore.passRate,
-                        differences: mathLiveScore.passRate >= katexScore.passRate ?
-                            mathLiveScore.differences : katexScore.differences
-                    };
-                } else if (mathLiveScore || katexScore) {
-                    htmlResult = mathLiveScore || katexScore;
-                } else if (lambdaScore) {
-                    // Use Lambda's own reference for consistency testing
-                    htmlResult = lambdaScore;
-                } else {
-                    htmlResult = { passRate: 50, differences: [{ issue: 'No HTML reference available' }] };
+                try {
+                    htmlResult = await compareMathLiveHtml(lambdaOutput.html, expr.latex, expr.type === 'display');
+                } catch (err) {
+                    htmlResult = { passRate: 0, differences: [{ issue: `MathLive render failed: ${err.message}` }] };
                 }
             } else {
                 htmlResult = { passRate: 0, differences: [{ issue: 'Lambda did not produce HTML' }] };
@@ -804,12 +811,31 @@ async function runBaselineTest(testInfo, options) {
     // Run Lambda parser
     const lambdaOutput = await runLambdaParser(latex);
 
-    if (lambdaOutput.error) {
+    if (lambdaOutput.error && lambdaOutput.error !== 'no-error') {
+        const expectedError = mathlive_expected_error(latex);
+        if (expectedError === lambdaOutput.error) {
+            return {
+                name: testInfo.file,
+                suite: 'baseline',
+                status: 'passed',
+                errorContract: expectedError,
+                score: {
+                    overall: 100,
+                    breakdown: {
+                        ast: { rate: 0, weighted: 0 },
+                        html: { rate: 100, weighted: 100 },
+                        dvi: { rate: 0, weighted: 0, unavailable: true }
+                    }
+                },
+                passedViaDVI: false,
+                passedViaWeighted: true
+            };
+        }
         return {
             name: testInfo.file,
             suite: 'baseline',
             status: 'failed',
-            error: lambdaOutput.error,
+            error: `${lambdaOutput.error} (MathLive: ${expectedError || 'no error contract'})`,
             score: { overall: 0 }
         };
     }
@@ -856,52 +882,19 @@ async function runBaselineTest(testInfo, options) {
     }
 
     // HTML comparison with cross-reference
-    const refMathLiveHtml = path.join(REFERENCE_DIR, `${refBaseName}.mathlive.html`);
-    const refKatexHtml = path.join(REFERENCE_DIR, `${refBaseName}.katex.html`);
-    const refLambdaHtml = path.join(REFERENCE_DIR, `${refBaseName}.lambda.html`);
-
     if (lambdaOutput.html) {
-        let mathLiveScore = null;
-        let katexScore = null;
-        let lambdaScore = null;
-
-        if (fs.existsSync(refMathLiveHtml)) {
-            const refHtml = fs.readFileSync(refMathLiveHtml, 'utf-8');
-            mathLiveScore = compareHTML(lambdaOutput.html, refHtml, 'mathlive');
-        }
-
-        if (fs.existsSync(refKatexHtml)) {
-            const refHtml = fs.readFileSync(refKatexHtml, 'utf-8');
-            katexScore = compareHTML(lambdaOutput.html, refHtml, 'katex');
-        }
-
-        if (fs.existsSync(refLambdaHtml)) {
-            const refHtml = fs.readFileSync(refLambdaHtml, 'utf-8');
-            lambdaScore = compareHTML(lambdaOutput.html, refHtml, 'lambda');
-        }
-
-        if (mathLiveScore && katexScore) {
-            htmlResult = {
-                passRate: Math.max(mathLiveScore.passRate, katexScore.passRate),
-                bestReference: mathLiveScore.passRate >= katexScore.passRate ? 'mathlive' : 'katex',
-                mathliveScore: mathLiveScore.passRate,
-                katexScore: katexScore.passRate,
-                differences: mathLiveScore.passRate >= katexScore.passRate ?
-                    mathLiveScore.differences : katexScore.differences
-            };
-        } else if (mathLiveScore || katexScore) {
-            htmlResult = mathLiveScore || katexScore;
-        } else if (lambdaScore) {
-            htmlResult = lambdaScore;
-        } else {
-            htmlResult = { passRate: 50, differences: [{ issue: 'No HTML reference available' }] };
+        try {
+            htmlResult = await compareMathLiveHtml(lambdaOutput.html, latex, displayMatch != null);
+        } catch (err) {
+            htmlResult = { passRate: 0, differences: [{ issue: `MathLive render failed: ${err.message}` }] };
         }
     } else {
         htmlResult = { passRate: 0, differences: [{ issue: 'Lambda did not produce HTML' }] };
     }
 
-    // Calculate weighted score using extended test formula
-    const weightedScore = calculateTestScore(astResult, htmlResult, dviResult, 'all');
+    // Use the selected active comparison contract. The default HTML contract
+    // matches the script-level static renderer, not the retired CLI artifacts.
+    const weightedScore = calculateTestScore(astResult, htmlResult, dviResult, options.compare);
 
     // Pass if DVI is 100% OR weighted score is 100%
     const weightedPasses = Math.round(weightedScore.overall) >= 100;
@@ -961,13 +954,14 @@ function printResults(results, options) {
 
     // Baseline results
     if (baselineResults.length > 0) {
-        console.log('📂 Baseline Tests (DVI 100% OR Weighted 100%)');
+        console.log('📂 Baseline Tests (HTML 100%)');
         console.log('--------------------------------------------------------------------------------');
 
         for (const result of baselineResults) {
             const icon = result.status === 'passed' ? '✅' :
                         result.status === 'skipped' ? '⏭️' : '❌';
-            const dviScore = result.score.dvi ? result.score.dvi.passRate.toFixed(1) : 'N/A';
+            const htmlScore = result.score.breakdown?.html?.rate;
+            const scoreText = htmlScore != null ? htmlScore.toFixed(1) : 'N/A';
 
             // Show which criterion passed
             let passMethod = '';
@@ -975,11 +969,11 @@ function printResults(results, options) {
                 if (result.score.passedViaDVI) {
                     passMethod = ' (DVI)';
                 } else if (result.score.passedViaWeighted) {
-                    passMethod = ' (Weighted)';
+                    passMethod = ' (HTML)';
                 }
             }
 
-            console.log(`  ${icon} ${result.name.padEnd(30)} DVI: ${dviScore}%${passMethod}`);
+            console.log(`  ${icon} ${result.name.padEnd(30)} HTML: ${scoreText}%${passMethod}`);
 
             if (options.verbose && result.score.dvi?.differences?.length > 0) {
                 for (const diff of result.score.dvi.differences.slice(0, 3)) {
@@ -1010,13 +1004,11 @@ function printResults(results, options) {
                             result.status === 'skipped' ? '⏭️' : '❌';
 
                 // Show component scores if available
-                const ast = result.score.breakdown?.ast?.rate ?? 'N/A';
                 const html = result.score.breakdown?.html?.rate ?? 'N/A';
-                const dvi = result.score.breakdown?.dvi?.rate ?? 'N/A';
                 const overall = result.score.overall;
 
                 if (options.verbose) {
-                    console.log(`     ${icon} ${result.name.padEnd(25)} AST: ${String(ast).padStart(5)}%  HTML: ${String(html).padStart(5)}%  DVI: ${String(dvi).padStart(5)}%  → ${overall.toFixed(1)}%`);
+                    console.log(`     ${icon} ${result.name.padEnd(25)} HTML: ${String(html).padStart(5)}%  → ${overall.toFixed(1)}%`);
                 } else {
                     console.log(`     ${icon} ${result.name.padEnd(25)} → ${overall.toFixed(1)}%`);
                 }
@@ -1061,20 +1053,16 @@ function printResults(results, options) {
     // Component averages
     const validResults = results.filter(r => r.score.breakdown);
     if (validResults.length > 0) {
-        const astAvg = validResults.reduce((sum, r) => sum + (r.score.breakdown?.ast?.rate || 0), 0) / validResults.length;
         const htmlAvg = validResults.reduce((sum, r) => sum + (r.score.breakdown?.html?.rate || 0), 0) / validResults.length;
-        const dviAvg = validResults.reduce((sum, r) => sum + (r.score.breakdown?.dvi?.rate || 0), 0) / validResults.length;
 
         console.log('');
-        console.log('  Component Averages:');
-        console.log(`    AST:  ${astAvg.toFixed(1)}%  (target: 95%)`);
+        console.log('  HTML Average:');
         console.log(`    HTML: ${htmlAvg.toFixed(1)}%  (target: 90%)`);
-        console.log(`    DVI:  ${dviAvg.toFixed(1)}%  (target: 80%)`);
     }
 
     const overallAvg = results.reduce((sum, r) => sum + r.score.overall, 0) / totalTests;
     console.log('');
-    console.log(`  Weighted Average Score: ${overallAvg.toFixed(1)}%`);
+    console.log(`  Overall HTML Score: ${overallAvg.toFixed(1)}%`);
     console.log('================================================================================');
     console.log('');
 }

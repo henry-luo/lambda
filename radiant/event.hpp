@@ -398,7 +398,7 @@ void event_state_log_document(EventStateLog* log, const char* sub_type /* e.g. "
 
 
 
-// CE-3 (Radiant_Design_Content_Editable.md §6.2): complete §6.2 inputType
+// Radiant_Design_Editable.md §13: complete inputType
 // coverage. Entries marked "consumer-issued only" are NOT synthesized by
 // Radiant; they exist so consumers can emit them through the same dispatcher.
 typedef enum InputIntentType {
@@ -1093,7 +1093,7 @@ struct DomBoundary dom_boundary_move(struct DomBoundary b,
 // ===== editing host =====
 
 // EditingHost — central recognition + lookup of `contenteditable` editing
-// hosts. See vibe/radiant/Radiant_Design_Content_Editable.md §4.
+// hosts. See vibe/radiant/Radiant_Design_Editable.md §7.
 //
 // One concept, one resolver: replaces the ad-hoc `contenteditable` reads
 // that used to live in event.cpp (focus / hit-test) and dom_range.cpp
@@ -2440,6 +2440,8 @@ typedef struct DocState {
     uint32_t state_batch_depth; // suppresses assertions during this document's batch mutation
     uint32_t pseudo_state_batch_depth; // coalesces full stylesheet recascades
     bool pseudo_state_restyle_pending;
+    bool hover_styles_active; // previous hover transition matched a :hover rule
+    SelectorMatcher* hover_matcher; // document-pool matcher reused across pointer transitions
     uint32_t text_control_history_guard; // undo/redo recursion guard for this document
     const char* text_edit_history_input_type; // ambient inputType for document history pushes
     uint32_t transition_depth;     // nonzero while state_machine.cpp applies a transition

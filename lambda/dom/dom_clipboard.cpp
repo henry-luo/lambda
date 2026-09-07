@@ -932,7 +932,7 @@ static Item js_make_data_transfer_object(void) {
 }
 JS_FORWARD_ITEM(js_data_transfer_new, (void), js_make_data_transfer_object, ())
 
-// CE-3 follow-up (Radiant_Design_Content_Editable.md §6.1 / §8): build a
+// Radiant_Design_Editable.md §13: build a
 // DataTransfer pre-populated with text/plain and/or text/html records, for
 // the InputEvent {insertFromPaste|insertFromDrop|deleteByDrag} dispatch path.
 // Either string may be null/empty — only non-empty records are added. The

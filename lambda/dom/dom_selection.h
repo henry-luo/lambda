@@ -16,7 +16,7 @@ extern "C" {
 Item dom_create_range(void);
 Item dom_get_selection(void);
 
-// CE-7 (Radiant_Design_Content_Editable.md §6.1, §10): StaticRange
+// Radiant_Design_Editable.md §13: StaticRange
 // constructor. Per Input Events Level 2, `StaticRange` is an immutable
 // snapshot of {startContainer, startOffset, endContainer, endOffset} that
 // does not update under DOM mutation — used by InputEvent.getTargetRanges().

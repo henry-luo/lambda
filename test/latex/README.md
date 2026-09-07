@@ -1,14 +1,14 @@
 # LaTeX Math Test Framework
 
-Multi-layered semantic comparison framework for LaTeX math typesetting in Lambda.
+Static HTML comparison framework for LaTeX math typesetting in Lambda.
 
 ## Overview
 
-This framework compares Lambda's LaTeX math output against multiple references at three abstraction levels:
+This framework compares Lambda's static LaTeX-to-HTML output against MathLive and KaTeX references.
 
-1. **AST Layer (50% weight)**: Structural/semantic correctness via MathLive
-2. **HTML Layer (40% weight)**: Visual representation via MathLive + KaTeX cross-reference
-3. **DVI Layer (10% weight)**: Precise typographic correctness via pdfTeX
+The retired `lambda.exe math --output-*` CLI formerly emitted a MathLive-shaped
+AST and DVI. The supported script-level math package exposes a tree-sitter AST
+and static HTML instead, so the active gate is HTML comparison.
 
 ## Quick Start
 
@@ -19,7 +19,7 @@ make setup-math-tests
 # Run all tests
 make test-math
 
-# Run baseline tests (DVI must pass 100%)
+# Run baseline tests (HTML must pass 100%)
 make test-math-baseline
 
 # Run extended tests (semantic comparison)
@@ -174,47 +174,38 @@ npm run generate:ast        # Generate AST references
 
 ## Lambda Integration
 
-The test runner calls Lambda's math typesetter:
+The test runner renders formulas through Lambda's supported math package:
 
 ```bash
-./lambda.exe math "\\frac{a}{b}" \
-    --output-ast output.ast.json \
-    --output-html output.html \
-    --output-dvi output.dvi
+import math: lambda.package.math.math
+let ast = parse("\\frac{a}{b}", {type: "math", flavor: "latex"})
+let rendered = math.render_display(ast)
 ```
 
-Lambda must implement this command to:
-1. Parse the LaTeX math expression
-2. Generate an AST (JSON format compatible with MathLive structure)
-3. Render HTML output
-4. Generate DVI output
+The runner serializes the rendered element tree to HTML and normalizes Lambda's
+`lm_` CSS prefix to the MathLive reference's `ML__` prefix before comparison.
 
 ## Scoring System
 
 ### Per-Test Score
 
 ```
-Overall Score = (AST × 50%) + (HTML × 40%) + (DVI × 10%)
+Overall Score = HTML comparison score
 ```
 
-- **AST**: Node-level comparison with normalization
 - **HTML**: Element structure comparison (best of MathLive/KaTeX)
-- **DVI**: Glyph position comparison with tolerance
 
 ### Pass Criteria
 
-- **Baseline tests**: 100% DVI match required
-- **Extended tests**: ≥80% overall score (configurable with `--threshold`)
+- **Baseline tests**: 100% HTML match required
+- **Extended tests**: ≥80% HTML score (configurable with `--threshold`)
 
 ### Success Metrics
 
 | Metric | Target |
 |--------|--------|
-| Baseline pass rate | 100% |
-| Extended average | ≥85% |
-| AST component | ≥90% |
-| HTML component | ≥85% |
-| DVI component | ≥75% |
+| Baseline HTML pass rate | 100% |
+| Extended HTML average | ≥85% |
 
 ## Output Format
 
@@ -223,23 +214,23 @@ Overall Score = (AST × 50%) + (HTML × 40%) + (DVI × 10%)
 📊 LaTeX Math Test Results
 ================================================================================
 
-📂 Baseline Tests (DVI must pass 100%)
+📂 Baseline Tests (HTML 100%)
 --------------------------------------------------------------------------------
-  ✅ fracs_basic.tex            DVI: 100.0%
-  ✅ sqrt_basic.tex             DVI: 100.0%
-  ✅ scripts_basic.tex          DVI: 100.0%
+  ✅ fracs_basic.tex            HTML: 100.0%
+  ✅ sqrt_basic.tex             HTML: 100.0%
+  ✅ scripts_basic.tex          HTML: 100.0%
 --------------------------------------------------------------------------------
   Baseline: 3/3 passed (100%)
 
 📂 Extended Tests by Feature Group
 --------------------------------------------------------------------------------
   📁 fracs (3 tests)
-     ✅ fracs_basic.json         AST:  100%  HTML:  100%  DVI:  100%  →  100.0%
-     ✅ fracs_nested.json        AST:   95%  HTML:   92%  DVI:   88%  →   93.3%
+     ✅ fracs_basic.json         HTML:  100%  →  100.0%
+     ✅ fracs_nested.json        HTML:   92%  →   92.0%
      Group Average: 96.7%
 
   📁 scripts (2 tests)
-     ✅ scripts_basic.json       AST:  100%  HTML:  100%  DVI:  100%  →  100.0%
+     ✅ scripts_basic.json       HTML:  100%  →  100.0%
      Group Average: 100.0%
 --------------------------------------------------------------------------------
 
@@ -340,8 +331,7 @@ fi
 - **npm packages**:
   - `jsdom`: HTML parsing
   - `puppeteer`: Browser automation (for MathLive)
-- **Lambda**: Must implement `math` command with `--output-ast`, `--output-html`, `--output-dvi` options
-- **pdfTeX**: For baseline reference DVIs (optional)
+- **Lambda**: `lambda.package.math.math` package
 
 ## Future Enhancements
 

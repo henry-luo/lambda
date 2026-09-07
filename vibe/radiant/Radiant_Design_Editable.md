@@ -16,11 +16,12 @@ ordinary paragraph paste is an explicit exclusion because its upstream core
 delegates that path to browser-native structural editing; Radiant exposes the
 clipboard event but does not recreate that retired default action.
 
+**Historical lineage:** §17.2 consolidates the removed CE1–CE3 design records:
+the editable-host foundation, the later native-legacy-editor pivot, and the
+Chromium structural-corpus program.
+
 **Builds on:**
 
-- [Radiant_Design_Content_Editable.md](../editing/Radiant_Design_Content_Editable.md)
-- [Radiant_Design_Content_Editable2.md](../editing/Radiant_Design_Content_Editable2.md)
-- [Radiant_Design_Content_Editable3.md](../editing/Radiant_Design_Content_Editable3.md)
 - [RAD_15 — Events and Input](../../doc/dev/radiant/RAD_15_Events_Input.md)
 - [RAD_18 — Editing, Selection and DOM Ranges](../../doc/dev/radiant/RAD_18_Editing_Selection_Ranges.md)
 - [RAD_21 — JS Scripting Integration](../../doc/dev/radiant/RAD_21_JS_Scripting_Integration.md)
@@ -1622,7 +1623,27 @@ consumer/default/testdriver adapters that predate the proposed registry.
 These pieces should be retired deliberately rather than kept as a parallel
 compatibility path.
 
-### 17.2 Delete after the corresponding cutover
+### 17.2 CE1–CE3 history (consolidated)
+
+The former `Radiant_Design_Content_Editable*.md` records were consolidated
+here and then removed. They capture useful context for the present decision,
+but none remains an implementation authority.
+
+| Record | Historical decision | What the current design retains / rejects |
+|---|---|---|
+| **CE1** — *Radiant `contenteditable`* (2026-05-19) | Defined the DOM editable-host layer shared by Lambda `edit <…>` templates and JavaScript: standard `contenteditable` modes, focus, `beforeinput` / `input`, composition, clipboard, drag/drop, `inputmode`, `enterkeyhint`, and a curated WPT baseline. It deliberately left source or DOM mutation to the editor consumer and rejected `execCommand`, `queryCommand*`, and `designMode`. | Retain the standard-host, Selection/Range, event-payload, and platform-input requirements. Refine the original consumer dispatch into this document's one editing gate and registered action-owner model. The earlier `data-editable` routing discussion is retired. |
+| **CE2** — *execCommand, Chrome corpus, WPT baseline* (2026-06-15) | Reversed CE1's legacy-API decision. It proposed a built-in native default-action engine for `execCommand` / `queryCommand*` / `designMode`, plus history and a Chromium `editing/` corpus as the primary compatibility program. Its intended event envelope remained `beforeinput` → mutation → `input`. | Retain the need for a single normalized transaction envelope, synthetic-input fidelity, and focused compatibility evidence. Reject the native rich-text command engine and all legacy command APIs: semantic edits are owned by the selected script/template handler, not by Radiant. |
+| **CE3** — *structural Chrome editing corpus plan* (2026-06-18) | Turned CE2's imported Chromium corpus into a broad structural conformance roadmap: a faithful legacy harness, sample-tree selection serialization, a general edit-operation planner, DOM normalization, and capability-by-capability promotion. | The CE3 `test/editing` raw-corpus link and native conformance lane are retired. Retain only the already-derived `test/editor-js/test/tier_f_chromium` fixtures where they express current editor-model behavior. Reject recreating Chromium's structural-editing algorithms, normalization rules, or legacy harness surface as a product contract. The required compatibility target is the explicit capability matrix in §15. |
+
+**Resulting direction.** CE1 identified the durable shared substrate. CE2 and
+CE3 demonstrated that making Radiant a browser-style rich-text editor would
+duplicate the model, command, history, and normalization systems that belong
+to the selected editor. This design therefore keeps one gate, sends
+`beforeinput` and `input` as notifications around one chosen action owner, and
+uses standard `contenteditable` plus existing template ownership to select the
+model-first template or limited DOM-compatibility route.
+
+### 17.3 Delete after the corresponding cutover
 
 | Existing code or artifact | Cleanup | Required replacement/deletion gate |
 |---|---|---|
@@ -1637,14 +1658,15 @@ compatibility path.
 | `JsDomTestdriverMutationArgs`, inert `js_dom_testdriver_rich_mutate()`, and the testdriver's hand-built `EditingTransaction` in `lambda/js/js_dom.cpp` | delete | synthetic keys enter the same platform/automation event path as end-to-end editor input; the testdriver no longer pretends to provide a native edit callback |
 | inert `document.execCommand`/`queryCommand*` cases in the LambdaJS document method/property dispatch tables | delete | the APIs are outside the capability surface and resolve as absent; editor fixtures use model commands or standard Range/DOM operations |
 | `test/ui/editor4b/phase3-no-native-edit.json` as a marker-era regression | replace, then delete | a new gate fixture proves route selection, one action owner, no implicit default, and structured outcome without referring to `data-script-edit` or the deleted native engine |
-| `test/ui/_retired_native_editing/` | extract useful substrate assertions, then delete the obsolete archive | equivalent active tests cover retained event payloads, Selection/Range, clipboard, composition, and observer behavior; no test expects the retired browser-rich algorithms |
+| `test/ui/_retired_native_editing/` | already deleted with the native-engine retirement; do not recreate it | active tests cover retained event payloads, Selection/Range, clipboard, composition, and observer behavior; no test expects the retired browser-rich algorithms |
+| `test/editing` CE3 raw Chromium-corpus symlink | delete | it exercised the retired native structural-editing program; the derived `test/editor-js/test/tier_f_chromium` fixtures remain the distinct current editor-model coverage |
 | stale `test/dedup/exclude.json` regions naming removed/renamed transaction helpers | delete | dedup/lint passes without the exclusions |
 
 Deletion happens in the phase that installs the replacement, not as an
 unrelated pre-cleanup patch. Temporary adapters must be private, marked with
 their removal phase, and must not become a supported API.
 
-### 17.3 Move or rename; preserve the behavior
+### 17.4 Move or rename; preserve the behavior
 
 | Current piece | Disposition |
 |---|---|
@@ -1661,7 +1683,7 @@ Rename a symbol only when its current name encodes a removed ownership or
 transaction assumption; geometry or selection helpers whose meaning remains
 accurate need no churn.
 
-### 17.4 Logs, replay, and documentation
+### 17.5 Logs, replay, and documentation
 
 The current audit records `lambda_handled`,
 `dispatch_input_without_mutation`, and `rich_transaction_*` state. Those
@@ -1682,11 +1704,12 @@ Update the current developer documentation
 `RAD_19_Form_Controls.md`, and
 `diagram/rad18_dispatch_seam.mmd` at cutover. Older `vibe/editing/` phase and
 design records should receive a short “superseded by this proposal” banner
-rather than being rewritten to look historically current. Active Stage 5
+rather than being rewritten to look historically current. The CE1–CE3 history
+is consolidated in §17.2 and its separate records are removed. Active Stage 5
 material that still prescribes `data-editable` must be changed to standard
 `contenteditable` plus the existing template-ownership lookup.
 
-### 17.5 Final removal gates
+### 17.6 Final removal gates
 
 The cleanup is complete only when:
 

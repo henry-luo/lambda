@@ -2309,10 +2309,11 @@ static bool is_unrendered_replaced_dom_child(View* child) {
     }
     if (parent->tag() == MARKUP_NAME_SELECT) {
         NameId child_tag = child->as_element()->tag();
-        // HTML select rendering only exposes its native option tree; arbitrary
-        // DOM children appended to a closed combo box have no rendered node.
-        if (child_tag != MARKUP_NAME_OPTION &&
-            child_tag != MARKUP_NAME_OPTGROUP && child_tag != MARKUP_NAME_HR) {
+        bool is_native_select_child = child_tag == MARKUP_NAME_OPTION ||
+            child_tag == MARKUP_NAME_OPTGROUP || child_tag == MARKUP_NAME_HR;
+        // A form control can retain focused/editing state after a script moves
+        // it into a select, while arbitrary DOM subtrees remain unrendered.
+        if (!is_native_select_child && !child->as_element()->form_control()) {
             return false;
         }
     }
