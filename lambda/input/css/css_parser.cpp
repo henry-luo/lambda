@@ -248,7 +248,7 @@ static CssSelectorType css_functional_pseudo_type(const char* func_name) {
     if (strcmp(func_name, "host") == 0 || strcmp(func_name, "host-context") == 0)
         return CSS_SELECTOR_PSEUDO_IS;               // Shadow DOM — treat like :is()
     if (strcmp(func_name, "slotted") == 0)           return CSS_SELECTOR_PSEUDO_SLOTTED;
-    return CSS_SELECTOR_PSEUDO_NOT;                   // unknown — default fallback
+    return CSS_SELECTOR_PSEUDO_GENERIC;               // unknown to CSS selectors
 }
 
 static bool css_parse_anb_suffix(const CssToken* tokens, int end, int* pos, int* b) {
@@ -1906,8 +1906,9 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                 } else if (strcmp(pseudo_name, "fullscreen") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_FULLSCREEN;
                 } else {
-                    // Accept unknown pseudo-classes but use a generic type
-                    selector->type = CSS_SELECTOR_PSEUDO_HOVER; // default fallback
+                    // preserve unknown names so DOM selector APIs can reject them
+                    // and jQuery can fall back to its Sizzle extension handling.
+                    selector->type = CSS_SELECTOR_PSEUDO_GENERIC;
                     log_debug(" Generic pseudo-class: ':%s'", pseudo_name);
                 }
 

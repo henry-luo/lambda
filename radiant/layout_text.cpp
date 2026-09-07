@@ -2652,7 +2652,6 @@ void line_break(LayoutContext* lycon) {
             used_line_height = css_line_height;
         }
     }
-
     // CSS 2.1 §10.8.1: Fix height of collapsed-content inline elements.
     // CSS 2.1 §9.4.2: Line boxes with no text/content/etc. are zero-height, so
     if (used_line_height > 0 && lycon->line.start_view) {
@@ -2673,6 +2672,7 @@ void line_break(LayoutContext* lycon) {
     if (max_tb > used_line_height) {
         used_line_height = max_tb;
     }
+
     // CSS Writing Modes uses the physical inline-level box width as the
     ViewElement* line_parent_view = lycon->view ? lycon->view->parent_view() : nullptr;
     ViewBlock* line_parent = layout_nearest_block_ancestor(line_parent_view);
@@ -3523,7 +3523,8 @@ static bool collapsed_space_followed_by_fitting_atomic(
         (inline_outer && layout_element_is_replaced(next));
     if (!atomic) return false;
 
-    IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, next);
+    // The fit probe is observational; preserve the surrounding line's sizing context.
+    IntrinsicSizes sizes = layout_measure_intrinsic_widths(lycon, next);
     LayoutIntrinsicMarginPair margins =
         layout_intrinsic_horizontal_margin_pair(lycon, next);
     float separator = layout_measure_space_advance(

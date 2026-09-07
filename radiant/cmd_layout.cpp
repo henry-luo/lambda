@@ -2103,6 +2103,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         dom_doc->js.virtual_clock_enabled = js_host_config->virtual_clock_enabled;
         dom_doc->js.virtual_clock_ms = js_host_config->virtual_clock_ms;
         dom_doc->js.redirect_stdout_to_stderr = js_host_config->redirect_stdout_to_stderr;
+        dom_doc->disable_css_animations = js_host_config->disable_css_animations;
     }
     dom_doc->document_charset = detected_charset;
     // HTML parsing always runs with scripting enabled in the layout loader;
@@ -3434,6 +3435,10 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     CssStylesheet* latex_stylesheet = load_home_stylesheet(
         css_engine, pool, "input/latex/css/article.css", "Lambda LaTeX", "LaTeX stylesheet", false);
+    // The compact article sheet does not follow base.css's @import, so load the
+    // combined faces directly before TeX metrics participate in layout.
+    CssStylesheet* cmu_font_stylesheet = load_home_stylesheet(
+        css_engine, pool, "input/latex/fonts/cmu-combined.css", "Lambda LaTeX", "CMU font stylesheet", false);
     CssStylesheet* katex_stylesheet = load_home_stylesheet(
         css_engine, pool, "input/latex/css/katex.css", "Lambda LaTeX", "KaTeX font stylesheet", false);
 
@@ -3441,10 +3446,10 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
         html_root, dom_root, css_engine, latex_filepath, pool, &inline_stylesheet_count);
 
-    CssStylesheet* latex_stylesheets[2] = {latex_stylesheet, katex_stylesheet};
+    CssStylesheet* latex_stylesheets[3] = {latex_stylesheet, cmu_font_stylesheet, katex_stylesheet};
     int latex_sheet_count = 0;
     CssStylesheet** all_latex_stylesheets = layout_merge_css_sources(
-        pool, latex_stylesheets, 2, inline_stylesheets, inline_stylesheet_count,
+        pool, latex_stylesheets, 3, inline_stylesheets, inline_stylesheet_count,
         &latex_sheet_count);
     layout_apply_css_stylesheets(dom_doc, dom_root, all_latex_stylesheets,
                                  latex_sheet_count, pool, css_engine);
@@ -3452,7 +3457,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     apply_inline_styles_to_tree(dom_root, pool);
 
 
-    store_document_stylesheets(dom_doc, latex_stylesheets, 2,
+    store_document_stylesheets(dom_doc, latex_stylesheets, 3,
                                inline_stylesheets, inline_stylesheet_count, pool);
 
     populate_layout_document(dom_doc, dom_root, html_root, HTML5,
@@ -4834,7 +4839,8 @@ static bool layout_single_file(
         auto_close,
         false,
         0.0,
-        result_stream != nullptr
+        result_stream != nullptr,
+        disable_animations
     };
 
     Url* input_url = url_parse_with_base(input_file, cwd);

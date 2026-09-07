@@ -1022,6 +1022,12 @@ struct DomElement : DomNode {
 
 };
 
+// Generated layout nodes share the live sibling chain but are not DOM element
+// children for CSS structural pseudo-classes.
+static inline bool dom_is_css_element_child(const DomNode* node) {
+    return node && node->is_element() && !node->as_element()->is_synthetic();
+}
+
 // The body is the document-wide editing host for designMode. Keep this DOM
 // tree query below DomElement's definition so core editing code does not need
 // to link against Radiant's event dispatcher just to resolve the host.

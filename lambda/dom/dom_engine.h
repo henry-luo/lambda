@@ -76,6 +76,10 @@ bool dom_engine_event_cascade_active(void);
 void dom_engine_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
 void dom_engine_sync_pseudo_state(void* view, uint32_t pseudo_flag, bool set);
 
+// HTML image loading: the engine owns decoding and intrinsic-image state; the
+// DOM core owns the deferred `load` event and node lifetime around it.
+bool dom_engine_set_image_source(DomElement* element, const char* source);
+
 #ifdef __cplusplus
 }
 #endif

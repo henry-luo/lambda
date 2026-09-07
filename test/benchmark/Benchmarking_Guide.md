@@ -23,7 +23,7 @@ This document describes how to prepare, run, and report Lambda benchmarks across
 | **Kostya** | `kostya/` | 7 | [kostya/benchmarks](https://github.com/kostya/benchmarks) | Community: brainfuck, matmul, base64, JSON |
 | **Larceny** | `larceny/` | 12 | [Larceny/Gabriel](https://www.larcenists.org/) | Gabriel suite: search, symbolic, allocation |
 | **JetStream** | `jetstream/` | 9 | [JetStream](https://browserbench.org/JetStream/) | SunSpider/Octane classics: n-body, deltablue, richards, splay |
-| **Text libraries** (opt-in) | `text/` | 3 | Embedded JS library sources | fast-diff, microdiff, and hyphen core workloads |
+| **Text libraries** (opt-in) | `text/` | 7 | Embedded JS library sources and AST fixture | fast-diff, microdiff, hyphen, Prettier AST, search, merge, and log-pipeline workloads |
 
 **Total: 62 benchmarks**
 

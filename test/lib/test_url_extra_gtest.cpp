@@ -264,6 +264,18 @@ TEST_F(UrlExtraTest, FragmentOnlyRelative) {
     }
 }
 
+TEST_F(UrlExtraTest, EmptyFragmentPreservesDelimiter) {
+    Url* base = url_parse("https://example.com/page.html");
+    ASSERT_NE(base, nullptr);
+
+    Url* resolved = url_resolve_relative("#", base);
+    ASSERT_NE(resolved, nullptr);
+    EXPECT_STREQ(url_get_href(resolved), "https://example.com/page.html#");
+
+    url_destroy(resolved);
+    url_destroy(base);
+}
+
 // Missing test 4: Query only relative
 TEST_F(UrlExtraTest, QueryOnlyRelative) {
     Url* base = url_parse("https://example.com/page.html");

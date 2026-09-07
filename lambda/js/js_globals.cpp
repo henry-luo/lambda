@@ -43,6 +43,7 @@ extern "C" bool js_promise_vmap_is(Item value);
 #include "../../lib/log.h"
 #include "../../lib/utf.h"
 #include <assert.h>
+#include <limits.h>
 #include "../dom/dom.h"
 
 extern "C" Item js_xhr_new(void);
@@ -855,7 +856,7 @@ static Item js_define_property_apply_validated_descriptor(Item obj, Item name,
     JS_ASSIGN_OR_RETURN(nm, get_type_id(name) == LMD_TYPE_STRING ? name : js_to_string(name));
     if (get_type_id(nm) != LMD_TYPE_STRING) return js_status_ok();
     String* nm_s = it2s(nm);
-    if (!nm_s || nm_s->len >= 200) return js_status_ok();
+    if (!nm_s || nm_s->len > (uint32_t)INT_MAX) return js_status_ok();
     const char* nm_chars = nm_s->chars;
     int nm_len = (int)nm_s->len;
 
@@ -1713,6 +1714,14 @@ static bool js_date_parse_iso_ms(String* s, double* out_ms) {
     return true;
 }
 
+static char* js_date_parse_full_month(const char* text, struct tm* tm) {
+    if (!text || !tm) return nullptr;
+    // Date strings used by web libraries commonly spell the month in full and
+    // include a comma; keep this form on the same civil-date path as Date.parse.
+    *tm = {};
+    return strptime(text, "%B %d, %Y %H:%M:%S", tm);
+}
+
 static void js_date_format_year(char* buf, size_t size, int year) {
     if (year < 0) snprintf(buf, size, "-%04d", -year);
     else snprintf(buf, size, "%04d", year);
@@ -1822,6 +1831,7 @@ extern "C" Item js_date_new_from(Item value) {
             }
             struct tm tm = {};
             char* rest = strptime(s->chars, "%Y-%m-%dT%H:%M:%S", &tm);
+            if (!rest) rest = js_date_parse_full_month(s->chars, &tm);
             if (!rest) rest = strptime(s->chars, "%a %b %d %Y %H:%M:%S", &tm);
             if (!rest) rest = strptime(s->chars, "%c", &tm);
             if (rest) {
@@ -2502,6 +2512,7 @@ extern "C" Item js_date_parse(Item str_item) {
         strptime(s->chars, "%a, %d %b %Y %H:%M:%S", &tm) ||
         strptime(s->chars, "%d %b %Y %H:%M:%S", &tm) ||
         strptime(s->chars, "%a %b %d %Y %H:%M:%S", &tm) ||
+        js_date_parse_full_month(s->chars, &tm) ||
         strptime(s->chars, "%c", &tm)) {
         time_t t = timegm(&tm);
         double ms = (double)t * 1000.0;
@@ -8422,12 +8433,7 @@ static Item js_map_own_string_keys(Item object, bool enumerable_only) {
         ShapeEntry* index_entry = (ShapeEntry*)(uintptr_t)index_pairs[i * 2 + 1];
         const char* name = index_entry->name->str;
         int name_len = (int)index_entry->name->length;
-        int copy_len = name_len < 255 ? name_len : 255;
-        char name_buffer[256];
-        memcpy(name_buffer, name, copy_len);
-        name_buffer[copy_len] = '\0';
-        js_array_push(result_root.get(), (Item){.item = s2it(
-            heap_create_name(name_buffer, copy_len))});
+        js_array_push(result_root.get(), js_name_item(name, name_len));
     }
     entry = type_map->shape;
     while (entry) {
@@ -8454,12 +8460,7 @@ static Item js_map_own_string_keys(Item object, bool enumerable_only) {
             skip = true;
         }
         if (!skip) {
-            int copy_len = name_len < 255 ? name_len : 255;
-            char name_buffer[256];
-            memcpy(name_buffer, name, copy_len);
-            name_buffer[copy_len] = '\0';
-            js_array_push(result_root.get(), (Item){.item = s2it(
-                heap_create_name(name_buffer, copy_len))});
+            js_array_push(result_root.get(), js_name_item(name, name_len));
         }
         entry = entry->next;
     }
@@ -8708,15 +8709,13 @@ extern "C" Item js_typed_array_enumerable_custom_keys(Item object) {
 // =============================================================================
 
 struct JsForInSeenEntry {
+    const char* name;
     int len;
-    char name[256];
 };
 
 static void js_for_in_seen_entry_set(JsForInSeenEntry* entry, const char* name, int len) {
-    int nlen = len < 255 ? len : 255;
-    entry->len = nlen;
-    memcpy(entry->name, name, (size_t)nlen);
-    entry->name[nlen] = '\0';
+    entry->name = name;
+    entry->len = len;
 }
 
 static uint64_t js_for_in_seen_hash(const void* item, uint64_t s0, uint64_t s1) {

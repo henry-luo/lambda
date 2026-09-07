@@ -237,11 +237,16 @@ static const TransformFunctionSpec TRANSFORM_FUNCTION_SPECS[] = {
     {"skewX", TRANSFORM_SKEWX},
     {"skewY", TRANSFORM_SKEWY},
     {"matrix", TRANSFORM_MATRIX},
+    {"translate3d", TRANSFORM_TRANSLATE3D},
     {"translateZ", TRANSFORM_TRANSLATEZ},
+    {"scale3d", TRANSFORM_SCALE3D},
+    {"scaleZ", TRANSFORM_SCALEZ},
     {"rotateX", TRANSFORM_ROTATEX},
     {"rotateY", TRANSFORM_ROTATEY},
     {"rotateZ", TRANSFORM_ROTATEZ},
+    {"rotate3d", TRANSFORM_ROTATE3D},
     {"perspective", TRANSFORM_PERSPECTIVE},
+    {"matrix3d", TRANSFORM_MATRIX3D},
 };
 
 static TransformFunctionType transform_function_type(const char* name) {
@@ -289,6 +294,7 @@ static TransformFunction* resolve_transform_function(LayoutContext* lycon,
     const CssValue* arg0 = func->arg_count >= 1 ? func->args[0] : nullptr;
     const CssValue* arg1 = func->arg_count >= 2 ? func->args[1] : nullptr;
     const CssValue* arg2 = func->arg_count >= 3 ? func->args[2] : nullptr;
+    const CssValue* arg3 = func->arg_count >= 4 ? func->args[3] : nullptr;
     switch (type) {
         case TRANSFORM_TRANSLATE:
             resolve_transform_translate_arg(lycon, prop_id, arg0,
@@ -321,6 +327,16 @@ static TransformFunction* resolve_transform_function(LayoutContext* lycon,
             tf->params.scale.x = 1.0f;
             tf->params.scale.y = transform_number_value(arg0, 1.0f);
             break;
+        case TRANSFORM_SCALE3D:
+            tf->params.scale3d.x = transform_number_value(arg0, 1.0f);
+            tf->params.scale3d.y = transform_number_value(arg1, 1.0f);
+            tf->params.scale3d.z = transform_number_value(arg2, 1.0f);
+            break;
+        case TRANSFORM_SCALEZ:
+            tf->params.scale3d.x = 1.0f;
+            tf->params.scale3d.y = 1.0f;
+            tf->params.scale3d.z = transform_number_value(arg0, 1.0f);
+            break;
         case TRANSFORM_ROTATE:
         case TRANSFORM_SKEWX:
         case TRANSFORM_SKEWY:
@@ -333,6 +349,12 @@ static TransformFunction* resolve_transform_function(LayoutContext* lycon,
             tf->params.skew.x = resolve_transform_angle(arg0);
             tf->params.skew.y = resolve_transform_angle(arg1);
             break;
+        case TRANSFORM_ROTATE3D:
+            tf->params.rotate3d.x = transform_number_value(arg0);
+            tf->params.rotate3d.y = transform_number_value(arg1);
+            tf->params.rotate3d.z = transform_number_value(arg2);
+            tf->params.rotate3d.angle = resolve_transform_angle(arg3);
+            break;
         case TRANSFORM_MATRIX:
             tf->params.matrix.a = 1.0f;
             tf->params.matrix.d = 1.0f;
@@ -344,6 +366,13 @@ static TransformFunction* resolve_transform_function(LayoutContext* lycon,
                 tf->params.matrix.d = transform_number_value(func->args[3]);
                 tf->params.matrix.e = transform_number_value(func->args[4]);
                 tf->params.matrix.f = transform_number_value(func->args[5]);
+            }
+            break;
+        case TRANSFORM_MATRIX3D:
+            if (func->arg_count >= 16) {
+                for (int i = 0; i < 16; i++) {
+                    tf->params.matrix3d[i] = transform_number_value(func->args[i]);
+                }
             }
             break;
         case TRANSFORM_TRANSLATE3D:

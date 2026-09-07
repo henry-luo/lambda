@@ -273,11 +273,16 @@ static void apply_html_body_margin_attribute(LayoutContext* lycon, ViewBlock* bl
     float value = strview_to_int(&view);
     if (value < 0.0f) return;
     BoundaryProp* boundary = block->boundary_mut();
+    // HTML presentational hints are author-origin declarations with zero
+    // specificity; the later UA-margin refresh must not replace them.
+    static constexpr int64_t HTML_PRESENTATIONAL_HINT_SPECIFICITY = 0;
     if (pair) {
-        radiant_spacing_set_pair(&boundary->margin, first, second, value);
+        radiant_spacing_set_pair(&boundary->margin, first, second, value,
+            HTML_PRESENTATIONAL_HINT_SPECIFICITY);
     } else {
         *radiant_spacing_value(&boundary->margin, first) = value;
-        *radiant_spacing_specificity(&boundary->margin, first) = -1;
+        *radiant_spacing_specificity(&boundary->margin, first) =
+            HTML_PRESENTATIONAL_HINT_SPECIFICITY;
     }
 }
 

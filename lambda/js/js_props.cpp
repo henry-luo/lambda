@@ -971,7 +971,7 @@ static Item js_define_own_property_from_descriptor_impl(Item object,
                                                         bool is_new_property,
                                                         bool existing_accessor) {
     if (!pd) return js_status_ok();
-    if (name_len < 0 || name_len >= 240) return js_status_ok();
+    if (name_len < 0) return js_status_ok();
     if (js_is_resting_error(object) &&
         !js_props_error_standard_field(name, name_len)) {
         // Error carriers store ordinary user properties in a side Map; writing

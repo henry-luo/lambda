@@ -821,7 +821,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 size_t probe_size = fread(probe_buf, 1, sizeof(probe_buf), svg_probe);
                 fclose(svg_probe);
                 // Network cache files do not preserve extensions; declared
-                // .png/.jpg resources must keep browser-like type handling.
+                // raster resources keep their URL-selected decoder.
                 is_svg = is_svg_content(probe_buf, probe_size);
             }
         }

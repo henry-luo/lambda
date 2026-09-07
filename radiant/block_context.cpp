@@ -319,8 +319,11 @@ BlockContextOffset block_context_offset_to_bfc(ViewElement* view, BlockContext* 
     ViewBlock* bfc_elem = bfc->establishing_element;
     ViewElement* walker = view;
     while (walker && walker != bfc_elem) {
-        offset.x += walker->x;
-        offset.y += walker->y;
+        // inline wrappers do not add a block-formatting offset to float geometry.
+        if (walker->is_block()) {
+            offset.x += walker->x;
+            offset.y += walker->y;
+        }
         walker = walker->parent_view();
     }
     return offset;

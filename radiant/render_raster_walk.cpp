@@ -48,6 +48,15 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
     if (!rdcon || !block) return;
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_DISPATCH);
 
+    if (block->tag_id == MARKUP_NAME_SVG) {
+        // MathLive positions a percentage-sized SVG inside a zero-height VList
+        // row. Its marker can miss the viewport even though the clipped SVG
+        // paint is visible, so dispatch it before generic block culling.
+        if (block->bound) render_bound(rdcon, block);
+        render_raster_profile_block(rdcon, block, render_inline_svg, RENDER_PROFILE_SVG);
+        return;
+    }
+
     if (render_block_viewport_misses(rdcon, block)) {
         return;
     }
@@ -62,11 +71,6 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
     if (block->form_control()) {
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_block_view for form control");
         render_block_view(rdcon, block);
-    }
-    else if (block->tag_id == MARKUP_NAME_SVG) {
-        if (block->bound) { render_bound(rdcon, block); }
-        if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_inline_svg for inline SVG");
-        render_raster_profile_block(rdcon, block, render_inline_svg, RENDER_PROFILE_SVG);
     }
     else if (block->embed && block->embedp()->img) {
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_image_view");
@@ -111,6 +115,16 @@ static void render_raster_walk_inline(void* vctx, ViewSpan* span, float abs_x, f
     RenderContext* rdcon = (RenderContext*)vctx;
     if (!rdcon || !span) return;
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_DISPATCH);
+
+    ViewBlock* block = lam::unsafe_view_block_api_span(span);
+    if (block && block->tag_id == MARKUP_NAME_SVG) {
+        // Inline SVG is represented by a ViewSpan, not a block View. Its
+        // replaced-element paint must use the SVG raster path before the
+        // ordinary inline walker recurses into its non-rendered DOM children.
+        render_raster_profile_block(rdcon, block, render_inline_svg, RENDER_PROFILE_SVG);
+        return;
+    }
+
     auto tiv1 = std::chrono::high_resolution_clock::now();
     render_inline_view(rdcon, span);
     auto tiv2 = std::chrono::high_resolution_clock::now();
