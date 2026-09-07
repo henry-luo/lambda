@@ -352,6 +352,14 @@ static void range_check_cross_root_drop(DomRange* r) {
 
 static void resync_selection_after_mutation(DocState* state);
 
+// A DOM-only test target does not link the editable waist.  Its weak default
+// keeps ordinary Range mutations unchanged; the waist supplies the strong
+// document-owned transaction predicate while an inverse journal is active.
+extern "C" __attribute__((weak)) bool dom_mutation_transaction_active(
+        DocState* /*state*/) {
+    return false;
+}
+
 // After a boundary mutation, ensure start <= end. If not, collapse the
 // other end to match (per spec: "If range's start is after its end, set
 // the other boundary to the same point as the changed boundary.")
@@ -698,8 +706,13 @@ static void sync_anchor_focus(DomSelection* s, bool forward) {
         if (!collapsed) direction = forward ? DOM_SEL_DIR_FORWARD : DOM_SEL_DIR_BACKWARD;
     }
 
-    bool changed = !selection_notification_snapshot_matches(s, direction);
     s->direction = direction;
+    // A generic DOM transaction still updates live Range endpoints, but it
+    // publishes Selection only after the inverse journal has committed. This
+    // prevents an allocation/stale failure from queuing selectionchange for a
+    // state the transaction later restores (D7.2.5).
+    if (dom_mutation_transaction_active(s->state)) return;
+    bool changed = !selection_notification_snapshot_matches(s, direction);
     if (changed) {
         selection_notification_snapshot_store(s, direction);
         notify_selection_changed(s);
@@ -958,6 +971,16 @@ static void resync_selection_after_mutation(DocState* state) {
     dom_state_invalidate_all_range_layouts(state);
 }
 
+extern "C" void dom_mutation_transaction_resync(DocState* state) {
+    resync_selection_after_mutation(state);
+}
+
+static inline void resync_selection_after_visible_mutation(DocState* state) {
+    if (!dom_mutation_transaction_active(state)) {
+        resync_selection_after_mutation(state);
+    }
+}
+
 // Apply boundary adjustments after `child` is removed from `parent` at `index`.
 // Per spec:
 //   - Endpoint inside the removed subtree (inclusive descendant of child):
@@ -1074,7 +1097,7 @@ void dom_mutation_pre_remove(DocState* state, DomNode* child) {
         }
     }
     normalize_selection_after_atomic_remove(state, parent, child, index);
-    resync_selection_after_mutation(state);
+    resync_selection_after_visible_mutation(state);
 }
 
 static void dom_range_pre_remove(DocState* state, DomNode* child) {
@@ -1100,7 +1123,7 @@ void dom_mutation_post_insert(DocState* state, DomNode* parent, DomNode* node) {
             r->layout_valid = false;
         }
     }
-    resync_selection_after_mutation(state);
+    resync_selection_after_visible_mutation(state);
 }
 
 void dom_mutation_text_replace_data(DocState* state, DomText* text,
@@ -1108,7 +1131,7 @@ void dom_mutation_text_replace_data(DocState* state, DomText* text,
                                     uint32_t replacement_len) {
     if (!state || !text) return;
     DomRange** head = dom_range_state_live_ranges_slot(state);
-    if (!head) { resync_selection_after_mutation(state); return; }
+    if (!head) { resync_selection_after_visible_mutation(state); return; }
 
     // range retention keeps endpoints after inserted replacement
     // text; otherwise retained selections would point before freshly inserted
@@ -1133,7 +1156,7 @@ void dom_mutation_text_replace_data(DocState* state, DomText* text,
         adjust(&r->end);
         r->layout_valid = false;
     }
-    resync_selection_after_mutation(state);
+    resync_selection_after_visible_mutation(state);
 }
 
 void dom_mutation_text_split(DocState* state, DomText* original,
@@ -1158,7 +1181,7 @@ void dom_mutation_text_split(DocState* state, DomText* original,
     if (new_node->parent) {
         dom_mutation_post_insert(state, new_node->parent, static_cast<DomNode*>(new_node));
     } else {
-        resync_selection_after_mutation(state);
+        resync_selection_after_visible_mutation(state);
     }
 }
 
@@ -1179,7 +1202,7 @@ void dom_mutation_text_merge(DocState* state, DomText* prev,
             r->layout_valid = false;
         }
     }
-    resync_selection_after_mutation(state);
+    resync_selection_after_visible_mutation(state);
 }
 
 // ============================================================================

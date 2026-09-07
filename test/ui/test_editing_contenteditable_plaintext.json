@@ -1,0 +1,13 @@
+{
+  "name": "Plaintext-only contenteditable uses descriptor policy",
+  "html": "test/html/editable-dom-plaintext.html",
+  "viewport": { "width": 480, "height": 180 },
+  "events": [
+    { "type": "set_editing_selection", "target": { "selector": "#surface" }, "start": 0, "end": 4 },
+    { "type": "click", "target": { "selector": "#format" } },
+    { "type": "assert_text", "target": { "selector": "#out" }, "equals": "false:false|seed" },
+    { "type": "set_editing_selection", "target": { "selector": "#surface" }, "start": 1, "end": 3 },
+    { "type": "click", "target": { "selector": "#text" } },
+    { "type": "assert_text", "target": { "selector": "#out" }, "equals": "true|sXd" }
+  ]
+}

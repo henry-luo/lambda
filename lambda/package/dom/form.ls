@@ -16,6 +16,7 @@ import focus: lambda.package.dom.focus
 import mouse: lambda.package.dom.mouse
 import dom_edit: lambda.package.dom.dom_edit
 import commands: lambda.package.dom.commands
+import design_mode: lambda.package.dom.edit_design_mode
 import submit: lambda.package.dom.submit
 import details: lambda.package.dom.details
 import keyboard: lambda.package.dom.keyboard
@@ -579,10 +580,15 @@ on scrollbarpress(evt) { scroll.scrollbar_press(evt) }
 on focuskey(evt) { focus.navigate(~, evt) }
 // F13: editing a plain contenteditable, the DOM twin of the text-control applier.
 on domedit(evt) { dom_edit.apply_fn(~, evt) }
+// D7.2.5: queryCommand* reads the package command descriptor.  It returns its
+// scalar directly through the behavior boundary and has no default mutation.
+on editquery(evt) { commands.query(~, evt) }
 // F14.1: the legacy command surface. Behavior-only — `document.execCommand` is
 // a method call, not an event — and document-scoped for the same reason the IME
 // session is: it addresses whatever the one selection currently covers.
 on execcommand(evt) { commands.exec(~, evt) }
+// The document binding forwards the raw IDL value to this package operation.
+on designmode(evt) { design_mode.set_mode(~, evt.data) }
 on compositionstart(evt)  { ime.begin(~) }
 on compositionupdate(evt) { ime.update(~, evt, null) }
 on compositionend(evt)    { ime.end(~) }

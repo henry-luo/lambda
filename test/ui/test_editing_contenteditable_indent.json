@@ -1,0 +1,13 @@
+{
+  "name": "Contenteditable indent and outdent use generic list moves",
+  "html": "test/html/editable-dom-indent.html",
+  "viewport": { "width": 640, "height": 240 },
+  "events": [
+    { "type": "set_editing_selection", "target": { "selector": "#second" }, "start": 0, "end": 3 },
+    { "type": "click", "target": { "selector": "#indent" } },
+    { "type": "assert_text", "target": { "selector": "#out" }, "equals": "indent:true|<li id=\"first\">one<ul><li id=\"second\">two</li></ul></li>" },
+    { "type": "set_editing_selection", "target": { "selector": "#second" }, "start": 0, "end": 3 },
+    { "type": "click", "target": { "selector": "#outdent" } },
+    { "type": "assert_text", "target": { "selector": "#out" }, "equals": "outdent:true|<li id=\"first\">one</li><li id=\"second\">two</li>" }
+  ]
+}

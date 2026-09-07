@@ -1,0 +1,24 @@
+<!doctype html>
+<body>
+  <div id="surface" contenteditable="plaintext-only">seed</div>
+  <button id="format">format</button>
+  <button id="text">text</button>
+  <div id="out"></div>
+  <script>
+    const surface = document.getElementById('surface');
+    const out = document.getElementById('out');
+    // Toolbar activation must retain the editable selection the command uses.
+    function retainSelection(event) { event.preventDefault(); }
+    document.getElementById('format').addEventListener('mousedown', retainSelection);
+    document.getElementById('text').addEventListener('mousedown', retainSelection);
+    document.getElementById('format').onclick = () => {
+      const enabled = document.queryCommandEnabled('bold');
+      const applied = document.execCommand('bold', false, '');
+      out.textContent = `${enabled}:${applied}|${surface.innerHTML}`;
+    };
+    document.getElementById('text').onclick = () => {
+      const applied = document.execCommand('insertText', false, 'X');
+      out.textContent = `${applied}|${surface.innerHTML}`;
+    };
+  </script>
+</body>

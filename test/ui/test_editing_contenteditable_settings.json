@@ -1,0 +1,16 @@
+{
+  "name": "Contenteditable document settings persist in the package session",
+  "html": "test/html/editable-dom-settings.html",
+  "viewport": {"width": 640, "height": 160},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_settings ==="},
+    {"type": "click", "target": {"selector": "#initial"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "initial:true:false:div"},
+    {"type": "click", "target": {"selector": "#style"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "style:true:true"},
+    {"type": "click", "target": {"selector": "#legacy"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "legacy:true:false"},
+    {"type": "click", "target": {"selector": "#separator"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "separator:true:p"}
+  ]
+}

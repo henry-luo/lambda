@@ -1,0 +1,15 @@
+{
+  "name": "Contenteditable copy cut and paste use package clipboard policy",
+  "html": "test/html/editable-dom-clipboard.html",
+  "viewport": { "width": 640, "height": 240 },
+  "events": [
+    { "type": "set_editing_selection", "target": { "selector": "#surface" }, "start": 0, "end": 4 },
+    { "type": "key_combo", "key": "c", "mods_str": "super" },
+    { "type": "assert_clipboard", "mime": "text/plain", "equals": "seed" },
+    { "type": "key_combo", "key": "x", "mods_str": "super" },
+    { "type": "assert_text", "target": { "selector": "#surface" }, "equals": "text" },
+    { "type": "assert_clipboard", "mime": "text/plain", "equals": "seed" },
+    { "type": "key_combo", "key": "v", "mods_str": "super" },
+    { "type": "assert_text", "target": { "selector": "#surface" }, "equals": "seedtext" }
+  ]
+}

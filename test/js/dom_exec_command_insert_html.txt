@@ -4,4 +4,4 @@ text:seed-html
 bold:-html
 notified:true
 collapsed:true
-unsupported:false
+unsupported:true

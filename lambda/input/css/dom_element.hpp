@@ -322,6 +322,10 @@ struct DomDocument {
     // controls never pays for the walk.
     bool behavior_init_pending;
 
+    // designMode is document editing state, not a property of whichever JS
+    // realm happens to be active when native input resolves its host (D7.2.5).
+    bool design_mode;
+
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -346,7 +350,8 @@ struct DomDocument {
                     pending_scroll_into_view_center(false),
                     mutation_epoch(0), page_kind(DOM_PAGE_KIND_UNKNOWN), js_has_dom_realm(false),
                     js_realm_released_after_load(false), dom_package_loaded(false),
-                    owns_script_runtime(false), behavior_init_pending(false) {}
+                    owns_script_runtime(false), behavior_init_pending(false),
+                    design_mode(false) {}
 
     bool init(Input* input);
     void destroy();
@@ -531,6 +536,14 @@ struct FragmentUnion {
     float min_x, max_x, min_y, max_y;
 };
 
+// Dynamic DOM nodes have no Mark-backed Element.  Their attributes therefore
+// live in document-pool storage while retaining the same public DOM API as
+// parsed nodes.
+struct DomSyntheticAttribute {
+    const char* name;
+    const char* value;
+};
+
 // tier-1: doc-pool, survives relayout
 struct DomElementExt {
     NameId name_id;
@@ -559,6 +572,9 @@ struct DomElementExt {
     bool has_inline_cb_edge_snapshot;
     const char** attribute_names_cache;
     int attribute_names_capacity;
+    DomSyntheticAttribute* synthetic_attributes;
+    int synthetic_attribute_count;
+    int synthetic_attribute_capacity;
     // Layout-only ruby column geometry. This lives outside InlineProp because
     // computed inline styles may be absent or canonicalized across elements.
     float ruby_column_anchor_x;
@@ -1005,6 +1021,23 @@ struct DomElement : DomNode {
     }
 
 };
+
+// The body is the document-wide editing host for designMode. Keep this DOM
+// tree query below DomElement's definition so core editing code does not need
+// to link against Radiant's event dispatcher just to resolve the host.
+inline DomElement* dom_document_body_element(DomDocument* document) {
+    DomElement* root = document ? document->root : nullptr;
+    if (!root) return nullptr;
+    if (root->tag_name && strcmp(root->tag_name, "body") == 0) return root;
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* element = child->as_element();
+        if (element && element->tag_name && strcmp(element->tag_name, "body") == 0) {
+            return element;
+        }
+    }
+    return nullptr;
+}
 
 // Live selectedness belongs to the DOM node, not to a particular scripting
 // guest.  Rendering and every guest must observe the same native state.

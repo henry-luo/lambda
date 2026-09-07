@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "corpus": "chromium-editing",
+  "upstream_revision": "c1d95c342fe4541d24be5833dabe3698c7a2a40d",
+  "root": "../lambda-test/editing",
+  "inventory": "selected",
+  "require_clean_worktree": true,
+  "runner": "test_chromium_contenteditable_gtest.exe",
+  "corpus_artifacts": [
+    {
+      "path": "MANIFEST",
+      "sha256": "41571528473532809c5a98e28465df05ca5346c0d49b9dd796cd85308f40cfb9"
+    },
+    {
+      "path": "RUNNABLE",
+      "sha256": "9dec8c0fbaf498201bfd207c7b517210a5c4c85aaaed5bc4c3879949471a8b54"
+    }
+  ],
+  "entries": [
+    {
+      "path": "selection/basic-selection.html",
+      "sha256": "6fc9d6258e136f7838a67549f7c84887e11c7bb8421fc7be6a63112ce3529e64",
+      "family": "selection",
+      "kind": "automated-dom",
+      "disposition": "required",
+      "runner": "test_chromium_contenteditable_gtest.exe"
+    },
+    {
+      "path": "selection/selectNode.html",
+      "sha256": "6b9a147d7f1055473c66a1022cd5acdafb6e69e19ff8af257dd2872b3dbbb69a",
+      "family": "selection",
+      "kind": "automated-dom",
+      "disposition": "required",
+      "runner": "test_chromium_contenteditable_gtest.exe"
+    },
+    {
+      "path": "selection/selectNodeContents.html",
+      "sha256": "ea5a6910a3f34dbf2a94c4878310a60215745420080f9ca6104bbd8633f049b8",
+      "family": "selection",
+      "kind": "automated-dom",
+      "disposition": "required",
+      "runner": "test_chromium_contenteditable_gtest.exe"
+    },
+    {
+      "path": "execCommand/bold-basic.html",
+      "sha256": "046bf411e305dba4751c90ec07820851326f716b3536a0218037311e3532d14e",
+      "family": "command",
+      "kind": "automated-dom",
+      "disposition": "required",
+      "runner": "test_chromium_contenteditable_gtest.exe"
+    }
+  ],
+  "not_yet_promoted": {
+    "disposition": "not-yet-promoted",
+    "reason": "The remaining pinned Chromium corpus needs a no-emulation protocol adapter for each legacy test flavor before it can be counted.",
+    "corpus_files": 3561,
+    "html_files": 2751
+  }
+}

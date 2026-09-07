@@ -40,7 +40,9 @@ fn editor_attrs(item) {
 fn mark_to_editor(item) {
   if (type(item) == string) { text(item) }
   else if (type(item) == element) {
-    let kids = [for (i in 0 to len(item) - 1) mark_to_editor(item[i])]
+    // Element indexing includes its optional value slot; semantic model
+    // children come from content() so absent slots never become text "null".
+    let kids = [for (child in content(item)) mark_to_editor(child)]
     let tag = if (name(item) == 'code' and len(kids) == 1 and is_text(kids[0]) and kids[0].text.contains("\n")) { 'code_block' } else { name(item) }
     node_attrs(tag, editor_attrs(item), kids)
   }

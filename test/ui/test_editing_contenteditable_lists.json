@@ -1,0 +1,14 @@
+{
+  "name": "Contenteditable list toggling uses package-selected core tree steps",
+  "html": "test/html/editable-dom-lists.html",
+  "viewport": {"width": 640, "height": 140},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_lists ==="},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 0, "end": 4},
+    {"type": "click", "target": {"selector": "#list"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "true|<ul><li><p>item</p></li></ul>"},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 0, "end": 4},
+    {"type": "click", "target": {"selector": "#list"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "true|<p>item</p>"}
+  ]
+}

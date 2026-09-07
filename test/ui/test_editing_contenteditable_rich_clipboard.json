@@ -1,0 +1,11 @@
+{
+  "name": "Contenteditable rich paste preserves package-selected HTML",
+  "html": "test/html/editable-dom-rich-clipboard.html",
+  "viewport": { "width": 640, "height": 240 },
+  "events": [
+    { "type": "set_editing_selection", "target": { "selector": "#surface" }, "start": 0, "end": 0 },
+    { "type": "paste_text", "target": { "selector": "#surface" }, "text": "rich", "html": "<strong>rich</strong>" },
+    { "type": "assert_text", "target": { "selector": "#surface" }, "equals": "richtail" },
+    { "type": "assert_text", "target": { "selector": "#surface strong" }, "equals": "rich" }
+  ]
+}

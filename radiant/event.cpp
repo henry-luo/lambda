@@ -44,6 +44,8 @@
 // only need the two-string builder for the paste/drop dispatch path.
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
                                                   const char* text_html);
+extern "C" Item js_data_transfer_new_read_only_with_strings(const char* text_plain,
+                                                              const char* text_html);
 extern Item js_make_number(double value);
 #include "../lib/hashmap.h"           // hashmap utilities used by DocState maps
 #include "../lib/memtrack.h"          // mem_free
@@ -579,15 +581,7 @@ static DomDocument* event_context_target_document(EventContext* evcon) {
 }
 
 DomElement* radiant_document_body_element(DomDocument* doc) {
-    DomElement* root = doc ? doc->root : nullptr;
-    if (!root) return nullptr;
-    if (root->tag() == MARKUP_NAME_BODY) return root;
-    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
-        if (!child->is_element()) continue;
-        DomElement* elem = child->as_element();
-        if (elem && elem->tag() == MARKUP_NAME_BODY) return elem;
-    }
-    return nullptr;
+    return dom_document_body_element(doc);
 }
 
 static void restore_embedded_document_scroll_model(DomDocument* doc) {
@@ -1888,6 +1882,30 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         else mb.putNull("value");
     }
 
+    // A behavior-only operation can carry a value without being either an
+    // edit intent or a legacy command. Preserve that generic transport shape
+    // for package handlers such as document-mode policy (D7.2.5).
+    if (intent && intent->type == INPUT_INTENT_NONE && !intent->command &&
+        intent->data) {
+        mb.put("data", intent->data);
+    }
+
+    // D7.2.5: the package uses this short-lived capability explicitly for
+    // every DOM edit primitive. It is absent from unrelated behavior events.
+    if (intent) {
+        if (intent->edit_invocation_id != 0) {
+            mb.put("edit_token", (int64_t)intent->edit_invocation_id);
+        } else {
+            mb.putNull("edit_token");
+        }
+        if (intent->edit_query_kind) mb.put("edit_query", intent->edit_query_kind);
+        else mb.putNull("edit_query");
+    }
+    // Package records are structural maps: an omitted optional Boolean is an
+    // absent-member error rather than a false value.  Always materialize this
+    // captured host-mode fact so command policy remains a total expression.
+    if (intent) mb.put("edit_plaintext_only", intent->edit_plaintext_only);
+
     // F9: a caret-key notification carries no edit intent either — only the key
     // and modifiers the template maps to an operation.
     if (intent && intent->type == INPUT_INTENT_NONE && intent->key != 0) {
@@ -2601,7 +2619,8 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
                                     const char* event_name, const InputIntent* intent,
                                     TemplateEntry* tmpl, TemplateHandlerEntry* h,
                                     Item model_item, const char* template_ref,
-                                    bool* out_model_reconciled) {
+                                    bool* out_model_reconciled,
+                                    Item* out_result = nullptr) {
     log_debug("invoke_template_handler: invoking '%s' handler on tmpl=%s",
               event_name, tmpl->name ? tmpl->name : tmpl->template_ref);
 
@@ -2660,10 +2679,11 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     // F17: author/UA handlers receive the in-flight host record. When no JS
     // stage created it (a Lambda-only document), create the same record shape
     // here instead of rebuilding a separate Mark map.
-    RootFrame event_roots(1);
+    RootFrame event_roots(2);
     Rooted<Item> event_root(event_roots,
         build_dom_event_record(doc, target, event_name, evcon, intent,
             event_context_dom_event(evcon, event_name)));
+    Rooted<Item> result_root(event_roots, ItemNull);
     Item event_item = event_root.get();
     event_context_set_dom_event(evcon, event_item);
 
@@ -2682,7 +2702,8 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     uint64_t mutation_epoch = edit_bridge_mutation_epoch();
 
     // invoke handler: Item handler(Item model, Item event)
-    Item verdict = call_template_event_handler(h, model_item, event_item);
+    result_root.set(call_template_event_handler(h, model_item, event_item));
+    Item verdict = result_root.get();
     bool declined = handler_verdict_is(verdict, "pass");
     if (evcon && handler_verdict_is(verdict, "prevent-default")) {
         evcon->default_prevented = true;
@@ -2721,6 +2742,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     input_context = saved_input_context;
 
     // a declining handler leaves the event unclaimed so dispatch keeps looking
+    if (out_result) *out_result = result_root.get();
     return !declined;
 }
 
@@ -3010,7 +3032,13 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         const char* env = getenv("RADIANT_DOM_PKG");
         s_enabled = (env && env[0] == '0') ? 0 : 1;
     }
-    if (!s_enabled) { doc->dom_package_loaded = true; return false; }
+    if (!s_enabled) {
+        // D7.2.5: disabling the behavior package makes rich UA editing
+        // unavailable; it must not select a native editing fallback.
+        doc->dom_package_loaded = true;
+        log_info("dom-package: disabled by RADIANT_DOM_PKG; package behavior unavailable");
+        return false;
+    }
 
     // ES12/D8: the package shares a document's one script runtime, whether
     // it was initialized by a Lambda document or an author script. Module
@@ -3299,7 +3327,9 @@ static TemplateEntry* behavior_match_walk(View* target, const char* event_name,
 static bool dispatch_behavior_handler(EventContext* evcon, View* target,
                                       const char* event_name,
                                       const InputIntent* intent,
-                                      bool* out_model_reconciled) {
+                                      bool* out_model_reconciled,
+                                      Item* out_result = nullptr) {
+    if (out_result) *out_result = ItemNull;
     // an author handler that returned 'prevent-default' suppresses UA behavior
     if (evcon && evcon->default_prevented) return false;
     // Attach-time dispatch carries no EventContext; fall back to the element's
@@ -3341,7 +3371,8 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
             Item model = radiant_dom_wrap_node(dom_elem);
             if (get_type_id(model) == LMD_TYPE_NULL) model = elem_item;
             if (invoke_template_handler(evcon, target, event_name, intent,
-                    tmpl, h, model, tmpl->template_ref, out_model_reconciled)) {
+                    tmpl, h, model, tmpl->template_ref, out_model_reconciled,
+                    out_result)) {
                 return true;
             }
             // declined with 'pass': keep looking above the matched element;
@@ -3538,6 +3569,16 @@ extern "C" bool radiant_dispatch_behavior_dom_edit(View* target,
     return dispatch_behavior_handler(nullptr, target, "domedit", intent, nullptr);
 }
 
+// D7.2.5: queries share the package descriptor registry with execution.  The
+// returned scalar is rooted through handler settlement before this seam hands
+// it back to the DOM IDL bridge.
+extern "C" bool radiant_dispatch_behavior_edit_query(View* target,
+                                                       const InputIntent* intent,
+                                                       Item* out_result) {
+    return dispatch_behavior_handler(nullptr, target, "editquery", intent,
+                                     nullptr, out_result);
+}
+
 extern "C" bool radiant_dispatch_behavior_key_intent(View* target,
                                                      const InputIntent* intent) {
     return dispatch_behavior_handler(nullptr, target, "keyintent", intent, nullptr);
@@ -3546,9 +3587,36 @@ extern "C" bool radiant_dispatch_behavior_key_intent(View* target,
 // F14.1: the legacy command seam. Behavior-only and context-free like the two
 // above — `document.execCommand` is a method call, not an event, so there is no
 // EventContext and nothing has been preventDefault'd ahead of it.
+static bool editing_result_claimed(Item result, bool fallback) {
+    if (get_type_id(result) != LMD_TYPE_MAP || !result.map) return fallback;
+    // Package record literals are structural Maps, not runtime VMapped host
+    // objects. Reading the union through `vmap` treated a shape word as a
+    // hashmap pointer and crashed the first execCommand bridge call.
+    Item claimed = map_get(result.map,
+        (Item){.item = s2it(heap_create_name("claimed"))});
+    return get_type_id(claimed) == LMD_TYPE_BOOL && it2b(claimed);
+}
+
 extern "C" bool radiant_dispatch_behavior_exec_command(View* target,
-                                                       const InputIntent* intent) {
-    return dispatch_behavior_handler(nullptr, target, "execcommand", intent, nullptr);
+                                                       const InputIntent* intent,
+                                                       Item* out_result) {
+    Item result = ItemNull;
+    bool matched = dispatch_behavior_handler(nullptr, target, "execcommand", intent,
+                                             nullptr, &result);
+    if (out_result) *out_result = result;
+    // An EditResult is the command bridge contract. Retain the legacy verdict
+    // fallback only for behavior templates that predate the package result.
+    return editing_result_claimed(result, matched);
+}
+
+// designMode is a document IDL operation, not a command alias. It uses the
+// same behavior bridge so native code transports the raw value without
+// deciding its compatibility semantics or editing-host lifecycle (D7.2.5).
+extern "C" bool radiant_dispatch_behavior_design_mode(View* target,
+                                                       const InputIntent* intent,
+                                                       Item* out_result) {
+    return dispatch_behavior_handler(nullptr, target, "designmode", intent,
+                                     nullptr, out_result);
 }
 
 extern "C" const char* radiant_caret_operation_name(void) { return s_caret_op_name; }
@@ -4035,7 +4103,12 @@ static bool event_document_has_js_runtime(EventContext* evcon) {
     // is not a DOM script realm. Test the realm bit the script runner sets
     // rather than the absence of a Lambda runtime: a document may host page JS
     // and Lambda code at once, so runtime presence cannot classify the page.
-    return dom_document_has_js_realm(document);
+    if (dom_document_has_js_realm(document)) return true;
+    // A direct `lambda.exe js --document` evaluation owns a JS context before
+    // the loader can retain it on the document. It is still a real live DOM
+    // realm for synchronous re-entry such as execCommand's post-action input.
+    return document && context && context->js_state &&
+        dom_get_document() == document;
 }
 
 static bool dispatch_contenteditable_event(EventContext* evcon, View* target,
@@ -6545,36 +6618,32 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
         have_range = true;
     }
 
-    if (have_range) {
-        bool prepared = dom_edit_prepare_pending_range(
-            state, canonical_host, start, end);
-        if (!prepared) {
-            return true;
-        }
-    } else if (intent->type == INPUT_INTENT_COMPOSITION_START) {
-        // starting composition reserves state but has no replacement range yet.
-        dom_edit_set_pending_range(state, canonical_host, nullptr, 0, 0,
-                                   nullptr, 0);
-    } else {
+    DomEditInvocation invocation = {};
+    if (have_range && !dom_edit_invocation_begin(state, canonical_host, start,
+                                                  end, &invocation)) {
+        return true;
+    }
+    if (!have_range && intent->type != INPUT_INTENT_COMPOSITION_START) {
         return true;
     }
 
-    uint64_t apply_epoch_before = dom_edit_apply_epoch();
-    bool claimed = radiant_dispatch_behavior_dom_edit(
-        static_cast<View*>(canonical_host), intent);
-    bool applied = dom_edit_apply_epoch() != apply_epoch_before;
-    DomNode* caret_node = dom_edit_caret_node();
-    uint32_t caret_offset = dom_edit_caret_offset_u16();
-    dom_edit_clear_pending_range(state);
-
-    if (applied && caret_node && selection) {
-        const char* exception = nullptr;
-        if (!dom_selection_collapse(selection, caret_node, caret_offset,
-                                    &exception)) {
-            log_error("F14.3: failed to collapse package editing caret: %s",
-                      exception ? exception : "unknown");
-        }
+    InputIntent package_intent;
+    if (!input_intent_clone(intent, &package_intent)) {
+        if (invocation.active) dom_edit_invocation_end(&invocation);
+        return true;
     }
+    package_intent.edit_invocation_id = invocation.id;
+    package_intent.edit_plaintext_only =
+        canonical_surface.mode == EDIT_MODE_PLAINTEXT_ONLY;
+    bool claimed = radiant_dispatch_behavior_dom_edit(
+        static_cast<View*>(canonical_host), &package_intent);
+    if (invocation.active) dom_edit_invocation_commit_selection(&invocation);
+    // Commit is the transaction boundary. Read the edit fact afterwards so a
+    // stale epoch or selection failure cannot synthesize input for rollback.
+    bool applied = invocation.changed;
+    if (invocation.failed) claimed = false;
+    DomNode* caret_node = invocation.caret_node;
+    uint32_t caret_offset = invocation.caret_offset;
 
     if (applied && intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT &&
         caret_node && caret_node->is_text()) {
@@ -6603,6 +6672,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
         state->editing.composition.dom_preedit_len = data_u16;
     }
 
+    if (invocation.active) dom_edit_invocation_end(&invocation);
     if (claimed || applied) {
         bool composition_cancel =
             intent->type == INPUT_INTENT_DELETE_COMPOSITION_TEXT;
@@ -7005,7 +7075,6 @@ static bool input_intent_uses_transfer_payload(InputIntentType type) {
         case INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION:
         case INPUT_INTENT_INSERT_FROM_DROP:
         case INPUT_INTENT_DELETE_BY_DRAG:
-        case INPUT_INTENT_DELETE_BY_CUT:
             return true;
         default:
             return false;
@@ -7040,14 +7109,23 @@ typedef struct {
     const InputIntent* intent;
     EditingSurface surface;
     bool has_surface;
+    // API commands carry the post-edit InputEvent facts selected by the
+    // package. Physical input derives them from the platform intent instead.
+    bool has_event_overrides;
+    const char* input_type_override;
+    const char* data_override;
 } InputEventBuildArgs;
+
+void event_context_cleanup(EventContext* evcon);
 
 static Item build_input_event_item(void* userdata) {
     InputEventBuildArgs* args = (InputEventBuildArgs*)userdata;
-    const char* input_type = input_intent_type_name(args->intent->type);
-    const char* data = input_event_data_for_surface(&args->surface,
-                                                    args->has_surface,
-                                                    args->intent);
+    const char* input_type = args->has_event_overrides
+        ? args->input_type_override : input_intent_type_name(args->intent->type);
+    const char* data = args->has_event_overrides
+        ? args->data_override : input_event_data_for_surface(&args->surface,
+                                                              args->has_surface,
+                                                              args->intent);
 
     EditingTargetRange ranges[1];
     const EditingTargetRange* range_snapshot = nullptr;
@@ -7084,8 +7162,8 @@ static Item build_input_event_item(void* userdata) {
     Item data_transfer = ItemNull;
     if (args->has_surface && editing_surface_is_rich(&args->surface) &&
         input_intent_uses_transfer_payload(args->intent->type)) {
-        data_transfer = js_data_transfer_new_with_strings(args->intent->data,
-                                                          args->intent->html_data);
+        data_transfer = js_data_transfer_new_read_only_with_strings(args->intent->data,
+                                                                     args->intent->html_data);
     }
 
     return js_create_native_input_event(args->type, input_type, data,
@@ -7104,6 +7182,32 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
     InputEventBuildArgs args = {evcon, target, type, intent, surface, has_surface};
     return radiant_dispatch_built_event(evcon, target, build_input_event_item,
         &args, true, nullptr, run_ua_tier, type, intent);
+}
+
+extern "C" bool radiant_dispatch_api_edit_input(DomDocument* document,
+                                                  DomElement* target,
+                                                  const InputIntent* intent,
+                                                  const char* input_type,
+                                                  const char* data) {
+    if (!document || !target || !intent || !input_type) return false;
+    EventContext evcon = {};
+    evcon.dom_event = ItemNull;
+    evcon.dom_event_root_lifetime = true;
+    evcon.target = static_cast<View*>(target);
+    evcon.target_document = document;
+    evcon.ui_context = static_cast<UiContext*>(document->js.host_ui_context);
+    EditingSurface surface;
+    bool has_surface = editing_surface_from_target(static_cast<View*>(target), &surface);
+    InputEventBuildArgs args = {&evcon, static_cast<View*>(target), "input", intent,
+                                 surface, has_surface, true, input_type, data};
+    // execCommand has already completed its package action. Dispatch only the
+    // observable post-action event; running the UA tier here would invoke the
+    // same package descriptor a second time.
+    bool dispatched = false;
+    radiant_dispatch_built_event(&evcon, static_cast<View*>(target),
+        build_input_event_item, &args, false, &dispatched, false, "input", intent);
+    event_context_cleanup(&evcon);
+    return dispatched;
 }
 
 typedef struct {
@@ -8111,14 +8215,10 @@ static bool dispatch_package_keyboard_command(EventContext* evcon,
         if (type == INPUT_INTENT_SELECT_ALL) {
             handled = dispatch_contenteditable_select_all(
                 evcon, state, rich_target, &intent);
-        } else if (type == INPUT_INTENT_COPY) {
-            handled = copy_current_selection_to_clipboard(state, "rich copy");
         } else {
-            if (type == INPUT_INTENT_DELETE_BY_CUT) {
-                if (!copy_current_selection_to_clipboard(state, "rich cut")) {
-                    return false;
-                }
-            }
+            // The package owns rich copy/cut/paste policy.  This common gate
+            // supplies only the public clipboard event and explicit live
+            // invocation; form controls retain their separate value path.
             handled = dispatch_contenteditable_event(evcon, rich_target, &intent);
         }
         if (handled) evcon->need_repaint = true;
@@ -8482,6 +8582,13 @@ bool is_view_focusable(View* view) {
         default:
             // Check for tabindex attribute
             if (elem->get_attribute("tabindex")) return true;
+            // designMode promotes its document body to the rich editing host.
+            // Keep that document-level rule explicit here: the synthetic body
+            // host has no contenteditable attribute to discover (D7.2.5).
+            if (delem->doc && delem->doc->design_mode &&
+                dom_document_body_element(delem->doc) == delem) {
+                return true;
+            }
             // Radiant_Design_Editable.md §7: a contenteditable
             // editing host is implicitly focusable (treated as tabindex=0)
             // when no explicit tabindex is set.

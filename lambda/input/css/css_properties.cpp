@@ -1238,32 +1238,27 @@ bool css_parse_color(const char* value_str, CssColor* color) {
         return false;
     }
 
-    // Handle named colors (simple examples)
-    if (strcmp(value_str, "red") == 0) {
-        color->r = 255; color->g = 0; color->b = 0; color->a = 255;
-        color->type = CSS_COLOR_KEYWORD;
-        color->data.keyword = "red";
-        return true;
-    } else if (strcmp(value_str, "green") == 0) {
-        color->r = 0; color->g = 128; color->b = 0; color->a = 255;
-        color->type = CSS_COLOR_KEYWORD;
-        color->data.keyword = "green";
-        return true;
-    } else if (strcmp(value_str, "blue") == 0) {
-        color->r = 0; color->g = 0; color->b = 255; color->a = 255;
-        color->type = CSS_COLOR_KEYWORD;
-        color->data.keyword = "blue";
-        return true;
-    } else if (strcmp(value_str, "transparent") == 0) {
-        color->r = 0; color->g = 0; color->b = 0; color->a = 0;
-        color->type = CSS_COLOR_TRANSPARENT;
-        return true;
-    } else if (strcmp(value_str, "currentColor") == 0) {
+    CssEnum keyword = css_enum_by_name(value_str);
+    if (keyword == CSS_VALUE_CURRENTCOLOR) {
         color->type = CSS_COLOR_CURRENT;
         return true;
     }
 
-    return false;
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+    uint8_t a = 255;
+    if (!css_named_color_to_rgba(keyword, &r, &g, &b, &a)) return false;
+
+    color->r = r;
+    color->g = g;
+    color->b = b;
+    color->a = a;
+    color->type = keyword == CSS_VALUE_TRANSPARENT
+        ? CSS_COLOR_TRANSPARENT : CSS_COLOR_KEYWORD;
+    const CssEnumInfo* info = css_enum_info(keyword);
+    color->data.keyword = info ? info->name : nullptr;
+    return true;
 }
 
 // ============================================================================

@@ -348,6 +348,10 @@ bool dom_text_set_content(DomText* text_node, const char* text);
  */
 bool dom_text_is_backed(DomText* text_node);
 
+// Find the live text wrapper for a backing String below `parent`, if present.
+// The Mark editor uses this to retain wrapper identity across inline changes.
+DomText* dom_find_text_child(DomElement* parent, String* string_value);
+
 /**
  * Get child index of text node in parent's Lambda Element
  * Validates cached index and rescans if necessary

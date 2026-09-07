@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable structural history</title>
+<div id="surface" contenteditable="true" tabindex="0">bold</div>
+<button id="bold">bold</button>
+<button id="undo">undo</button>
+<button id="redo">redo</button>
+<button id="author">author</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var out = document.getElementById('out');
+  ['bold', 'undo', 'redo', 'author'].forEach(function(id) {
+    document.getElementById(id).addEventListener('mousedown', function(event) {
+      event.preventDefault();
+    });
+  });
+  function report(name, value) {
+    out.textContent = name + ':' + value + ':' +
+      document.queryCommandEnabled('undo') + ':' +
+      document.queryCommandEnabled('redo') + '|' + surface.innerHTML;
+  }
+  document.getElementById('bold').addEventListener('click', function() {
+    report('bold', document.execCommand('bold', false, ''));
+  });
+  document.getElementById('undo').addEventListener('click', function() {
+    report('undo', document.execCommand('undo', false, ''));
+  });
+  document.getElementById('redo').addEventListener('click', function() {
+    report('redo', document.execCommand('redo', false, ''));
+  });
+  document.getElementById('author').addEventListener('click', function() {
+    surface.firstChild.firstChild.data = 'authored';
+    report('author', true);
+  });
+</script>

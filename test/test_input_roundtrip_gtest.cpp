@@ -1391,6 +1391,38 @@ TEST_F(LatexTests, LatexRoundtrip) {
     url_destroy(cwd);
 }
 
+TEST_F(LatexTests, NestedSameNameEnvironmentsParseWithoutErrors) {
+    const char* latex_content = "\\begin{document}\n"
+        "\\begin{itemize}\n"
+        "\\item outer\n"
+        "\\begin{itemize}\n"
+        "\\item inner\n"
+        "\\end{itemize}\n"
+        "\\end{itemize}\n"
+        "\\begin{enumerate}\n"
+        "\\item outer\n"
+        "\\begin{enumerate}\n"
+        "\\item inner\n"
+        "\\end{enumerate}\n"
+        "\\end{enumerate}\n"
+        "\\end{document}";
+
+    String* type_str = create_lambda_string("latex");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("nested.tex", cwd);
+    char* latex_copy = strdup(latex_content);
+
+    Input* parsed_input = input_from_source(latex_copy, dummy_url, type_str, NULL);
+
+    ASSERT_NE(parsed_input, nullptr);
+    EXPECT_FALSE(parsed_input->parse_failed)
+        << "Nested same-name environments must match their corresponding closing token";
+
+    free(latex_copy);
+    url_destroy(dummy_url);
+    url_destroy(cwd);
+}
+
 // RST Tests
 class RstTests : public InputRoundtripTest {};
 

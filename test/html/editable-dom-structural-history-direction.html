@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable structural history direction</title>
+<div id="surface" contenteditable="true" tabindex="0">bold</div>
+<button id="select" type="button">select backward</button>
+<button id="bold" type="button">bold</button>
+<button id="undo" type="button">undo</button>
+<button id="redo" type="button">redo</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var out = document.getElementById('out');
+  ['select', 'bold', 'undo', 'redo'].forEach(function(id) {
+    document.getElementById(id).addEventListener('mousedown', function(event) {
+      event.preventDefault();
+    });
+  });
+  function selection_direction() {
+    var selection = document.getSelection();
+    return selection.anchorOffset + ':' + selection.focusOffset;
+  }
+  function report(name, value) {
+    out.textContent = name + ':' + value + ':' + selection_direction() + '|' +
+      surface.innerHTML;
+  }
+  document.getElementById('select').addEventListener('click', function() {
+    var text = surface.firstChild;
+    document.getSelection().setBaseAndExtent(text, text.data.length, text, 0);
+    report('select', true);
+  });
+  document.getElementById('bold').addEventListener('click', function() {
+    report('bold', document.execCommand('bold', false, ''));
+  });
+  document.getElementById('undo').addEventListener('click', function() {
+    report('undo', document.execCommand('undo', false, ''));
+  });
+  document.getElementById('redo').addEventListener('click', function() {
+    report('redo', document.execCommand('redo', false, ''));
+  });
+</script>

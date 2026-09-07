@@ -3179,6 +3179,32 @@
             "icon": "\ud83e\ude9d"
           },
           {
+            "source": "test/wpt/test_wpt_contenteditable_gtest.cpp",
+            "name": "WPT Contenteditable Tests",
+            "category": "extended",
+            "parallel": false,
+            "dependencies": [],
+            "binary": "test_wpt_contenteditable_gtest.exe",
+            "libraries": [
+              "gtest"
+            ],
+            "requires_lambda_exe": true,
+            "icon": "\u2328\ufe0f"
+          },
+          {
+            "source": "test/chromium/test_chromium_contenteditable_gtest.cpp",
+            "name": "Chromium Contenteditable Tests",
+            "category": "extended",
+            "parallel": false,
+            "dependencies": [],
+            "binary": "test_chromium_contenteditable_gtest.exe",
+            "libraries": [
+              "gtest"
+            ],
+            "requires_lambda_exe": true,
+            "icon": "\u2328\ufe0f"
+          },
+          {
             "source": "test/wpt/test_wpt_form_gtest.cpp",
             "name": "WPT Form Tests",
             "category": "extended",

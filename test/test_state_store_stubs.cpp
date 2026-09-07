@@ -53,6 +53,22 @@ extern "C" void heap_register_gc_root(uint64_t* slot) {
     // render_map's process slot therefore needs no GC registration here.
 }
 
+// The package-state slot is released by DocState teardown. This standalone
+// target has no collecting heap and never populates the slot, so matching the
+// existing registration stub keeps the production lifecycle call linkable.
+extern "C" void heap_unregister_gc_root(uint64_t* slot) {
+    (void)slot;
+}
+
+// Retained DOM deltas live in the production editing waist, which this
+// pool-backed StateStore target deliberately does not link. The fixture never
+// creates one, so its teardown seam only needs to preserve that ownership
+// boundary while exercising the rest of DocState destruction.
+void dom_edit_discard_retained_deltas(DocState* state) {
+    if (!state) return;
+    state->editing.dom_edit_retained_mutations = nullptr;
+}
+
 extern "C" bool heap_register_gc_root_range_for(Context* runtime, uint64_t* base, int count) {
     (void)runtime;
     (void)base;

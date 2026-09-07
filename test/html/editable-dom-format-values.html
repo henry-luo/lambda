@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable legacy format values</title>
+<div id="font" contenteditable="true" tabindex="0">seed</div>
+<div id="css" contenteditable="true" tabindex="0">seed</div>
+<button id="font-name">font</button>
+<button id="style-bold">css bold</button>
+<div id="out"></div>
+<script>
+  var font = document.getElementById('font');
+  var css = document.getElementById('css');
+  var out = document.getElementById('out');
+  ['font-name', 'style-bold'].forEach(function(id) {
+    document.getElementById(id).addEventListener('mousedown', function(event) {
+      event.preventDefault();
+    });
+  });
+  document.getElementById('font-name').addEventListener('click', function() {
+    out.textContent = 'font:' + document.execCommand('fontName', false, 'serif') +
+      ':' + document.queryCommandValue('fontName') + '|' + font.innerHTML;
+  });
+  document.getElementById('style-bold').addEventListener('click', function() {
+    document.execCommand('styleWithCSS', false, true);
+    out.textContent = 'css:' + document.execCommand('bold', false, '') + ':' +
+      document.queryCommandState('bold') + '|' + css.innerHTML;
+  });
+</script>
