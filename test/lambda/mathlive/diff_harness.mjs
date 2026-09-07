@@ -26,6 +26,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   mathlive_to_lambda_classes,
+  render_mathlive_markup,
   render_lambda_math,
 } from './lambda_math_renderer.mjs';
 
@@ -34,10 +35,6 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 const TEMP_DIR = path.join(PROJECT_ROOT, 'temp');
 const LAMBDA = path.join(PROJECT_ROOT, 'lambda.exe');
-const MATHLIVE_SSR_PATH = path.join(
-  PROJECT_ROOT,
-  'ref/mathlive/dist/mathlive-ssr.min.mjs'
-);
 
 // ANSI colors — emit only when stdout is a TTY.
 const COLORS = process.stdout.isTTY
@@ -139,30 +136,11 @@ Options:
 }
 
 // ---------------------------------------------------------------------------
-// MathLive driver — lazy import once.
+// MathLive driver
 // ---------------------------------------------------------------------------
 
-let _mathliveExports = null;
-async function getMathLive() {
-  if (_mathliveExports != null) return _mathliveExports;
-  const mod = await import(MATHLIVE_SSR_PATH);
-  if (
-    typeof mod.convertLatexToMarkup !== 'function' ||
-    typeof mod.validateLatex !== 'function'
-  ) {
-    throw new Error('MathLive SSR bundle missing expected exports.');
-  }
-  _mathliveExports = mod;
-  return mod;
-}
-
 async function renderMathLive(formula, displayMode) {
-  const { convertLatexToMarkup } = await getMathLive();
-  // MathLive's mathstyle option: 'displaystyle' | 'textstyle' | 'scriptstyle' | 'scriptscriptstyle'.
-  const html = convertLatexToMarkup(formula, {
-    mathstyle: displayMode ? 'displaystyle' : 'textstyle',
-    defaultMode: 'math',
-  });
+  const html = await render_mathlive_markup(formula, { display: displayMode });
   return applyClassRename(html);
 }
 

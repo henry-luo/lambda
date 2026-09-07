@@ -11,6 +11,16 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 const DEFAULT_LAMBDA = path.join(PROJECT_ROOT, 'lambda.exe');
 const DEFAULT_SCRIPT = path.join(PROJECT_ROOT, 'temp', 'lambda_math_renderer.ls');
+const MATHLIVE_SSR_PATH = path.join(
+  PROJECT_ROOT,
+  'ref/mathlive/dist/mathlive-ssr.min.mjs'
+);
+const MATHLIVE_MARKUP_SNAPSHOT = path.join(
+  PROJECT_ROOT,
+  'ref/mathlive/test/__snapshots__/markup.test.ts.snap'
+);
+
+let mathlive_exports = null;
 
 export function render_lambda_math(formula, options = {}) {
   const display = options.display ?? true;
@@ -31,7 +41,10 @@ export function render_lambda_math(formula, options = {}) {
     throw new Error(`lambda.exe exited ${result.status ?? result.signal}: ${detail}`);
   }
 
-  return parse_lambda_json(result.stdout);
+  const rendered = parse_lambda_json(result.stdout);
+  const parseError = find_lambda_parse_error(rendered.ast);
+  if (parseError != null) rendered.error = parseError;
+  return rendered;
 }
 
 export function mathlive_to_lambda_classes(html) {
@@ -40,6 +53,30 @@ export function mathlive_to_lambda_classes(html) {
 
 export function lambda_to_mathlive_classes(html) {
   return html.replace(/\blm_/g, 'ML__');
+}
+
+export async function render_mathlive_markup(formula, options = {}) {
+  if (mathlive_exports == null) {
+    mathlive_exports = await import(MATHLIVE_SSR_PATH);
+  }
+  if (typeof mathlive_exports.convertLatexToMarkup !== 'function') {
+    throw new Error('MathLive SSR bundle missing convertLatexToMarkup().');
+  }
+  const mathstyle = (options.display ?? true) ? 'displaystyle' : 'textstyle';
+  return mathlive_exports.convertLatexToMarkup(formula, {
+    mathstyle,
+    defaultMode: 'math',
+  });
+}
+
+export function mathlive_expected_error(formula) {
+  const snapshot = fs.readFileSync(MATHLIVE_MARKUP_SNAPSHOT, 'utf8');
+  const lines = snapshot.split('\n');
+  for (const line of lines) {
+    const match = line.match(/^exports\[`[^/]+\/ (.*) errors 1`\] = `"([^"]+)"`;$/);
+    if (match && unescape_snapshot_latex(match[1]) === formula) return match[2];
+  }
+  return null;
 }
 
 function build_lambda_math_script(formula, display) {
@@ -72,4 +109,24 @@ function parse_lambda_json(stdout) {
       `could not parse Lambda JSON output: ${error.message}\n${output.slice(0, 1000)}`
     );
   }
+}
+
+function find_lambda_parse_error(node) {
+  if (node == null || typeof node !== 'object') return null;
+  if (typeof node.error === 'string') return node.error;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const error = find_lambda_parse_error(child);
+      if (error != null) return error;
+    }
+  }
+  for (const value of Object.values(node)) {
+    const error = find_lambda_parse_error(value);
+    if (error != null) return error;
+  }
+  return null;
+}
+
+function unescape_snapshot_latex(latex) {
+  return latex.replace(/\\\\/g, '\\');
 }

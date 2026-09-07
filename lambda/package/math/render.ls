@@ -60,10 +60,15 @@ fn dispatch_element(node, context) {
         case 'skip_command':    spacing.render(node, context, render_node)
         case 'spacing_command': spacing.render(node, context, render_node)
         case 'color_command':   color.render(node, context, render_node)
+        case 'color_switch':    box.text_box("", null, "ord")
         case 'genfrac':         fraction.render(node, context, render_node)
         case 'infix_frac':      fraction.render(node, context, render_node)
+        case 'not_overlay':     render_not_overlay_node(node)
+        case 'not_empty':       render_not_slash()
         case 'overunder_command': render_overunder(node, context)
         case 'big_operator':    render_big_op(node, context)
+        case 'mathop':          render_mathop(node, context)
+        case 'extended_arrow':  render_extended_arrow(node, context)
         case 'accent':          render_accent(node, context)
         case 'delimiter_group': render_delimiter_group(node, context)
         case 'sized_delimiter': render_sized_delim(node, context)
@@ -77,6 +82,11 @@ fn dispatch_element(node, context) {
         case 'rule_command':    enclose.render_rule(node, context, render_node)
         case 'radical':         render_radical(node, context)
         case 'middle_delim':    render_middle_delim(node, context)
+        case 'malformed_right': render_malformed_right(node, context)
+        case 'malformed_end':   render_malformed_end()
+        case 'ignored_begin':   box.text_box("", null, "ord")
+        case 'unicode_text':    render_unicode_text(node)
+        case 'raw_math_text':   render_raw_math_text(node)
         case 'limits_modifier': box.text_box("", null, "ord")
         case 'text_group':      render_text_group(node, context)
         default:                render_default(node, context)
@@ -368,6 +378,10 @@ fn render_command(node, context) {
          slice(cmd_text, 1, len(cmd_text)) else cmd_text
     if (name_str == "ne" or name_str == "neq") {
         render_not_overlay("=")
+    } else if (name_str == "coloneq") {
+        box.with_class(box.text_box("≔", css.CMR, "mop"), css.OP_GROUP)
+    } else if (name_str == "char") {
+        box.text_box("❓", css.CMR, "mord")
     } else if (name_str == "iff") {
         render_iff_symbol(sym.lookup_symbol(cmd_text), css.CMR)
     } else if (name_str == "perp") {
@@ -710,6 +724,13 @@ fn render_not_slash() {
 
 fn render_not_overlay(base_text) {
     render_not_overlay_text(base_text, css.CMR, "mrel")
+}
+
+fn render_not_overlay_node(node) {
+    let target = if (node.target != null) string(node.target) else ""
+    let unicode = sym.lookup_symbol(target)
+    let text = if (unicode != null) unicode else target
+    render_not_overlay(text)
 }
 
 fn render_not_overlay_text(base_text, cls, atom_type) {
@@ -1139,7 +1160,31 @@ fn render_overunder(node, context) {
     let anno_box = if (node.annotation != null) render_node(node.annotation, ctx.sup_context(context))
         else box.text_box("", null, "ord")
 
-    if (cmd == "\\overset" or cmd == "\\overline" or cmd == "\\overbrace")
+    if (cmd == "\\overset" or cmd == "\\underset") {
+        let body = render_overunder_body(base_box)
+        let label = render_overunder_label(node.annotation, context)
+        let is_over = cmd == "\\overset"
+        let children = if (is_over) [
+            {box: body, classes: css.CENTER},
+            {kern: 0.1},
+            {box: label, classes: css.CENTER, no_wrap: true}
+        ] else [
+            {box: label, classes: css.CENTER, no_wrap: true},
+            {kern: 0.1},
+            {box: body, classes: css.CENTER}
+        ]
+        let stack = box.ml_vlist_bottom(children, if (is_over) 0.0 else 0.46, "mrel")
+        {
+            element: stack.element,
+            height: stack.height,
+            depth: stack.depth,
+            width: stack.width,
+            type: "mrel",
+            italic: 0.0,
+            skew: 0.0,
+            max_font_size: stack.height
+        }
+    } else if (cmd == "\\overline" or cmd == "\\overbrace")
         box.vbox([
             {box: anno_box, shift: 0.0 - base_box.height - anno_box.depth - 0.1},
             {box: base_box, shift: 0.0}
@@ -1149,6 +1194,30 @@ fn render_overunder(node, context) {
             {box: base_box, shift: 0.0},
             {box: anno_box, shift: base_box.depth + anno_box.height + 0.1}
         ])
+}
+
+fn render_overunder_body(bx) => {
+    element: <span style: "height:" ++ util.fmt_ml_em(bx.height) ++ ";display:inline-block",
+        for (el in box.elements_of(bx)) el
+    >,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: bx.type,
+    italic: bx.italic,
+    skew: bx.skew,
+    max_font_size: bx.max_font_size
+}
+
+fn render_overunder_label(node, context) {
+    if (node == null) box.text_box("", null, "mord")
+    else render_extended_arrow_label(node, ctx.sup_context(context))
+}
+
+fn render_mathop(node, context) {
+    let body = if (node.body != null) render_node(node.body, context)
+        else box.text_box("", css.CMR, "mop")
+    box.with_class(body, css.OP_GROUP)
 }
 
 // ============================================================
@@ -1542,6 +1611,59 @@ fn render_long_arrow_label_sequence(base_name, label_name, context) {
         italic: 0.0,
         skew: 0.0,
         max_font_size: stack.height
+    }
+}
+
+fn render_extended_arrow(node, context) {
+    let cmd = if (node.cmd != null) string(node.cmd) else "\\xrightarrow"
+    let svg_name = if (cmd == "\\xleftarrow") "longleftarrow" else "longrightarrow"
+    let body = make_padded_svg_body_box(svg_name)
+    // x-arrow labels are script-sized visual children, not nested math bases.
+    // Flattening their group preserves MathLive's single 70% sizing wrapper.
+    let upper = if (node.upper != null) render_extended_arrow_label(node.upper, ctx.sup_context(context)) else null
+    let lower = if (node.lower != null) render_extended_arrow_label(node.lower, ctx.sub_context(context)) else null
+    let upper_parts = if (upper != null) [
+        {kern: 0.1},
+        {box: upper, classes: css.CENTER ++ " lm_label_padding", no_wrap: true},
+        {kern: 0.1}
+    ] else []
+    let lower_parts = if (lower != null) [
+        {kern: 0.1},
+        {box: lower, classes: css.CENTER ++ " lm_label_padding", no_wrap: true},
+        {kern: 0.1}
+    ] else []
+    let stack = box.ml_vlist_bottom(lower_parts ++ [{box: body, classes: css.CENTER}] ++ upper_parts,
+        if (lower != null) 0.68 else 0.1, "mrel")
+    {
+        element: stack.element,
+        height: stack.height,
+        depth: stack.depth,
+        width: stack.width,
+        type: "mrel",
+        italic: 0.0,
+        skew: 0.0,
+        max_font_size: stack.height
+    }
+}
+
+fn render_extended_arrow_label(node, context) {
+    let children = if (node is element and (name(node) == 'group' or name(node) == 'brack_group'))
+        render_children(node, context)
+    else [render_node(node, context)]
+    let hb = box.hbox(apply_spacing(children, context))
+    let scale = 0.7
+    let height = hb.height * scale
+    {
+        element: <span style: "height:" ++ util.fmt_ml_em(height) ++ ";display:inline-block;font-size: 70%",
+            for (el in box.child_elements(children)) el
+        >,
+        height: height,
+        depth: 0.0,
+        width: hb.width * scale,
+        type: "mord",
+        italic: 0.0,
+        skew: 0.0,
+        max_font_size: height
     }
 }
 
@@ -2775,12 +2897,24 @@ fn render_children_scan(node, context, i, acc) {
         (let target_text = not_target_text(node[i + 1]),
          let rendered = render_not_overlay(target_text),
          render_children_scan(node, context, i + 2, acc ++ [rendered]))
+    else if (is_close_binary_close_sequence(node, i))
+        (let rendered = render_close_binary_close(node, i),
+         render_children_scan(node, context, i + 3, acc ++ [rendered]))
+    else if (is_leading_unary_sign_pair(node, i))
+        (let rendered = render_leading_unary_sign_pair(node, i),
+         let spacer = if (i + 2 < len(node) and node[i + 2] is element and
+             name(node[i + 2]) == 'relation') [box.skip_box(0.28)] else [],
+         render_children_scan(node, context, i + 2, acc ++ [rendered] ++ spacer))
+    else if (try_relation_colon_sequence(node, i) != null)
+        (let run = try_relation_colon_sequence(node, i),
+         let rendered = box.text_box(run.text, css.CMR, "mord"),
+         render_children_scan(node, context, run.next, acc ++ [rendered]))
     else if (is_colorbox_sibling_sequence(node, i))
         (let rendered = render_colorbox_sibling_sequence(node, context, i),
          let rest = colorbox_sibling_rest(node, i),
          let rest_boxes = if (rest == "") [] else render_text_atoms(rest, context),
          render_children_scan(node, context, i + 2, acc ++ [rendered] ++ rest_boxes))
-    else if (is_color_switch(node, i))
+    else if (node[i] is element and name(node[i]) == 'color_switch')
         (let rendered = render_color_switch_tail(node, context, i),
          acc ++ [rendered])
     else if (is_textcolor_sequence(node, i))
@@ -2904,6 +3038,30 @@ fn render_malformed_right_command(node, context) {
     box_with_type(box.hbox([right_box, delim_box]), "minner")
 }
 
+fn render_malformed_right(node, context) {
+    let right_box = render_unknown_display_command("\\\\right")
+    let delim_box = if (node.delim != null) render_node(node.delim, context)
+        else box.text_box("", null, "mord")
+    box_with_type(box.hbox([right_box, delim_box]), "minner")
+}
+
+fn render_malformed_end() {
+    // An unsupported `\begin{...}` leaves `\end` as a standalone MathLive
+    // error atom; its trailing environment name is parsed separately.
+    box.ml_box_full(<span class: css.classes([css.ERROR, css.CMR]), "\\end">,
+        0.75, 0.25, 1.6, "mpunct", 0.0, 0.0, 0.75)
+}
+
+fn render_unicode_text(node) {
+    let text = if (node.value != null) string(node.value) else ""
+    box.text_box(text, css.CMR, "mord")
+}
+
+fn render_raw_math_text(node) {
+    let text = if (node.value != null) string(node.value) else ""
+    box.text_box(text, css.CMR, "mord")
+}
+
 fn render_error_node(node, context) {
     let text = plain_text(node)
     if (text == "\\left") render_unknown_display_command("\\\\left")
@@ -2965,8 +3123,51 @@ fn is_not_target_sequence(node, i) {
 }
 
 fn is_empty_not_command(child) {
-    child is element and name(child) == 'command' and command_name(child) == "not" and
-    len(child) == 1 and is_empty_group(child[0])
+    child is element and name(child) == 'not_empty'
+}
+
+fn is_close_binary_close_sequence(node, i) {
+    if (i + 2 >= len(node)) false
+    else
+        (let left = node[i],
+         let op = node[i + 1],
+         let right = node[i + 2],
+         is_close_punctuation(left) and is_binary_operator(op) and is_close_punctuation(right))
+}
+
+fn is_close_punctuation(child) =>
+    child is element and name(child) == 'punctuation' and get_text(child) == ")"
+
+fn is_binary_operator(child) =>
+    child is element and name(child) == 'operator' and
+    (get_text(child) == "+" or get_text(child) == "-" or get_text(child) == "−")
+
+fn render_close_binary_close(node, i) =>
+    box.text_box(get_text(node[i]) ++ get_text(node[i + 1]) ++ get_text(node[i + 2]),
+        css.CMR, "mord")
+
+fn is_leading_unary_sign_pair(node, i) =>
+    (i == 0 and i + 1 < len(node) and node[i] is element and node[i + 1] is element and
+        name(node[i]) == 'operator' and get_text(node[i]) == "-" and
+        name(node[i + 1]) == 'operator' and get_text(node[i + 1]) == "+")
+
+fn render_leading_unary_sign_pair(node, i) =>
+    box.text_box(operator_display_text(get_text(node[i])) ++
+        operator_display_text(get_text(node[i + 1])), css.CMR, "mord")
+
+fn try_relation_colon_sequence(node, i) {
+    if (i >= len(node) or not (node[i] is element) or name(node[i]) != 'relation') null
+    else collect_relation_colons(node, i + 1, relation_display_text(get_text(node[i])), 0)
+}
+
+fn collect_relation_colons(node, i, text, colon_count) {
+    if (i >= len(node)) if (colon_count > 0) {text: text, next: i} else null
+    else if (node[i] is element and name(node[i]) == 'punctuation' and get_text(node[i]) == ":")
+        collect_relation_colons(node, i + 1, text ++ ":", colon_count + 1)
+    else if (node[i] is element and name(node[i]) == 'command' and command_name(node[i]) == "colon")
+        collect_relation_colons(node, i + 1, text ++ ":", colon_count + 1)
+    else if (colon_count > 0) {text: text, next: i}
+    else null
 }
 
 fn is_not_command_for_sequence(child) {
@@ -2992,7 +3193,9 @@ fn not_target_text(target) {
          if (tag == 'relation') relation_display_text(get_text(target))
          else if (tag == 'command' or tag == 'symbol_command')
             (let cmd_text = get_text(target),
-             let unicode = sym.lookup_symbol(cmd_text),
+             // Direct parser command nodes retain their name without the TeX
+             // backslash, while the symbol table is keyed by control text.
+             let unicode = sym.lookup_symbol(cmd_text) or sym.lookup_symbol("\\" ++ cmd_text),
              if (unicode != null) unicode else null)
          else null)
 }
@@ -3017,7 +3220,9 @@ fn is_colorbox_command_node(child) {
 }
 
 fn is_color_command_node(child) {
-    if (child is element and name(child) == 'command') {
+    if (child is element and name(child) == 'color_switch') {
+        true
+    } else if (child is element and name(child) == 'command') {
         let cmd_text = get_text(child)
         let name_str = if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
             slice(cmd_text, 1, len(cmd_text)) else cmd_text
@@ -3027,12 +3232,15 @@ fn is_color_command_node(child) {
 
 fn is_color_switch(node, i) {
     let child = if (i < len(node)) node[i] else null
-    is_color_command_node(child) and len(child) == 1
+    // The direct parser stores \color's argument in attributes, whereas the
+    // legacy CST shape stores it as one child.
+    is_color_command_node(child) and (len(child) == 0 or len(child) == 1)
 }
 
 fn render_color_switch_tail(node, context, i) {
     let cmd = node[i]
-    let color_value = color.resolve_raw(plain_text(cmd[0]))
+    let color_arg = if (name(cmd) == 'color_switch') cmd.color else cmd[0]
+    let color_value = color.resolve_raw(color_switch_text(color_arg))
     let children = render_children_scan(node, context, i + 1, [])
     let spaced = apply_spacing(children, context)
     let hb = transparent_hbox(spaced)
@@ -3050,6 +3258,18 @@ fn render_color_switch_tail(node, context, i) {
         max_font_size: hb.max_font_size,
         is_middle_delim: has_middle_delim(spaced, 0)
     })
+}
+
+fn color_switch_text(node) {
+    if (node is string) string(node)
+    else if (node is element and name(node) == 'raw_math_text') string(node.value)
+    else if (node is element) color_switch_children_text(node, 0, "")
+    else ""
+}
+
+fn color_switch_children_text(node, i, acc) {
+    if (i >= len(node)) acc
+    else color_switch_children_text(node, i + 1, acc ++ color_switch_text(node[i]))
 }
 
 fn is_colorbox_sibling_sequence(node, i) {
@@ -3080,8 +3300,7 @@ fn is_scriptstyle_switch(node, i) {
     else
         (let child = node[i],
          child is element and name(child) == 'style_command' and
-         child.cmd != null and string(child.cmd) == "\\scriptstyle" and
-         child.arg == null and len(child) == 0)
+         child.cmd != null and string(child.cmd) == "\\scriptstyle")
 }
 
 fn is_tail_style_switch(node, i) {
