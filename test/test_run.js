@@ -81,8 +81,11 @@ const SCRIPT_TESTS = [
     {
         baseName: 'run_lambda_mathlive_markup',
         script: 'test/lambda/mathlive/run_lambda_mathlive_markup.mjs',
-        suite: 'extended',
-        category: 'extended',
+        // Keep the complete MathLive adapter corpus in the Lambda baseline lane;
+        // the adapter report still tracks the upstream 206-case regression set.
+        suite: 'lambda',
+        category: 'baseline',
+        baselineFixtureSource: 'all',
         displayName: 'Lambda MathLive Markup Baseline',
         icon: '🔢',
         runner: 'node',
@@ -512,8 +515,12 @@ function runTest(testInfo) {
         if (testInfo.runner === 'node') {
             command = 'node';
             let scriptArgs = testInfo.args || [];
-            if (baseName === 'run_lambda_mathlive_markup' && targetCategory === 'baseline') {
-                scriptArgs = appendArgValue(scriptArgs, '--fixture-source', 'mathlive');
+            if (targetCategory === 'baseline' && testInfo.baselineFixtureSource) {
+                scriptArgs = appendArgValue(
+                    scriptArgs,
+                    '--fixture-source',
+                    testInfo.baselineFixtureSource
+                );
             }
             testArgs = appendArgValue(scriptArgs, '--report', jsonFile);
             spawnArgs = [scriptPath, ...testArgs];
