@@ -214,22 +214,18 @@ fn render_relation(node, context) {
         let unicode = sym.lookup_symbol(text)
         if (unicode != null) unicode else text
     } else text
-    // The `<`/`>` relation glyphs are emitted RAW by MathLive inside top-level
-    // math `lm_cmr` spans (unlike text-mode `<`/`>`, e.g. inside `\text{...}`,
-    // which it escapes). Carry them as private-use sentinels (U+E000/U+E001)
-    // that the HTML serializer maps back to raw glyphs after entity-escaping
-    // everything else. Skip the sentinel for inline math embedded in text.
-    let raw_lt_gt = context.text_embedded != true
-    let display = if (raw_lt_gt and display0 == "<") "\u{E000}"
-        else if (raw_lt_gt and display0 == ">") "\u{E001}"
-        else display0
+    // Keep relation glyphs as their real characters in the element tree: the
+    // Radiant LaTeX view consumes that tree directly, bypassing HTML escaping.
+    // The serializer preserves MathLive's raw relation-markup form separately.
+    let display = display0
     if (text == "\\iff") render_iff_symbol(display, css.CMR)
     else if (text == "\\perp") render_perp_symbol(display)
     else {
     // ASCII `!` is mclose in TeX math, not mrel — `n!` should typeset
     // without thickspace between the letter and the factorial.
     let atom_type = if (text == "!") "mclose" else "mrel"
-    box.text_box(display, css.CMR, atom_type)
+    let raw_relation = if (context.text_embedded == true) false else true
+    box.text_box(display, css.CMR, atom_type, raw_relation)
     }
     }
 }
