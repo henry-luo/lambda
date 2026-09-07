@@ -33,6 +33,7 @@
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/io/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../lambda/dom/dom.h"      // dom_set_document for HTML event handlers
+#include "../lambda/dom/dom_cssom.h" // live <style> stylesheet synchronization
 #include "../lambda/dom/dom_events.h" // dom_dispatch_event + native event factories
 #include "../lambda/js/js_runtime.h"   // js_new_object / js_set_key_default / js_array_new / js_array_push
 #include "../lambda/js/js_runtime_state.hpp"
@@ -6314,6 +6315,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     auto t0 = high_resolution_clock::now();
     dom_js_mutation_log_records(doc);
+    // CSSOM needs a connected <style>'s sheet during this same script turn;
+    // deferring text-tree changes until load completion loses dynamic keyframes.
+    dom_cssom_sync_mutated_inline_stylesheets(doc);
 
     const char* fallback_reason = "none";
     if (post_html_handler_incremental_rebuild(evcon, doc, t_start, t0,
@@ -6363,13 +6367,11 @@ static void post_html_handler_rebuild(EventContext* evcon,
         view_pool_reset_retained(doc->view_tree);
     }
 
-    // Clear stale layout-pool targets. DOM-backed StateStore entries survive
-    // and are pruned/rebound after relayout below.
+    // CSS animation targets are retained DOM nodes, not view-pool allocations.
+    // Only a detached target is invalid across the layout-resource reset.
     if (state) {
-        // Drop CSS animations/transitions whose View* targets were just freed; relayout
-        // below re-creates them for elements that still have them. Without this, the next
-        // animation_scheduler_tick dereferences a dangling View* (use-after-free).
-        animation_scheduler_remove_views(state->animation_scheduler);
+        animation_scheduler_prune_disconnected_css_views(
+            state->animation_scheduler, doc);
     }
 
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;

@@ -113,6 +113,41 @@ static void add_macos_dirs(FontDatabase* db) {
     }
 }
 
+static int collection_face_index_macos(CFURLRef url, CFStringRef postscript_name) {
+    if (!url || !postscript_name) return 0;
+
+    char path[1024];
+    if (!CFURLGetFileSystemRepresentation(url, true, (UInt8*)path, sizeof(path))) return 0;
+
+    size_t path_len = strlen(path);
+    bool is_collection = (path_len > 4 &&
+        (strcasecmp(path + path_len - 4, ".ttc") == 0 ||
+         strcasecmp(path + path_len - 4, ".otc") == 0));
+    if (!is_collection) return 0;
+
+    CFArrayRef descriptors = CTFontManagerCreateFontDescriptorsFromURL(url);
+    if (!descriptors) return 0;
+
+    int face_index = 0;
+    CFIndex count = CFArrayGetCount(descriptors);
+    for (CFIndex i = 0; i < count; i++) {
+        CTFontDescriptorRef descriptor =
+            (CTFontDescriptorRef)CFArrayGetValueAtIndex(descriptors, i);
+        CFStringRef face_name =
+            (CFStringRef)CTFontDescriptorCopyAttribute(descriptor, kCTFontNameAttribute);
+        if (face_name) {
+            if (CFStringCompare(face_name, postscript_name, 0) == kCFCompareEqualTo) {
+                face_index = (int)i;
+                CFRelease(face_name);
+                break;
+            }
+            CFRelease(face_name);
+        }
+    }
+    CFRelease(descriptors);
+    return face_index;
+}
+
 // CoreText-based font path fallback for macOS
 //
 // IMPORTANT: CTFontDescriptorCreateWithNameAndSize and CTFontCreateWithName both
@@ -120,8 +155,9 @@ static void add_macos_dirs(FontDatabase* db) {
 // requested font is not installed. Callers iterating a font-family list rely on
 // NULL being returned for unknown fonts so they can try the next candidate.
 // We therefore verify the resulting family/PostScript name matches what was asked.
-static char* find_font_path_macos(const char* font_name) {
+static char* find_font_path_macos(const char* font_name, int* out_face_index) {
     if (!font_name) return NULL;
+    if (out_face_index) *out_face_index = 0;
 
     CFStringRef cf_name = CFStringCreateWithCString(NULL, font_name, kCFStringEncodingUTF8);
     if (!cf_name) return NULL;
@@ -157,7 +193,13 @@ static char* find_font_path_macos(const char* font_name) {
     }
 
     CFURLRef url = (CFURLRef)CTFontCopyAttribute(ct_font, kCTFontURLAttribute);
+    CFStringRef postscript_name = CTFontCopyPostScriptName(ct_font);
+    if (out_face_index && url && postscript_name) {
+        // retain the CoreText-selected family member for TTC/OTC loading.
+        *out_face_index = collection_face_index_macos(url, postscript_name);
+    }
     CFRelease(ct_font);
+    if (postscript_name) CFRelease(postscript_name);
     if (!url) return NULL;
 
     char path[1024];
@@ -401,16 +443,18 @@ void font_platform_add_default_dirs(FontDatabase* db) {
              db->scan_directories ? db->scan_directories->length : 0);
 }
 
-char* font_platform_find_fallback(const char* font_name) {
+char* font_platform_find_fallback(const char* font_name, int* out_face_index) {
     if (!font_name) return NULL;
+    if (out_face_index) *out_face_index = 0;
 
 #ifdef __APPLE__
-    return find_font_path_macos(font_name);
+    return find_font_path_macos(font_name, out_face_index);
 #elif defined(_WIN32)
+    (void)out_face_index;
     return find_font_path_windows(font_name);
 #else
     // Linux: handled by font_database_find_best_match_internal instead
-    (void)font_name;
+    (void)font_name; (void)out_face_index;
     return NULL;
 #endif
 }
@@ -600,34 +644,8 @@ char* font_platform_find_codepoint_font(void* base_font_ref, uint32_t codepoint,
     char path[1024];
     bool ok = CFURLGetFileSystemRepresentation(url, true, (UInt8*)path, sizeof(path));
 
-    // for TTC/OTC collections, determine the correct face index by matching
-    // the PostScript name against all faces in the collection file
     if (ok && path[0] && out_face_index && ps_name) {
-        size_t path_len = strlen(path);
-        bool is_collection = (path_len > 4 &&
-            (strcasecmp(path + path_len - 4, ".ttc") == 0 ||
-             strcasecmp(path + path_len - 4, ".otc") == 0));
-        if (is_collection) {
-            CFArrayRef descs = CTFontManagerCreateFontDescriptorsFromURL(url);
-            if (descs) {
-                CFIndex count = CFArrayGetCount(descs);
-                for (CFIndex i = 0; i < count; i++) {
-                    CTFontDescriptorRef face_desc = (CTFontDescriptorRef)CFArrayGetValueAtIndex(descs, i);
-                    CFStringRef face_ps = (CFStringRef)CTFontDescriptorCopyAttribute(face_desc, kCTFontNameAttribute);
-                    if (face_ps) {
-                        if (CFStringCompare(face_ps, ps_name, 0) == kCFCompareEqualTo) {
-                            *out_face_index = (int)i;
-                            log_debug("font_platform: TTC face index %d for '%s'",
-                                      (int)i, CFStringGetCStringPtr(ps_name, kCFStringEncodingUTF8));
-                            CFRelease(face_ps);
-                            break;
-                        }
-                        CFRelease(face_ps);
-                    }
-                }
-                CFRelease(descs);
-            }
-        }
+        *out_face_index = collection_face_index_macos(url, ps_name);
     }
 
     CFRelease(url);
@@ -689,29 +707,7 @@ char* font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index) {
     bool ok = CFURLGetFileSystemRepresentation(url, true, (UInt8*)path, sizeof(path));
 
     if (ok && path[0] && out_face_index && ps_name) {
-        size_t path_len = strlen(path);
-        bool is_collection = (path_len > 4 &&
-            (strcasecmp(path + path_len - 4, ".ttc") == 0 ||
-             strcasecmp(path + path_len - 4, ".otc") == 0));
-        if (is_collection) {
-            CFArrayRef descs = CTFontManagerCreateFontDescriptorsFromURL(url);
-            if (descs) {
-                CFIndex count = CFArrayGetCount(descs);
-                for (CFIndex i = 0; i < count; i++) {
-                    CTFontDescriptorRef face_desc = (CTFontDescriptorRef)CFArrayGetValueAtIndex(descs, i);
-                    CFStringRef face_ps = (CFStringRef)CTFontDescriptorCopyAttribute(face_desc, kCTFontNameAttribute);
-                    if (face_ps) {
-                        if (CFStringCompare(face_ps, ps_name, 0) == kCFCompareEqualTo) {
-                            *out_face_index = (int)i;
-                            CFRelease(face_ps);
-                            break;
-                        }
-                        CFRelease(face_ps);
-                    }
-                }
-                CFRelease(descs);
-            }
-        }
+        *out_face_index = collection_face_index_macos(url, ps_name);
     }
 
     CFRelease(url);

@@ -2651,6 +2651,21 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     } else if (child) {
         do {
+            bool child_can_close_inline_line = child->is_text();
+            if (child->is_element()) {
+                DomElement* child_element = child->as_element();
+                DisplayValue child_display = resolve_display_value(child_element);
+                child_can_close_inline_line =
+                    !layout_element_is_abs_or_fixed(child_element) &&
+                    layout_display_is_inline_level(child_display.outer);
+            }
+            float saved_span_content_height = span->content_height;
+            int line_number_before_child = lycon->block.line_number;
+            if (child_can_close_inline_line) {
+                // CSS 2.1 §10.8.1: publish this strut while a child can finalize
+                // its fragment; unclosed inline content must not affect later lines.
+                span->content_height = span_resolved_line_height;
+            }
             if (child->is_element() && child->tag() == MARKUP_NAME_BR &&
                 span->in_line && span->inl() &&
                 vertical_align_baseline_shift(
@@ -2662,10 +2677,17 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 contribute_inline_strut(lycon, elmt, span);
             }
             layout_flow_node(lycon, child);
+            if (child_can_close_inline_line &&
+                lycon->block.line_number == line_number_before_child) {
+                span->content_height = saved_span_content_height;
+            }
             child = child->next_sibling;
         } while (child);
     }
     float collapsed_inline_fragment_x = lycon->line.advance_x;
+    bool completed_line_while_laying_span =
+        inline_start_line_number < lycon->block.line_number;
+    float completed_line_fragment_y = span->y;
     // completed fragment and must not be applied to that fresh line.
     bool ended_at_new_line_start = lycon->block.line_number > inline_start_line_number &&
         lycon->line.is_line_start;
@@ -2682,9 +2704,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->line.inline_start_edge_pending = saved_inline_pending;
     }
     // CSS 2.1 §10.8.1: For non-replaced inline elements, the inline box height
-    if (!had_children) {
+    bool has_only_out_of_flow_children = had_children &&
+        layout_span_children_have_only_out_of_flow_descendants(span);
+    if (!had_children || has_only_out_of_flow_children) {
         if (lycon->line.is_line_start && !lycon->line.has_phantom_inline_fragment) {
-            // CSS 2.1 §16.2: phantom empty inlines retain an aligned static
+            // CSS 2.1 §16.2: descendants outside normal flow leave a zero-width
+            // inline static position which still participates in text alignment.
             lycon->line.start_view = layout_inline_fragment_root(static_cast<View*>(span));
             lycon->line.has_phantom_inline_fragment = true;
         }
@@ -2731,7 +2756,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
         }
     }
-    // CSS 2.1 §10.6.1: Store span's resolved line-height for use by
+    // CSS 2.1 §10.6.1: retain the resolved line-height for the final fragment.
     span->content_height = span_resolved_line_height;
     if (had_children && has_inline_axis_decoration && layout_span_children_have_no_line_content(span)) {
         // CSS Inline 3: a forced break inside a zero-content inline leaves its
@@ -2896,6 +2921,11 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     }
                 }
                 span->height = expected_height;
+                if (completed_line_while_laying_span &&
+                    preserve_inline_atomic_line_origin) {
+                    // CSS Inline 3: retain the completed atomic line's font fragment.
+                    span->y = completed_line_fragment_y;
+                }
             }
             // CSS 2.1 §10.8.1: For empty inline elements with inline decorations
             if (!had_children && !lycon->block.line_height_is_normal) {

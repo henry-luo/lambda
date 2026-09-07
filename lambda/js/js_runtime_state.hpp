@@ -94,6 +94,9 @@ struct JsEventLoopQueueState {
     int raf_count = 0;
     int64_t next_raf_id = 1;
     bool auto_close_mode = false;
+    // Static capture closes only after the document's load lifecycle completes.
+    bool auto_close_after_load = false;
+    double auto_close_settle_ms = 0.0;
     bool shutting_down = false;
     // Dynamic source compiled from a queued callback belongs to its parent turn.
     bool callback_running = false;

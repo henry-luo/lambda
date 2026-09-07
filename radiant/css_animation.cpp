@@ -1612,7 +1612,14 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
         if (existing->target == element && existing->type == ANIM_CSS_ANIMATION) {
             CssAnimState* as = (CssAnimState*)existing->state;
             if (as && as->keyframes && strcmp(as->keyframes->name, anim_name) == 0) {
-                return; // already running
+                // A retained relayout clears view properties but keeps the
+                // document-owned animation instance and its current time.
+                animation_scheduler_tick(scheduler, scheduler->current_time, NULL);
+                if (element->blk) {
+                    lycon->block.given_width = element->block()->given_width;
+                    lycon->block.given_height = element->block()->given_height;
+                }
+                return;
             }
         }
         existing = existing->next;
@@ -2429,7 +2436,16 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
         // a spurious change) and must NOT overwrite the snapshot. Scan the scheduler
         // (authoritative) rather than trusting a raw pointer across relayouts.
         bool is_running = (css_transition_find_running(scheduler, element, prop_id) != NULL);
-        if (is_running) continue;
+        if (is_running) {
+            // Retained relayout resets view properties, not the DOM-owned
+            // transition. Reapply its sampled value before sizing this box.
+            animation_scheduler_tick(scheduler, now, NULL);
+            if (element->blk) {
+                lycon->block.given_width = element->block()->given_width;
+                lycon->block.given_height = element->block()->given_height;
+            }
+            continue;
+        }
 
         bool changed = false;
         float from_f = new_f; float from_ratio = new_ratio;

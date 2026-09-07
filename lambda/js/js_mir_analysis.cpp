@@ -79,9 +79,9 @@ static bool jm_entry_is_enclosing_nonmodule_binding(const JsFunctionNode* functi
 }
 
 static bool jm_entry_is_promoted_iife_binding(JsMirTranspiler* mt,
-        JsFuncCollected* function, const char* name, const NameEntry* entry) {
+        JsFuncCollected* function, const NameEntry* entry) {
     JsModuleConstEntry* module_entry = mt && mt->module_consts
-        ? jm_find_module_const_in(mt->module_consts, name) : NULL;
+        ? jm_find_module_const_by_binding(mt, (NameEntry*)entry) : NULL;
     if (!module_entry || !(module_entry->is_iife_var ||
             module_entry->is_iife_func_decl)) return false;
     for (JsFuncCollected* ancestor = jm_parent_collected_func(mt, function);
@@ -776,7 +776,7 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
         if (!ref->entry) continue;
         bool local_binding = jm_entry_is_owned_by_function(fn, ref->entry);
         bool enclosing_binding = jm_entry_is_enclosing_nonmodule_binding(fn, ref->entry) &&
-            !jm_entry_is_promoted_iife_binding(mt, fc, ref->name, ref->entry);
+            !jm_entry_is_promoted_iife_binding(mt, fc, ref->entry);
         // The AST now resolves an NFE self name to its private function scope,
         // but MIR still represents recursion through the closure environment.
         if (!JM_JS_FACT(fc, is_class_method) && !is_method_syntax &&

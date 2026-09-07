@@ -1128,12 +1128,36 @@ static bool positioned_has_percentage_width_child(ViewBlock* block) {
     return false;
 }
 
+static bool positioned_defers_static_inline_x(ViewBlock* block, BlockContext* pa_block,
+                                              Linebox* pa_line,
+                                              TextDirection static_direction,
+                                              bool was_inline) {
+    if (!block || !block->position || !pa_block || !pa_line || !was_inline ||
+        static_direction != TD_LTR || layout_block_inline_axis_is_vertical(block) ||
+        block->positionp()->has_left || block->positionp()->has_right) {
+        return false;
+    }
+    CssEnum text_align = pa_block->text_align;
+    if (text_align != CSS_VALUE_CENTER && text_align != CSS_VALUE_RIGHT &&
+        text_align != CSS_VALUE_END) {
+        return false;
+    }
+    return !pa_block->establishing_element ||
+        !layout_is_shrink_to_fit_width(pa_block->establishing_element);
+}
+
 static float static_position_line_x(BlockContext* pa_block, Linebox* pa_line,
                                     TextDirection static_direction, bool was_inline,
-                                    ViewBlock* containing_block) {
+                                    ViewBlock* containing_block,
+                                    bool defer_inline_alignment) {
     float line_x = (pa_block && pa_line)
         ? calculate_static_line_x(pa_block, pa_line, static_direction, was_inline)
         : 0.0f;
+    if (defer_inline_alignment && pa_line) {
+        // The hypothetical inline box shares the line's final text alignment,
+        // which is known only after following in-flow siblings are placed.
+        line_x = pa_line->advance_x;
+    }
     if (was_inline && containing_block && containing_block->view_type == RDT_VIEW_INLINE) {
         float inline_cb_origin = inline_containing_block_origin(
             containing_block, LAYOUT_AXIS_X);
@@ -1354,6 +1378,35 @@ static void positioned_register_static_line_self_alignment(
     line->last_static_line_alignment = block;
 }
 
+static void positioned_register_static_inline_position(ViewBlock* block, Linebox* line) {
+    if (!block || !block->position || !line) return;
+    block->position->next_static_inline_position = nullptr;
+    if (line->last_static_inline_position) {
+        line->last_static_inline_position->position->next_static_inline_position = block;
+    } else {
+        line->first_static_inline_position = block;
+    }
+    line->last_static_inline_position = block;
+}
+
+void layout_finalize_static_inline_positions(LayoutContext* lycon) {
+    if (!lycon) return;
+    ViewBlock* block = lycon->line.first_static_inline_position;
+    float offset = lycon->line.static_inline_alignment_offset_x;
+    while (block) {
+        ViewBlock* next = block->position
+            ? block->positionp()->next_static_inline_position : nullptr;
+        if (block->position) {
+            block->position->next_static_inline_position = nullptr;
+            block->x += offset;
+        }
+        block = next;
+    }
+    lycon->line.first_static_inline_position = nullptr;
+    lycon->line.last_static_inline_position = nullptr;
+    lycon->line.static_inline_alignment_offset_x = 0.0f;
+}
+
 void layout_finalize_static_line_self_alignment(LayoutContext* lycon,
                                                 float used_line_height) {
     if (!lycon) return;
@@ -1480,12 +1533,15 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     bool was_inline = false;
     was_inline = layout_element_was_inline(
         lam::dom_require<DOM_NODE_ELEMENT>(block), false);
+    bool defer_static_inline_x = positioned_defers_static_inline_x(
+        block, pa_block, pa_line, static_direction, was_inline);
     float parent_to_cb_offset_x = 0;
     float parent_to_cb_offset_y = 0;
     layout_parent_to_containing_block_offset(block, containing_block,
                                              &parent_to_cb_offset_x, &parent_to_cb_offset_y);
     float static_line_x = static_position_line_x(
-        pa_block, pa_line, static_direction, was_inline, containing_block);
+        pa_block, pa_line, static_direction, was_inline, containing_block,
+        defer_static_inline_x);
     float static_left = parent_to_cb_offset_x + static_line_x;
     bool can_inset_stretch_width = !ratio_transfers_max_height &&
         (!has_replaced_sizing || stretch_form_width) && !width_alignment.active;
@@ -1620,10 +1676,9 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // CSS 2.1 §10.4: Apply min-width/max-width constraints BEFORE position calculation.
     // Per spec, min-width overrides max-width when they conflict.
     // This must happen before computing x position, because right-positioned elements
-    // CSS 2.1 §10.3.7: Solve auto margins for horizontal axis
-    // When left, right, and width are all NOT auto, the equation is over-constrained.
+    // CSS 2.1 §10.3.7: solve auto margins after a constrained inset-stretched width.
     positioned_finalize_auto_margins(block, cb_width, content_width, LAYOUT_AXIS_X,
-                                     has_width, cb_direction);
+                                     has_width || width_from_inset_stretch, cb_direction);
     // CSS width is already the border-box width when border-box sizing is active.
     positioned_set_axis_position(block, containing_block, border_offset_x,
                                  cb_width, content_width, LAYOUT_AXIS_X);
@@ -1974,6 +2029,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     if (elmt->is_element()) {
         was_inline = layout_element_was_inline(elmt->as_element(), false);
     }
+    bool defer_static_inline_x = positioned_defers_static_inline_x(
+        block, pa_block, pa_line, static_direction, was_inline);
     bool defer_vertical_rtl_static_y = layout_block_inline_axis_is_vertical(block) &&
         parent && parent->view_type == RDT_VIEW_INLINE && pa_line &&
         cb->view_type != RDT_VIEW_INLINE && static_direction == TD_RTL &&
@@ -2036,10 +2093,11 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         // For originally-inline elements (blockified by §9.7), the static X is
         // the inline cursor (advance_x), adjusted for float avoidance and text-align.
         float line_x = static_position_line_x(
-            pa_block, pa_line, static_direction, was_inline, cb);
+            pa_block, pa_line, static_direction, was_inline, cb,
+            defer_static_inline_x);
 
         float static_x = parent_to_cb_offset_x + line_x;
-        if (block->bound && block->boundary_mut()->margin.left > 0) {
+        if (block->bound && block->boundary()->margin.left_type != CSS_VALUE_AUTO) {
             static_x += block->boundary()->margin.left;
         }
         block->x = static_x;
@@ -2449,6 +2507,9 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         positioned_register_static_line_self_alignment(
             block, static_containing_block, pa_block, pa_line);
     }
+    if (defer_static_inline_x) {
+        positioned_register_static_inline_position(block, pa_line);
+    }
     lycon->depth--;
     log_leave();
 }
@@ -2752,7 +2813,14 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
         // CSS 2.1 §9.5.1 Rule 7: "A left-floating box that has another left-floating box
         // to its left may not have its right outer edge to the right of its containing
         // block's right edge. (Loosely: a left float may not stick out at the right edge,
-        if (float_wider_than_cb) {
+        bool opposite_float_intrudes = left_float
+            ? space.has_right_float &&
+                space.right < containing_block_right_bfc - 0.5f
+            : space.has_left_float &&
+                space.left > containing_block_left_bfc + 0.5f;
+        // CSS 2.2 §9.5.1 rule 3: an over-wide float may protrude outside its
+        // containing block, but must step below an opposing float that narrows it.
+        if (float_wider_than_cb && !opposite_float_intrudes) {
             if (left_float) {
                 bool at_leftmost = !space.has_left_float || (space.left <= containing_block_left_bfc + 0.5f);
                 if (at_leftmost) {

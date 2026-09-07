@@ -1362,7 +1362,12 @@ static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
                     origin_x, origin_y, transform->origin_z);
             }
         }
-        RdtMatrix4 offset = rdt_matrix4_translate(current->x, current->y, 0.0f);
+        // Inline fragments position their own CSSOM box but do not establish a
+        // coordinate space for descendants. Match calculate_absolute_position:
+        // retain the target's local offset, then accumulate block ancestors only.
+        RdtMatrix4 offset = (i == 0 || current->is_block())
+            ? rdt_matrix4_translate(current->x, current->y, 0.0f)
+            : rdt_matrix4_identity();
         RdtMatrix4 local_to_parent = rdt_matrix4_multiply(&offset, &local);
         accumulated = rdt_matrix4_multiply(&local_to_parent, &accumulated);
     }
@@ -1442,7 +1447,11 @@ void view_get_visual_bounds(View* view, float* out_x, float* out_y,
     calculate_absolute_position(view, nullptr, &x, &y);
     float width = view->width;
     float height = view->height;
-    apply_css_transforms_to_bounds(view, &x, &y, &width, &height);
+    if (view_chain_has_3d_transform(view)) {
+        apply_3d_transform_to_bounds(view, &x, &y, &width, &height);
+    } else {
+        apply_css_transforms_to_bounds(view, &x, &y, &width, &height);
+    }
     if (out_x) *out_x = x;
     if (out_y) *out_y = y;
     if (out_width) *out_width = width;

@@ -930,8 +930,8 @@ typedef struct CssStylesheet {
     const char* origin_url;      // URL where stylesheet was loaded from
     CssOrigin origin;
     bool disabled;
-    // Inline sheets retain their owning style element for CSSOM state changes.
-    struct DomElement* owner_style_element;
+    // Document sheets retain their owning <link> or <style> for source order.
+    struct DomElement* owner_element;
 
     // Source information
     const char* source_text;

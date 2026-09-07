@@ -2400,6 +2400,8 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // auto-close belongs to the bound document Runtime; applying it before
     // creation loses the setting and lets recursive page timers block layout.
     js_event_loop_set_auto_close_mode(dom_doc->js.auto_close_event_loop);
+    js_event_loop_set_auto_close_after_load(false);
+    js_event_loop_set_auto_close_settle_ms(dom_doc->js.post_load_settle_ms);
     // A virtual clock is semantic state of this document's event-loop capsule.
     // Configure it only after that capsule is bound, before the first script
     // can create a timer.
@@ -2519,6 +2521,8 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         log_error("execute_document_scripts: JS execution failed");
     } else {
         log_info("execute_document_scripts: JS execution completed successfully");
+        // Capture settlement starts only after window.load has queued its tasks.
+        js_event_loop_set_auto_close_after_load(true);
         if (dom_is_host_driven_loop()) {
             // A long-lived host (Radiant `view`) pumps the event loop AFTER it
             // commits the first layout. Draining timers here — still inside the

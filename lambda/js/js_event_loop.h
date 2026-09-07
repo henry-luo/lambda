@@ -42,6 +42,8 @@ double js_event_loop_virtual_clock_now_ms(void);
 int js_event_loop_advance_virtual_time(double delta_ms, int frame_steps);
 void js_event_loop_shutdown(void);
 void js_event_loop_set_auto_close_mode(bool enabled);
+void js_event_loop_set_auto_close_after_load(bool enabled);
+void js_event_loop_set_auto_close_settle_ms(double settle_ms);
 bool js_event_loop_auto_close_mode(void);
 bool js_event_loop_is_shutting_down(void);
 

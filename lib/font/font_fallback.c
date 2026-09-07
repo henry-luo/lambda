@@ -411,7 +411,8 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
         if (source_handle) {
             // @font-face handles own an exact raw-data face; a CoreText name
             // lookup may substitute an installed font and change fallback metrics.
-            if (source_handle->is_document_font && source_handle->ct_raster_ref) {
+            if ((source_handle->is_document_font || source_handle->is_explicit_scan_font) &&
+                source_handle->ct_raster_ref) {
                 base_font_ref = source_handle->ct_raster_ref;
             } else {
                 base_font_ref = source_handle->ct_font_ref

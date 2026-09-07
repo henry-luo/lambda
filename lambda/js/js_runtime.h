@@ -113,6 +113,8 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(JS_ITER_DONE_SENTINEL >> 5
 Item js_to_number(Item value);
 // ToNumeric preserves BigInt while otherwise applying ToNumber.
 Item js_to_numeric(Item value);
+// ECMAScript ToInt32, used by bitwise operations and Web IDL integer adapters.
+int32_t js_to_int32(double value);
 Item js_to_string(Item value);
 Item js_to_boolean(Item value);
 Item js_to_object(Item value);

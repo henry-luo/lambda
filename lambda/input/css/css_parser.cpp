@@ -3260,6 +3260,36 @@ CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length,
     return group;
 }
 
+static bool css_selector_contains_generic_pseudo(const CssSelector* selector) {
+    if (!selector) return false;
+    for (size_t i = 0; i < selector->compound_selector_count; i++) {
+        CssCompoundSelector* compound = selector->compound_selectors[i];
+        if (!compound) continue;
+        for (size_t j = 0; j < compound->simple_selector_count; j++) {
+            CssSimpleSelector* simple = compound->simple_selectors[j];
+            if (!simple) continue;
+            if (simple->type == CSS_SELECTOR_PSEUDO_GENERIC ||
+                simple->type == CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC) {
+                return true;
+            }
+            for (size_t k = 0; k < simple->function_selector_count; k++) {
+                if (css_selector_contains_generic_pseudo(simple->function_selectors[k])) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+bool css_selector_group_contains_generic_pseudo(const CssSelectorGroup* group) {
+    if (!group) return false;
+    for (size_t i = 0; i < group->selector_count; i++) {
+        if (css_selector_contains_generic_pseudo(group->selectors[i])) return true;
+    }
+    return false;
+}
+
 CssDeclaration* css_parse_declaration_text(const char* text, size_t length, Pool* pool) {
     if (!text || length == 0 || !pool) return NULL;
 

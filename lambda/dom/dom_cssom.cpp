@@ -46,10 +46,10 @@ extern "C" void dom_notify_mutation(DomJsMutationKind kind, void* target, void* 
 
 static void js_cssom_notify_stylesheet_mutation(CssStylesheet* stylesheet = nullptr) {
     // stylesheet edits do not touch a DOM node, but they still require post-script cascade.
-    DomDocument* doc = stylesheet && stylesheet->owner_style_element
-        ? stylesheet->owner_style_element->doc : (DomDocument*)dom_get_document();
+    DomDocument* doc = stylesheet && stylesheet->owner_element
+        ? stylesheet->owner_element->doc : (DomDocument*)dom_get_document();
     style_epoch_mark_global_change(doc);
-    DomElement* owner = stylesheet ? stylesheet->owner_style_element : nullptr;
+    DomElement* owner = stylesheet ? stylesheet->owner_element : nullptr;
     dom_notify_mutation(DOM_JS_MUTATION_STYLE, owner, owner ? owner->parent : nullptr);
 }
 
@@ -250,9 +250,9 @@ static Pool* unwrap_rule_decl_pool(Item item) {
 static Pool* sheet_pool(CssStylesheet* sheet) {
     if (!sheet) return get_document_pool();
     if (sheet->pool) return sheet->pool;
-    if (sheet->owner_style_element && sheet->owner_style_element->doc &&
-        sheet->owner_style_element->doc->document_pool) {
-        return sheet->owner_style_element->doc->document_pool;
+    if (sheet->owner_element && sheet->owner_element->doc &&
+        sheet->owner_element->doc->document_pool) {
+        return sheet->owner_element->doc->document_pool;
     }
     return get_document_pool();
 }
@@ -931,7 +931,7 @@ extern "C" Item dom_cssom_stylesheet_rule_at(Item sheet_item, Item index_item) {
 // HTMLStyleElement .sheet
 // =============================================================================
 
-static CssStylesheet* js_cssom_create_inline_stylesheet(DomElement* elem) {
+static CssStylesheet* js_cssom_parse_inline_stylesheet(DomElement* elem) {
     if (!elem || !elem->doc || !elem->doc->document_pool) return nullptr;
 
     Pool* pool = elem->doc->document_pool;
@@ -956,14 +956,143 @@ static CssStylesheet* js_cssom_create_inline_stylesheet(DomElement* elem) {
     strbuf_free(css_text);
     if (!sheet) return nullptr;
 
-    sheet->owner_style_element = elem;
-    if (!lam::pool_grow_array(pool, &elem->doc->stylesheets,
-                              &elem->doc->stylesheet_capacity,
-                              elem->doc->stylesheet_count + 1, 4)) {
-        return nullptr;
-    }
-    elem->doc->stylesheets[elem->doc->stylesheet_count++] = sheet;
+    sheet->owner_element = elem;
     return sheet;
+}
+
+static bool dom_cssom_node_precedes(DomNode* first, DomNode* second) {
+    if (!first || !second || first == second) return false;
+    int first_depth = 0;
+    int second_depth = 0;
+    for (DomNode* node = first; node; node = node->parent) first_depth++;
+    for (DomNode* node = second; node; node = node->parent) second_depth++;
+    while (first_depth > second_depth) {
+        first = first->parent;
+        first_depth--;
+    }
+    if (first == second) return false;
+    while (second_depth > first_depth) {
+        second = second->parent;
+        second_depth--;
+    }
+    if (first == second) return true;
+    while (first && second && first->parent != second->parent) {
+        first = first->parent;
+        second = second->parent;
+    }
+    if (!first || !second || first->parent != second->parent) return false;
+    for (DomNode* node = first; node; node = node->next_sibling) {
+        if (node == second) return true;
+    }
+    return false;
+}
+
+static void dom_cssom_reorder_owned_document_stylesheets(DomDocument* doc) {
+    if (!doc || !doc->stylesheets) return;
+    for (int i = 1; i < doc->stylesheet_count; i++) {
+        for (int j = i; j > 0; j--) {
+            CssStylesheet* previous = doc->stylesheets[j - 1];
+            CssStylesheet* current = doc->stylesheets[j];
+            if (!previous || !current || !previous->owner_element ||
+                !current->owner_element ||
+                !dom_cssom_node_precedes(current->owner_element,
+                                         previous->owner_element)) {
+                break;
+            }
+            doc->stylesheets[j - 1] = current;
+            doc->stylesheets[j] = previous;
+        }
+    }
+}
+
+static bool dom_cssom_append_document_stylesheet(DomDocument* doc,
+                                                  CssStylesheet* sheet) {
+    if (!doc || !doc->document_pool || !sheet) return false;
+    if (doc->stylesheet_count >= doc->stylesheet_capacity) {
+        int capacity = doc->stylesheet_capacity > 0
+            ? doc->stylesheet_capacity * 2 : 4;
+        CssStylesheet** sheets = (CssStylesheet**)pool_alloc(
+            doc->document_pool, (size_t)capacity * sizeof(CssStylesheet*));
+        if (!sheets) return false;
+        if (doc->stylesheets && doc->stylesheet_count > 0) {
+            memcpy(sheets, doc->stylesheets,
+                   (size_t)doc->stylesheet_count * sizeof(CssStylesheet*));
+        }
+        // Loader-owned sheet arrays can outlive a document but are not owned by
+        // its pool, so append by copying instead of reallocating foreign storage.
+        doc->stylesheets = sheets;
+        doc->stylesheet_capacity = capacity;
+    }
+    doc->stylesheets[doc->stylesheet_count++] = sheet;
+    dom_cssom_reorder_owned_document_stylesheets(doc);
+    return true;
+}
+
+static bool dom_cssom_remove_inline_stylesheet(DomDocument* doc,
+                                                DomElement* elem) {
+    if (!doc || !elem) return false;
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        CssStylesheet* sheet = doc->stylesheets[i];
+        if (!sheet || sheet->owner_element != elem) continue;
+        memmove(&doc->stylesheets[i], &doc->stylesheets[i + 1],
+                (size_t)(doc->stylesheet_count - i - 1) * sizeof(CssStylesheet*));
+        doc->stylesheet_count--;
+        // A detached style must stop contributing rules and keyframes immediately.
+        doc->services.keyframe_registry = nullptr;
+        doc->font_faces_processed = false;
+        return true;
+    }
+    return false;
+}
+
+extern "C" bool dom_cssom_sync_inline_style_element(void* dom_elem) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem || !elem->doc || !elem->tag_name ||
+        strcasecmp(elem->tag_name, "style") != 0) {
+        return false;
+    }
+
+    DomDocument* doc = elem->doc;
+    bool connected = false;
+    for (DomNode* node = static_cast<DomNode*>(elem); node; node = node->parent) {
+        if (node == static_cast<DomNode*>(doc->root)) {
+            connected = true;
+            break;
+        }
+    }
+    if (!connected) return dom_cssom_remove_inline_stylesheet(doc, elem);
+
+    CssStylesheet* sheet = js_cssom_parse_inline_stylesheet(elem);
+    if (!sheet) return false;
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        if (doc->stylesheets[i] && doc->stylesheets[i]->owner_element == elem) {
+            doc->stylesheets[i] = sheet;
+            dom_cssom_reorder_owned_document_stylesheets(doc);
+            // Keyframes are parsed from stylesheet text, so their cache tracks
+            // the same text-tree update as the style sheet.
+            doc->services.keyframe_registry = nullptr;
+            doc->font_faces_processed = false;
+            return true;
+        }
+    }
+
+    if (!dom_cssom_append_document_stylesheet(doc, sheet)) {
+        return false;
+    }
+    doc->services.keyframe_registry = nullptr;
+    doc->font_faces_processed = false;
+    return true;
+}
+
+extern "C" void dom_cssom_sync_mutated_inline_stylesheets(void* dom_doc) {
+    DomDocument* doc = (DomDocument*)dom_doc;
+    if (!doc) return;
+    for (int i = 0; i < doc->js.inline_stylesheet_mutation_count; i++) {
+        dom_cssom_sync_inline_style_element(doc->js.inline_stylesheet_mutations[i]);
+    }
+    // CSS Cascade source order follows the current document tree, including
+    // an inserted style that precedes a previously parsed link or style sheet.
+    dom_cssom_reorder_owned_document_stylesheets(doc);
 }
 
 extern "C" Item dom_cssom_get_style_element_sheet(Item elem_item) {
@@ -980,13 +1109,19 @@ extern "C" Item dom_cssom_get_style_element_sheet(Item elem_item) {
 
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* sheet = doc->stylesheets[i];
-        if (sheet && sheet->owner_style_element == elem) {
+        if (sheet && sheet->owner_element == elem) {
             return dom_cssom_wrap_stylesheet(sheet);
         }
     }
 
-    CssStylesheet* sheet = js_cssom_create_inline_stylesheet(elem);
-    return sheet ? dom_cssom_wrap_stylesheet(sheet) : ItemNull;
+    if (!dom_cssom_sync_inline_style_element(elem)) return ItemNull;
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        CssStylesheet* sheet = doc->stylesheets[i];
+        if (sheet && sheet->owner_element == elem) {
+            return dom_cssom_wrap_stylesheet(sheet);
+        }
+    }
+    return ItemNull;
 }
 
 // =============================================================================
