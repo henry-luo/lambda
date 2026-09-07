@@ -6330,7 +6330,7 @@ static bool js_array_companion_write_same_size_slot(TypeMap* tm, ShapeEntry* ent
     // Retag on T->NULL too, else the stored null word is read back through the
     // stale tag as a zero-valued T (`arr.tag = 7; arr.tag = null` read `0`).
     if (shape_entry_retag_is_safe(tm, value_type)) {
-        entry->type = type_info[value_type].type;
+        shape_entry_set_type(entry, type_info[value_type].type);
     }
     return true;
 }

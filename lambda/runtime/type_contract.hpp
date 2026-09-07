@@ -77,11 +77,11 @@ bool lambda_boundary_is_redundant(Type* source, Type* target);
 // the other.
 bool boundary_numeric_admission_is_dynamic(TypeId source_id, TypeId target_id);
 
-bool lambda_type_accepts_error(Type* type);
-bool lambda_type_accepts_null(Type* type);
+// lambda_type_accepts_error / lambda_type_accepts_null live in the core
+// header (lambda-data.hpp) beside the storage resolver they feed.
 bool lambda_type_has_proven_error(Type* type);
-// Resolves the physical lane from the full semantic contract. Returns false
-// for abstract/heterogeneous contracts that must remain boxed.
+// Native-lane projection of lambda_lane_storage_desc_for: false for contracts
+// that must remain boxed (abstract, heterogeneous, non-nullable wide ints).
 bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out);
 // Canonicalize a semantic `T | null` result as `T?` when it has one concrete
 // payload type. Abstract/error-bearing cases deliberately remain boxed.

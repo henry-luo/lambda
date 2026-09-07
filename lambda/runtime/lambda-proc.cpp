@@ -165,8 +165,8 @@ static bool write_raw_bytes(const char* file_path, const char* mode, bool atomic
 // append: true for append mode, false for write (truncate) mode
 // atomic: if true, write to temp file first then rename (only for write mode, not append)
 // Returns: bytes written on success, ItemError on failure
-static RetItem pn_output_internal(Item source, Item target_item, const char* format_str, bool append, bool atomic) {
-    if (g_dry_run) return ri_ok(dry_run_fabricated_output());
+static Item pn_output_internal(Item source, Item target_item, const char* format_str, bool append, bool atomic) {
+    if (g_dry_run) return dry_run_fabricated_output();
     const char* mode = append ? "a" : "w";
     const char* mode_binary = append ? "ab" : "wb";
 
@@ -180,7 +180,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
     TypeId target_type = get_type_id(target_item);
     if (!is_text_type_id(target_type) && target_type != LMD_TYPE_PATH) {
         log_error("pn_output_internal: target must be string, symbol, or path, got type %s", get_type_name(target_type));
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // Convert target to unified Target struct
@@ -188,14 +188,14 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
     Target* target = item_to_target(target_item.item, cwd);
     if (!target) {
         log_error("pn_output_internal: failed to convert item to target");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // Check if target is writable (local file only)
     if (!target_is_local(target)) {
         log_error("pn_output_internal: cannot write to remote URL (scheme=%d)", target->scheme);
         target_free(target);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // Get local file path from target
@@ -204,7 +204,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         log_error("pn_output_internal: failed to resolve target to local path");
         target_free(target);
         if (path_buf) strbuf_free(path_buf);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     const char* file_path = path_buf->str;
@@ -215,7 +215,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         log_error("pn_output_internal: failed to create directories for %s", file_path);
         strbuf_free(path_buf);
         target_free(target);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // Clean up target (no longer needed)
@@ -226,7 +226,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
     if (source_type == LMD_TYPE_ERROR) {
         log_error("pn_output_internal: cannot output error to file");
         strbuf_free(path_buf);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // string source: output as raw text (ignore format)
@@ -235,16 +235,16 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         if (!str) {
             log_error("pn_output_internal: source string is null");
             strbuf_free(path_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
 
         if (!write_raw_bytes(file_path, mode, atomic, str->chars, str->len)) {
             strbuf_free(path_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
         log_debug("pn_output_internal: wrote %zu bytes (text) to %s", (size_t)str->len, file_path);
         strbuf_free(path_buf);
-        return ri_ok({.item = i2it((int64_t)str->len)});
+        return {.item = i2it((int64_t)str->len)};
     }
 
     // binary source: output as raw binary data (ignore format)
@@ -255,18 +255,18 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         if (!bin) {
             log_error("pn_output_internal: source binary is null");
             strbuf_free(path_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
 
         size_t bin_len = binary_length(bin);
         if (!write_raw_bytes(file_path, mode_binary, atomic, binary_data(bin), bin_len)) {
             strbuf_free(path_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
 
         log_debug("pn_output_internal: wrote %zu bytes (binary) to %s", bin_len, file_path);
         strbuf_free(path_buf);
-        return ri_ok({.item = i2it((int64_t)bin_len)});
+        return {.item = i2it((int64_t)bin_len)};
     }
 
     // determine format for structured data
@@ -331,7 +331,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         log_error("pn_output_internal: unsupported format '%s'", effective_format);
         mem_pool_destroy(temp_pool);
         strbuf_free(path_buf);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // determine actual write path (temp file for atomic writes)
@@ -350,7 +350,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         mem_pool_destroy(temp_pool);
         if (temp_path_buf) strbuf_free(temp_path_buf);
         strbuf_free(path_buf);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     size_t written;
@@ -369,7 +369,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
             mem_pool_destroy(temp_pool);
             if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
 
         log_debug("pn_output_internal: wrote %zu bytes (mark) to %s", written, file_path);
@@ -381,7 +381,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
             mem_pool_destroy(temp_pool);
             if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
 
         written = fwrite(formatted->chars, 1, strlen(formatted->chars), f);
@@ -393,7 +393,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
             mem_pool_destroy(temp_pool);
             if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
 
         log_debug("pn_output_internal: wrote %zu bytes (%s) to %s", written, effective_format, file_path);
@@ -407,19 +407,19 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
             mem_pool_destroy(temp_pool);
             strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
         strbuf_free(temp_path_buf);
     }
 
     mem_pool_destroy(temp_pool);
     strbuf_free(path_buf);
-    return ri_ok({.item = i2it((int64_t)written)});
+    return {.item = i2it((int64_t)written)};
 }
 
 // 2-parameter wrapper: output(source, trg) - writes data to target (default format, write mode)
 // Returns: bytes written on success, error on failure
-RetItem pn_output2(Item source, Item target_item) {
+Item pn_output2(Item source, Item target_item) {
     return pn_output_internal(source, target_item, NULL, false, false);
 }
 
@@ -463,7 +463,7 @@ static bool get_map_bool_field(Map* map, const char* field_name, bool default_va
 //   mode: symbol - 'write or 'append (default: 'write)
 //   atomic: bool - write to temp file first, then rename (default: false)
 // Returns: bytes written on success, error on failure
-RetItem pn_output3(Item source, Item target_item, Item options_item) {
+Item pn_output3(Item source, Item target_item, Item options_item) {
     const char* format_str = NULL;
     bool append = false;
     bool atomic = false;
@@ -492,7 +492,7 @@ RetItem pn_output3(Item source, Item target_item, Item options_item) {
         }
     } else if (options_type != LMD_TYPE_NULL) {
         log_error("pn_output3: options must be a map, symbol, string, or null, got type %s", get_type_name(options_type));
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     return pn_output_internal(source, target_item, format_str, append, atomic);
@@ -500,7 +500,7 @@ RetItem pn_output3(Item source, Item target_item, Item options_item) {
 
 // 2-parameter append wrapper: used by |>> pipe operator
 // Directly calls pn_output_internal with append=true, no format, no atomic
-RetItem pn_output_append(Item source, Item target_item) {
+Item pn_output_append(Item source, Item target_item) {
     return pn_output_internal(source, target_item, NULL, true, false);
 }
 
@@ -524,21 +524,21 @@ Item fetch_response_to_item(FetchResponse* response) {
     return result;
 }
 
-RetItem pn_fetch(Item url, Item options) {
-    if (g_dry_run) return ri_ok(dry_run_fabricated_fetch());
+Item pn_fetch(Item url, Item options) {
+    if (g_dry_run) return dry_run_fabricated_fetch();
     log_debug("pn_fetch called");
     // Validate target parameter
     TypeId url_type = get_type_id(url);
     if (!is_text_type_id(url_type) && url_type != LMD_TYPE_PATH) {
         log_debug("fetch target must be a string, symbol, or path, got type %s", get_type_name(url_type));
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     Url* cwd = context ? (Url*)context->cwd : NULL;
     Target* target = item_to_target(url.item, cwd);
     if (!target) {
         log_error("fetch: failed to resolve target");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     if (target_is_local(target)) {
@@ -548,7 +548,7 @@ RetItem pn_fetch(Item url, Item options) {
         if (!path_buf || !path_buf->str || path_buf->length == 0) {
             log_error("fetch: failed to resolve local target path");
             if (path_buf) strbuf_free(path_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
 
         size_t file_size = 0;
@@ -556,20 +556,20 @@ RetItem pn_fetch(Item url, Item options) {
         if (!file_data) {
             log_error("fetch: failed to read local file %s", path_buf->str);
             strbuf_free(path_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
 
         // fetch() returns a string body; local files use the same owned string path as HTTP bodies.
         String* body = heap_strcpy(file_data, file_size);
         mem_free(file_data);
         strbuf_free(path_buf);
-        return ri_ok((Item){.item = s2it(body)});
+        return (Item){.item = s2it(body)};
     }
 
     if (!target_is_remote(target)) {
         log_error("fetch: unsupported target scheme %d", target->scheme);
         target_free(target);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // Parse options parameter (similar to JS fetch options)
@@ -648,7 +648,7 @@ RetItem pn_fetch(Item url, Item options) {
     if (!url_str || url_buf->length == 0) {
         log_error("fetch: failed to render remote target URL");
         strbuf_free(url_buf);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // Perform the HTTP request
@@ -656,11 +656,11 @@ RetItem pn_fetch(Item url, Item options) {
     strbuf_free(url_buf);
     if (!response) {
         log_debug("fetch: HTTP request failed");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // Convert response to Lambda Item
-    return ri_ok(fetch_response_to_item(response));
+    return fetch_response_to_item(response);
 }
 
 // Helper function to escape shell arguments for safety
@@ -834,32 +834,32 @@ String* format_cmd_args(String* cmd, Item args) {
     return result;
 }
 
-RetItem pn_cmd2(Item cmd, Item args);
+Item pn_cmd2(Item cmd, Item args);
 
-RetItem pn_cmd1(Item cmd) {
-    if (g_dry_run) return ri_ok(dry_run_fabricated_cmd());
+Item pn_cmd1(Item cmd) {
+    if (g_dry_run) return dry_run_fabricated_cmd();
     return pn_cmd2(cmd, ItemNull);
 }
 
-RetItem pn_cmd2(Item cmd, Item args) {
-    if (g_dry_run) return ri_ok(dry_run_fabricated_cmd());
+Item pn_cmd2(Item cmd, Item args) {
+    if (g_dry_run) return dry_run_fabricated_cmd();
     log_debug("pn_cmd called");
     if (get_type_id(cmd) != LMD_TYPE_STRING) {
         log_debug("pn_cmd: command must be a string");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     String* cmd_str = cmd.get_string();
     if (!cmd_str || cmd_str->len == 0) {
         log_debug("pn_cmd: command string is empty");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // Format the complete command with arguments
     String* full_cmd = format_cmd_args(cmd_str, args);
     if (!full_cmd) {
         log_debug("pn_cmd: failed to format command arguments");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     log_debug("pn_cmd: executing command: %s", full_cmd->chars);
@@ -892,11 +892,11 @@ RetItem pn_cmd2(Item cmd, Item args) {
     // non-zero exit code means the command failed — return error
     if (actual_exit_code != 0) {
         log_debug("pn_cmd: command failed with exit code %d", actual_exit_code);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     log_debug("pn_cmd: command output: %s", result_str->chars);
-    return ri_ok(result);
+    return result;
 }
 
 // ============================================================================
@@ -930,13 +930,13 @@ extern "C" StrBuf* lambda_get_local_path_from_item(Item item) {
 // io.copy(src, dst) - Copy file or directory
 // src can be local path or remote URL (http/https)
 // dst must be a local path
-RetItem pn_io_copy(Item src_item, Item dst_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.copy()"); return ri_ok(ItemNull); }
+Item pn_io_copy(Item src_item, Item dst_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.copy()"); return ItemNull; }
     // First, check if source is remote
     Target* src_target = item_to_target(src_item.item, NULL);
     if (!src_target) {
         log_error("io.copy: invalid source argument");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     // Destination must always be local
@@ -944,7 +944,7 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
     if (!dst_buf) {
         log_error("io.copy: destination must be a local path");
         target_free(src_target);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     const char* dst_path = dst_buf->str;
@@ -962,20 +962,19 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
 
         // Fetch the remote data using pn_fetch
         Item url_item = {.item = s2it(url_str)};
-        RetItem fetch_ri = pn_fetch(url_item, ItemNull);
+        Item fetch_result = pn_fetch(url_item, ItemNull);
 
-        if (fetch_ri.err || fetch_ri.value.item == ItemNull.item) {
+        if (item_is_error(fetch_result) || fetch_result.item == ItemNull.item) {
             log_error("io.copy: failed to fetch remote source");
             strbuf_free(dst_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
-        Item fetch_result = fetch_ri.value;
 
         // Create parent directories if needed
         if (create_parent_dirs(dst_path) != 0) {
             log_error("io.copy: failed to create parent directories for %s", dst_path);
             strbuf_free(dst_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
 
         // Write the fetched data to destination
@@ -1007,12 +1006,12 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
         if (wr != 0) {
             log_error("io.copy: failed to write to destination file %s", dst_path);
             strbuf_free(dst_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
 
         log_debug("io.copy: wrote %zu bytes from remote source to %s", written, dst_path);
         strbuf_free(dst_buf);
-        return ri_ok(ItemNull);
+        return ItemNull;
     }
 
     // Local source - get local path
@@ -1022,7 +1021,7 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
     if (!src_buf) {
         log_error("io.copy: invalid source path");
         strbuf_free(dst_buf);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     const char* src_path = src_buf->str;
@@ -1039,12 +1038,12 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
     strbuf_free(src_buf);
     strbuf_free(dst_buf);
 
-    return (result != 0) ? item_to_ri(ItemError) : ri_ok(ItemNull);
+    return (result != 0) ? ItemError : ItemNull;
 }
 
 // io.move(src, dst) - Move/rename file or directory
-RetItem pn_io_move(Item src_item, Item dst_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.move()"); return ri_ok(ItemNull); }
+Item pn_io_move(Item src_item, Item dst_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.move()"); return ItemNull; }
     StrBuf* src_buf = lambda_get_local_path_from_item(src_item);
     StrBuf* dst_buf = lambda_get_local_path_from_item(dst_item);
 
@@ -1052,7 +1051,7 @@ RetItem pn_io_move(Item src_item, Item dst_item) {
         log_error("io.move: invalid path argument");
         if (src_buf) strbuf_free(src_buf);
         if (dst_buf) strbuf_free(dst_buf);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     const char* src_path = src_buf->str;
@@ -1065,11 +1064,11 @@ RetItem pn_io_move(Item src_item, Item dst_item) {
     // If rename fails (cross-device), fall back to copy+delete
     if (result != 0 && errno == EXDEV) {
         log_debug("io.move: cross-device move, using copy+delete");
-        RetItem copy_ri = pn_io_copy(src_item, dst_item);
-        if (copy_ri.err) {
+        Item copy_result = pn_io_copy(src_item, dst_item);
+        if (item_is_error(copy_result)) {
             strbuf_free(src_buf);
             strbuf_free(dst_buf);
-            return item_to_ri(ItemError);
+            return ItemError;
         }
         // Delete source after successful copy
         result = file_delete_recursive(src_path);
@@ -1082,17 +1081,17 @@ RetItem pn_io_move(Item src_item, Item dst_item) {
     strbuf_free(src_buf);
     strbuf_free(dst_buf);
 
-    return (result != 0) ? item_to_ri(ItemError) : ri_ok(ItemNull);
+    return (result != 0) ? ItemError : ItemNull;
 }
 
 // io.delete(path) - Delete file or directory
-RetItem pn_io_delete(Item path_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.delete()"); return ri_ok(ItemNull); }
+Item pn_io_delete(Item path_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.delete()"); return ItemNull; }
     StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
     if (!path_buf) {
         log_error("io.delete: invalid path argument");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     const char* path = path_buf->str;
@@ -1102,7 +1101,7 @@ RetItem pn_io_delete(Item path_item) {
     if (!file_exists(path)) {
         log_error("io.delete: path does not exist: %s", path);
         strbuf_free(path_buf);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     int result = file_delete_recursive(path);
@@ -1113,17 +1112,17 @@ RetItem pn_io_delete(Item path_item) {
 
     strbuf_free(path_buf);
 
-    return (result != 0) ? item_to_ri(ItemError) : ri_ok(ItemNull);
+    return (result != 0) ? ItemError : ItemNull;
 }
 
 // io.mkdir(path) - Create directory (recursive)
-RetItem pn_io_mkdir(Item path_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.mkdir()"); return ri_ok(ItemNull); }
+Item pn_io_mkdir(Item path_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.mkdir()"); return ItemNull; }
     StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
     if (!path_buf) {
         log_error("io.mkdir: invalid path argument");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     const char* path = path_buf->str;
@@ -1138,17 +1137,17 @@ RetItem pn_io_mkdir(Item path_item) {
 
     strbuf_free(path_buf);
 
-    return ok ? ri_ok(ItemNull) : item_to_ri(ItemError);
+    return ok ? ItemNull : ItemError;
 }
 
 // io.touch(path) - Create file or update modification time
-RetItem pn_io_touch(Item path_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.touch()"); return ri_ok(ItemNull); }
+Item pn_io_touch(Item path_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.touch()"); return ItemNull; }
     StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
     if (!path_buf) {
         log_error("io.touch: invalid path argument");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     const char* path = path_buf->str;
@@ -1159,16 +1158,16 @@ RetItem pn_io_touch(Item path_item) {
     if (result != 0) {
         log_error("io.touch: failed to touch %s", path);
         strbuf_free(path_buf);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     strbuf_free(path_buf);
-    return ri_ok(ItemNull);
+    return ItemNull;
 }
 
 // io.symlink(target, link) - Create symbolic link
-RetItem pn_io_symlink(Item target_item, Item link_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.symlink()"); return ri_ok(ItemNull); }
+Item pn_io_symlink(Item target_item, Item link_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.symlink()"); return ItemNull; }
     StrBuf* target_buf = lambda_get_local_path_from_item(target_item);
     StrBuf* link_buf = lambda_get_local_path_from_item(link_item);
 
@@ -1176,7 +1175,7 @@ RetItem pn_io_symlink(Item target_item, Item link_item) {
         log_error("io.symlink: invalid path argument");
         if (target_buf) strbuf_free(target_buf);
         if (link_buf) strbuf_free(link_buf);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     const char* target_path = target_buf->str;
@@ -1194,18 +1193,18 @@ RetItem pn_io_symlink(Item target_item, Item link_item) {
     strbuf_free(target_buf);
     strbuf_free(link_buf);
 
-    return (result != 0) ? item_to_ri(ItemError) : ri_ok(ItemNull);
+    return (result != 0) ? ItemError : ItemNull;
 }
 
 // io.chmod(path, mode) - Change file permissions
 // mode can be string like "755" or int like 0755
-RetItem pn_io_chmod(Item path_item, Item mode_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.chmod()"); return ri_ok(ItemNull); }
+Item pn_io_chmod(Item path_item, Item mode_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.chmod()"); return ItemNull; }
     StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
     if (!path_buf) {
         log_error("io.chmod: invalid path argument");
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     const char* path = path_buf->str;
@@ -1224,7 +1223,7 @@ RetItem pn_io_chmod(Item path_item, Item mode_item) {
     } else {
         log_error("io.chmod: mode must be int or string");
         strbuf_free(path_buf);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     log_debug("io.chmod: %s mode=%o", path, mode);
@@ -1237,12 +1236,12 @@ RetItem pn_io_chmod(Item path_item, Item mode_item) {
 
     strbuf_free(path_buf);
 
-    return (result != 0) ? item_to_ri(ItemError) : ri_ok(ItemNull);
+    return (result != 0) ? ItemError : ItemNull;
 }
 
 // io.rename(old_path, new_path) - Rename file or directory (same as move but clearer intent)
-RetItem pn_io_rename(Item old_item, Item new_item) {
-    if (g_dry_run) { log_debug("dry-run: fabricated io.rename()"); return ri_ok(ItemNull); }
+Item pn_io_rename(Item old_item, Item new_item) {
+    if (g_dry_run) { log_debug("dry-run: fabricated io.rename()"); return ItemNull; }
     StrBuf* old_buf = lambda_get_local_path_from_item(old_item);
     StrBuf* new_buf = lambda_get_local_path_from_item(new_item);
 
@@ -1250,7 +1249,7 @@ RetItem pn_io_rename(Item old_item, Item new_item) {
         log_error("io.rename: invalid path argument");
         if (old_buf) strbuf_free(old_buf);
         if (new_buf) strbuf_free(new_buf);
-        return item_to_ri(ItemError);
+        return ItemError;
     }
 
     const char* old_path = old_buf->str;
@@ -1267,15 +1266,15 @@ RetItem pn_io_rename(Item old_item, Item new_item) {
     strbuf_free(old_buf);
     strbuf_free(new_buf);
 
-    return (result != 0) ? item_to_ri(ItemError) : ri_ok(ItemNull);
+    return (result != 0) ? ItemError : ItemNull;
 }
 
 // io.fetch(target) - Fetch content from URL or local file (1-arg version)
-RetItem pn_io_fetch1(Item target_item) {
+Item pn_io_fetch1(Item target_item) {
     return pn_fetch(target_item, ItemNull);
 }
 
 // io.fetch(target, options) - Fetch content from URL or local file (2-arg version)
-RetItem pn_io_fetch2(Item target_item, Item options_item) {
+Item pn_io_fetch2(Item target_item, Item options_item) {
     return pn_fetch(target_item, options_item);
 }

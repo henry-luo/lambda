@@ -1878,6 +1878,57 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block,
     }
 }
 
+static void re_resolve_abs_children_horizontal(ViewBlock* containing_block) {
+    if (!containing_block || !containing_block->position ||
+        !containing_block->positionp()->first_abs_child) {
+        return;
+    }
+
+    LayoutContainingBlock cb = layout_containing_block_for_view(containing_block);
+    float cb_width = cb.padding_width;
+    if (cb_width <= 0.0f) return;
+
+    for (ViewBlock* child = containing_block->positionp()->first_abs_child; child;
+         child = child->position ? child->positionp()->next_abs_sibling : nullptr) {
+        if (!child->blk || isnan(child->block()->given_width_percent)) continue;
+
+        float css_width = child->block()->given_width_percent * cb_width / 100.0f;
+        css_width = layout_apply_min_max_axis(child, css_width, true, false);
+        float content_width = layout_content_size_if_border_box(child, css_width, true);
+        child->blk->given_width = css_width;
+        child->content_width = content_width;
+        child->width = content_width + layout_box_metrics(child).pad_border_h;
+        if (child->scroller) {
+            // The old zero-width overflow clip was established before the
+            // table track became definite; keep it aligned with this update.
+            update_scroller(child, child->content_width, child->content_height);
+        }
+        if (child->positionp()->has_right && !child->positionp()->has_left) {
+            recalculate_right_positioned_x(child, containing_block);
+        }
+    }
+}
+
+void re_resolve_abs_descendant_widths(View* root) {
+    if (!root) return;
+    ViewBlock* block = nullptr;
+    if (root->is_block()) {
+        block = lam::view_require_block(root);
+    } else if (root->view_type == RDT_VIEW_INLINE) {
+        block = lam::unsafe_view_block_api_span(static_cast<ViewSpan*>(root));
+    }
+    if (block) {
+        // Table track sizing can make a relative inline box definite only after
+        // its earlier percentage-positioned children were laid out.
+        re_resolve_abs_children_horizontal(block);
+    }
+    if (!root->is_element()) return;
+    ViewElement* element = lam::view_require_element(root);
+    for (View* child = element->first_child; child; child = child->next_sibling) {
+        re_resolve_abs_descendant_widths(child);
+    }
+}
+
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line) {
     log_enter();
     // guard against deeply nested positioned elements (e.g., 200 nested position:fixed flex divs)

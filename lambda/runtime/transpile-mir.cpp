@@ -1542,12 +1542,6 @@ static void emit_jit_root_frame_exit(MirTranspiler* mt) {
         offsetof(Context, side_root_top), mt->em.frame.root_base);
 }
 
-enum FunctionReturnLaneKind {
-    RETURN_LANE_NONE = 0,
-    RETURN_LANE_SCALAR = 1,
-    RETURN_LANE_ERROR = 2,
-};
-
 // The "no error" value on a shape-4 error lane.
 //
 // RV9 rules this `ItemNull` for the v3 pair: a `T^E` function returning a
@@ -1570,11 +1564,11 @@ static inline MIR_op_t mir_error_lane_no_error_op(MirTranspiler* mt) {
 // and the emitted body MUST answer identically — a contract promising the v2
 // home while the body returns a pair is precisely the v27 havlak
 // convention-mismatch bug class — so both derive it from this one predicate.
-static inline bool mir_body_returns_pair(int return_lane_kind,
-        MirScalarReturnMode scalar_mode) {
+static inline bool mir_body_returns_pair(MirReturnLaneKind return_lane_kind,
+        ScalarReturnClass scalar_mode) {
     // Shape 2: a boxed body whose value may be wide.
     if (return_lane_kind == RETURN_LANE_SCALAR &&
-            scalar_mode != MIR_SCALAR_RETURN_NONE) {
+            scalar_mode != SCALAR_RETURN_NONE) {
         return em_returns_result_pair(em_companion_transport(
             RETURN_SHAPE_ITEM_SCALAR, /*c_reachable=*/false));
     }
@@ -1588,9 +1582,9 @@ static inline bool mir_body_returns_pair(int return_lane_kind,
 }
 
 static void begin_function_epilogue(MirTranspiler* mt, MIR_type_t return_type,
-                                    int lane_kind = RETURN_LANE_NONE,
-                                    MirScalarReturnMode scalar_mode =
-                                        MIR_SCALAR_RETURN_DYNAMIC) {
+                                    MirReturnLaneKind lane_kind = RETURN_LANE_NONE,
+                                    ScalarReturnClass scalar_mode =
+                                        SCALAR_RETURN_DYNAMIC) {
     mt->em.frame.return_label = new_label(mt);
     mt->em.frame.return_type = return_type;
     mt->em.frame.return_reg = new_reg(mt, "return_value", return_type);
@@ -17845,7 +17839,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             async_track_pending_reg(mt, handles_item);
             async_track_pending_reg(mt, timeout);
             async_emit_invoke_resume_point(mt, call_node);
-            RETURN_CALL_VALUE(emit_call_2(mt, "pn_select_mir", MIR_T_I64,
+            RETURN_CALL_VALUE(emit_call_2(mt, "pn_select", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, handles_item),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, timeout)));
         }
@@ -18422,14 +18416,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         } else {
             snprintf(sys_fn_name, sizeof(sys_fn_name), "%s%s",
                 info->is_proc ? "pn_" : "fn_", info->name);
-        }
-
-        // For C_RET_RETITEM functions (returning 16-byte struct), use MIR wrapper
-        // that returns Item. RetItem has ABI issues with MIR's i64 return type.
-        if (info->c_ret_type == C_RET_RETITEM) {
-            char mir_name[140];
-            snprintf(mir_name, sizeof(mir_name), "%s_mir", sys_fn_name);
-            memcpy(sys_fn_name, mir_name, sizeof(sys_fn_name));
         }
 
         // Determine the actual C return type based on the SysFunc enum value.
@@ -22129,7 +22115,7 @@ static MirValue transpile_pipe_file_value(MirTranspiler* mt,
     MIR_reg_t data = transpile_box_item(mt, pipe->left);
     MIR_reg_t target = transpile_box_item(mt, pipe->right);
     const char* output = pipe->op == OPERATOR_PIPE_APPEND
-        ? "pn_output_append_mir" : "pn_output2_mir";
+        ? "pn_output_append" : "pn_output2";
     MIR_reg_t result = emit_call_2(mt, output, MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, data),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, target));
@@ -25050,7 +25036,7 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
     return LMD_TYPE_ANY;
 }
 
-static MirScalarReturnMode infer_boxed_return_mode(MirTranspiler* mt,
+static ScalarReturnClass infer_boxed_return_mode(MirTranspiler* mt,
         AstFuncNode* fn_node) {
     AstNode* fn_as_node = (AstNode*)fn_node;
     bool is_proc = fn_as_node->node_type == AST_NODE_PROC;
@@ -25063,7 +25049,7 @@ static MirScalarReturnMode infer_boxed_return_mode(MirTranspiler* mt,
             // A procedure with no value exit returns a plain ItemNull carrier;
             // reserving a number home for it only taxes every side-effecting
             // call (D5.2, D5.3).
-            return MIR_SCALAR_RETURN_NONE;
+            return SCALAR_RETURN_NONE;
         }
         AstNode* body = ast_unwrap_primary(fn_node->body);
         int return_count = 0;
@@ -25072,9 +25058,9 @@ static MirScalarReturnMode infer_boxed_return_mode(MirTranspiler* mt,
             // shape 1 is safe only after every explicit value exit has passed
             // the wide-free proof; unknown calls and union values remain on
             // the dynamic companion lane (D5.2.1v3).
-            return MIR_SCALAR_RETURN_NONE;
+            return SCALAR_RETURN_NONE;
         }
-        return MIR_SCALAR_RETURN_DYNAMIC;
+        return SCALAR_RETURN_DYNAMIC;
     }
     AstNode* body_result = function_body_result_expr(fn_node);
     bool body_wide_free = body_result &&
@@ -25098,7 +25084,7 @@ static MirScalarReturnMode infer_boxed_return_mode(MirTranspiler* mt,
         // compact TypeId is LMD_TYPE_TYPE. Use the same producer proof as the
         // body consumers instead of collapsing every structured contract to
         // the dynamic companion shape.
-        return MIR_SCALAR_RETURN_NONE;
+        return SCALAR_RETURN_NONE;
     }
     TypeId return_type = LMD_TYPE_ANY;
     if (fn_as_node->type && fn_as_node->type->type_id == LMD_TYPE_FUNC) {
@@ -25114,12 +25100,31 @@ static MirScalarReturnMode infer_boxed_return_mode(MirTranspiler* mt,
     // DYNAMIC — mapping it through the scalar table would yield NONE and skip
     // the adoption that keeps the payload alive past the watermark restore.
     if (return_type == LMD_TYPE_TYPE) return_type = LMD_TYPE_ANY;
-    return em_scalar_return_mode_for_type(return_type);
+    return em_scalar_return_class_for_type(return_type);
+}
+
+// SCU11: a body's return lane and boxed scalar class are derived ONCE from the
+// declared signature (RV2). The body emitter, its forward declaration and its
+// ABI wrapper all call these; none spells the rule locally.
+static MirReturnLaneKind lambda_body_return_lane(MirTranspiler* mt,
+        AstFuncNode* fn_node, TypeFunc* fn_type, bool native_return, bool is_proc) {
+    if (native_return) {
+        return (fn_type && fn_type->can_raise) ? RETURN_LANE_ERROR : RETURN_LANE_NONE;
+    }
+    bool has_value_return = !is_proc || mir_proc_has_value_return(mt, fn_node);
+    return has_value_return ? RETURN_LANE_SCALAR : RETURN_LANE_NONE;
+}
+
+static ScalarReturnClass lambda_body_scalar_class(MirTranspiler* mt,
+        AstFuncNode* fn_node, MirReturnLaneKind lane) {
+    return lane == RETURN_LANE_ERROR ? SCALAR_RETURN_DYNAMIC
+        : lane == RETURN_LANE_SCALAR ? infer_boxed_return_mode(mt, fn_node)
+        : SCALAR_RETURN_NONE;
 }
 
 static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
         AstFuncNode* fn,
-        NativeFuncInfo* native_info, MirScalarReturnMode scalar_mode) {
+        NativeFuncInfo* native_info, ScalarReturnClass scalar_mode) {
     if (!mt || !fn) return NULL;
     FnAnalysis* analysis = fn->analysis;
     FnVariantAnalysis* variants = NULL;
@@ -25173,7 +25178,7 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
     ValueRep return_rep = native ? lambda_canonical_rep_for_type_id(return_type) : VALUE_REP_ITEM;
     ScalarReturnClass scalar_class = em_scalar_return_class_for_type(
         return_type);
-    if (!native) scalar_class = scalar_mode == MIR_SCALAR_RETURN_DYNAMIC
+    if (!native) scalar_class = scalar_mode == SCALAR_RETURN_DYNAMIC
         ? SCALAR_RETURN_DYNAMIC : scalar_class;
     body->result.normal = {return_type, return_rep, scalar_class};
     if (type && type->can_raise && native) {
@@ -25423,14 +25428,13 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     mt->em.frame.return_type = ret_type;
     emit_jit_root_frame_enter(mt);
     begin_function_epilogue(mt, ret_type, RETURN_LANE_SCALAR,
-        MIR_SCALAR_RETURN_DYNAMIC);
+        SCALAR_RETURN_DYNAMIC);
     mt->em.frame.plan.scalar_home_lane_mask = 0;
     mt->em.frame.plan.accepts_caller_scalar_home = false;
     // RVO13: the public descriptor is selected once with the body analysis;
     // wrapper emission must consume that descriptor rather than re-derive it.
-    mt->em.frame.plan.return_shape = public_shape;
-    mt->em.frame.plan.companion = em_companion_transport(
-        public_shape, /*c_reachable=*/true);
+    em_plan_bind_return(&mt->em.frame.plan,
+        public_variant ? &public_variant->result : NULL, /*c_reachable=*/true);
     mt->em.frame.incoming_scalar_home = 0;
     mt->em.frame.plan.debug_name = wrapper_name->str;
     emit_number_frame_enter(mt);
@@ -25669,9 +25673,10 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         abort();
     }
     bool native_return = nfi && nfi->return_type != LMD_TYPE_ANY;
-    int raw_lane_kind = native_return
-        ? ((fn_type && fn_type->can_raise) ? RETURN_LANE_ERROR : RETURN_LANE_NONE)
-        : RETURN_LANE_SCALAR;
+    // the wrapper always speaks the boxed lane for a non-native body, even a
+    // value-less procedure: is_proc=false keeps that rule in the shared helper
+    MirReturnLaneKind raw_lane_kind = lambda_body_return_lane(mt, fn_node,
+        fn_type, native_return, /*is_proc=*/false);
     MIR_type_t call_types[WRAPPER_PARAM_CAPACITY];
     for (int i = 0; i < call_arg_count; i++) {
         call_types[i] = call_vars[i].type;
@@ -26013,16 +26018,10 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         }
     }
 
-    bool has_value_return = !is_proc_fn ||
-        mir_proc_has_value_return(mt, fn_node);
-    int return_lane_kind = native_return
-        ? ((fn_type && fn_type->can_raise) ? RETURN_LANE_ERROR : RETURN_LANE_NONE)
-        : has_value_return ? RETURN_LANE_SCALAR : RETURN_LANE_NONE;
-    MirScalarReturnMode body_scalar_mode = return_lane_kind == RETURN_LANE_ERROR
-        ? MIR_SCALAR_RETURN_DYNAMIC
-        : return_lane_kind == RETURN_LANE_SCALAR
-            ? infer_boxed_return_mode(mt, fn_node)
-            : MIR_SCALAR_RETURN_NONE;
+    MirReturnLaneKind return_lane_kind = lambda_body_return_lane(mt, fn_node,
+        fn_type, native_return, is_proc_fn);
+    ScalarReturnClass body_scalar_mode = lambda_body_scalar_class(mt, fn_node,
+        return_lane_kind);
     // Shape-2 bodies return the payload through the companion lane.  No
     // generated function accepts the retired trailing home parameter.
     bool body_returns_pair = mir_body_returns_pair(return_lane_kind,
@@ -26191,12 +26190,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // RV10: the emitter READS the published descriptor rather than deriving a
     // second answer from its own locals — the two answers drifting apart is the
     // v27 havlak bug class. Universal shape 2 is the safe fallback.
-    mt->em.frame.plan.return_shape = body_variant
-        ? body_variant->result.shape : RETURN_SHAPE_ITEM_SCALAR;
-    mt->em.frame.plan.companion = body_variant
-        ? body_variant->result.companion
-        : em_companion_transport(RETURN_SHAPE_ITEM_SCALAR,
-            /*c_reachable=*/false);
+    em_plan_bind_return(&mt->em.frame.plan,
+        body_variant ? &body_variant->result : NULL, /*c_reachable=*/false);
 
     // Register as local function early (before body transpilation for recursion)
     register_local_func_contract(mt, name_buf->str, func_item, body_variant);
@@ -27975,17 +27970,10 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                     name_buf->str);
                 bool native_return = fwd_nfi &&
                     fwd_nfi->return_type != LMD_TYPE_ANY;
-                bool has_value_return = !is_proc ||
-                    mir_proc_has_value_return(mt, fn_node);
-                int lane_kind = native_return
-                    ? ((ft && ft->can_raise)
-                        ? RETURN_LANE_ERROR : RETURN_LANE_NONE)
-                    : has_value_return ? RETURN_LANE_SCALAR : RETURN_LANE_NONE;
-                MirScalarReturnMode scalar_mode = lane_kind == RETURN_LANE_ERROR
-                    ? MIR_SCALAR_RETURN_DYNAMIC
-                    : lane_kind == RETURN_LANE_SCALAR
-                        ? infer_boxed_return_mode(mt, fn_node)
-                        : MIR_SCALAR_RETURN_NONE;
+                MirReturnLaneKind lane_kind = lambda_body_return_lane(mt,
+                    fn_node, ft, native_return, is_proc);
+                ScalarReturnClass scalar_mode = lambda_body_scalar_class(mt,
+                    fn_node, lane_kind);
                 FnVariantAnalysis* variant = analyze_lambda_mir_variants(
                     mt, fn_node, fwd_nfi, scalar_mode);
                 register_local_func_contract(mt, name_buf->str, fwd, variant);

@@ -166,13 +166,15 @@ extern Item fn_redo(void);
 extern Item fn_commit0(void);
 extern Item fn_commit1(Item description);
 
+extern Item pn_select(Item handles, Item timeout_ms);
+
 // io.http module
-extern RetItem pn_io_http_create_server(Item config);
-extern RetItem pn_io_http_listen(Item server, Item port);
-extern RetItem pn_io_http_route(Item server, Item method, Item path, Item handler);
-extern RetItem pn_io_http_use(Item server, Item middleware);
-extern RetItem pn_io_http_static(Item server, Item url_path, Item dir_path);
-extern RetItem pn_io_http_stop(Item server);
+extern Item pn_io_http_create_server(Item config);
+extern Item pn_io_http_listen(Item server, Item port);
+extern Item pn_io_http_route(Item server, Item method, Item path, Item handler);
+extern Item pn_io_http_use(Item server, Item middleware);
+extern Item pn_io_http_static(Item server, Item url_path, Item dir_path);
+extern Item pn_io_http_stop(Item server);
 
 // target_equal is in target.cpp (C++ linkage)
 extern bool target_equal(Target* a, Target* b);
@@ -551,10 +553,10 @@ SysFuncInfo sys_func_defs[] = {
     // I/O functions — can_raise=true for functions that may fail
     // ========================================================================
     {SYSFUNC_INPUT1, "input", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "fn_input1", FPTR(fn_input1), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_input1", FPTR(fn_input1), NULL, NULL, false, 0},
 
     {SYSFUNC_INPUT2, "input", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "fn_input2", FPTR(fn_input2), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_input2", FPTR(fn_input2), NULL, NULL, false, 0},
 
     {SYSFUNC_FORMAT1, "format", 1, &TYPE_STRING, false, true, true, LMD_TYPE_ANY, false,
      C_RET_STRING, C_ARG_ITEM, "fn_format1", FPTR(fn_format1), NULL, NULL, false, 0},
@@ -901,10 +903,10 @@ SysFuncInfo sys_func_defs[] = {
     // Parse string functions — overloaded with arg count
     // ========================================================================
     {SYSFUNC_PARSE1, "parse", 1, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true,
-     C_RET_RETITEM, C_ARG_ITEM, "fn_parse1", FPTR(fn_parse1), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_parse1", FPTR(fn_parse1), NULL, NULL, false, 0},
 
     {SYSFUNC_PARSE2, "parse", 2, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, true,
-     C_RET_RETITEM, C_ARG_ITEM, "fn_parse2", FPTR(fn_parse2), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_parse2", FPTR(fn_parse2), NULL, NULL, false, 0},
 
     {SYSFUNC_PARSE_HTML_FRAGMENT, "parse_html_fragment", 1, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
         C_RET_ITEM, C_ARG_ITEM, "fn_parse_html_fragment1", FPTR(fn_parse_html_fragment1), NULL, NULL, false, 0,
@@ -943,22 +945,22 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, C_ARG_ITEM, "pn_start", NULL, NULL, NULL, false, 0, false},
 
     {SYSPROC_SEND, "send", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_send", FPTR(pn_send), NULL, NULL, false, 0, false},
+     C_RET_ITEM, C_ARG_ITEM, "pn_send", FPTR(pn_send), NULL, NULL, false, 0, false},
 
     {SYSPROC_RECEIVE, "receive", 0, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_receive", FPTR(pn_receive), NULL, NULL, false, 0, true},
+     C_RET_ITEM, C_ARG_ITEM, "pn_receive", FPTR(pn_receive), NULL, NULL, false, 0, true},
 
     {SYSPROC_WAIT, "wait", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_wait1", FPTR(pn_wait1), NULL, NULL, false, 0, true},
+     C_RET_ITEM, C_ARG_ITEM, "pn_wait1", FPTR(pn_wait1), NULL, NULL, false, 0, true},
 
     {SYSPROC_WAIT, "wait", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_wait2", FPTR(pn_wait2), NULL, NULL, false, 0, true},
+     C_RET_ITEM, C_ARG_ITEM, "pn_wait2", FPTR(pn_wait2), NULL, NULL, false, 0, true},
 
     {SYSPROC_SELECT, "select", -1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_select", NULL, NULL, NULL, false, 0, true},
+     C_RET_ITEM, C_ARG_ITEM, "pn_select", NULL, NULL, NULL, false, 0, true},
 
     {SYSPROC_SLEEP, "sleep", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_sleep", FPTR(pn_sleep), NULL, NULL, false, 0, true},
+     C_RET_ITEM, C_ARG_ITEM, "pn_sleep", FPTR(pn_sleep), NULL, NULL, false, 0, true},
 
     {SYSPROC_SELF, "self", 0, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "pn_self", FPTR(pn_self), NULL, NULL, false, 0, false},
@@ -967,74 +969,74 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, C_ARG_ITEM, "pn_cancel", FPTR(pn_cancel), NULL, NULL, false, 0, false},
 
     {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_fetch", FPTR(pn_fetch), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_fetch", FPTR(pn_fetch), NULL, NULL, false, 0},
 
     {SYSPROC_OUTPUT2, "output", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_output2", FPTR(pn_output2), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_output2", FPTR(pn_output2), NULL, NULL, false, 0},
 
     {SYSPROC_OUTPUT3, "output", 3, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_output3", FPTR(pn_output3), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_output3", FPTR(pn_output3), NULL, NULL, false, 0},
 
     {SYSPROC_CMD1, "cmd", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_cmd1", FPTR(pn_cmd1), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_cmd1", FPTR(pn_cmd1), NULL, NULL, false, 0},
 
     {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_cmd2", FPTR(pn_cmd2), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_cmd2", FPTR(pn_cmd2), NULL, NULL, false, 0},
 
     // ========================================================================
     // IO module procedures — all can_raise=true for I/O errors
     // ========================================================================
     {SYSPROC_IO_COPY, "io_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_copy", FPTR(pn_io_copy), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_copy", FPTR(pn_io_copy), NULL, NULL, false, 0},
 
     {SYSPROC_IO_READ, "io_read", 1, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_read", FPTR(pn_io_read), NULL, NULL, false, 0, true},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_read", FPTR(pn_io_read), NULL, NULL, false, 0, true},
 
     {SYSPROC_IO_MOVE, "io_move", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_move", FPTR(pn_io_move), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_move", FPTR(pn_io_move), NULL, NULL, false, 0},
 
     {SYSPROC_IO_DELETE, "io_delete", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_delete", FPTR(pn_io_delete), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_delete", FPTR(pn_io_delete), NULL, NULL, false, 0},
 
     {SYSPROC_IO_MKDIR, "io_mkdir", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_mkdir", FPTR(pn_io_mkdir), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_mkdir", FPTR(pn_io_mkdir), NULL, NULL, false, 0},
 
     {SYSPROC_IO_TOUCH, "io_touch", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_touch", FPTR(pn_io_touch), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_touch", FPTR(pn_io_touch), NULL, NULL, false, 0},
 
     {SYSPROC_IO_SYMLINK, "io_symlink", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_symlink", FPTR(pn_io_symlink), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_symlink", FPTR(pn_io_symlink), NULL, NULL, false, 0},
 
     {SYSPROC_IO_CHMOD, "io_chmod", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_chmod", FPTR(pn_io_chmod), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_chmod", FPTR(pn_io_chmod), NULL, NULL, false, 0},
 
     {SYSPROC_IO_RENAME, "io_rename", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_rename", FPTR(pn_io_rename), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_rename", FPTR(pn_io_rename), NULL, NULL, false, 0},
 
     {SYSPROC_IO_FETCH, "io_fetch", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_fetch1", FPTR(pn_io_fetch1), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_fetch1", FPTR(pn_io_fetch1), NULL, NULL, false, 0},
 
     {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_fetch2", FPTR(pn_io_fetch2), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_fetch2", FPTR(pn_io_fetch2), NULL, NULL, false, 0},
 
     // io.http module
     {SYSPROC_IO_HTTP_CREATE_SERVER, "io_http_create_server", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_http_create_server", FPTR(pn_io_http_create_server), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_http_create_server", FPTR(pn_io_http_create_server), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_LISTEN, "io_http_listen", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_http_listen", FPTR(pn_io_http_listen), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_http_listen", FPTR(pn_io_http_listen), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_ROUTE, "io_http_route", 4, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_http_route", FPTR(pn_io_http_route), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_http_route", FPTR(pn_io_http_route), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_USE, "io_http_use", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_http_use", FPTR(pn_io_http_use), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_http_use", FPTR(pn_io_http_use), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_STATIC, "io_http_static", 3, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_http_static", FPTR(pn_io_http_static), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_http_static", FPTR(pn_io_http_static), NULL, NULL, false, 0},
 
     {SYSPROC_IO_HTTP_STOP, "io_http_stop", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
-     C_RET_RETITEM, C_ARG_ITEM, "pn_io_http_stop", FPTR(pn_io_http_stop), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_io_http_stop", FPTR(pn_io_http_stop), NULL, NULL, false, 0},
 
     {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
      C_RET_BOOL, C_ARG_ITEM, "fn_exists", FPTR(fn_exists), NULL, NULL, false, 0},
@@ -1085,9 +1087,9 @@ SysFuncInfo sys_func_defs[] = {
     // Needs first_param_type-based disambiguation in build_ast before enabling.
     // ========================================================================
     // {SYSPROC_REPLACE_FILE, "replace", 3, &TYPE_NULL, true, true, false, LMD_TYPE_PATH, true,
-    //  C_RET_RETITEM, C_ARG_ITEM, "pn_replace_file3", NULL, NULL, NULL, false, 0},
+    //  C_RET_ITEM, C_ARG_ITEM, "pn_replace_file3", NULL, NULL, NULL, false, 0},
     // {SYSPROC_REPLACE_FILE4, "replace", 4, &TYPE_NULL, true, true, false, LMD_TYPE_PATH, true,
-    //  C_RET_RETITEM, C_ARG_ITEM, "pn_replace_file4", NULL, NULL, NULL, false, 0},
+    //  C_RET_ITEM, C_ARG_ITEM, "pn_replace_file4", NULL, NULL, NULL, false, 0},
 
     // ========================================================================
     // S12.3.4 dynamic application. Two rows, one surface name: the AST builder
@@ -1154,41 +1156,7 @@ const int sys_func_def_count = SYS_FUNC_DEF_COUNT;
 
 #ifndef LAMBDA_IO_STATIC_VALUES
 
-// MIR JIT wrapper declarations for RetItem-returning functions
-extern Item fn_parse1_mir(Item str_item);
-extern Item fn_parse2_mir(Item str_item, Item type);
-extern Item fn_input1_mir(Item url);
-extern Item fn_input2_mir(Item url, Item options);
-extern Item pn_send_mir(Item handle, Item message);
-extern Item pn_receive_mir(void);
-extern Item pn_wait1_mir(Item handle);
-extern Item pn_wait2_mir(Item handle, Item timeout_ms);
-extern Item pn_select_mir(Item handles, Item timeout_ms);
-extern Item pn_sleep_mir(Item duration_ms);
-extern Item pn_cmd1_mir(Item cmd);
-extern Item pn_cmd2_mir(Item cmd, Item args);
-extern Item pn_fetch_mir(Item url, Item options);
-extern Item pn_output2_mir(Item source, Item target);
-extern Item pn_output3_mir(Item source, Item target, Item options);
-extern Item pn_io_copy_mir(Item src, Item dst);
-extern Item pn_io_read_mir(Item target);
-extern Item pn_io_move_mir(Item src, Item dst);
-extern Item pn_io_delete_mir(Item path);
-extern Item pn_io_mkdir_mir(Item path);
-extern Item pn_io_touch_mir(Item path);
-extern Item pn_io_symlink_mir(Item target, Item link);
-extern Item pn_io_chmod_mir(Item path, Item mode);
-extern Item pn_io_rename_mir(Item old_path, Item new_path);
-extern Item pn_io_fetch1_mir(Item target);
-extern Item pn_io_fetch2_mir(Item target, Item options);
-extern Item pn_output_append_mir(Item source, Item target);
 // io.http module
-extern Item pn_io_http_create_server_mir(Item config);
-extern Item pn_io_http_listen_mir(Item server, Item port);
-extern Item pn_io_http_route_mir(Item server, Item method, Item path, Item handler);
-extern Item pn_io_http_use_mir(Item server, Item middleware);
-extern Item pn_io_http_static_mir(Item server, Item url_path, Item dir_path);
-extern Item pn_io_http_stop_mir(Item server);
 
 // Trampolines for calling _b boxed wrappers from MIR Direct (RetItem ABI fix)
 extern Item fn_call_boxed_0(void* fp);
@@ -2011,10 +1979,6 @@ JitImport jit_runtime_imports[] = {
     {"lambda_array_set_checked_inplace", FPTR(lambda_array_set_checked_inplace)},
     {"lambda_array_set_checked_lane", FPTR(lambda_array_set_checked_lane)},
     {"lambda_array_set_checked_inplace_lane", FPTR(lambda_array_set_checked_inplace_lane)},
-    {"ri_ok", FPTR(ri_ok)},
-    {"ri_err", FPTR(ri_err)},
-    {"item_to_ri", FPTR(item_to_ri)},
-    {"ri_to_item", FPTR(ri_to_item)},
 
     // ========================================================================
     // Runtime pool access
@@ -3194,19 +3158,9 @@ JitImport jit_runtime_imports[] = {
     {"bash_clear_heredoc_stdin", FPTR(bash_clear_heredoc_stdin)},
 #endif // LAMBDA_BASH
 
-    // ========================================================================
-    // MIR JIT wrappers for RetItem-returning functions
-    // ========================================================================
-    {"fn_parse1_mir", FPTR(fn_parse1_mir)},
-    {"fn_parse2_mir", FPTR(fn_parse2_mir)},
-    {"fn_input1_mir", FPTR(fn_input1_mir)},
-    {"fn_input2_mir", FPTR(fn_input2_mir)},
-    {"pn_send_mir", FPTR(pn_send_mir)},
-    {"pn_receive_mir", FPTR(pn_receive_mir)},
-    {"pn_wait1_mir", FPTR(pn_wait1_mir)},
-    {"pn_wait2_mir", FPTR(pn_wait2_mir)},
-    {"pn_select_mir", FPTR(pn_select_mir)},
-    {"pn_sleep_mir", FPTR(pn_sleep_mir)},
+    // select() is async-lowered, so its registry row carries no entry point;
+    // generated code reaches the C function through this import.
+    {"pn_select", FPTR(pn_select)},
     {"lambda_async_frame_enter_current", FPTR(lambda_async_frame_enter_current)},
     {"lambda_async_frame_get_raw", FPTR(lambda_async_frame_get_raw)},
     {"lambda_async_frame_set_raw", FPTR(lambda_async_frame_set_raw)},
@@ -3243,33 +3197,9 @@ JitImport jit_runtime_imports[] = {
     {"lambda_task_start_function", FPTR(lambda_task_start_function)},
     {"lambda_task_start_function_scoped", FPTR(lambda_task_start_function_scoped)},
     {"lambda_task_run_root_raw", FPTR(lambda_task_run_root_raw)},
-    {"pn_cmd1_mir", FPTR(pn_cmd1_mir)},
-    {"pn_cmd2_mir", FPTR(pn_cmd2_mir)},
-    {"pn_fetch_mir", FPTR(pn_fetch_mir)},
-    {"pn_output2_mir", FPTR(pn_output2_mir)},
-    {"pn_output3_mir", FPTR(pn_output3_mir)},
-    {"pn_io_copy_mir", FPTR(pn_io_copy_mir)},
-    {"pn_io_read_mir", FPTR(pn_io_read_mir)},
-    {"pn_io_move_mir", FPTR(pn_io_move_mir)},
-    {"pn_io_delete_mir", FPTR(pn_io_delete_mir)},
-    {"pn_io_mkdir_mir", FPTR(pn_io_mkdir_mir)},
-    {"pn_io_touch_mir", FPTR(pn_io_touch_mir)},
-    {"pn_io_symlink_mir", FPTR(pn_io_symlink_mir)},
-    {"pn_io_chmod_mir", FPTR(pn_io_chmod_mir)},
-    {"pn_io_rename_mir", FPTR(pn_io_rename_mir)},
-    {"pn_io_fetch1_mir", FPTR(pn_io_fetch1_mir)},
-    {"pn_io_fetch2_mir", FPTR(pn_io_fetch2_mir)},
-    {"pn_output_append_mir", FPTR(pn_output_append_mir)},
-    // io.http module
-    {"pn_io_http_create_server_mir", FPTR(pn_io_http_create_server_mir)},
-    {"pn_io_http_listen_mir", FPTR(pn_io_http_listen_mir)},
-    {"pn_io_http_route_mir", FPTR(pn_io_http_route_mir)},
-    {"pn_io_http_use_mir", FPTR(pn_io_http_use_mir)},
-    {"pn_io_http_static_mir", FPTR(pn_io_http_static_mir)},
-    {"pn_io_http_stop_mir", FPTR(pn_io_http_stop_mir)},
 
     // ========================================================================
-    // Trampolines for calling _b boxed wrappers from MIR Direct (RetItem ABI)
+    // Trampolines for calling _b boxed wrappers from MIR Direct
     // ========================================================================
     {"fn_call_boxed_0", FPTR(fn_call_boxed_0)},
     {"fn_call_boxed_1", FPTR(fn_call_boxed_1)},

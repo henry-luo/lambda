@@ -332,9 +332,14 @@ label_done:
                 // If title was on same line as URL, definition is invalid
                 // If title was on separate line, URL-only definition is still valid
                 if (title_on_separate_line) {
-                    // Restore to URL-only state
+                    // Restore to URL-only state. The title span must be
+                    // dropped too: title_end is a length marker, not a
+                    // pointer, so a stale title_start would make the
+                    // URL-only add compute a garbage title length.
                     p = saved_p;
                     lines_consumed = saved_lines_consumed;
+                    title_start = nullptr;
+                    title_end = nullptr;
                     goto add_without_title;
                 }
                 mem_free(label_copy);
@@ -361,9 +366,12 @@ label_done:
             // If title was on same line as URL, definition is invalid
             // If title was on separate line, URL-only definition is still valid
             if (title_on_separate_line) {
-                // Restore to URL-only state
+                // Restore to URL-only state (see the note above: clear the
+                // title span so the URL-only add passes no title)
                 p = saved_p;
                 lines_consumed = saved_lines_consumed;
+                title_start = nullptr;
+                title_end = nullptr;
                 goto add_without_title;
             }
             mem_free(label_copy);

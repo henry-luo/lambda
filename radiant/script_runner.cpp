@@ -1650,11 +1650,11 @@ static const char* script_task_filename(JsScriptTask* task, char* scratch, size_
 static EvalContext* script_eval_context_prepare(Runtime* runtime) {
     EvalContext* eval_context = runtime_get_eval_context(runtime);
     if (!eval_context) return nullptr;
-    eval_context->heap = runtime->heap;
-    eval_context->name_pool = runtime->name_pool;
-    if (!runtime->type_list) runtime->type_list = arraylist_new(64);
-    eval_context->type_list = runtime->type_list;
-    eval_context->pool = runtime->heap ? runtime->heap->pool : nullptr;
+    eval_context->heap = runtime_heap(runtime);
+    eval_context->name_pool = runtime_name_pool(runtime);
+    if (!runtime_type_list(runtime)) runtime_set_type_list(runtime, arraylist_new(64));
+    eval_context->type_list = runtime_type_list(runtime);
+    eval_context->pool = runtime_heap(runtime) ? runtime_heap(runtime)->pool : nullptr;
     return eval_context;
 }
 
@@ -2833,7 +2833,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     JsPreambleState* preamble = (JsPreambleState*)dom_doc->js.preamble_state;
     Runtime* runtime = dom_doc->js.runtime;
     EvalContext* handler_compile_ctx = runtime_get_eval_context(runtime);
-    if (!handler_compile_ctx || !runtime->heap || !runtime->name_pool) {
+    if (!handler_compile_ctx || !runtime_heap(runtime) || !runtime_name_pool(runtime)) {
         log_error("collect_and_compile_event_handlers: document runtime is incomplete");
         strbuf_free(compile_buf);
         hashmap_free(handlers->element_map);
@@ -2966,26 +2966,26 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     module_registry_cleanup_for_runtime(runtime);
 
     // Destroy retained heap and GC metadata.
-    if (runtime->heap) {
-        Heap* heap = runtime->heap;
+    if (runtime_heap(runtime)) {
+        Heap* heap = runtime_heap(runtime);
         if (heap->gc) {
             heap_finalize_gc_objects(heap->gc);
             gc_heap_destroy(heap->gc);
             // pool is destroyed separately below
         }
         mem_free(heap);
-        runtime->heap = nullptr;
+        runtime_set_heap(runtime, nullptr);
     }
 
-    if (runtime->type_list) {
+    if (runtime_type_list(runtime)) {
         // A loaded Lambda package can publish its Script-owned type list here.
         if (!runtime_type_list_is_script_owned(runtime)) {
-            arraylist_free(runtime->type_list);
+            arraylist_free(runtime_type_list(runtime));
         }
-        runtime->type_list = nullptr;
+        runtime_set_type_list(runtime, nullptr);
     }
 
-    runtime->name_pool = nullptr;
+    runtime_set_name_pool(runtime, nullptr);
     // Lambda modules can be loaded into this runtime (the dom package), and
     // this teardown is hand-rolled rather than runtime_cleanup, so the pieces
     // that running Lambda code establishes have to be released here too: the
@@ -2994,9 +2994,9 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     lambda_stack_cleanup();
     // Running Lambda in this runtime can stand up the task scheduler, which
     // runtime_cleanup would own but this hand-rolled teardown otherwise leaks.
-    if (runtime->scheduler) {
-        lambda_scheduler_destroy(runtime->scheduler);
-        runtime->scheduler = nullptr;
+    if (runtime_scheduler(runtime)) {
+        lambda_scheduler_destroy(runtime_scheduler(runtime));
+        runtime_set_scheduler(runtime, nullptr);
     }
     runtime_free_all_scripts(runtime);
     // The dom package registers its behavior templates in the EvalContext's

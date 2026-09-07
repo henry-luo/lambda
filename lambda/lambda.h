@@ -993,24 +993,40 @@ _Static_assert(JS_ELEMENTS_STATE_MASK == (uint8_t)(0x20u | 0x40u | 0x80u),
 
 // A descriptor carries the full semantic contract for a packed carrier. TypeId
 // alone cannot distinguish int from int?, even though both have LMD_TYPE_INT.
+//
+// SCU7 (D2.6.1, D3.4.6): ONE total resolver, `lambda_lane_storage_desc_for`,
+// answers for every well-formed contract. Every other storage decision -- the
+// TypeId that decodes a packed slot, the slot width, the "native lane" tests
+// the JIT and the array boundary make -- is a projection of this record.
 typedef enum LaneStorageKind {
     LANE_STORAGE_INVALID = 0,
-    LANE_STORAGE_ITEM,
-    LANE_STORAGE_INT,
-    LANE_STORAGE_BOOL,
-    LANE_STORAGE_SIZED_I64,
-    LANE_STORAGE_FLOAT64,
-    LANE_STORAGE_POINTER,
+    LANE_STORAGE_ITEM,        // one boxed Item word (nullable int64/uint64, compact NumSized, dynamic `null` slots)
+    LANE_STORAGE_INT,         // int lane word (INT_LANE_NULL when nullable)
+    LANE_STORAGE_BOOL,        // one byte (2 = null when nullable; also `undefined`)
+    LANE_STORAGE_SIZED_I64,   // raw 64-bit integer word: nullable sized ints, full-width int64/uint64
+    LANE_STORAGE_FLOAT64,     // raw double (NaN-boxed null when nullable)
+    LANE_STORAGE_POINTER,     // raw pointer word (containers, strings, datetime, type, ...)
+    LANE_STORAGE_TYPED_ITEM,  // self-describing TypedItem: `any`, unions, abstract numerics
 } LaneStorageKind;
 
 typedef struct LaneStorageDesc {
-    Type* semantic_contract;
-    Type* base_contract;
-    uint8_t kind;       // LaneStorageKind
-    uint8_t nullable;
-    uint8_t byte_size;  // packed map width; native Array slots remain 8 bytes
-    uint8_t reserved[5];
+    Type* semantic_contract;  // non-owning: the full contract the descriptor was derived from
+    Type* base_contract;      // non-owning: the payload contract under `?`/`| null`
+    uint8_t kind;             // LaneStorageKind
+    uint8_t nullable;         // the slot admits null
+    uint8_t byte_size;        // packed map width; native Array slots remain 8 bytes
+    uint8_t value_domain;     // TypeId that decodes the slot (map_field_to_item et al.)
+    // The value has a raw register/slot representation the JIT may address
+    // directly. Non-native kinds still describe the packed slot exactly; they
+    // are decoded through `value_domain`.
+    uint8_t native;
+    uint8_t reserved[3];
 } LaneStorageDesc;
+
+// A field's packed slot is a nullable native lane (int?/bool?/float?/T?/...).
+static inline bool lane_desc_is_nullable_native(const LaneStorageDesc* desc) {
+    return desc && desc->native && desc->nullable;
+}
 
 // List/Array flags (stored in List.flags / Array.flags field)
 
@@ -1327,7 +1343,10 @@ struct Function {
     union {
         uint32_t flags;          // whole-word initialization/copy only
         struct {
-            uint32_t returns_ret_item : 1;
+            // Retired with the aggregate return record (SCU17). The bit stays
+            // reserved so the positions generated code bakes in for the
+            // fields below hold.
+            uint32_t reserved_bit_ret_item : 1;
             uint32_t has_kwargs : 1;
             uint32_t is_generator : 1;
             uint32_t is_coroutine : 1;
@@ -1596,7 +1615,7 @@ static inline bool is_numeric_type_id(TypeId type_id) {
 // number home (v1) or the companion lane (v3)? Everything else is inline,
 // pointer-backed or a container, and so needs no rehoming at any boundary.
 // This is the single source of the "NONE" decision: the emitter's
-// `em_scalar_return_mode_for_type()` defers to it, and the C-side sys-func
+// `em_scalar_return_class_for_type()` defers to it, and the C-side sys-func
 // metadata fallback in mir.c uses it directly, so the two cannot drift.
 static inline bool lambda_type_id_may_be_wide_scalar(TypeId type_id) {
     return type_id == LMD_TYPE_FLOAT ||
@@ -2112,58 +2131,19 @@ static inline LambdaError* it2err(Item item) {
 }
 #endif // !__cplusplus
 
-#ifndef __cplusplus
-typedef struct RetItem   { Item         value; LambdaError* err; } RetItem;
-#endif
-#ifdef __cplusplus
-struct RetItem;  // full definition in lambda.hpp
-#endif
-
-// RetItem (boxed, universal — used by _b trampolines)
-// In C++ mode, these are defined in lambda.hpp (after full Item struct definition).
-#ifndef __cplusplus
-static inline RetItem ri_ok(Item value) {
-    RetItem r; r.value = value; r.err = null; return r;
-}
-static inline RetItem ri_err(LambdaError* error) {
-    RetItem r; r.value = ITEM_ERROR; r.err = error; return r;
-}
-#endif
-
-// ============================================================================
-// Compatibility shims for incremental migration
-// In C++ mode, these are defined in lambda.hpp (after full Item struct definition).
-// ============================================================================
-#ifndef __cplusplus
-
 // C helpers use the same merged-lane tag test as the C++ runtime.  Keep the
 // implementation here so native host boundaries do not need the C++ Item API.
+#ifndef __cplusplus
 static inline bool item_is_error(Item item) {
     return ((uint64_t)item >> 56) == LMD_TYPE_ERROR;
 }
 
-// Wrap a legacy Item-returning function result into RetItem.
-// Error Items may be either the historical sentinel (pointer=0) or a tagged
-// LambdaError* created at runtime. Preserve the pointer when present and use
-// .err as a boolean sentinel only for pointer-less errors.
-static inline RetItem item_to_ri(Item item) {
-    RetItem r;
-    r.value = item;
-    if ((uint64_t)item >> 56 == LMD_TYPE_ERROR) {
-        LambdaError* err = it2err(item);
-        r.err = err ? err : (LambdaError*)1;
-    } else {
-        r.err = null;
-    }
-    return r;
+// Error completion from a LambdaError* that may be null (payload allocation
+// failed): a null payload still completes as the pointer-less ERROR sentinel,
+// never as null (D1.4v3). This is the one spelling of "return this error".
+static inline Item err2it_or_error(LambdaError* err) {
+    return err ? err2it(err) : ITEM_ERROR;
 }
-
-// Extract Item from RetItem (for legacy callers expecting plain Item)
-// .value always holds the actual Item — whether error or normal value.
-static inline Item ri_to_item(RetItem ri) {
-    return ri.value;
-}
-
 #endif // !__cplusplus
 
 Array* array_fill(Array* arr, int count, ...);
@@ -2188,6 +2168,13 @@ Map* map_fill_items(Map* map, const Item* values, int value_count);
 extern "C"
 #endif
 TypeId lambda_shape_field_storage_type_id(const void* field_type);
+// The collector decodes a shaped field from the entry's stored descriptor
+// (SCU9): kind, nullability and the decoding TypeId, never from Type::type_id.
+#ifdef __cplusplus
+extern "C"
+#endif
+void lambda_shape_entry_lane(const void* shape_entry, uint8_t* kind,
+    uint8_t* nullable, uint8_t* value_domain);
 
 typedef struct Element Element;
 Element* elmt_fill(Element *elmt, ...);
@@ -2850,10 +2837,10 @@ extern "C" {
     // returns the name of an element, function, or type as a symbol
     Symbol* fn_name(Item item);
 
-    RetItem fn_input1(Item url);
-    RetItem fn_input2(Item url, Item options);
-    RetItem fn_parse1(Item str);
-    RetItem fn_parse2(Item str, Item options);
+    Item fn_input1(Item url);
+    Item fn_input2(Item url, Item options);
+    Item fn_parse1(Item str);
+    Item fn_parse2(Item str, Item options);
     Item fn_parse_html_fragment1(Item str);
     String* fn_format1(Item item);
     String* fn_format2(Item item, Item options);
@@ -2887,25 +2874,25 @@ extern "C" {
     // procedural functions
     Item pn_print(Item item);
     double pn_clock();        // clock() - high-resolution monotonic time in seconds
-    RetItem pn_cmd1(Item cmd);
-    RetItem pn_cmd2(Item cmd, Item args);
-    RetItem pn_fetch(Item url, Item options);
-    RetItem pn_output2(Item source, Item target);            // output(data, trg) - writes data to target, returns bytes written
-    RetItem pn_output3(Item source, Item target, Item options);  // output(data, trg, options) - options: map {format, mode, atomic}, symbol/string (format), or null
-    RetItem pn_output_append(Item source, Item target);      // used by |>> pipe operator (append mode)
+    Item pn_cmd1(Item cmd);
+    Item pn_cmd2(Item cmd, Item args);
+    Item pn_fetch(Item url, Item options);
+    Item pn_output2(Item source, Item target);            // output(data, trg) - writes data to target, returns bytes written
+    Item pn_output3(Item source, Item target, Item options);  // output(data, trg, options) - options: map {format, mode, atomic}, symbol/string (format), or null
+    Item pn_output_append(Item source, Item target);      // used by |>> pipe operator (append mode)
 
     // io module functions (procedural)
-    RetItem pn_io_copy(Item src, Item dst);
-    RetItem pn_io_read(Item target);
-    RetItem pn_io_move(Item src, Item dst);
-    RetItem pn_io_delete(Item path);
-    RetItem pn_io_mkdir(Item path);
-    RetItem pn_io_touch(Item path);
-    RetItem pn_io_symlink(Item target, Item link);
-    RetItem pn_io_chmod(Item path, Item mode);
-    RetItem pn_io_rename(Item old_path, Item new_path);
-    RetItem pn_io_fetch1(Item target);
-    RetItem pn_io_fetch2(Item target, Item options);
+    Item pn_io_copy(Item src, Item dst);
+    Item pn_io_read(Item target);
+    Item pn_io_move(Item src, Item dst);
+    Item pn_io_delete(Item path);
+    Item pn_io_mkdir(Item path);
+    Item pn_io_touch(Item path);
+    Item pn_io_symlink(Item target, Item link);
+    Item pn_io_chmod(Item path, Item mode);
+    Item pn_io_rename(Item old_path, Item new_path);
+    Item pn_io_fetch1(Item target);
+    Item pn_io_fetch2(Item target, Item options);
 
     // bitwise functions (integer operations)
     int64_t fn_band(int64_t a, int64_t b);

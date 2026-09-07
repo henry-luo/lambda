@@ -155,6 +155,7 @@ static TypeMap* js_typemap_clone_for_mutation_ex(Item obj, bool force_clone) {
         if (!dst) return nullptr;
         dst->name = src->name;
         dst->type = src->type;
+        dst->storage = *shape_entry_storage(src);
         dst->byte_offset = src->byte_offset;
         dst->next = nullptr;
         dst->ns = src->ns;
@@ -327,7 +328,7 @@ extern "C" TypeMap* js_typemap_transition_for_type(Item obj,
     target->is_shared_constructor_shape = false;
     target->is_transition_shared_shape = true;
     target->transitions = NULL;
-    target_entry->type = type_info[value_type].type;
+    shape_entry_set_type(target_entry, type_info[value_type].type);
 
     transition->name_id = operation_name_id != NAME_ID_NONE
         ? operation_name_id : entry->name_id;

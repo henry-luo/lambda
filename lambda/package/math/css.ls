@@ -131,7 +131,14 @@ pub fn get_stylesheet(options = null) {
     ".lm_delim-size2{font-family:" ++ families.size2 ++ "}" ++
     ".lm_delim-size3{font-family:" ++ families.size3 ++ "}" ++
     ".lm_delim-size4{font-family:" ++ families.size4 ++ "}" ++
+    // MathLive's stacked recipes use these unprefixed classes.  Keep them on
+    // the matching Size fonts so their component glyph metrics match the vlist.
+    ".delim-size1{font-family:" ++ families.size1 ++ "}" ++
+    ".delim-size2{font-family:" ++ families.size2 ++ "}" ++
+    ".delim-size3{font-family:" ++ families.size3 ++ "}" ++
+    ".delim-size4{font-family:" ++ families.size4 ++ "}" ++
     ".lm_accent-body{font-family:" ++ families.main ++ "}" ++
+    ".lm_accent-combining-char{left:0.24em;position:relative}" ++
     ".lm_negativethinspace{display:inline-block;margin-left:-0.16667em;height:0.71em}" ++
     ".lm_thinspace{display:inline-block;width:0.16667em;height:0.71em}" ++
     ".lm_mediumspace{display:inline-block;width:0.22222em;height:0.71em}" ++
@@ -141,6 +148,15 @@ pub fn get_stylesheet(options = null) {
     ".lm_qquad{display:inline-block;width:2em;height:0.71em}" ++
     ".lm_nulldelimiter{display:inline-block;width:0.12em}" ++
     ".lm_rule{display:inline-block;border:solid 0;position:relative;box-sizing:border-box}" ++
+    // Overlays carry zero inline width; their contents are positioned over the
+    // following atom instead of contributing a separate layout fragment.
+    ".lm_llap,.lm_rlap{display:inline-block;position:relative;width:0}" ++
+    ".lm_llap>.lm_inner,.lm_rlap>.lm_inner{position:absolute}" ++
+    ".lm_llap>.lm_inner{right:0}.lm_rlap>.lm_inner{left:0}" ++
+    ".lm_llap>.lm_fix,.lm_rlap>.lm_fix{display:inline-block}" ++
+    ".overline .overline-line,.underline .underline-line{width:100%}" ++
+    ".lm_stretchy{display:block;left:0;overflow:hidden;position:absolute;width:100%}" ++
+    ".lm_stretchy svg{display:block;fill:currentColor;height:inherit;position:absolute;stroke:currentColor;stroke-width:1;width:100%}" ++
     // Matrix columns are inline siblings; flex column layout stacks them vertically.
     ".lm_mtable{vertical-align:middle}.lm_mtable>.lm_arraycolsep{display:inline-block}" ++
     ".lm_mtable>.col-align-c>.lm_vlist-t,.lm_mtable>.col-align-m>.lm_vlist-t{text-align:center}" ++

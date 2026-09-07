@@ -320,6 +320,12 @@ typedef struct ShapeEntry {
     // Object-method field lowering uses the builder-resolved binding directly.
     // Runtime/Input-created shapes leave this compiler-only edge null.
     struct NameEntry* binding;
+    // SCU9 (D3.4.6): the physical descriptor derived from `type` by the one
+    // resolver, at the moment the contract is assigned (shape_entry_set_type).
+    // Readers, writers, the collector and MIR direct access all consult this
+    // record; none re-derives a lane from `type`. Trailing so the GC ABI view
+    // (LambdaGcShapeEntryLayout: type, byte_offset, next) is untouched.
+    LaneStorageDesc storage;
 } ShapeEntry;
 
 // Both shape walks (map_get_by_name_id_keyed and fn_map_set) confirm a field by
@@ -488,29 +494,61 @@ static inline void* map_field_ptr(void* map_data, const ShapeEntry* field) {
     return (uint8_t*)map_data + field->byte_offset;
 }
 
-// Defined in lambda/core/lambda-data.cpp. NOT header-inline: both this and
-// shape_entry_uses_native_lane below are long classifiers (92 and 28 lines),
-// and a `static inline` of that size in a header this widely included is
-// emitted out-of-line in every TU that cannot fully inline it -- which pulled
-// a symbol into test binaries that do not link it and made them fail to LOAD
-// (`symbol not found in flat namespace '_ItemError'`). See Tune19 §12.9.
+// ---------------------------------------------------------------------------
+// SCU7/SCU8: the one storage resolver and its projections.
+// Defined in lambda/core/lambda-data.cpp, NOT header-inline: these are long
+// classifiers, and a `static inline` of that size in a header this widely
+// included is emitted out-of-line in every TU that cannot fully inline it --
+// which pulled a symbol into test binaries that do not link it and made them
+// fail to LOAD (`symbol not found in flat namespace '_ItemError'`, Tune19 §12.9).
+// ---------------------------------------------------------------------------
+
+// Pure contract walks promoted from the runtime type-contract rules so the
+// core resolver (and the collector, and Input) can use them without linking
+// the runtime library.
+bool lambda_type_accepts_error(Type* type);
+bool lambda_type_accepts_null(Type* type);
+// The payload contract under `T?` / `T | null` (nullable=true), or the
+// contract itself, unwrapping type parameters and constrained bases. NULL for
+// heterogeneous unions and error-admitting `null | T`.
+Type* lambda_type_nullable_lane_base(Type* type, bool* nullable);
+
+// THE resolver (D2.6.1, D3.4.6): total over well-formed contracts. A null
+// contract logs and yields LANE_STORAGE_INVALID (D1.9: never a guess).
+LaneStorageDesc lambda_lane_storage_desc_for(Type* type);
+
+// Width projection: the packed slot size of a field holding `type`.
+static inline int lambda_lane_storage_size(Type* type) {
+    return lambda_lane_storage_desc_for(type).byte_size;
+}
+
+// Decoding-TypeId projection (what map_field_to_item and the collector read).
 TypeId type_field_storage_type_id(const Type* type);
 
-// The full semantic contract, not just TypeId, decides whether a packed field
-// has a nullable native lane.  The implementation lives with the type-contract
-// rules so a ShapeEntry and an array boundary cannot disagree about `T?`.
+// SCU9: assign a field's contract and derive its descriptor once. Every
+// ShapeEntry constructor and every retag goes through here.
+void shape_entry_set_type(ShapeEntry* entry, Type* type);
+// The stored descriptor. A constructor that bypassed shape_entry_set_type is
+// repaired on first read (and logged) so a missed site cannot desynchronize
+// readers; it is a bug to rely on that.
+const LaneStorageDesc* shape_entry_storage(const ShapeEntry* entry);
+
+// Nullable-native projection: the field's slot is int?/bool?/float?/T? lane.
 bool shape_entry_uses_native_lane(const ShapeEntry* field,
         LaneStorageDesc* out);
 
 static inline TypeId shape_entry_storage_type_id(const ShapeEntry* field) {
-    return field ? type_field_storage_type_id(field->type) : LMD_TYPE_NULL;
+    return field ? (TypeId)shape_entry_storage(field)->value_domain : LMD_TYPE_NULL;
+}
+
+static inline int shape_entry_storage_size(const ShapeEntry* field) {
+    return field ? shape_entry_storage(field)->byte_size : 0;
 }
 
 static inline bool shape_entry_storage_fits_data(const ShapeEntry* field,
         int64_t data_cap) {
     if (!field || field->byte_offset < 0 || data_cap < 0) return false;
-    TypeId storage_type = shape_entry_storage_type_id(field);
-    int storage_size = type_info[storage_type].byte_size;
+    int storage_size = shape_entry_storage_size(field);
     // Packed maps may end in a one-byte undefined/bool field; requiring a
     // pointer-width tail made that valid final field appear absent after a
     // sibling type change rebuilt the shape.

@@ -3352,6 +3352,10 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     CssStylesheet* latex_stylesheet = load_home_stylesheet(
         css_engine, pool, "input/latex/css/article.css", "Lambda LaTeX", "LaTeX stylesheet", false);
+    // The compact article sheet does not follow base.css's @import, so load the
+    // combined faces directly before TeX metrics participate in layout.
+    CssStylesheet* cmu_font_stylesheet = load_home_stylesheet(
+        css_engine, pool, "input/latex/fonts/cmu-combined.css", "Lambda LaTeX", "CMU font stylesheet", false);
     CssStylesheet* katex_stylesheet = load_home_stylesheet(
         css_engine, pool, "input/latex/css/katex.css", "Lambda LaTeX", "KaTeX font stylesheet", false);
 
@@ -3359,10 +3363,10 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
         html_root, dom_root, css_engine, latex_filepath, pool, &inline_stylesheet_count);
 
-    CssStylesheet* latex_stylesheets[2] = {latex_stylesheet, katex_stylesheet};
+    CssStylesheet* latex_stylesheets[3] = {latex_stylesheet, cmu_font_stylesheet, katex_stylesheet};
     int latex_sheet_count = 0;
     CssStylesheet** all_latex_stylesheets = layout_merge_css_sources(
-        pool, latex_stylesheets, 2, inline_stylesheets, inline_stylesheet_count,
+        pool, latex_stylesheets, 3, inline_stylesheets, inline_stylesheet_count,
         &latex_sheet_count);
     layout_apply_css_stylesheets(dom_doc, dom_root, all_latex_stylesheets,
                                  latex_sheet_count, pool, css_engine);
@@ -3370,7 +3374,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     apply_inline_styles_to_tree(dom_root, pool);
 
 
-    store_document_stylesheets(dom_doc, latex_stylesheets, 2,
+    store_document_stylesheets(dom_doc, latex_stylesheets, 3,
                                inline_stylesheets, inline_stylesheet_count, pool);
 
     populate_layout_document(dom_doc, dom_root, html_root, HTML5,
@@ -3599,10 +3603,10 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
 
     Input* script_output = run_script_mir(runtime, script_source, script_filepath, false);
 
-    if (runtime->heap) {
-        layout_context->heap = runtime->heap;
-        layout_context->name_pool = runtime->name_pool;
-        layout_context->pool = runtime->heap->pool;
+    if (runtime_heap(runtime)) {
+        layout_context->heap = runtime_heap(runtime);
+        layout_context->name_pool = runtime_name_pool(runtime);
+        layout_context->pool = runtime_heap(runtime)->pool;
         if (runtime->ui_mode && runtime->result_arena) {
             layout_context->ui_mode = true;
             layout_context->arena = runtime->result_arena;

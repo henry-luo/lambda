@@ -1418,11 +1418,11 @@ extern "C" void js_event_loop_attach_lambda_scheduler(void) {
         // Pure-JS contexts must retain their existing loop footprint. Attach a
         // Lambda scheduler only after a cross-language module activates the
         // membrane, so exported procedures can progress on this libuv loop.
-        context->scheduler = runtime->scheduler
-            ? runtime->scheduler
+        context->scheduler = runtime_scheduler(runtime)
+            ? runtime_scheduler(runtime)
             : lambda_scheduler_create(LAMBDA_MAILBOX_DEFAULT_CAPACITY);
-        if (!runtime->scheduler) {
-            runtime->scheduler = context->scheduler;
+        if (!runtime_scheduler(runtime)) {
+            runtime_set_scheduler(runtime, context->scheduler);
         }
     }
 }

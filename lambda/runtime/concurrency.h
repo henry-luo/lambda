@@ -105,24 +105,17 @@ LambdaTaskScope* lambda_task_scope_current(void);
 Item lambda_task_scope_leave(LambdaTaskScope* scope, bool error_exit);
 Item lambda_task_scope_unwind(LambdaTaskScope* base, bool error_exit);
 
-RetItem pn_send(Item handle, Item message);
-RetItem pn_receive(void);
-RetItem pn_wait1(Item handle);
-RetItem pn_wait2(Item handle, Item timeout_ms);
-RetItem pn_select(Item handles, Item timeout_ms);
-RetItem pn_sleep(Item duration_ms);
-RetItem pn_io_read(Item target);
+Item pn_send(Item handle, Item message);
+Item pn_receive(void);
+Item pn_wait1(Item handle);
+Item pn_wait2(Item handle, Item timeout_ms);
+Item pn_select(Item handles, Item timeout_ms);
+Item pn_sleep(Item duration_ms);
+Item pn_io_read(Item target);
 Item pn_self(void);
 Item pn_cancel(Item handle);
 Item fn_to_promise(Item handle);
 
-Item pn_send_mir(Item handle, Item message);
-Item pn_receive_mir(void);
-Item pn_wait1_mir(Item handle);
-Item pn_wait2_mir(Item handle, Item timeout_ms);
-Item pn_select_mir(Item handles, Item timeout_ms);
-Item pn_sleep_mir(Item duration_ms);
-Item pn_io_read_mir(Item target);
 
 #ifdef __cplusplus
 }

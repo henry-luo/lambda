@@ -2358,3 +2358,107 @@ TEST_F(CsvTests, SimpleCsvRoundtrip) {
     url_destroy(dummy_url);
     url_destroy(cwd);
 }
+
+// ============================================================================
+// SCU16: parser working sets grow from the document. Each case exceeds the
+// fixed capacity its parser used to embed (100,000 line starts, 256 link
+// definitions with 1,024-byte URLs, 256 anchors) and checks the result is
+// still correct rather than silently truncated.
+// ============================================================================
+#include "../lambda/input/source_tracker.hpp"
+
+static int count_occurrences(const char* hay, const char* needle) {
+    int n = 0;
+    size_t len = strlen(needle);
+    for (const char* p = strstr(hay, needle); p; p = strstr(p + len, needle)) n++;
+    return n;
+}
+
+TEST(InputWorkingSetTests, SourceTrackerIndexesBeyondOldLineCap) {
+    const size_t lines = 150000;
+    StrBuf* sb = strbuf_new_cap(lines * 3 + 8);
+    for (size_t i = 0; i < lines; i++) strbuf_append_str(sb, "ab\n");
+    strbuf_append_str(sb, "last");
+
+    lambda::SourceTracker tracker(sb->str, sb->length);
+    EXPECT_STREQ(tracker.extractLine(lines), "ab");
+    EXPECT_STREQ(tracker.extractLine(lines + 1), "last");
+    EXPECT_STREQ(tracker.extractLine(lines + 2), "");
+    // the tracker itself no longer embeds a document-sized table
+    EXPECT_LT(sizeof(lambda::SourceTracker), 256u);
+    strbuf_free(sb);
+}
+
+TEST(InputWorkingSetTests, MarkdownReferenceLinksBeyondOldCap) {
+    const int n = 300;
+    const size_t long_url_len = 2048;
+    StrBuf* sb = strbuf_new_cap(n * 96 + long_url_len + 64);
+    char line[128];
+    for (int i = 0; i < n; i++) {
+        snprintf(line, sizeof(line), "[ref%d]: http://example.com/%d\n", i, i);
+        strbuf_append_str(sb, line);
+    }
+    strbuf_append_str(sb, "[longref]: http://example.com/");
+    for (size_t i = 0; i < long_url_len; i++) strbuf_append_char(sb, 'x');
+    strbuf_append_str(sb, "\n\n");
+    for (int i = 0; i < n; i++) {
+        snprintf(line, sizeof(line), "[t%d][ref%d] ", i, i);
+        strbuf_append_str(sb, line);
+    }
+    strbuf_append_str(sb, "[long][longref]\n");
+
+    Url* cwd = url_parse("file://./");
+    Url* url = url_parse_with_base("refs.md", cwd);
+    char* src = strdup(sb->str);
+    Input* parsed = input_from_source(src, url, create_lambda_string("markdown"), NULL);
+    ASSERT_NE(parsed, nullptr);
+    String* html = format_data(parsed->root, create_lambda_string("html"), NULL, parsed->pool);
+    ASSERT_NE(html, nullptr);
+
+    // definition 299 lies past the retired 256-entry table
+    EXPECT_NE(strstr(html->chars, "http://example.com/299"), nullptr);
+    // the 2 KB URL survives intact past the retired 1,024-byte buffer
+    const char* long_at = strstr(html->chars, "http://example.com/xxxx");
+    ASSERT_NE(long_at, nullptr);
+    size_t xs = 0;
+    for (const char* p = long_at + strlen("http://example.com/"); *p == 'x'; p++) xs++;
+    EXPECT_EQ(xs, long_url_len);
+
+    free(src);
+    url_destroy(url);
+    url_destroy(cwd);
+    strbuf_free(sb);
+}
+
+TEST(InputWorkingSetTests, YamlAnchorsBeyondOldCap) {
+    const int n = 300;
+    StrBuf* sb = strbuf_new_cap(n * 48);
+    char line[64];
+    for (int i = 0; i < n; i++) {
+        snprintf(line, sizeof(line), "a%d: &n%d v%d\n", i, i, i);
+        strbuf_append_str(sb, line);
+    }
+    for (int i = 0; i < n; i++) {
+        snprintf(line, sizeof(line), "r%d: *n%d\n", i, i);
+        strbuf_append_str(sb, line);
+    }
+
+    Url* cwd = url_parse("file://./");
+    Url* url = url_parse_with_base("anchors.yaml", cwd);
+    char* src = strdup(sb->str);
+    Input* parsed = input_from_source(src, url, create_lambda_string("yaml"), NULL);
+    ASSERT_NE(parsed, nullptr);
+    String* json = format_data(parsed->root, create_lambda_string("json"), NULL, parsed->pool);
+    ASSERT_NE(json, nullptr);
+
+    // every alias past the retired 256-entry table resolves to its anchor value:
+    // the value appears once at the anchor and once at the alias
+    EXPECT_EQ(count_occurrences(json->chars, "\"v299\""), 2);
+    EXPECT_EQ(count_occurrences(json->chars, "\"v257\""), 2);
+    EXPECT_EQ(count_occurrences(json->chars, "\"v0\""), 2);
+
+    free(src);
+    url_destroy(url);
+    url_destroy(cwd);
+    strbuf_free(sb);
+}

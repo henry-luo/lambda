@@ -283,15 +283,10 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                         strncpy(ref_name, sb->str->chars + word_start, ref_len);
                         ref_name[ref_len] = '\0';
 
-                        // Look up the reference in link_defs_
+                        // Look up the reference in the normalized-label index
                         const char* url = nullptr;
-                        for (int i = 0; i < parser->link_def_count_; i++) {
-                            size_t label_len = strlen(parser->link_defs_[i].label);
-                            if (label_len == ref_len &&
-                                str_ieq(ref_name, ref_len, parser->link_defs_[i].label, label_len)) {
-                                url = parser->link_defs_[i].url;
-                                break;
-                            }
+                        if (const LinkDefinition* def = parser->getLinkDefinition(ref_name, ref_len)) {
+                            url = def->url;
                         }
 
                         // If reference found, create link

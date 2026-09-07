@@ -354,13 +354,6 @@ extern const Item ItemError;
     if (get_type_id(b) == LMD_TYPE_ERROR) return (b); \
     if (get_type_id(c) == LMD_TYPE_ERROR) return (c)
 
-// RetItem-returning error guards: propagate error as RetItem
-#define GUARD_ERROR_RI1(a) \
-    if (get_type_id(a) == LMD_TYPE_ERROR) return item_to_ri(a)
-#define GUARD_ERROR_RI2(a, b) \
-    if (get_type_id(a) == LMD_TYPE_ERROR) return item_to_ri(a); \
-    if (get_type_id(b) == LMD_TYPE_ERROR) return item_to_ri(b)
-
 // Bool-returning function guards: propagate error as BOOL_ERROR
 #define GUARD_BOOL_ERROR1(a) \
     if (get_type_id(a) == LMD_TYPE_ERROR) return BOOL_ERROR
@@ -917,28 +910,9 @@ static inline LambdaError* it2err(Item item) {
     return (LambdaError*)(uintptr_t)(item.item & 0x00FFFFFFFFFFFFFFULL);
 }
 
-// RetItem — C++ version (Item is complete here)
-typedef struct RetItem { Item value; LambdaError* err; } RetItem;
-
-static inline RetItem ri_ok(Item value) {
-    RetItem r; r.value = value; r.err = null; return r;
-}
-static inline RetItem ri_err(LambdaError* error) {
-    RetItem r; r.value = ItemError; r.err = error; return r;
-}
-
-static inline RetItem item_to_ri(Item item) {
-    RetItem r;
-    r.value = item;
-    if (item._type_id == LMD_TYPE_ERROR) {
-        LambdaError* err = it2err(item);
-        r.err = err ? err : (LambdaError*)1;
-    } else {
-        r.err = nullptr;
-    }
-    return r;
-}
-
-static inline Item ri_to_item(RetItem ri) {
-    return ri.value;
+// Error completion from a LambdaError* that may be null (payload allocation
+// failed): a null payload still completes as the pointer-less ERROR sentinel,
+// never as null (D1.4v3). This is the one spelling of "return this error".
+static inline Item err2it_or_error(LambdaError* err) {
+    return err ? err2it(err) : ItemError;
 }

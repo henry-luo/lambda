@@ -907,7 +907,7 @@ static Item resolve_directory_children(Path* parent_path, const char* dir_path) 
 }
 
 // External declaration for input system
-extern RetItem fn_input1(Item url);
+extern Item fn_input1(Item url);
 
 /**
  * Load and parse file content.
@@ -922,9 +922,7 @@ static Item resolve_file_content(Path* path, const char* file_path) {
     mem_free(file_url);
 
     // Use existing input system to load and parse
-    RetItem content_ri = fn_input1(s2it(url_str));
-    
-    return ri_to_item(content_ri);
+    return fn_input1(s2it(url_str));
 }
 
 /**

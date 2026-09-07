@@ -5,6 +5,7 @@
 #include "side_stack.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/log.h"
+#include <string.h>
 
 // The runtime layer owns the active evaluator for runners and fixtures.
 __thread EvalContext* context = nullptr;
@@ -45,25 +46,51 @@ bool eval_context_shutdown(EvalContext* owner) {
     return true;
 }
 
+// The canonical EvalContext of a Runtime, created on first use. Lives here,
+// beside the ownership seam that materializes it, so core-linked binaries
+// that carry runtime-state.o need no runner.o.
+EvalContext* runtime_get_eval_context(Runtime* runtime) {
+    if (!runtime) return NULL;
+    if (!runtime->eval_context) {
+        runtime->eval_context = (EvalContext*)mem_alloc(sizeof(EvalContext), MEM_CAT_EVAL);
+        if (!runtime->eval_context) {
+            log_error("runtime-context: failed to allocate canonical EvalContext");
+            return NULL;
+        }
+        memset(runtime->eval_context, 0, sizeof(EvalContext));
+    }
+    runtime->eval_context->runtime = runtime;
+    return runtime->eval_context;
+}
+
+// SCU14: the canonical EvalContext owns the retained resources. Binding a
+// context to them copies FROM the canonical owner (a self-copy when the
+// caller passes the canonical context itself, which every Radiant and DOM
+// entry does); publishing copies a non-canonical realm's tuple INTO it (the
+// test262 batch realm, a one-shot guest heap). No other writer exists.
 bool runtime_context_bind_retained(Runtime* runtime, EvalContext* owner) {
-    if (!runtime || !owner || !runtime->heap || !runtime->name_pool) {
+    Heap* heap = runtime_heap(runtime);
+    NamePool* name_pool = runtime_name_pool(runtime);
+    if (!runtime || !owner || !heap || !name_pool) {
         log_error("runtime-context-bind: missing retained runtime owner");
         return false;
     }
     owner->runtime = runtime;
-    owner->heap = runtime->heap;
-    owner->name_pool = runtime->name_pool;
-    owner->type_list = runtime->type_list;
-    owner->pool = runtime->heap->pool;
+    owner->heap = heap;
+    owner->name_pool = name_pool;
+    owner->type_list = runtime_type_list(runtime);
+    owner->pool = heap->pool;
     return eval_context_init(owner);
 }
 
 void runtime_context_publish_owners(Runtime* runtime, EvalContext* owner) {
     if (!runtime || !owner) return;
     owner->runtime = runtime;
-    runtime->heap = owner->heap;
-    runtime->name_pool = owner->name_pool;
-    runtime->type_list = (ArrayList*)owner->type_list;
+    EvalContext* canonical = runtime_get_eval_context(runtime);
+    if (!canonical || canonical == owner) return;
+    canonical->heap = owner->heap;
+    canonical->name_pool = owner->name_pool;
+    canonical->type_list = owner->type_list;
 }
 
 Item runtime_publish_result(EvalContext* owner, Item result) {

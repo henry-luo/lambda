@@ -373,11 +373,11 @@ static LambdaTaskPoll park_then_finish(LambdaTask* task, void* data, Item* out) 
 static LambdaTaskPoll wait_with_timeout(LambdaTask* task, void* data, Item* out) {
     (void)task;
     WaitFrame* frame = (WaitFrame*)data;
-    RetItem result = pn_wait2(frame->handle, frame->timeout);
-    if (result.value.item == ITEM_TASK_SUSPENDED) {
+    Item result = pn_wait2(frame->handle, frame->timeout);
+    if (result.item == ITEM_TASK_SUSPENDED) {
         return LAMBDA_TASK_POLL_PARKED;
     }
-    *out = ri_to_item(result);
+    *out = result;
     return LAMBDA_TASK_POLL_DONE;
 }
 

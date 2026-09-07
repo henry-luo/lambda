@@ -25,8 +25,6 @@
 #include <stdlib.h>
 
 extern "C" Item lambda_module_var_read_slot(void* module_state, uint32_t slot);
-extern "C" Item pn_output2_mir(Item source, Item target);
-extern "C" Item pn_output_append_mir(Item source, Item target);
 
 // ---------------------------------------------------------------------------
 // Tier selection
@@ -1038,21 +1036,6 @@ static Item eval_sys_call(InterpFrame* f, SysFuncInfo* info, const Item* args,
 
     if (info->c_arg_conv == C_ARG_NATIVE) {
         return eval_native_sys_item_call(info, args, argc, result_type);
-    }
-
-    if (info->c_ret_type == C_RET_RETITEM) {
-        // These entries return the 16-byte RetItem, not an Item. Calling one
-        // through an Item-returning prototype is undefined and drops `.err`
-        // silently; the registry stores the raw function, and lowering reaches
-        // it through an `_mir` wrapper that does exactly this mapping.
-        RetItem ri =
-            argc == 0 ? ((RetItem(*)())fp)() :
-            argc == 1 ? ((RetItem(*)(Item))fp)(args[0]) :
-            argc == 2 ? ((RetItem(*)(Item, Item))fp)(args[0], args[1]) :
-            argc == 3 ? ((RetItem(*)(Item, Item, Item))fp)(args[0], args[1], args[2]) :
-                        ((RetItem(*)(Item, Item, Item, Item))fp)(
-                            args[0], args[1], args[2], args[3]);
-        return ri.err ? ItemError : ri.value;
     }
 
 #define SYS_DISPATCH(RetT) \
@@ -4137,8 +4120,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         target.set(eval_expr(f, pipe->right));
         if (interp_frame_pending(f)) return target.get();
         return pipe->op == OPERATOR_PIPE_APPEND
-            ? pn_output_append_mir(source.get(), target.get())
-            : pn_output2_mir(source.get(), target.get());
+            ? pn_output_append(source.get(), target.get())
+            : pn_output2(source.get(), target.get());
     }
     case AST_NODE_MATCH_EXPR:
         return eval_match(f, (AstMatchNode*)node);

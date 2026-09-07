@@ -3,6 +3,8 @@
 //
 // This runner uses the copied MathLive snapshot corpus as expected output, but
 // renders formulas through lambda/package/math via a generated Lambda script.
+// When invoked by test/test_run.js, it accepts the runner's --report argument
+// and emits the summary/results shape consumed by the shared Node adapter lane.
 
 import fs from 'node:fs';
 import os from 'node:os';

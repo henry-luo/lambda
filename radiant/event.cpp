@@ -2483,9 +2483,9 @@ static void event_context_set_dom_event(EventContext* evcon, Item event) {
     if (evcon->dom_event_root_lifetime && !evcon->dom_event_root_gc) {
         DomDocument* doc = event_context_target_document(evcon);
         Runtime* runtime = dom_document_script_runtime(doc);
-        if (runtime && runtime->heap && runtime->heap->gc) {
-            gc_register_root(runtime->heap->gc, &evcon->dom_event.item);
-            evcon->dom_event_root_gc = runtime->heap->gc;
+        if (runtime && runtime_heap(runtime) && runtime_heap(runtime)->gc) {
+            gc_register_root(runtime_heap(runtime)->gc, &evcon->dom_event.item);
+            evcon->dom_event_root_gc = runtime_heap(runtime)->gc;
         }
     }
     evcon->dom_event = event;
@@ -2645,12 +2645,12 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
         rt = context->runtime;
     }
     Context* saved_input_context = input_context;
-    if (rt && rt->heap) {
+    if (rt && runtime_heap(rt)) {
         handler_ctx = runtime_get_eval_context(rt);
         if (!handler_ctx) return true;
-        handler_ctx->heap = rt->heap;
-        handler_ctx->name_pool = rt->name_pool;
-        handler_ctx->pool = rt->heap->pool;
+        handler_ctx->heap = runtime_heap(rt);
+        handler_ctx->name_pool = runtime_name_pool(rt);
+        handler_ctx->pool = runtime_heap(rt)->pool;
         handler_ctx->type_info = type_info;
         // A retained handler runs on the document's eval thread;
         // nested dispatch must never replace that thread owner.
@@ -4080,7 +4080,7 @@ bool radiant_focus_element(DomDocument* doc, View* target) {
     }
 
     EvalContext* focus_ctx = runtime_get_eval_context(runtime);
-    if (!focus_ctx || !runtime->heap || !runtime->name_pool) return false;
+    if (!focus_ctx || !runtime_heap(runtime) || !runtime_name_pool(runtime)) return false;
     Context* saved_input_ctx = input_context;
     void* saved_doc = dom_get_document();
     // Programmatic focus runs on the document's evaluator; event handlers must
@@ -6461,11 +6461,11 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     if (!s->doc || !s->doc->js.runtime) return false;
     Runtime* runtime = s->doc->js.runtime;
     s->handler_ctx = runtime_get_eval_context(runtime);
-    if (!s->handler_ctx || !runtime->heap || !runtime->name_pool) return false;
-    s->handler_ctx->heap = runtime->heap;
-    s->handler_ctx->name_pool = runtime->name_pool;
-    s->handler_ctx->type_list = runtime->type_list;
-    s->handler_ctx->pool = runtime->heap->pool;
+    if (!s->handler_ctx || !runtime_heap(runtime) || !runtime_name_pool(runtime)) return false;
+    s->handler_ctx->heap = runtime_heap(runtime);
+    s->handler_ctx->name_pool = runtime_name_pool(runtime);
+    s->handler_ctx->type_list = runtime_type_list(runtime);
+    s->handler_ctx->pool = runtime_heap(runtime)->pool;
     s->saved_input_ctx = input_context;
     if (!eval_context_init(s->handler_ctx) ||
             (s->handler_ctx->js_state &&
@@ -9633,11 +9633,11 @@ struct EventDocumentScope {
         Runtime* runtime = dom_document_script_runtime(doc);
         if (!runtime) return;
         EvalContext* owner = runtime_get_eval_context(runtime);
-        if (!owner || !runtime->heap || !runtime->name_pool) return;
-        owner->heap = runtime->heap;
-        owner->name_pool = runtime->name_pool;
-        owner->type_list = runtime->type_list;
-        owner->pool = runtime->heap->pool;
+        if (!owner || !runtime_heap(runtime) || !runtime_name_pool(runtime)) return;
+        owner->heap = runtime_heap(runtime);
+        owner->name_pool = runtime_name_pool(runtime);
+        owner->type_list = runtime_type_list(runtime);
+        owner->pool = runtime_heap(runtime)->pool;
         // EO5v2: at the outermost dispatch this may hand the thread from
         // another document's evaluator to this one. Nested dispatch never
         // switches — the outer document's frames are still live.

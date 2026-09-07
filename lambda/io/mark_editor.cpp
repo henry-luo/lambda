@@ -675,7 +675,7 @@ Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
     int64_t new_byte_size = 0;
     ShapeEntry* entry = new_shape;
     while (entry) {
-        new_byte_size = entry->byte_offset + type_info[entry->type->type_id].byte_size;
+        new_byte_size = entry->byte_offset + shape_entry_storage_size(entry);
         entry = entry->next;
     }
 
@@ -699,7 +699,7 @@ Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
                 old_type_id == entry->type->type_id) {
             void* old_field = (char*)old_container->data + old_offset;
             void* new_field = (char*)new_data + entry->byte_offset;
-            memcpy(new_field, old_field, type_info[entry->type->type_id].byte_size);
+            memcpy(new_field, old_field, shape_entry_storage_size(entry));
         }
         entry = entry->next;
     }

@@ -7802,6 +7802,9 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     table->each_cell([&](ViewTableRow* row, ViewTableCell* cell) {
         (void)row;
         position_zero_height_out_of_flow_cell(lycon, cell);
+        // MathLive places stretch SVGs in relative vlist rows. Resolve their
+        // percentage widths after this cell's table track is final.
+        re_resolve_abs_descendant_widths(static_cast<View*>(cell));
     });
 
 }

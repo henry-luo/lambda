@@ -637,7 +637,7 @@ AstNode* parse_map_type(Lexer* lx) {
             // payload byte, and the shape failed its own
             // shape_entry_storage_fits_data (Lambda_Design_Compiling_Lane.md
             // §10.4b G3).
-            byte_offset += type_info[type_field_storage_type_id(item->type)].byte_size;
+            byte_offset += lambda_lane_storage_size(item->type);
         } while (eat(lx, ','));
     }
     if (!eat(lx, '}')) { fail(lx, "expected '}'"); return NULL; }
@@ -718,7 +718,7 @@ AstNode* parse_element_type(Lexer* lx) {
         prev_item = (AstNode*)named;
         append_shape_entry_typed(lx->tp, named->name, named->type, &type->shape, &prev_entry, byte_offset);
         type->length++;
-        byte_offset += type_info[type_field_storage_type_id(named->type)].byte_size;
+        byte_offset += lambda_lane_storage_size(named->type);
         if (eat(lx, ',')) { continue; }
         if (eat(lx, ';')) { saw_content_sep = true; }
         break;

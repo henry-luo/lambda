@@ -28,6 +28,10 @@ true
 true
 "16. has bottomrule:"
 true
+"16a. table splits alignment tabs:"
+true
+"16b. table omits placement option:"
+true
 "17. has Section autoref:"
 true
 "18. has Theorem autoref:"

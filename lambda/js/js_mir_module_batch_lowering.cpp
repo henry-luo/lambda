@@ -2783,7 +2783,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
         // in `normal`; the scalar-home mask is reserved for the retired v2
         // caller-donated transport.
         public_entry->result.shape = em_return_shape(false, false,
-            em_scalar_return_mode_for_class(scalar_class));
+            scalar_class);
         public_entry->result.companion = em_companion_transport(
             public_entry->result.shape, /*c_reachable=*/true);
         int env_param_count = JM_CAPTURE_COUNT(fc) > 0 ? 1 : 0;
@@ -2916,7 +2916,7 @@ static int js_mir_lower(void* opaque) {
     mt->in_main = true;
     mt->func_error_lane_label = 0;  // reset for js_main
 
-    jm_begin_function_frame(mt, main_ret, true, MIR_SCALAR_RETURN_DYNAMIC,
+    jm_begin_function_frame(mt, main_ret, true, SCALAR_RETURN_DYNAMIC,
         MIR_reg(mt->ctx, "ctx", main_func), true);
     jm_push_scope(mt);
 

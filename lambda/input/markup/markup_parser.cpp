@@ -15,6 +15,8 @@
 #include "../line_counter.hpp"
 #include "../../../lib/html_entities.h"
 #include "../../../lib/memtrack.h"
+#include "../../../lib/hashmap.h"
+#include "../../../lib/arena.h"
 #include "../input-utils.h"
 #include "../markup-format.h"
 #include "../../core/utf_string.h"
@@ -37,6 +39,7 @@ MarkupParser::MarkupParser(Input* input, const ParseConfig& cfg)
     , lines(nullptr)
     , line_count(0)
     , current_line(0)
+    , link_defs_(nullptr)
     , link_def_count_(0)
     , html5_parser_(nullptr)
 {
@@ -53,6 +56,8 @@ MarkupParser::MarkupParser(Input* input, const ParseConfig& cfg)
 
 MarkupParser::~MarkupParser() {
     freeLines();
+    // Definition strings live in the Input arena; only the index is ours.
+    if (link_defs_) hashmap_free(link_defs_);
     // html5_parser_ is pool-managed, no explicit cleanup needed
 }
 
@@ -476,23 +481,22 @@ void MarkupParser::noteUnresolvedReference(const char* ref_type, const char* ref
 // ============================================================================
 
 /**
- * unescape_to_buffer - Process backslash escapes and entity references in a string into a buffer
+ * unescape_append - Process backslash escapes and entity references in a string, appending to a StrBuf
  *
  * Copies the input string to the output buffer, processing backslash escapes
  * and HTML entity references (both named and numeric).
  */
-static void unescape_to_buffer(const char* src, size_t src_len, char* dst, size_t dst_size) {
-    if (!src || !dst || dst_size == 0) return;
+static void unescape_append(StrBuf* dst, const char* src, size_t src_len) {
+    if (!src || !dst) return;
 
-    size_t out_pos = 0;
     const char* pos = src;
     const char* end = src + src_len;
 
-    while (pos < end && out_pos < dst_size - 1) {
+    while (pos < end) {
         if (*pos == '\\' && pos + 1 < end && is_escapable(*(pos + 1))) {
             // skip the backslash, copy the escaped character
             pos++;
-            dst[out_pos++] = *pos++;
+            strbuf_append_char(dst, *pos++);
         } else if (*pos == '&') {
             // Try to parse entity reference
             const char* entity_start = pos + 1;
@@ -538,11 +542,12 @@ static void unescape_to_buffer(const char* src, size_t src_len, char* dst, size_
                     }
                 }
 
-                if (valid && out_pos + 4 < dst_size) {
+                if (valid) {
                     if (codepoint == 0) codepoint = 0xFFFD;
-                    int utf8_len = codepoint_to_utf8(codepoint, dst + out_pos);
+                    char utf8[8];
+                    int utf8_len = codepoint_to_utf8(codepoint, utf8);
                     if (utf8_len > 0) {
-                        out_pos += utf8_len;
+                        strbuf_append_str_n(dst, utf8, (size_t)utf8_len);
                         pos = entity_pos + 1;
                         continue;
                     }
@@ -560,10 +565,8 @@ static void unescape_to_buffer(const char* src, size_t src_len, char* dst, size_
                     size_t name_len = entity_pos - entity_start;
                     const char* replacement = html_entity_lookup(entity_start, name_len);
 
-                    if (replacement && out_pos + strlen(replacement) < dst_size) {
-                        size_t rep_len = strlen(replacement);
-                        memcpy(dst + out_pos, replacement, rep_len);
-                        out_pos += rep_len;
+                    if (replacement) {
+                        strbuf_append_str(dst, replacement);
                         pos = entity_pos + 1;
                         continue;
                     }
@@ -571,25 +574,20 @@ static void unescape_to_buffer(const char* src, size_t src_len, char* dst, size_
             }
 
             // Not a valid entity, copy & literally
-            dst[out_pos++] = *pos++;
+            strbuf_append_char(dst, *pos++);
         } else {
-            dst[out_pos++] = *pos++;
+            strbuf_append_char(dst, *pos++);
         }
     }
-
-    dst[out_pos] = '\0';
 }
 
-void MarkupParser::normalizeLabel(const char* label, size_t len, char* out, size_t out_size) {
-    if (!label || !out || out_size == 0) return;
+char* MarkupParser::normalizeLabel(const char* label, size_t len) {
+    if (!label) return nullptr;
 
     // First, collapse whitespace and trim
     // We need to do this before Unicode case folding
     char* temp = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_MARKUP);
-    if (!temp) {
-        out[0] = '\0';
-        return;
-    }
+    if (!temp) return nullptr;
 
     size_t temp_pos = 0;
     bool in_whitespace = true; // start true to skip leading whitespace
@@ -624,17 +622,26 @@ void MarkupParser::normalizeLabel(const char* label, size_t len, char* out, size
     char* folded = normalize_utf8proc_casefold(temp, (int)temp_pos, &folded_len);
     mem_free(temp);
 
+    char* out = nullptr;
     if (folded && folded_len > 0) {
-        // Copy the folded result to output
-        size_t copy_len = (size_t)folded_len < out_size - 1 ? (size_t)folded_len : out_size - 1;
-        memcpy(out, folded, copy_len);
-        out[copy_len] = '\0';
-        free_utf8proc_result(folded);
-    } else {
-        // Fallback: if case folding fails, do simple ASCII lowercase
-        if (folded) free_utf8proc_result(folded);
-        out[0] = '\0';
+        out = (char*)mem_alloc((size_t)folded_len + 1, MEM_CAT_INPUT_MARKUP);
+        if (out) {
+            memcpy(out, folded, (size_t)folded_len);
+            out[folded_len] = '\0';
+        }
     }
+    if (folded) free_utf8proc_result(folded);
+    return out;
+}
+
+// hashmap callbacks: entries are LinkDefinition, keyed by the normalized label
+static uint64_t link_def_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const LinkDefinition* def = (const LinkDefinition*)item;
+    return hashmap_sip(def->label, strlen(def->label), seed0, seed1);
+}
+
+static int link_def_compare(const void* a, const void* b, void*) {
+    return strcmp(((const LinkDefinition*)a)->label, ((const LinkDefinition*)b)->label);
 }
 
 bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
@@ -645,45 +652,60 @@ bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
         return false;
     }
 
-    if (link_def_count_ >= MAX_LINK_DEFINITIONS) {
-        log_debug("markup_parser: link definition limit reached (%d)", MAX_LINK_DEFINITIONS);
-        return false;
-    }
+    char* normalized = normalizeLabel(label, label_len);
+    if (!normalized) return false;
 
-    // normalize the label
-    char normalized[256];
-    normalizeLabel(label, label_len, normalized, sizeof(normalized));
-
-    // check for duplicate (first definition wins per CommonMark)
-    for (int i = 0; i < link_def_count_; i++) {
-        if (strcmp(link_defs_[i].label, normalized) == 0) {
-            // duplicate, ignore
+    if (!link_defs_) {
+        link_defs_ = hashmap_new(sizeof(LinkDefinition), 16, 0, 0,
+            link_def_hash, link_def_compare, nullptr, nullptr);
+        if (!link_defs_) {
+            mem_free(normalized);
+            log_error("markup_parser: link definition table allocation failed");
             return false;
         }
     }
 
-    // add new definition
-    LinkDefinition& def = link_defs_[link_def_count_];
+    // check for duplicate (first definition wins per CommonMark)
+    LinkDefinition probe = { normalized, "", "", false };
+    if (hashmap_get(link_defs_, &probe)) {
+        mem_free(normalized);
+        return false;
+    }
 
-    strncpy(def.label, normalized, sizeof(def.label) - 1);
-    def.label[sizeof(def.label) - 1] = '\0';
+    // Definition strings outlive the parser's temp buffers; the Input arena
+    // is the owner every reference link resolves against.
+    Arena* arena = input()->arena;
+    LinkDefinition def;
+    def.label = arena_strdup(arena, normalized);
+    mem_free(normalized);
 
     // unescape backslash escapes in URL and title
     // Handle empty URLs (e.g., [foo]: <>)
+    StrBuf* buf = strbuf_new_cap(url_len + title_len + 16);
     if (url && url_len > 0) {
-        unescape_to_buffer(url, url_len, def.url, sizeof(def.url));
+        unescape_append(buf, url, url_len);
+        def.url = arena_strndup(arena, buf->str, buf->length);
     } else {
-        def.url[0] = '\0';  // empty URL
+        def.url = "";  // empty URL
     }
 
     if (title && title_len > 0) {
-        unescape_to_buffer(title, title_len, def.title, sizeof(def.title));
+        strbuf_reset(buf);
+        unescape_append(buf, title, title_len);
+        def.title = arena_strndup(arena, buf->str, buf->length);
         def.has_title = true;
     } else {
-        def.title[0] = '\0';
+        def.title = "";
         def.has_title = false;
     }
+    strbuf_free(buf);
 
+    if (!def.label || !def.url || !def.title) {
+        log_error("markup_parser: link definition allocation failed");
+        return false;
+    }
+
+    hashmap_set(link_defs_, &def);
     link_def_count_++;
     log_debug("markup_parser: added link definition [%s] -> %s", def.label, def.url);
     return true;
@@ -713,7 +735,7 @@ static bool label_contains_unescaped_brackets(const char* label, size_t label_le
 }
 
 const LinkDefinition* MarkupParser::getLinkDefinition(const char* label, size_t label_len) const {
-    if (!label || label_len == 0) {
+    if (!label || label_len == 0 || !link_defs_) {
         return nullptr;
     }
 
@@ -723,16 +745,12 @@ const LinkDefinition* MarkupParser::getLinkDefinition(const char* label, size_t 
     }
 
     // normalize the label for lookup
-    char normalized[256];
-    normalizeLabel(label, label_len, normalized, sizeof(normalized));
-
-    for (int i = 0; i < link_def_count_; i++) {
-        if (strcmp(link_defs_[i].label, normalized) == 0) {
-            return &link_defs_[i];
-        }
-    }
-
-    return nullptr;
+    char* normalized = normalizeLabel(label, label_len);
+    if (!normalized) return nullptr;
+    LinkDefinition probe = { normalized, "", "", false };
+    const LinkDefinition* found = (const LinkDefinition*)hashmap_get(link_defs_, &probe);
+    mem_free(normalized);
+    return found;
 }
 
 } // namespace markup
@@ -763,7 +781,7 @@ extern "C" Item input_markup_modular(Input* input, const char* content) {
     cfg.collect_metadata = true;
     cfg.resolve_refs = true;
 
-    // Allocate on heap - MarkupParser is too large for the stack (~460KB link_defs_ array)
+    // Allocate on heap through the audited factory boundary
     MarkupParser* parser = markup_parser_create(input, cfg);
     Item result = parser->parseContent(content);
     markup_parser_destroy(parser);
@@ -799,7 +817,7 @@ extern "C" Item input_markup_commonmark(Input* input, const char* content) {
 
 
 
-    // Allocate on heap - MarkupParser is too large for the stack (~460KB link_defs_ array)
+    // Allocate on heap through the audited factory boundary
     MarkupParser* parser = markup_parser_create(input, cfg);
 
     Item result = parser->parseContent(content);
@@ -860,7 +878,7 @@ extern "C" Item input_markup_with_format(Input* input, const char* content, Mark
     cfg.collect_metadata = true;
     cfg.resolve_refs = true;
 
-    // Allocate on heap - MarkupParser is too large for the stack (~460KB link_defs_ array)
+    // Allocate on heap through the audited factory boundary
     MarkupParser* parser = markup_parser_create(input, cfg);
     Item result = parser->parseContent(content);
 

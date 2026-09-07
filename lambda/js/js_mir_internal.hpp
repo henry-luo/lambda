@@ -276,7 +276,7 @@ static inline void jm_emit_ret(JsMirTranspiler* mt, MIR_reg_t reg) {
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label);
 void jm_emit_label_with_state(JsMirTranspiler* mt, MIR_label_t label, JsErrorLaneTrack state);
 void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
-    bool item_return, MirScalarReturnMode scalar_return_mode,
+    bool item_return, ScalarReturnClass scalar_return_mode,
     MIR_reg_t runtime_reg, bool clean_error_lane_entry);
 void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name);
 int jm_create_gc_root_slot(JsMirTranspiler* mt, MIR_reg_t value);

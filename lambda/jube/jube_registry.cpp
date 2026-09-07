@@ -2351,7 +2351,7 @@ static int jube_host_mir_function_frame_begin(void* compiler_cursor,
     MirFrameState* frame = &emitter->frame;
     frame->return_type = MIR_T_I64;
     frame->item_return = true;
-    frame->scalar_return_mode = MIR_SCALAR_RETURN_DYNAMIC;
+    frame->scalar_return_mode = SCALAR_RETURN_DYNAMIC;
     frame->runtime = (MIR_reg_t)runtime_register;
     frame->root_base = em_new_reg(emitter, "py_root_frame", MIR_T_I64);
     frame->root_end = em_new_reg(emitter, "py_root_frame_end", MIR_T_I64);
@@ -2380,8 +2380,9 @@ static int jube_host_mir_function_frame_scalar_return_home_set(void* compiler_cu
     frame->plan.scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
     frame->plan.accepts_caller_scalar_home = true;
     // v3 descriptor: a guest body that accepts a caller home is exactly one
-    // that may return a wide scalar, i.e. the universal pair shape.
-    frame->plan.return_shape = RETURN_SHAPE_ITEM_SCALAR;
+    // that may return a wide scalar, i.e. the universal pair shape (SCU11:
+    // bound through the plan's writer, never assigned here).
+    em_plan_bind_hosted_pair(&frame->plan);
     return 0;
 }
 

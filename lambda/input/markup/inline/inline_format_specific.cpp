@@ -298,15 +298,11 @@ Item parse_rst_reference_link(MarkupParser* parser, const char** text) {
     strncpy(ref_name, start, ref_len);
     ref_name[ref_len] = '\0';
 
-    // Look up the reference in link_defs_ (RST refs are case-insensitive)
+    // Look up the reference (RST refs are case-insensitive; the definition
+    // index is keyed by the normalized label, which folds case)
     const char* url = nullptr;
-    for (int i = 0; i < parser->link_def_count_; i++) {
-        size_t label_len = strlen(parser->link_defs_[i].label);
-        if (label_len == ref_len &&
-            str_ieq(ref_name, ref_len, parser->link_defs_[i].label, label_len)) {
-            url = parser->link_defs_[i].url;
-            break;
-        }
+    if (const LinkDefinition* def = parser->getLinkDefinition(ref_name, ref_len)) {
+        url = def->url;
     }
 
     // Create anchor element

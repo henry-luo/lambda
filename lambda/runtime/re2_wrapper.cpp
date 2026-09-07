@@ -928,11 +928,11 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
     nv1->str = "value";
     nv1->length = 5;
     e_value->name = nv1;
-    e_value->type = type_info[LMD_TYPE_STRING].type;
+    shape_entry_set_type(e_value, type_info[LMD_TYPE_STRING].type);
     e_value->byte_offset = 0;
     e_value->next = nullptr;
 
-    int64_t offset2 = type_info[LMD_TYPE_STRING].byte_size;
+    int64_t offset2 = e_value->storage.byte_size;
 
     // entry 2: "index" -> int
     ShapeEntry* e_index = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
@@ -940,13 +940,13 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
     nv2->str = "index";
     nv2->length = 5;
     e_index->name = nv2;
-    e_index->type = type_info[LMD_TYPE_INT].type;
+    shape_entry_set_type(e_index, type_info[LMD_TYPE_INT].type);
     e_index->byte_offset = offset2;
     e_index->next = nullptr;
 
     e_value->next = e_index;
 
-    int64_t byte_size = offset2 + type_info[LMD_TYPE_INT].byte_size;
+    int64_t byte_size = offset2 + e_index->storage.byte_size;
 
     // create TypeMap
     TypeMap* mt = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));

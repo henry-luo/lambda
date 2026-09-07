@@ -1344,19 +1344,7 @@ void runner_init(Runtime *runtime, Runner* runner) {
     runner->runtime = runtime;
 }
 
-EvalContext* runtime_get_eval_context(Runtime* runtime) {
-    if (!runtime) return NULL;
-    if (!runtime->eval_context) {
-        runtime->eval_context = (EvalContext*)mem_alloc(sizeof(EvalContext), MEM_CAT_EVAL);
-        if (!runtime->eval_context) {
-            log_error("runtime-context: failed to allocate canonical EvalContext");
-            return NULL;
-        }
-        memset(runtime->eval_context, 0, sizeof(EvalContext));
-    }
-    runtime->eval_context->runtime = runtime;
-    return runtime->eval_context;
-}
+// runtime_get_eval_context lives in runtime-state.cpp with the ownership seam (SCU14).
 
 #include "../../lib/url.h"
 #include "../validator/validator.hpp"
@@ -1379,14 +1367,14 @@ void runner_setup_context(Runner* runner) {
     ctx->stack_limit = _lambda_stack_limit;
 
     ArrayList* next_type_list = runner->script->type_list;
-    if (runner->runtime->type_list && runner->runtime->type_list != next_type_list &&
+    if (runtime_type_list(runner->runtime) && runtime_type_list(runner->runtime) != next_type_list &&
             !runtime_type_list_is_script_owned(runner->runtime)) {
         // A Lambda package can replace the active JS registry on a reused
         // heap. Release the old Runtime-owned registry before publishing the
         // package's Script-owned list, or final teardown loses that pointer.
-        arraylist_free(runner->runtime->type_list);
+        arraylist_free(runtime_type_list(runner->runtime));
     }
-    runner->runtime->type_list = next_type_list;
+    runtime_set_type_list(runner->runtime, next_type_list);
     ctx->pool = runner->script->pool;
     ctx->type_list = next_type_list;
 
@@ -1435,7 +1423,7 @@ void runner_setup_context(Runner* runner) {
     // Reuse or create the GC heap and name_pool from the Runtime.
     // These persist across multiple evaluations on the same Runtime.
     Runtime* rt = runner->runtime;
-    if (rt && rt->heap) {
+    if (rt && runtime_heap(rt)) {
         // Reuse retained heap and name_pool from a previous evaluation
         log_debug("runner_setup_context: reusing retained heap from Runtime");
         if (!runtime_context_bind_retained(rt, ctx)) return;
@@ -1453,29 +1441,15 @@ void runner_setup_context(Runner* runner) {
     }
     path_register_pool_provider(runner_path_pool_provider);
 
-    if (rt && rt->scheduler) {
-        ctx->scheduler = rt->scheduler;
+    if (rt && runtime_scheduler(rt)) {
+        ctx->scheduler = runtime_scheduler(rt);
     } else {
         ctx->scheduler = lambda_scheduler_create(LAMBDA_MAILBOX_DEFAULT_CAPACITY);
-        if (rt) rt->scheduler = ctx->scheduler;
+        if (rt) runtime_set_scheduler(rt, ctx->scheduler);
     }
-    if (rt && rt->js_bootstrap_context) {
-        // The Lambda runner now owns every heap resource created while its JS
-        // imports were compiled. Move the JS capsule before freeing the shell;
-        // otherwise callbacks would retain semantic state in dead stack-like
-        // bootstrap storage.
-        if (rt->js_bootstrap_context != ctx && !ctx->js_state) {
-            ctx->js_state = rt->js_bootstrap_context->js_state;
-            rt->js_bootstrap_context->js_state = NULL;
-        }
-        // JS import setup can already be using Runtime's canonical context.
-        // That owner survives until runtime_cleanup, so freeing this alias here
-        // left runner setup dereferencing a released EvalContext.
-        if (rt->js_bootstrap_context != ctx) {
-            mem_free(rt->js_bootstrap_context);
-        }
-        rt->js_bootstrap_context = NULL;
-    }
+    // SCU15: cross-language JS imports compile on this same canonical context
+    // (load_js_module binds runtime_get_eval_context), so their JS capsule is
+    // already ctx->js_state; there is no separate bootstrap context to adopt.
     // Radiant/Jube Lambda calls reuse JS DOM primitives even without importing
     // JavaScript. Initialize the derived capsule once for this eval-thread
     // lifetime so those native helpers can read their paired TLS state.
@@ -1709,10 +1683,10 @@ void runtime_register_script(Runtime* runtime, Script* script) {
 // runtime::type_list can alias a Script's Input-owned list while a nested
 // Lambda package is evaluated. The Script remains the owner of that alias.
 bool runtime_type_list_is_script_owned(Runtime* runtime) {
-    if (!runtime || !runtime->type_list || !runtime->scripts) return false;
+    if (!runtime || !runtime_type_list(runtime) || !runtime->scripts) return false;
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script* script = (Script*)runtime->scripts->data[i];
-        if (script && script->type_list == runtime->type_list) return true;
+        if (script && script->type_list == runtime_type_list(runtime)) return true;
     }
     return false;
 }
@@ -1765,14 +1739,11 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     decimal_constants_release(script->decimal_constants);
     script->decimal_constants = NULL;
     if (script->type_list) {
-        // Script teardown owns this registry; clear every active alias before
-        // releasing it so a later Runtime cleanup cannot free it twice.
-        if (runtime && runtime->type_list == script->type_list) {
-            runtime->type_list = NULL;
-        }
-        if (runtime && runtime->eval_context &&
-                runtime->eval_context->type_list == script->type_list) {
-            runtime->eval_context->type_list = NULL;
+        // Script teardown owns this registry; clear the canonical owner's
+        // alias before releasing it so a later Runtime cleanup cannot free it
+        // twice (one owner now: the canonical EvalContext).
+        if (runtime && runtime_type_list(runtime) == script->type_list) {
+            runtime_set_type_list(runtime, NULL);
         }
     }
     input_release_auxiliary_resources((Input*)script);
@@ -1851,12 +1822,12 @@ void runtime_log_mir_cache_summary(Runtime* runtime) {
 // call will create fresh heap/name_pool state and store it back.
 void runtime_reset_heap(Runtime* runtime) {
     if (!runtime) return;
-    if (runtime->heap) {
+    if (runtime_heap(runtime)) {
         EvalContext* cleanup_context = runtime_get_eval_context(runtime);
         if (!cleanup_context) return;
         if (!runtime_context_bind_retained(runtime, cleanup_context)) return;
         cleanup_context->result = ItemNull;
-        cleanup_context->scheduler = runtime->scheduler;
+        cleanup_context->scheduler = runtime_scheduler(runtime);
         if (cleanup_context->js_state &&
                 !js_runtime_state_init(cleanup_context)) return;
         if (cleanup_context->last_error) {
@@ -1885,9 +1856,9 @@ void runtime_reset_heap(Runtime* runtime) {
             js_batch_reset();
         }
 
-        if (runtime->scheduler) {
-            lambda_scheduler_destroy(runtime->scheduler);
-            runtime->scheduler = NULL;
+        if (runtime_scheduler(runtime)) {
+            lambda_scheduler_destroy(runtime_scheduler(runtime));
+            runtime_set_scheduler(runtime, NULL);
         }
         if (runtime->js_runtime_used) {
             js_event_loop_shutdown();
@@ -1902,41 +1873,33 @@ void runtime_reset_heap(Runtime* runtime) {
 
         // Batch heap replacement invalidates module-owned callback Items just
         // as final runtime teardown does; release those roots before the GC.
-        jube_notify_heap_cleanup(runtime->heap);
+        jube_notify_heap_cleanup(runtime_heap(runtime));
         // Module bindings and ICs are context-owned slabs.  Drop their precise
         // root registrations and bulk-clear them while the old heap is still
         // current; the next module instantiation re-registers once.
         lambda_module_state_reset();
 
-        if (runtime->type_list) {
+        if (runtime_type_list(runtime)) {
             // a nested package may publish its Script-owned type list through
             // the runtime context; let runtime_free_script release that owner.
             bool script_owned = runtime_type_list_is_script_owned(runtime);
-            if (!script_owned) arraylist_free(runtime->type_list);
-            runtime->type_list = NULL;
+            if (!script_owned) arraylist_free(runtime_type_list(runtime));
+            runtime_set_type_list(runtime, NULL);
         }
 
         js_runtime_state_release_heap_resources();
         heap_destroy();
-        runtime->heap = NULL;
+        runtime_set_heap(runtime, NULL);
         cleanup_context->heap = NULL;
         // D4.2.1v2/RN-NamePool: GC finalizers may still inspect NameRecords;
         // release the dedicated runtime pool only after heap destruction.
-        if (runtime->name_pool) {
-            name_pool_release(runtime->name_pool);
-            runtime->name_pool = NULL;
+        if (runtime_name_pool(runtime)) {
+            name_pool_release(runtime_name_pool(runtime));
+            runtime_set_name_pool(runtime, NULL);
         }
         cleanup_context->name_pool = NULL;
         cleanup_context->type_list = NULL;
         cleanup_context->scheduler = NULL;
-    }
-    if (runtime->js_bootstrap_context) {
-        // Cross-language imports can use the canonical EvalContext directly;
-        // freeing that alias here left the next batch binding a dead context.
-        if (runtime->js_bootstrap_context != runtime_get_eval_context(runtime)) {
-            mem_free(runtime->js_bootstrap_context);
-        }
-        runtime->js_bootstrap_context = NULL;
     }
 }
 
@@ -1970,7 +1933,7 @@ void runtime_cleanup(Runtime* runtime) {
     bool event_loop_cleaned = false;
 
     // Destroy retained execution state (heap and name_pool)
-    if (runtime->heap) {
+    if (runtime_heap(runtime)) {
         EvalContext* cleanup_context = cleanup_owner
             ? cleanup_owner : runtime_get_eval_context(runtime);
         if (!cleanup_context) return;
@@ -1984,10 +1947,10 @@ void runtime_cleanup(Runtime* runtime) {
         render_map_destroy();
         tmpl_state_destroy();
 
-        if (runtime->scheduler) {
-            cleanup_context->scheduler = runtime->scheduler;
-            lambda_scheduler_destroy(runtime->scheduler);
-            runtime->scheduler = NULL;
+        if (runtime_scheduler(runtime)) {
+            cleanup_context->scheduler = runtime_scheduler(runtime);
+            lambda_scheduler_destroy(runtime_scheduler(runtime));
+            runtime_set_scheduler(runtime, NULL);
         }
 
         if (cleanup_context->js_state) js_event_loop_shutdown();
@@ -2007,17 +1970,17 @@ void runtime_cleanup(Runtime* runtime) {
 
         // Jube modules may cache heap-owned callbacks across repeated page
         // interactions; release those roots before this heap disappears.
-        jube_notify_heap_cleanup(runtime->heap);
+        jube_notify_heap_cleanup(runtime_heap(runtime));
 
         print_heap_entries();
         check_memory_leak();
 
-        if (runtime->type_list) {
+        if (runtime_type_list(runtime)) {
             // a nested package may publish its Script-owned type list through
             // the runtime context; let runtime_free_script release that owner.
             bool script_owned = runtime_type_list_is_script_owned(runtime);
-            if (!script_owned) arraylist_free(runtime->type_list);
-            runtime->type_list = NULL;
+            if (!script_owned) arraylist_free(runtime_type_list(runtime));
+            runtime_set_type_list(runtime, NULL);
         }
 
         js_runtime_state_release_heap_resources();
@@ -2035,13 +1998,13 @@ void runtime_cleanup(Runtime* runtime) {
         // defining module slab; destroy those slabs only after that cleanup.
         lambda_module_state_destroy();
         heap_destroy();
-        runtime->heap = NULL;
+        runtime_set_heap(runtime, NULL);
         cleanup_context->heap = NULL;
         // D4.2.1v2/RN-NamePool: GC finalizers can traverse name-backed
         // shapes, so the dedicated runtime pool outlives heap teardown.
-        if (runtime->name_pool) {
-            name_pool_release(runtime->name_pool);
-            runtime->name_pool = NULL;
+        if (runtime_name_pool(runtime)) {
+            name_pool_release(runtime_name_pool(runtime));
+            runtime_set_name_pool(runtime, NULL);
         }
         cleanup_context->name_pool = NULL;
         cleanup_context->type_list = NULL;
@@ -2060,16 +2023,6 @@ void runtime_cleanup(Runtime* runtime) {
             js_event_loop_shutdown();
         }
         lambda_uv_cleanup();
-    }
-    if (runtime->js_bootstrap_context) {
-        // A failed cross-language compile can leave the bootstrap pointer
-        // aliased to the canonical EvalContext. Freeing it here makes the
-        // later last_error cleanup dereference a dead context; the canonical
-        // owner is released in the eval_context block below.
-        if (runtime->js_bootstrap_context != runtime->eval_context) {
-            mem_free(runtime->js_bootstrap_context);
-        }
-        runtime->js_bootstrap_context = NULL;
     }
     if (runtime->eval_context) {
         EvalContext* retiring_context = runtime->eval_context;

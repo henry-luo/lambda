@@ -500,7 +500,7 @@ void jm_update_gc_root_slot(JsMirTranspiler* mt, JsMirVarEntry* var) {
 }
 
 void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
-        bool item_return, MirScalarReturnMode scalar_return_mode,
+        bool item_return, ScalarReturnClass scalar_return_mode,
         MIR_reg_t runtime_reg, bool clean_error_lane_entry) {
     if (!mt) return;
     // Function entry starts unknown because the preceding native return may
@@ -620,7 +620,7 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
             offsetof(Context, side_number_top), mt->em.frame.number_base);
     } else if (!mt->em.frame.item_return ||
-            mt->em.frame.scalar_return_mode == MIR_SCALAR_RETURN_NONE) {
+            mt->em.frame.scalar_return_mode == SCALAR_RETURN_NONE) {
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
             offsetof(Context, side_number_top), mt->em.frame.number_base);
     }

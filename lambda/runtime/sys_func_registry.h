@@ -28,7 +28,6 @@ extern "C" {
 // C-level return type convention for system functions
 typedef enum CRetType {
     C_RET_ITEM = 0,    // returns boxed Item (default, most sys funcs)
-    C_RET_RETITEM,     // returns RetItem {Item value; LambdaError* err} (can_raise functions)
     C_RET_INT64,       // returns raw int64_t (fn_len, bitwise, and machine operations)
     C_RET_DOUBLE,      // returns raw double (pn_clock)
     C_RET_BOOL,        // returns Bool/uint8_t (fn_contains, fn_starts_with, etc.)
@@ -176,8 +175,10 @@ typedef struct JitCallMetadata {
     uint16_t source_arg_count;
     int16_t scalar_return_home_arg_index;
     uint8_t scalar_home_lane_mask;
-    // v3 (RV10): mirrored from the callee's FnReturnAnalysis so a call site
-    // never recomputes the shape from its own local facts.
+    // SCU11 (RV10): the callee's published return contract, referenced, so a
+    // call site never recomputes the shape from its own local facts.
+    // `return_shape` is its cached projection (NULL abi = universal shape 2).
+    const struct FnReturnAnalysis* abi;
     FnReturnShape return_shape;
     uint32_t flags;
 } JitCallMetadata;

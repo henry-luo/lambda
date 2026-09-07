@@ -147,6 +147,11 @@ public:
     size_t maxErrors() const { return errors_.maxErrors(); }
 };
 
+// SCU16 size budget: a parser context embeds no document-proportional table,
+// so parsers may keep it on the stack. A failure here means a fixed-capacity
+// array crept back in.
+static_assert(sizeof(InputContext) < 1024, "InputContext must stay small: no embedded document-sized tables");
+
 } // namespace lambda
 
 // LaTeX command/environment classification — see input-latex-tables.h
