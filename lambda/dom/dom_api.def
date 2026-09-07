@@ -155,7 +155,8 @@ DOM_OP(CORE, tc_selection_end, textctl, 1, "fn(n: any) -> int", dom_engine_tc_se
 DOM_OP(CORE, edit_node, editing, 1, "fn(host: any) -> any", dom_engine_edit_node, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, edit_start, editing, 1, "fn(host: any) -> int", dom_engine_edit_start, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, edit_end, editing, 1, "fn(host: any) -> int", dom_engine_edit_end, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
-DOM_OP(CORE, tc_value,         textctl, 1, "fn(n: any) -> string",                          dom_engine_tc_value, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+// This is a text-control predicate, not the control's string value.
+DOM_OP(CORE, tc_value,         textctl, 1, "fn(n: any) -> bool",                            dom_engine_tc_value, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(DERIVED, tc_set_value,  textctl, 2, "fn(n: any, v: string) -> bool",                 DOM_NO_BODY, DOM_F_NEUTRAL | DOM_F_MUTATES,
        "set_state(n, \"value\", v)")
 DOM_OP(DERIVED, tc_selection,  textctl, 1, "fn(n: any) -> map",                             DOM_NO_BODY, DOM_F_NEUTRAL,

@@ -13803,6 +13803,12 @@ static bool mir_tail_transfers_control(AstNode* node) {
 
 static MirValue transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
     AstNode* tail_value = ast_unwrap_primary(node);
+    // A final `if` in a pn body is the procedure's implicit return value, not
+    // a statement-position branch. Preserve its branch result as T0 does.
+    bool saved_preserve_proc_if_result = mt->preserve_proc_if_result;
+    if (mt->in_proc && tail_value && tail_value->node_type == AST_NODE_IF_EXPR) {
+        mt->preserve_proc_if_result = true;
+    }
     if (mt->native_return_tid == LMD_TYPE_INT && mt->native_body_tail_expr &&
             tail_value == mt->native_body_tail_expr) {
         // A braced native body reaches this helper after content lowering has
@@ -13812,17 +13818,21 @@ static MirValue transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
         AstNode* native_value = ast_unwrap_primary(node);
         if (mir_is_native_int_arith(mt, native_value)) {
             mt->native_body_result_is_raw = true;
-            return emit_binary_value(mt, (AstBinaryNode*)native_value, true);
+            MirValue result = emit_binary_value(mt, (AstBinaryNode*)native_value, true);
+            mt->preserve_proc_if_result = saved_preserve_proc_if_result;
+            return result;
         }
         if (native_value && native_value->node_type == AST_NODE_INDEX_EXPR &&
                 mir_expr_carrier_type(mt, native_value) == LMD_TYPE_INT) {
             // native int index reads already produce the lane; boxing this tail
             // made the generated function return an Item while callers expected i64.
             mt->native_body_result_is_raw = true;
-            return mir_value_from_reg(mt, node,
+            MirValue result = mir_value_from_reg(mt, node,
                 emit_int_native_lane_typed(mt,
                     transpile_expr_value(mt, native_value)).r,
                 VALUE_REP_INT_LANE, node->type, LMD_TYPE_INT);
+            mt->preserve_proc_if_result = saved_preserve_proc_if_result;
+            return result;
         }
     }
     if (mt->native_return_tid != LMD_TYPE_ANY && mt->native_body_tail_expr &&
@@ -13832,12 +13842,17 @@ static MirValue transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
         // its reachable result joins in the function's native return lane.
         // Preserve that producer-selected lane through the content wrapper;
         // forcing Item here loses the physical fact before the ABI boundary.
-        return transpile_expr_value(mt, node, MIR_VALUE_REQUIRED_REP,
+        MirValue result = transpile_expr_value(mt, node, MIR_VALUE_REQUIRED_REP,
             lambda_canonical_rep_for_type_id(mt->native_return_tid));
+        mt->preserve_proc_if_result = saved_preserve_proc_if_result;
+        return result;
     }
     // The ordinary tail is explicitly consumed as an Item. The enclosing
     // content descriptor retains the semantic contract independently.
-    return transpile_expr_value(mt, node, MIR_VALUE_REQUIRED_REP, VALUE_REP_ITEM);
+    MirValue result = transpile_expr_value(mt, node, MIR_VALUE_REQUIRED_REP,
+        VALUE_REP_ITEM);
+    mt->preserve_proc_if_result = saved_preserve_proc_if_result;
+    return result;
 }
 
 static void transpile_proc_side_effect(MirTranspiler* mt, AstNode* item) {
