@@ -38,6 +38,7 @@ test/lambda/comp_expr_edge.ls	direct
 test/lambda/compact_typed_arrays.ls	direct
 test/lambda/complex.ls	direct
 test/lambda/complex_iot_report_html.ls	direct
+test/lambda/computed_keys.ls	direct
 test/lambda/constrained_type.ls	direct
 test/lambda/constrained_type_hoisted.ls	direct
 test/lambda/correlation_math.ls	direct
@@ -64,6 +65,7 @@ test/lambda/dom_stylesheet.ls	direct
 test/lambda/dom_validate.ls	direct
 test/lambda/edit_bridge.ls	direct
 test/lambda/element_content_axes.ls	direct
+test/lambda/elmt_literal_module.ls	direct
 test/lambda/empty_string.ls	direct
 test/lambda/eq_decimal_float.ls	direct
 test/lambda/eq_element.ls	direct
@@ -496,6 +498,7 @@ test/lambda/proc/cow_param_chain.ls	run
 test/lambda/proc/cow_param_snapshot.ls	run
 test/lambda/proc/cow_place_snapshot.ls	run
 test/lambda/proc/cow_place_var_borrow.ls	run
+test/lambda/proc/cow_rmw_borrow.ls	run
 test/lambda/proc/cow_snapshot_iteration.ls	run
 test/lambda/proc/cow_var_borrow.ls	run
 test/lambda/proc/dynamic_abi_16.ls	run
@@ -504,6 +507,8 @@ test/lambda/proc/guarded_store_null_slot_retag.ls	run
 test/lambda/proc/inferred_shape_guarded_read.ls	run
 test/lambda/proc/int64_accumulator_widening.ls	run
 test/lambda/proc/int_large_carriers.ls	run
+test/lambda/proc/interp_var_writeback.ls	run
+test/lambda/proc/jit_tail_if_push_error.ls	run
 test/lambda/proc/let_finality.ls	run
 test/lambda/proc/map_object_robustness.ls	run
 test/lambda/proc/match_stam.ls	run

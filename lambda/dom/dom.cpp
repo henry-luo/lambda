@@ -1530,7 +1530,11 @@ static void register_named_elements_recursive(DomElement* elem) {
         // The AST tier has no deferred MIR preamble pass; compile parsed inline
         // handlers while the document realm is active so later DOM events see
         // the same EventTarget properties as the MIR tier.
+        // Dynamic Function rebinding re-enters dom_set_document, so guard only
+        // this element's compilation rather than suppressing the whole walk.
+        s_dom_event_attrs_initializing = true;
         dom_initialize_event_attrs(elem);
+        s_dom_event_attrs_initializing = false;
     }
 
     if (elem->id && elem->id[0] != '\0') {
@@ -1571,11 +1575,7 @@ static void register_named_elements_recursive(DomElement* elem) {
 
 void dom_register_named_elements(DomElement* root) {
     if (!root) return;
-    bool initialize_event_attrs = js_ast_interpreter_requested() &&
-        !s_dom_event_attrs_initializing;
-    if (initialize_event_attrs) s_dom_event_attrs_initializing = true;
     register_named_elements_recursive(root);
-    if (initialize_event_attrs) s_dom_event_attrs_initializing = false;
 }
 
 static DomDocument* js_document_proxy_doc_from_item(Item item);
@@ -9985,7 +9985,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = i2it(parsed)};
         return (Item){.item = i2it(dom_default_tab_index(elem))};
     }
-    // CE-4 (Radiant_Design_Content_Editable.md §7): inputMode/enterKeyHint
+    // Radiant_Design_Editable.md §13: inputMode/enterKeyHint
     // are enumerated reflected attributes. The IDL getter canonicalises the
     // value (lowercase, one of the listed keywords) and returns "" for
     // missing/unknown — matches HTML spec "reflect ... limited to known
@@ -10025,7 +10025,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         }
         return js_name_item(out);
     }
-    // CE-1 / CE-4 (Radiant_Design_Content_Editable.md §4.2 + §10):
+    // Radiant_Design_Editable.md §13:
     // contentEditable returns "true"/"false"/"plaintext-only"/"inherit".
     // isContentEditable is the computed property — walks ancestors honouring
     // inheritance and ="false" islands.
@@ -10453,7 +10453,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         return value;
     }
 
-    // CE-1 / CE-4 (Radiant_Design_Content_Editable.md §4.2):
+    // Radiant_Design_Editable.md §13:
     // contentEditable setter validates per HTML spec. Empty string maps to
     // "inherit" (attribute removed). Invalid values are a SyntaxError — we
     // log and ignore; the proper raise will be wired through the JS

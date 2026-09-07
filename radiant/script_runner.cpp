@@ -2638,7 +2638,10 @@ static const struct {
     {"onkeydown",    "keydown"},
     {"onkeyup",      "keyup"},
     {"onfocus",      "focus"},
+    // focusin/focusout bubble, unlike focus/blur, and need distinct IDL slots.
+    {"onfocusin",    "focusin"},
     {"onblur",       "blur"},
+    {"onfocusout",   "focusout"},
     {"onchange",     "change"},
     {"oninput",      "input"},
     // textarea onselect must use the retained handler context; the generic

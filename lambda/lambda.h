@@ -1375,6 +1375,7 @@ Item fn_call3(Function* fn, Item a, Item b, Item c);
 // entries resolve their companion lane in Context; hosted callbacks may still
 // supply an explicit payload owner across this C boundary.
 Item fn_call_into(Function* fn, List* args, uint64_t* result_home);
+Item fn_call_borrowed_into(Function* fn, List* args, uint64_t* result_home);  // caller published CW33 var homes
 // S12.3.4 dynamic application; colour-split for the error convention.
 // Named *_apply_args, not *_call: `fn_call` is already the dynamic dispatcher.
 Item fn_apply_args(Item callee, Item args);
@@ -2288,6 +2289,7 @@ extern "C" {
     ArrayNum* array_float();
 
     ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length);
+    ArrayNum* array_num_new_uninit(ArrayNumElemType elem_type, int64_t length);  // lanes unset: caller writes all before read/GC
     ArrayNum* array_num_new_with_extra(ArrayNumElemType elem_type, int64_t length,
                                        int64_t extra);
     ArrayNum* array_num_new_external_view(Container* base, void* data_base,
@@ -2328,6 +2330,7 @@ extern "C" {
         void* type_list_ptr);
     Element* elmt(int64_t type_index);
     Element* elmt_with_tl(int64_t type_index, void* type_list_ptr);
+    Element* elmt_with_type(struct TypeElmt* elmt_type);
     Object* object(int64_t type_index);
     Object* object_with_data(int64_t type_index);
     Object* object_with_tl(int64_t type_index, void* type_list_ptr);
@@ -2933,6 +2936,7 @@ extern "C" {
     Item array_num_set_cow_idx(Item owner, int64_t index, Item value);
     Item index_assign_cow(Item owner, Item key, Item value);
     Item cow_capture_value(Item value);
+    Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item key2);  // CW34
     // Whether S9.3.1 insertion capture is active (LAMBDA_COW_CAPTURE). The
     // transpiler reads it too, so flag-off emits the pre-capture code exactly.
     // Capture every field of a freshly built shaped literal (S9.3.1).

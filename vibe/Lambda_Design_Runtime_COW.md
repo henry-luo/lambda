@@ -41,6 +41,7 @@
 | View-borrow confinement | CW16.3, §11.7 | Not started |
 | ArrayNum COW | CW15–CW16, **CW32v2** (§11.8) | **IMPLEMENTED 2026-08-29** (worktree `nm-impl-work`): mark-only binds, guarded lane stores on marked roots (byte-test at offset 4 → cold detach + republish), `array_num_set_cow_idx`/`index_assign_cow` wrappers, T0 mask fix. Fixture `cow_arraynum_alias.ls`. Mutable views OPEN/TODO by designer ruling |
 | JS↔Lambda ownership boundary | CW17, §9.3 | **Deferred by designer (2026-08-28)** |
+| Read-modify-write handle borrows | **CW34** (§11.11) | **RATIFIED + IMPLEMENTED 2026-09-06**: tier-shared static shape (`build_ast`), runtime spine test `cow_bind_rmw_handle`; fixture `proc/cow_rmw_borrow.ls`, emission fixture `cw34_rmw_borrow` |
 
 ## 1. Context A — the C4 semantic contract this must implement
 
@@ -992,6 +993,83 @@ stage of CW33 fixes this by construction — a rebind through `Container**`
 is a store through the caller's home. Until then the shape is a standing
 T0/MIR divergence for a rarely-written idiom (rebind-through-borrow rather
 than mutate-through-borrow).
+
+### 11.11 CW34 — read-modify-write handle borrows (RATIFIED 2026-09-06, user; IMPLEMENTED same day)
+
+**The idiom.** Handle-store code reads a level out of a mutable root into a
+local, writes through the local, and stores it back where it came from:
+
+```lambda
+pn arr_set(var a, idx, val) {
+    var l0 = a.l0          // place copy (S9.1.2)
+    var c1 = l0[i0]        // nested handle, same shape
+    c1[i1] = val
+    l0[i0] = c1            // store-back
+    a.l0 = l0              // store-back; l0 dead afterwards
+}
+```
+
+Under the Stage-1 mechanism the bind share-marks the level (`cow_bind_var`),
+the first write detaches one level, and the store-back captures the copy
+(S9.3.1) — and because the mark is a monotonic bit (D4.4.1) the next call
+finds the level shared again and copies again. `COW_EXEC_PROFILE` on the
+suite (2026-09-06): havlak 205k array copies / 36 MB per run, awfy deltablue
+49k, all with `unique_mutations = 0` — copies whose source dies at the
+store-back in the same activation.
+
+**The ruling.** A place-copy handle may be bound as a *borrow* of its place
+— no share-mark, so its writes land in place and the store-back stores the
+pointer it already holds — when nothing can observe the difference (P6):
+
+1. *Static shape* (decided once in `build_ast` at FUNCTION_END, consumed by
+   both tiers through `NameEntry::cow_borrow_lowered` and
+   `AstAssignNode::cow_borrow_release`): the handle is a mutated place copy
+   (`is_place_copy && place_copy_mutated`) of a **`var` local or `var`
+   parameter** root — a plain parameter's own writes are S9.1.3 snapshots,
+   so it is never a root — declared as the statement's only declarator with
+   no annotation, through at most three links whose keys are member names,
+   identifiers or integer literals; a store-back `root.path = handle` with
+   the same path follows **in the same statement list** and the last one
+   closes the region; inside the region the root is named only by
+   store-backs of that path, no key identifier is reassigned or passed to a
+   call, no nested function, handler, `raise`, `^` propagation, `start` or
+   `try` appears, `break`/`continue` target a loop inside the region, and
+   every `return` is immediately preceded by a store-back in its own list;
+   after any store-back the handle is never named again in that list.
+2. *Runtime spine test* (`cow_bind_rmw_handle(root, value, count, k1, k2)`):
+   the borrow is taken only while every container on the spine from the
+   root to the leaf's parent is unshared, not static and not immortal; any
+   shared link takes the ordinary snapshot bind. This is what keeps the rule
+   sound against observers the body cannot see — a `var snap = a` before the
+   bind marks the root, a caller-side alias arrives with its bits set, a
+   one-level clone leaves its children marked.
+3. *Emission*: the borrowed handle is modelled as possibly shared
+   (`MirVarEntry::cow_marked`), so every store through it consults the
+   container's bit (`member_set_cow`, `index_assign_cow`,
+   `array_num_set_cow_idx`, the nested-path rebuild) and never takes a raw
+   lane store; the store-back skips `cow_capture_value` because the handle is
+   dead there. T0 mirrors both: the bind calls the same helper, the
+   store-back skips the mark.
+
+**What stays observably identical.** A read of the root in the region, an
+early exit without the store-back, a handle that escapes (a capture marks it
+and the next write copies), a handle rebound to a fresh container (the
+store-back is then a real store), and a shared spine all keep S9.1.2/S9.1.3
+behaviour; `test/lambda/proc/cow_rmw_borrow.ls` pins each case with a golden
+that is byte-identical on `interp`/`auto`/`jit` and to the pre-CW34 build.
+An error exit inside the region leaves the partial in-place writes visible
+through the root — exactly the rule a `var` parameter already has under
+CW33, which the borrow is.
+
+**Not covered (measured, deliberately out of scope).** cd's `arr_set` is
+lowered but its root arrives through a plain-parameter chain
+(`recurse_draw(voxel_map, …)`), so the spine is CW29-shared and its 220k
+copies are the S9.1.3 snapshot cost of that source; splay's rotations bind
+`var left = node.left`, overwrite the place (`node.left = branch`) and return
+`left` — the mark is stale but there is no store-back (an "observer removed
+by an intervening write" rule, not RMW); jetstream deltablue writes through
+plain parameters with no store-back at all. Those are candidates for a
+later ruling, not extensions of this one.
 
 ## 12. Settled decisions and residual risks
 

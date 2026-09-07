@@ -7024,7 +7024,7 @@ static const char* input_event_data_for_surface(const EditingSurface* surface,
 }
 
 /**
- * CE-3 (Radiant_Design_Content_Editable.md §6): dispatch a `beforeinput` or
+ * Radiant_Design_Editable.md §9: dispatch a `beforeinput` or
  * `input` event via the JS EventTarget pipeline. `beforeinput` is cancelable;
  * a JS handler that calls preventDefault() causes us to return true so the
  * caller can skip the model mutation. `input` is informational only.
@@ -8413,7 +8413,7 @@ bool is_view_focusable(View* view) {
         default:
             // Check for tabindex attribute
             if (elem->get_attribute("tabindex")) return true;
-            // CE-2 (Radiant_Design_Content_Editable.md §5): a contenteditable
+            // Radiant_Design_Editable.md §7: a contenteditable
             // editing host is implicitly focusable (treated as tabindex=0)
             // when no explicit tabindex is set.
             EditingHost h;
@@ -8537,7 +8537,7 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
             te_focus_capture_value(lam::dom_require_element(new_focus));
         }
 
-        // CE-4 (Radiant_Design_Content_Editable.md §7): on focus of any
+        // Radiant_Design_Editable.md §13: on focus of any
         // element carrying `inputmode` / `enterkeyhint`, read the hints so
         // the platform IME / on-screen keyboard backend can apply them.
         // Actual forwarding to NSTextInputClient / TSF / IBus is reserved

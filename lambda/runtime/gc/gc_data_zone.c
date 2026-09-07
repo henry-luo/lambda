@@ -114,7 +114,7 @@ void* gc_data_zone_alloc(gc_data_zone_t* dz, size_t size) {
         void* ptr = block->cursor;
         block->cursor += size;
         dz->total_allocated += size;
-        return ptr;  // already zeroed from block allocation or reset
+        return ptr;  // contents unspecified: zero from a fresh block, dirty after a reset
     }
 
     // current block full — try subsequent existing blocks (after a reset, blocks still exist)
@@ -150,14 +150,14 @@ void* gc_data_zone_alloc(gc_data_zone_t* dz, size_t size) {
 void gc_data_zone_reset(gc_data_zone_t* dz) {
     if (!dz) return;
 
-    // reset all block cursors to base (retain blocks for reuse)
+    // reset all block cursors to base (retain blocks for reuse). The used
+    // portion is NOT zeroed here: a reused block hands out dirty memory, and
+    // the allocator zeroes (or the caller fully initializes) at allocation
+    // time instead. Zeroing at reset cost a memset of the whole nursery per
+    // collection -- brainfuck's 2.4 GB of `fill(30000, 0)` tapes were zeroed
+    // at reset, zeroed again by calloc, then written by fill.
     gc_data_block_t* block = dz->head;
     while (block) {
-        // zero the used portion for clean reuse
-        size_t used = (size_t)(block->cursor - block->base);
-        if (used > 0) {
-            memset(block->base, 0, used);
-        }
         block->cursor = block->base;
         block = block->next;
     }

@@ -1845,6 +1845,20 @@ bool interp_satellite_import_supported(const NameEntry* entry) {
     return supported;
 }
 
+// T21-3b (D8.1.1v6): an untyped `var` parameter crosses a tier boundary
+// through the CW33 home-transport cells (Context::mir_var_homes) -- the
+// satellite prologue and epilogue already implement the generated side, and
+// T0 now sets/consumes the same cells around its calls. A typed `var`
+// parameter has no transport (the raw-lane ABI carries no home), so it stays
+// pinned.
+static bool interp_var_parameters_transportable(const TypeFunc* signature) {
+    for (TypeParam* param = signature ? signature->param : NULL;
+            param; param = param->next) {
+        if (param->is_var_param && param->full_type) return false;
+    }
+    return true;
+}
+
 static void interp_scan_satellite_node(AstNode* node, void* opaque) {
     SatelliteScanCtx* sc = (SatelliteScanCtx*)opaque;
     if (!node || !sc->ok) return;
@@ -1857,19 +1871,17 @@ static void interp_scan_satellite_node(AstNode* node, void* opaque) {
         // Nested definitions need an explicit cross-satellite closure contract.
         sc->ok = false;
         return;
-    case AST_NODE_MEMBER_ASSIGN_STAM:
-    case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_OBJECT_TYPE:
     case AST_NODE_VIEW:
-        // Indexed/member stores need the T0 frame's replacement channel. A
-        // satellite has no safe publication path for those roots (D3.3.1 /
-        // D5.2). T21-3 / D8.1.1v6: a local `var` declaration and a plain
-        // rebinding assignment are NOT such roots -- a promoted body owns its
-        // whole activation, and its locals are MIR registers with the same
-        // GC root slots the eager module compiler gives them; refusing them
-        // pinned nearly every procedural body (hyphen, sum, tak) to T0.
         sc->ok = false;
         return;
+    // T21-3 / D8.1.1v6: local `var` declarations, rebinding assignments and
+    // (T21-3b) indexed/member stores are all owned by the promoted activation:
+    // a store through a local or a value parameter replaces a MIR register
+    // the satellite roots itself, a store through a module binding goes to
+    // the shared slab, and a store through an untyped `var` parameter is
+    // published to the caller's home by the CW33 epilogue. Refusing them had
+    // pinned nearly every procedural body to T0.
     case AST_NODE_MATCH_EXPR:
         // Pattern arms carry compiled regex/type-list state that is owned by
         // the T0 module activation. A satellite has no equivalent pattern
@@ -1883,9 +1895,10 @@ static void interp_scan_satellite_node(AstNode* node, void* opaque) {
         TypeFunc* signature = direct && ((AstNode*)direct)->type &&
                 ((AstNode*)direct)->type->type_id == LMD_TYPE_FUNC
             ? (TypeFunc*)((AstNode*)direct)->type : NULL;
-        if (signature && ast_type_func_has_var_parameter(signature)) {
-            // Even an exact direct call carries borrowed roots; the satellite
-            // ABI cannot preserve the caller's var write-back slots.
+        if (signature && ast_type_func_has_var_parameter(signature) &&
+                !interp_var_parameters_transportable(signature)) {
+            // A typed `var` parameter has no home transport, so the satellite
+            // could not preserve the caller's write-back slot for it.
             sc->ok = false;
             return;
         }
@@ -1946,10 +1959,10 @@ bool interp_satellite_supported(const AstFuncNode* fn) {
         return false;
     }
     TypeFunc* signature = (TypeFunc*)((AstNode*)fn)->type;
-    if (ast_type_func_has_var_parameter(signature)) {
-        // T0's direct-borrow path publishes a replacement into its active
-        // caller frame. A satellite has only the boxed dynamic ABI, which
-        // deliberately has no mutable-borrow write-back channel.
+    if (ast_type_func_has_var_parameter(signature) &&
+            !interp_var_parameters_transportable(signature)) {
+        // A typed `var` parameter has no CW33 home transport; untyped ones
+        // write back through the cells T0 sets before entering the satellite.
         return false;
     }
     for (TypeParam* param = signature ? signature->param : NULL;

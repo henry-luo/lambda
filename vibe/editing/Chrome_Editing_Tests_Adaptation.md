@@ -1,9 +1,11 @@
 # Adapting the Chromium Editing Test Suite
 
 **Date:** 2026-06-26
-**Status:** Proposal + implementation plan
-**Source:** `test/editing` → `../../lambda-test/editing` = Chromium/Blink `web_tests/editing/` (~2,751 HTML tests)
-**Target:** `test/editor-js/` JS reference editor
+**Status:** Historical scenario-harvest record; derived fixtures remain active
+**Historical source:** CE3's `test/editing` link to Chromium/Blink
+`web_tests/editing/` (~2,751 HTML tests) is retired from the Lambda test tree.
+**Retained target:** the derived editor-model fixtures under
+`test/editor-js/test/tier_f_chromium/`
 
 ---
 

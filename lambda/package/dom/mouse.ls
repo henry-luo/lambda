@@ -26,8 +26,9 @@ fn input_target(node) {
 // current logical line on multiline controls and rich text; an input asks for
 // the HTML select-all convention explicitly.
 fn selection_operation(evt) {
-    if (evt.button != 0) null
-    else if (evt.shiftKey) "extend"
+    // A declined context-menu press still places its caret; an opened menu exits
+    // before this default action.
+    if (evt.shiftKey) "extend"
     else if (evt.detail >= 3) {
         if (input_target(evt.target) != null) "selectAll" else "selectLine"
     }

@@ -686,7 +686,8 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
     // instead of aliasing a child a fresh literal never captured. All T0
     // declaration paths funnel through this bind. Mark-only: cannot allocate.
     if (named->entry && named->entry->is_place_copy &&
-            named->entry->place_copy_mutated) {
+            named->entry->place_copy_mutated && !named->entry->cow_borrow_lowered) {
+        // CW34: a borrowed handle was already decided by cow_bind_rmw_handle
         cow_mark_shared(bound);
     }
     if (!item_is_error(source) && item_is_error(bound) && named->declared_type &&
@@ -1608,6 +1609,41 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             if (item_is_error(private_owner)) return private_owner;
             words[index] = private_owner.item;
             interp_write_binding(f, entry, private_owner);
+        }
+        // T21-3b (D8.1.1v6): a promoted callee takes its borrowed homes through
+        // the CW33 transport cells the generated code already uses -- T0 hands
+        // over the ADDRESS of each frame slot, prepares chain-root borrows
+        // exactly as the interpreted callee prologue would, and the satellite
+        // epilogue stores the final parameter value back through the cell.
+        // Only homes can travel; a legacy entry-channel borrow (view-state or
+        // object-field binding without a slot) keeps the interpreted path.
+        bool transportable = true;
+        for (int index = 0; index < dispatch_argc; index++) {
+            if (borrowed[index] && !borrow_homes[index]) transportable = false;
+        }
+        if (transportable && (interp_promote_function_if_hot(fn) ||
+                fn->entry_abi != FN_ENTRY_ABI_LAMBDA_INTERPRETED)) {
+            Context* transport = (Context*)f->st->ctx;
+            for (int index = 0; index < dispatch_argc; index++) {
+                uint64_t* home = borrow_homes[index];
+                if (home && borrowed[index] && !borrowed[index]->is_var_param) {
+                    Item prepared = cow_prepare_write((Item){.item = *home});
+                    if (item_is_error(prepared)) return prepared;
+                    *home = prepared.item;
+                    words[index] = prepared.item;
+                }
+                transport->mir_var_homes[index] = home;
+            }
+            List args = {};
+            args.length = dispatch_argc;
+            args.items = (Item*)(void*)words;
+            uint64_t result_home = 0;
+            Item result = fn_call_borrowed_into(fn, dispatch_argc ? &args : NULL,
+                &result_home);
+            for (int index = 0; index < dispatch_argc; index++) {
+                transport->mir_var_homes[index] = NULL;
+            }
+            return result;
         }
         return interp_call_with_borrowed(fn, (const Item*)(void*)words,
             dispatch_argc, f, borrowed, borrow_homes);
@@ -3363,6 +3399,34 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
             AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
             Item value = eval_expr(f, named->init);
             if (interp_frame_pending(f)) return;
+            if (named->entry && named->entry->cow_borrow_lowered) {
+                // CW34: the handle borrows its place while the spine is
+                // unshared (same helper and decision as lowering)
+                AstCowPath borrow_path = {};
+                if (ast_collect_cow_path(&borrow_path, named->init) &&
+                        borrow_path.count >= 1 && borrow_path.count <= 3) {
+                    NameEntry* root_entry = ((AstIdentNode*)borrow_path.root)->entry;
+                    Scratch root_slot(f);
+                    Scratch value_slot(f);
+                    Scratch key1(f);
+                    Scratch key2(f);
+                    root_slot.set(interp_read_binding(f, root_entry));
+                    value_slot.set(value);
+                    if (borrow_path.count > 1) {
+                        key1.set(interp_eval_cow_path_key(f, borrow_path.segment[0],
+                            borrow_path.is_member[0]));
+                    }
+                    if (borrow_path.count > 2) {
+                        key2.set(interp_eval_cow_path_key(f, borrow_path.segment[1],
+                            borrow_path.is_member[1]));
+                    }
+                    if (interp_frame_pending(f)) return;
+                    value = cow_bind_rmw_handle(root_slot.get(), value_slot.get(),
+                        borrow_path.count - 1, key1.get(), key2.get());
+                } else {
+                    cow_mark_shared(value);
+                }
+            }
             // A declared `float` binding is a coercion boundary (S7.7.2):
             // lowering stores the initializer in a double lane, so
             // `let x: float = 7 div 2` observes 3.0, not the int 3. Only the
@@ -4444,7 +4508,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // S9.3.1: a named value stored into a container is captured, so later
         // writes through the source binding detach instead of aliasing the slot.
         // The setters below are shared with raw/host paths and carry no policy.
-        if (ast_expr_insertion_needs_capture(ca->value)) {
+        // CW34: a borrowed handle's store-back skips the mark (handle dead)
+        if (!ca->cow_borrow_release && ast_expr_insertion_needs_capture(ca->value)) {
             cow_capture_value(value_slot.get());
         }
 
@@ -4863,8 +4928,8 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
     Item result = ItemNull;
     TypeId escaped_scalar_type = LMD_TYPE_NULL;
     uint64_t escaped_scalar_payload = 0;
-    InterpBorrowedScratch borrowed_scratch(borrowed && borrowed->caller);
-    if (!borrowed_scratch.valid(borrowed && borrowed->caller)) {
+    InterpBorrowedScratch borrowed_scratch(borrowed != NULL);
+    if (!borrowed_scratch.valid(borrowed != NULL)) {
         st->depth++;
         log_error("interp: could not allocate borrowed argument scratch");
         return ItemError;
@@ -4894,8 +4959,8 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             }
             Item source = value;
             if (borrowed && borrowed->homes[index] &&
-                    borrowed->entries[index] &&
-                    !borrowed->entries[index]->is_var_param) {
+                    (!borrowed->entries[index] ||
+                     !borrowed->entries[index]->is_var_param)) {
                 // A `var` parameter re-borrows its caller's prepared root.
                 // Every other binding, including a mutated place copy, is an
                 // S9.1.2 snapshot and must detach before its `var` callee writes.
@@ -4988,7 +5053,9 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 signature->return_contract, "function return");
             result = checked;
         }
-        if (borrowed && borrowed->caller) {
+        if (borrowed) {
+            // a transported home (satellite caller) has no caller frame but
+            // still needs its final value captured for the write-back below
             for (int index = 0; index < (int)params; index++) {
                 if (!borrowed->entries[index] && !borrowed->homes[index]) continue;
                 Item value = (Item){.item = frame->slots[index]};
@@ -5027,11 +5094,14 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
     } else if (escaped_scalar_type == LMD_TYPE_UINT64) {
         result = box_uint64_value(escaped_scalar_payload);
     }
-    if (borrowed && borrowed->caller) {
+    if (borrowed) {
         for (int index = 0; index < LAMBDA_MAX_FUNCTION_ARGS; index++) {
             NameEntry* entry = borrowed->entries[index];
             uint64_t* home = borrowed->homes[index];
             if (!entry && !home) continue;
+            // a transported home (satellite caller) has no caller frame; the
+            // legacy entry channel needs one
+            if (!home && !borrowed->caller) continue;
             Item value = borrowed_scratch.scalar_types[index] == LMD_TYPE_INT64
                 ? box_int64_value((int64_t)borrowed_scratch.scalar_payloads[index])
                 : borrowed_scratch.scalar_types[index] == LMD_TYPE_UINT64
@@ -5068,6 +5138,34 @@ static Item interp_call_with_borrowed(Function* fn, const Item* args, int argc,
 }
 
 extern "C" Item interp_call(Function* fn, const Item* args, int argc) {
+    return interp_call_internal(fn, args, argc, NULL);
+}
+
+// T21-3b (D8.1.1v6): the borrowed-mode entry. A generated caller (a
+// satellite) transports borrowed `var` homes in the CW33 cells; consume them
+// exactly as the generated prologue does -- read, then clear -- and treat
+// each as a chain-root borrow, so the interpreted callee prepares through the
+// home and stores its final parameter value back at return. Only the
+// borrowed dispatch mode reaches this entry: the cells are written by a
+// borrowed-mode caller right before its call and are not otherwise kept
+// clean, so an ordinary call must never read them.
+extern "C" Item interp_call_borrowed(Function* fn, const Item* args, int argc) {
+    InterpState* st = interp_current_state();
+    Context* transport = st ? (Context*)st->ctx : NULL;
+    if (transport) {
+        InterpBorrowedCall borrowed = {};
+        bool any = false;
+        int count = argc < LAMBDA_MAX_FUNCTION_ARGS ? argc : LAMBDA_MAX_FUNCTION_ARGS;
+        for (int index = 0; index < count; index++) {
+            uint64_t* home = transport->mir_var_homes[index];
+            transport->mir_var_homes[index] = NULL;
+            if (home) {
+                borrowed.homes[index] = home;
+                any = true;
+            }
+        }
+        if (any) return interp_call_internal(fn, args, argc, &borrowed);
+    }
     return interp_call_internal(fn, args, argc, NULL);
 }
 

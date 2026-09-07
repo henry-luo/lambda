@@ -17,6 +17,7 @@ void heap_gc_destroy_external_payload(void* obj, uint16_t type_tag);
 extern "C" {
 #endif
 void* heap_data_alloc(size_t size);
+void* heap_data_alloc_uninit(size_t size);  // caller writes every byte before any read/GC safepoint
 void* heap_data_calloc(size_t size);
 // Retag an identity-preserving managed container only across a proven
 // same-layout transition; the visible header and GC allocation tag move as one.

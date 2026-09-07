@@ -1,5 +1,5 @@
 // editing_host.cpp — central `contenteditable` lookup + IDL.
-// See vibe/radiant/Radiant_Design_Content_Editable.md §4.
+// See vibe/radiant/Radiant_Design_Editable.md §7.
 
 #include "event.hpp"
 

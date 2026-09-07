@@ -364,6 +364,13 @@ struct NameEntry {
     bool place_copy_mutation_pending;
     SourceSpan place_copy_mutation_span;
     NameEntry* place_copy_next;   // intrusive link over pending candidates
+    // CW34 (COW §11.11): this mutated place copy is a read-modify-write handle
+    // -- bound from `root.path`, written through, stored back to the same path
+    // on every exit, never observed alongside the root in between -- so both
+    // tiers bind it as a BORROW when the runtime spine is unshared and the
+    // store-back skips its capture mark (the handle is dead there). Decided
+    // once at FUNCTION_END (lambda_ast_lower_rmw_borrows).
+    bool cow_borrow_lowered;
     // When this name was hung into the scope by an import, the module that
     // actually declares it. `slot` is then an index into *that* module's slab,
     // not this one's — the two modules' plan passes number their globals
@@ -771,6 +778,10 @@ typedef struct AstAssignNode : AstNode {
     struct NameEntry* target_entry;
     AstNode *object; // optional compound-target owner
     AstNode *key; // optional compound-target key
+    // CW34: this compound store puts a borrowed read-modify-write handle back
+    // where it was read from, and the handle is dead afterwards -- no S9.3.1
+    // capture mark (it would make the next bind of the place copy again).
+    bool cow_borrow_release;
 } AstAssignNode;
 
 // for declaration decomposition (let a, b = expr / let a, b at expr)

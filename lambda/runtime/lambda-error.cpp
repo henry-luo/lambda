@@ -665,7 +665,6 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
     StackFrame* result = NULL;
     StackFrame** tail = &result;
     int depth = 0;
-    int total_frames_found = 0;
     
     void** frame_ptr = (void**)fp;
     
@@ -713,7 +712,6 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
             
             *tail = frame;
             tail = &frame->next;
-            total_frames_found++;
             depth++;
         }
 #if defined(__APPLE__) || defined(__linux__)
@@ -748,8 +746,7 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
                     
                     *tail = frame;
                     tail = &frame->next;
-                    total_frames_found++;
-                    depth++;
+                            depth++;
                 } else {
                     log_debug("err_capture_stack_trace: skipping C func '%s' at %p",
                               name, return_addr);
@@ -773,7 +770,9 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
         frame_ptr = (void**)prev_fp;
     }
     
-    log_info("err_capture_stack_trace: captured %d frames (Lambda + C)", total_frames_found);
+    // `depth` counts every linked frame (Lambda + C); a separate counter was a
+    // write-only duplicate that release builds (log_info compiled out) reject
+    log_info("err_capture_stack_trace: captured %d frames (Lambda + C)", depth);
     return result;
 }
 

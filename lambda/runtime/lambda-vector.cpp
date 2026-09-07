@@ -1623,14 +1623,14 @@ Item fn_fill(Item n_item, Item value) {
         // as its lane sentinel).
         int64_t val = (val_type == LMD_TYPE_INT) ? lambda_int_item_to_lane(value.item)
                                                  : value.get_int64();
-        ArrayNum* result = array_int_new(n);
+        ArrayNum* result = array_num_new_uninit(ELEM_INT, n);  // every lane written below
         for (int64_t i = 0; i < n; i++) {
             result->items[i] = val;
         }
         return { .array_num = result };
     }
     else if (val_type == LMD_TYPE_UINT64) {
-        ArrayNum* result = array_num_new(ELEM_UINT64, n);
+        ArrayNum* result = array_num_new_uninit(ELEM_UINT64, n);
         uint64_t val = value.get_uint64();
         for (int64_t i = 0; i < n; i++) {
             ((uint64_t*)result->data)[i] = val;
@@ -1639,7 +1639,7 @@ Item fn_fill(Item n_item, Item value) {
     }
     else if (val_type == LMD_TYPE_FLOAT) {
         double val = value.get_double();
-        ArrayNum* result = array_float_new(n);
+        ArrayNum* result = array_num_new_uninit(ELEM_FLOAT64, n);
         for (int64_t i = 0; i < n; i++) {
             result->float_items[i] = val;
         }
@@ -1651,7 +1651,7 @@ Item fn_fill(Item n_item, Item value) {
         // 8x the memory and — because the value then reaches a declared
         // `bool[]` boundary as a generic array — turns admission into an
         // O(n) element walk instead of the O(1) representation check.
-        ArrayNum* result = array_num_new(ELEM_BOOL, n);
+        ArrayNum* result = array_num_new_uninit(ELEM_BOOL, n);
         if (!result) return ItemError;
         uint8_t val = it2b(value) ? 1 : 0;
         memset(result->data, val, (size_t)n);

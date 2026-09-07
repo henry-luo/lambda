@@ -1,0 +1,5 @@
+2   7   null   7   0 
+16   some   flag off 
+100   1   [100]   int 
+2   [2, 3] 
+

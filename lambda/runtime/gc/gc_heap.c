@@ -259,7 +259,8 @@ static void gc_dump_tune_stats(const gc_heap_t* gc) {
     log_notice(
         "gc-tune-stats: large_adds=%llu add_probes=%llu (%.2f/add) "
         "removes=%llu finds=%llu find_probes=%llu (%.2f/find) rehashes=%llu "
-        "peak_large=%zu live_large=%zu | mark_collections=%llu mark_ms=%.3f\n",
+        "peak_large=%zu live_large=%zu | mark_collections=%llu mark_ms=%.3f "
+        "collections=%zu data_threshold=%zu object_threshold=%zu\n",
         (unsigned long long)t->large_add_calls,
         (unsigned long long)t->large_add_probes,
         t->large_add_calls ? (double)t->large_add_probes / (double)t->large_add_calls : 0.0,
@@ -270,7 +271,8 @@ static void gc_dump_tune_stats(const gc_heap_t* gc) {
         (unsigned long long)t->large_rehashes,
         t->large_peak_count, gc->large_objects.count,
         (unsigned long long)t->mark_collections,
-        (double)t->mark_nanos / 1.0e6);
+        (double)t->mark_nanos / 1.0e6,
+        gc->collections, gc->gc_threshold, gc->object_threshold);
 }
 
 // ============================================================================
@@ -638,6 +640,24 @@ void gc_heap_destroy(gc_heap_t* gc) {
 // deferring collection indefinitely.
 #define GC_OBJECT_HEAP_THRESHOLD_CAP ((size_t)1024 * 1024 * 1024)
 
+// Upper bound for the paced nursery (data zone) threshold.
+#define GC_DATA_ZONE_THRESHOLD_CAP ((size_t)256 * 1024 * 1024)
+
+// Time-budget pacing shared by both automatic triggers (Tune20 T20-5's gate):
+// a collection that cost `cost_ns` bought `mutator_ns` of mutator time. Grow
+// the trigger x4 while the collector's share of wall time exceeds 50%, x2
+// while it exceeds 10%; otherwise return `floor` unchanged.
+static size_t gc_paced_floor(size_t previous, uint64_t cost_ns, uint64_t mutator_ns,
+                             size_t floor, size_t cap) {
+    if (cost_ns * 2 > mutator_ns) {
+        floor = previous > SIZE_MAX / 4 ? SIZE_MAX : previous * 4;
+    } else if (cost_ns * 10 > mutator_ns) {
+        floor = previous > SIZE_MAX / 2 ? SIZE_MAX : previous * 2;
+    }
+    if (floor > cap) floor = cap;
+    return floor;
+}
+
 static void gc_heap_rebase_object_threshold(gc_heap_t* gc) {
     if (!gc) return;
     size_t live = gc->total_allocated;
@@ -647,24 +667,43 @@ static void gc_heap_rebase_object_threshold(gc_heap_t* gc) {
     // every floor's worth of churn. A tree-building script paid a full mark
     // nineteen times per run (Result36 gcbench2, 0 -> 19 collections, ~50% of
     // its time in marking). Grow the threshold while the collector's share of
-    // wall time since the previous pressure collection exceeds the 10% budget
-    // (Tune20 T20-5's gate); shrink back toward 2x live when it is cheap.
+    // wall time since the previous pressure collection exceeds the 10% budget;
+    // shrink back toward 2x live when it is cheap.
     size_t floor = GC_OBJECT_HEAP_THRESHOLD;
     if (gc->object_pressure_last_end_ns && gc->object_pressure_last_cost_ns) {
         uint64_t now = gc_now_nanos();
         uint64_t mutator = now > gc->object_pressure_last_end_ns
             ? now - gc->object_pressure_last_end_ns : 0;
-        uint64_t cost = gc->object_pressure_last_cost_ns;
-        size_t previous = gc->object_threshold;
-        if (cost * 2 > mutator) {
-            floor = previous > SIZE_MAX / 4 ? SIZE_MAX : previous * 4;   // > 50% share
-        } else if (cost * 10 > mutator) {
-            floor = previous > SIZE_MAX / 2 ? SIZE_MAX : previous * 2;   // > 10% share
-        }
-        if (floor > GC_OBJECT_HEAP_THRESHOLD_CAP) floor = GC_OBJECT_HEAP_THRESHOLD_CAP;
-        if (floor < GC_OBJECT_HEAP_THRESHOLD) floor = GC_OBJECT_HEAP_THRESHOLD;
+        floor = gc_paced_floor(gc->object_threshold, gc->object_pressure_last_cost_ns,
+                               mutator, floor, GC_OBJECT_HEAP_THRESHOLD_CAP);
     }
     gc->object_threshold = next > floor ? next : floor;
+}
+
+// T20-5 (havlak): the nursery trigger was a fixed 3 MB of data-buffer churn
+// while every collection marks the WHOLE object heap, so a script with a
+// growing live graph paid a full mark per 3 MB of worklist growth (havlak: 27
+// collections, ~45% of its run in the collector; the productivity rule below
+// in gc_collect never grew the nursery because each cycle freed >= 75% of it).
+// Pace the nursery by the same time budget as the object trigger, but on the
+// MARK phase only: marking is the fixed per-collection cost a larger nursery
+// amortizes, whereas compaction and the reset memset scale with the nursery
+// itself, so a total-cost share never converges for a churn-heavy script with
+// a tiny live set (brainfuck ran the nursery to the cap for +100 MB RSS and
+// no speedup).
+static void gc_heap_rebase_data_threshold(gc_heap_t* gc, uint64_t start_ns,
+                                          uint64_t cost_ns) {
+    if (!gc->data_pressure_last_end_ns) return;
+    uint64_t mutator = start_ns > gc->data_pressure_last_end_ns
+        ? start_ns - gc->data_pressure_last_end_ns : 0;
+    size_t paced = gc_paced_floor(gc->gc_threshold, cost_ns, mutator,
+                                  gc->gc_threshold, GC_DATA_ZONE_THRESHOLD_CAP);
+    if (paced > gc->gc_threshold) {
+        log_debug("gc-data-pressure: threshold %zu -> %zu (cost=%llu us, mutator=%llu us)",
+                  gc->gc_threshold, paced, (unsigned long long)(cost_ns / 1000),
+                  (unsigned long long)(mutator / 1000));
+        gc->gc_threshold = paced;
+    }
 }
 
 static void gc_heap_maybe_collect_object_pressure(gc_heap_t* gc, const char* site) {
@@ -898,7 +937,11 @@ void gc_heap_pool_free(gc_heap_t* gc, void* ptr) {
     gc->object_count--;
 }
 
-void* gc_data_alloc(gc_heap_t* gc, size_t size) {
+// The nursery is not zeroed at reset (gc_data_zone_reset), so the zeroed
+// contract of gc_data_alloc is met here, right before the caller touches the
+// buffer (cache-warm), and a caller that writes every byte takes the
+// uninitialized variant and skips the pass entirely.
+static void* gc_data_alloc_impl(gc_heap_t* gc, size_t size, int zeroed) {
     if (!gc || !gc->data_zone || size == 0) {
         log_error("gc_data_alloc: null check failed gc=%p dz=%p size=%zu",
                   (void*)gc, gc ? (void*)gc->data_zone : NULL, size);
@@ -915,7 +958,14 @@ void* gc_data_alloc(gc_heap_t* gc, size_t size) {
         if (used >= gc->gc_threshold) {
             log_debug("gc_data_alloc: threshold exceeded (%zu >= %zu), triggering GC",
                       used, gc->gc_threshold);
+            uint64_t start = gc_now_nanos();
+            uint64_t mark_before = gc->tune.mark_nanos;
             gc->collect_callback();
+            uint64_t end = gc_now_nanos();
+            uint64_t mark_cost = gc->tune.mark_nanos - mark_before;
+            gc_heap_rebase_data_threshold(gc, start, mark_cost ? mark_cost : 1);
+            gc->data_pressure_last_cost_ns = mark_cost;
+            gc->data_pressure_last_end_ns = end;
         }
     }
 
@@ -923,8 +973,18 @@ void* gc_data_alloc(gc_heap_t* gc, size_t size) {
     if (!result) {
         log_error("gc_data_alloc: gc_data_zone_alloc returned NULL for %zu bytes, dz=%p dz->current=%p",
                   size, (void*)gc->data_zone, gc->data_zone ? (void*)gc->data_zone->current : NULL);
+    } else if (zeroed) {
+        memset(result, 0, size);
     }
     return result;
+}
+
+void* gc_data_alloc(gc_heap_t* gc, size_t size) {
+    return gc_data_alloc_impl(gc, size, 1);
+}
+
+void* gc_data_alloc_uninit(gc_heap_t* gc, size_t size) {
+    return gc_data_alloc_impl(gc, size, 0);
 }
 
 // ============================================================================
@@ -2505,8 +2565,8 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
             // somewhat unproductive: < 75% freed — grow 2x
             new_threshold = gc->gc_threshold * 2;
         }
-        // cap at 256 MB to prevent runaway growth
-        if (new_threshold > 256 * 1024 * 1024) new_threshold = 256 * 1024 * 1024;
+        // cap to prevent runaway growth
+        if (new_threshold > GC_DATA_ZONE_THRESHOLD_CAP) new_threshold = GC_DATA_ZONE_THRESHOLD_CAP;
         if (new_threshold > gc->gc_threshold) {
             log_debug("gc_collect: adaptive threshold %zu -> %zu (freed=%zu/%zu=%zu%%, survived=%zu)",
                       gc->gc_threshold, new_threshold, freed_this_cycle, nursery_used_before,
