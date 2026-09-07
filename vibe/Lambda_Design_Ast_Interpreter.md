@@ -316,9 +316,13 @@ so the adapter is all it needs:
   callee's detached replacement -- whose Item bits are its untagged pointer.
 - *Adapter.* The `_b` wrapper consumes the cell for a typed `var` position
   (a stale cell would otherwise be read as a home by the next borrowed-mode
-  call inside the body), prepares the container once (`cow_prepare_write`:
-  the CW33 callee-prologue prepare, placed where the boxed→native coercions
-  already live), admits it under the declared contract (`ensure_typed_array`
+  call inside the body), prepares the container once when a home was
+  transported (`cow_prepare_write`: the CW33 callee-prologue prepare, placed
+  where the boxed→native coercions already live -- without a home a
+  replacement could not be stored back and the write would be lost, which
+  is exactly how the first cut hung the eager tier's deltablue2: its
+  wrapper-entered `vec_remove_first` shrank a private copy of `todo`),
+  admits it under the declared contract (`ensure_typed_array`
   / `lambda_type_check`), calls the raw entry, and on return stores the
   binding's boxed container back through the home -- so an admission that
   rebuilt the carrier is visible to the caller too. The raw entry is
@@ -335,6 +339,53 @@ Fixtures: `test/lambda/proc/interp_typed_var_param.ls` (in-place stores,
 records, nested and recursive `var` chains, aliasing inside the callee,
 three tiers byte-identical) and `interp_typed_var_rebind.ls` (golden is
 T0's; the auto tier matches, the eager tier does not -- DO29).
+
+**D8.1.1v9 (2026-09-07) -- the satellite cluster.** With every scan pin
+gone, the remaining auto residue was the satellite's own shape: one
+definition per image. richards/deltablue (1.2-1.4x) paid for it in boxed
+dynamic dispatch through every callee's `_b` wrapper (40 / 111
+`fn_call_borrowed_into` sites where the eager tier has direct edges), and
+diviter (66x) in inference: `diviter_div(x, y)`'s only callers live in
+`benchmark`, and a root holding one definition sees no call sites, so its
+raw entry ran `fn_ge`/`fn_sub` on boxed Items. The whole-script route was
+the measured stopgap; the cluster is the general form:
+
+- *Image = target + direct-callee closure.* `mir_satellite_collect_cluster`
+  walks the target's body (worklist, nested definitions excluded) and admits
+  every module-level definition of this script that is promotable and still
+  interpreted (`FnPromotionCell::state == INTERP`), capped at 64. Already
+  compiled callees keep their entry (calls to them stay dynamic through the
+  boxed wrapper, which is the E229-lifted path), pinned and unsupported
+  bodies likewise. The members are defined in MODULE order: the
+  forward-declare pass pre-registers each definition's native call facts in
+  sequence, and a caller placed ahead of the callee whose return lane it
+  inherits made the direct edge disagree with the body (the first cut
+  crashed in `fn_numeric_binary` on a raw lane).
+- *Call-site inference over the whole module.* The satellite root holds
+  shallow copies of the members (their `next` relinked), but
+  `prepass_collect_call_sites` now walks the owner's complete AST -- exactly
+  the eager caller set; a T0 caller that passes another shape meets the
+  wrapper's exact-shape guard and slow body. The copies and the originals
+  share one `body`, which `mir_callsite_canonical_fn` uses as the identity
+  of every function-keyed table (the copy-keyed lookup was why the second
+  image of diviter still inferred `any`).
+- *Publication.* After the image links (once, gen interface: every function
+  is generated then), `interp_publish_satellite_member` upgrades each
+  member's T0 function to its `_b` entry -- resolved by address lookup, not
+  by the per-call re-link `jit_gen_func` performs -- and marks its cell
+  COMPILED, as the whole-script route does for the module. The image's
+  compile time (transpile, link, publish) is logged per image.
+- *Cost model.* A cluster compiles the target's whole reachable graph at the
+  target's first entry, so a once-called loop-bodied `main` pays roughly the
+  eager tier's compile up front (deltablue: 115 ms for 48 definitions) --
+  the same work the eager tier does at load, now placed at promotion. Small
+  modules stay within a few ms of their per-function cost.
+
+Fixture: `test/lambda/proc/interp_satellite_cluster.ls` (a loop-bodied
+`main` whose cluster spans call-site-typed helpers, mutual recursion, an
+untyped `var` callee and a member promoted by an earlier image; a
+nested-definition callee stays pinned and is reached dynamically; golden
+tier-agreed).
 
 ### 5.3 Entry swap and consistency
 

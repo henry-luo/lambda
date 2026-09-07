@@ -912,7 +912,8 @@ split across the number extent stays.
 **Typed half on the boxed edges — implemented 2026-09-07 (D8.1.1v8).** The
 boxed `_b` wrapper is the adapter the table above names: for a typed `var`
 position it consumes the `Item*` home cell, runs the callee-prologue prepare
-(`cow_prepare_write`, once), admits the container under the declared
+(`cow_prepare_write`, once -- only when a home was transported, since a
+replacement without a home cannot be published), admits the container under the declared
 contract, hands the raw entry the container (in-place writes), and re-stores
 the boxed container through the home on return; a generated dynamic caller
 transports every `var` position and reloads typed ones keeping their raw

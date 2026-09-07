@@ -164,6 +164,10 @@ struct MirTranspiler {
     // definition except this target are dynamic through those Function slots.
     Script* interp_module_owner;
     AstFuncNode* satellite_target;
+    // D8.1.1v9: the module-level definitions co-compiled with the target
+    // (its direct-callee closure); calls among them are direct native edges.
+    AstFuncNode* const* satellite_cluster;
+    int satellite_cluster_count;
     bool whole_script_poc;
     uint32_t satellite_module_state_id;
 
@@ -687,6 +691,7 @@ static TypeId mir_param_array_element_type(AstFuncNode* fn_node, int index,
     return declared;
 }
 
+static AstFuncNode* mir_callsite_canonical_fn(MirTranspiler* mt, AstFuncNode* fn);
 static void mir_store_param_types(MirTranspiler* mt, AstFuncNode* fn_node,
         const TypeId* resolved_types, int param_count) {
     if (!mt || !fn_node || param_count < 0 || param_count > LAMBDA_MAX_FUNCTION_ARGS) return;
@@ -721,7 +726,7 @@ static void mir_store_param_types(MirTranspiler* mt, AstFuncNode* fn_node,
             } else if (mt && mt->callsite_info) {
                 CallSiteEntry key;
                 memset(&key, 0, sizeof(key));
-                key.fn = fn_node;
+                key.fn = mir_callsite_canonical_fn(mt, fn_node);
                 CallSiteEntry* calls = (CallSiteEntry*)hashmap_get(mt->callsite_info, &key);
                 if (calls && calls->specialization_elem_types[i] != LMD_TYPE_ERROR) {
                     info->inferred_elem_type = calls->specialization_elem_types[i];
@@ -2029,6 +2034,17 @@ static MIR_reg_t mir_prepare_cow_root(MirTranspiler* mt, MirVarEntry* root) {
     return replacement;
 }
 
+// D8.1.1v9: a satellite image defines its target and the target's
+// direct-callee cluster; every other local function is a dynamic target.
+static bool mir_satellite_defines(MirTranspiler* mt, AstNode* entry_node) {
+    if (!mt->satellite_target) return true;
+    if (entry_node == (AstNode*)mt->satellite_target) return true;
+    for (int i = 0; i < mt->satellite_cluster_count; i++) {
+        if ((AstNode*)mt->satellite_cluster[i] == entry_node) return true;
+    }
+    return false;
+}
+
 static bool mir_root_may_need_cow(MirVarEntry* root) {
     if (!root) return false;
     // This gate is an ELISION, not the correctness mechanism (CW32v2):
@@ -2673,7 +2689,7 @@ static void plan_native_func_specialization(MirTranspiler* mt,
     }
     CallSiteEntry key;
     memset(&key, 0, sizeof(key));
-    key.fn = fn_node;
+    key.fn = mir_callsite_canonical_fn(mt, fn_node);
     CallSiteEntry* callers = mt && mt->callsite_info
         ? (CallSiteEntry*)hashmap_get(mt->callsite_info, &key) : NULL;
     nfi->needs_boxed_entry = callers && callers->escaped;
@@ -4983,22 +4999,18 @@ static MirValue mir_module_slot_load_item(void* owner, uint32_t slot,
         MIR_new_reg_op(mt->ctx, vars),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, vars),
             state, 0, 1)));
-    MIR_reg_t boxed = 0;
-    if (mt->satellite_target || mt->interp_module_owner) {
-        // T0-backed MIR reads are boxed Item values just like the T0 slab.
-        // The old early return skipped the native unbox below, so an `int`
-        // module binding entered scalar MIR arithmetic as raw Item bits and
-        // produced `inf` after promotion (D8.1.1v4 / D5.3.3).
-        boxed = emit_call_2(mt, "lambda_module_var_at", MIR_T_I64,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, state), MIR_T_I64,
-            MIR_new_int_op(mt->ctx, (int64_t)slot));
-    } else {
-        boxed = new_reg(mt, "gv_val", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, boxed),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                (MIR_disp_t)slot * (MIR_disp_t)sizeof(Item), vars, 0, 1)));
-    }
+    // T0-backed MIR reads are boxed Item values just like the T0 slab, and a
+    // satellite reads the very same slab (`state->vars`, re-read from the
+    // state on every use so a REPL-grown slab is never stale). D8.1.1v9: the
+    // load is inline here as on the eager path; the per-read
+    // lambda_module_var_at call was every `let` constant in deltablue's and
+    // richards' hot loops (103 / 118 sites). The native unbox below still
+    // applies (D8.1.1v4 / D5.3.3).
+    MIR_reg_t boxed = new_reg(mt, "gv_val", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, boxed),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+            (MIR_disp_t)slot * (MIR_disp_t)sizeof(Item), vars, 0, 1)));
     return em_value_for_rep(boxed, semantic_type, VALUE_REP_ITEM);
 }
 
@@ -5115,10 +5127,21 @@ static void store_global_var(MirTranspiler* mt, GlobalVarEntry* gvar, MIR_reg_t 
 
 static MIR_reg_t emit_load_const(MirTranspiler* mt, int const_index, MIR_type_t as_type) {
     if (mt && (mt->satellite_target || mt->interp_module_owner)) {
+        // D8.1.1v9: the same two loads lambda_module_const_at_state performs
+        // (`state->consts[index]`), re-read from the state at every use so a
+        // rebound const image (after interning) is never stale.
         MIR_reg_t state = emit_module_state(mt);
-        return emit_call_2(mt, "lambda_module_const_at_state", MIR_T_P,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, state),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, const_index));
+        MIR_reg_t consts = new_reg(mt, "module_consts", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, consts),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, consts),
+                state, 0, 1)));
+        MIR_reg_t value = new_reg(mt, "module_const", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, value),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                (MIR_disp_t)const_index * (MIR_disp_t)sizeof(void*), consts, 0, 1)));
+        return value;
     }
     // Use a call boundary here: MIR may reuse a virtual register across an
     // arbitrary preceding runtime call, while literal pool ownership is fixed
@@ -6015,7 +6038,7 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
             // as a captured variable (closures store captured functions as vars)
             MirVarEntry* cap_var = find_var_by_binding(mt, ident->entry);
             bool satellite_dynamic_target = mt->satellite_target &&
-                entry_node != (AstNode*)mt->satellite_target;
+                !mir_satellite_defines(mt, entry_node);
             bool whole_script_dynamic_target = mt->whole_script_poc &&
                 !interp_satellite_supported((AstFuncNode*)entry_node);
             satellite_dynamic_target = satellite_dynamic_target ||
@@ -18778,7 +18801,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             (entry_node->node_type == AST_NODE_FUNC ||
              entry_node->node_type == AST_NODE_FUNC_EXPR ||
              entry_node->node_type == AST_NODE_PROC) &&
-            entry_node != (AstNode*)mt->satellite_target;
+            !mir_satellite_defines(mt, entry_node);
         bool whole_script_dynamic_target = mt->whole_script_poc && entry_node &&
             (entry_node->node_type == AST_NODE_FUNC ||
              entry_node->node_type == AST_NODE_FUNC_EXPR ||
@@ -24118,7 +24141,7 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
     if (mt && mt->callsite_info) {
         CallSiteEntry key;
         memset(&key, 0, sizeof(key));
-        key.fn = fn_node;
+        key.fn = mir_callsite_canonical_fn(mt, fn_node);
         const CallSiteEntry* found = (const CallSiteEntry*)hashmap_get(mt->callsite_info, &key);
         if (found && found->has_call) cs = found;
     }
@@ -25481,9 +25504,23 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
             // body writes the container in place and cannot publish a COW
             // replacement, so un-share-at-borrow (S9.2.2) happens here, once
             // -- a byte-test no-op when the container is already unique.
-            preg = emit_call_1(mt, "cow_prepare_write", MIR_T_I64,
+            // ONLY when a home was transported: a replacement the adapter
+            // cannot store back is a lost write (deltablue2's `todo` never
+            // shrank and its planner loop never ended), whereas the pre-v8
+            // pass-through keeps the caller's aliasing semantics intact.
+            MIR_label_t no_prepare = new_label(mt);
+            MIR_reg_t prepared = new_reg(mt, "typed_var_prepared", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, prepared), MIR_new_reg_op(mt->ctx, preg)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                MIR_new_label_op(mt->ctx, no_prepare), MIR_new_reg_op(mt->ctx, home)));
+            MIR_reg_t replacement = emit_call_1(mt, "cow_prepare_write", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-            emit_return_if_item_error(mt, preg);
+            emit_return_if_item_error(mt, replacement);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, prepared), MIR_new_reg_op(mt->ctx, replacement)));
+            emit_label(mt, no_prepare);
+            preg = prepared;
         }
 
         bool wrapper_typed_array_witness =
@@ -27223,11 +27260,24 @@ static AstFuncNode* mir_ident_local_func(AstNode* node) {
     return (AstFuncNode*)target;
 }
 
+// D8.1.1v9: a satellite root holds shallow COPIES of its cluster members
+// (their `next` is relinked), while call sites collected from the owner's
+// complete AST name the ORIGINAL definitions; both share one `body`, which
+// is the identity every function-keyed table uses.
+static AstFuncNode* mir_callsite_canonical_fn(MirTranspiler* mt, AstFuncNode* fn) {
+    if (!fn || !mt->satellite_target) return fn;
+    if (fn->body == mt->satellite_target->body) return mt->satellite_target;
+    for (int i = 0; i < mt->satellite_cluster_count; i++) {
+        if (mt->satellite_cluster[i]->body == fn->body) return mt->satellite_cluster[i];
+    }
+    return fn;
+}
+
 static CallSiteEntry* mir_callsite_entry(MirTranspiler* mt, AstFuncNode* fn, bool create) {
     if (!mt->callsite_info || !fn) return NULL;
     CallSiteEntry key;
     memset(&key, 0, sizeof(key));
-    key.fn = fn;
+    key.fn = mir_callsite_canonical_fn(mt, fn);
     CallSiteEntry* found = (CallSiteEntry*)hashmap_get(mt->callsite_info, &key);
     if (found || !create) return found;
     for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
@@ -27456,7 +27506,7 @@ static TypeId mir_callsite_arg_elem_type_at(MirTranspiler* mt, AstNode* arg,
         AstIdentNode* ident = (AstIdentNode*)unwrapped;
         CallSiteEntry key;
         memset(&key, 0, sizeof(key));
-        key.fn = mt->prepass_enclosing;
+        key.fn = mir_callsite_canonical_fn(mt, mt->prepass_enclosing);
         CallSiteEntry* enclosing = mt->callsite_info
             ? (CallSiteEntry*)hashmap_get(mt->callsite_info, &key) : NULL;
         if (enclosing && ident->name) {
@@ -28698,6 +28748,8 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
                                     MirModuleArtifacts* out_artifacts,
                                     Script* interp_module_owner,
                                     AstFuncNode* satellite_target,
+                                    AstFuncNode* const* satellite_cluster,
+                                    int satellite_cluster_count,
                                     bool whole_script_poc,
                                     const AstIndex* ast_index) {
     log_notice("transpile AST to MIR (direct)");
@@ -28725,6 +28777,10 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
     mt.ast_index = ast_index;
     mt.interp_module_owner = interp_module_owner;
     mt.satellite_target = satellite_target;
+    // set before any prepass: the forward-declare pass pre-registers each
+    // member's native call facts from the same call-site table the bodies use
+    mt.satellite_cluster = satellite_cluster;
+    mt.satellite_cluster_count = satellite_cluster_count;
     mt.whole_script_poc = whole_script_poc;
     mt.satellite_module_state_id = interp_module_owner
         ? interp_module_owner->module_state_id : 0;
@@ -28774,7 +28830,15 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
 
     // M2: collect every call site and escaping reference before any inference
     // runs, so params with a closed, uniformly-typed caller set can be narrowed.
-    prepass_collect_call_sites(&mt, script->child);
+    // D8.1.1v9: a satellite root holds only its cluster, but the CALLERS that
+    // type its parameters live anywhere in the module -- walk the owner's
+    // complete retained AST for collection (exactly the eager caller set;
+    // an unseen T0 caller is the wrapper's exact-shape guard's business).
+    AstNode* callsite_root = script->child;
+    if (mt.satellite_target && interp_module_owner && interp_module_owner->ast_root) {
+        callsite_root = ((AstScript*)interp_module_owner->ast_root)->child;
+    }
+    prepass_collect_call_sites(&mt, callsite_root);
 
     // Forward-declare ALL functions first (handles forward references between functions)
     prepass_forward_declare(&mt, script->child);
@@ -29047,7 +29111,7 @@ static int lambda_mir_plan_compiler_pass(void* opaque) {
         pass->tp->pool, pass->tp->name_pool, &MIR_DEFAULT_MODULE_NAMES,
         pass->property_keys, NULL,
         pass->tp->compile_against_interp_slab ? pass->script : NULL,
-        NULL, pass->tp->whole_script_poc, &pass->tp->ast_index);
+        NULL, NULL, 0, pass->tp->whole_script_poc, &pass->tp->ast_index);
     return 1;
 }
 
@@ -29135,6 +29199,106 @@ static bool build_property_key_image(ArrayList* property_keys,
     return true;
 }
 
+// D8.1.1v9: the module-level definitions reachable from `target` through
+// direct calls that a satellite may define beside it. Already compiled or
+// pinned definitions keep their own entries (calls to them stay dynamic), as
+// do unsupported bodies and anything that is not a module-level function of
+// this script (imports, nested definitions, methods).
+enum { MIR_SATELLITE_CLUSTER_CAP = 64 };
+
+typedef struct MirSatelliteClusterScan {
+    AstScript* root;
+    AstFuncNode** members;
+    int count;
+    int capacity;
+} MirSatelliteClusterScan;
+
+static bool mir_satellite_module_definition(AstScript* root, AstFuncNode* def) {
+    if (!root || !def || !def->analysis) return false;
+    NameEntry* decl = def->analysis->decl_entry;
+    if (!decl || decl->node != (AstNode*)def ||
+            decl->binding_storage != BINDING_STORAGE_MODULE) return false;
+    for (NameEntry* entry = root->global_vars ? root->global_vars->first : NULL;
+            entry; entry = entry->next) {
+        if (entry == decl) return true;
+    }
+    return false;
+}
+
+static void mir_satellite_cluster_visit(AstNode* node, void* opaque) {
+    MirSatelliteClusterScan* scan = (MirSatelliteClusterScan*)opaque;
+    if (!node) return;
+    switch (node->node_type) {
+    case AST_NODE_FUNC: case AST_NODE_PROC: case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC:
+        return;   // a nested definition's calls are its own
+    case AST_NODE_CALL_EXPR: {
+        AstFuncNode* direct = ast_direct_call_function((AstCallNode*)node);
+        if (direct && scan->count < scan->capacity &&
+                (((AstNode*)direct)->node_type == AST_NODE_FUNC ||
+                 ((AstNode*)direct)->node_type == AST_NODE_PROC) &&
+                mir_satellite_module_definition(scan->root, direct) &&
+                direct->analysis->promotion.state == FN_PROMOTION_INTERP &&
+                interp_satellite_supported(direct)) {
+            bool seen = false;
+            for (int i = 0; i < scan->count && !seen; i++) seen = scan->members[i] == direct;
+            const char* skip = getenv("LAMBDA_SATELLITE_CLUSTER_SKIP");
+            if (!seen && skip && direct->name) {
+                const char* hit = strstr(skip, direct->name->chars);
+                size_t len = direct->name->len;
+                while (hit && !((hit == skip || hit[-1] == ',') &&
+                        (hit[len] == '\0' || hit[len] == ','))) {
+                    hit = strstr(hit + 1, direct->name->chars);
+                }
+                if (hit) seen = true;
+            }
+            if (!seen) scan->members[scan->count++] = direct;
+        } else if (direct) {
+            log_debug("interp-tier: satellite cluster skips function='%s' module_def=%d state=%d supported=%d",
+                direct->name ? direct->name->chars : "<anonymous>",
+                (int)mir_satellite_module_definition(scan->root, direct),
+                direct->analysis ? (int)direct->analysis->promotion.state : -1,
+                (int)interp_satellite_supported(direct));
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    interp_visit_children(node, mir_satellite_cluster_visit, opaque);
+}
+
+static int mir_satellite_collect_cluster(AstScript* root, AstFuncNode* target,
+        AstFuncNode** members, int capacity) {
+    // diagnostics: LAMBDA_SATELLITE_CLUSTER_CAP=N bounds the cluster (1 = the
+    // old one-definition image); LAMBDA_SATELLITE_CLUSTER_SKIP=a,b keeps the
+    // named definitions out of it (they stay dynamic targets)
+    const char* cap_env = getenv("LAMBDA_SATELLITE_CLUSTER_CAP");
+    if (cap_env && atoi(cap_env) > 0 && atoi(cap_env) < capacity) capacity = atoi(cap_env);
+    MirSatelliteClusterScan scan = {root, members, 0, capacity};
+    members[scan.count++] = target;
+    // worklist: members appended while scanning are scanned in turn
+    for (int i = 0; i < scan.count; i++) {
+        if (members[i]->body) mir_satellite_cluster_visit(members[i]->body, &scan);
+    }
+    // Define the members in MODULE order, as the eager compiler does: the
+    // forward-declare pass pre-registers each definition's native call facts
+    // (return lane included) in sequence, and a caller declared before its
+    // callee reads the facts the eager order established. Discovery order
+    // (target first) put a caller ahead of the callee whose return lane it
+    // inherits, and the direct edge then disagreed with the callee's body.
+    for (int i = 1; i < scan.count; i++) {
+        AstFuncNode* key = members[i];
+        int j = i - 1;
+        while (j >= 0 && members[j]->source_span.start_byte > key->source_span.start_byte) {
+            members[j + 1] = members[j];
+            j--;
+        }
+        members[j + 1] = key;
+    }
+    return scan.count;
+}
+
 bool compile_ast_function_satellite(Runtime* runtime, Script* script,
         const AstFuncNode* fn, void** out_boxed_entry) {
     if (out_boxed_entry) *out_boxed_entry = NULL;
@@ -29165,14 +29329,27 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     }
 
     // `AstFuncNode::next` is the module declaration chain. The temporary root
-    // must contain exactly this definition or a promotion would accidentally
-    // lower the rest of the module again.
-    AstFuncNode satellite_fn = *fn;
-    satellite_fn.next = NULL;
+    // must contain exactly the compiled definitions or a promotion would
+    // accidentally lower the rest of the module again. D8.1.1v9: those are
+    // the target plus its direct-callee CLUSTER (module-level, supported, not
+    // yet compiled or pinned), so the calls among them are direct native
+    // edges with the eager tier's call-site inference instead of boxed
+    // dynamic dispatch through every callee's wrapper (richards/deltablue
+    // 1.2-1.4x, diviter 66x on the auto tier).
+    AstScript* source_root = (AstScript*)script->ast_root;
+    AstFuncNode* members[MIR_SATELLITE_CLUSTER_CAP];
+    int member_count = mir_satellite_collect_cluster(source_root, (AstFuncNode*)fn,
+        members, MIR_SATELLITE_CLUSTER_CAP);
+    AstFuncNode* copies = (AstFuncNode*)mem_calloc((size_t)member_count,
+        sizeof(AstFuncNode), MEM_CAT_EVAL);
+    if (!copies) return false;
+    for (int i = 0; i < member_count; i++) {
+        copies[i] = *members[i];
+        copies[i].next = i + 1 < member_count ? (AstNode*)&copies[i + 1] : NULL;
+    }
     AstScript satellite_root = {};
     satellite_root.node_type = AST_SCRIPT;
-    satellite_root.child = (AstNode*)&satellite_fn;
-    AstScript* source_root = (AstScript*)script->ast_root;
+    satellite_root.child = (AstNode*)&copies[0];
     satellite_root.global_vars = source_root ? source_root->global_vars : NULL;
 
     // A satellite links its own MIR module directly, so it must publish the
@@ -29190,11 +29367,14 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     MirModuleArtifacts artifacts = {};
     ArrayList* property_keys = NULL;
     MirModuleBuild build = {};
+    struct timespec image_t0;
+    clock_gettime(CLOCK_MONOTONIC, &image_t0);
     transpile_mir_ast_begin(&build, script->jit_context, &satellite_root, script->source,
         script->type_list, script->const_list, script->pool, script->name_pool,
         &names, &property_keys, &artifacts, script, (AstFuncNode*)fn,
-        false, &script->ast_index);
+        members, member_count, false, &script->ast_index);
     transpile_mir_ast_lower(&build);
+    mem_free(copies);
     transpile_mir_ast_finalize(&build, &property_keys, &artifacts);
     if (property_keys && property_keys->length != 0) {
         uint64_t capacity = (uint64_t)property_keys->length * sizeof(PropertyKeySpec);
@@ -29242,6 +29422,31 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
         log_error("interp-tier: satellite link did not publish its immutable BSS");
         return false;
     }
+    // publish every cluster member's boxed entry to its T0 Function; a member
+    // whose entry cannot be found simply stays interpreted (its cell is
+    // untouched), the image itself is still valid for the target. The link
+    // above already generated every function (gen interface), so the entry
+    // is the item's address: jit_gen_func re-walks, reloads and RE-LINKS the
+    // whole context per call, which at 47 members cost more than the
+    // compile itself (deltablue's auto run spent 180 ms there).
+    for (int i = 0; i < member_count; i++) {
+        if (members[i] == (AstFuncNode*)fn) continue;   // the target: published by the caller
+        StrBuf* member_name = strbuf_new_cap(96);
+        if (!member_name) break;
+        write_fn_name_ex(member_name, members[i], NULL, "_b");
+        void* member_entry = find_func(script->jit_context, member_name->str);
+        bool published = member_entry &&
+            interp_publish_satellite_member(script, members[i], member_entry);
+        log_debug("interp-tier: satellite cluster member function='%s' published=%d",
+            members[i]->name ? members[i]->name->chars : "<anonymous>", (int)published);
+        strbuf_free(member_name);
+    }
+    struct timespec image_t1;
+    clock_gettime(CLOCK_MONOTONIC, &image_t1);
+    double image_ms = (double)(image_t1.tv_sec - image_t0.tv_sec) * 1000.0 +
+        (double)(image_t1.tv_nsec - image_t0.tv_nsec) / 1e6;
+    log_notice("interp-tier: satellite image function='%s' members=%d compile_ms=%.1f",
+        fn->name ? fn->name->chars : "<anonymous>", member_count, image_ms);
 
     *(void**)artifacts.consts_bss->addr = script->const_list
         ? script->const_list->data : NULL;

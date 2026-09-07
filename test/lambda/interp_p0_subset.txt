@@ -509,6 +509,7 @@ test/lambda/proc/if_arm_block_value.ls	run
 test/lambda/proc/inferred_shape_guarded_read.ls	run
 test/lambda/proc/int64_accumulator_widening.ls	run
 test/lambda/proc/int_large_carriers.ls	run
+test/lambda/proc/interp_satellite_cluster.ls	run
 test/lambda/proc/interp_typed_var_param.ls	run
 test/lambda/proc/interp_typed_var_rebind.ls	run
 test/lambda/proc/interp_var_writeback.ls	run

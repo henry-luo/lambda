@@ -844,7 +844,10 @@ rooted slots and reloads them, with `interp_call_borrowed` consuming the
 cells on the interpreted side. Typed `var` parameters (raw-lane ABI, no
 home) stayed pinned until D8.1.1v8 (2026-09-07: admitted through the boxed
 edges' CW33 cells with a wrapper prepare/admit/store-back; rebinding bodies
-and their satellite callers stay in T0 -- Result37 analysis §6 item 4). A `var` local passed to an untyped `var` parameter is
+and their satellite callers stay in T0 -- Result37 analysis §6 item 4).
+D8.1.1v9 (same day) then made each satellite image a direct-callee cluster
+with module-wide call-site inference, which closed the richards/deltablue
+dispatch gap and diviter's boxed arithmetic (Result37 analysis §6 item 4). A `var` local passed to an untyped `var` parameter is
 bound boxed at declaration — which also fixed a pre-existing eager-JIT
 divergence (`pn bump(var n) { n = n + 1 }` left an int-lane caller local
 unchanged).

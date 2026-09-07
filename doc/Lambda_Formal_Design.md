@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.48.0 (2026-09-07)
+**Spec version:** 1.49.0 (2026-09-07)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1231,7 +1231,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1v8*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+- **D8.1.1v9*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
   parser → the shared typed AST → **tiered execution**. The parser reduces
   directly into the retained `AstNode` graph; no Lambda CST or replacement
   syntax tree is retained. The default file/module path is the C parser, while
@@ -1276,10 +1276,12 @@ loosely across the corpus — context disambiguates, and we live with it.
   entry sees it.)* *(v8, 2026-09-07)* A typed `var` parameter (`var x:
   float[]`, `var p: Rec`) is admitted too. On every boxed edge -- T0 →
   satellite, and a satellite's dynamic call -- its position travels through
-  the same CW33 home cells; the boxed `_b` wrapper consumes the cell,
-  prepares the container once (un-share-at-borrow, S9.2.2: the CW33
-  callee-prologue prepare placed in the adapter, a byte-test no-op when the
-  container is unique), admits it under the declared contract, hands the raw
+  the same CW33 home cells; the boxed `_b` wrapper consumes the cell and,
+  when a home WAS transported, prepares the container once (un-share-at-
+  borrow, S9.2.2: the CW33 callee-prologue prepare placed in the adapter, a
+  byte-test no-op when the container is unique; without a home there is
+  nothing to store a replacement back through, so the container passes
+  through as before), admits it under the declared contract, hands the raw
   entry the container to write in place, and stores the admitted container
   back through the home on return; a satellite caller reloads its register
   from the slot and keeps the raw descriptor, since a typed `var` position is
@@ -1288,7 +1290,21 @@ loosely across the corpus — context disambiguates, and we live with it.
   and so does every satellite that would call it directly: T0 publishes the
   rebind through the home, a raw argument would not be reloaded. P2 still
   fails closed for such rebinding bodies, nested definitions, indirect Lambda
-  calls, object-field identifiers, and match expressions. Two invariants this
+  calls, object-field identifiers, and match expressions. *(v9, 2026-09-07)*
+  A satellite image is a **cluster**, not a single definition: the promoted
+  target together with every module-level definition reachable from it
+  through direct calls that is itself promotable and not yet compiled or
+  pinned (bounded, 64 definitions), defined in module order. Calls among
+  cluster members are direct native edges, and the image's call-site
+  inference collects from the module's complete retained AST, so a member's
+  parameters take the lanes the eager tier would give them (a T0 caller that
+  passes something else meets the wrapper's exact-shape guard). Each member's
+  boxed entry is published to its T0 function when the image links; a callee
+  that is already compiled keeps its own entry and stays a dynamic target,
+  as do pinned and unsupported bodies. A satellite reads module bindings and
+  interned constants with the eager tier's inline loads from the owner's
+  slab state (re-read from the state at every use), no longer through a
+  per-read accessor call. Two invariants this
   admission exposed: a satellite that interns literals into its module's const
   list must rebind the module state's static image afterwards, and a
   dynamic-call argument list is built by verbatim positional append, never by
@@ -1802,7 +1818,7 @@ slice; no formal semantic ruling or document semver changes.
 | D7.4.5 | Direction only; implementation deferred past DOM4 (user ruling 2026-08-13: DOM4 settles vmap first; the runtime is likely not ready for new carriers). `varray` and `velmt` do not exist: DOM collections are materialized Arrays with companion-map decoration and a 4096-entry issued-collection cache refreshed per mutation (dom.cpp); Radiant `Velmt` handles are struct-copied into VMap payloads with strcmp projection. varray + collection conversion = future Jube stage; DOM-node carrier move to velmt = DOM4 OQ9 (DOM5-scale). |
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
-| D8.1.1v8 | Revised 2026-09-07 (v8): typed `var` parameters are admitted to satellites -- every `var` position travels through the CW33 home cells on the boxed edges, the `_b` wrapper prepares, admits and stores the container back through the home, and a satellite's dynamic edge transports and reloads typed positions keeping their raw descriptor; a body that rebinds a typed `var` parameter, and every satellite that would call it directly, stays in T0 (navier_stokes, nbody2, json2 promote; DO29 records the eager tier's own rebind loss). Revised 2026-09-07 (v7): a loop-bodied procedure promotes at its first entry (once-called `main` loops: mandelbrot 5.5 s → 0.8 s, matmul 3.2 s → 56 ms auto e2e on the debug build); aggregate/structured value-parameter contracts are admitted to satellites (nbody2, pnpoly2, deriv2, ray2, array1); a satellite's read of an annotated `string[]` module binding takes the generic index path because the T0-initialized slab carries the boundary's native carrier (DO28). Revised 2026-09-06: satellite admission widened to plain `any` parameters, bodies with local `var`/rebinding statements and indexed/member stores, and untyped `var` parameters (write-back through the CW33 home transport on both tier edges, borrowed-call dispatch mode; aggregate contracts and typed `var` parameters stay pinned); satellites rebind the module's static const image after interning, and dynamic-call arguments append verbatim. Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for bodies that rebind a typed `var` parameter (and their direct satellite callers), nested definitions, indirect Lambda calls, object-field identifiers, match expressions, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
+| D8.1.1v9 | Revised 2026-09-07 (v9): a satellite image co-compiles the target's direct-callee cluster in module order (direct native edges among members, module-wide call-site inference, every member's boxed entry published; compiled/pinned/unsupported callees stay dynamic) -- diviter 20 s → 349 ms, richards 786 → 620 ms, deltablue 464 → 348 ms auto e2e, each at eager parity; DO30 records splay. Revised 2026-09-07 (v8): typed `var` parameters are admitted to satellites -- every `var` position travels through the CW33 home cells on the boxed edges, the `_b` wrapper prepares, admits and stores the container back through the home, and a satellite's dynamic edge transports and reloads typed positions keeping their raw descriptor; a body that rebinds a typed `var` parameter, and every satellite that would call it directly, stays in T0 (navier_stokes, nbody2, json2 promote; DO29 records the eager tier's own rebind loss). Revised 2026-09-07 (v7): a loop-bodied procedure promotes at its first entry (once-called `main` loops: mandelbrot 5.5 s → 0.8 s, matmul 3.2 s → 56 ms auto e2e on the debug build); aggregate/structured value-parameter contracts are admitted to satellites (nbody2, pnpoly2, deriv2, ray2, array1); a satellite's read of an annotated `string[]` module binding takes the generic index path because the T0-initialized slab carries the boundary's native carrier (DO28). Revised 2026-09-06: satellite admission widened to plain `any` parameters, bodies with local `var`/rebinding statements and indexed/member stores, and untyped `var` parameters (write-back through the CW33 home transport on both tier edges, borrowed-call dispatch mode; aggregate contracts and typed `var` parameters stay pinned); satellites rebind the module's static const image after interning, and dynamic-call arguments append verbatim. Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for bodies that rebind a typed `var` parameter (and their direct satellite callers), nested definitions, indirect Lambda calls, object-field identifiers, match expressions, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
 | D8.1.2v2 | Decided 2026-08-24 with D8.1.1v4. `grammar-lambda.js` remains the complete Tree-sitter syntax oracle/editor/bindings grammar; `grammar.js` and generated `parser.c` are reference artifacts regenerated by the normal grammar target and are never hand-edited. The production Lambda parser is maintained in `lambda/runtime/parser/` and is built through the generated build configuration. |
 | D8.1.3v10 | Revised 2026-08-29: normal JavaScript and TypeScript source admission uses the first-party C lexer and hybrid recursive-descent/Pratt parser, reducing directly to the retained `JsAstNode` graph. The vendored JS/TS Tree-sitter grammar archives remain unchanged but link only into `lambda-cst` for differential acceptance checks; normal Lambda, runtime, test, and release targets do not link either archive. The LambdaJS AST tier includes the synchronous ES-module slice under the same Runtime/EvalContext/heap/event loop/module registry as Lambda. Registry-owned namespace placeholders, hoisted function declaration instantiation before dependency traversal, strict private slabs, live import reads, and registry propagation preserve the admitted default/named/namespace imports, default/named/namespace/non-ambiguous-star exports, named/star re-exports, `import.meta.url`, dynamic `import()`, and circular function imports without a JS-private module cache. Lambda `.ls` imports use that descriptor and their public boxed function values cross the common JS call kernel through the existing Lambda boxed dynamic-call ABI with retained `TypeFunc` metadata. The two languages retain their own semantic walkers and activation records; no second runtime, EvalContext, stack owner, heap, or module registry is created. Top-level await/async module evaluation, generators/async functions, ambiguous star exports, shared T0/T1 environments, continuations, and AUTO policy remain pending. `JS_EXECUTION_BACKEND=ast` remains explicit and fail-closed, and the default remains MIR. Status and focused gates: `vibe/jube/JS_Grammar_Parser.md`, `vibe/Lambda_Design_JS_Interpreter.md`, and `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
 | D8.2.1–D8.2.3 | The physical Lambda/JS foundation is substantially shared (`AstNodeType`, many layouts/aliases, `FnAnalysis`, and `MirEmitter`), but structural convergence is incomplete. P1a (2026-08-28) moved Lambda iterator `for` to `AST_NODE_FOR_EXPR`/`AstForNode`; P1b moved Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode`; P1c folded assignment/declaration-wrapper storage; P1d (2026-08-28) promotes condition loops to one `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` and retires the old while/do/C-style tags, while iterator clauses use `AST_NODE_FOR_CLAUSE`. P1e (2026-08-29) retires the duplicated JavaScript core-child rows and leaves only extension layouts in `js_ast_children.cpp`; Python remains the later guest acceptance test. |
@@ -1996,6 +2012,15 @@ Numbered `DO#` (design-open); each links to its record.
   T0's; the auto tier matches it). Closing it is CW33's typed
   `Container**` half on the raw entry (COW doc §11.10), not a satellite
   matter.
+- **DO30** Eager inference slower than boxed bodies on splay. With
+  D8.1.1v9's module-wide call-site inference the auto tier compiles splay
+  exactly as the eager tier does and runs it in 446 ms; the uninferred
+  one-definition satellites of D8.1.1v8 ran the same script in 256 ms
+  (`LAMBDA_TIER=jit` has always been ~450 ms). The eager lowering gives
+  `splay_find(tree, key)` a float `key` lane and `next_random` /
+  `insert_new_node` native float returns; whatever that costs (boundary
+  boxing, guard misses or the shape hints) is an eager-tier matter, not a
+  satellite one -- the tier that used to hide it no longer does.
 
 ## Appendix C — Decision-Record Index
 

@@ -5443,6 +5443,28 @@ static bool interp_whole_script_publish_function(Script* script,
     return true;
 }
 
+bool interp_publish_satellite_member(Script* script, AstFuncNode* def, void* entry) {
+    if (!script || !def || !def->analysis || !entry) return false;
+    NameEntry* decl = def->analysis->decl_entry;
+    LambdaModuleState* state = interp_module_state(script);
+    if (!decl || !state || !decl->storage_assigned ||
+            decl->binding_storage != BINDING_STORAGE_MODULE || decl->slot < 0) {
+        return false;
+    }
+    Item value = lambda_module_var_at(state, (uint32_t)decl->slot);
+    if (get_type_id(value) != LMD_TYPE_FUNC) return false;
+    Function* fn = value.function;
+    if (!fn || fn->def != def || fn->def_module != script || fn->closure_env ||
+            fn->method) return false;
+    FnPromotionCell* cell = &def->analysis->promotion;
+    if (fn->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
+        interp_upgrade_function_entry(fn, def, entry);
+    }
+    cell->state = FN_PROMOTION_COMPILED;
+    cell->boxed_entry = entry;
+    return true;
+}
+
 static int interp_whole_script_publish_module_functions(Script* script) {
     if (!script || !script->interp_whole_script_poc_active || !script->ast_root) {
         return 0;
