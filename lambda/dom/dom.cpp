@@ -1530,7 +1530,11 @@ static void register_named_elements_recursive(DomElement* elem) {
         // The AST tier has no deferred MIR preamble pass; compile parsed inline
         // handlers while the document realm is active so later DOM events see
         // the same EventTarget properties as the MIR tier.
+        // Dynamic Function rebinding re-enters dom_set_document, so guard only
+        // this element's compilation rather than suppressing the whole walk.
+        s_dom_event_attrs_initializing = true;
         dom_initialize_event_attrs(elem);
+        s_dom_event_attrs_initializing = false;
     }
 
     if (elem->id && elem->id[0] != '\0') {
@@ -1571,11 +1575,7 @@ static void register_named_elements_recursive(DomElement* elem) {
 
 void dom_register_named_elements(DomElement* root) {
     if (!root) return;
-    bool initialize_event_attrs = js_ast_interpreter_requested() &&
-        !s_dom_event_attrs_initializing;
-    if (initialize_event_attrs) s_dom_event_attrs_initializing = true;
     register_named_elements_recursive(root);
-    if (initialize_event_attrs) s_dom_event_attrs_initializing = false;
 }
 
 static DomDocument* js_document_proxy_doc_from_item(Item item);
