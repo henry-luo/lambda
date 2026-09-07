@@ -398,7 +398,7 @@ void event_state_log_document(EventStateLog* log, const char* sub_type /* e.g. "
 
 
 
-// CE-3 (Radiant_Design_Content_Editable.md §6.2): complete §6.2 inputType
+// Radiant_Design_Editable.md §13: complete inputType
 // coverage. Entries marked "consumer-issued only" are NOT synthesized by
 // Radiant; they exist so consumers can emit them through the same dispatcher.
 typedef enum InputIntentType {
@@ -1093,7 +1093,7 @@ struct DomBoundary dom_boundary_move(struct DomBoundary b,
 // ===== editing host =====
 
 // EditingHost — central recognition + lookup of `contenteditable` editing
-// hosts. See vibe/radiant/Radiant_Design_Content_Editable.md §4.
+// hosts. See vibe/radiant/Radiant_Design_Editable.md §7.
 //
 // One concept, one resolver: replaces the ad-hoc `contenteditable` reads
 // that used to live in event.cpp (focus / hit-test) and dom_range.cpp

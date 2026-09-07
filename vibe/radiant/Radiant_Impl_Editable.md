@@ -1659,9 +1659,8 @@ callable false-returning stub.
 ### 8.5 Fixture cleanup
 
 - replace and remove `test/ui/editor4b/phase3-no-native-edit.json`;
-- extract still-valid substrate assertions from
-  `test/ui/_retired_native_editing/`;
-- delete the obsolete archive only after equivalent active coverage exists;
+- keep the already-extracted substrate assertions in active fixtures;
+- the obsolete `test/ui/_retired_native_editing/` archive is already deleted;
 - remove stale `test/dedup/exclude.json` entries naming removed helpers;
 - preserve `test/editor-js` as the distinct Lambda custom-editor project.
 

@@ -173,7 +173,7 @@ Item js_create_native_drag_event(const char* type,
     double client_x, double client_y, Item data_transfer,
     bool ctrl, bool shift, bool alt, bool meta);
 
-// CE-3 (Radiant_Design_Content_Editable.md §6): native InputEvent factory.
+// Radiant_Design_Editable.md §13: native InputEvent factory.
 // `type` is "beforeinput" or "input"; the former is cancelable, the latter is
 // not (Input Events Level 2 §3.2). `data_transfer` may be ItemNull.
 // `target_ranges` is a JS array of StaticRange-shaped objects (each with

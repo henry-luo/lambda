@@ -9985,7 +9985,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = i2it(parsed)};
         return (Item){.item = i2it(dom_default_tab_index(elem))};
     }
-    // CE-4 (Radiant_Design_Content_Editable.md §7): inputMode/enterKeyHint
+    // Radiant_Design_Editable.md §13: inputMode/enterKeyHint
     // are enumerated reflected attributes. The IDL getter canonicalises the
     // value (lowercase, one of the listed keywords) and returns "" for
     // missing/unknown — matches HTML spec "reflect ... limited to known
@@ -10025,7 +10025,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         }
         return js_name_item(out);
     }
-    // CE-1 / CE-4 (Radiant_Design_Content_Editable.md §4.2 + §10):
+    // Radiant_Design_Editable.md §13:
     // contentEditable returns "true"/"false"/"plaintext-only"/"inherit".
     // isContentEditable is the computed property — walks ancestors honouring
     // inheritance and ="false" islands.
@@ -10453,7 +10453,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         return value;
     }
 
-    // CE-1 / CE-4 (Radiant_Design_Content_Editable.md §4.2):
+    // Radiant_Design_Editable.md §13:
     // contentEditable setter validates per HTML spec. Empty string maps to
     // "inherit" (attribute removed). Invalid values are a SyntaxError — we
     // log and ignore; the proper raise will be wired through the JS

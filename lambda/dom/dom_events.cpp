@@ -1504,7 +1504,7 @@ extern "C" Item js_create_native_composition_event(const char* type,
                                           js_ctor_composition_event_fn);
 }
 
-// CE-7 (Radiant_Design_Content_Editable.md §6.1, §10): StaticRange
+// Radiant_Design_Editable.md §13: StaticRange
 // constructor. Per Input Events Level 2 / DOM, a StaticRange is an
 // immutable snapshot of {startContainer, startOffset, endContainer,
 // endOffset}; `collapsed` is derived. We expose the four fields and
@@ -1790,7 +1790,7 @@ extern "C" Item js_create_native_focus_event(const char* type, Item related_targ
     return js_create_trusted_native_event(type, init, js_ctor_focus_event_fn);
 }
 
-// CE-3 follow-up (Radiant_Design_Content_Editable.md §6.1): Range-backed
+// Radiant_Design_Editable.md §13: Range-backed
 // target list for `event.getTargetRanges()`. Script-created InputEvents store
 // live Range wrappers so DOM mutations between construction and
 // getTargetRanges() are reflected as StaticRange snapshots. Native editing
