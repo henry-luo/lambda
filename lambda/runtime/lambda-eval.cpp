@@ -9590,7 +9590,10 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             // Avoids map_rebuild_for_type_change which allocates from data zone and
             // can trigger GC compaction that corrupts field data at scale.
             // Safe for JS constructor objects (non-pooled shapes).
-            if (field_type == LMD_TYPE_NULL) {
+            // An error is never a field contract: retagging a SHARED literal
+            // shape to `error` here made every later literal at that site
+            // fail its own construction ("unknown map storage type error").
+            if (field_type == LMD_TYPE_NULL && value_type != LMD_TYPE_ERROR) {
                 int old_bsz = type_info[field_type].byte_size;
                 int new_bsz = type_info[value_type].byte_size;
                 if (old_bsz == new_bsz) {
