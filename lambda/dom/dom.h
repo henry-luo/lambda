@@ -57,6 +57,10 @@ bool dom_is_host_driven_loop(void);
  */
 bool dom_collection_has_live_property_state(Item collection);
 
+// Expose one NamedNodeMap entry through the current materialized collection
+// representation. DOM attribute names are supported property keys in JS.
+void dom_attribute_collection_expose_named(Item collection, Item name, Item attr);
+
 // DOMRect-shaped object: x/y/top/left/right/bottom/width/height as doubles,
 // on interned keys. dom.cpp, dom_observers.cpp and dom_selection.cpp
 // each built this themselves.

@@ -1,0 +1,18 @@
+"=== LaTeX AST tags ==="
+'latex_document'
+8
+"=== Rendering ===<div class="latex-output"><article class="latex-document latex-article"><p> </p><header class="latex-title"><div class="title">Hello World</div><div class="author">Test Author</div></header><p> </p><h2 id="introduction"><span class="sec-num">1 </span>Introduction</h2><p>
+This is a <strong>bold</strong> and <em>italic</em> test.
+Here is some <code class="latex-code">inline code</code>.</p><p>A second paragraph with a footnote<sup class="latex-footnote-ref"><a href="#fn-1" id="fnref-1">1</a></sup>.</p><h3 id="lists"><span class="sec-num">1.1 </span>Lists</h3><p> </p><ul class="latex-itemize"><li> </li><li> First item
+</li><li> Second item
+</li><li> Third item
+</li></ul><ol class="latex-enumerate"><li> </li><li> Alpha
+</li><li> Beta
+</li><li> Gamma
+</li></ol><h3 id="math"><span class="sec-num">1.2 </span>Math</h3><p>
+Inline math: <span class="lm_latex"><span class="lm_strut" style="height:0.82em"></span><span class="lm_strut--bottom" style="height:1.01em;vertical-align:-0.19em"></span><span class="lm_base"><span class="lm_mathit">x</span><span class="lm_msubsup"><span class="lm_vlist-t"><span class="lm_vlist-r"><span class="lm_vlist" style="height:0.82em"><span style="top:-3.36em;margin-right:0.05em"><span class="lm_pstrut" style="height:3em"></span><span style="height:0.46em;display:inline-block;font-size: 70%"><span class="lm_cmr">2</span></span></span></span></span></span></span><span style="display:inline-block;width:0.23em"></span><span class="lm_cmr">+</span><span style="display:inline-block;width:0.23em"></span><span class="lm_mathit" style="margin-right:0.04em">y</span><span class="lm_msubsup"><span class="lm_vlist-t"><span class="lm_vlist-r"><span class="lm_vlist" style="height:0.82em"><span style="top:-3.36em;margin-right:0.05em"><span class="lm_pstrut" style="height:3em"></span><span style="height:0.46em;display:inline-block;font-size: 70%"><span class="lm_cmr">2</span></span></span></span></span></span></span><span style="display:inline-block;width:0.28em"></span><span class="lm_cmr">=</span><span style="display:inline-block;width:0.28em"></span><span class="lm_mathit" style="margin-right:0.05em">z</span><span class="lm_msubsup"><span class="lm_vlist-t"><span class="lm_vlist-r"><span class="lm_vlist" style="height:0.82em"><span style="top:-3.36em;margin-right:0.05em"><span class="lm_pstrut" style="height:3em"></span><span style="height:0.46em;display:inline-block;font-size: 70%"><span class="lm_cmr">2</span></span></span></span></span></span></span></span></span></p><p>Display math:
+</p><div class="math-display-container"><span class="lm_latex"><span class="lm_strut" style="height:0.87em"></span><span class="lm_base"><span class="lm_mathit" style="margin-right:0.06em">E</span><span style="display:inline-block;width:0.28em"></span><span class="lm_cmr">=</span><span style="display:inline-block;width:0.28em"></span><span class="lm_mathit">mc</span><span class="lm_msubsup"><span class="lm_vlist-t"><span class="lm_vlist-r"><span class="lm_vlist" style="height:0.87em"><span style="top:-3.41em;margin-right:0.05em"><span class="lm_pstrut" style="height:3em"></span><span style="height:0.46em;display:inline-block;font-size: 70%"><span class="lm_cmr">2</span></span></span></span></span></span></span></span></span></div><h3 id="quote"><span class="sec-num">1.3 </span>Quote</h3><p> </p><blockquote class="latex-quote"><p>
+To be or not to be, that is the question.
+</p></blockquote><h2 id="conclusion"><span class="sec-num">2 </span>Conclusion</h2><p>
+This is the end.
+</p></article><section class="latex-footnotes"><hr><ol><li id="fn-1">This is a note. <a class="footnote-backref" href="#fnref-1">↩</a></li></ol></section></div>"

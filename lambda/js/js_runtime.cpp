@@ -10436,6 +10436,9 @@ static Item js_intrinsic_array_prototype(JsIndexedIntrinsicOp op,
             this_type == LMD_TYPE_NULL) {
             Item type_name = js_name_item("TypeError");
             char msg[128];
+            if (name && strcmp(name, "bbox") == 0) {
+                log_error("BBOXTRACE intrinsic null receiver while reading bbox");
+            }
             snprintf(msg, sizeof(msg), "Cannot read properties of %s (reading '%s')",
                 this_val.item == ITEM_JS_UNDEFINED ? "undefined" : "null", name);
             Item msg_item = js_name_item(msg, strlen(msg));

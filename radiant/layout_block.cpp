@@ -1505,6 +1505,24 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
 bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent);
 
+static void refresh_pseudo_element_style(DomElement* parent,
+                                         DomElement* pseudo,
+                                         PseudoStyleKind kind,
+                                         FontProp* parent_font) {
+    if (!parent || !pseudo) return;
+    StyleTree* style = parent->pseudo_style(kind);
+    if (!style || !style->tree) return;
+    if (parent_font && pseudo->font) {
+        // Generated boxes inherit the originating element's computed font;
+        // retained view storage must be refreshed before the pseudo cascade.
+        font_prop_copy(pseudo->font, parent_font);
+    }
+    // CSS generated boxes borrow the owner's pseudo cascade; rebind retained
+    // nodes after a stylesheet recascade before resolving their display.
+    dom_element_borrow_specified_style(pseudo, style);
+    pseudo->display = resolve_display_value(pseudo);
+}
+
 static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* parent,
                                           const char* content, bool is_before,
                                           FontProp* parent_font) {
@@ -1518,6 +1536,10 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     pseudo_elem->prev_sibling = nullptr;
     // IMPORTANT: Do NOT share parent's FontProp pointer with pseudo-element!
     pseudo_elem->font = nullptr;
+    if (parent_font) {
+        pseudo_elem->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+        if (pseudo_elem->font) font_prop_copy(pseudo_elem->font, parent_font);
+    }
     // pseudo_elem->bound = parent->bound;  // BUG: causes shared BackgroundProp
     pseudo_elem->bound = nullptr;  // Will be allocated when CSS properties are applied
     // pseudo_elem->in_line = parent->in_line;  // BUG: causes shared opacity
@@ -1526,10 +1548,9 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     pseudo_elem->display.inner = CSS_VALUE_FLOW;
     StyleTree* pseudo_styles = is_before ? parent->pseudo_style(PSEUDO_STYLE_BEFORE) : parent->pseudo_style(PSEUDO_STYLE_AFTER);
     if (pseudo_styles && pseudo_styles->tree) {
-        dom_element_borrow_specified_style(pseudo_elem, pseudo_styles);
-        // Generated pseudo boxes use the same display cascade as authored elements;
-        // resolving only a few keyword cases left display:list-item pseudos inline.
-        pseudo_elem->display = resolve_display_value(pseudo_elem);
+        refresh_pseudo_element_style(parent, pseudo_elem,
+            is_before ? PSEUDO_STYLE_BEFORE : PSEUDO_STYLE_AFTER,
+            parent_font);
     }
     bool has_counter_content = false;
     if (pseudo_styles) {
@@ -2705,6 +2726,10 @@ static void add_deferred_line_extent(DeferredInlineLineRun* runs, int* run_count
 
 static int first_deferred_inline_line_number(View* child) {
     while (child) {
+        if (layout_view_is_out_of_flow(child)) {
+            child = child->next();
+            continue;
+        }
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             if (text->rect) return text->rect->line_number;
@@ -2733,6 +2758,10 @@ static bool deferred_inline_atomic_anchor(View* child, int* line_number) {
 static void collect_deferred_inline_line_runs(View* child, DeferredInlineLineRun* runs,
                                               int* run_count) {
     while (child) {
+        if (layout_view_is_out_of_flow(child)) {
+            child = child->next();
+            continue;
+        }
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
@@ -2767,6 +2796,10 @@ static void collect_deferred_inline_line_runs(View* child, DeferredInlineLineRun
 static bool view_has_deferred_line_content(View* child,
                                            const DeferredInlineLineRun* run) {
     while (child) {
+        if (layout_view_is_out_of_flow(child)) {
+            child = child->next();
+            continue;
+        }
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
@@ -2795,6 +2828,10 @@ static void shift_deferred_inline_line(View* child,
                                        const DeferredInlineLineRun* run,
                                        float shift) {
     while (child) {
+        if (layout_view_is_out_of_flow(child)) {
+            child = child->next();
+            continue;
+        }
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             bool shifted_rect = false;
@@ -2870,6 +2907,31 @@ static float layout_strut_below_baseline(LayoutContext* lycon) {
     float half_leading = (lycon->block.line_height -
         (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
     return max(lycon->block.init_descender + half_leading, 0.0f);
+}
+
+static void layout_middle_inline_contribution(LayoutContext* lycon,
+                                               float item_height,
+                                               float* ascender,
+                                               float* descender) {
+    if (!lycon || !ascender || !descender) return;
+    float parent_font_size = lycon->line.parent_font_size;
+    if (parent_font_size <= 0.0f && lycon->font.style) {
+        parent_font_size = lycon->font.style->font_size;
+    }
+    if (parent_font_size <= 0.0f) {
+        parent_font_size = lycon->block.init_ascender + lycon->block.init_descender;
+    }
+    float x_height_half;
+    if (font_box_handle(&lycon->font)) {
+        float x_ratio = font_get_x_height_ratio(font_box_handle(&lycon->font));
+        float x_height_font_size = lycon->font.current_font_size > 0.0f
+            ? lycon->font.current_font_size : parent_font_size;
+        x_height_half = x_height_font_size * x_ratio / 2.0f;
+    } else {
+        x_height_half = parent_font_size * 0.25f;
+    }
+    *ascender = item_height / 2.0f + x_height_half;
+    *descender = item_height / 2.0f - x_height_half;
 }
 
 static float layout_select_listbox_baseline(LayoutContext* lycon,
@@ -5140,9 +5202,13 @@ void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
     DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(block);
     if (block->pseudo) {
         if (block->pseudo->before) {
+            refresh_pseudo_element_style(element, block->pseudo->before,
+                PSEUDO_STYLE_BEFORE, element->font);
             insert_pseudo_into_rendered_tree(element, block->pseudo->before, true);
         }
         if (block->pseudo->after) {
+            refresh_pseudo_element_style(element, block->pseudo->after,
+                PSEUDO_STYLE_AFTER, element->font);
             insert_pseudo_into_rendered_tree(element, block->pseudo->after, false);
         }
         bool marker_allowed = include_marker &&
@@ -5770,20 +5836,26 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     do {
                         float pre_advance_y = lycon->block.advance_y;
                         bool child_is_floated = false;
+                        bool child_has_clear = false;
                         if (child->is_element()) {
                             DomElement* child_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
                             CssEnum child_float = get_element_float_value(child_elem);
                             child_is_floated = child_float == CSS_VALUE_LEFT || child_float == CSS_VALUE_RIGHT;
+                            // The retained position prop is cleared before style
+                            // resolution, so inspect the declaration when deciding
+                            // whether clearance makes reuse unsafe.
+                            CssEnum child_clear = layout_specified_keyword(
+                                child_elem, CSS_PROPERTY_CLEAR, CSS_VALUE_NONE);
+                            child_has_clear = child_clear == CSS_VALUE_LEFT ||
+                                child_clear == CSS_VALUE_RIGHT ||
+                                child_clear == CSS_VALUE_BOTH;
                         }
-                        // HTML button layout's anonymous content box does not
-                        // create a line for indentation-only DOM whitespace.
-                        bool suppress_button_whitespace = block->tag() == MARKUP_NAME_BUTTON &&
-                            child->is_text() && !layout_text_node_has_content(child);
-                        if (suppress_button_whitespace) {
-                            child->layout_height_contribution = 0.0f;
-                        } else if (lycon->doc && lycon->doc->incremental_layout
+                        if (lycon->doc && lycon->doc->incremental_layout
                             && child->is_element() && !child->layout_dirty
                             && !child_is_floated
+                            // incremental reuse cannot skip clearance because it
+                            // depends on the current BFC float list.
+                            && !child_has_clear
                             && child->height > 0 && child->view_type != RDT_VIEW_NONE) {
                             DomElement* skip_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
                             verify_incremental_layout_skip(lycon, child, pre_advance_y);
@@ -7990,6 +8062,18 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             layout_store_given_axis(lycon, block, 0.0f, false, true);
         }
     }
+    ViewBlock* stretch_parent = block->parent_view() && block->parent_view()->is_block()
+        ? lam::view_require_block(block->parent_view()) : nullptr;
+    bool quirks_body_stretch_basis = stretch_parent &&
+        stretch_parent->tag_id == MARKUP_NAME_BODY &&
+        is_quirks_mode(lycon->doc->view_tree->html_version);
+    bool stretch_parent_has_definite_height = stretch_parent && stretch_parent->blk &&
+        stretch_parent->block()->given_height >= 0.0f;
+    // prefer the actual block parent; the copied context can retain a child
+    // height while an auto-height inline-block is laying out later siblings.
+    bool stretch_height_has_definite_basis = stretch_parent
+        ? (stretch_parent_has_definite_height || quirks_body_stretch_basis)
+        : (pa_block && (pa_block->given_height >= 0.0f || quirks_body_stretch_basis));
     float stretch_constraint_available_width = max(
         pa_block->content_width - bfc_available_width_reduction, 0.0f);
     if (bfc_available_width_reduction > 0.0f) {
@@ -7997,7 +8081,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
     layout_resolve_stretch_minmax_axis(block, stretch_constraint_available_width, true, true);
     layout_resolve_stretch_minmax_axis(block, pa_block->content_height,
-                                       pa_block->given_height >= 0.0f, false);
+                                       stretch_height_has_definite_basis, false);
     layout_block_resolve_intrinsic_axis_constraints(
         lycon, block, LAYOUT_AXIS_X, 0.0f);
     // No BlockProp represents the initial auto width until another property needs it.
@@ -8055,13 +8139,6 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         block->blk, LAYOUT_AXIS_X) ||
         (block_justify_self_stretches && block_justify_self_axis == LAYOUT_AXIS_X &&
          width_is_auto);
-    ViewBlock* stretch_parent = block->parent_view() && block->parent_view()->is_block()
-        ? lam::view_require_block(block->parent_view()) : nullptr;
-    bool quirks_body_stretch_basis = stretch_parent &&
-        stretch_parent->tag_id == MARKUP_NAME_BODY &&
-        is_quirks_mode(lycon->doc->view_tree->html_version);
-    bool stretch_height_has_definite_basis = pa_block &&
-        (pa_block->given_height >= 0.0f || quirks_body_stretch_basis);
     float stretch_height_basis = quirks_body_stretch_basis
         ? lycon->height : pa_block->content_height;
     float ratio_determining_height = lycon->block.given_height;
@@ -9794,25 +9871,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (!is_broken_alt_image && valign != CSS_VALUE_TOP && valign != CSS_VALUE_BOTTOM) {
                     float asc_contribution, desc_contribution;
                     if (valign == CSS_VALUE_MIDDLE) {
-                        // CSS 2.1 §10.8.1: "Align the vertical midpoint of the box with
-                        float x_height_half;
-                        float parent_font_size = lycon->line.parent_font_size;
-                        if (parent_font_size <= 0.0f && lycon->font.style) {
-                            parent_font_size = lycon->font.style->font_size;
-                        }
-                        if (parent_font_size <= 0.0f) {
-                            parent_font_size = lycon->block.init_ascender + lycon->block.init_descender;
-                        }
-                        if (font_box_handle(&lycon->font)) {
-                            float x_ratio = font_get_x_height_ratio(font_box_handle(&lycon->font));
-                            float x_height_font_size = lycon->font.current_font_size > 0.0f
-                                ? lycon->font.current_font_size : parent_font_size;
-                            x_height_half = x_height_font_size * x_ratio / 2.0f;
-                        } else {
-                            x_height_half = parent_font_size * 0.25f;
-                        }
-                        asc_contribution = item_height / 2.0f + x_height_half;
-                        desc_contribution = item_height / 2.0f - x_height_half;
+                        // CSS 2.1 §10.8.1: align the box midpoint with the parent x-height.
+                        layout_middle_inline_contribution(
+                            lycon, item_height, &asc_contribution, &desc_contribution);
                     } else if (valign == CSS_VALUE_TEXT_TOP) {
                         asc_contribution = lycon->line.parent_font_ascender;
                         desc_contribution = item_height - asc_contribution;
@@ -9949,8 +10010,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
                 } // !is_containing_block
             }
-            if (!is_broken_alt_image) {
-                lycon->line.has_replaced_content = true;  // inline-block contributes to line box
+            // CSS 2.1 §10.8.1: middle-aligned fallback glyphs expand the line
+            // through the replaced inline's extents, not the text threshold.
+            bool broken_alt_expands_line = is_broken_alt_image && block->in_line &&
+                block->inl()->vertical_align == CSS_VALUE_MIDDLE;
+            if (!is_broken_alt_image || broken_alt_expands_line) {
+                lycon->line.has_replaced_content = true;
                 lycon->line.atomic_inline_count++;
             }
             // CSS 2.1 §10.8.1: vertical-align defaults to 'baseline' (CSS_VALUE__UNDEF=0 also means baseline).
@@ -9974,6 +10039,19 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // CSS 2.1 §10.8.1: Same second-pass treatment as vertical-align:top.
                     lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, block_flow_height);
                     lycon->line.max_bottom_height = max(lycon->line.max_bottom_height, block_flow_height);
+                }
+                else if (is_broken_alt_image &&
+                         block->inl()->vertical_align == CSS_VALUE_MIDDLE) {
+                    // broken-image fallback remains an inline visual and must
+                    // contribute its middle-aligned extents to the line box.
+                    float asc_contribution = 0.0f;
+                    float desc_contribution = 0.0f;
+                    layout_middle_inline_contribution(
+                        lycon, block_flow_height, &asc_contribution, &desc_contribution);
+                    lycon->line.max_ascender = max(
+                        lycon->line.max_ascender, asc_contribution);
+                    lycon->line.max_descender = max(
+                        lycon->line.max_descender, desc_contribution);
                 }
                 else {
                     lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->line.max_ascender);

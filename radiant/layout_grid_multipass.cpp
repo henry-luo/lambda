@@ -626,6 +626,11 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
     // controls retain their role data while receiving ordinary grid item state.
     ViewBlock* elem_block = lam::view_as_block(elem);
     if (!grid_item_prop(elem_block)) {
+        // Intrinsic sizing can provisionally tag an aspect-ratio box as a flex item;
+        // the actual parent formatting context must decide its item role.
+        if (elem->parent_item_kind() == DomElement::PARENT_ITEM_FLEX) {
+            elem->set_parent_item_kind(DomElement::PARENT_ITEM_NONE);
+        }
         elem->ensure_grid_item(lycon->doc->view_tree);
     }
     // CRITICAL: Set lycon->view to this element so style resolution

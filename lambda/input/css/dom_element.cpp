@@ -2388,7 +2388,7 @@ bool DomElement::is_first_child() {
     DomElement* parent = static_cast<DomElement*>(element->parent);
     DomNode* child = parent->first_child;
     while (child) {
-        if (child->is_element()) {
+        if (dom_is_css_element_child(child)) {
             return child == (DomNode*)element;
         }
         child = child->next_sibling;
@@ -2406,7 +2406,7 @@ bool DomElement::is_last_child() {
     // child ELEMENT of its parent. Text nodes after it are not counted.
     DomNode* sibling = element->next_sibling;
     while (sibling) {
-        if (sibling->is_element()) {
+        if (dom_is_css_element_child(sibling)) {
             return false;
         }
         sibling = sibling->next_sibling;
@@ -2439,7 +2439,7 @@ int DomElement::child_index() {
 
     while (sibling && sibling != element) {
         // Only count element nodes for nth-child
-        if (sibling->is_element()) {
+        if (dom_is_css_element_child(sibling)) {
             index++;
         }
         sibling = sibling->next_sibling;
@@ -2469,8 +2469,8 @@ int DomElement::count_child_elements() {
     DomNode* child = element->first_child;
 
     while (child) {
-        // Only count element children (not text or comment nodes)
-        if (child->is_element()) {
+        // Count source element children; generated layout nodes are not DOM children.
+        if (dom_is_css_element_child(child)) {
             count++;
         }
         child = child->next_sibling;

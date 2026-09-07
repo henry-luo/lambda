@@ -3760,6 +3760,7 @@ typedef struct DocumentJsHostConfig {
     bool virtual_clock_enabled;
     double virtual_clock_ms;
     bool redirect_stdout_to_stderr;
+    bool disable_css_animations;
 } DocumentJsHostConfig;
 
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);

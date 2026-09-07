@@ -330,7 +330,7 @@ String* url_construct_href(const Url* url) {
     }
 
     // Fragment
-    if (url->hash && url->hash->len > 0) {
+    if (url->hash) {
         str_copy(buffer + pos, total_size + 1 - pos, url->hash->chars, url->hash->len);
         pos += url->hash->len;
     }
