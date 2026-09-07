@@ -176,6 +176,10 @@ TEXT = [
     ("fast_diff", "text-diff", "test/benchmark/text/fast_diff.ls", "test/benchmark/text/fast_diff.js", None),
     ("microdiff", "data-diff", "test/benchmark/text/microdiff.ls", "test/benchmark/text/microdiff.js", None),
     ("hyphen", "hyphenation", "test/benchmark/text/hyphen.ls", "test/benchmark/text/hyphen.js", None),
+    ("prettier_ast", "formatting", "test/benchmark/text/prettier_ast.ls", "test/benchmark/text/prettier_ast.js", None),
+    ("text_search", "search", "test/benchmark/text/text_search.ls", "test/benchmark/text/text_search.js", None),
+    ("three_way_merge", "merge", "test/benchmark/text/three_way_merge.ls", "test/benchmark/text/three_way_merge.js", None),
+    ("log_pipeline", "log-processing", "test/benchmark/text/log_pipeline.ls", "test/benchmark/text/log_pipeline.js", None),
 ]
 
 JETSTREAM_LS = [
