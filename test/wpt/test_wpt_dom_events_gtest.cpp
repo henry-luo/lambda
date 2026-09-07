@@ -73,9 +73,19 @@
 #ifndef WPT_RUNNER_SKIP_TENTATIVE
 #define WPT_RUNNER_SKIP_TENTATIVE 1
 #endif
+#ifndef WPT_RUNNER_SHIM_PATH
+#define WPT_RUNNER_SHIM_PATH "test/wpt/wpt_testharness_shim.js"
+#endif
+#ifndef WPT_RUNNER_AUXILIARY_SHIM_PATH
+#define WPT_RUNNER_AUXILIARY_SHIM_PATH ""
+#endif
+#ifndef WPT_RUNNER_KEEP_TEMP
+#define WPT_RUNNER_KEEP_TEMP 0
+#endif
 
 static const char* WPT_DIR = WPT_RUNNER_DIR;
-static const char* SHIM_PATH = "test/wpt/wpt_testharness_shim.js";
+static const char* SHIM_PATH = WPT_RUNNER_SHIM_PATH;
+static const char* AUXILIARY_SHIM_PATH = WPT_RUNNER_AUXILIARY_SHIM_PATH;
 static const char* TEMP_DIR = "temp";
 static const char* BASELINE_PATH = WPT_RUNNER_BASELINE_PATH;
 static const char* UPDATE_BASELINE_ENV = WPT_RUNNER_UPDATE_ENV;
@@ -639,6 +649,15 @@ static WptDomEventsResult run_wpt_dom_events_case(const WptDomEventsParam& p) {
         result.setup_error = std::string("Could not read testharness shim: ") + SHIM_PATH;
         return result;
     }
+    if (AUXILIARY_SHIM_PATH[0]) {
+        std::string auxiliary_shim = read_file_contents(AUXILIARY_SHIM_PATH);
+        if (auxiliary_shim.empty()) {
+            result.setup_error = std::string("Could not read testharness extension: ") +
+                AUXILIARY_SHIM_PATH;
+            return result;
+        }
+        shim += "\n" + auxiliary_shim;
+    }
 
     // Compose: shim + extracted scripts + onload simulation + summary.
     std::string combined = shim + "\n" + scripts +
@@ -668,7 +687,7 @@ static WptDomEventsResult run_wpt_dom_events_case(const WptDomEventsParam& p) {
         }
     }
 
-    unlink(temp_js.c_str());
+    if (!WPT_RUNNER_KEEP_TEMP) unlink(temp_js.c_str());
     result.crash_test_passed =
         p.test_name.find("crash") != std::string::npos &&
         result.total_count == 0 && result.exit_code == 0;

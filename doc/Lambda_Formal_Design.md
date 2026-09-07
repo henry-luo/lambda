@@ -1125,6 +1125,21 @@ loosely across the corpus — context disambiguates, and we live with it.
   keeping `lambda.math` for the built-in math module. A package path names
   exactly one thing: no path may be both a built-in module and a shipped
   package. [S17.2.1, S17.2.2, S16.10.1v2]
+- **D7.2.5*** **Full user-agent editing policy belongs to the shipped Lambda
+  DOM behavior package, never to Radiant's native implementation.** Radiant
+  owns the platform-input gate and standard DOM mechanisms—editing-host
+  recognition,
+  events, Selection/Range, clipboard/composition transport, observation,
+  geometry, and checked generic DOM mutation primitives. The behavior package
+  (currently sourced under `lambda/package/dom`) owns uncanceled
+  `contenteditable` default actions, structural normalization, editing
+  history, `designMode`, and the complete
+  `execCommand`/`queryCommand*` compatibility surface. User input and legacy
+  commands lower through one package operation model, so cancellation,
+  command state, mutation, history, and selection cannot drift between entry
+  points. Its conformance gates are the applicable automated WPT
+  contenteditable/editing suites and the pinned Chromium editing corpus.
+  [D7.2.1–D7.2.3, D7.3.5, D7.5.3; Radiant_Design_Editable §20]
 
 ### D7.3 Jube modules: the module system
 
@@ -1812,6 +1827,7 @@ slice; no formal semantic ruling or document semver changes.
 | D6.1.3 | `may_await` analysis exists; the `may_defect` split does not — `may_return_error` is overloaded and the missing-analysis polarity is currently "trusted clean" (wrong direction; one half of the measured O1 divergence). |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
+| D7.2.5 | Implemented 2026-09-07. The shipped `lambda/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
 | D7.4.1v2 | Native-module POC 1 remains unstarted; the engine-owned Promise VMap is designed by JR7/Tune7 but not yet implemented. |
 | D7.4.3 | Hosted-language layering: `lang-python` is the landed DSO reference chain, but Python is currently statically linked and its ten follow-up ADRs (Lang_Hosting §17) are unwritten. |
 | D7.4.4 | Implemented in DOM4 (2026-08-14): `host_ops`, `legacy_ops`, `JubeHostObjectOps`, and the vmap `string_key_item` re-materialization shim were removed; record-owned hooks are the only host-object protocol and the ABI is version 4. |
@@ -2051,7 +2067,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
 | D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md` |
-| D7.2 | RG14; DF15; ER-D2; MC1 | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md` |
+| D7.2 | RG14; DF15; ER-D2; MC1; UA editing | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20 |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md` |
 | D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12; JSI1–JSI13 | `Lambda_Design_Unified_AST.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |

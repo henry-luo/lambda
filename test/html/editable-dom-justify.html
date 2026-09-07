@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable justify command</title>
+<div id="surface" contenteditable="true" tabindex="0"><p style="color:blue;">item</p></div>
+<button id="justify">justify</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var out = document.getElementById('out');
+  document.getElementById('justify').addEventListener('mousedown', function(event) {
+    event.preventDefault();
+  });
+  document.getElementById('justify').addEventListener('click', function() {
+    out.textContent = document.execCommand('justifyCenter', false, '') +
+      '|' + surface.innerHTML;
+  });
+</script>

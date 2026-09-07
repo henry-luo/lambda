@@ -109,7 +109,7 @@
       "target": {
         "selector": "#out"
       },
-      "equals": "unsup:false|<b><i>-x</i>seed</b>text"
+      "equals": "unsup:true|<b><i>-x</i>seed</b>text"
     },
     {
       "type": "set_editing_selection",

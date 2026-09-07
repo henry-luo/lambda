@@ -1843,6 +1843,17 @@ extern "C" void selection_refresh_presentation(DocState* state) {
 }
 
 void DocState::destroy() {
+    // The package can retain opaque generic DOM delta ids. Release their
+    // document-owned snapshots before this state's DOM/storage dependencies
+    // begin teardown (D5.3.3).
+    dom_edit_discard_retained_deltas(this);
+
+    if (editing.dom_edit_session_rooted) {
+        heap_unregister_gc_root(&editing.dom_edit_session_root);
+        editing.dom_edit_session_rooted = false;
+        editing.dom_edit_session_root = ItemNull.item;
+    }
+
     // Detach template state map from global store before destroying
     if (template_state_map) {
         tmpl_state_set_map(NULL);

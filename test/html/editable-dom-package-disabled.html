@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable package disabled</title>
+<div id="surface" contenteditable="true" tabindex="0">seed</div>
+<button id="api" type="button">API insert</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var out = document.getElementById('out');
+  var beforeinput_count = 0;
+  document.getElementById('api').addEventListener('mousedown', function(event) {
+    event.preventDefault();
+  });
+  surface.addEventListener('beforeinput', function() {
+    beforeinput_count++;
+  });
+  document.getElementById('api').addEventListener('click', function() {
+    out.textContent = document.execCommand('insertText', false, 'A') + ':' +
+      beforeinput_count + '|' + surface.textContent;
+  });
+</script>

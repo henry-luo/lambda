@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable removeFormat</title>
+<div id="surface" contenteditable="true" tabindex="0"><b><span style="color:red;">item</span></b></div>
+<button id="remove">remove</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var out = document.getElementById('out');
+  document.getElementById('remove').addEventListener('mousedown', function(event) {
+    event.preventDefault();
+  });
+  document.getElementById('remove').addEventListener('click', function() {
+    out.textContent = document.execCommand('removeFormat', false, '') +
+      '|' + surface.innerHTML;
+  });
+</script>

@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable selectAll</title>
+<div id="surface" contenteditable="true" tabindex="0">seedtext</div>
+<button id="select">select</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var out = document.getElementById('out');
+  document.getElementById('select').addEventListener('mousedown', function(event) {
+    event.preventDefault();
+  });
+  document.getElementById('select').addEventListener('click', function() {
+    out.textContent = document.execCommand('selectAll', false, '') + '|' +
+      document.getSelection().toString();
+  });
+</script>

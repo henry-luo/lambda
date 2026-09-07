@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable list command</title>
+<div id="surface" contenteditable="true" tabindex="0"><p>item</p></div>
+<button id="list">list</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var out = document.getElementById('out');
+  document.getElementById('list').addEventListener('mousedown', function(event) {
+    event.preventDefault();
+  });
+  document.getElementById('list').addEventListener('click', function() {
+    out.textContent = document.execCommand('insertUnorderedList', false, '') +
+      '|' + surface.innerHTML;
+  });
+</script>

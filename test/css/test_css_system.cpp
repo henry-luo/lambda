@@ -263,6 +263,11 @@ TEST_F(CssPropertySystemTest, ColorParsing) {
     EXPECT_EQ(color.g, 0);
     EXPECT_EQ(color.b, 255);
 
+    EXPECT_TRUE(css_parse_color("orange", &color));
+    EXPECT_EQ(color.r, 255);
+    EXPECT_EQ(color.g, 165);
+    EXPECT_EQ(color.b, 0);
+
     // Test special colors
     EXPECT_TRUE(css_parse_color("transparent", &color));
     EXPECT_EQ(color.type, CSS_COLOR_TRANSPARENT);

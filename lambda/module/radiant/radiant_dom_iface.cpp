@@ -10,6 +10,7 @@
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
 #include "../../jube/jube.h"
+#include "../../../lib/log.h"
 
 extern const JubeHostAPI* radiant_host_api;
 extern "C" const void* radiant_dom_range_host_type(void);
@@ -300,7 +301,12 @@ const char radiant_dom_interface_decl[] =
     "    dispatch_event: fn(a0: any) any,\n"
     "    create_tree_walker: fn(a0: any, a1: any) any,\n"
     "    create_event: fn(a0: any) any,\n"
-    "    exec_command: fn(a0: any, a1: any, a2: any) bool\n"
+    "    exec_command: fn(a0: any, a1: any, a2: any) bool,\n"
+    "    query_command_supported: fn(a0: any) bool,\n"
+    "    query_command_enabled: fn(a0: any) bool,\n"
+    "    query_command_state: fn(a0: any) bool,\n"
+    "    query_command_indeterm: fn(a0: any) bool,\n"
+    "    query_command_value: fn(a0: any) string\n"
     "}\n"
     "type foreign_document : document {\n"
     "}\n"
@@ -1438,6 +1444,11 @@ static Item radiant_dom_doc_key(const char* name) {
         return radiant_dom_document_host_get_property(receiver, radiant_dom_doc_key(js), out); \
     }
 
+#define RADIANT_DOC_SET_FN(fn, js) \
+    static int fn(Item receiver, Item value, Item* out) { \
+        return radiant_dom_document_host_set_property(receiver, radiant_dom_doc_key(js), value, out); \
+    }
+
 #define RADIANT_DOC_CALL_FN(fn, operation) \
     static int fn(Item receiver, Item* args, int argc, Item* out) { \
         return radiant_dom_document_operation(receiver, operation, args, argc, out); \
@@ -1476,6 +1487,7 @@ RADIANT_DOC_GET_FN(radiant_doc_get_implementation, "implementation")
 RADIANT_DOC_GET_FN(radiant_doc_get_design_mode, "designMode")
 RADIANT_DOC_GET_FN(radiant_doc_get_active_element, "activeElement")
 RADIANT_DOC_GET_FN(radiant_doc_get_forms, "forms")
+RADIANT_DOC_SET_FN(radiant_doc_set_design_mode, "designMode")
 
 RADIANT_DOC_CALL_FN(radiant_doc_call_assign, RADIANT_DOCUMENT_ASSIGN)
 RADIANT_DOC_CALL_FN(radiant_doc_call_replace, RADIANT_DOCUMENT_REPLACE)
@@ -1515,9 +1527,16 @@ RADIANT_DOC_CALL_FN(radiant_doc_call_dispatch_event, RADIANT_DOCUMENT_DISPATCH_E
 RADIANT_DOC_CALL_FN(radiant_doc_call_create_tree_walker, RADIANT_DOCUMENT_CREATE_TREE_WALKER)
 RADIANT_DOC_CALL_FN(radiant_doc_call_create_event, RADIANT_DOCUMENT_CREATE_EVENT)
 RADIANT_DOC_CALL_FN(radiant_doc_call_exec_command, RADIANT_DOCUMENT_EXEC_COMMAND)
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_supported, RADIANT_DOCUMENT_QUERY_COMMAND_SUPPORTED)
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_enabled, RADIANT_DOCUMENT_QUERY_COMMAND_ENABLED)
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_state, RADIANT_DOCUMENT_QUERY_COMMAND_STATE)
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_indeterm, RADIANT_DOCUMENT_QUERY_COMMAND_INDETERM)
+RADIANT_DOC_CALL_FN(radiant_doc_call_query_command_value, RADIANT_DOCUMENT_QUERY_COMMAND_VALUE)
 
 #define DOC_FIELD(n, js, fn) \
     {n, js, fn, NULL, NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE}
+#define DOC_FIELD_SET(n, js, get_fn, set_fn) \
+    {n, js, get_fn, set_fn, NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE}
 #define DOC_METHOD(n, js, fn) \
     {n, js, NULL, NULL, fn, NULL, JUBE_MEMBER_NON_ENUMERABLE}
 
@@ -1552,7 +1571,8 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_FIELD("style_sheets", "styleSheets", radiant_doc_get_style_sheets),
     DOC_FIELD("default_view", "defaultView", radiant_doc_get_default_view),
     DOC_FIELD("implementation", NULL, radiant_doc_get_implementation),
-    DOC_FIELD("design_mode", "designMode", radiant_doc_get_design_mode),
+    DOC_FIELD_SET("design_mode", "designMode", radiant_doc_get_design_mode,
+                  radiant_doc_set_design_mode),
     DOC_FIELD("active_element", "activeElement", radiant_doc_get_active_element),
     DOC_FIELD("forms", NULL, radiant_doc_get_forms),
     DOC_METHOD("assign", NULL, radiant_doc_call_assign),
@@ -1593,6 +1613,11 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_METHOD("create_tree_walker", "createTreeWalker", radiant_doc_call_create_tree_walker),
     DOC_METHOD("create_event", "createEvent", radiant_doc_call_create_event),
     DOC_METHOD("exec_command", "execCommand", radiant_doc_call_exec_command),
+    DOC_METHOD("query_command_supported", "queryCommandSupported", radiant_doc_call_query_command_supported),
+    DOC_METHOD("query_command_enabled", "queryCommandEnabled", radiant_doc_call_query_command_enabled),
+    DOC_METHOD("query_command_state", "queryCommandState", radiant_doc_call_query_command_state),
+    DOC_METHOD("query_command_indeterm", "queryCommandIndeterm", radiant_doc_call_query_command_indeterm),
+    DOC_METHOD("query_command_value", "queryCommandValue", radiant_doc_call_query_command_value),
 };
 
 extern "C" int radiant_velmt_host_get_property(Item object, Item key, Item* out);

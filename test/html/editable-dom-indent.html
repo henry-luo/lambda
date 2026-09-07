@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable list indentation</title>
+<ul id="surface" contenteditable="true" tabindex="0"><li id="first">one</li><li id="second">two</li></ul>
+<button id="indent">indent</button><button id="outdent">outdent</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var out = document.getElementById('out');
+  function keepSelection(event) { event.preventDefault(); }
+  ['indent', 'outdent'].forEach(function(id) {
+    document.getElementById(id).addEventListener('mousedown', keepSelection);
+  });
+  document.getElementById('indent').addEventListener('click', function() {
+    out.textContent = 'indent:' + document.execCommand('indent', false, '') + '|' + surface.innerHTML;
+  });
+  document.getElementById('outdent').addEventListener('click', function() {
+    out.textContent = 'outdent:' + document.execCommand('outdent', false, '') + '|' + surface.innerHTML;
+  });
+</script>

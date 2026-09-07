@@ -1,0 +1,16 @@
+{
+  "name": "Contenteditable queryCommand APIs read the dom package registry",
+  "html": "test/html/editable-dom-queries.html",
+  "viewport": {"width": 640, "height": 240},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_queries ==="},
+    {"type": "click", "target": {"selector": "#support"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "support:true:false"},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 0, "end": 4},
+    {"type": "click", "target": {"selector": "#before"}},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "before:true:true:false:false:"},
+    {"type": "click", "target": {"selector": "#apply"}},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "seedtext"},
+    {"type": "assert_text", "target": {"selector": "#out"}, "equals": "after:true:true:true:false:"}
+  ]
+}

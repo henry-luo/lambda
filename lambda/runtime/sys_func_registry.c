@@ -1426,8 +1426,9 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    // v3 pending resolution: allocates in the caller's number extent, so it is
-    // NOT number-stack preserving, but its result is a stable scalar home.
+    // v3 pending resolution is the MIR pending-pair materialization intrinsic.
+    // Its `AutoAssertNoGC` guard is part of the emitter contract: marking this
+    // call MAY_GC would recursively try to materialize its pending argument.
     {"lambda_item_resolve_pending", FPTR(lambda_item_resolve_pending),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
@@ -2307,7 +2308,9 @@ JitImport jit_runtime_imports[] = {
     {"js_elements_set_int", FPTR(js_elements_set_int)},
     {"js_elements_set_existing_dense_int_fast",
      FPTR(js_elements_set_existing_dense_int_fast),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+     // Prototype/shape guards can lazily resolve JS state before the final
+     // no-GC dense write, so the import itself needs a caller safepoint.
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM),
@@ -3549,7 +3552,6 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_int_lane_divmod_slow", "int2it_lane",
         "js_is_truthy", "js_is_nullish",
         "js_typed_array_matches_type", "js_number_key_to_index_fast",
-        "js_elements_set_existing_dense_int_fast",
         "js_error_lane_payload",
         "js_set_this", "js_get_new_target",
         "js_set_direct_new_target", "js_set_function_source",

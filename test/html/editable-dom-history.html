@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable retained history</title>
+<div id="surface" contenteditable="true" tabindex="0">seed</div>
+<button id="insert">insert</button>
+<button id="undo">undo</button>
+<button id="redo">redo</button>
+<button id="report">report</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var out = document.getElementById('out');
+  ['insert', 'undo', 'redo', 'report'].forEach(function(id) {
+    document.getElementById(id).addEventListener('mousedown', function(event) {
+      event.preventDefault();
+    });
+  });
+  function report(name, value) {
+    out.textContent = name + ':' + value + ':' +
+      document.queryCommandEnabled('undo') + ':' +
+      document.queryCommandEnabled('redo') + '|' + surface.textContent;
+  }
+  document.getElementById('insert').addEventListener('click', function() {
+    report('insert', document.execCommand('insertText', false, 'A'));
+  });
+  document.getElementById('undo').addEventListener('click', function() {
+    report('undo', document.execCommand('undo', false, ''));
+  });
+  document.getElementById('redo').addEventListener('click', function() {
+    report('redo', document.execCommand('redo', false, ''));
+  });
+  document.getElementById('report').addEventListener('click', function() {
+    report('report', true);
+  });
+</script>

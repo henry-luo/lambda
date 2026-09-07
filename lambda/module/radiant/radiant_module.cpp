@@ -1176,6 +1176,23 @@ RADIANT_C_API Item fn_radiant_focus_set(Item node_item, Item from_keyboard_item)
     return radiant_bool_item(true);
 }
 
+RADIANT_C_API Item fn_radiant_clear_editing_focus(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "CLEAR_EDITING_FOCUS");
+    DocState* state = elem && elem->doc ? (DocState*)elem->doc->state : nullptr;
+    if (!state) return radiant_bool_item(false);
+
+    // A mode transition may leave its synthetic host selected, but it must not
+    // retain that host as a future keyboard-input fallback (D7.2.5).
+    if (focus_get(state) == (View*)elem) {
+        focus_clear_preserve_selection(state);
+    }
+    if (state->editing.has_active_surface &&
+        state->editing.active_surface.owner == elem) {
+        editing_interaction_set_active_surface(state, nullptr);
+    }
+    return radiant_bool_item(true);
+}
+
 // Mouse policy chooses the focus target in Lambda, but the state-machine
 // transition must run after that behavior hook returns so focus/blur ordering
 // remains at the originating mousedown boundary.
@@ -2008,26 +2025,6 @@ extern "C" int editing_controller_caret_surface_kind(DocState* state);
 // has no vertical motion, a rich surface has no value boundary.
 // F11: the dropdown's hover cursor — which option is highlighted while the
 // popup is open. Storage and paint stay native; which key moves it does not.
-// F13: the DOM-range waist. The DOM counts offsets in UTF-16 code units; every
-// Lambda-facing offset is a codepoint (ES9), so both primitives convert at this
-// boundary and nowhere else.
-bool dom_edit_replace_range_u16(DocState* state, DomText* text,
-                                uint32_t start_u16, uint32_t end_u16,
-                                const char* replacement, uint32_t* out_caret_u16);
-bool dom_edit_set_caret_u16(DocState* state, uint32_t caret_u16);
-bool dom_edit_insert_at_boundary_u16(DocState* state, const char* text_data,
-                                     uint32_t* out_caret_u16);
-bool dom_edit_range_in_format(DocState* state, const char* tag);
-bool dom_edit_wrap_range_u16(DocState* state, uint32_t start_u16,
-                             uint32_t end_u16, const char* tag);
-bool dom_edit_unwrap_range_u16(DocState* state, uint32_t start_u16,
-                               uint32_t end_u16, const char* tag);
-bool dom_edit_insert_html(DocState* state, const char* html);
-bool dom_edit_replace_pending_range(DocState* state, const char* replacement);
-bool dom_edit_delete_pending_range(DocState* state);
-bool dom_edit_insert_paragraph(DocState* state);
-bool dom_edit_insert_line_break(DocState* state);
-
 static uint32_t radiant_u16_to_cp(const char* text, uint32_t u16) {
     if (!text) return 0;
     uint32_t bytes = (uint32_t)strlen(text);
@@ -2043,45 +2040,143 @@ static uint32_t radiant_cp_to_u16(const char* text, uint32_t cp) {
     return tc_utf8_to_utf16_length(text, (uint32_t)byte_off);
 }
 
+static DomEditInvocation* radiant_dom_edit_invocation(Item node_item,
+                                                      Item token_item,
+                                                      const char* operation,
+                                                      DomElement** out_elem) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, operation, &elem);
+    int64_t token = it2l(token_item);
+    if (out_elem) *out_elem = elem;
+    if (!state || !elem || token <= 0) return nullptr;
+    return dom_edit_invocation_lookup(state, elem, (uint64_t)token);
+}
+
+// The DOM behavior package keeps its own immutable editing session. This
+// bridge provides only a document-owned, precisely rooted value slot; native
+// code neither constructs nor reads the session's policy fields (D7.2.5).
+RADIANT_C_API Item fn_radiant_dom_edit_session(Item node_item) {
+    DocState* state = radiant_state_for_element(node_item, "DOM_EDIT_SESSION",
+                                                nullptr);
+    if (!state || !state->editing.dom_edit_session_rooted) return ItemNull;
+    return (Item){.item = state->editing.dom_edit_session_root};
+}
+
+RADIANT_C_API Item fn_radiant_dom_set_edit_session(Item node_item,
+                                                    Item session_item) {
+    DocState* state = radiant_state_for_element(node_item,
+                                                "DOM_SET_EDIT_SESSION",
+                                                nullptr);
+    if (!state) return ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> session_root(roots, session_item);
+    if (!roots.valid()) return ItemNull;
+    // Session updates made while a package DOM transaction is open must roll
+    // back with its ordinary DOM writes; the waist retains only this opaque
+    // root, never any package-owned policy fields (D7.2.5, D5.3.3).
+    if (!dom_edit_transaction_snapshot_edit_session(state)) return ItemNull;
+    if (!state->editing.dom_edit_session_rooted) {
+        state->editing.dom_edit_session_root = ItemNull.item;
+        if (!heap_try_register_gc_root(&state->editing.dom_edit_session_root)) {
+            return ItemNull;
+        }
+        state->editing.dom_edit_session_rooted = true;
+    }
+    state->editing.dom_edit_session_root = session_root.get().item;
+    return session_root.get();
+}
+
 // The text node an editing dispatch resolved to, and its range. Three scalar
 // accessors rather than one map, matching selection_start/selection_end: the
 // module has no map-building idiom, and a template reads these once each.
 // Null when the edit did not land inside a single text node. Structural
 // commands use the raw pending endpoints through their dedicated primitives.
-RADIANT_C_API Item fn_radiant_dom_edit_node(Item node_item) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item, "DOM_EDIT_NODE", &elem);
-    if (!state || !state->editing.pending_dom_edit_text) return ItemNull;
-    return radiant_dom_wrap_node((void*)state->editing.pending_dom_edit_text);
+RADIANT_C_API Item fn_radiant_dom_edit_node(Item node_item, Item token_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_EDIT_NODE", nullptr);
+    if (!invocation || !invocation->text) return ItemNull;
+    return radiant_dom_wrap_node((void*)invocation->text);
 }
 
-static Item radiant_dom_edit_offset(Item node_item, const char* op, bool want_end) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item, op, &elem);
-    if (!state) return ItemNull;
-    DomText* text = state->editing.pending_dom_edit_text;
+// Document-scoped behavior templates are attached to an ancestor such as
+// <body>. Recover the invocation's canonical host through the explicit token;
+// this is capability transport, not a command-policy lookup (D7.2.5).
+RADIANT_C_API Item fn_radiant_dom_edit_target(Item node_item, Item token_item) {
+    DomElement* receiver = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "DOM_EDIT_TARGET",
+                                                &receiver);
+    int64_t token = it2l(token_item);
+    DomEditInvocation* invocation =
+        state && receiver && token > 0
+            ? dom_edit_invocation_lookup_document(state, (uint64_t)token)
+            : nullptr;
+    if (!invocation || !invocation->host ||
+        invocation->host->doc != receiver->doc) {
+        return ItemNull;
+    }
+    return radiant_dom_wrap_node(invocation->host);
+}
+
+static Item radiant_dom_edit_offset(Item node_item, Item token_item,
+                                    const char* op, bool want_end) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(node_item,
+        token_item, op, nullptr);
+    if (!invocation) return ItemNull;
+    DomText* text = invocation->text;
     if (!text) return ItemNull;
     const char* data = text->text ? text->text : "";
-    uint32_t u16 = want_end ? state->editing.pending_dom_edit_end
-                            : state->editing.pending_dom_edit_start;
+    uint32_t u16 = want_end ? invocation->text_end : invocation->text_start;
     return radiant_int_item((int64_t)radiant_u16_to_cp(data, u16));
 }
 
-RADIANT_C_API Item fn_radiant_dom_edit_start(Item node_item) {
-    return radiant_dom_edit_offset(node_item, "DOM_EDIT_START", false);
+RADIANT_C_API Item fn_radiant_dom_edit_start(Item node_item, Item token_item) {
+    return radiant_dom_edit_offset(node_item, token_item, "DOM_EDIT_START", false);
 }
 
-RADIANT_C_API Item fn_radiant_dom_edit_end(Item node_item) {
-    return radiant_dom_edit_offset(node_item, "DOM_EDIT_END", true);
+RADIANT_C_API Item fn_radiant_dom_edit_end(Item node_item, Item token_item) {
+    return radiant_dom_edit_offset(node_item, token_item, "DOM_EDIT_END", true);
+}
+
+// Generic live Range endpoints let package planners classify affected roots
+// without asking native code to recognize a block, list, or formatting tag.
+static Item radiant_dom_edit_container(Item node_item, Item token_item,
+                                       const char* operation, bool want_end) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, operation, nullptr);
+    DomNode* node = invocation ? (want_end ? invocation->end.node
+                                            : invocation->start.node)
+                               : nullptr;
+    return node ? radiant_dom_wrap_node(node) : ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_dom_edit_start_container(Item node_item,
+                                                       Item token_item) {
+    return radiant_dom_edit_container(node_item, token_item,
+                                      "DOM_EDIT_START_CONTAINER", false);
+}
+
+RADIANT_C_API Item fn_radiant_dom_edit_end_container(Item node_item,
+                                                     Item token_item) {
+    return radiant_dom_edit_container(node_item, token_item,
+                                      "DOM_EDIT_END_CONTAINER", true);
+}
+
+// The planner records the captured document epoch so its plan can be audited
+// against the same explicit capability every generic mutator validates.
+RADIANT_C_API Item fn_radiant_dom_edit_epoch(Item node_item, Item token_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_EDIT_EPOCH", nullptr);
+    return invocation ? radiant_int_item((int64_t)invocation->mutation_epoch)
+                      : ItemNull;
 }
 
 // The resolved node's current text, so a template can compute a delete range
 // without a second round trip through the DOM.
-RADIANT_C_API Item fn_radiant_dom_edit_text(Item node_item) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item, "DOM_EDIT_TEXT", &elem);
-    if (!state || !state->editing.pending_dom_edit_text) return ItemNull;
-    DomText* text = state->editing.pending_dom_edit_text;
+RADIANT_C_API Item fn_radiant_dom_edit_text(Item node_item, Item token_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_EDIT_TEXT", nullptr);
+    if (!invocation || !invocation->text) return ItemNull;
+    DomText* text = invocation->text;
     return radiant_string_item(text->text ? text->text : "");
 }
 
@@ -2089,16 +2184,17 @@ RADIANT_C_API Item fn_radiant_dom_edit_text(Item node_item) {
 // none. A different operation from a range replacement — `dom_replace_range`
 // addresses an existing node — so it is named separately rather than folded in.
 // Returns the new caret offset in codepoints, or null.
-RADIANT_C_API Item fn_radiant_dom_insert_at_boundary(Item node_item, Item text_item) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item, "DOM_INSERT_AT_BOUNDARY", &elem);
-    if (!state) return ItemNull;
+RADIANT_C_API Item fn_radiant_dom_insert_at_boundary(Item node_item,
+                                                     Item token_item, Item text_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_INSERT_AT_BOUNDARY", nullptr);
+    if (!invocation) return ItemNull;
     const char* data = fn_to_cstr(text_item);
     uint32_t caret_u16 = 0;
-    if (!dom_edit_insert_at_boundary_u16(state, data ? data : "", &caret_u16)) {
+    if (!dom_edit_insert_at_boundary_u16(invocation, data ? data : "", &caret_u16)) {
         return ItemNull;
     }
-    DomNode* caret = dom_edit_caret_node();
+    DomNode* caret = invocation->caret_node;
     const char* after = (caret && caret->is_text())
         ? (static_cast<DomText*>(caret)->text ? static_cast<DomText*>(caret)->text : "")
         : "";
@@ -2107,27 +2203,80 @@ RADIANT_C_API Item fn_radiant_dom_insert_at_boundary(Item node_item, Item text_i
 
 // Place the caret in the resolved text node without editing it. Two arguments,
 // deliberately: this exists because dom_replace_range could not grow a fifth.
-RADIANT_C_API Item fn_radiant_dom_set_caret(Item node_item, Item offset_item) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item, "DOM_SET_CARET", &elem);
-    if (!state) return (Item){.item = b2it(0)};
-    DomText* text = state->editing.pending_dom_edit_text;
+RADIANT_C_API Item fn_radiant_dom_set_caret(Item node_item, Item token_item,
+                                            Item offset_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_SET_CARET", nullptr);
+    if (!invocation) return (Item){.item = b2it(0)};
+    DomText* text = invocation->text;
     if (!text) return (Item){.item = b2it(0)};
     const char* data = text->text ? text->text : "";
     int64_t cp = it2l(offset_item);
     if (cp < 0) cp = 0;
-    bool ok = dom_edit_set_caret_u16(state, radiant_cp_to_u16(data, (uint32_t)cp));
+    bool ok = dom_edit_set_caret_u16(invocation,
+                                     radiant_cp_to_u16(data, (uint32_t)cp));
     return (Item){.item = b2it(ok ? 1 : 0)};
+}
+
+// Open one generic transaction before a package plan composes ordinary DOM
+// tree/attribute steps. It validates only the opaque invocation capability;
+// no command or structural policy reaches the waist (D7.2.5).
+RADIANT_C_API Item fn_radiant_dom_edit_begin_transaction(Item node_item,
+                                                         Item token_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_EDIT_BEGIN_TRANSACTION", nullptr);
+    return radiant_bool_item(dom_edit_invocation_begin_transaction(invocation));
+}
+
+RADIANT_C_API Item fn_radiant_dom_edit_abort_transaction(Item node_item,
+                                                         Item token_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_EDIT_ABORT_TRANSACTION", nullptr);
+    return radiant_bool_item(dom_edit_invocation_abort_transaction(invocation));
+}
+
+// Retained history is a generic DOM transaction snapshot. The bridge exposes
+// opaque document-local ids only; package code retains command and grouping
+// policy while the waist owns identity-preserving replay (D7.2.5, D5.3.3).
+RADIANT_C_API Item fn_radiant_dom_edit_retain_delta(Item node_item,
+                                                    Item token_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_EDIT_RETAIN_DELTA", nullptr);
+    uint64_t delta_id = dom_edit_invocation_retain_delta(invocation);
+    return delta_id == 0 ? ItemNull : radiant_int_item((int64_t)delta_id);
+}
+
+RADIANT_C_API Item fn_radiant_dom_edit_replay_delta(Item node_item,
+                                                    Item token_item,
+                                                    Item delta_item,
+                                                    Item undo_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_EDIT_REPLAY_DELTA", nullptr);
+    int64_t delta_id = it2l(delta_item);
+    if (delta_id <= 0) return radiant_bool_item(false);
+    return radiant_bool_item(dom_edit_invocation_replay_delta(invocation,
+        (uint64_t)delta_id, it2b(undo_item) != 0));
+}
+
+RADIANT_C_API Item fn_radiant_dom_edit_release_delta(Item node_item,
+                                                     Item delta_item) {
+    DomElement* element = nullptr;
+    DocState* state = radiant_state_for_element(node_item,
+        "DOM_EDIT_RELEASE_DELTA", &element);
+    int64_t delta_id = it2l(delta_item);
+    return radiant_bool_item(state && element && delta_id > 0 &&
+        dom_edit_release_retained_delta(state, element, (uint64_t)delta_id));
 }
 
 // Splice the resolved text node. Returns the new caret offset in codepoints, or
 // null when the splice did not happen.
-RADIANT_C_API Item fn_radiant_dom_replace_range(Item node_item, Item start_item,
-                                                Item end_item, Item text_item) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item, "DOM_REPLACE_RANGE", &elem);
-    if (!state) return ItemNull;
-    DomText* text = state->editing.pending_dom_edit_text;
+RADIANT_C_API Item fn_radiant_dom_replace_range(Item node_item, Item token_item,
+                                                Item start_item, Item end_item,
+                                                Item text_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_REPLACE_RANGE", nullptr);
+    if (!invocation) return ItemNull;
+    DomText* text = invocation->text;
     if (!text) return ItemNull;
     const char* data = text->text ? text->text : "";
     int64_t cp_start = it2l(start_item), cp_end = it2l(end_item);
@@ -2136,7 +2285,7 @@ RADIANT_C_API Item fn_radiant_dom_replace_range(Item node_item, Item start_item,
     const char* repl = fn_to_cstr(text_item);
     uint32_t caret_u16 = 0;
     const char* repl_text = repl ? repl : "";
-    if (!dom_edit_replace_range_u16(state, text,
+    if (!dom_edit_invocation_replace_range_u16(invocation, text,
                                     radiant_cp_to_u16(data, (uint32_t)cp_start),
                                     radiant_cp_to_u16(data, (uint32_t)cp_end),
                                     repl_text, &caret_u16)) {
@@ -2146,23 +2295,13 @@ RADIANT_C_API Item fn_radiant_dom_replace_range(Item node_item, Item start_item,
     return radiant_int_item((int64_t)radiant_u16_to_cp(after, caret_u16));
 }
 
-// F14.1: the formatting primitives. All offsets in codepoints, like every
-// other Lambda-facing offset (ES9); the tag and the toggle decision come from
-// `commands.ls`, which is the whole point of the seam.
-RADIANT_C_API Item fn_radiant_dom_range_format(Item node_item, Item tag_item) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item, "DOM_RANGE_FORMAT", &elem);
-    const char* tag = fn_to_cstr(tag_item);
-    if (!state || !tag) return (Item){.item = b2it(0)};
-    return (Item){.item = b2it(dom_edit_range_in_format(state, tag) ? 1 : 0)};
-}
-
 // The codepoint offsets a wrap/unwrap addresses are converted against the
 // resolved node's *current* text, so this helper has to run before the splits.
-static bool radiant_dom_format_bounds(DocState* state, Item start_item,
+static bool radiant_dom_format_bounds(DomEditInvocation* invocation,
+                                      Item start_item,
                                       Item end_item, uint32_t* out_start,
                                       uint32_t* out_end) {
-    DomText* text = state ? state->editing.pending_dom_edit_text : nullptr;
+    DomText* text = invocation ? invocation->text : nullptr;
     if (!text) return false;
     const char* data = text->text ? text->text : "";
     int64_t cp_start = it2l(start_item), cp_end = it2l(end_item);
@@ -2173,76 +2312,106 @@ static bool radiant_dom_format_bounds(DocState* state, Item start_item,
     return true;
 }
 
-RADIANT_C_API Item fn_radiant_dom_wrap_range(Item node_item, Item start_item,
-                                             Item end_item, Item tag_item) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item, "DOM_WRAP_RANGE", &elem);
+RADIANT_C_API Item fn_radiant_dom_wrap_range(Item node_item, Item token_item,
+                                             Item start_item, Item end_item,
+                                             Item tag_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_WRAP_RANGE", nullptr);
     const char* tag = fn_to_cstr(tag_item);
     uint32_t start = 0, end = 0;
-    if (!state || !tag || !radiant_dom_format_bounds(state, start_item, end_item,
-                                                     &start, &end)) {
+    if (!invocation || !tag || !radiant_dom_format_bounds(invocation, start_item,
+                                                           end_item, &start, &end)) {
         return (Item){.item = b2it(0)};
     }
-    return (Item){.item = b2it(dom_edit_wrap_range_u16(state, start, end, tag) ? 1 : 0)};
+    return (Item){.item = b2it(dom_edit_wrap_range_u16(invocation, start, end, tag) ? 1 : 0)};
 }
 
-RADIANT_C_API Item fn_radiant_dom_unwrap_range(Item node_item, Item start_item,
-                                               Item end_item, Item tag_item) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item, "DOM_UNWRAP_RANGE", &elem);
-    const char* tag = fn_to_cstr(tag_item);
+RADIANT_C_API Item fn_radiant_dom_unwrap_range(Item node_item, Item token_item,
+                                               Item start_item, Item end_item,
+                                               Item format_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_UNWRAP_RANGE", nullptr);
+    DomElement* format = radiant_dom_element_from_item(format_item,
+                                                       "DOM_UNWRAP_RANGE");
     uint32_t start = 0, end = 0;
-    if (!state || !tag || !radiant_dom_format_bounds(state, start_item, end_item,
-                                                     &start, &end)) {
+    if (!invocation || !format || !radiant_dom_format_bounds(invocation, start_item,
+                                                           end_item, &start, &end)) {
         return (Item){.item = b2it(0)};
     }
-    return (Item){.item = b2it(dom_edit_unwrap_range_u16(state, start, end, tag) ? 1 : 0)};
+    return (Item){.item = b2it(dom_edit_unwrap_range_u16(
+        invocation, start, end, format) ? 1 : 0)};
 }
 
 // insertHTML: the command formerly special-cased by the native bridge, now
 // reached through the same package command path as every other command.
-RADIANT_C_API Item fn_radiant_dom_insert_html(Item node_item, Item html_item) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item, "DOM_INSERT_HTML", &elem);
+RADIANT_C_API Item fn_radiant_dom_insert_html(Item node_item, Item token_item,
+                                              Item html_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_INSERT_HTML", nullptr);
     const char* html = fn_to_cstr(html_item);
-    if (!state || !html) return (Item){.item = b2it(0)};
-    return (Item){.item = b2it(dom_edit_insert_html(state, html) ? 1 : 0)};
+    if (!invocation || !html) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(dom_edit_insert_html(invocation, html) ? 1 : 0)};
 }
 
 // F14.2: structural range replacement. The pending endpoints stay in the
 // waist, so this Lambda-facing primitive needs only the host and payload.
 RADIANT_C_API Item fn_radiant_dom_replace_dom_range(Item node_item,
-                                                    Item text_item) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item,
-                                                "DOM_REPLACE_DOM_RANGE", &elem);
+                                                    Item token_item, Item text_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_REPLACE_DOM_RANGE", nullptr);
     const char* text = fn_to_cstr(text_item);
-    if (!state || !text) return (Item){.item = b2it(0)};
-    return (Item){.item = b2it(dom_edit_replace_pending_range(state, text) ? 1 : 0)};
+    if (!invocation || !text) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(dom_edit_replace_range(invocation, text) ? 1 : 0)};
 }
 
-RADIANT_C_API Item fn_radiant_dom_delete_dom_range(Item node_item) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item,
-                                                "DOM_DELETE_DOM_RANGE", &elem);
-    if (!state) return (Item){.item = b2it(0)};
-    return (Item){.item = b2it(dom_edit_delete_pending_range(state) ? 1 : 0)};
+RADIANT_C_API Item fn_radiant_dom_delete_dom_range(Item node_item, Item token_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_DELETE_DOM_RANGE", nullptr);
+    if (!invocation) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(dom_edit_delete_range(invocation) ? 1 : 0)};
 }
 
-RADIANT_C_API Item fn_radiant_dom_insert_paragraph(Item node_item) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item,
-                                                "DOM_INSERT_PARAGRAPH", &elem);
-    if (!state) return (Item){.item = b2it(0)};
-    return (Item){.item = b2it(dom_edit_insert_paragraph(state) ? 1 : 0)};
+RADIANT_C_API Item fn_radiant_dom_insert_paragraph(Item node_item, Item token_item,
+                                                    Item source_item, Item tag_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_INSERT_PARAGRAPH", nullptr);
+    DomElement* source = radiant_dom_element_from_item(source_item,
+                                                        "DOM_INSERT_PARAGRAPH");
+    const char* tag = fn_to_cstr(tag_item);
+    if (!invocation || !source || !tag) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(dom_edit_insert_paragraph(
+        invocation, source, tag) ? 1 : 0)};
 }
 
-RADIANT_C_API Item fn_radiant_dom_insert_line_break(Item node_item) {
-    DomElement* elem = nullptr;
-    DocState* state = radiant_state_for_element(node_item,
-                                                "DOM_INSERT_LINE_BREAK", &elem);
-    if (!state) return (Item){.item = b2it(0)};
-    return (Item){.item = b2it(dom_edit_insert_line_break(state) ? 1 : 0)};
+// A package planner passes the exact two blocks it decided are compatible.
+// The waist only validates document/host adjacency and moves their children.
+RADIANT_C_API Item fn_radiant_dom_merge_adjacent_blocks(Item node_item,
+                                                        Item token_item,
+                                                        Item start_item,
+                                                        Item end_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_MERGE_ADJACENT_BLOCKS", nullptr);
+    DomElement* start_block = radiant_dom_element_from_item(
+        start_item, "DOM_MERGE_ADJACENT_BLOCKS");
+    DomElement* end_block = radiant_dom_element_from_item(
+        end_item, "DOM_MERGE_ADJACENT_BLOCKS");
+    if (!invocation || !start_block || !end_block) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(dom_edit_merge_adjacent_blocks(
+        invocation, start_block, end_block) ? 1 : 0)};
+}
+
+RADIANT_C_API Item fn_radiant_dom_insert_line_break(Item node_item, Item token_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_INSERT_LINE_BREAK", nullptr);
+    if (!invocation) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(dom_edit_insert_line_break(invocation) ? 1 : 0)};
+}
+
+RADIANT_C_API Item fn_radiant_dom_select_edit_host(Item node_item,
+                                                    Item token_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_EDIT_SELECT_HOST", nullptr);
+    return (Item){.item = b2it(dom_edit_select_host(invocation) ? 1 : 0)};
 }
 
 extern "C" void radiant_key_intent_request(const char* name);
@@ -2350,6 +2519,50 @@ RADIANT_C_API Item fn_radiant_clipboard_text() {
     const char* clip = clipboard_get_text();
     if (!clip || !*clip) return ItemNull;
     return radiant_string_item(clip);
+}
+
+// The package chooses whether a selection is copied, cut, or represented as
+// rich/plain text.  These capability-scoped helpers only serialize the live
+// DOM Selection and reach the platform clipboard mechanism (D7.2.5).
+RADIANT_C_API Item fn_radiant_dom_edit_selection_text(Item node_item,
+                                                      Item token_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_EDIT_SELECTION_TEXT", nullptr);
+    if (!invocation || !invocation->state) return ItemNull;
+    Arena* arena = mem_arena_create(nullptr, MEM_ROLE_TEMP, "edit.selection_text");
+    if (!arena) return ItemNull;
+    char* value = state_store_extract_selection_text(invocation->state, arena);
+    Item result = value ? radiant_string_item(value) : ItemNull;
+    arena_destroy(arena);
+    return result;
+}
+
+RADIANT_C_API Item fn_radiant_dom_edit_selection_html(Item node_item,
+                                                      Item token_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_EDIT_SELECTION_HTML", nullptr);
+    if (!invocation || !invocation->state) return ItemNull;
+    Arena* arena = mem_arena_create(nullptr, MEM_ROLE_TEMP, "edit.selection_html");
+    if (!arena) return ItemNull;
+    char* value = state_store_extract_selection_html(invocation->state, arena);
+    Item result = value ? radiant_string_item(value) : ItemNull;
+    arena_destroy(arena);
+    return result;
+}
+
+RADIANT_C_API Item fn_radiant_dom_edit_clipboard_write(Item node_item,
+                                                       Item token_item,
+                                                       Item html_item,
+                                                       Item text_item) {
+    DomEditInvocation* invocation = radiant_dom_edit_invocation(
+        node_item, token_item, "DOM_EDIT_CLIPBOARD_WRITE", nullptr);
+    if (!invocation) return radiant_bool_item(false);
+    const char* html = fn_to_cstr(html_item);
+    const char* text = fn_to_cstr(text_item);
+    if (!text || !text[0]) return radiant_bool_item(false);
+    if (html && html[0]) clipboard_copy_rich(html, text);
+    else clipboard_copy_text(text);
+    return radiant_bool_item(true);
 }
 
 // F2b/#4: the password reveal window. Which control reveals, what gets revealed
@@ -3171,6 +3384,9 @@ RADIANT_C_API void radiant_jube_register_static(void) {
     extern "C" Item dom_engine_##name(void) { return fn(); }
 #define RADIANT_PROVIDE_ENGINE_4(name, fn) \
     extern "C" Item dom_engine_##name(Item a, Item b, Item c, Item d) { return fn(a, b, c, d); }
+#define RADIANT_PROVIDE_ENGINE_5(name, fn) \
+    extern "C" Item dom_engine_##name(Item a, Item b, Item c, Item d, Item e) { \
+        return fn(a, b, c, d, e); }
 #define RADIANT_PROVIDE_ENGINE_1(name, fn) \
     extern "C" Item dom_engine_##name(Item a) { return fn(a); }
 #define RADIANT_PROVIDE_ENGINE_2(name, fn) \
@@ -3183,6 +3399,7 @@ RADIANT_PROVIDE_ENGINE_3(set_state, fn_radiant_set_state)
 RADIANT_PROVIDE_ENGINE_1(request_change, fn_radiant_request_change)
 RADIANT_PROVIDE_ENGINE_1(focused, fn_radiant_focused)
 RADIANT_PROVIDE_ENGINE_2(focus_set, fn_radiant_focus_set)
+RADIANT_PROVIDE_ENGINE_1(clear_editing_focus, fn_radiant_clear_editing_focus)
 RADIANT_PROVIDE_ENGINE_1(mouse_focus, fn_radiant_mouse_focus)
 RADIANT_PROVIDE_ENGINE_1(activate_popover, fn_radiant_activate_popover)
 RADIANT_PROVIDE_ENGINE_1(keyboard_click, fn_radiant_keyboard_click)
@@ -3191,25 +3408,40 @@ RADIANT_PROVIDE_ENGINE_3(caret_operation, fn_radiant_caret_operation)
 RADIANT_PROVIDE_ENGINE_2(pointer_selection, fn_radiant_pointer_selection)
 RADIANT_PROVIDE_ENGINE_1(clear_ime_preedit, fn_radiant_clear_ime_preedit)
 RADIANT_PROVIDE_ENGINE_0(clipboard_text, fn_radiant_clipboard_text)
+RADIANT_PROVIDE_ENGINE_2(edit_selection_text, fn_radiant_dom_edit_selection_text)
+RADIANT_PROVIDE_ENGINE_2(edit_selection_html, fn_radiant_dom_edit_selection_html)
+RADIANT_PROVIDE_ENGINE_4(edit_clipboard_write, fn_radiant_dom_edit_clipboard_write)
 RADIANT_PROVIDE_ENGINE_1(context_menu_target, fn_radiant_context_menu_target)
-RADIANT_PROVIDE_ENGINE_2(edit_insert_at_boundary, fn_radiant_dom_insert_at_boundary)
-RADIANT_PROVIDE_ENGINE_1(edit_insert_break, fn_radiant_dom_insert_line_break)
+RADIANT_PROVIDE_ENGINE_3(edit_insert_at_boundary, fn_radiant_dom_insert_at_boundary)
+RADIANT_PROVIDE_ENGINE_2(edit_insert_break, fn_radiant_dom_insert_line_break)
+RADIANT_PROVIDE_ENGINE_2(edit_select_host, fn_radiant_dom_select_edit_host)
 RADIANT_PROVIDE_ENGINE_4(edit_replace_range, fn_radiant_replace_range)
-RADIANT_PROVIDE_ENGINE_1(edit_split_block, fn_radiant_dom_insert_paragraph)
+RADIANT_PROVIDE_ENGINE_4(edit_split_block, fn_radiant_dom_insert_paragraph)
 RADIANT_PROVIDE_ENGINE_2(key_intent, fn_radiant_key_intent)
 RADIANT_PROVIDE_ENGINE_3(navigation_destination, fn_radiant_navigation_destination)
 RADIANT_PROVIDE_ENGINE_2(open_context_menu, fn_radiant_open_context_menu)
 RADIANT_PROVIDE_ENGINE_1(request_navigation, fn_radiant_request_navigation)
-RADIANT_PROVIDE_ENGINE_2(set_caret, fn_radiant_dom_set_caret)
+RADIANT_PROVIDE_ENGINE_3(set_caret, fn_radiant_dom_set_caret)
 RADIANT_PROVIDE_ENGINE_3(set_ime_preedit, fn_radiant_set_ime_preedit)
 RADIANT_PROVIDE_ENGINE_3(set_password_reveal, fn_radiant_set_password_reveal)
 RADIANT_PROVIDE_ENGINE_1(tc_value, fn_radiant_text_control)
 RADIANT_PROVIDE_ENGINE_1(ime_preedit, fn_radiant_ime_preedit)
 RADIANT_PROVIDE_ENGINE_1(tc_selection_start, fn_radiant_selection_start)
 RADIANT_PROVIDE_ENGINE_1(tc_selection_end, fn_radiant_selection_end)
-RADIANT_PROVIDE_ENGINE_1(edit_node, fn_radiant_dom_edit_node)
-RADIANT_PROVIDE_ENGINE_1(edit_start, fn_radiant_dom_edit_start)
-RADIANT_PROVIDE_ENGINE_1(edit_end, fn_radiant_dom_edit_end)
+RADIANT_PROVIDE_ENGINE_2(edit_node, fn_radiant_dom_edit_node)
+RADIANT_PROVIDE_ENGINE_2(edit_target, fn_radiant_dom_edit_target)
+RADIANT_PROVIDE_ENGINE_2(edit_start, fn_radiant_dom_edit_start)
+RADIANT_PROVIDE_ENGINE_2(edit_end, fn_radiant_dom_edit_end)
+RADIANT_PROVIDE_ENGINE_2(edit_start_container, fn_radiant_dom_edit_start_container)
+RADIANT_PROVIDE_ENGINE_2(edit_end_container, fn_radiant_dom_edit_end_container)
+RADIANT_PROVIDE_ENGINE_2(edit_epoch, fn_radiant_dom_edit_epoch)
+RADIANT_PROVIDE_ENGINE_2(edit_begin_transaction, fn_radiant_dom_edit_begin_transaction)
+RADIANT_PROVIDE_ENGINE_2(edit_abort_transaction, fn_radiant_dom_edit_abort_transaction)
+RADIANT_PROVIDE_ENGINE_2(edit_retain_delta, fn_radiant_dom_edit_retain_delta)
+RADIANT_PROVIDE_ENGINE_4(edit_replay_delta, fn_radiant_dom_edit_replay_delta)
+RADIANT_PROVIDE_ENGINE_2(edit_release_delta, fn_radiant_dom_edit_release_delta)
+RADIANT_PROVIDE_ENGINE_1(edit_session, fn_radiant_dom_edit_session)
+RADIANT_PROVIDE_ENGINE_2(set_edit_session, fn_radiant_dom_set_edit_session)
 
 // is_focusable has no radiant.* spelling to forward to: the engine keeps the
 // predicate internal and publishes only focus_candidates, the whole list. A
@@ -3245,14 +3477,14 @@ RADIANT_PROVIDE_ENGINE_1(focus_candidates, fn_radiant_focus_candidates)
 RADIANT_PROVIDE_ENGINE_1(check_validity, fn_radiant_check_validity)
 RADIANT_PROVIDE_ENGINE_1(close_context_menu, fn_radiant_close_context_menu)
 RADIANT_PROVIDE_ENGINE_1(custom_validity, fn_radiant_custom_validity)
-RADIANT_PROVIDE_ENGINE_1(dom_delete_dom_range, fn_radiant_dom_delete_dom_range)
-RADIANT_PROVIDE_ENGINE_1(dom_edit_text, fn_radiant_dom_edit_text)
-RADIANT_PROVIDE_ENGINE_2(dom_insert_html, fn_radiant_dom_insert_html)
-RADIANT_PROVIDE_ENGINE_2(dom_range_format, fn_radiant_dom_range_format)
-RADIANT_PROVIDE_ENGINE_2(dom_replace_dom_range, fn_radiant_dom_replace_dom_range)
-RADIANT_PROVIDE_ENGINE_4(dom_replace_range, fn_radiant_dom_replace_range)
-RADIANT_PROVIDE_ENGINE_4(dom_unwrap_range, fn_radiant_dom_unwrap_range)
-RADIANT_PROVIDE_ENGINE_4(dom_wrap_range, fn_radiant_dom_wrap_range)
+RADIANT_PROVIDE_ENGINE_2(dom_delete_dom_range, fn_radiant_dom_delete_dom_range)
+RADIANT_PROVIDE_ENGINE_2(dom_edit_text, fn_radiant_dom_edit_text)
+RADIANT_PROVIDE_ENGINE_4(dom_merge_adjacent_blocks, fn_radiant_dom_merge_adjacent_blocks)
+RADIANT_PROVIDE_ENGINE_3(dom_insert_html, fn_radiant_dom_insert_html)
+RADIANT_PROVIDE_ENGINE_3(dom_replace_dom_range, fn_radiant_dom_replace_dom_range)
+RADIANT_PROVIDE_ENGINE_5(dom_replace_range, fn_radiant_dom_replace_range)
+RADIANT_PROVIDE_ENGINE_5(dom_unwrap_range, fn_radiant_dom_unwrap_range)
+RADIANT_PROVIDE_ENGINE_5(dom_wrap_range, fn_radiant_dom_wrap_range)
 RADIANT_PROVIDE_ENGINE_1(dropdown_open, fn_radiant_dropdown_open)
 RADIANT_PROVIDE_ENGINE_1(embedded_document_root, fn_radiant_embedded_document_root)
 RADIANT_PROVIDE_ENGINE_1(embedding_element, fn_radiant_embedding_element)

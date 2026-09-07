@@ -557,7 +557,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir c2mir-driver verify-mir-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
-	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui view-ui native-gui-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing check-error-recovery \
+	test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui view-ui native-gui-ui editable-unit editable-ui editable-editor-e2e test-editable test-wpt-contenteditable test-chromium-contenteditable audit-editable-ownership editable-package-disabled test-editable-ua-focused editable-form-regressions test-editable-ua drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report test-jube-node-net-crypto-dynamic test-mathlive
@@ -2468,11 +2468,41 @@ test-reactive-ui: build-test
 editable-unit: build-test
 	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_dom_action,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,editable_template_gate" $(ARGS)
 
+# The WPT manifest verifies the complete pinned contenteditable directory before
+# the runner executes its explicitly automated DOM/crash subset.
+test-wpt-contenteditable: build-test
+	@node test/wpt/verify_contenteditable_manifest.mjs
+	@node test/wpt/verify_contenteditable_manifest.mjs test/wpt/input_events_editing_manifest.json
+	@./test/test_wpt_contenteditable_gtest.exe $(ARGS)
+
+test-chromium-contenteditable: build-test
+	@node test/wpt/verify_contenteditable_manifest.mjs test/chromium/contenteditable_manifest.json
+	@./test/test_chromium_contenteditable_gtest.exe $(ARGS)
+
+audit-editable-ownership:
+	@node test/editing/audit_contenteditable_ownership.mjs
+
+# D7.2.5 requires package failure to leave rich-edit defaults unavailable,
+# while author beforeinput listeners still observe the platform request.
+editable-package-disabled: build-test
+	@env RADIANT_DOM_PKG=0 ./lambda.exe view test/html/editable-dom-package-disabled.html --event-file test/ui/test_editing_contenteditable_package_disabled.json --event-result temp/editable-package-disabled-result.json --headless --no-log --font-dir test/layout/data/font
+
+# Focused UA coverage is intentionally separate from the existing editor
+# regressions: it runs only promoted no-emulation corpus cases plus direct
+# package behavior fixtures.
+test-editable-ua-focused: audit-editable-ownership editable-package-disabled editable-unit editable-ui test-wpt-contenteditable test-chromium-contenteditable
+	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_blocks,test_editing_contenteditable_clipboard,test_editing_contenteditable_designmode,test_editing_contenteditable_format_values,test_editing_contenteditable_history,test_editing_contenteditable_structural_history,test_editing_contenteditable_structural_history_direction,test_editing_contenteditable_indent,test_editing_contenteditable_inline_formats,test_editing_contenteditable_justify,test_editing_contenteditable_lists,test_editing_contenteditable_objects,test_editing_contenteditable_plaintext,test_editing_contenteditable_queries,test_editing_contenteditable_remove_format,test_editing_contenteditable_rich_clipboard,test_editing_contenteditable_select_all,test_editing_contenteditable_settings,test_editing_contenteditable_typing_state" $(ARGS)
+
+editable-form-regressions: build-test
+	@./test/test_ui_automation_gtest.exe --suite editor --test "test_form_input_typing,test_form_input_undo_redo,test_form_ime_compose,test_editing_paired_history_textarea" $(ARGS)
+
+test-editable-ua: test-editable-ua-focused test-editable editable-form-regressions
+
 editable-ui: build-test
 	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_dom_action,test_editing_contenteditable_composition,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,test_editing_paired_false_island_contenteditable,rte_typing_at_caret,editable_mixed_routes" $(ARGS)
 
 editable-editor-e2e: build-test
-	@./test/test_ui_automation_gtest.exe --suite editor --test "editable-editors-*" $(ARGS)
+	@./test/test_ui_automation_gtest.exe --suite editor --test "editable_editors_*" $(ARGS)
 
 test-editable: editable-unit editable-ui editable-editor-e2e
 

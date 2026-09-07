@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable object commands</title>
+<div id="link" contenteditable="true" tabindex="0">link</div>
+<div id="image" contenteditable="true" tabindex="0">tail</div>
+<button id="create">create</button>
+<button id="unlink">unlink</button>
+<button id="image-command">image</button>
+<button id="rule">rule</button>
+<div id="out"></div>
+<script>
+  var link = document.getElementById('link');
+  var image = document.getElementById('image');
+  var out = document.getElementById('out');
+  ['create', 'unlink', 'image-command', 'rule'].forEach(function(id) {
+    document.getElementById(id).addEventListener('mousedown', function(event) {
+      event.preventDefault();
+    });
+  });
+  document.getElementById('create').addEventListener('click', function() {
+    out.textContent = 'create:' + document.execCommand('createLink', false, '/next') +
+      '|' + link.innerHTML;
+  });
+  document.getElementById('unlink').addEventListener('click', function() {
+    out.textContent = 'unlink:' + document.execCommand('unlink', false, '') +
+      '|' + link.innerHTML;
+  });
+  document.getElementById('image-command').addEventListener('click', function() {
+    out.textContent = 'image:' + document.execCommand('insertImage', false, '/pic.png') +
+      '|' + image.innerHTML;
+  });
+  document.getElementById('rule').addEventListener('click', function() {
+    out.textContent = 'rule:' + document.execCommand('insertHorizontalRule', false, '') +
+      '|' + image.innerHTML;
+  });
+</script>
