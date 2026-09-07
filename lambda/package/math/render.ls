@@ -110,7 +110,10 @@ fn render_math_root(node, context) {
 fn render_group(node, context) {
     let children = render_children(node, context)
     let spacing_context = group_spacing_context(context)
-    let spaced = apply_spacing(children, spacing_context)
+    // MathLive's colorbox payload is an inner presentation list: its binary
+    // atoms do not receive surrounding TeX inter-atom glue.
+    let spaced = if (context.colorbox_content == true and context.frac_gstyle != null) children
+        else apply_spacing(children, spacing_context)
     transparent_hbox(spaced)
 }
 
@@ -143,7 +146,7 @@ fn render_symbol_command(node, context) {
         render_standalone_long_arrow(cmd_text)
     else if (cmd_text == "\\iff")
         render_iff_symbol(display_text, cls)
-    else if (cmd_text == "\\perp")
+    else if (cmd_text == "\\perp" or cmd_text == "perp")
         render_perp_symbol(display_text)
     else if (unicode != null and sym.is_limit_op(cmd_text))
         render_limit_operator_symbol(display_text, context)
@@ -234,7 +237,7 @@ fn render_relation(node, context) {
 fn render_perp_symbol(display) {
     // MathLive's U+27C2 relation carries Main-Regular descent; without it the
     // root hbox omits the bottom strut for `EF \perp GH`.
-    box.ml_box_full(<span class: css.CMR, display>, 0.7, 0.19444, 0.8,
+    box.ml_box_full(<span class: css.CMR, display>, 0.7, 0.2, 0.8,
         "mrel", 0.0, 0.0, 0.7)
 }
 
@@ -303,7 +306,12 @@ fn punct_display_text(text) {
 
 fn render_escaped_symbol(node, context) {
     let text = get_text(node)
-    box.text_box(escaped_symbol_display_text(text), css.CMR, "mord")
+    let display = escaped_symbol_display_text(text)
+    // MathLive reserves the narrow trailing correction on escaped underscore.
+    if (display == "_") box.ml_box_full(
+        <span class: css.CMR, style: "margin-right:0.03em", display>,
+        0.75, 0.31, 0.5, "mord", 0.0, 0.0, 0.75)
+    else box.text_box(display, css.CMR, "mord")
 }
 
 fn escaped_symbol_display_text(text) {
@@ -434,7 +442,9 @@ fn render_command(node, context) {
             if (op_name != null) {
             box.with_class(box.text_box(op_name, css.CMR, "mop"), css.OP_GROUP)
             } else {
-                render_unknown_command_node(node, name_str, context)
+            if (is_sized_delimiter_error_name(name_str))
+                render_unknown_command("\\\\" ++ name_str)
+            else render_unknown_command_node(node, name_str, context)
             }
         }
     }
@@ -445,6 +455,12 @@ fn render_command(node, context) {
 // span carrying `\cmd`, followed by the command's arguments rendered as
 // ordinary math (the braces are not consumed by an unknown macro). E.g.
 // `\label{eq:x}` → error("\label") + the math `eq:x`.
+fn is_sized_delimiter_error_name(name_str) {
+    // A control word that starts with a valid size delimiter but has an
+    // unrecognized suffix follows MathLive's delimiter-recovery spelling.
+    starts_with(name_str, "big") or starts_with(name_str, "Big")
+}
+
 fn render_unknown_command_node(node, name_str, context) {
     // The leading `\` (cmr backslash: height 0.75, depth 0.25) governs the
     // error token's vertical extent.
@@ -464,7 +480,9 @@ fn render_unknown_command_node(node, name_str, context) {
     let arg_boxes = (for (child in node
         where child is element and (name(child) == 'group' or name(child) == 'brack_group'))
         render_node(child, context))
-    if (len(arg_boxes) == 0) err_box
+    // A bare unknown control word is an ordinary atom. Marking it punctuation
+    // reclassifies a preceding binary operator and creates a thin trailing gap.
+    if (len(arg_boxes) == 0) box_with_type(err_box, "mord")
     else {
         // Numeric unknown arguments stay attached to the unknown control word
         // (`\cbrt{8}` -> `\cbrt8`); word-like arguments keep MathLive's
@@ -825,7 +843,7 @@ fn render_pmod_command(node, context) {
 fn render_bmod_command(node, context) {
     let mod_box = box.with_class(box.text_box("mod", css.CMR, "mop"), css.OP_GROUP)
     let thick_l = box.box_cls(css.THICK, 0.0, 0.0, 0.0, "skip")
-    if (len(node) > 0) {
+    if (node[0] != null) {
         let arg_box = render_node(node[0], context)
         box_with_type(box.hbox([thick_l, mod_box, box.skip_box(0.23), arg_box]), "mbin")
     } else box_with_type(box.hbox([thick_l, mod_box]), "mbin")
@@ -2181,7 +2199,7 @@ fn render_sized_delim(node, context) {
     let size_cmd = if (node.size != null) string(node.size) else ""
     let size_name = if (len(size_cmd) > 0 and slice(size_cmd, 0, 1) == "\\")
         slice(size_cmd, 1, len(size_cmd)) else size_cmd
-    render_sized_delim_text(size_name, delim_text)
+    box_with_type(render_sized_delim_text(size_name, delim_text), sized_delim_atom_type(size_name))
 }
 
 fn render_sized_delim_text(size_name, delim_text) {
@@ -2211,6 +2229,16 @@ fn is_sized_delim_pair(node, i) {
         (let child = node[i],
          child is element and name(child) == 'sized_delimiter' and child.delim == null and
          child.size != null and sized_pair_text(node[i + 1]) != null)
+}
+
+fn is_sized_close_relation_pair(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let delim = node[i],
+         let next = node[i + 1],
+         delim is element and name(delim) == 'sized_delimiter' and delim.size != null and
+         sized_command_suffix(string(delim.size)) == "r" and
+         next is element and name(next) == 'relation')
 }
 
 // Detect `\big` (or `Big`/`bigg`/`Bigg`) followed by 2–5 alpha letters that
@@ -2391,7 +2419,8 @@ fn render_sized_delim_pair(cmd_node, delim_node, context) {
 }
 
 fn sized_delim_atom_type(size_name) {
-    if (sized_command_suffix(size_name) == "l" or sized_command_suffix(size_name) == "r") "mopen"
+    let suffix = sized_command_suffix(size_name)
+    if (suffix == "l") "mopen"
     else "mord"
 }
 
@@ -2801,10 +2830,23 @@ fn render_default(node, context) {
         let hb = box.hbox(apply_spacing(children, context))
         if (is_malformed_right_fraction_sequence(node))
             box_with_type(hb, "minner")
-        else hb
+        else if (is_recovered_left_sequence(node))
+            // The recovered `\left` is followed by an ordinary opening
+            // delimiter, so the enclosing list needs mopen-to-atom spacing.
+            box_with_type(hb, "mopen")
+        else box_with_type(hb, children[len(children) - 1].type)
     }
     else if (len(children) > 0) box.hbox(children)
     else box.text_box(get_text(node), css.font_class(context.font), "mord")
+}
+
+fn is_recovered_left_sequence(node) {
+    len(node) == 2 and is_left_error_node(node[0]) and
+        node[1] is element and name(node[1]) == 'punctuation' and get_text(node[1]) == "("
+}
+
+fn is_recovered_left_node(node) {
+    node is element and name(node) == '_seq' and is_recovered_left_sequence(node)
 }
 
 // ============================================================
@@ -2919,6 +2961,21 @@ fn render_children_scan(node, context, i, acc) {
     else if (node[i] is element and name(node[i]) == 'color_switch')
         (let rendered = render_color_switch_tail(node, context, i),
          acc ++ [rendered])
+    else if (is_recovered_left_node(node[i]))
+        (let rendered = render_node(node[i], context),
+         render_children_scan(node, context, i + 1, acc ++ [rendered, box.skip_box(0.17)]))
+    else if (is_colorbox_textcolor_pair(node, i))
+        // MathLive inserts a thin transition gap from a background box to an
+        // adjacent foreground-color atom, despite both being ordinary atoms.
+        (let bg = render_node(node[i], context),
+         let fg = render_node(node[i + 1], context),
+         render_children_scan(node, context, i + 2, acc ++ [bg, box.skip_box(0.17), fg]))
+    else if (is_unknown_command_open_pair(node, i))
+        // MathLive separates a bare unknown control word from a following
+        // parenthesized expression; it is recovery punctuation, not mopen.
+        (let err = render_node(node[i], context),
+         let open = render_node(node[i + 1], context),
+         render_children_scan(node, context, i + 2, acc ++ [err, box.skip_box(0.17), open]))
     else if (is_textcolor_sequence(node, i))
         (let rendered = render_textcolor_sequence(node, context, i),
          let spacer = if (last_box_is_colorbox(acc)) [box.skip_box(0.17)] else [],
@@ -2955,6 +3012,13 @@ fn render_children_scan(node, context, i, acc) {
     else if (is_sized_delim_pair(node, i))
         (let rendered = render_sized_delim_pair(node[i], node[i + 1], context),
          render_children_scan(node, context, i + 2, acc ++ [rendered]))
+    else if (is_sized_close_relation_pair(node, i))
+        (let close_box = render_node(node[i], context),
+         let relation_box = render_node(node[i + 1], context),
+         // Keep the close atom's no-left-space boundary, then materialize the
+         // relation's following thickspace at its actual source boundary.
+         let rendered = box_with_type(box.hbox([close_box, relation_box]), "mclose"),
+         render_children_scan(node, context, i + 2, acc ++ [rendered, box.skip_box(0.28)]))
     else if (is_null_middle_sequence(node, i))
         (let rendered = render_middle_delim(node[i], context),
          render_children_scan(node, context, i + 2, acc ++ [rendered]))
@@ -3042,7 +3106,7 @@ fn render_malformed_right_command(node, context) {
 
 fn render_malformed_right(node, context) {
     let right_box = render_unknown_display_command("\\\\right")
-    let delim_box = if (node.delim != null) render_node(node.delim, context)
+    let delim_box = if (node.delim != null) box.text_box(punct_display_text(string(node.delim)), css.CMR, "mord")
         else box.text_box("", null, "mord")
     box_with_type(box.hbox([right_box, delim_box]), "minner")
 }
@@ -3329,7 +3393,7 @@ fn render_tail_style_switch(node, context, i) {
 
 fn is_size_switch(node, i) {
     let child = if (i < len(node)) node[i] else null
-    child is element and name(child) == 'command' and len(child) == 0 and
+    child is element and name(child) == 'command' and
         is_math_size_name(command_name(child))
 }
 
@@ -3451,6 +3515,29 @@ fn is_textcolor_sequence(node, i) {
          child_is_text(node, i + 5, "r") and
          color_arg is element and name(color_arg) == 'group' and
          content_arg is element and name(content_arg) == 'group')
+}
+
+fn is_colorbox_textcolor_pair(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let first = node[i],
+         let second = node[i + 1],
+         first is element and second is element and
+         name(first) == 'color_command' and name(second) == 'color_command' and
+         first.cmd != null and second.cmd != null and
+         string(first.cmd) == "\\colorbox" and string(second.cmd) == "\\textcolor")
+}
+
+fn is_unknown_command_open_pair(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let cmd = node[i],
+         let next = node[i + 1],
+         cmd is element and name(cmd) == 'command' and cmd[0] == null and
+         next is element and name(next) == 'punctuation' and get_text(next) == "(" and
+         sym.lookup_symbol("\\" ++ command_name(cmd)) == null and
+         sym.get_operator_name(command_name(cmd)) == null and
+         not is_math_size_name(command_name(cmd)))
 }
 
 fn render_textcolor_sequence(node, context, i) {

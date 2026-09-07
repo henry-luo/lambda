@@ -290,10 +290,9 @@ private:
         if (position_ >= length_) return ItemNull;
         char c = source_[position_];
         if (c == '{') return parse_group();
-        if (c == '[') {
-            Item group = parse_brack_group();
-            return item_present(group) ? group : parse_punctuation_or_operator();
-        }
+        // Bare brackets are math delimiters. Optional arguments are consumed
+        // only by the commands that declare them (e.g. \sqrt and \color).
+        if (c == '[') return parse_punctuation_or_operator();
         if (c == '\\') return parse_command();
         if ((unsigned char)c >= 0x80) {
             size_t start = position_;
@@ -311,6 +310,14 @@ private:
             // splitting them would introduce binary-operator spacing.
             ElementBuilder elem = builder_.element("raw_math_text");
             elem.attr("value", builder_.createStringItem(source_ + start, position_ - start));
+            return elem.final();
+        }
+        if (c == '.' && position_ + 2 < length_ && source_[position_ + 1] == '.' &&
+            source_[position_ + 2] == '.') {
+            // MathLive keeps a literal three-dot run in one upright atom.
+            position_ += 3;
+            ElementBuilder elem = builder_.element("raw_math_text");
+            elem.attr("value", builder_.createStringItem("..."));
             return elem.final();
         }
         if (isdigit((unsigned char)c) || (c == '.' && position_ + 1 < length_ && isdigit((unsigned char)source_[position_ + 1]))) {
@@ -585,7 +592,20 @@ private:
             }
         }
         if (strlen(name) == 1 && strchr("{}[]()$%#&_", name[0])) {
-            return builder_.createStringItem(name, 1);
+            // Escaped punctuation is upright; combine adjacent compatible
+            // escapes so MathLive serializes them as one CMR atom.
+            char escaped[104];
+            size_t escaped_len = 0;
+            escaped[escaped_len++] = name[0];
+            while (name[0] != '_' && position_ + 1 < length_ && source_[position_] == '\\' &&
+                   strchr("{}[]()$%#&", source_[position_ + 1]) != nullptr) {
+                escaped[escaped_len++] = source_[position_ + 1];
+                position_ += 2;
+            }
+            escaped[escaped_len] = '\0';
+            ElementBuilder elem = builder_.element("escaped_symbol");
+            elem.attr("value", builder_.createStringItem(escaped));
+            return elem.final();
         }
         ElementBuilder elem = builder_.element("command");
         elem.attr("name", builder_.createStringItem(name));
@@ -626,6 +646,15 @@ private:
     Item parse_delimiter_token() {
         skip_space();
         if (position_ >= length_) return builder_.createStringItem(".");
+        if (source_[position_] == '{') {
+            // MathLive accepts a braced delimiter spelling after \right while
+            // retaining only its first delimiter token.
+            size_t begin = ++position_;
+            Item delim = parse_delimiter_token();
+            if (position_ < length_ && source_[position_] == '}') position_++;
+            else position_ = begin;
+            return delim;
+        }
         if (source_[position_] == '\\') {
             char name[96], full[104];
             read_command(name, sizeof(name), full, sizeof(full));
@@ -654,7 +683,21 @@ private:
     }
 
     Item parse_delimiter_group(const char* full) {
-        (void)full;
+        skip_space();
+        if (position_ < length_ && source_[position_] == '{') {
+            // A braced token cannot be the delimiter after \left. Match
+            // MathLive recovery: emit the invalid command then retain the
+            // group's leading delimiter as ordinary math.
+            position_++;
+            ElementBuilder err = builder_.element("ERROR");
+            err.child(builder_.createStringItem(full));
+            ElementBuilder seq = builder_.element("_seq");
+            seq.child(err.final());
+            Item first = parse_primary();
+            if (item_present(first)) seq.child(first);
+            if (position_ < length_ && source_[position_] == '}') position_++;
+            return seq.final();
+        }
         Item left = parse_delimiter_token();
         ElementBuilder elem = builder_.element("delimiter_group");
         elem.attr("left", left);
@@ -670,7 +713,9 @@ private:
                 }
                 if (strcmp(name, "middle") == 0) {
                     ElementBuilder middle = builder_.element("middle_delim");
-                    middle.attr("delim", parse_delimiter_token());
+                    // Invalid middle tokens are recovered as a null delimiter;
+                    // the renderer drops the following offending atom.
+                    if (has_sized_delimiter_token()) middle.attr("delim", parse_delimiter_token());
                     elem.child(middle.final());
                     continue;
                 }
