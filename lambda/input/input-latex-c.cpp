@@ -908,7 +908,7 @@ class DirectLatexParser {
 public:
     DirectLatexParser(InputContext& context)
         : ctx_(context), builder_(context.builder), source_(context.source()),
-          length_(context.source_length()), position_(0) {}
+          length_(context.source_length()), position_(0), tabular_mode_(false) {}
 
     Item parse() {
         ElementBuilder root = builder_.element("latex_document");
@@ -922,6 +922,7 @@ private:
     const char* source_;
     size_t length_;
     size_t position_;
+    bool tabular_mode_;
 
     void error(const char* message) {
         ctx_.tracker.seek(position_);
@@ -1074,6 +1075,11 @@ private:
                 elem.attr("columns", builder_.createStringItem(source_ + columns_begin, columns_end - columns_begin));
             }
         }
+        if (strcmp(name, "table") == 0 && position_ < length_ && source_[position_] == '[') {
+            // keep placement metadata out of the table body rendered by the package.
+            Item placement = parse_brack_group();
+            if (item_present(placement)) elem.attr("placement", placement);
+        }
         size_t after_end = find_environment_end(name, position_, &body_end, &found_end);
         if (!found_end) error("missing \\end environment");
         const char* body_source = source_ + position_;
@@ -1095,6 +1101,7 @@ private:
             nested.source_ = body_source;
             nested.length_ = body_len;
             nested.position_ = 0;
+            nested.tabular_mode_ = strcmp(name, "tabular") == 0;
             nested.parse_children(elem, 0, true);
         }
         position_ = after_end;
@@ -1227,6 +1234,14 @@ private:
                 append_text(parent, text_begin, position_);
                 while (position_ < length_ && source_[position_] != '\n' && source_[position_] != '\r') position_++;
                 if (position_ < length_) position_++;
+                text_begin = position_;
+                continue;
+            }
+            if (tabular_mode_ && c == '&') {
+                // preserve cell boundaries for the package table renderer.
+                append_text(parent, text_begin, position_);
+                position_++;
+                parent.child(builder_.createSymbolItem("alignment_tab"));
                 text_begin = position_;
                 continue;
             }

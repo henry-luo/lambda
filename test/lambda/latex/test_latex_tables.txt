@@ -1,0 +1,8 @@
+"1. table renders:"
+true
+"2. alignment tabs split cells:"
+true
+"3. ordinary row splits cells:"
+true
+"4. placement argument is not rendered:"
+true
