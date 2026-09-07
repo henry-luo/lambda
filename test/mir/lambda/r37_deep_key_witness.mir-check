@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "Result37 (paraffins 2.35x, T21-2a window): the call-site typer's initializer-chain guard (was depth 4) typed `nc2 = remain - nc1` with `remain = m - nc1`, `m = n - 1` as ANY, and `half = shr(m, 1)` as ANY because shr's registry success type is `any` although its C return is a raw int64; either made the subscript a dynamic key and withheld the inferred ArrayNum witness, so the whole body indexed boxed. Both keys now type INT and `count` keeps its `_array_witness` parameter and lane reads.",
+  "checks": [
+    {
+      "in_func": "_count_#",
+      "expect_any": [
+        "_array_witness"
+      ],
+      "forbid": [
+        "call\tfn_index_p"
+      ]
+    }
+  ]
+}

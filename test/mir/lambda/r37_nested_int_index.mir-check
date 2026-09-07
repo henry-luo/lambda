@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "Result37 (triangl2 1.65x, T21-1c window): (1) a subscript that is itself a typed int[] element read is a native index leaf, and the `int?` contract such a read carries is a value contract, not a type-valued index (`arr[int]`), so the outer bool[] read takes its native lane; (2) a nested native `and`/`or` (`a and b and (not c)`) is itself a native bool operand, so the chain branches on the nullable bool lane without boxing for is_truthy. Before the fix the outer access boxed (fn_index) and the outer `and` boxed both operands for is_truthy (2 calls where v36 had one fn_not).",
+  "checks": [
+    {
+      "in_func": "_scan_#",
+      "forbid": [
+        "call\tfn_index_p",
+        "call\tis_truthy_p",
+        "call\tfn_not_p",
+        "call\tit2b_p"
+      ]
+    }
+  ]
+}
