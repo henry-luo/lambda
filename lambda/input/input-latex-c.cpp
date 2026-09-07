@@ -47,7 +47,9 @@ static bool is_style_command(const char* name) {
     return strcmp(name, "mathrm") == 0 || strcmp(name, "mathbf") == 0 ||
         strcmp(name, "mathit") == 0 || strcmp(name, "mathsf") == 0 ||
         strcmp(name, "mathtt") == 0 || strcmp(name, "mathcal") == 0 ||
-        strcmp(name, "mathbb") == 0 || strcmp(name, "displaystyle") == 0 ||
+        strcmp(name, "mathbb") == 0 || strcmp(name, "mathfrak") == 0 ||
+        strcmp(name, "mathscr") == 0 || strcmp(name, "mathnormal") == 0 ||
+        strcmp(name, "operatorname") == 0 || strcmp(name, "displaystyle") == 0 ||
         strcmp(name, "textstyle") == 0 || strcmp(name, "scriptstyle") == 0 ||
         strcmp(name, "scriptscriptstyle") == 0;
 }
@@ -55,15 +57,51 @@ static bool is_style_command(const char* name) {
 static bool is_spacing_command(const char* name) {
     return strcmp(name, "quad") == 0 || strcmp(name, "qquad") == 0 ||
         strcmp(name, "hspace") == 0 || strcmp(name, "vspace") == 0 ||
+        strcmp(name, "hskip") == 0 || strcmp(name, "vskip") == 0 ||
         strcmp(name, "kern") == 0 || strcmp(name, "mkern") == 0;
+}
+
+static bool is_sized_delimiter_command(const char* name) {
+    return strcmp(name, "big") == 0 || strcmp(name, "bigl") == 0 ||
+        strcmp(name, "bigr") == 0 || strcmp(name, "bigm") == 0 ||
+        strcmp(name, "Big") == 0 || strcmp(name, "Bigl") == 0 ||
+        strcmp(name, "Bigr") == 0 || strcmp(name, "Bigm") == 0 ||
+        strcmp(name, "bigg") == 0 || strcmp(name, "biggl") == 0 ||
+        strcmp(name, "biggr") == 0 || strcmp(name, "biggm") == 0 ||
+        strcmp(name, "Bigg") == 0 || strcmp(name, "Biggl") == 0 ||
+        strcmp(name, "Biggr") == 0 || strcmp(name, "Biggm") == 0;
+}
+
+static bool is_box_command(const char* name) {
+    return strcmp(name, "bbox") == 0 || strcmp(name, "boxed") == 0 ||
+        strcmp(name, "fbox") == 0 || strcmp(name, "llap") == 0 ||
+        strcmp(name, "rlap") == 0 || strcmp(name, "clap") == 0 ||
+        strcmp(name, "mathllap") == 0 || strcmp(name, "mathrlap") == 0 ||
+        strcmp(name, "mathclap") == 0;
+}
+
+static bool is_infix_fraction_command(const char* name) {
+    return strcmp(name, "over") == 0 || strcmp(name, "atop") == 0 ||
+        strcmp(name, "above") == 0 || strcmp(name, "choose") == 0 ||
+        strcmp(name, "brace") == 0 || strcmp(name, "brack") == 0;
+}
+
+static bool is_supported_math_environment(const char* name) {
+    return strcmp(name, "array") == 0 || strcmp(name, "matrix") == 0 ||
+        strcmp(name, "pmatrix") == 0 || strcmp(name, "bmatrix") == 0 ||
+        strcmp(name, "Bmatrix") == 0 || strcmp(name, "vmatrix") == 0 ||
+        strcmp(name, "Vmatrix") == 0 || strcmp(name, "cases") == 0 ||
+        strcmp(name, "rcases") == 0 || strcmp(name, "dcases") == 0 ||
+        strcmp(name, "aligned") == 0 || strcmp(name, "align") == 0 ||
+        strcmp(name, "equation") == 0 || strcmp(name, "smallmatrix") == 0;
 }
 
 class DirectMathParser {
 public:
     DirectMathParser(InputContext& context, const char* source, size_t length,
-                     size_t source_offset, bool ascii)
+                     size_t source_offset, bool ascii, bool allow_infix = true)
         : ctx_(context), builder_(context.builder), source_(source), length_(length),
-          offset_(source_offset), position_(0), ascii_(ascii) {}
+          offset_(source_offset), position_(0), ascii_(ascii), allow_infix_(allow_infix) {}
 
     Item parse() {
         ElementBuilder root = builder_.element("math");
@@ -83,6 +121,7 @@ private:
     size_t offset_;
     size_t position_;
     bool ascii_;
+    bool allow_infix_;
 
     void error(const char* message) {
         ctx_.tracker.seek(offset_ + position_);
@@ -108,14 +147,26 @@ private:
             position_ = end;
             return true;
         }
-        error("unterminated group");
-        position_ = length_;
+        if (open == '{') {
+            // MathLive keeps an unterminated command argument as recoverable
+            // input (for example, `\\rule{` still produces its default rule).
+            // Preserve the remaining source instead of rejecting the formula.
+            *content_start = position_ < length_ ? position_ + 1 : length_;
+            *content_end = length_;
+            position_ = length_;
+            return true;
+        }
+        // A bare unmatched '[' is punctuation, not an empty optional group.
         return false;
     }
 
     Item parse_group() {
         size_t begin = 0, end = 0;
         if (!consume_group_span('{', '}', &begin, &end)) return ItemNull;
+        return parse_group_contents(begin, end);
+    }
+
+    Item parse_group_contents(size_t begin, size_t end) {
         DirectMathParser nested(ctx_, source_ + begin, end - begin, offset_ + begin, ascii_);
         ElementBuilder group = builder_.element("group");
         nested.parse_into(group, false);
@@ -148,7 +199,54 @@ private:
         }
         if (source_[position_] == '{') return parse_group();
         if (ascii_ && source_[position_] == '(') return parse_paren_script_group();
+        if (!ascii_) {
+            // TeX takes precisely one token for an unbraced argument: in
+            // `\\frac57`, 5 is the numerator and 7 is the denominator.
+            // parse_primary() would consume the full numeric or word run.
+            if (source_[position_] == '\\') return parse_command();
+            if (isdigit((unsigned char)source_[position_]) || isalpha((unsigned char)source_[position_])) {
+                return builder_.createStringItem(source_ + position_++, 1);
+            }
+            return parse_punctuation_or_operator();
+        }
         return parse_primary();
+    }
+
+    Item parse_optional_script_arg() {
+        skip_space();
+        if (position_ >= length_) return ItemNull;
+        return parse_script_arg();
+    }
+
+    Item parse_color_content() {
+        skip_space();
+        if (position_ >= length_ || source_[position_] != '{') return parse_script_arg();
+        size_t begin = 0, end = 0;
+        if (!consume_group_span('{', '}', &begin, &end)) return ItemNull;
+        size_t first = begin;
+        size_t last = end;
+        while (first < last && isspace((unsigned char)source_[first])) first++;
+        while (last > first && isspace((unsigned char)source_[last - 1])) last--;
+        if (last - first >= 2 && source_[first] == '$' && source_[last - 1] == '$') {
+            // Color commands inherit text-mode `$...$` switches.  The markers
+            // delimit the embedded math; MathLive does not emit them as glyphs.
+            return parse_group_contents(first + 1, last - 1);
+        }
+        return parse_group_contents(begin, end);
+    }
+
+    Item parse_dimension_arg() {
+        skip_space();
+        if (position_ >= length_) return ItemNull;
+        if (source_[position_] == '{') {
+            size_t begin = 0;
+            size_t end = 0;
+            if (!consume_group_span('{', '}', &begin, &end)) return ItemNull;
+            return builder_.createStringItem(source_ + begin, end - begin);
+        }
+        size_t begin = position_;
+        while (position_ < length_ && !isspace((unsigned char)source_[position_])) position_++;
+        return builder_.createStringItem(source_ + begin, position_ - begin);
     }
 
     Item parse_atom_with_scripts() {
@@ -156,8 +254,22 @@ private:
         if (!item_present(base)) return base;
         Item sub = ItemNull;
         Item sup = ItemNull;
+        const char* modifier = nullptr;
         for (;;) {
             skip_space();
+            if (position_ < length_ && source_[position_] == '\\') {
+                char modifier_name[96];
+                char modifier_full[104];
+                size_t end = latex_scan_command(source_, length_, position_, modifier_name,
+                                                sizeof(modifier_name), modifier_full,
+                                                sizeof(modifier_full));
+                if (end != 0 && (strcmp(modifier_name, "limits") == 0 ||
+                                 strcmp(modifier_name, "nolimits") == 0)) {
+                    position_ = end;
+                    modifier = strcmp(modifier_name, "limits") == 0 ? "limits" : "nolimits";
+                    continue;
+                }
+            }
             if (position_ >= length_ || (source_[position_] != '_' && source_[position_] != '^')) break;
             char marker = source_[position_++];
             Item value = parse_script_arg();
@@ -169,6 +281,7 @@ private:
         result.attr("base", base);
         if (item_present(sub)) result.attr("sub", sub);
         if (item_present(sup)) result.attr("sup", sup);
+        if (modifier != nullptr) result.attr("modifier", builder_.createStringItem(modifier));
         return result.final();
     }
 
@@ -177,8 +290,36 @@ private:
         if (position_ >= length_) return ItemNull;
         char c = source_[position_];
         if (c == '{') return parse_group();
-        if (c == '[') return parse_brack_group();
+        // Bare brackets are math delimiters. Optional arguments are consumed
+        // only by the commands that declare them (e.g. \sqrt and \color).
+        if (c == '[') return parse_punctuation_or_operator();
         if (c == '\\') return parse_command();
+        if ((unsigned char)c >= 0x80) {
+            size_t start = position_;
+            while (position_ < length_ && (unsigned char)source_[position_] >= 0x80) position_++;
+            ElementBuilder elem = builder_.element("unicode_text");
+            elem.attr("value", builder_.createStringItem(source_ + start, position_ - start));
+            return elem.final();
+        }
+        if (c == '#' || c == '!') {
+            size_t start = position_++;
+            while (position_ < length_ &&
+                   (source_[position_] == '#' || source_[position_] == '!' ||
+                    isdigit((unsigned char)source_[position_]))) position_++;
+            // Color-literal punctuation and digits stay in one upright atom;
+            // splitting them would introduce binary-operator spacing.
+            ElementBuilder elem = builder_.element("raw_math_text");
+            elem.attr("value", builder_.createStringItem(source_ + start, position_ - start));
+            return elem.final();
+        }
+        if (c == '.' && position_ + 2 < length_ && source_[position_ + 1] == '.' &&
+            source_[position_ + 2] == '.') {
+            // MathLive keeps a literal three-dot run in one upright atom.
+            position_ += 3;
+            ElementBuilder elem = builder_.element("raw_math_text");
+            elem.attr("value", builder_.createStringItem("..."));
+            return elem.final();
+        }
         if (isdigit((unsigned char)c) || (c == '.' && position_ + 1 < length_ && isdigit((unsigned char)source_[position_ + 1]))) {
             size_t start = position_++;
             while (position_ < length_ && (isdigit((unsigned char)source_[position_]) || source_[position_] == '.')) position_++;
@@ -186,7 +327,11 @@ private:
         }
         if (isalpha((unsigned char)c)) {
             size_t start = position_++;
-            while (position_ < length_ && isalpha((unsigned char)source_[position_])) position_++;
+            // TeX math makes each bare letter its own ordinary atom. ASCII
+            // math keeps multi-letter identifiers (for example, `alpha`).
+            if (ascii_) {
+                while (position_ < length_ && isalpha((unsigned char)source_[position_])) position_++;
+            }
             return builder_.createStringItem(source_ + start, position_ - start);
         }
         return parse_punctuation_or_operator();
@@ -239,6 +384,7 @@ private:
         if (!read_command(name, sizeof(name), full, sizeof(full))) return ItemNull;
         if (name[0] == '\0') return ItemNull;
         if (name[0] == ' ' || name[0] == '\t' || name[0] == '\n') return builder_.createStringItem(" ");
+        if (!allow_infix_ && is_infix_fraction_command(name)) return ItemNull;
 
         if (strcmp(name, "frac") == 0 || strcmp(name, "dfrac") == 0 ||
             strcmp(name, "tfrac") == 0 || strcmp(name, "cfrac") == 0) {
@@ -255,8 +401,10 @@ private:
             Item bottom = parse_script_arg();
             ElementBuilder elem = builder_.element("binomial");
             elem.attr("cmd", builder_.createStringItem(full));
-            if (item_present(top)) elem.attr("top", top);
-            if (item_present(bottom)) elem.attr("bottom", bottom);
+            // Fraction rendering shares the numerator/denominator contract for
+            // bar and no-bar forms; `top`/`bottom` left binomials empty.
+            if (item_present(top)) elem.attr("numer", top);
+            if (item_present(bottom)) elem.attr("denom", bottom);
             return elem.final();
         }
         if (strcmp(name, "sqrt") == 0) {
@@ -269,47 +417,131 @@ private:
             if (item_present(radicand)) elem.attr("radicand", radicand);
             return elem.final();
         }
+        if (strcmp(name, "xrightarrow") == 0 || strcmp(name, "xleftarrow") == 0) {
+            Item lower = ItemNull;
+            skip_space();
+            if (position_ < length_ && source_[position_] == '[') lower = parse_brack_group();
+            Item upper = parse_script_arg();
+            ElementBuilder elem = builder_.element("extended_arrow");
+            elem.attr("cmd", builder_.createStringItem(full));
+            if (item_present(upper)) elem.attr("upper", upper);
+            if (item_present(lower)) elem.attr("lower", lower);
+            return elem.final();
+        }
+        if (strcmp(name, "mathop") == 0) {
+            Item body = parse_script_arg();
+            ElementBuilder elem = builder_.element("mathop");
+            if (item_present(body)) elem.attr("body", body);
+            return elem.final();
+        }
+        if (strcmp(name, "stackrel") == 0 || strcmp(name, "overset") == 0 ||
+            strcmp(name, "underset") == 0) {
+            Item annotation = parse_script_arg();
+            Item base = parse_script_arg();
+            ElementBuilder elem = builder_.element("overunder_command");
+            elem.attr("cmd", builder_.createStringItem(strcmp(name, "stackrel") == 0 ? "\\overset" : full));
+            if (item_present(annotation)) elem.attr("annotation", annotation);
+            if (item_present(base)) elem.attr("base", base);
+            return elem.final();
+        }
         if (strcmp(name, "left") == 0) return parse_delimiter_group(full);
+        if (is_sized_delimiter_command(name)) {
+            ElementBuilder elem = builder_.element("sized_delimiter");
+            elem.attr("size", builder_.createStringItem(full));
+            if (has_sized_delimiter_token()) elem.attr("delim", parse_delimiter_token());
+            return elem.final();
+        }
         if (strcmp(name, "begin") == 0) return parse_environment();
         if (strcmp(name, "text") == 0 || strcmp(name, "mbox") == 0 || strcmp(name, "hbox") == 0) {
             return parse_text_command(full);
         }
         if (is_text_command(name)) return parse_text_command(full);
         if (is_style_command(name)) {
-            Item arg = parse_script_arg();
             ElementBuilder elem = builder_.element("style_command");
             elem.attr("cmd", builder_.createStringItem(full));
-            if (item_present(arg)) elem.attr("arg", arg);
-            return elem.final();
-        }
-        if (is_spacing_command(name)) {
-            ElementBuilder elem = builder_.element("space_command");
-            elem.attr("value", builder_.createStringItem(full));
-            skip_space();
-            if (position_ < length_ && source_[position_] == '{') {
-                Item arg = parse_group();
+            bool declaration = strcmp(name, "displaystyle") == 0 ||
+                strcmp(name, "textstyle") == 0 || strcmp(name, "scriptstyle") == 0 ||
+                strcmp(name, "scriptscriptstyle") == 0;
+            if (!declaration) {
+                Item arg = parse_script_arg();
                 if (item_present(arg)) elem.attr("arg", arg);
             }
             return elem.final();
         }
-        if (strcmp(name, "color") == 0 || strcmp(name, "textcolor") == 0) {
+        if (is_spacing_command(name)) {
+            ElementBuilder elem = builder_.element("space_command");
+            bool dimensional = strcmp(name, "hspace") == 0 || strcmp(name, "vspace") == 0 ||
+                strcmp(name, "hskip") == 0 || strcmp(name, "vskip") == 0 ||
+                strcmp(name, "kern") == 0 || strcmp(name, "mkern") == 0;
+            if (dimensional) {
+                elem.attr("cmd", builder_.createStringItem(full));
+                Item value = parse_dimension_arg();
+                if (item_present(value)) elem.attr("value", value);
+            } else {
+                elem.attr("value", builder_.createStringItem(full));
+            }
+            return elem.final();
+        }
+        if (strcmp(name, "color") == 0 || strcmp(name, "textcolor") == 0 || strcmp(name, "colorbox") == 0) {
             Item options = ItemNull;
             skip_space();
             if (position_ < length_ && source_[position_] == '[') options = parse_brack_group();
-            Item content = parse_script_arg();
-            ElementBuilder elem = builder_.element("color_command");
+            size_t color_begin = 0;
+            size_t color_end = 0;
+            bool has_color_source = position_ < length_ && source_[position_] == '{' &&
+                latex_scan_group_end(source_, length_, position_, '{', '}', &color_begin, &color_end) != 0;
+            Item color = parse_script_arg();
+            Item content = ItemNull;
+            if (strcmp(name, "textcolor") == 0 || strcmp(name, "colorbox") == 0) content = parse_color_content();
+            ElementBuilder elem = builder_.element(strcmp(name, "color") == 0 ?
+                                                     "color_switch" : "color_command");
             elem.attr("cmd", builder_.createStringItem(full));
             if (item_present(options)) elem.attr("options", options);
+            if (item_present(color)) elem.attr("color", color);
+            // Color syntax is CSS-like data, so preserve punctuation and spaces
+            // separately from its parsed math subtree.
+            if (has_color_source) elem.attr("color_raw", builder_.createStringItem(source_ + color_begin, color_end - color_begin));
+            if (item_present(content)) elem.attr("content", content);
+            return elem.final();
+        }
+        if (is_box_command(name)) {
+            Item options = ItemNull;
+            skip_space();
+            size_t options_begin = 0;
+            size_t options_end = 0;
+            bool has_options_source = false;
+            if (strcmp(name, "bbox") == 0 && position_ < length_ && source_[position_] == '[') {
+                has_options_source = latex_scan_group_end(source_, length_, position_, '[', ']', &options_begin, &options_end) != 0;
+                options = parse_brack_group();
+            }
+            Item content = parse_optional_script_arg();
+            ElementBuilder elem = builder_.element("box_command");
+            elem.attr("cmd", builder_.createStringItem(full));
+            if (item_present(options)) elem.attr("options", options);
+            if (has_options_source) elem.attr("options_raw", builder_.createStringItem(source_ + options_begin, options_end - options_begin));
             if (item_present(content)) elem.attr("content", content);
             return elem.final();
         }
         if (strcmp(name, "hat") == 0 || strcmp(name, "bar") == 0 || strcmp(name, "vec") == 0 ||
-            strcmp(name, "dot") == 0 || strcmp(name, "ddot") == 0 || strcmp(name, "tilde") == 0 ||
-            strcmp(name, "overline") == 0 || strcmp(name, "underline") == 0 || strcmp(name, "mathring") == 0) {
-            Item base = parse_script_arg();
+            strcmp(name, "dot") == 0 || strcmp(name, "ddot") == 0 || strcmp(name, "dddot") == 0 ||
+            strcmp(name, "ddddot") == 0 || strcmp(name, "tilde") == 0 || strcmp(name, "acute") == 0 ||
+            strcmp(name, "breve") == 0 || strcmp(name, "check") == 0 || strcmp(name, "grave") == 0 ||
+            strcmp(name, "widehat") == 0 || strcmp(name, "widetilde") == 0 ||
+            strcmp(name, "overline") == 0 || strcmp(name, "underline") == 0 ||
+            strcmp(name, "overbrace") == 0 || strcmp(name, "underbrace") == 0 ||
+            strcmp(name, "overrightarrow") == 0 || strcmp(name, "underrightarrow") == 0 ||
+            strcmp(name, "overleftarrow") == 0 || strcmp(name, "underleftarrow") == 0 ||
+            strcmp(name, "overleftrightarrow") == 0 || strcmp(name, "underleftrightarrow") == 0 ||
+            strcmp(name, "mathring") == 0) {
+            Item base = parse_optional_script_arg();
             ElementBuilder elem = builder_.element("accent");
             elem.attr("cmd", builder_.createStringItem(full));
             if (item_present(base)) elem.attr("base", base);
+            return elem.final();
+        }
+        if (strcmp(name, "ne") == 0 || strcmp(name, "neq") == 0) {
+            ElementBuilder elem = builder_.element("not_overlay");
+            elem.attr("target", builder_.createStringItem("="));
             return elem.final();
         }
         if (is_greek_letter(name) || is_math_operator(name) || is_trig_function(name) || is_log_function(name)) {
@@ -317,7 +549,17 @@ private:
             elem.attr("name", builder_.createStringItem(name));
             return elem.final();
         }
-        if (strcmp(name, "right") == 0 || strcmp(name, "limits") == 0 || strcmp(name, "nolimits") == 0) {
+        if (strcmp(name, "right") == 0) {
+            ElementBuilder elem = builder_.element("malformed_right");
+            elem.attr("delim", parse_delimiter_token());
+            return elem.final();
+        }
+        if (strcmp(name, "end") == 0) {
+            // An unmatched closing environment is an error token; leave its
+            // following group for ordinary math parsing, as MathLive does.
+            return builder_.element("malformed_end").final();
+        }
+        if (strcmp(name, "limits") == 0 || strcmp(name, "nolimits") == 0) {
             return builder_.createSymbolItem(name);
         }
         if (strcmp(name, ",") == 0 || strcmp(name, ":") == 0 || strcmp(name, ";") == 0 || strcmp(name, "!") == 0) {
@@ -325,15 +567,64 @@ private:
             elem.attr("value", builder_.createStringItem(full));
             return elem.final();
         }
+        if (strcmp(name, "not") == 0) {
+            skip_space();
+            if (position_ + 1 < length_ && source_[position_] == '{' && source_[position_ + 1] == '}') {
+                // Keep the empty-argument spelling distinct: adjacent
+                // `\not{}` targets are coalesced by MathLive's renderer.
+                position_ += 2;
+                return builder_.element("not_empty").final();
+            }
+            if (position_ < length_ && source_[position_] == '\\') {
+                char target_name[96];
+                char target_full[104];
+                if (read_command(target_name, sizeof(target_name), target_full, sizeof(target_full))) {
+                    ElementBuilder elem = builder_.element("not_overlay");
+                    elem.attr("target", builder_.createStringItem(target_full));
+                    return elem.final();
+                }
+            }
+            if (position_ < length_ && strchr("=<>|", source_[position_]) != nullptr) {
+                ElementBuilder elem = builder_.element("not_overlay");
+                elem.attr("target", builder_.createStringItem(source_ + position_, 1));
+                position_++;
+                return elem.final();
+            }
+        }
         if (strlen(name) == 1 && strchr("{}[]()$%#&_", name[0])) {
-            return builder_.createStringItem(name, 1);
+            // Escaped punctuation is upright; combine adjacent compatible
+            // escapes so MathLive serializes them as one CMR atom.
+            char escaped[104];
+            size_t escaped_len = 0;
+            escaped[escaped_len++] = name[0];
+            while (name[0] != '_' && position_ + 1 < length_ && source_[position_] == '\\' &&
+                   strchr("{}[]()$%#&", source_[position_ + 1]) != nullptr) {
+                escaped[escaped_len++] = source_[position_ + 1];
+                position_ += 2;
+            }
+            escaped[escaped_len] = '\0';
+            ElementBuilder elem = builder_.element("escaped_symbol");
+            elem.attr("value", builder_.createStringItem(escaped));
+            return elem.final();
         }
         ElementBuilder elem = builder_.element("command");
         elem.attr("name", builder_.createStringItem(name));
+        bool preserves_raw_args = strcmp(name, "class") == 0 ||
+            strcmp(name, "cssId") == 0 || strcmp(name, "htmlData") == 0;
+        size_t arg_index = 0;
         for (;;) {
             skip_space();
             if (position_ < length_ && source_[position_] == '{') {
+                size_t arg_begin = 0;
+                size_t arg_end = 0;
+                bool has_arg_source = preserves_raw_args &&
+                    latex_scan_group_end(source_, length_, position_, '{', '}', &arg_begin, &arg_end) != 0;
                 elem.child(parse_group());
+                if (has_arg_source && arg_index == 0)
+                    elem.attr("arg0_raw", builder_.createStringItem(source_ + arg_begin, arg_end - arg_begin));
+                else if (has_arg_source && arg_index == 1)
+                    elem.attr("arg1_raw", builder_.createStringItem(source_ + arg_begin, arg_end - arg_begin));
+                arg_index++;
             } else if (position_ < length_ && source_[position_] == '[') {
                 elem.child(parse_brack_group());
             } else break;
@@ -355,6 +646,15 @@ private:
     Item parse_delimiter_token() {
         skip_space();
         if (position_ >= length_) return builder_.createStringItem(".");
+        if (source_[position_] == '{') {
+            // MathLive accepts a braced delimiter spelling after \right while
+            // retaining only its first delimiter token.
+            size_t begin = ++position_;
+            Item delim = parse_delimiter_token();
+            if (position_ < length_ && source_[position_] == '}') position_++;
+            else position_ = begin;
+            return delim;
+        }
         if (source_[position_] == '\\') {
             char name[96], full[104];
             read_command(name, sizeof(name), full, sizeof(full));
@@ -363,8 +663,41 @@ private:
         return builder_.createStringItem(source_ + position_++, 1);
     }
 
+    bool has_sized_delimiter_token() {
+        skip_space();
+        if (position_ >= length_) return false;
+        char c = source_[position_];
+        if (strchr("()[]{}|<>/.", c) != nullptr) return true;
+        if (c != '\\') return false;
+        char name[96];
+        char full[104];
+        size_t end = latex_scan_command(source_, length_, position_, name,
+                                        sizeof(name), full, sizeof(full));
+        if (end == 0) return false;
+        return strcmp(name, "{") == 0 || strcmp(name, "}") == 0 ||
+            strcmp(name, "|") == 0 || strcmp(name, "vert") == 0 ||
+            strcmp(name, "Vert") == 0 || strcmp(name, "lvert") == 0 ||
+            strcmp(name, "rvert") == 0 || strcmp(name, "lVert") == 0 ||
+            strcmp(name, "rVert") == 0 || strcmp(name, "langle") == 0 ||
+            strcmp(name, "rangle") == 0;
+    }
+
     Item parse_delimiter_group(const char* full) {
-        (void)full;
+        skip_space();
+        if (position_ < length_ && source_[position_] == '{') {
+            // A braced token cannot be the delimiter after \left. Match
+            // MathLive recovery: emit the invalid command then retain the
+            // group's leading delimiter as ordinary math.
+            position_++;
+            ElementBuilder err = builder_.element("ERROR");
+            err.child(builder_.createStringItem(full));
+            ElementBuilder seq = builder_.element("_seq");
+            seq.child(err.final());
+            Item first = parse_primary();
+            if (item_present(first)) seq.child(first);
+            if (position_ < length_ && source_[position_] == '}') position_++;
+            return seq.final();
+        }
         Item left = parse_delimiter_token();
         ElementBuilder elem = builder_.element("delimiter_group");
         elem.attr("left", left);
@@ -378,29 +711,127 @@ private:
                     elem.attr("right", parse_delimiter_token());
                     return elem.final();
                 }
+                if (strcmp(name, "middle") == 0) {
+                    ElementBuilder middle = builder_.element("middle_delim");
+                    // Invalid middle tokens are recovered as a null delimiter;
+                    // the renderer drops the following offending atom.
+                    if (has_sized_delimiter_token()) middle.attr("delim", parse_delimiter_token());
+                    elem.child(middle.final());
+                    continue;
+                }
                 position_ = save;
             }
             Item child = parse_atom_with_scripts();
             if (!item_present(child)) break;
             elem.child(child);
         }
-        error("missing \\right delimiter");
+        // MathLive recovers incomplete delimiter pairs with a null right side.
         elem.attr("right", builder_.createStringItem("."));
         return elem.final();
     }
 
+    bool find_infix_fraction(size_t* command_begin, size_t* command_end,
+                             char* command, size_t command_capacity) {
+        size_t brace_depth = 0;
+        for (size_t cursor = position_; cursor < length_;) {
+            char c = source_[cursor];
+            if (c == '{') {
+                brace_depth++;
+                cursor++;
+                continue;
+            }
+            if (c == '}') {
+                if (brace_depth > 0) brace_depth--;
+                cursor++;
+                continue;
+            }
+            if (c != '\\') {
+                cursor++;
+                continue;
+            }
+
+            char name[96];
+            char full[104];
+            size_t end = latex_scan_command(source_, length_, cursor, name,
+                                            sizeof(name), full, sizeof(full));
+            if (end == 0) {
+                cursor++;
+                continue;
+            }
+            if (brace_depth == 0 && is_infix_fraction_command(name)) {
+                *command_begin = cursor;
+                *command_end = end;
+                size_t command_len = strlen(full);
+                if (command_len >= command_capacity) command_len = command_capacity - 1;
+                memcpy(command, full, command_len);
+                command[command_len] = '\0';
+                return true;
+            }
+            cursor = end;
+        }
+        return false;
+    }
+
+    Item parse_infix_fraction_side(size_t begin, size_t end, bool allow_infix) {
+        DirectMathParser nested(ctx_, source_ + begin, end - begin, offset_ + begin, ascii_, allow_infix);
+        ElementBuilder group = builder_.element("group");
+        nested.parse_into(group, false);
+        return group.final();
+    }
+
+    bool parse_infix_fraction(ElementBuilder& parent) {
+        if (!allow_infix_ || ascii_ || position_ != 0) return false;
+        size_t command_begin = 0;
+        size_t command_end = 0;
+        char command[104];
+        if (!find_infix_fraction(&command_begin, &command_end, command, sizeof(command))) return false;
+
+        // TeX scopes one infix fraction to its enclosing math list. Nested
+        // braces start their own scope, but another unbraced infix operator is
+        // recovery text rather than a recursively nested denominator fraction.
+        ElementBuilder fraction = builder_.element("infix_frac");
+        fraction.attr("cmd", builder_.createStringItem(command));
+        fraction.attr("numer", parse_infix_fraction_side(position_, command_begin, false));
+        fraction.attr("denom", parse_infix_fraction_side(command_end, length_, false));
+        parent.child(fraction.final());
+        position_ = length_;
+        return true;
+    }
+
     size_t find_environment_end(const char* name, size_t from, size_t* body_end,
-                                bool* found) {
+                                bool* found, bool* recovered) {
         if (found) *found = false;
+        if (recovered) *recovered = false;
         size_t name_len = strlen(name);
-        for (size_t i = from; i + 5 + name_len < length_; i++) {
+        size_t recovery_end = 0;
+        size_t recovery_body_end = 0;
+        for (size_t i = from; i + 5 < length_; i++) {
             if (source_[i] != '\\' || !starts_with(source_, length_, i, "\\end{")) continue;
             size_t name_start = i + 5;
-            if (memcmp(source_ + name_start, name, name_len) == 0 && source_[name_start + name_len] == '}') {
+            size_t end_name_start = 0;
+            size_t end_name_end = 0;
+            size_t after_end = latex_scan_group_end(source_, length_, i + 4, '{', '}',
+                                                     &end_name_start, &end_name_end);
+            if (after_end != 0 && recovery_end == 0) {
+                // MathLive recovers an unmatched environment by ending at the
+                // first closing environment token rather than consuming it as
+                // ordinary math content.
+                recovery_body_end = i;
+                recovery_end = after_end;
+            }
+            if (name_start + name_len < length_ &&
+                memcmp(source_ + name_start, name, name_len) == 0 &&
+                source_[name_start + name_len] == '}') {
                 if (body_end) *body_end = i;
                 if (found) *found = true;
                 return name_start + name_len + 1;
             }
+        }
+        if (recovery_end != 0) {
+            if (body_end) *body_end = recovery_body_end;
+            if (found) *found = true;
+            if (recovered) *recovered = true;
+            return recovery_end;
         }
         return length_;
     }
@@ -408,12 +839,20 @@ private:
     Item parse_environment() {
         skip_space();
         size_t name_begin = 0, name_end = 0;
+        // MathLive treats a bare `\begin` as an empty recoverable construct.
+        // Do not turn that local omission into a fatal input parse error.
+        if (position_ >= length_ || source_[position_] != '{') return ItemNull;
         if (!consume_group_span('{', '}', &name_begin, &name_end)) return ItemNull;
         char env_name[96];
         size_t env_len = name_end - name_begin;
         if (env_len >= sizeof(env_name)) env_len = sizeof(env_name) - 1;
         memcpy(env_name, source_ + name_begin, env_len);
         env_name[env_len] = '\0';
+        if (!is_supported_math_environment(env_name)) {
+            // MathLive ignores an unknown opening environment, then lets the
+            // following `\end{...}` take its ordinary error-recovery path.
+            return builder_.element("ignored_begin").final();
+        }
         ElementBuilder elem = builder_.element("environment");
         elem.attr("name", builder_.createStringItem(env_name));
         if (strcmp(env_name, "array") == 0 && position_ < length_ && source_[position_] == '{') {
@@ -425,8 +864,14 @@ private:
         }
         size_t body_end = length_;
         bool found_end = false;
-        size_t after_end = find_environment_end(env_name, position_, &body_end, &found_end);
-        if (!found_end) error("missing \\end environment");
+        bool recovered_end = false;
+        size_t after_end = find_environment_end(env_name, position_, &body_end, &found_end,
+                                                &recovered_end);
+        if (recovered_end) {
+            // A differently named closing token cannot close this environment.
+            // Preserve the recoverable tree while exposing MathLive's error class.
+            elem.attr("error", builder_.createStringItem("unbalanced-environment"));
+        }
         const char* body_source = source_ + position_;
         size_t body_len = body_end >= position_ ? body_end - position_ : 0;
         ElementBuilder body = builder_.element("env_body");
@@ -438,6 +883,7 @@ private:
     }
 
     void parse_children(ElementBuilder& parent, bool matrix_mode) {
+        if (!matrix_mode && parse_infix_fraction(parent)) return;
         while (position_ < length_) {
             skip_space();
             if (position_ >= length_) break;

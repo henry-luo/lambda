@@ -164,6 +164,10 @@ struct MirTranspiler {
     // definition except this target are dynamic through those Function slots.
     Script* interp_module_owner;
     AstFuncNode* satellite_target;
+    // D8.1.1v9: the module-level definitions co-compiled with the target
+    // (its direct-callee closure); calls among them are direct native edges.
+    AstFuncNode* const* satellite_cluster;
+    int satellite_cluster_count;
     bool whole_script_poc;
     uint32_t satellite_module_state_id;
 
@@ -300,6 +304,9 @@ struct MirTranspiler {
     // Whether we're inside a proc function body (pn)
     bool in_proc;
     bool preserve_proc_if_result;
+    // the statement `transpile_discard_expr` is lowering for effect only; an
+    // `if` reached through any other (value) path keeps its result
+    AstNode* discarding_if_node;
     bool current_func_can_raise;
 
     // Lambda concurrency state-machine context. Only procedures in the
@@ -684,6 +691,7 @@ static TypeId mir_param_array_element_type(AstFuncNode* fn_node, int index,
     return declared;
 }
 
+static AstFuncNode* mir_callsite_canonical_fn(MirTranspiler* mt, AstFuncNode* fn);
 static void mir_store_param_types(MirTranspiler* mt, AstFuncNode* fn_node,
         const TypeId* resolved_types, int param_count) {
     if (!mt || !fn_node || param_count < 0 || param_count > LAMBDA_MAX_FUNCTION_ARGS) return;
@@ -718,7 +726,7 @@ static void mir_store_param_types(MirTranspiler* mt, AstFuncNode* fn_node,
             } else if (mt && mt->callsite_info) {
                 CallSiteEntry key;
                 memset(&key, 0, sizeof(key));
-                key.fn = fn_node;
+                key.fn = mir_callsite_canonical_fn(mt, fn_node);
                 CallSiteEntry* calls = (CallSiteEntry*)hashmap_get(mt->callsite_info, &key);
                 if (calls && calls->specialization_elem_types[i] != LMD_TYPE_ERROR) {
                     info->inferred_elem_type = calls->specialization_elem_types[i];
@@ -1199,6 +1207,32 @@ static bool mir_is_zero_int_literal(MirTranspiler* mt, AstNode* node) {
     return mir_is_exact_int_literal(mt, node, "0", 1);
 }
 
+// the value of a compact int literal (a parser-built primary spelled as a
+// decimal, optionally signed); false for anything else
+static bool mir_int_literal_value(MirTranspiler* mt, AstNode* node, int64_t* out) {
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!mt || !mt->source || !node || !node->type ||
+            node->type->type_id != LMD_TYPE_INT) {
+        return false;
+    }
+    uint32_t start = node->source_span.start_byte;
+    uint32_t end = node->source_span.end_byte;
+    if (end <= start || end - start > 18) return false;
+    const char* text = mt->source + start;
+    uint32_t i = text[0] == '-' ? 1 : 0;
+    if (i >= end - start) return false;
+    int64_t value = 0;
+    for (; i < end - start; i++) {
+        if (text[i] < '0' || text[i] > '9') return false;
+        value = value * 10 + (text[i] - '0');
+    }
+    *out = text[0] == '-' ? -value : value;
+    return true;
+}
+
 static bool mir_is_one_int_literal(MirTranspiler* mt, AstNode* node) {
     return mir_is_exact_int_literal(mt, node, "1", 1);
 }
@@ -1352,7 +1386,14 @@ static MIR_reg_t mir_materialize_pending_reg(MirTranspiler* mt,
 
 static void transpile_discard_expr(MirTranspiler* mt, AstNode* node) {
     MirLoweringProfile profile = {&mt->em, mt, mir_profile_lower_value, NULL};
+    // Result37: `(if (c) { x } else { y }) + 1` returned null on the JIT --
+    // transpile_if discarded every boxed proc-mode `if` that was not a tail
+    // or an initializer, including one consumed as an operand. Only THIS
+    // statement-position lowering may discard.
+    AstNode* saved = mt->discarding_if_node;
+    mt->discarding_if_node = ast_unwrap_primary(node);
     (void)em_lower_profile_value(&profile, node, MIR_VALUE_DISCARD);
+    mt->discarding_if_node = saved;
 }
 
 #define emit_call_0(mt, fn, ret) em_call_0(&(mt)->em, fn, ret, false)
@@ -1993,6 +2034,17 @@ static MIR_reg_t mir_prepare_cow_root(MirTranspiler* mt, MirVarEntry* root) {
     return replacement;
 }
 
+// D8.1.1v9: a satellite image defines its target and the target's
+// direct-callee cluster; every other local function is a dynamic target.
+static bool mir_satellite_defines(MirTranspiler* mt, AstNode* entry_node) {
+    if (!mt->satellite_target) return true;
+    if (entry_node == (AstNode*)mt->satellite_target) return true;
+    for (int i = 0; i < mt->satellite_cluster_count; i++) {
+        if ((AstNode*)mt->satellite_cluster[i] == entry_node) return true;
+    }
+    return false;
+}
+
 static bool mir_root_may_need_cow(MirVarEntry* root) {
     if (!root) return false;
     // This gate is an ELISION, not the correctness mechanism (CW32v2):
@@ -2376,7 +2428,24 @@ static bool mir_expr_native_bool_operand(MirTranspiler* mt, AstNode* node) {
     // emitter still publishes the native 0/1 lane, so consume that lane
     // instead of boxing it for is_truthy.
     if (mir_numeric_comparison_native_lane(mt, node)) return true;
-    return base && base->node_type == AST_NODE_INDEX_EXPR &&
+    if (!base) return false;
+    if (base->node_type == AST_NODE_BINARY) {
+        // Result37 (triangl2): `a and b and (not c)` nests a native and/or
+        // whose AST type is the operands' `bool?` contract, not `bool`; its
+        // emitter still publishes (VALUE_REP_I64, LMD_TYPE_BOOL) whenever
+        // both operands are native, so consume that lane instead of boxing
+        // it for is_truthy. The nullable lane's null (2) stays falsy at
+        // every native gate (T21-1c).
+        AstBinaryNode* binary = (AstBinaryNode*)base;
+        return (binary->op == OPERATOR_AND || binary->op == OPERATOR_OR) &&
+            mir_expr_native_bool_operand(mt, binary->left) &&
+            mir_expr_native_bool_operand(mt, binary->right);
+    }
+    if (base->node_type == AST_NODE_UNARY) {
+        // `not` publishes the native 0/1 lane on both of its arms.
+        return ((AstUnaryNode*)base)->op == OPERATOR_NOT;
+    }
+    return base->node_type == AST_NODE_INDEX_EXPR &&
         mir_expr_carrier_type(mt, base) == LMD_TYPE_BOOL;
 }
 
@@ -2620,7 +2689,7 @@ static void plan_native_func_specialization(MirTranspiler* mt,
     }
     CallSiteEntry key;
     memset(&key, 0, sizeof(key));
-    key.fn = fn_node;
+    key.fn = mir_callsite_canonical_fn(mt, fn_node);
     CallSiteEntry* callers = mt && mt->callsite_info
         ? (CallSiteEntry*)hashmap_get(mt->callsite_info, &key) : NULL;
     nfi->needs_boxed_entry = callers && callers->escaped;
@@ -3369,6 +3438,16 @@ static MIR_reg_t emit_box_impl(MirTranspiler* mt, MIR_reg_t val_reg,
         // Already boxed Item or NULL
         return val_reg;
     }
+}
+
+// A type-VALUED expression (`arr[int]`, a `let T = int` binding) carries a
+// TypeType wrapper or a global meta-type: `LMD_TYPE_TYPE` with the simple
+// kind. An occurrence or union CONTRACT (`int?` from a total indexed read,
+// `int | null`) also has `type_id == LMD_TYPE_TYPE` but an extended kind and
+// describes a value, so testing the id alone sent every `a[b[i]]` on a
+// declared `T[]` through boxed fn_index (Result37 triangl2).
+static bool mir_type_is_type_value(Type* type) {
+    return type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE;
 }
 
 static Type* mir_unwrap_decl_type(Type* type) {
@@ -4920,22 +4999,18 @@ static MirValue mir_module_slot_load_item(void* owner, uint32_t slot,
         MIR_new_reg_op(mt->ctx, vars),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, vars),
             state, 0, 1)));
-    MIR_reg_t boxed = 0;
-    if (mt->satellite_target || mt->interp_module_owner) {
-        // T0-backed MIR reads are boxed Item values just like the T0 slab.
-        // The old early return skipped the native unbox below, so an `int`
-        // module binding entered scalar MIR arithmetic as raw Item bits and
-        // produced `inf` after promotion (D8.1.1v4 / D5.3.3).
-        boxed = emit_call_2(mt, "lambda_module_var_at", MIR_T_I64,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, state), MIR_T_I64,
-            MIR_new_int_op(mt->ctx, (int64_t)slot));
-    } else {
-        boxed = new_reg(mt, "gv_val", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, boxed),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                (MIR_disp_t)slot * (MIR_disp_t)sizeof(Item), vars, 0, 1)));
-    }
+    // T0-backed MIR reads are boxed Item values just like the T0 slab, and a
+    // satellite reads the very same slab (`state->vars`, re-read from the
+    // state on every use so a REPL-grown slab is never stale). D8.1.1v9: the
+    // load is inline here as on the eager path; the per-read
+    // lambda_module_var_at call was every `let` constant in deltablue's and
+    // richards' hot loops (103 / 118 sites). The native unbox below still
+    // applies (D8.1.1v4 / D5.3.3).
+    MIR_reg_t boxed = new_reg(mt, "gv_val", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, boxed),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+            (MIR_disp_t)slot * (MIR_disp_t)sizeof(Item), vars, 0, 1)));
     return em_value_for_rep(boxed, semantic_type, VALUE_REP_ITEM);
 }
 
@@ -5052,10 +5127,21 @@ static void store_global_var(MirTranspiler* mt, GlobalVarEntry* gvar, MIR_reg_t 
 
 static MIR_reg_t emit_load_const(MirTranspiler* mt, int const_index, MIR_type_t as_type) {
     if (mt && (mt->satellite_target || mt->interp_module_owner)) {
+        // D8.1.1v9: the same two loads lambda_module_const_at_state performs
+        // (`state->consts[index]`), re-read from the state at every use so a
+        // rebound const image (after interning) is never stale.
         MIR_reg_t state = emit_module_state(mt);
-        return emit_call_2(mt, "lambda_module_const_at_state", MIR_T_P,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, state),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, const_index));
+        MIR_reg_t consts = new_reg(mt, "module_consts", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, consts),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(LambdaModuleState, consts),
+                state, 0, 1)));
+        MIR_reg_t value = new_reg(mt, "module_const", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, value),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                (MIR_disp_t)const_index * (MIR_disp_t)sizeof(void*), consts, 0, 1)));
+        return value;
     }
     // Use a call boundary here: MIR may reuse a virtual register across an
     // arbitrary preceding runtime call, while literal pool ownership is fixed
@@ -5952,7 +6038,7 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
             // as a captured variable (closures store captured functions as vars)
             MirVarEntry* cap_var = find_var_by_binding(mt, ident->entry);
             bool satellite_dynamic_target = mt->satellite_target &&
-                entry_node != (AstNode*)mt->satellite_target;
+                !mir_satellite_defines(mt, entry_node);
             bool whole_script_dynamic_target = mt->whole_script_poc &&
                 !interp_satellite_supported((AstFuncNode*)entry_node);
             satellite_dynamic_target = satellite_dynamic_target ||
@@ -7256,7 +7342,7 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
                 idx_unwrapped->node_type == AST_NODE_UNARY_TYPE ||
                 idx_unwrapped->node_type == AST_NODE_CONTENT_TYPE)
                 idx_is_type = true;
-            if (!idx_is_type && idx_unwrapped->type && idx_unwrapped->type->type_id == LMD_TYPE_TYPE)
+            if (!idx_is_type && mir_type_is_type_value(idx_unwrapped->type))
                 idx_is_type = true;
         }
         // Boolean mask index a[mask] returns an ARRAY, not a scalar element — skip
@@ -8279,6 +8365,7 @@ static MirNativeIndexValue mir_emit_native_index_expr(MirTranspiler* mt, AstNode
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MUL,
                 MIR_new_reg_op(mt->ctx, raw), MIR_new_reg_op(mt->ctx, left.value),
                 MIR_new_reg_op(mt->ctx, right.value)));
+            int64_t literal_factor = 0;
             if (mir_index_expr_nonnegative(mt, binary->left) &&
                     mir_index_expr_nonnegative(mt, binary->right)) {
                 // Both operands are loop counters or bounds the enclosing
@@ -8299,6 +8386,25 @@ static MirNativeIndexValue mir_emit_native_index_expr(MirTranspiler* mt, AstNode
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
                     MIR_new_reg_op(mt->ctx, no_overflow), MIR_new_reg_op(mt->ctx, l_ok),
                     MIR_new_reg_op(mt->ctx, r_ok)));
+            } else if ((mir_int_literal_value(mt, binary->left, &literal_factor) ||
+                        mir_int_literal_value(mt, binary->right, &literal_factor)) &&
+                    literal_factor != 0 && literal_factor > -(INT64_C(1) << 26) &&
+                    literal_factor < (INT64_C(1) << 26)) {
+                // Result37 (cube3d 1.2x): `i * 4 + j` inside `while` loops has
+                // no counted-loop proof, so it fell to the double-lane check
+                // below -- two conversions, a double multiply and two double
+                // compares per index. With one factor a literal below 2^26,
+                // the product is below 2^53 exactly when the other factor is
+                // below 2^27 in magnitude: one add and one unsigned compare.
+                MIR_reg_t other = mir_int_literal_value(mt, binary->left, &literal_factor)
+                    ? right.value : left.value;
+                MIR_reg_t shifted = new_reg(mt, "idx_lit_shift", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                    MIR_new_reg_op(mt->ctx, shifted), MIR_new_reg_op(mt->ctx, other),
+                    MIR_new_int_op(mt->ctx, INT64_C(1) << 27)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ULT,
+                    MIR_new_reg_op(mt->ctx, no_overflow), MIR_new_reg_op(mt->ctx, shifted),
+                    MIR_new_int_op(mt->ctx, INT64_C(1) << 28)));
             } else {
                 MIR_reg_t l_d = new_reg(mt, "idx_l_d", MIR_T_D);
                 MIR_reg_t r_d = new_reg(mt, "idx_r_d", MIR_T_D);
@@ -10008,7 +10114,8 @@ static MirValue transpile_if(MirTranspiler* mt, AstIfNode* if_node) {
 
     // In proc statement context the if/else result is unused, but a final
     // pn-body if/else is the implicit return value and must keep branch values.
-    bool proc_discard = mt->in_proc && need_boxing && !mt->preserve_proc_if_result;
+    bool proc_discard = mt->in_proc && need_boxing && !mt->preserve_proc_if_result &&
+        mt->discarding_if_node == (AstNode*)if_node;
 
     MIR_type_t result_type = need_boxing ? MIR_T_I64 : type_to_mir(if_tid);
     MIR_reg_t result = new_reg(mt, "if_res", result_type);
@@ -16772,6 +16879,16 @@ static bool mir_index_leaf_is_native_int(MirTranspiler* mt, AstNode* node) {
         // `last` is emitted as the machine int len(object)-1 while it is
         // inside a subscript, so it is already a valid native index leaf.
         return true;
+    case AST_NODE_INDEX_EXPR: {
+        // Result37 (triangl2): a nested subscript `a[b[i]]` whose inner read
+        // publishes the int lane (typed `int[]` element, native key) is a
+        // machine index like any int-lane binding; its out-of-range lane null
+        // already lands in the checked load's OOB arm.
+        AstFieldNode* inner = (AstFieldNode*)node;
+        return inner->field && !inner->field->next &&
+            mir_expr_carrier_type(mt, node) == LMD_TYPE_INT &&
+            mir_index_expr_is_native_int(mt, inner->field);
+    }
     case AST_NODE_PRIMARY: {
         AstPrimaryNode* pri = (AstPrimaryNode*)node;
         // a PRIMARY with no inner expression is itself the literal
@@ -17133,10 +17250,17 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
     TypeId obj_tid = mir_expr_carrier_type(mt, field_node->object);
     Type* object_value_type = mir_ident_value_type(field_node->object);
     if (obj_tid == LMD_TYPE_TYPE && object_value_type &&
-            object_value_type->type_id == LMD_TYPE_ARRAY) {
+            object_value_type->type_id == LMD_TYPE_ARRAY &&
+            !mt->satellite_target && !mt->interp_module_owner) {
         // The annotation node is a meta-type, but the immutable module value
         // has the concrete Array-of-Items representation needed by the direct
-        // string[] load path (D2.6.2, D3.2.1).
+        // string[] load path (D2.6.2, D3.2.1). That holds for the eager
+        // module init only: a T0-initialized slab (satellite / T0-owned
+        // module) coerced the declared literal through the shared boundary,
+        // which rebuilds a pointer-lane element contract into its native
+        // carrier, and decoding that as Array-of-Items read every `string[]`
+        // element as null (base642 on the auto tier). Those readers keep the
+        // generic fn_index path, which handles either carrier.
         obj_tid = LMD_TYPE_ARRAY;
     }
 
@@ -17169,7 +17293,7 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
             is_type_index = true;
         }
         // Node whose expression type is LMD_TYPE_TYPE (type-valued expression)
-        if (!is_type_index && idx_node->type && idx_node->type->type_id == LMD_TYPE_TYPE) {
+        if (!is_type_index && mir_type_is_type_value(idx_node->type)) {
             is_type_index = true;
         }
     }
@@ -17566,8 +17690,12 @@ static bool mir_emit_var_home_transport(MirTranspiler* mt, int position,
 // (rebind/detach) through the transported home -- reload each transported
 // binding from its own slot; the home holds a boxed Item by the untyped
 // convention.
+// D8.1.1v8: a TYPED `var` position (`typed` set) is invariant (S9.2.1), so
+// the home still holds the declared container -- possibly the callee's
+// detached replacement -- whose Item bits are its untagged pointer; the
+// binding keeps its raw descriptor and only the register is refreshed.
 static void mir_emit_var_home_reload(MirTranspiler* mt,
-        MirVarEntry* const* roots, int count) {
+        MirVarEntry* const* roots, const bool* typed, int count) {
     for (int vh = 0; vh < count; vh++) {
         MirVarEntry* vroot = roots[vh];
         if (!vroot) continue;
@@ -17576,6 +17704,7 @@ static void mir_emit_var_home_reload(MirTranspiler* mt,
             MIR_new_mem_op(mt->ctx, MIR_T_I64,
                 (MIR_disp_t)vroot->root_slot * (MIR_disp_t)sizeof(uint64_t),
                 mt->em.frame.root_base, 0, 1)));
+        if (typed && typed[vh]) continue;
         vroot->type_id = LMD_TYPE_ANY;
         vroot->mir_type = MIR_T_I64;
         update_gc_root_slot(mt, vroot);
@@ -17598,10 +17727,17 @@ static TypeFunc* mir_dynamic_call_var_signature(AstCallNode* call_node) {
     return signature;
 }
 
-static bool mir_dynamic_call_var_position(TypeFunc* signature, int position) {
+// D8.1.1v8: every `var` position travels through the CW33 home cells on
+// the dynamic edge -- an untyped one is consumed by the raw prologue, a typed
+// one by the boxed wrapper (prepare, admit, store the container back).
+static TypeParam* mir_dynamic_call_var_param(TypeFunc* signature, int position) {
     TypeParam* param = signature ? signature->param : NULL;
     for (int i = 0; param && i < position; i++) param = param->next;
-    return param && param->is_var_param && !param->full_type;
+    return param && param->is_var_param ? param : NULL;
+}
+
+static bool mir_dynamic_call_var_position(TypeFunc* signature, int position) {
+    return mir_dynamic_call_var_param(signature, position) != NULL;
 }
 
 static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
@@ -18665,7 +18801,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             (entry_node->node_type == AST_NODE_FUNC ||
              entry_node->node_type == AST_NODE_FUNC_EXPR ||
              entry_node->node_type == AST_NODE_PROC) &&
-            entry_node != (AstNode*)mt->satellite_target;
+            !mir_satellite_defines(mt, entry_node);
         bool whole_script_dynamic_target = mt->whole_script_poc && entry_node &&
             (entry_node->node_type == AST_NODE_FUNC ||
              entry_node->node_type == AST_NODE_FUNC_EXPR ||
@@ -19604,7 +19740,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             }
             // CW33 M1a: reload the transported bindings after the callee's
             // epilogue write-back.
-            mir_emit_var_home_reload(mt, var_home_roots, var_home_count);
+            mir_emit_var_home_reload(mt, var_home_roots, NULL, var_home_count);
             MIR_reg_t second_result = 0;
             // the slot transport is also materialized in a MIR register by
             // em_call_direct, so register presence does not identify a pair.
@@ -19874,6 +20010,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
     // has been evaluated, so a nested call cannot clobber the cells.
     TypeFunc* dyn_var_signature = mir_dynamic_call_var_signature(call_node);
     MirVarEntry* dyn_home_roots[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    bool dyn_home_typed[LAMBDA_MAX_FUNCTION_ARGS] = {false};
     int dyn_home_count = 0;
     if (dyn_var_signature) {
         // the borrowed-call entry lets the dispatcher accept the `var`
@@ -19899,9 +20036,11 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         AstNode* position_arg = call_node->argument;
         for (int i = 0; i < count && position_arg && i < LAMBDA_MAX_FUNCTION_ARGS;
                 i++, position_arg = position_arg->next) {
-            if (!mir_dynamic_call_var_position(dyn_var_signature, i)) continue;
+            TypeParam* var_param = mir_dynamic_call_var_param(dyn_var_signature, i);
+            if (!var_param) continue;
             MirVarEntry* borrow_root = mir_direct_root_binding(mt, position_arg);
             if (mir_emit_var_home_transport(mt, i, borrow_root, boxed_args[i], true)) {
+                dyn_home_typed[dyn_home_count] = var_param->full_type != NULL;
                 dyn_home_roots[dyn_home_count++] = borrow_root;
             }
         }
@@ -20019,7 +20158,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
     }
 
     // T21-3b: reload the transported `var` bindings (see the direct path).
-    mir_emit_var_home_reload(mt, dyn_home_roots, dyn_home_count);
+    mir_emit_var_home_reload(mt, dyn_home_roots, dyn_home_typed, dyn_home_count);
 
     // Dynamic calls (fn_call0/1/2/3) return Item (already boxed).
     // Unbox to native type to match direct call behavior, so callers
@@ -22317,7 +22456,16 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
 
                 MIR_reg_t path = mir_emit_cow_path_array(mt, &typed_path, ca->key, false);
                 MIR_reg_t owner = emit_box(mt, typed_root->reg, typed_root->type_id);
-                MIR_reg_t replacement = emit_call_5(mt, "lambda_map_path_set_checked", MIR_T_I64,
+                // NM-O8 typed arm: a `var` parameter root writes THROUGH to the
+                // caller and, under the typed raw-lane ABI, has no home to
+                // publish a detached candidate through -- the checked helper's
+                // swapped-in root stayed in this frame's register and the
+                // caller's record never changed. Write in place (the caller
+                // prepared the root at the borrow, CW33) and re-check the
+                // post-state, exactly as the flat store already selects.
+                MIR_reg_t replacement = emit_call_5(mt, typed_root->is_var_param
+                        ? "lambda_map_path_set_checked_inplace" : "lambda_map_path_set_checked",
+                    MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, path),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
@@ -23131,7 +23279,12 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
             MIR_reg_t value = transpile_box_item(mt, ca->value);
             MIR_reg_t path = mir_emit_cow_path_array(mt, &cow_path, ca->key, true);
             MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
-            MIR_reg_t replacement = emit_call_5(mt, "lambda_map_path_set_checked", MIR_T_I64,
+            // NM-O8 typed arm (see the computed-key site): a `var` parameter
+            // root has no home under the typed ABI, so the write must land in
+            // the caller's record itself.
+            MIR_reg_t replacement = emit_call_5(mt, cow_root->is_var_param
+                    ? "lambda_map_path_set_checked_inplace" : "lambda_map_path_set_checked",
+                MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, path),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
@@ -23988,7 +24141,7 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
     if (mt && mt->callsite_info) {
         CallSiteEntry key;
         memset(&key, 0, sizeof(key));
-        key.fn = fn_node;
+        key.fn = mir_callsite_canonical_fn(mt, fn_node);
         const CallSiteEntry* found = (const CallSiteEntry*)hashmap_get(mt->callsite_info, &key);
         if (found && found->has_call) cs = found;
     }
@@ -25290,6 +25443,13 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     // declared values as the raw call would have received.
     MIR_reg_t prepared_params[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     MIR_reg_t raw_array_params[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    // D8.1.1v8 / CW33 adapter: a TYPED `var` position has no home under the
+    // raw ABI, so a T0 caller's transport cell would otherwise stay set for
+    // the whole body (a later borrowed-mode call would read it as its own
+    // home). Consume the cell here and, on return, store the admitted
+    // container back through it: raw writes were in place, and an admission
+    // that rebuilt the carrier is thereby visible to the caller's binding.
+    MIR_reg_t typed_var_homes[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     uint64_t wrapper_array_witness_mask = nfi
         ? mir_typed_array_witness_mask(nfi->fn_node) : 0;
     bool wrapper_has_parameter_error_guard = false;
@@ -25329,6 +25489,39 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
             emit_return_if_item_error(mt, preg);
         }
         preg = emit_optional_argument_value(mt, preg, parameter);
+        if (parameter && parameter->is_var_param && parameter->full_type) {
+            MIR_disp_t cell = (MIR_disp_t)offsetof(Context, mir_var_homes)
+                + (MIR_disp_t)user_index * (MIR_disp_t)sizeof(uint64_t*);
+            MIR_reg_t home = new_reg(mt, "typed_var_home", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, home),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, cell, runtime, 0, 1)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, cell, runtime, 0, 1),
+                MIR_new_int_op(mt->ctx, 0)));
+            typed_var_homes[user_index] = home;
+            // CW33 callee-prologue prepare, placed in the adapter: the raw
+            // body writes the container in place and cannot publish a COW
+            // replacement, so un-share-at-borrow (S9.2.2) happens here, once
+            // -- a byte-test no-op when the container is already unique.
+            // ONLY when a home was transported: a replacement the adapter
+            // cannot store back is a lost write (deltablue2's `todo` never
+            // shrank and its planner loop never ended), whereas the pre-v8
+            // pass-through keeps the caller's aliasing semantics intact.
+            MIR_label_t no_prepare = new_label(mt);
+            MIR_reg_t prepared = new_reg(mt, "typed_var_prepared", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, prepared), MIR_new_reg_op(mt->ctx, preg)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                MIR_new_label_op(mt->ctx, no_prepare), MIR_new_reg_op(mt->ctx, home)));
+            MIR_reg_t replacement = emit_call_1(mt, "cow_prepare_write", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
+            emit_return_if_item_error(mt, replacement);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, prepared), MIR_new_reg_op(mt->ctx, replacement)));
+            emit_label(mt, no_prepare);
+            preg = prepared;
+        }
 
         bool wrapper_typed_array_witness =
             (wrapper_array_witness_mask & ((uint64_t)1 << user_index)) != 0;
@@ -25567,12 +25760,34 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     if (scalar_home_id) {
         em_scalar_home_bind(&mt->em, scalar_home_id, boxed_result);
     }
+    // typed `var` store-back (see typed_var_homes): the binding's current
+    // boxed Item -- the admitted container on the raw edge, or whatever the
+    // source-level slow body left bound -- goes through the caller's home.
+    auto emit_typed_var_store_back = [&]() {
+        AstNamedNode* vp = fn_node->param;
+        for (int i = 0; vp && i < LAMBDA_MAX_FUNCTION_ARGS;
+                i++, vp = (AstNamedNode*)vp->next) {
+            if (!typed_var_homes[i]) continue;
+            MirVarEntry* binding = find_var(mt, vp->name->chars);
+            if (!binding) continue;
+            MIR_label_t no_home = new_label(mt);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                MIR_new_label_op(mt->ctx, no_home),
+                MIR_new_reg_op(mt->ctx, typed_var_homes[i])));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, typed_var_homes[i], 0, 1),
+                MIR_new_reg_op(mt->ctx, binding->reg)));
+            emit_label(mt, no_home);
+        }
+    };
+    emit_typed_var_store_back();
     // The wrapper's side-number frame is about to be reclaimed; its result
     // must therefore be adopted by the caller-provided home in the epilogue.
     emit_function_return(mt, MIR_new_reg_op(mt->ctx, boxed_result));
     if (has_slow_body) {
         emit_label(mt, slow_body_label);
         MIR_reg_t slow_result = emit_boxed_slow_body(mt, fn_node, fn_type);
+        emit_typed_var_store_back();
         emit_function_return(mt, MIR_new_reg_op(mt->ctx, slow_result));
     }
     finish_function_epilogue(mt);
@@ -27045,11 +27260,24 @@ static AstFuncNode* mir_ident_local_func(AstNode* node) {
     return (AstFuncNode*)target;
 }
 
+// D8.1.1v9: a satellite root holds shallow COPIES of its cluster members
+// (their `next` is relinked), while call sites collected from the owner's
+// complete AST name the ORIGINAL definitions; both share one `body`, which
+// is the identity every function-keyed table uses.
+static AstFuncNode* mir_callsite_canonical_fn(MirTranspiler* mt, AstFuncNode* fn) {
+    if (!fn || !mt->satellite_target) return fn;
+    if (fn->body == mt->satellite_target->body) return mt->satellite_target;
+    for (int i = 0; i < mt->satellite_cluster_count; i++) {
+        if (mt->satellite_cluster[i]->body == fn->body) return mt->satellite_cluster[i];
+    }
+    return fn;
+}
+
 static CallSiteEntry* mir_callsite_entry(MirTranspiler* mt, AstFuncNode* fn, bool create) {
     if (!mt->callsite_info || !fn) return NULL;
     CallSiteEntry key;
     memset(&key, 0, sizeof(key));
-    key.fn = fn;
+    key.fn = mir_callsite_canonical_fn(mt, fn);
     CallSiteEntry* found = (CallSiteEntry*)hashmap_get(mt->callsite_info, &key);
     if (found || !create) return found;
     for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
@@ -27278,7 +27506,7 @@ static TypeId mir_callsite_arg_elem_type_at(MirTranspiler* mt, AstNode* arg,
         AstIdentNode* ident = (AstIdentNode*)unwrapped;
         CallSiteEntry key;
         memset(&key, 0, sizeof(key));
-        key.fn = mt->prepass_enclosing;
+        key.fn = mir_callsite_canonical_fn(mt, mt->prepass_enclosing);
         CallSiteEntry* enclosing = mt->callsite_info
             ? (CallSiteEntry*)hashmap_get(mt->callsite_info, &key) : NULL;
         if (enclosing && ident->name) {
@@ -27353,7 +27581,11 @@ static TypeId mir_callsite_arg_type(MirTranspiler* mt, AstNode* arg) {
 }
 
 static TypeId mir_callsite_arg_type_at(MirTranspiler* mt, AstNode* arg, int depth) {
-    if (!arg || depth > 4) return LMD_TYPE_ANY;
+    // Result37: `var nc4 = remain - nc3` with `remain = m - nc1 - nc2` and
+    // `m = n - 1` is five initializer hops from the parameter; the old guard
+    // of 4 typed it ANY, the subscript `rcount[nc4]` became a dynamic key and
+    // paraffins lost its array witness (2.4x). The walk is compile-time only.
+    if (!arg || depth > 8) return LMD_TYPE_ANY;
     if (mir_callsite_arg_elem_type(mt, arg) != LMD_TYPE_ANY) return LMD_TYPE_ARRAY_NUM;
     TypeId tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
     if (tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT) return tid;
@@ -27412,6 +27644,10 @@ static TypeId mir_callsite_arg_type_at(MirTranspiler* mt, AstNode* arg, int dept
                 TypeId success = mir_decl_type_id(info->success_type);
                 if (success == LMD_TYPE_INT || success == LMD_TYPE_FLOAT) return success;
             }
+            // A row whose C return is a raw int64 (`shr`, `band`, `len`)
+            // publishes the int lane whatever its declared success type says;
+            // `half = shr(n, 1)` typed ANY made `rcount[half]` a dynamic key.
+            if (info && info->c_ret_type == C_RET_INT64) return LMD_TYPE_INT;
         }
     }
     if (unwrapped && unwrapped->node_type == AST_NODE_INDEX_EXPR) {
@@ -28512,6 +28748,8 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
                                     MirModuleArtifacts* out_artifacts,
                                     Script* interp_module_owner,
                                     AstFuncNode* satellite_target,
+                                    AstFuncNode* const* satellite_cluster,
+                                    int satellite_cluster_count,
                                     bool whole_script_poc,
                                     const AstIndex* ast_index) {
     log_notice("transpile AST to MIR (direct)");
@@ -28539,6 +28777,10 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
     mt.ast_index = ast_index;
     mt.interp_module_owner = interp_module_owner;
     mt.satellite_target = satellite_target;
+    // set before any prepass: the forward-declare pass pre-registers each
+    // member's native call facts from the same call-site table the bodies use
+    mt.satellite_cluster = satellite_cluster;
+    mt.satellite_cluster_count = satellite_cluster_count;
     mt.whole_script_poc = whole_script_poc;
     mt.satellite_module_state_id = interp_module_owner
         ? interp_module_owner->module_state_id : 0;
@@ -28588,7 +28830,15 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
 
     // M2: collect every call site and escaping reference before any inference
     // runs, so params with a closed, uniformly-typed caller set can be narrowed.
-    prepass_collect_call_sites(&mt, script->child);
+    // D8.1.1v9: a satellite root holds only its cluster, but the CALLERS that
+    // type its parameters live anywhere in the module -- walk the owner's
+    // complete retained AST for collection (exactly the eager caller set;
+    // an unseen T0 caller is the wrapper's exact-shape guard's business).
+    AstNode* callsite_root = script->child;
+    if (mt.satellite_target && interp_module_owner && interp_module_owner->ast_root) {
+        callsite_root = ((AstScript*)interp_module_owner->ast_root)->child;
+    }
+    prepass_collect_call_sites(&mt, callsite_root);
 
     // Forward-declare ALL functions first (handles forward references between functions)
     prepass_forward_declare(&mt, script->child);
@@ -28861,7 +29111,7 @@ static int lambda_mir_plan_compiler_pass(void* opaque) {
         pass->tp->pool, pass->tp->name_pool, &MIR_DEFAULT_MODULE_NAMES,
         pass->property_keys, NULL,
         pass->tp->compile_against_interp_slab ? pass->script : NULL,
-        NULL, pass->tp->whole_script_poc, &pass->tp->ast_index);
+        NULL, NULL, 0, pass->tp->whole_script_poc, &pass->tp->ast_index);
     return 1;
 }
 
@@ -28949,6 +29199,106 @@ static bool build_property_key_image(ArrayList* property_keys,
     return true;
 }
 
+// D8.1.1v9: the module-level definitions reachable from `target` through
+// direct calls that a satellite may define beside it. Already compiled or
+// pinned definitions keep their own entries (calls to them stay dynamic), as
+// do unsupported bodies and anything that is not a module-level function of
+// this script (imports, nested definitions, methods).
+enum { MIR_SATELLITE_CLUSTER_CAP = 64 };
+
+typedef struct MirSatelliteClusterScan {
+    AstScript* root;
+    AstFuncNode** members;
+    int count;
+    int capacity;
+} MirSatelliteClusterScan;
+
+static bool mir_satellite_module_definition(AstScript* root, AstFuncNode* def) {
+    if (!root || !def || !def->analysis) return false;
+    NameEntry* decl = def->analysis->decl_entry;
+    if (!decl || decl->node != (AstNode*)def ||
+            decl->binding_storage != BINDING_STORAGE_MODULE) return false;
+    for (NameEntry* entry = root->global_vars ? root->global_vars->first : NULL;
+            entry; entry = entry->next) {
+        if (entry == decl) return true;
+    }
+    return false;
+}
+
+static void mir_satellite_cluster_visit(AstNode* node, void* opaque) {
+    MirSatelliteClusterScan* scan = (MirSatelliteClusterScan*)opaque;
+    if (!node) return;
+    switch (node->node_type) {
+    case AST_NODE_FUNC: case AST_NODE_PROC: case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC:
+        return;   // a nested definition's calls are its own
+    case AST_NODE_CALL_EXPR: {
+        AstFuncNode* direct = ast_direct_call_function((AstCallNode*)node);
+        if (direct && scan->count < scan->capacity &&
+                (((AstNode*)direct)->node_type == AST_NODE_FUNC ||
+                 ((AstNode*)direct)->node_type == AST_NODE_PROC) &&
+                mir_satellite_module_definition(scan->root, direct) &&
+                direct->analysis->promotion.state == FN_PROMOTION_INTERP &&
+                interp_satellite_supported(direct)) {
+            bool seen = false;
+            for (int i = 0; i < scan->count && !seen; i++) seen = scan->members[i] == direct;
+            const char* skip = getenv("LAMBDA_SATELLITE_CLUSTER_SKIP");
+            if (!seen && skip && direct->name) {
+                const char* hit = strstr(skip, direct->name->chars);
+                size_t len = direct->name->len;
+                while (hit && !((hit == skip || hit[-1] == ',') &&
+                        (hit[len] == '\0' || hit[len] == ','))) {
+                    hit = strstr(hit + 1, direct->name->chars);
+                }
+                if (hit) seen = true;
+            }
+            if (!seen) scan->members[scan->count++] = direct;
+        } else if (direct) {
+            log_debug("interp-tier: satellite cluster skips function='%s' module_def=%d state=%d supported=%d",
+                direct->name ? direct->name->chars : "<anonymous>",
+                (int)mir_satellite_module_definition(scan->root, direct),
+                direct->analysis ? (int)direct->analysis->promotion.state : -1,
+                (int)interp_satellite_supported(direct));
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    interp_visit_children(node, mir_satellite_cluster_visit, opaque);
+}
+
+static int mir_satellite_collect_cluster(AstScript* root, AstFuncNode* target,
+        AstFuncNode** members, int capacity) {
+    // diagnostics: LAMBDA_SATELLITE_CLUSTER_CAP=N bounds the cluster (1 = the
+    // old one-definition image); LAMBDA_SATELLITE_CLUSTER_SKIP=a,b keeps the
+    // named definitions out of it (they stay dynamic targets)
+    const char* cap_env = getenv("LAMBDA_SATELLITE_CLUSTER_CAP");
+    if (cap_env && atoi(cap_env) > 0 && atoi(cap_env) < capacity) capacity = atoi(cap_env);
+    MirSatelliteClusterScan scan = {root, members, 0, capacity};
+    members[scan.count++] = target;
+    // worklist: members appended while scanning are scanned in turn
+    for (int i = 0; i < scan.count; i++) {
+        if (members[i]->body) mir_satellite_cluster_visit(members[i]->body, &scan);
+    }
+    // Define the members in MODULE order, as the eager compiler does: the
+    // forward-declare pass pre-registers each definition's native call facts
+    // (return lane included) in sequence, and a caller declared before its
+    // callee reads the facts the eager order established. Discovery order
+    // (target first) put a caller ahead of the callee whose return lane it
+    // inherits, and the direct edge then disagreed with the callee's body.
+    for (int i = 1; i < scan.count; i++) {
+        AstFuncNode* key = members[i];
+        int j = i - 1;
+        while (j >= 0 && members[j]->source_span.start_byte > key->source_span.start_byte) {
+            members[j + 1] = members[j];
+            j--;
+        }
+        members[j + 1] = key;
+    }
+    return scan.count;
+}
+
 bool compile_ast_function_satellite(Runtime* runtime, Script* script,
         const AstFuncNode* fn, void** out_boxed_entry) {
     if (out_boxed_entry) *out_boxed_entry = NULL;
@@ -28979,14 +29329,27 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     }
 
     // `AstFuncNode::next` is the module declaration chain. The temporary root
-    // must contain exactly this definition or a promotion would accidentally
-    // lower the rest of the module again.
-    AstFuncNode satellite_fn = *fn;
-    satellite_fn.next = NULL;
+    // must contain exactly the compiled definitions or a promotion would
+    // accidentally lower the rest of the module again. D8.1.1v9: those are
+    // the target plus its direct-callee CLUSTER (module-level, supported, not
+    // yet compiled or pinned), so the calls among them are direct native
+    // edges with the eager tier's call-site inference instead of boxed
+    // dynamic dispatch through every callee's wrapper (richards/deltablue
+    // 1.2-1.4x, diviter 66x on the auto tier).
+    AstScript* source_root = (AstScript*)script->ast_root;
+    AstFuncNode* members[MIR_SATELLITE_CLUSTER_CAP];
+    int member_count = mir_satellite_collect_cluster(source_root, (AstFuncNode*)fn,
+        members, MIR_SATELLITE_CLUSTER_CAP);
+    AstFuncNode* copies = (AstFuncNode*)mem_calloc((size_t)member_count,
+        sizeof(AstFuncNode), MEM_CAT_EVAL);
+    if (!copies) return false;
+    for (int i = 0; i < member_count; i++) {
+        copies[i] = *members[i];
+        copies[i].next = i + 1 < member_count ? (AstNode*)&copies[i + 1] : NULL;
+    }
     AstScript satellite_root = {};
     satellite_root.node_type = AST_SCRIPT;
-    satellite_root.child = (AstNode*)&satellite_fn;
-    AstScript* source_root = (AstScript*)script->ast_root;
+    satellite_root.child = (AstNode*)&copies[0];
     satellite_root.global_vars = source_root ? source_root->global_vars : NULL;
 
     // A satellite links its own MIR module directly, so it must publish the
@@ -29004,11 +29367,14 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     MirModuleArtifacts artifacts = {};
     ArrayList* property_keys = NULL;
     MirModuleBuild build = {};
+    struct timespec image_t0;
+    clock_gettime(CLOCK_MONOTONIC, &image_t0);
     transpile_mir_ast_begin(&build, script->jit_context, &satellite_root, script->source,
         script->type_list, script->const_list, script->pool, script->name_pool,
         &names, &property_keys, &artifacts, script, (AstFuncNode*)fn,
-        false, &script->ast_index);
+        members, member_count, false, &script->ast_index);
     transpile_mir_ast_lower(&build);
+    mem_free(copies);
     transpile_mir_ast_finalize(&build, &property_keys, &artifacts);
     if (property_keys && property_keys->length != 0) {
         uint64_t capacity = (uint64_t)property_keys->length * sizeof(PropertyKeySpec);
@@ -29056,6 +29422,31 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
         log_error("interp-tier: satellite link did not publish its immutable BSS");
         return false;
     }
+    // publish every cluster member's boxed entry to its T0 Function; a member
+    // whose entry cannot be found simply stays interpreted (its cell is
+    // untouched), the image itself is still valid for the target. The link
+    // above already generated every function (gen interface), so the entry
+    // is the item's address: jit_gen_func re-walks, reloads and RE-LINKS the
+    // whole context per call, which at 47 members cost more than the
+    // compile itself (deltablue's auto run spent 180 ms there).
+    for (int i = 0; i < member_count; i++) {
+        if (members[i] == (AstFuncNode*)fn) continue;   // the target: published by the caller
+        StrBuf* member_name = strbuf_new_cap(96);
+        if (!member_name) break;
+        write_fn_name_ex(member_name, members[i], NULL, "_b");
+        void* member_entry = find_func(script->jit_context, member_name->str);
+        bool published = member_entry &&
+            interp_publish_satellite_member(script, members[i], member_entry);
+        log_debug("interp-tier: satellite cluster member function='%s' published=%d",
+            members[i]->name ? members[i]->name->chars : "<anonymous>", (int)published);
+        strbuf_free(member_name);
+    }
+    struct timespec image_t1;
+    clock_gettime(CLOCK_MONOTONIC, &image_t1);
+    double image_ms = (double)(image_t1.tv_sec - image_t0.tv_sec) * 1000.0 +
+        (double)(image_t1.tv_nsec - image_t0.tv_nsec) / 1e6;
+    log_notice("interp-tier: satellite image function='%s' members=%d compile_ms=%.1f",
+        fn->name ? fn->name->chars : "<anonymous>", member_count, image_ms);
 
     *(void**)artifacts.consts_bss->addr = script->const_list
         ? script->const_list->data : NULL;

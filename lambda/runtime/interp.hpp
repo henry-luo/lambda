@@ -218,6 +218,9 @@ bool interp_scan_supported(Script* script, AstNodeType* reject);
 // or unsupported mutation. Module bindings are read from T0's shared slab; a
 // rejected function remains T0 for semantic safety.
 bool interp_satellite_supported(const AstFuncNode* fn);
+// D8.1.1v9: a satellite image co-compiles the target's direct-callee cluster;
+// each extra member's boxed entry is published to its T0 Function here.
+bool interp_publish_satellite_member(Script* script, AstFuncNode* def, void* entry);
 // True when an imported binding has a planned T0 owner and a stable module
 // slab slot. Satellite lowering uses this predicate before embedding that
 // `{module_id, slot}` pair instead of linking a generated import symbol.

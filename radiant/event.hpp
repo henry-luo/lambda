@@ -2533,6 +2533,8 @@ typedef struct DocState {
     uint32_t state_batch_depth; // suppresses assertions during this document's batch mutation
     uint32_t pseudo_state_batch_depth; // coalesces full stylesheet recascades
     bool pseudo_state_restyle_pending;
+    bool hover_styles_active; // previous hover transition matched a :hover rule
+    SelectorMatcher* hover_matcher; // document-pool matcher reused across pointer transitions
     uint32_t text_control_history_guard; // undo/redo recursion guard for this document
     const char* text_edit_history_input_type; // ambient inputType for document history pushes
     uint32_t transition_depth;     // nonzero while state_machine.cpp applies a transition

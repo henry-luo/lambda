@@ -1,0 +1,16 @@
+[8, 5, 7.5, 7]   [8, 10, 12, 14]   [256, 512, 768]   9   82 
+alias  100   100 
+shared  -5   -5 
+alias  100   100 
+shared  -5   -5 
+alias  100   100 
+shared  -5   -5 
+alias  100   100 
+shared  -5   -5 
+alias  100   100 
+shared  -5   -5 
+alias  100   100 
+shared  -5   -5 
+[-5, -5, -5, -5] 
+[4, 5, 6, 7] 
+

@@ -63,7 +63,7 @@ let relations = {
     trianglelefteq: "⊴", trianglerighteq: "⊵",
     // AMS relations
     preceq: "⪯", succeq: "⪰", nmid: "∤",
-    nleq: "≰", ngeq: "≱",
+    nleq: "≰", ngeq: "≱", nleqslant: "\uE010", nshortparallel: "\uE007",
     triangle: "△"
 }
 
@@ -104,7 +104,7 @@ let misc_symbols = {
     forall: "∀", exists: "∃", nexists: "∄",
     emptyset: "∅", varnothing: "∅",
     neg: "¬", lnot: "¬", surd: "√",
-    top: "⊤", bot: "⊥", angle: "∠",
+    top: "⊤", bot: "⊥", angle: "∠", measuredangle: "∡",
     backslash: "∖",
     ell: "ℓ", wp: "℘", Re: "ℜ", Im: "ℑ",
     aleph: "ℵ", beth: "ℶ", gimel: "ℷ",
@@ -113,12 +113,14 @@ let misc_symbols = {
     flat: "♭", natural: "♮", sharp: "♯",
     clubsuit: "♣", diamondsuit: "♢",
     heartsuit: "♡", spadesuit: "♠",
-    blacktriangle: "▲", blacksquare: "■",
+    blacktriangle: "▲", blacksquare: "■", blacklozenge: "⧫", Finv: "Ⅎ",
+    gothicCapitalC: "C", gothicCapitalH: "H", scriptCapitalE: "E",
+    doubleStruckCapitalQ: "Q", Bbbk: "k",
     checkmark: "✓", maltese: "✠",
     degree: "°", copyright: "©",
     dots: "…", ldots: "…", cdots: "⋯",
     vdots: "⋮", ddots: "⋱",
-    colon: ":", vert: "∣", Vert: "∥",
+    colon: ":", coloneq: "≔", vert: "∣", Vert: "∥",
     langle: "⟨", rangle: "⟩",
     lceil: "⌈", rceil: "⌉", lfloor: "⌊", rfloor: "⌋",
     lbrace: "{", rbrace: "}",
@@ -329,7 +331,11 @@ let font_class_map = {
     // More AMS symbols
     emptyset: "lm_cmr", varnothing: "lm_ams",
     beth: "lm_ams", gimel: "lm_ams", daleth: "lm_ams",
-    neg: "lm_ams", lnot: "lm_ams",
+    neg: "lm_ams", lnot: "lm_ams", nleqslant: "lm_ams", nshortparallel: "lm_ams",
+    measuredangle: "lm_ams", blacklozenge: "lm_ams", Finv: "lm_ams",
+    maltese: "lm_ams", colon: "lm_cmr",
+    gothicCapitalC: "lm_frak", gothicCapitalH: "lm_frak",
+    scriptCapitalE: "lm_script", doubleStruckCapitalQ: "lm_bb", Bbbk: "lm_ams",
 
     // -- AMS symbols --
     blacksquare: "lm_ams", blacktriangle: "lm_ams",

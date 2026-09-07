@@ -7567,6 +7567,72 @@ static bool document_has_hover_rules(DomDocument* doc) {
     return false;
 }
 
+static bool css_rule_matches_hover_in_tree(CssRule* rule, SelectorMatcher* matcher,
+                                           DomNode* node) {
+    if (!rule || !matcher || !node) return false;
+    if (node->is_element()) {
+        DomElement* element = lam::dom_require_element(node);
+        if (rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTING) {
+            CssSelectorGroup* group = rule->data.style_rule.selector_group;
+            if (group) {
+                for (size_t i = 0; i < group->selector_count; i++) {
+                    CssSelector* selector = group->selectors ? group->selectors[i] : NULL;
+                    if (css_selector_uses_hover(selector) &&
+                        selector_matcher_matches(matcher, selector, element, NULL)) {
+                        return true;
+                    }
+                }
+            } else if (css_selector_uses_hover(rule->data.style_rule.selector) &&
+                       selector_matcher_matches(matcher, rule->data.style_rule.selector,
+                                                element, NULL)) {
+                return true;
+            }
+            for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
+                if (css_rule_matches_hover_in_tree(
+                        rule->data.style_rule.nested_rules ? rule->data.style_rule.nested_rules[i] : NULL,
+                        matcher, node)) return true;
+            }
+        }
+        for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+            if (css_rule_matches_hover_in_tree(rule, matcher, child)) return true;
+        }
+    }
+    if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
+        rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
+        for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+            if (css_rule_matches_hover_in_tree(
+                    rule->data.conditional_rule.rules ? rule->data.conditional_rule.rules[i] : NULL,
+                    matcher, node)) return true;
+        }
+    }
+    return false;
+}
+
+static bool document_has_matched_hover_rules(DomDocument* doc, DocState* state) {
+    if (!doc || !state || !doc->root || !doc->document_pool || !document_has_hover_rules(doc)) {
+        return false;
+    }
+    SelectorMatcher* matcher = state->hover_matcher;
+    if (!matcher) {
+        matcher = selector_matcher_create(doc->document_pool);
+        state->hover_matcher = matcher;
+    }
+    if (!matcher) return true; // preserve the existing conservative restyle path.
+    state_configure_selector_matcher(state, matcher);
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        CssStylesheet* stylesheet = doc->stylesheets ? doc->stylesheets[i] : NULL;
+        if (!stylesheet || stylesheet->disabled) continue;
+        for (size_t r = 0; r < stylesheet->rule_count; r++) {
+            CssRule* rule = stylesheet->rules ? stylesheet->rules[r] : NULL;
+            if (css_rule_uses_hover(rule) &&
+                css_rule_matches_hover_in_tree(rule, matcher, static_cast<DomNode*>(doc->root))) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static void recascade_document_for_pseudo_state(DomDocument* doc, DocState* state) {
     if (!doc || !state) return;
 
@@ -7672,13 +7738,16 @@ static void sync_hover_pseudo_state_after_transition(DocState* state,
     if (!doc) doc = hover_resolve_document(prev_hover);
     if (!doc) return;
 
-    if (document_has_hover_rules(doc)) {
+    // An unrelated :hover rule must not invalidate retained percentage geometry.
+    bool hover_styles_active = document_has_matched_hover_rules(doc, state);
+    if (hover_styles_active || state->hover_styles_active) {
         recascade_document_for_pseudo_state(doc, state);
         if (doc->root) {
             reflow_schedule(state, doc->root, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
             dirty_mark_element(state, doc->root);
         }
     }
+    state->hover_styles_active = hover_styles_active;
 
     View* node = prev_hover;
     while (node) {

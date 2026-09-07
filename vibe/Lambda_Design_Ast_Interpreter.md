@@ -276,8 +276,116 @@ direct calls, extended to both tier edges:
   `pn bump(var n) { n = n + 1 }` on an int-lane local left `n` unchanged
   because the lane binding had no root slot to transport.
 
-Still pinned: typed `var` parameters (the raw-lane ABI has no home) and the
-other v5 rules. Committed differential: `test/lambda/proc/interp_var_writeback.ls`.
+Typed `var` parameters followed on 2026-09-07 (D8.1.1v8, below).
+Committed differential: `test/lambda/proc/interp_var_writeback.ls`.
+
+**D8.1.1v7 (2026-09-07) -- the residue after write-back.** Result37's part 2
+showed two pins left: (1) the once-called `main` whose loop is the whole
+workload (mandelbrot 100x, matmul 146x, navier_stokes 61x Node e2e) --
+`interp_promote_function` now promotes a procedure whose body owns a loop
+statement at its first entry (`FnPromotionCell::loop_bodied`, scanned once
+per definition, nested definitions excluded); back-edge promotion stays
+next-entry, so this is not OSR; (2) aggregate/structured value-parameter
+contracts (`float[]`, records) -- `interp_satellite_supported` admits them:
+the boxed `_b` wrapper admits each argument under the declared contract
+before the raw entry sees it, exactly as the eager compiler's wrapper does,
+so the v5 mis-decode hazard did not apply. Typed `var` parameters stay
+pinned. Admitting typed bodies exposed one tier carrier divergence (DO28): a
+satellite's read of an annotated `string[]` module binding now takes the
+generic index path. The whole-script route (`LAMBDA_AUTO_WHOLE_SCRIPT=1`)
+remains an option, not the default: it rescues rows whose satellites lack
+cross-function call-site inference (diviter 20.7 s → 0.29 s, levenshtein,
+quicksort, richards) and is neutral elsewhere -- satellite call-site
+specialization is the design item that would retire it.
+
+**D8.1.1v8 (2026-09-07) -- typed `var` parameters.** The last scan pin on
+the Result37 residue (navier_stokes: every kernel takes `var x: float[]`;
+nbody2: `advance(var bx: float[], ...)`; json2: `p_read(var p: Parser)`)
+was the typed `var` parameter, refused because the raw-lane ABI has no
+home. CW33 already rules the typed case (§11.10: `Container**` on the
+native edge, `Item*` for every `var` position on the boxed entry, an
+adapter that bridges); the satellite path only ever uses the boxed entry,
+so the adapter is all it needs:
+
+- *Transport.* Every `var` position -- typed included -- travels through
+  `Context::mir_var_homes` on both boxed edges. T0 already published every
+  borrowed slot; a satellite's dynamic call now transports typed positions
+  too (`mir_dynamic_call_var_param`) and reloads them afterwards keeping
+  the raw descriptor (`mir_emit_var_home_reload` `typed`): the position is
+  invariant, so the home holds the declared container -- possibly the
+  callee's detached replacement -- whose Item bits are its untagged pointer.
+- *Adapter.* The `_b` wrapper consumes the cell for a typed `var` position
+  (a stale cell would otherwise be read as a home by the next borrowed-mode
+  call inside the body), prepares the container once when a home was
+  transported (`cow_prepare_write`: the CW33 callee-prologue prepare, placed
+  where the boxed→native coercions already live -- without a home a
+  replacement could not be stored back and the write would be lost, which
+  is exactly how the first cut hung the eager tier's deltablue2: its
+  wrapper-entered `vec_remove_first` shrank a private copy of `todo`),
+  admits it under the declared contract (`ensure_typed_array`
+  / `lambda_type_check`), calls the raw entry, and on return stores the
+  binding's boxed container back through the home -- so an admission that
+  rebuilt the carrier is visible to the caller too. The raw entry is
+  unchanged: it writes its typed `var` parameter in place, as on the eager
+  direct edge.
+- *Pin.* What the raw entry cannot publish is a rebind of the parameter.
+  `interp_fn_rebinds_typed_var_param` (cached in
+  `FnPromotionCell::typed_var_rebind`) keeps such a body in T0, and the
+  satellite scan keeps every body that calls it directly in T0 as well,
+  because a raw argument would not be reloaded; T0 publishes the rebind
+  through the home. The eager tier's own rebind loss is DO29.
+
+Fixtures: `test/lambda/proc/interp_typed_var_param.ls` (in-place stores,
+records, nested and recursive `var` chains, aliasing inside the callee,
+three tiers byte-identical) and `interp_typed_var_rebind.ls` (golden is
+T0's; the auto tier matches, the eager tier does not -- DO29).
+
+**D8.1.1v9 (2026-09-07) -- the satellite cluster.** With every scan pin
+gone, the remaining auto residue was the satellite's own shape: one
+definition per image. richards/deltablue (1.2-1.4x) paid for it in boxed
+dynamic dispatch through every callee's `_b` wrapper (40 / 111
+`fn_call_borrowed_into` sites where the eager tier has direct edges), and
+diviter (66x) in inference: `diviter_div(x, y)`'s only callers live in
+`benchmark`, and a root holding one definition sees no call sites, so its
+raw entry ran `fn_ge`/`fn_sub` on boxed Items. The whole-script route was
+the measured stopgap; the cluster is the general form:
+
+- *Image = target + direct-callee closure.* `mir_satellite_collect_cluster`
+  walks the target's body (worklist, nested definitions excluded) and admits
+  every module-level definition of this script that is promotable and still
+  interpreted (`FnPromotionCell::state == INTERP`), capped at 64. Already
+  compiled callees keep their entry (calls to them stay dynamic through the
+  boxed wrapper, which is the E229-lifted path), pinned and unsupported
+  bodies likewise. The members are defined in MODULE order: the
+  forward-declare pass pre-registers each definition's native call facts in
+  sequence, and a caller placed ahead of the callee whose return lane it
+  inherits made the direct edge disagree with the body (the first cut
+  crashed in `fn_numeric_binary` on a raw lane).
+- *Call-site inference over the whole module.* The satellite root holds
+  shallow copies of the members (their `next` relinked), but
+  `prepass_collect_call_sites` now walks the owner's complete AST -- exactly
+  the eager caller set; a T0 caller that passes another shape meets the
+  wrapper's exact-shape guard and slow body. The copies and the originals
+  share one `body`, which `mir_callsite_canonical_fn` uses as the identity
+  of every function-keyed table (the copy-keyed lookup was why the second
+  image of diviter still inferred `any`).
+- *Publication.* After the image links (once, gen interface: every function
+  is generated then), `interp_publish_satellite_member` upgrades each
+  member's T0 function to its `_b` entry -- resolved by address lookup, not
+  by the per-call re-link `jit_gen_func` performs -- and marks its cell
+  COMPILED, as the whole-script route does for the module. The image's
+  compile time (transpile, link, publish) is logged per image.
+- *Cost model.* A cluster compiles the target's whole reachable graph at the
+  target's first entry, so a once-called loop-bodied `main` pays roughly the
+  eager tier's compile up front (deltablue: 115 ms for 48 definitions) --
+  the same work the eager tier does at load, now placed at promotion. Small
+  modules stay within a few ms of their per-function cost.
+
+Fixture: `test/lambda/proc/interp_satellite_cluster.ls` (a loop-bodied
+`main` whose cluster spans call-site-typed helpers, mutual recursion, an
+untyped `var` callee and a member promoted by an earlier image; a
+nested-definition callee stays pinned and is reached dynamically; golden
+tier-agreed).
 
 ### 5.3 Entry swap and consistency
 

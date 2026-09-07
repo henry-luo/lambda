@@ -431,6 +431,24 @@ correct) — a T0 `var`-param write-back regression on the `c` array.
   pin; `make interp-sweep` partition regenerated.
   (B) — the moved argument for `x = f(x)` — remains open for its own ruling.
 
+**Result37 JIT regressions (2026-09-07, bisected per slice; full account in
+`vibe/impl/Lambda_Benchmark_Result37_Analysis.md` §6):** the four rows that
+went backwards between v36 and v37 were attributed by normalised dump diffs
+(struct-offset and TypeId renumbering from the upstream window are noise;
+per-function runtime-call deltas are the signal) plus `git blame`, since the
+base commit no longer builds in a worktree.
+
+| Row | slice | cause | status |
+|---|---|---|---|
+| paraffins | T21-2a call-site typer | `shr`'s `C_RET_INT64` result was typed ANY and the initializer chain exceeded the depth-4 guard, so the array keys read as dynamic (`container_key_dynamic`) and the ArrayNum witness was withheld | **fixed** (ret-int64 → INT, depth 8): 0.21x |
+| cube3d | T21-1b product check | `i*4+j` inside `while` loops has no counted-loop range proof, so the product took the double-lane arm (130 `i2d`) | **fixed** (literal-factor arm: `add other,2^27; ult ·,2^28`, 6 `i2d`): 0.93x; pin `r37_literal_index_product` |
+| nqueens2 | none | upstream validator runtime (`lambda_type_matches` 2.5x per call); emission byte-identical modulo noise | not an emission regression; left |
+| triangl2 | T21-1c nullable bool lane | the `bool?` contract on each `board[...]` read made the nested `and` a non-native operand: both sides boxed, two `is_truthy` | **fixed** (`mir_expr_native_bool_operand` admits nested native and/or/not): 0.59x; pin `r37_nested_int_index`; the `T?`-as-type-value blindness in the index guard and the condition lint fixed alongside |
+
+Gates on the final tree: auto/jit/interp sweeps 0 regressions, `make
+test-lambda-baseline` green, `make interp-sweep` regenerated (numbers in
+the Result37 analysis §6).
+
 ### T21-2 — Untyped lane parity (the biggest lever)
 
 **Implementation status (2026-09-02): T21-2a landed as six call-site
@@ -824,7 +842,12 @@ promoted callee through the new borrowed dispatch mode
 (`fn_call_borrowed_into`), and a satellite's dynamic call publishes its
 rooted slots and reloads them, with `interp_call_borrowed` consuming the
 cells on the interpreted side. Typed `var` parameters (raw-lane ABI, no
-home) stay pinned. A `var` local passed to an untyped `var` parameter is
+home) stayed pinned until D8.1.1v8 (2026-09-07: admitted through the boxed
+edges' CW33 cells with a wrapper prepare/admit/store-back; rebinding bodies
+and their satellite callers stay in T0 -- Result37 analysis §6 item 4).
+D8.1.1v9 (same day) then made each satellite image a direct-callee cluster
+with module-wide call-site inference, which closed the richards/deltablue
+dispatch gap and diviter's boxed arithmetic (Result37 analysis §6 item 4). A `var` local passed to an untyped `var` parameter is
 bound boxed at declaration — which also fixed a pre-existing eager-JIT
 divergence (`pn bump(var n) { n = n + 1 }` left an int-lane caller local
 unchanged).

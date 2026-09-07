@@ -1,0 +1,2 @@
+true  false  true  null  null  true  true  null  false  true  null  T F T
+
