@@ -96,6 +96,23 @@ static FontFaceDescriptor* font_face_descriptor_from_css(CssFontFaceDescriptor* 
     descriptor->font_style = css_desc->font_style;
     descriptor->font_weight = css_desc->font_weight;
     descriptor->font_display = css_desc->font_display;
+    if (css_desc->unicode_range_count > 0 && css_desc->unicode_ranges) {
+        descriptor->unicode_ranges = (FontFaceUnicodeRange*)mem_calloc(
+            (size_t)css_desc->unicode_range_count, sizeof(FontFaceUnicodeRange), MEM_CAT_LAYOUT);
+        if (!descriptor->unicode_ranges) {
+            if (descriptor->family_name) mem_free(descriptor->family_name);
+            if (descriptor->src_local_path) mem_free(descriptor->src_local_path);
+            mem_free(descriptor);
+            return nullptr;
+        }
+        for (int i = 0; i < css_desc->unicode_range_count; i++) {
+            descriptor->unicode_ranges[i].start_codepoint =
+                css_desc->unicode_ranges[i].start_codepoint;
+            descriptor->unicode_ranges[i].end_codepoint =
+                css_desc->unicode_ranges[i].end_codepoint;
+        }
+        descriptor->unicode_range_count = css_desc->unicode_range_count;
+    }
     return descriptor;
 }
 
@@ -430,6 +447,8 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
         face_desc.slant        = fs;
         face_desc.sources      = sources;
         face_desc.source_count = src_count;
+        face_desc.unicode_ranges = descriptor->unicode_ranges;
+        face_desc.unicode_range_count = descriptor->unicode_range_count;
 
         if (font_face_register(uicon->font_ctx, &face_desc)) {
             clog_debug(font_log, "register_font_face: bridged to unified font module for '%s'",

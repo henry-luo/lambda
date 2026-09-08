@@ -112,17 +112,19 @@ static bool float_is_left(ViewBlock* block) {
 }
 
 static float float_position_x(const FloatAvailableSpace& space, bool left,
-                              float parent_x_in_bfc, float content_offset_x,
-                              float parent_content_width, ViewBlock* block,
+                              float parent_x_in_bfc, float containing_left_bfc,
+                              float containing_right_bfc, ViewBlock* block,
                               float margin_left, float margin_right) {
+    // A BFC float affects this box only where it overlaps the float's
+    // containing block; use the same clamped edges as the fit calculation.
     if (left) {
-        return space.has_left_float
-            ? space.left - parent_x_in_bfc + margin_left
-            : content_offset_x + margin_left;
+        float edge = space.has_left_float
+            ? max(space.left, containing_left_bfc) : containing_left_bfc;
+        return edge - parent_x_in_bfc + margin_left;
     }
-    return space.has_right_float
-        ? space.right - parent_x_in_bfc - block->width - margin_right
-        : content_offset_x + parent_content_width - block->width - margin_right;
+    float edge = space.has_right_float
+        ? min(space.right, containing_right_bfc) : containing_right_bfc;
+    return edge - parent_x_in_bfc - block->width - margin_right;
 }
 
 float layout_relative_axis_offset(ViewBlock* block, bool horizontal, float containing_size) {
@@ -2857,7 +2859,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
         // float wraps to the next line. Browsers avoid this via fixed-point math.
         if (available_width >= float_total_width - 0.001f) {
             block->x = float_position_x(space, left_float, parent_x_in_bfc,
-                                        content_offset_x, parent_content_width,
+                                        containing_block_left_bfc, containing_block_right_bfc,
                                         block, margin_left, margin_right);
             break;  // Found a valid position
         }
@@ -2896,7 +2898,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
             FloatAvailableSpace final_space = block_context_space_at_y(
                 bfc, final_y_bfc, float_total_height, false, true);
             block->x = float_position_x(final_space, left_float, parent_x_in_bfc,
-                                        content_offset_x, parent_content_width,
+                                        containing_block_left_bfc, containing_block_right_bfc,
                                         block, margin_left, margin_right);
             break;
         }

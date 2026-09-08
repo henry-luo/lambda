@@ -376,8 +376,13 @@ static TransformFunction* resolve_transform_function(LayoutContext* lycon,
             }
             break;
         case TRANSFORM_TRANSLATE3D:
-            tf->params.translate3d.x = transform_length_value(lycon, prop_id, arg0);
-            tf->params.translate3d.y = transform_length_value(lycon, prop_id, arg1);
+            // Percentage translate components resolve against this element's transform box.
+            resolve_transform_translate_arg(lycon, prop_id, arg0,
+                                            &tf->params.translate3d.x,
+                                            &tf->translate_x_percent);
+            resolve_transform_translate_arg(lycon, prop_id, arg1,
+                                            &tf->params.translate3d.y,
+                                            &tf->translate_y_percent);
             tf->params.translate3d.z = transform_length_value(lycon, prop_id, arg2);
             break;
         case TRANSFORM_TRANSLATEZ:
@@ -5069,6 +5074,13 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // otherwise use the inherited value. E.g.:
             if (prop_id == CSS_PROPERTY_TEXT_ALIGN) {
                 DomElement* cur_elem = lam::dom_require_element(lycon->view);
+                // HTML's <center> presentation hint is a specified value, so
+                // an inherited author value must not replace it.
+                if (cur_elem && cur_elem->tag() == MARKUP_NAME_CENTER &&
+                    inheritance_span->blk &&
+                    inheritance_span->block()->text_align == CSS_VALUE_CENTER) {
+                    continue;
+                }
                 if (cur_elem && cur_elem->tag_name && strcmp(cur_elem->tag_name, "th") == 0) {
                     bool inherited_is_noninitial = false;
                     for (DomElement* p = dom_parent_element(dom_elem);

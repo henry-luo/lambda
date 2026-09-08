@@ -243,6 +243,9 @@ typedef struct FontFaceEntry {
     } *sources;
     int source_count;
 
+    FontFaceUnicodeRange* unicode_ranges;
+    int unicode_range_count;
+
     // loaded handle (NULL until first load)
     FontHandle* loaded_handle;
 } FontFaceEntry;
@@ -531,6 +534,9 @@ char*               font_cache_make_key(Arena* arena, const char* family,
 FontHandle*         font_resolve_authored_for_codepoint(FontContext* ctx,
                                                         const FontStyleDesc* style,
                                                         uint32_t codepoint);
+FontHandle*         font_resolve_document_face_for_codepoint(FontContext* ctx,
+                                                             const FontStyleDesc* style,
+                                                             uint32_t codepoint);
 
 // font_fallback.c
 const char**        font_get_generic_family(const char* family);

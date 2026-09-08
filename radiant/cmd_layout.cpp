@@ -1398,9 +1398,12 @@ static CssStylesheet* parse_inline_style_chunks(CssEngine* engine,
         offset += chunks[i].length;
     }
     css[offset] = '\0';
+    int before = *count;
     CssStylesheet* stylesheet = parse_and_collect_stylesheet(
         engine, css, "<inline-style>", base_path, pool, stylesheets, count, capacity, 0);
-    if (stylesheet) stylesheet->owner_element = owner;
+    for (int i = before; i < *count; i++) {
+        (*stylesheets)[i]->owner_element = owner;
+    }
     return stylesheet;
 }
 
@@ -1577,6 +1580,50 @@ static CssStylesheet** layout_merge_css_sources(Pool* pool,
         }
     }
     return merged;
+}
+
+static bool stylesheet_owner_is_in_head(const CssStylesheet* stylesheet) {
+    if (!stylesheet || !stylesheet->owner_element) return false;
+    for (DomNode* node = static_cast<DomNode*>(stylesheet->owner_element);
+         node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* element = node->as_element();
+        if (element->tag_name && strcasecmp(element->tag_name, "head") == 0) return true;
+    }
+    return false;
+}
+
+static void partition_document_stylesheets_at_head(
+    Pool* pool, CssStylesheet** stylesheets, int count,
+    CssStylesheet*** head_stylesheets, int* head_count,
+    CssStylesheet*** following_stylesheets, int* following_count) {
+    if (!head_stylesheets || !head_count || !following_stylesheets || !following_count) return;
+    *head_stylesheets = nullptr;
+    *head_count = 0;
+    *following_stylesheets = stylesheets;
+    *following_count = count;
+    if (!pool || !stylesheets || count <= 0) return;
+
+    CssStylesheet** head = (CssStylesheet**)pool_alloc(
+        pool, (size_t)count * sizeof(CssStylesheet*));
+    CssStylesheet** following = (CssStylesheet**)pool_alloc(
+        pool, (size_t)count * sizeof(CssStylesheet*));
+    if (!head || !following) return;
+
+    int head_index = 0;
+    int following_index = 0;
+    for (int i = 0; i < count; i++) {
+        CssStylesheet* stylesheet = stylesheets[i];
+        if (stylesheet_owner_is_in_head(stylesheet)) {
+            head[head_index++] = stylesheet;
+        } else {
+            following[following_index++] = stylesheet;
+        }
+    }
+    *head_stylesheets = head;
+    *head_count = head_index;
+    *following_stylesheets = following;
+    *following_count = following_index;
 }
 
 static void store_document_stylesheets(DomDocument* dom_doc,
@@ -1892,6 +1939,7 @@ struct HtmlLoadPhaseTiming {
 };
 
 static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css_filename,
+    bool css_at_head_end,
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
     bool track_source_lines, bool execute_scripts, HtmlLoadPhaseTiming* timing,
     DocumentScriptPhaseTiming* script_timing, const DocumentJsHostConfig* js_host_config) {
@@ -2136,10 +2184,30 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // Store stylesheets before scripts so getComputedStyle and @font-face share
     // the same sheet list that the pre-script cascade uses.
     CssStylesheet* external_sources[] = {external_stylesheet};
-    store_document_stylesheets(dom_doc,
-                               external_stylesheet ? external_sources : nullptr,
-                               external_stylesheet ? 1 : 0,
-                               inline_stylesheets, inline_stylesheet_count, pool);
+    // Match a stylesheet injected immediately before </head>, not after body sheets.
+    if (css_at_head_end) {
+        CssStylesheet** head_stylesheets = nullptr;
+        CssStylesheet** following_stylesheets = nullptr;
+        int head_stylesheet_count = 0;
+        int following_stylesheet_count = 0;
+        partition_document_stylesheets_at_head(
+            pool, inline_stylesheets, inline_stylesheet_count,
+            &head_stylesheets, &head_stylesheet_count,
+            &following_stylesheets, &following_stylesheet_count);
+        int preceding_count = 0;
+        CssStylesheet** preceding_stylesheets = layout_merge_css_sources(
+            pool, head_stylesheets, head_stylesheet_count,
+            external_stylesheet ? external_sources : nullptr,
+            external_stylesheet ? 1 : 0, &preceding_count);
+        store_document_stylesheets(dom_doc,
+                                   preceding_stylesheets, preceding_count,
+                                   following_stylesheets, following_stylesheet_count, pool);
+    } else {
+        store_document_stylesheets(dom_doc,
+                                   external_stylesheet ? external_sources : nullptr,
+                                   external_stylesheet ? 1 : 0,
+                                   inline_stylesheets, inline_stylesheet_count, pool);
+    }
     auto t_stylesheet_setup = timing ? high_resolution_clock::now() : t_css_parse;
 
     // Step 2c: Apply inline style="" attributes BEFORE scripts
@@ -2272,7 +2340,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     int viewport_width, int viewport_height, Pool* pool, const char* html_source = nullptr,
     bool track_source_lines = false, bool execute_scripts = true) {
-    return load_lambda_html_doc_profiled(html_url, css_filename, viewport_width, viewport_height,
+    return load_lambda_html_doc_profiled(html_url, css_filename, false,
+                                         viewport_width, viewport_height,
                                          pool, html_source, track_source_lines, execute_scripts,
                                          nullptr, nullptr, nullptr);
 }
@@ -2280,7 +2349,8 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 static DomDocument* load_lambda_html_doc_with_host_config(
     Url* html_url, const char* css_filename, int viewport_width, int viewport_height,
     Pool* pool, const DocumentJsHostConfig* js_host_config) {
-    return load_lambda_html_doc_profiled(html_url, css_filename, viewport_width, viewport_height,
+    return load_lambda_html_doc_profiled(html_url, css_filename, false,
+                                         viewport_width, viewport_height,
                                          pool, nullptr, false, true, nullptr, nullptr,
                                          js_host_config);
 }
@@ -4360,6 +4430,7 @@ struct LayoutOptions {
     const char* output_file;
     const char* output_dir;                     // output directory for batch mode
     const char* css_file;
+    bool css_at_head_end;                       // insert --css before body stylesheets
     const char* view_output_file;  // Custom output path for view_tree.json (single file mode)
     const char* font_dirs[16];                  // additional font scan directories
     int font_dir_count;                         // number of font directories
@@ -4413,6 +4484,8 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         {nullptr, "--output-dir", "--output-dir", &opts->output_dir, LAYOUT_OPTION_STRING},
         {nullptr, "--view-output", "--view-output", &opts->view_output_file, LAYOUT_OPTION_STRING},
         {"-c", "--css", "-c", &opts->css_file, LAYOUT_OPTION_STRING},
+        {nullptr, "--css-at-head-end", nullptr,
+         &opts->css_at_head_end, LAYOUT_OPTION_FLAG},
         {nullptr, "--timing-output", "--timing-output", &opts->timing_output_file, LAYOUT_OPTION_STRING},
         {nullptr, "--view-memory-profile", "--view-memory-profile",
          &opts->memory_profile_output_file, LAYOUT_OPTION_STRING},
@@ -4723,6 +4796,7 @@ static bool layout_single_file(
     const char* input_file,
     const char* output_path,
     const char* css_file,
+    bool css_at_head_end,
     int viewport_width,
     int viewport_height,
     UiContext* ui_context,
@@ -4824,7 +4898,8 @@ static bool layout_single_file(
         for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
             script_runner_set_retain_js_state(false);
             script_runner_set_execute_external_scripts(true);
-            doc = load_lambda_html_doc_profiled(input_url, css_file, viewport_width,
+            doc = load_lambda_html_doc_profiled(input_url, css_file, css_at_head_end,
+                                                viewport_width,
                                                 viewport_height, pool, nullptr,
                                                 track_source_lines, true,
                                                 timing_file ? &html_load_timing : nullptr,
@@ -5391,6 +5466,7 @@ int cmd_layout(int argc, char** argv) {
                 input_file,
                 output_path,
                 opts.css_file,
+                opts.css_at_head_end,
                 opts.viewport_width,
                 opts.viewport_height,
                 &ui_context,

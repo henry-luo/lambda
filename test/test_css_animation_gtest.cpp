@@ -143,6 +143,20 @@ TEST(CssInterpolation, FloatNegative) {
     EXPECT_FLOAT_EQ(css_interpolate_float(-10.0f, 10.0f, 1.0f), 10.0f);
 }
 
+TEST(CssTransform, Translate3dPercentagesUseTransformReferenceBox) {
+    TransformFunction translate = {};
+    translate.type = TRANSFORM_TRANSLATE3D;
+    translate.translate_x_percent = 25.0f;
+    translate.translate_y_percent = 100.0f;
+    translate.params.translate3d.z = 12.0f;
+
+    RdtMatrix matrix = radiant::compute_transform_matrix(
+        &translate, 400.0f, 83.6f, 0.0f, 0.0f);
+
+    EXPECT_FLOAT_EQ(matrix.e13, 100.0f);
+    EXPECT_FLOAT_EQ(matrix.e23, 83.6f);
+}
+
 // ============================================================================
 // Color Interpolation Tests
 // ============================================================================
