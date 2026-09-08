@@ -16,96 +16,11 @@ import blocks: lambda.dom.edit_blocks
 import clipboard: lambda.dom.edit_clipboard
 import text: lambda.dom.edit_text
 import history: lambda.dom.edit_history
+import registry: lambda.dom.edit_registry
 
-let registry = [
-    { name: "bold", aliases: ["bold", "formatbold"], input_type: "formatBold", family: "format", format_tag: "b", css_property: "font-weight", css_value: "bold", requires_host: true, plaintext_rule: "disable", step_kind: "wrap_range", history_class: "format", event_contract: "beforeinput-input", state_kind: "boolean" },
-    { name: "italic", aliases: ["italic", "formatitalic"], input_type: "formatItalic", family: "format", format_tag: "i", css_property: "font-style", css_value: "italic", requires_host: true, plaintext_rule: "disable", step_kind: "wrap_range", history_class: "format", event_contract: "beforeinput-input", state_kind: "boolean" },
-    { name: "underline", aliases: ["underline", "formatunderline"], input_type: "formatUnderline", family: "format", format_tag: "u", css_property: "text-decoration", css_value: "underline", requires_host: true, plaintext_rule: "disable", step_kind: "wrap_range", history_class: "format", event_contract: "beforeinput-input", state_kind: "boolean" },
-    { name: "strikethrough", aliases: ["strikethrough", "formatstrikethrough"], input_type: "formatStrikeThrough", family: "format", format_tag: "strike", css_property: "text-decoration", css_value: "line-through", requires_host: true, plaintext_rule: "disable", step_kind: "wrap_range", history_class: "format", event_contract: "beforeinput-input", state_kind: "boolean" },
-    { name: "subscript", aliases: ["subscript", "formatsubscript"], input_type: "formatSubscript", family: "format", format_tag: "sub", exclusive_tag: "sup", requires_host: true, plaintext_rule: "disable", step_kind: "wrap_range", history_class: "format", event_contract: "beforeinput-input", state_kind: "boolean" },
-    { name: "superscript", aliases: ["superscript", "formatsuperscript"], input_type: "formatSuperscript", family: "format", format_tag: "sup", exclusive_tag: "sub", requires_host: true, plaintext_rule: "disable", step_kind: "wrap_range", history_class: "format", event_contract: "beforeinput-input", state_kind: "boolean" },
-    { name: "fontname", aliases: ["fontname"], input_type: "formatFontName", family: "format", format_tag: "font", attribute_name: "face", css_property: "font-family", api_data_kind: "value", requires_host: true, plaintext_rule: "disable", step_kind: "wrap_range", history_class: "format", event_contract: "beforeinput-input", state_kind: "value" },
-    { name: "fontsize", aliases: ["fontsize"], input_type: "formatFontSize", family: "format", format_tag: "font", attribute_name: "size", css_property: "font-size", requires_host: true, plaintext_rule: "disable", step_kind: "wrap_range", history_class: "format", event_contract: "beforeinput-input", state_kind: "value" },
-    { name: "forecolor", aliases: ["forecolor"], input_type: "formatFontColor", family: "format", format_tag: "font", attribute_name: "color", css_property: "color", api_data_kind: "color", requires_host: true, plaintext_rule: "disable", step_kind: "wrap_range", history_class: "format", event_contract: "beforeinput-input", state_kind: "value" },
-    { name: "backcolor", aliases: ["backcolor"], input_type: "formatBackColor", family: "format", format_tag: "span", css_property: "background-color", legacy_style: true, api_data_kind: "color", requires_host: true, plaintext_rule: "disable", step_kind: "wrap_range", history_class: "format", event_contract: "beforeinput-input", state_kind: "value" },
-    { name: "hilitecolor", aliases: ["hilitecolor"], input_type: "formatHiliteColor", exec_input_type: "formatBackColor", family: "format", format_tag: "span", css_property: "background-color", legacy_style: true, api_data_kind: "color", requires_host: true, plaintext_rule: "disable", step_kind: "wrap_range", history_class: "format", event_contract: "beforeinput-input", state_kind: "value" },
-    { name: "removeformat", aliases: ["removeformat"], input_type: "formatRemove", family: "remove_format", format_tag: null, requires_host: true, plaintext_rule: "disable", step_kind: "unwrap_node", history_class: "format", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "createlink", aliases: ["createlink"], input_type: "insertLink", family: "create_link", format_tag: "a", api_data_kind: "value", requires_host: true, plaintext_rule: "disable", step_kind: "wrap_range", history_class: "format", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "unlink", aliases: ["unlink"], input_type: "removeLink", exec_input_type: "", family: "unlink", format_tag: "a", requires_host: true, plaintext_rule: "disable", step_kind: "unwrap_node", history_class: "format", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "insertimage", aliases: ["insertimage"], input_type: "insertImage", family: "insert_image", format_tag: null, requires_host: true, plaintext_rule: "disable", step_kind: "insert_fragment", history_class: "structural", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "inserthorizontalrule", aliases: ["inserthorizontalrule"], input_type: "insertHorizontalRule", family: "insert_horizontal_rule", format_tag: null, requires_host: true, plaintext_rule: "disable", step_kind: "insert_fragment", history_class: "structural", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "insertorderedlist", aliases: ["insertorderedlist"], input_type: "insertOrderedList", family: "list", format_tag: "ol", requires_host: true, plaintext_rule: "disable", step_kind: "move_node", history_class: "structural", event_contract: "beforeinput-input", state_kind: "boolean" },
-    { name: "insertunorderedlist", aliases: ["insertunorderedlist"], input_type: "insertUnorderedList", family: "list", format_tag: "ul", requires_host: true, plaintext_rule: "disable", step_kind: "move_node", history_class: "structural", event_contract: "beforeinput-input", state_kind: "boolean" },
-    { name: "indent", aliases: ["indent"], input_type: "formatIndent", family: "indent", format_tag: null, requires_host: true, plaintext_rule: "disable", step_kind: "move_node", history_class: "structural", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "outdent", aliases: ["outdent"], input_type: "formatOutdent", family: "outdent", format_tag: null, requires_host: true, plaintext_rule: "disable", step_kind: "move_node", history_class: "structural", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "formatblock", aliases: ["formatblock"], input_type: "formatBlock", family: "format_block", format_tag: null, requires_host: true, plaintext_rule: "disable", step_kind: "move_node", history_class: "structural", event_contract: "beforeinput-input", state_kind: "value" },
-    { name: "justifyleft", aliases: ["justifyleft"], input_type: "formatJustifyLeft", family: "justify", format_value: "left", requires_host: true, plaintext_rule: "disable", step_kind: "set_style", history_class: "structural", event_contract: "beforeinput-input", state_kind: "boolean" },
-    { name: "justifyright", aliases: ["justifyright"], input_type: "formatJustifyRight", family: "justify", format_value: "right", requires_host: true, plaintext_rule: "disable", step_kind: "set_style", history_class: "structural", event_contract: "beforeinput-input", state_kind: "boolean" },
-    { name: "justifycenter", aliases: ["justifycenter"], input_type: "formatJustifyCenter", family: "justify", format_value: "center", requires_host: true, plaintext_rule: "disable", step_kind: "set_style", history_class: "structural", event_contract: "beforeinput-input", state_kind: "boolean" },
-    { name: "justifyfull", aliases: ["justifyfull"], input_type: "formatJustifyFull", family: "justify", format_value: "justify", requires_host: true, plaintext_rule: "disable", step_kind: "set_style", history_class: "structural", event_contract: "beforeinput-input", state_kind: "boolean" },
-    { name: "inserthtml", aliases: ["inserthtml"], input_type: "insertHTML", family: "insert_html", format_tag: null, requires_host: true, plaintext_rule: "disable", step_kind: "insert_fragment", history_class: "clipboard", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "inserttext", aliases: ["inserttext"], input_type: "insertText", input_aliases: ["insertReplacementText"], family: "replace", format_tag: null, api_data_kind: "value", requires_host: true, plaintext_rule: "allow", step_kind: "replace_text", history_class: "typing", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "delete", aliases: ["delete", "deletecontentbackward"], input_type: "deleteContentBackward", family: "delete", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "replace_text", history_class: "typing", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "forwarddelete", aliases: ["forwarddelete", "deletecontentforward"], input_type: "deleteContentForward", family: "delete", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "replace_text", history_class: "typing", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "insertparagraph", aliases: ["insertparagraph"], input_type: "insertParagraph", family: "paragraph", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "split_element", history_class: "structural", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "insertlinebreak", aliases: ["insertlinebreak"], input_type: "insertLineBreak", family: "line_break", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "insert_node", history_class: "structural", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "compositionstart", aliases: [], input_type: "compositionStart", family: "composition_start", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "set_session", history_class: "composition", event_contract: "beforeinput", state_kind: "none" },
-    { name: "composition", aliases: [], input_type: "insertCompositionText", input_aliases: ["insertFromComposition", "deleteCompositionText"], family: "composition", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "replace_text", history_class: "composition", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "insertfromdrop", aliases: [], input_type: "insertFromDrop", family: "drop", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "replace_text", history_class: "clipboard", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "deletebydrag", aliases: [], input_type: "deleteByDrag", family: "drag_delete", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "replace_text", history_class: "clipboard", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "selectall", aliases: ["selectall"], input_type: "selectAll", family: "selection", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "set_selection", history_class: "none", event_contract: "selectionchange", state_kind: "none" },
-    { name: "copy", aliases: ["copy"], input_type: "copy", family: "copy", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "clipboard_write", history_class: "none", event_contract: "clipboard", state_kind: "none" },
-    { name: "cut", aliases: ["cut"], input_type: "deleteByCut", family: "cut", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "clipboard_write", history_class: "clipboard", event_contract: "clipboard-beforeinput-input", state_kind: "none" },
-    { name: "paste", aliases: ["paste"], input_type: "insertFromPaste", family: "paste", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "insert_fragment", history_class: "clipboard", event_contract: "clipboard-beforeinput-input", state_kind: "none" },
-    { name: "undo", aliases: ["undo"], input_type: "historyUndo", family: "history_undo", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "replace_text", history_class: "none", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "redo", aliases: ["redo"], input_type: "historyRedo", family: "history_redo", format_tag: null, requires_host: true, plaintext_rule: "allow", step_kind: "replace_text", history_class: "none", event_contract: "beforeinput-input", state_kind: "none" },
-    { name: "stylewithcss", aliases: ["stylewithcss"], input_type: "styleWithCSS", family: "setting", format_tag: null, requires_host: false, plaintext_rule: "allow", step_kind: "set_session", history_class: "none", event_contract: "none", state_kind: "boolean" },
-    { name: "usecss", aliases: ["usecss"], input_type: "useCSS", family: "setting", format_tag: null, requires_host: false, plaintext_rule: "allow", step_kind: "set_session", history_class: "none", event_contract: "none", state_kind: "boolean" },
-    { name: "defaultparagraphseparator", aliases: ["defaultparagraphseparator"], input_type: "defaultParagraphSeparator", family: "setting", format_tag: null, requires_host: false, plaintext_rule: "allow", step_kind: "set_session", history_class: "none", event_contract: "none", state_kind: "value" }
-]
-
-fn has_alias(descriptor, spelling) {
-    any([for (alias in descriptor.aliases) alias == spelling])
-}
-
-fn descriptor_at_name(spelling, index) {
-    if (index >= len(registry)) null
-    else {
-        let descriptor = registry[index];
-        if (has_alias(descriptor, spelling)) descriptor
-        else descriptor_at_name(spelling, index + 1)
-    }
-}
-
-fn has_input_alias(aliases, intent) {
-    if (aliases == null) false
-    else any([for (alias in aliases) alias == intent])
-}
-
-fn matches_input_intent(descriptor, intent) {
-    if (descriptor.input_type == intent) true
-    else has_input_alias(descriptor.input_aliases, intent)
-}
-
-fn descriptor_at_intent(intent, index) {
-    if (index >= len(registry)) null
-    else {
-        let descriptor = registry[index];
-        if (matches_input_intent(descriptor, intent)) descriptor
-        else descriptor_at_intent(intent, index + 1)
-    }
-}
-
-// `descriptor` is the only spelling resolver. Query and execute calls share
-// it, so adding a command cannot accidentally add query-only policy.
-pub fn descriptor(spelling) {
-    if (spelling == null) null else descriptor_at_name(lower(spelling), 0)
-}
-
-pub fn canonical(spelling) {
-    let descriptor = descriptor(spelling);
-    if (descriptor == null) null else descriptor.input_type
-}
+// Compatibility facade: query and execution now share the pure registry.
+pub fn descriptor(spelling) => registry.descriptor(spelling)
+pub fn canonical(spelling) => registry.canonical(spelling)
 
 // The document behavior template is attached at an ancestor, while an edit
 // invocation names its concrete host. Keep that handoff explicit rather than
@@ -122,11 +37,11 @@ fn invocation_host(receiver, evt, descriptor) {
 // Exposing this pure lookup lets the package oracle pin that invariant without
 // constructing a live DOM invocation.
 pub fn descriptor_for_intent(intent) {
-    if (intent == null) null else descriptor_at_intent(intent, 0)
+    registry.descriptor_for_intent(intent)
 }
 
 pub fn is_format(intent) {
-    let descriptor = descriptor_at_intent(intent, 0);
+    let descriptor = registry.descriptor_for_intent(intent);
     descriptor != null and descriptor.family == "format"
 }
 
@@ -320,7 +235,7 @@ pn apply_plan(host, edit_context, descriptor, edit_plan, evt) {
 
 // Structured execution result for both legacy command and keyboard adapters.
 pub pn execute(host, evt, intent, value) {
-    let descriptor = descriptor_at_intent(intent, 0);
+    let descriptor = registry.descriptor_for_intent(intent);
     let edit_context = context.build(host, evt, descriptor);
     if (descriptor == null) result.decline(false, false, "unsupported", 0)
     else if (not edit_context.enabled) result.decline(true, false, "disabled", 0)

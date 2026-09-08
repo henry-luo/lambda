@@ -527,6 +527,85 @@ paths check it before triggering (`:628`, `:846`), so an allocation made *during
 tracing or a finalize callback simply skips collecting rather than asserting.
 Acceptable, but unguarded against pathological growth inside a callback.
 
+<a id="lr08-11"></a>**LR08-11 · Native realm construction is not GC-safe · RESOLVED (2026-09-08)**
+The JS realm's native module builders were written against an implicit
+"no collection happens here" assumption. Under
+`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` this fails in three distinct
+ways, all violating **D5.4.2** (a value under construction is live and needs an
+exact root); D2.1.7 pins the heap as non-moving, so these are liveness bugs, not
+address-stability bugs.
+
+1. **Root ranges registered one Item too high.** Five `JsNamespaceState`-derived
+   caches (`stream`, `http`, `https`, `net`, `fs`) registered their precise root
+   range at the first *derived* field rather than the inherited
+   `namespace_object`, which the base lays out first. Each range therefore left
+   its namespace object unrooted *and* scanned one Item past the end of the
+   struct. `require("stream")` returned a namespace with **zero** properties
+   under forced GC. Fixed 2026-09-08 in `js_runtime_state.cpp`; the catalog now
+   starts every such range at `namespace_object`, and a one-time runtime check
+   (`js-root-range:` in the log) pins the start/count pair for all seven
+   namespace states. These states are not standard-layout, so `offsetof` on them
+   is ill-formed and the guard cannot be a `static_assert`.
+
+2. **Factories that build an object on a bare C local.** `js_new_object()`
+   followed by a run of allocating property installs, with the only reference in
+   a C automatic. The object is reachable from nowhere until the last store, so
+   a collection mid-construction reclaims it and the finished object comes back
+   missing methods, or a later store writes into reclaimed memory and crashes.
+   Fixed: the four `node_crypto` factories, both `node_path` parse factories and
+   `path.win32` (this one crashed `require("path")` outright), `node_os`
+   `networkInterfaces`/`userInfo`, the `stream` base constructor and its
+   prototype, and `http.STATUS_CODES`.
+
+3. **Two allocating arguments in one store.** `set(obj, make_string(k),
+   make_string(v))` — argument evaluation order is unspecified, so whichever
+   operand is built first is an unrooted temporary while its sibling allocates.
+   The canonical rooted publisher `js_install_native_*`
+   (`js_runtime_function.cpp`) already carries this rule as a comment citing
+   D5.2/D6.2.2v2, but hand-rolled `*_set_method` clones bypassed it. Fixed:
+   `stream_set_method`, `assert_set_method`/`assert_set_fresh_method`/
+   `assert_set_method_item`, `js_path_set_method`, `dns_set_constant`,
+   `js_message_port_data_clone_error`, and the `js_net` address-property and
+   `node_events` unhandled-error stores. The 15 Jube-module `*_set_method`
+   clones were already correct.
+
+**Second pass (2026-09-08) closed it.** All 26 built-in modules now report
+byte-identical key sets with and without
+`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`, and
+`make test-jube-node-core-dynamic` — whose forced-GC arm produced 7 of 35
+registry lines on pristine `HEAD` and 11 after the first pass — passes.
+
+A fourth shape appeared in this pass, and it is the most dangerous of the four:
+
+4. **A cache slot published before its root exists, or with no root at all.**
+   `js_get_internal_stream_state_namespace` assigned the fresh object into a
+   `JsStreamState` slot without first calling `stream_ensure_roots()`, so the
+   range backing that slot was not yet registered. The object was reclaimed and
+   its storage reused by the two native functions installed immediately after,
+   which is why the module registry reported this namespace as a **function**
+   rather than an object. `js_get_internal_stream_add_abort_signal_namespace`
+   was worse: it cached into a function-local `static Item`, which a precise
+   collector never scans at all. That namespace now has a real slot in
+   `JsStreamState` (range 44 → 45, guard's last field updated accordingly), and
+   both getters plus `js_get_internal_stream_end_of_stream_namespace` register
+   the range before publishing. The other 13 function-local `static Item`
+   namespace caches in `js_runtime.cpp` were audited and all call
+   `heap_register_gc_root`, so this was the only unrooted one.
+
+Also fixed in this pass: `tls` rootCertificates key (freed across the
+certificate-bundle build) and the bundled-pem push; `http` `METHODS` array and
+`globalAgent` (both unreachable across their own construction); the three `dns`
+server-array builders (`dns_load_system_servers`, `dns_array_copy`,
+`dns_validated_servers_copy`, whose arrays were bare locals across push loops —
+this is why `dns.__dns_servers__` was absent while `getServers()` still worked);
+and `zlib` `constants`, which was created and then left unrooted while the
+sibling `codes` object allocated, so its root slot received a reclaimed pointer.
+
+**Rule of thumb the four shapes reduce to:** publish into a registered root
+*before* the next allocation, never between two of them. The ~194-site shape
+scan of `lambda/{js,module,dom}` remains a starting point for future audits, not
+a defect list — most entries are reachable through an already-rooted owner.
+
 <a id="lr08-10"></a>**LR08-10 · Fixed compile-time sizes · OPEN**
 Object size classes are now 16/32/48/64/96/128/256/384 B
 (`gc_object_zone.h:16`, `GC_NUM_SIZE_CLASSES 8` at `:43`) with a `malloc`

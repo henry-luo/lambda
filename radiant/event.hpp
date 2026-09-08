@@ -500,6 +500,9 @@ typedef struct InputIntent {
     // package maps this stable item index to a command and owns dismissal.
     // -1 for every other intent.
     int context_menu_item;
+    // A same-surface text drop carries its source selection separately from
+    // the drop target range. Backends decide how to realize the move.
+    bool drag_move;
 } InputIntent;
 
 typedef InputIntent EditingIntent;
@@ -683,6 +686,16 @@ typedef struct DomEditInvocation {
     struct DomEditInvocation* next;
 } DomEditInvocation;
 
+// Shared structural EditResult readers used by the event gate and the DOM
+// command waist. Returned strings are MEM_CAT_TEMP copies owned by the caller.
+Item radiant_edit_result_field(Item result, const char* name);
+bool radiant_edit_result_bool(Item result, const char* name);
+char* radiant_edit_result_string_copy(Item result, const char* name);
+uint64_t radiant_model_edit_surface_bind(DomElement* target,
+                                         uint64_t model_revision);
+bool radiant_finish_model_edit(Item surface_handle, Item edit_result);
+void radiant_model_edit_surface_bindings_destroy(DocState* state);
+
 typedef enum DomBoundaryOrder {
     DOM_BOUNDARY_BEFORE   = -1,
     DOM_BOUNDARY_EQUAL    =  0,
@@ -838,6 +851,16 @@ typedef enum DomSelectionDirection {
     DOM_SEL_DIR_BACKWARD = 2,  // anchor after focus
 } DomSelectionDirection;
 
+// The canonical selection records why its latest observable revision moved.
+// Model commits carry the source revision whose regenerated DOM was projected.
+typedef enum DomSelectionOrigin {
+    DOM_SELECTION_ORIGIN_API = 0,
+    DOM_SELECTION_ORIGIN_POINTER,
+    DOM_SELECTION_ORIGIN_KEYBOARD,
+    DOM_SELECTION_ORIGIN_MODEL_COMMIT,
+    DOM_SELECTION_ORIGIN_DOM_MUTATION,
+} DomSelectionOrigin;
+
 typedef enum EditingSelectionKind {
     EDIT_SEL_NONE = 0,
     EDIT_SEL_DOM_RANGE,
@@ -851,7 +874,7 @@ typedef struct EditingSelection {
     DomElement* control;
     uint32_t start_u16;
     uint32_t end_u16;
-    uint32_t mutation_seq;
+    uint64_t mutation_seq;
 } EditingSelection;
 
 #define DOM_SELECTION_MAX_RANGES 4
@@ -2408,6 +2431,9 @@ typedef struct DragDropState {
     uint32_t source_start;         // codepoint offsets into source_view's value
     uint32_t source_end;
     uint32_t press_offset;         // where the press landed inside the selection
+    bool has_source_dom_range;     // rich-selection drag source snapshot
+    DomBoundary source_dom_start;
+    DomBoundary source_dom_end;
 } DragDropState;
 
 typedef enum EditingDragMode {
@@ -2445,6 +2471,13 @@ typedef struct EditingCompositionState {
     bool canceled;
 } EditingCompositionState;
 
+typedef struct ModelEditSurfaceBinding {
+    uint64_t handle_id;
+    char* host_key;
+    uint64_t model_revision;
+    struct ModelEditSurfaceBinding* next;
+} ModelEditSurfaceBinding;
+
 typedef struct EditingInteractionState {
     EditingSurface active_surface;
     bool has_active_surface;
@@ -2466,6 +2499,8 @@ typedef struct EditingInteractionState {
     // D5.3.3); it must never inspect command, history, or typing-state fields.
     uint64_t dom_edit_session_root;
     bool dom_edit_session_rooted;
+    ModelEditSurfaceBinding* model_edit_surfaces;
+    uint64_t next_model_edit_surface_id;
     bool pointer_selecting;
     bool selection_extending;
     EditingDragMode drag_mode;
@@ -2575,8 +2610,10 @@ typedef struct DocState {
     // `selection_event_seq` is the last seq we already enqueued a
     // selectionchange task for. Set equal once dispatch task is queued;
     // cleared/advanced when next mutation runs.
-    uint32_t             selection_mutation_seq;
-    uint32_t             selection_event_seq;
+    uint64_t             selection_mutation_seq;
+    uint64_t             selection_event_seq;
+    DomSelectionOrigin   selection_origin;
+    uint64_t             selection_model_revision;
     bool                 selectionchange_pending;  // task queued and not yet fired
     // Phase 8E: per-text-control selectionchange coalescing. Linked list head
     // through the element's DOM task link. Drained by a single
@@ -2851,6 +2888,9 @@ extern "C" {
 void state_store_refresh_editing_selection_shadow(DocState* state);
 bool state_store_editing_selection_shadow_matches(DocState* state);
 void state_store_note_selection_mutation(DocState* state);
+void state_store_tag_selection_origin(DocState* state,
+                                      DomSelectionOrigin origin,
+                                      uint64_t model_revision);
 void selection_refresh_presentation(DocState* state);
 bool state_store_set_selection(DocState* state,
                                const DomBoundary* anchor,
@@ -3164,6 +3204,9 @@ DragDropState* doc_state_begin_drag_drop(DocState* state, View* source,
 // begin_drag_drop so the element-drag callers keep their existing signature.
 void doc_state_set_drag_source_range(DocState* state, uint32_t start, uint32_t end,
                                     uint32_t press_offset);
+void doc_state_set_drag_source_dom_range(DocState* state,
+                                         const DomBoundary* start,
+                                         const DomBoundary* end);
 void doc_state_update_drag_drop_motion(DocState* state, float x, float y);
 void doc_state_set_drag_drop_active(DocState* state, bool active);
 void doc_state_set_drag_drop_target(DocState* state, View* drop_target,
@@ -3780,6 +3823,9 @@ typedef struct DragTransitionArgs {
     uint32_t source_start;
     uint32_t source_end;
     uint32_t press_offset;
+    bool has_source_dom_range;
+    DomBoundary source_dom_start;
+    DomBoundary source_dom_end;
 } DragTransitionArgs;
 
 bool focus_transition(DocState* state,
@@ -4369,6 +4415,14 @@ typedef struct EventContext {
     // legacy native call sites cannot replay the author walk after JS returns.
     bool dom_event_ua_handled;
     bool dom_event_author_dirty;
+
+    // Source-model actions can finish inside an author cascade whose DOM
+    // reconciliation is deferred until propagation ends. Keep the requested
+    // selection rooted on the event and apply it after that reconciliation.
+    Item model_edit_selection;
+    void* model_edit_selection_root_gc;
+    bool model_edit_selection_pending;
+    uint64_t model_edit_revision;
 
     // paste text (set before dispatching "paste" event)
     const char* paste_text;

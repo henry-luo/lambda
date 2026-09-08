@@ -1,0 +1,40 @@
+{
+  registry_valid: true,
+  word_delete: {
+    name: "deletewordbackward",
+    target: "word-backward",
+    model: "delete_word_backward"
+  },
+  soft_line_delete: {
+    target: "soft-line-forward",
+    model: "delete_forward"
+  },
+  request: {
+    input_type: "insertFromPaste",
+    origin: "platform",
+    data: "plain",
+    html: null,
+    mime: "text/plain",
+    target: "selection"
+  },
+  action: {
+    family: "paste",
+    origin: "platform",
+    history: "clipboard",
+    data: "plain"
+  },
+  result: {
+    claimed: true,
+    changed: true,
+    selection_space: "source",
+    revision: 4,
+    offset: 2
+  },
+  collision_rejected: true,
+  unknown_target_rejected: true,
+  text: {
+    crlf: "a\nb",
+    word_start: 6,
+    fitted: "ab"
+  }
+}

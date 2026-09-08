@@ -744,6 +744,10 @@ static bool editing_dom_transaction_commit(DomEditInvocation* invocation) {
         transaction->state->editing.dom_mutation_transaction = nullptr;
     }
     dom_mutation_transaction_resync(transaction->state);
+    // A committed UA edit moves Selection through live Range adjustment. Tag
+    // that already-published revision without introducing a second writer.
+    state_store_tag_selection_origin(transaction->state,
+                                     DOM_SELECTION_ORIGIN_DOM_MUTATION, 0);
     for (int i = 0; i < transaction->notifications->length; i++) {
         DomMutationNotification* notification =
             static_cast<DomMutationNotification*>(
@@ -2152,23 +2156,6 @@ extern "C" bool radiant_dispatch_behavior_design_mode(View* target,
                                                        const InputIntent* intent,
                                                        Item* out_result);
 
-static Item editing_result_field(Item result, const char* name) {
-    if (get_type_id(result) != LMD_TYPE_MAP || !result.map || !name) return ItemNull;
-    return map_get(result.map, (Item){.item = s2it(heap_create_name(name))});
-}
-
-static bool editing_result_bool(Item result, const char* name) {
-    Item field = editing_result_field(result, name);
-    return get_type_id(field) == LMD_TYPE_BOOL && it2b(field);
-}
-
-static char* editing_result_string_copy(Item result, const char* name) {
-    Item field = editing_result_field(result, name);
-    if (get_type_id(field) == LMD_TYPE_NULL) return nullptr;
-    const char* text = fn_to_cstr(field);
-    return text ? mem_strdup(text, MEM_CAT_TEMP) : nullptr;
-}
-
 // Native transport identifies the document body for this IDL operation. The
 // package receives the raw coerced value, canonicalizes it, and invokes the
 // generic Boolean document mechanism; no package means no native fallback.
@@ -2241,9 +2228,9 @@ extern "C" bool radiant_dom_exec_command(void* document_ptr, const char* command
     bool changed = invocation.changed;
     // D7.2.5: post-commit API event facts come from the structured package
     // result. This bridge carries no command-name or inputType policy.
-    bool emit_input = editing_result_bool(edit_result.get(), "api_input");
-    char* input_type = editing_result_string_copy(edit_result.get(), "api_input_type");
-    char* input_data = editing_result_string_copy(edit_result.get(), "api_input_data");
+    bool emit_input = radiant_edit_result_bool(edit_result.get(), "api_input");
+    char* input_type = radiant_edit_result_string_copy(edit_result.get(), "api_input_type");
+    char* input_data = radiant_edit_result_string_copy(edit_result.get(), "api_input_data");
     if (emit_input && input_type) {
         InputIntent input_intent;
         // The standard intent builder supplies a clipboard snapshot when this

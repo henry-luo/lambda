@@ -74,6 +74,36 @@ struct JsWithData {
     int depth;
 };
 
+// JSCU19: the immutable native-call facts of a callable, split off the value
+// record. Only a native wrapper has them, so a script closure carries one null
+// word instead of 32 B of zeros. The wrapper cache already dedupes *values* by
+// (target, arity, kind, policy, capabilities), so a record is created exactly
+// once per native code identity and its lifetime is that of its wrapper.
+struct JsNativeCode {
+    JsNativeCallBody      call;
+    JsNativeConstructBody construct;
+    JsNativeTarget        target;
+    uint8_t               arity;
+    uint8_t               policy;
+};
+
+// An AST-bodied closure retains source-level semantics while using the ordinary
+// JS call kernel. Only such a closure carries these facts, so a compiled-code
+// function holds one null word instead of five fields and three flags. The two
+// Items are precise GC edges reached through the owning value's tracer.
+struct JsAstBody {
+    AstFuncNode* function;
+    JsScript* script;
+    JsInterpEnv* env;
+    Item lexical_this;
+    Item lexical_new_target;
+    // Derived once at closure creation; immutable because the source AST and
+    // the lexical function form are immutable too.
+    bool has_direct_eval;
+    bool uses_arguments;
+    bool tail_reuse_safe;
+};
+
 // Source origin of a dynamically compiled function.
 struct JsEvalOrigin {
     String* filename;
@@ -104,11 +134,8 @@ struct JsFunction {
     uint8_t pool_pointer_roots_registered;
     JsCallEntry invoke;
     JsConstructEntry construct;
-    JsNativeCallBody native_call;
-    JsNativeConstructBody native_construct;
-    JsNativeTarget native_target;
-    uint8_t native_arity;
-    uint8_t native_policy;
+    // JSCU19: present only on a native wrapper; see JsNativeCode.
+    JsNativeCode* native;
     uint32_t module_state_id;
     Item home_global;
     Item home_class;
@@ -124,26 +151,27 @@ struct JsFunction {
     // former callable-Map protocol and leaves ordinary properties observable.
     JsClassData* klass;
     Context* runtime_context;
-    // AST bodies retain source-level semantics while using the ordinary JS
-    // call kernel. The lexical environment is a precise GC edge.
-    AstFuncNode* ast_function;
-    JsScript* ast_script;
-    JsInterpEnv* interp_env;
-    Item ast_lexical_this;
-    Item ast_lexical_new_target;
-    // AST execution facts are derived once when the closure is created. They
-    // are immutable because the source AST and lexical function form are too.
-    bool ast_has_direct_eval;
-    bool ast_uses_arguments;
-    bool ast_tail_reuse_safe;
+    // JSCU20: present only on an AST-bodied closure. `body_kind` stays inline
+    // because it is the body discriminator every call site tests.
+    JsAstBody* ast;
     uint8_t body_kind;
 };
 
 // A missing payload reads as all-zero, so call sites keep the shape they had
 // when these were inline fields and an unguarded read stays safe.
+inline const JsNativeCode js_fn_native_absent{};
+inline const JsAstBody js_fn_ast_absent{};
 inline const JsBoundData js_fn_bound_absent{};
 inline const JsClassData js_fn_class_absent{};
 inline const JsWithData js_fn_with_absent{};
+
+static inline const JsNativeCode* js_fn_native(const JsFunction* fn) {
+    return fn && fn->native ? fn->native : &js_fn_native_absent;
+}
+
+static inline const JsAstBody* js_fn_ast(const JsFunction* fn) {
+    return fn && fn->ast ? fn->ast : &js_fn_ast_absent;
+}
 
 static inline const JsBoundData* js_fn_bound(const JsFunction* fn) {
     return fn && fn->bound ? fn->bound : &js_fn_bound_absent;
@@ -155,6 +183,8 @@ static inline const JsWithData* js_fn_with(const JsFunction* fn) {
     return fn && fn->with ? fn->with : &js_fn_with_absent;
 }
 
+JsNativeCode* js_fn_native_ensure(JsFunction* fn);
+JsAstBody* js_fn_ast_ensure(JsFunction* fn);
 JsBoundData* js_fn_bound_ensure(JsFunction* fn);
 JsClassData* js_fn_class_ensure(JsFunction* fn);
 JsWithData* js_fn_with_ensure(JsFunction* fn);

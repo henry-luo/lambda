@@ -392,6 +392,14 @@ static void socket_update_state_properties(JsSocket* sock) {
     js_set_key_cstr(sock->js_object, "readyState", make_string_item(ready_state));
 }
 
+// Store a freshly built string under a freshly built key with both rooted:
+// the two allocations must not race each other through unspecified argument
+// evaluation order (D5.4.2).
+static void socket_set_string_property(Item obj, const char* key, const char* value) {
+    JS_ROOTS(roots, obj_root, obj, value_root, make_string_item(value));
+    js_set_key_cstr(obj_root.get(), key, value_root.get());
+}
+
 static void net_set_endpoint_properties(Item obj, const char* prefix,
                                         const struct sockaddr_storage* addr,
                                         bool family_before_port) {
@@ -416,19 +424,22 @@ static void net_set_endpoint_properties(Item obj, const char* prefix,
         return;
     }
 
+    // key and value are both freshly allocated; whichever the compiler builds
+    // first is an unrooted temporary while the other allocates, and argument
+    // evaluation order is unspecified (D5.4.2)
     char key[32];
     snprintf(key, sizeof(key), "%sAddress", prefix);
-    js_set_key_default(obj, make_string_item(key), make_string_item(address));
+    socket_set_string_property(obj, key, address);
     if (family_before_port) {
         snprintf(key, sizeof(key), "%sFamily", prefix);
-        js_set_key_default(obj, make_string_item(key), make_string_item(family));
+        socket_set_string_property(obj, key, family);
         snprintf(key, sizeof(key), "%sPort", prefix);
-        js_set_key_default(obj, make_string_item(key), (Item){.item = i2it(port)});
+        js_set_key_cstr(obj, key, (Item){.item = i2it(port)});
     } else {
         snprintf(key, sizeof(key), "%sPort", prefix);
-        js_set_key_default(obj, make_string_item(key), (Item){.item = i2it(port)});
+        js_set_key_cstr(obj, key, (Item){.item = i2it(port)});
         snprintf(key, sizeof(key), "%sFamily", prefix);
-        js_set_key_default(obj, make_string_item(key), make_string_item(family));
+        socket_set_string_property(obj, key, family);
     }
 }
 

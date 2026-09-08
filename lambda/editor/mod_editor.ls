@@ -2,7 +2,7 @@
 //
 // This module is a thin API layer over the lower-level command, transaction,
 // history, and input-intent modules. It gives scripts a first-class editor
-// value today while the native Radiant EditSession ABI catches up.
+// value over the common DOM editing protocol and the Radiant mechanism waist.
 
 import .mod_commands
 import .mod_decorations
@@ -12,6 +12,10 @@ import .mod_input_intent
 import .mod_md_schema
 import .mod_source_pos
 import .mod_transaction
+import dom_adapter: lambda.editor.mod_dom_adapter
+import edit_request: lambda.dom.edit_request
+import edit_registry: lambda.dom.edit_registry
+import dom
 
 pub let editor_schemas = {
   markdown: markdown_schema,
@@ -30,110 +34,87 @@ fn selection_or_start(sel) => if (sel == null) text_selection(pos([0, 0], 0), po
 pub fn edit_open(doc, schema, selection) =>
   {kind: 'editor', doc: doc, schema: schema_or_default(schema), selection: selection_or_start(selection),
    history: history_new(), decorations: null, composition: null, stored_marks: null,
-   events: [], mounted: false, preset: null}
+   events: [], mounted: false, preset: null, surface_handle: null,
+   model_revision: 0, native_selection_revision: 0}
 
-pub fn edit_mount(editor, window, preset) =>
-  {kind: 'editor', doc: editor.doc, schema: editor.schema, selection: editor.selection,
-   history: editor.history, decorations: editor.decorations, composition: editor.composition,
-   stored_marks: editor.stored_marks, events: [*editor.events, {kind: 'mount', window: window, preset: preset}],
-   mounted: true, preset: preset}
+pub fn edit_mount(editor, surface, preset) {
+  let handle = if (type(surface) == string or surface == null) null
+               else dom.bind_model_edit_surface(surface, editor.model_revision);
+  { *: editor, events: [*editor.events, {kind: 'mount', surface: surface, preset: preset}],
+    mounted: true, preset: preset, surface_handle: handle }
+}
 
 // keep this pure state transition total when its public signature crosses a module boundary.
 pub fn edit_set_selection(editor, selection) map =>
-  {kind: 'editor', doc: editor.doc, schema: editor.schema, selection: selection,
-   history: editor.history, decorations: editor.decorations, composition: editor.composition,
-   stored_marks: null, events: [*editor.events, {kind: 'selection', selection: selection}],
-   mounted: editor.mounted, preset: editor.preset}
+  { *: editor, selection: selection, stored_marks: null,
+    events: [*editor.events, {kind: 'selection', selection: selection}] }
 
-pub fn edit_cmd_insert_text(text) => {name: 'insert_text', text: text}
-pub fn edit_cmd_paste_text(text) => {name: 'paste_text', text: text}
-pub fn edit_cmd_paste_html(html, fallback_text) => {name: 'paste_html', html: html, fallback_text: fallback_text}
-pub fn edit_cmd_insert_image(src, alt) => {name: 'insert_image', src: src, alt: alt}
-pub fn edit_cmd_insert_link(href, title, label) => {name: 'insert_link', href: href, title: title, label: label}
-pub fn edit_cmd_insert_horizontal_rule() => {name: 'insert_horizontal_rule'}
-pub fn edit_cmd_insert_code_block(text) => {name: 'insert_code_block', text: text}
-pub fn edit_cmd_wrap_blockquote() => {name: 'wrap_blockquote'}
-pub fn edit_cmd_lift_blockquote() => {name: 'lift_blockquote'}
-pub fn edit_cmd_insert_table(rows, cols, header) => {name: 'insert_table', rows: rows, cols: cols, header: header}
-pub fn edit_cmd_add_table_row() => {name: 'add_table_row'}
-pub fn edit_cmd_delete_table_row() => {name: 'delete_table_row'}
-pub fn edit_cmd_add_table_column() => {name: 'add_table_column'}
-pub fn edit_cmd_delete_table_column() => {name: 'delete_table_column'}
-pub fn edit_cmd_delete_backward() => {name: 'delete_backward'}
-pub fn edit_cmd_delete_forward() => {name: 'delete_forward'}
-pub fn edit_cmd_delete_multi_node() => {name: 'delete_multi_node'}
-pub fn edit_cmd_insert_line_break() => {name: 'insert_line_break'}
-pub fn edit_cmd_toggle_mark(mark, value) => {name: 'toggle_mark', mark: mark, value: value}
-pub fn edit_cmd_wrap_list(kind) => {name: 'wrap_list', kind: kind}
-pub fn edit_cmd_indent_list_item() => {name: 'indent_list_item'}
-pub fn edit_cmd_outdent_list_item() => {name: 'outdent_list_item'}
-pub fn edit_cmd_split_block() => {name: 'split_block'}
-pub fn edit_cmd_set_block_type(tag) => {name: 'set_block_type', tag: tag}
-pub fn edit_cmd_history_undo() => {name: 'history_undo'}
-pub fn edit_cmd_history_redo() => {name: 'history_redo'}
+pub fn edit_cmd_insert_text(text) => {name: 'insert_text', input_type: "insertText", data: text}
+pub fn edit_cmd_paste_text(text) => {name: 'paste_text', input_type: "insertFromPaste", data: text, mime: "text/plain"}
+pub fn edit_cmd_paste_html(html, fallback_text) => {name: 'paste_html', input_type: "insertFromPaste", html: html, data: fallback_text, mime: "text/html"}
+pub fn edit_cmd_insert_image(src, alt) => {name: 'insert_image', input_type: "insertImage", src: src, alt: alt}
+pub fn edit_cmd_insert_link(href, title, label) => {name: 'insert_link', input_type: "insertLink", href: href, title: title, label: label}
+pub fn edit_cmd_insert_horizontal_rule() => {name: 'insert_horizontal_rule', input_type: "insertHorizontalRule"}
+pub fn edit_cmd_insert_code_block(text) => {name: 'insert_code_block', input_type: "insertCodeBlock", data: text}
+pub fn edit_cmd_wrap_blockquote() => {name: 'wrap_blockquote', input_type: "formatBlockquote"}
+pub fn edit_cmd_lift_blockquote() => {name: 'lift_blockquote', input_type: "formatLiftBlockquote"}
+pub fn edit_cmd_insert_table(rows, cols, header) => {name: 'insert_table', input_type: "insertTable", rows: rows, cols: cols, header: header}
+pub fn edit_cmd_add_table_row() => {name: 'add_table_row', input_type: "insertTableRow"}
+pub fn edit_cmd_delete_table_row() => {name: 'delete_table_row', input_type: "deleteTableRow"}
+pub fn edit_cmd_add_table_column() => {name: 'add_table_column', input_type: "insertTableColumn"}
+pub fn edit_cmd_delete_table_column() => {name: 'delete_table_column', input_type: "deleteTableColumn"}
+pub fn edit_cmd_delete_backward() => {name: 'delete_backward', input_type: "deleteContentBackward"}
+pub fn edit_cmd_delete_forward() => {name: 'delete_forward', input_type: "deleteContentForward"}
+pub fn edit_cmd_delete_multi_node() => {name: 'delete_multi_node', input_type: "modelDeleteMultiNode"}
+pub fn edit_cmd_insert_line_break() => {name: 'insert_line_break', input_type: "insertLineBreak"}
+
+fn mark_input_type(mark) {
+  if (mark == 'strong') "formatBold"
+  else if (mark == 'em') "formatItalic"
+  else if (mark == 'u') "formatUnderline"
+  else "modelToggleMark"
+}
+
+pub fn edit_cmd_toggle_mark(mark, value) =>
+  {name: 'toggle_mark', input_type: mark_input_type(mark), mark: mark, value: value}
+pub fn edit_cmd_wrap_list(kind) =>
+  {name: 'wrap_list', input_type: if (kind == 'ordered') "insertOrderedList" else "insertUnorderedList", kind: kind}
+pub fn edit_cmd_indent_list_item() => {name: 'indent_list_item', input_type: "formatIndent"}
+pub fn edit_cmd_outdent_list_item() => {name: 'outdent_list_item', input_type: "formatOutdent"}
+pub fn edit_cmd_split_block() => {name: 'split_block', input_type: "insertParagraph"}
+pub fn edit_cmd_set_block_type(tag) => {name: 'set_block_type', input_type: "formatBlock", tag: tag}
+pub fn edit_cmd_history_undo() => {name: 'history_undo', input_type: "historyUndo"}
+pub fn edit_cmd_history_redo() => {name: 'history_redo', input_type: "historyRedo"}
 pub fn edit_cmd_move_text_selection(source_selection, target_pos) =>
-  {name: 'move_text_selection', source_selection: source_selection, target_pos: target_pos}
+  {name: 'move_text_selection', input_type: "modelMoveTextSelection",
+   source_selection: source_selection, target_pos: target_pos}
 
-fn command_tx(editor, command) {
-  if (command.name == 'insert_text') { cmd_insert_text(editor, command.text) }
-  else if (command.name == 'paste_text') { cmd_paste_text(editor, command.text) }
-  else if (command.name == 'paste_html') { cmd_paste_html(editor, command.html, command.fallback_text) }
-  else if (command.name == 'insert_image') { cmd_insert_image(editor, command.src, command.alt) }
-  else if (command.name == 'insert_link') { cmd_insert_link(editor, command.href, command.title, command.label) }
-  else if (command.name == 'insert_horizontal_rule') { cmd_insert_horizontal_rule(editor) }
-  else if (command.name == 'insert_code_block') { cmd_insert_code_block(editor, command.text) }
-  else if (command.name == 'wrap_blockquote') { cmd_wrap_blockquote(editor) }
-  else if (command.name == 'lift_blockquote') { cmd_lift_blockquote(editor) }
-  else if (command.name == 'insert_table') { cmd_insert_table(editor, command.rows, command.cols, command.header) }
-  else if (command.name == 'add_table_row') { cmd_add_table_row(editor) }
-  else if (command.name == 'delete_table_row') { cmd_delete_table_row(editor) }
-  else if (command.name == 'add_table_column') { cmd_add_table_column(editor) }
-  else if (command.name == 'delete_table_column') { cmd_delete_table_column(editor) }
-  else if (command.name == 'delete_backward') { cmd_delete_backward(editor) }
-  else if (command.name == 'delete_forward') { cmd_delete_forward(editor) }
-  else if (command.name == 'delete_multi_node') { cmd_delete_multi_node(editor) }
-  else if (command.name == 'insert_line_break') { cmd_insert_line_break(editor) }
-  else if (command.name == 'toggle_mark') { cmd_toggle_mark(editor, command.mark, command.value) }
-  else if (command.name == 'wrap_list') { cmd_wrap_list(editor, command.kind) }
-  else if (command.name == 'indent_list_item') { cmd_indent_list_item(editor) }
-  else if (command.name == 'outdent_list_item') { cmd_outdent_list_item(editor) }
-  else if (command.name == 'split_block') { cmd_split_block(editor) }
-  else if (command.name == 'set_block_type') { cmd_set_block_type(editor, command.tag) }
-  else if (command.name == 'history_undo') { dispatch_intent(editor, {input_type: "historyUndo"}) }
-  else if (command.name == 'history_redo') { dispatch_intent(editor, {input_type: "historyRedo"}) }
-  else if (command.name == 'move_text_selection') { cmd_move_text_selection(editor, command.source_selection, command.target_pos) }
-  else { null }
-}
+fn command_tx(editor, command) => dom_adapter.transaction_for_command(editor, command)
 
-fn editor_after_tx(editor, tx) {
-  if (tx == null) { editor }
-  else {
-    let tx2 = tx_set_meta(tx, "scrollIntoView", true)
-    let next = state_after_intent(editor, tx2)
-    {kind: 'editor', doc: next.doc, schema: editor.schema, selection: next.selection,
-     history: next.history, decorations: next.decorations, composition: next.composition,
-     stored_marks: next.stored_marks,
-     events: [*editor.events, {kind: 'change', transaction: tx2}, {kind: 'selection', selection: next.selection}],
-     mounted: editor.mounted, preset: editor.preset}
-  }
-}
-
-pub fn edit_exec(editor, command) => editor_after_tx(editor, command_tx(editor, command))
+pub fn edit_exec(editor, command) => dom_adapter.apply_transaction(editor, command_tx(editor, command))
 
 pub fn edit_can_exec(editor, command) => command_tx(editor, command) != null
 
-pub fn edit_apply(editor, tx) => editor_after_tx(editor, tx)
+pub fn edit_apply(editor, tx) => dom_adapter.apply_transaction(editor, tx)
 
-pub fn edit_dispatch(editor, intent) => editor_after_tx(editor, dispatch_intent(editor, intent))
+pub fn edit_dispatch(editor, intent) => dom_adapter.handle_event(editor, intent).editor
 
-pub fn edit_can_dispatch(editor, intent) => dispatch_intent(editor, intent) != null
+pub fn edit_can_dispatch(editor, intent) => dom_adapter.transaction_for_event(editor, intent) != null
+
+pub fn edit_handle_dom_action(editor, action_event) => dom_adapter.handle_event(editor, action_event)
+pub fn edit_handle_request(editor, request) => dom_adapter.handle_request(editor, request)
+pub fn edit_accept_dom_selection(editor, evt) => dom_adapter.accept_dom_selection(editor, evt)
+
+pub fn edit_request_from_toolbar(input_type, payload) {
+  let descriptor = dom_adapter.descriptor_for_intent(input_type)
+  if (descriptor == null) null else edit_request.from_toolbar(descriptor, payload)
+}
+
+pub fn edit_descriptor(spelling) => edit_registry.descriptor(spelling)
 
 pub fn edit_set_decorations(editor, decorations) =>
-  {kind: 'editor', doc: editor.doc, schema: editor.schema, selection: editor.selection,
-   history: editor.history, decorations: decorations, composition: editor.composition,
-   stored_marks: editor.stored_marks,
-   events: [*editor.events, {kind: 'decorations', decorations: decorations}],
-   mounted: editor.mounted, preset: editor.preset}
+  { *: editor, decorations: decorations,
+    events: [*editor.events, {kind: 'decorations', decorations: decorations}] }
 
 // A search decoration can fail to build from malformed editor state; exposing
 // that value preserves the session instead of publishing a partial editor.

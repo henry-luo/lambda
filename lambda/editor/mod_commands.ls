@@ -20,6 +20,7 @@ import .mod_source_pos
 import .mod_html_paste
 import .mod_paste
 import .mod_md_schema
+import text_policy: lambda.dom.edit_text_policy
 
 // ---------------------------------------------------------------------------
 // Selection helpers
@@ -1068,22 +1069,6 @@ pub fn cmd_delete_forward(st) {
 // cmd_delete_word_backward / cmd_insert_line_break
 // ---------------------------------------------------------------------------
 
-fn is_space_char(ch) => ch == " " or ch == "\n" or ch == "\t" or ch == "\r"
-
-fn skip_space_left(text, i) {
-  if (i <= 0) { 0 }
-  else if (is_space_char(slice(text, i - 1, i))) { skip_space_left(text, i - 1) }
-  else { i }
-}
-
-fn scan_word_left(text, i) {
-  if (i <= 0) { 0 }
-  else if (is_space_char(slice(text, i - 1, i))) { i }
-  else { scan_word_left(text, i - 1) }
-}
-
-fn word_start_left(text, i) => scan_word_left(text, skip_space_left(text, i))
-
 pub fn cmd_delete_word_backward(st) {
   let sel = st.selection
   if (sel == null) { null }
@@ -1094,7 +1079,7 @@ pub fn cmd_delete_word_backward(st) {
     let leaf = node_at(st.doc, p.path)
     if (leaf == null or not is_text(leaf) or p.offset <= 0) { null }
     else {
-      let start = word_start_left(leaf.text, p.offset)
+      let start = text_policy.word_start(leaf.text, p.offset)
       if (start == p.offset) { null }
       else { delete_range(st, pos(p.path, start), p) }
     }

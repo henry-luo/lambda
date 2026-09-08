@@ -986,9 +986,12 @@ static Item node_zlib_namespace(void) {
     node_zlib_install_method(namespace_root, key_root, function_root, "createUnzip", 10,
         node_zlib_create_unzip, 1);
 
+    // publish each object into its root slot BEFORE the next allocation: the
+    // second new_object() can collect the first one while it is still only a
+    // bare local, and the slot then holds a reclaimed pointer (D5.4.2)
     Item constants = node_zlib_host->value->new_object();
-    Item codes = node_zlib_host->value->new_object();
     *constants_root = constants.item;
+    Item codes = node_zlib_host->value->new_object();
     *codes_root = codes.item;
 #define NODE_ZLIB_SET_CONSTANT(name, constant_value) \
     node_zlib_host->value->property_set(constants, node_zlib_key(name, strlen(name)), \

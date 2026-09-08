@@ -100,6 +100,7 @@ extern "C" void js_async_hooks_restore_resource(Item previous);
 #define stream_passthrough_prototype (js_runtime_state.stream.passthrough_prototype)
 #define internal_stream_state_namespace (js_runtime_state.stream.internal_state_namespace)
 #define internal_stream_end_of_stream_namespace (js_runtime_state.stream.internal_end_of_stream_namespace)
+#define internal_stream_add_abort_signal_namespace (js_runtime_state.stream.internal_add_abort_signal_namespace)
 #define stream_iter_namespace (js_runtime_state.stream.iterator_namespace)
 #define stream_web_namespace (js_runtime_state.stream.web_namespace)
 #define js_stream_default_byte_hwm (js_runtime_state.stream.default_byte_hwm)
@@ -8673,19 +8674,24 @@ static void js_stream_install_state_accessors(Item readable_ctor, Item writable_
 #define stream_namespace (js_runtime_state.stream.namespace_object)
 #define stream_promises_namespace (js_runtime_state.stream.promises_namespace)
 
+// D5.2/D6.2.2v2: native-method publication uses one exact-rooted shape.
+// Constructing the function and naming it both allocate, so the namespace and
+// the key must be rooted across them — otherwise the key is a freed string by
+// the time the store hashes it (D5.4.2).
 template <bool Constructable = false, typename Target>
 static Item stream_set_method(Item ns, const char* name, Target target,
         int adapter_arity) {
-    Item key = make_string_item(name);
-    Item fn = ItemNull;
+    JS_ROOTS(roots, ns_root, ns, key_root, make_string_item(name));
+    Item built = ItemNull;
     if constexpr (Constructable) {
-        fn = js_new_native_constructor(target);
+        built = js_new_native_constructor(target);
     } else {
-        fn = js_new_native_function(target, adapter_arity);
+        built = js_new_native_function(target, adapter_arity);
     }
-    js_set_function_name(fn, key);
-    js_set_key_default(ns, key, fn);
-    return fn;
+    JS_ROOTS(fn_roots, fn_root, built);
+    js_set_function_name(fn_root.get(), key_root.get());
+    js_set_key_default(ns_root.get(), key_root.get(), fn_root.get());
+    return fn_root.get();
 }
 JS_FORWARD_STATIC_ITEM(js_stream_promisify_custom_symbol, (void), js_symbol_for, (make_string_item("nodejs.util.promisify.custom")))
 
@@ -9187,8 +9193,15 @@ extern "C" Item js_get_stream_namespace(void) {
     // Stream — base class that inherits from EventEmitter and provides pipe().
     Item events_ctor = ItemNull;
     jube_specifier_resolve("events", &events_ctor);
+    // the base constructor and its prototype are reachable from nothing until
+    // they are stored on the namespace ~15 allocating calls below, so under
+    // forced GC they were reclaimed mid-build (D5.4.2)
     Item stream_base = js_new_native_constructor(js_stream_base_constructor);
+    JS_ROOTS(base_roots, stream_base_root, stream_base);
     Item stream_base_proto = js_new_object();
+    JS_ROOTS(base_proto_roots, stream_base_proto_root, stream_base_proto);
+    stream_base = stream_base_root.get();
+    stream_base_proto = stream_base_proto_root.get();
     Item events_proto = js_get_key_cstr(events_ctor, "prototype");
     if (js_node_is_property_carrier(events_proto)) {
         js_set_prototype(stream_base_proto, events_proto);
@@ -9316,29 +9329,45 @@ extern "C" Item js_get_stream_web_namespace(void) {
 }
 
 extern "C" Item js_get_internal_stream_add_abort_signal_namespace(void) {
-    static Item add_abort_ns = {0};
-    if (add_abort_ns.item != 0) return add_abort_ns;
-    add_abort_ns = js_new_object();
-    js_set_native_key(add_abort_ns, make_string_item("addAbortSignalNoValidate"), js_stream_addAbortSignalNoValidate);
-    js_set_key_cstr(add_abort_ns, "default", add_abort_ns);
-    return add_abort_ns;
+    // this used to cache into a function-local `static Item`, which a precise
+    // collector never scans; it now lives in the stream root range (D5.3)
+    if (!stream_ensure_roots()) return ItemError;
+    if (internal_stream_add_abort_signal_namespace.item != 0)
+        return internal_stream_add_abort_signal_namespace;
+    internal_stream_add_abort_signal_namespace = js_new_object();
+    js_set_native_method(internal_stream_add_abort_signal_namespace,
+                         "addAbortSignalNoValidate", js_stream_addAbortSignalNoValidate);
+    js_set_key_cstr(internal_stream_add_abort_signal_namespace, "default",
+                    internal_stream_add_abort_signal_namespace);
+    return internal_stream_add_abort_signal_namespace;
 }
 
 extern "C" Item js_get_internal_stream_state_namespace(void) {
+    // the slot lives in the stream root range, so the range must be registered
+    // before the fresh object is published into it — otherwise the object is
+    // collected and its storage is reused by the very functions installed next,
+    // which is how this namespace came back as a function (D5.3, D5.4.2)
+    if (!stream_ensure_roots()) return ItemError;
     if (internal_stream_state_namespace.item != 0) return internal_stream_state_namespace;
     internal_stream_state_namespace = js_new_object();
-    js_set_native_key(internal_stream_state_namespace, make_string_item("getDefaultHighWaterMark"), js_stream_getDefaultHighWaterMark);
-    js_set_native_key(internal_stream_state_namespace, make_string_item("setDefaultHighWaterMark"), js_stream_setDefaultHighWaterMark);
+    js_set_native_method(internal_stream_state_namespace, "getDefaultHighWaterMark",
+                         js_stream_getDefaultHighWaterMark);
+    js_set_native_method(internal_stream_state_namespace, "setDefaultHighWaterMark",
+                         js_stream_setDefaultHighWaterMark);
     js_set_key_cstr(internal_stream_state_namespace, "default", internal_stream_state_namespace);
     return internal_stream_state_namespace;
 }
 
 extern "C" Item js_get_internal_stream_end_of_stream_namespace(void) {
+    // same contract as the sibling getters: register the range before publishing
+    if (!stream_ensure_roots()) return ItemError;
     if (internal_stream_end_of_stream_namespace.item != 0)
         return internal_stream_end_of_stream_namespace;
     internal_stream_end_of_stream_namespace = js_new_object();
-    Item eos_fn = js_new_native_rest_function(js_stream_finished_rest);
-    Item finished_fn = js_new_native_rest_function(js_stream_promises_finished);
+    JS_ROOTS(eos_roots, eos_root, js_new_native_rest_function(js_stream_finished_rest));
+    JS_ROOTS(fin_roots, fin_root, js_new_native_rest_function(js_stream_promises_finished));
+    Item eos_fn = eos_root.get();
+    Item finished_fn = fin_root.get();
     js_set_key_cstr(internal_stream_end_of_stream_namespace, "eos", eos_fn);
     // Node's internal EOS module exports callback eos() and Promise finished();
     // sharing eos here makes stream/promises.finished wait forever for a callback.

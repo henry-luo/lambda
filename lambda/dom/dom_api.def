@@ -176,6 +176,10 @@ DOM_OP(CORE, clear_editing_focus, editing, 1, "fn(host: any) -> bool", dom_engin
 // has no visibility into its session schema or editing policy (D7.2.5).
 DOM_OP(CORE, edit_session, editing, 1, "fn(host: any) -> any", dom_engine_edit_session, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(CORE, set_edit_session, editing, 2, "fn(host: any, session: any) -> any", dom_engine_set_edit_session, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
+// A model surface gets a document-local logical handle; toolbar edits finish
+// through that handle after their owning reactive handler publishes the model.
+DOM_OP(CORE, bind_model_edit_surface, editing, 2, "fn(host: any, revision: int) -> int|null", dom_engine_bind_model_edit_surface, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
+DOM_OP(CORE, finish_model_edit, editing, 2, "fn(surface: int, result: any) -> bool", dom_engine_finish_model_edit, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "")
 // This is a text-control predicate, not the control's string value.
 DOM_OP(CORE, tc_value,         textctl, 1, "fn(n: any) -> bool",                            dom_engine_tc_value, DOM_F_ENGINE | DOM_F_NEUTRAL, "")
 DOM_OP(DERIVED, tc_set_value,  textctl, 2, "fn(n: any, v: string) -> bool",                 DOM_NO_BODY, DOM_F_NEUTRAL | DOM_F_MUTATES,

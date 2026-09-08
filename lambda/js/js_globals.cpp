@@ -7052,7 +7052,7 @@ extern "C" bool js_func_is_builtin_ctor(Item fn) {
     JsFuncProps* efn = (JsFuncProps*)fn.function;
     // Builtin constructor descriptors follow the stored construct target;
     // mutating `.name` cannot change prototype attributes (D6.2.2v2).
-    return efn && (efn->native_construct != NULL ||
+    return efn && (js_fn_native(efn)->construct != NULL ||
         efn->intrinsic_class != JS_CLASS_NONE);
 }
 
@@ -13514,7 +13514,12 @@ static bool js_message_port_transfer_list_has(Item transfer_list, Item value) {
     }
     return false;
 }
-JS_FORWARD_STATIC_ITEM(js_message_port_data_clone_error, (const char* message), js_domexception_new, (make_string_item(message ? message : ""), make_string_item("DataCloneError")))
+// both arguments allocate and their evaluation order is unspecified (D5.4.2)
+static Item js_message_port_data_clone_error(const char* message) {
+    JS_ROOTS(roots, message_root, make_string_item(message ? message : ""));
+    JS_ROOTS(name_roots, name_root, make_string_item("DataCloneError"));
+    return js_domexception_new(message_root.get(), name_root.get());
+}
 
 static bool js_message_port_is_detached(Item port) {
     if (!js_message_port_is_port(port)) return false;
@@ -15562,9 +15567,9 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
     fn->param_count = spec->param_count;
     fn->formal_length = -1; // -1 = use param_count for .length
     fn->catalog_id = spec->target_id;
-    fn->native_call = target->call_body;
-    fn->native_construct = target->construct_body;
-    fn->native_policy = JS_NATIVE_CALL_BODY;
+    js_fn_native_ensure(fn)->call = target->call_body;
+    js_fn_native_ensure(fn)->construct = target->construct_body;
+    js_fn_native_ensure(fn)->policy = JS_NATIVE_CALL_BODY;
     fn->name = heap_create_name(spec->name, spec->len);
     // The catalog object becomes observable through the global cache below;
     // publish its executable capabilities before that ownership transfer.
@@ -16441,9 +16446,9 @@ extern "C" Item js_get_typed_array_base() {
     fn->formal_length = -1;
     fn->intrinsic_class = JS_CLASS_TYPED_ARRAY;
     fn->name = heap_create_name("TypedArray", 10);
-    fn->native_call = js_typed_array_base_call_body;
-    fn->native_construct = js_typed_array_base_construct_body;
-    fn->native_policy = JS_NATIVE_CALL_BODY;
+    js_fn_native_ensure(fn)->call = js_typed_array_base_call_body;
+    js_fn_native_ensure(fn)->construct = js_typed_array_base_construct_body;
+    js_fn_native_ensure(fn)->policy = JS_NATIVE_CALL_BODY;
     // %TypedArray% is cached immediately, so its capability slots must already
     // be final even though its prototype is initialized lazily afterwards.
     js_function_finalize_capabilities(fn);
@@ -16653,9 +16658,9 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     if (!target || !target->call_body) return ItemError;
     // The binding chooses its immutable call/construct capabilities once;
     // runtime_id remains cache/prototype linkage only (D6.2.2v2).
-    fn->native_call = target->call_body;
-    fn->native_construct = target->construct_body;
-    fn->native_policy = JS_NATIVE_CALL_BODY;
+    js_fn_native_ensure(fn)->call = target->call_body;
+    js_fn_native_ensure(fn)->construct = target->construct_body;
+    js_fn_native_ensure(fn)->policy = JS_NATIVE_CALL_BODY;
     fn->catalog_id = target->catalog_id;
     fn->param_count = param_count;
     int typed_array_element_type =
