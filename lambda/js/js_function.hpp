@@ -61,6 +61,9 @@ struct JsBoundData {
     Item target;
     Item* args;
     int argc;
+    // JSCUO9: the bound receiver's owned scalar home. Only a bound function has
+    // one, so it moved off the value with the rest of the bound state.
+    Item this_store[2];
 };
 
 struct JsClassData {
@@ -112,50 +115,68 @@ struct JsEvalOrigin {
     int64_t column_offset;
 };
 
+// JSCUO8: one payload word on the value, not six. A value that needs none
+// carries a single null pointer; a value that needs any carries one container
+// and pays for only the records it actually has. Six separate pointers cost
+// 48 B on every function value, including the overwhelming majority that use
+// at most one of them.
+struct JsFunctionPayload {
+    Item          home_class;
+    JsBoundData*  bound;
+    JsClassData*  klass;
+    JsWithData*   with;
+    JsAstBody*    ast;
+    JsNativeCode* native;
+    JsEvalOrigin* eval_origin;
+};
+
 struct JsFunction {
+    // JSCUO9: fields are grouped by alignment. The previous source order left
+    // 30 B of interior padding — six 4- and 1-byte fields each sitting in an
+    // 8-byte hole — which is what kept the record in the 256 B GC size class.
+    // Only the discrimination prefix below is contractual (see JSCUO6).
     TypeId type_id;
     uint32_t layout_magic;
+
+    // 8-byte group
     void* func_ptr;
-    int param_count;
     Item* env;
-    int env_size;
     Item prototype;
-    Item bound_this_store[2];
-    JsBoundData* bound;
     String* name;
-    int catalog_id;
     Item properties_map;
+    JsCallEntry invoke;
+    JsConstructEntry construct;
+    Item home_global;
+    // `source_text` stays on the value: its setter js_set_function_source is a
+    // NO_GC JIT import (sys_func_registry.c) and must not allocate, which a
+    // lazily minted payload would force it to do.
+    String* source_text;
+    Context* runtime_context;
+    // JSCUO8: every optional record hangs off this one word.
+    JsFunctionPayload* payload;
+
+    // 4-byte group
+    int param_count;
+    int env_size;
+    int catalog_id;
+    uint32_t module_state_id;
+
+    // 2-byte group
     uint16_t flags;
-    uint8_t intrinsic_class;
     int16_t formal_length;
+
+    // 1-byte group
+    uint8_t intrinsic_class;
     // Concrete TypedArray constructors carry their element policy directly;
     // display names and catalog IDs are never executable selectors (D6.2.2v2).
     uint8_t typed_array_element_type_plus_one;
     uint8_t pool_pointer_roots_registered;
-    JsCallEntry invoke;
-    JsConstructEntry construct;
-    // JSCU19: present only on a native wrapper; see JsNativeCode.
-    JsNativeCode* native;
-    uint32_t module_state_id;
-    Item home_global;
-    Item home_class;
-    String* source_text;
     bool eval_initializer_context;
-    JsWithData* with;
-    // JSCU20: only a dynamically compiled function (eval / new Function / vm)
-    // has an origin, so ordinary closures carry one null word instead of four
-    // fields. Owned by this value and released by its destroy hook.
-    JsEvalOrigin* eval_origin;
-    // Source classes are functions with an explicit construct capability.
-    // Keeping their constructor body and instance prototype here removes the
-    // former callable-Map protocol and leaves ordinary properties observable.
-    JsClassData* klass;
-    Context* runtime_context;
-    // JSCU20: present only on an AST-bodied closure. `body_kind` stays inline
-    // because it is the body discriminator every call site tests.
-    JsAstBody* ast;
+    // `body_kind` stays inline because it is the discriminator every call site
+    // tests before it looks at the payload at all.
     uint8_t body_kind;
 };
+
 
 // A missing payload reads as all-zero, so call sites keep the shape they had
 // when these were inline fields and an unguarded read stays safe.
@@ -165,22 +186,30 @@ inline const JsBoundData js_fn_bound_absent{};
 inline const JsClassData js_fn_class_absent{};
 inline const JsWithData js_fn_with_absent{};
 
+inline const JsEvalOrigin js_fn_eval_origin_absent{};
+
+#define JS_FN_PAYLOAD_READ(fn, field) \
+    ((fn) && (fn)->payload && (fn)->payload->field ? (fn)->payload->field \
+                                                   : &js_fn_##field##_absent)
+
 static inline const JsNativeCode* js_fn_native(const JsFunction* fn) {
-    return fn && fn->native ? fn->native : &js_fn_native_absent;
+    return JS_FN_PAYLOAD_READ(fn, native);
 }
-
 static inline const JsAstBody* js_fn_ast(const JsFunction* fn) {
-    return fn && fn->ast ? fn->ast : &js_fn_ast_absent;
+    return JS_FN_PAYLOAD_READ(fn, ast);
 }
-
 static inline const JsBoundData* js_fn_bound(const JsFunction* fn) {
-    return fn && fn->bound ? fn->bound : &js_fn_bound_absent;
-}
-static inline const JsClassData* js_fn_class(const JsFunction* fn) {
-    return fn && fn->klass ? fn->klass : &js_fn_class_absent;
+    return JS_FN_PAYLOAD_READ(fn, bound);
 }
 static inline const JsWithData* js_fn_with(const JsFunction* fn) {
-    return fn && fn->with ? fn->with : &js_fn_with_absent;
+    return JS_FN_PAYLOAD_READ(fn, with);
+}
+static inline const JsEvalOrigin* js_fn_eval_origin(const JsFunction* fn) {
+    return JS_FN_PAYLOAD_READ(fn, eval_origin);
+}
+static inline const JsClassData* js_fn_class(const JsFunction* fn) {
+    return fn && fn->payload && fn->payload->klass ? fn->payload->klass
+                                                   : &js_fn_class_absent;
 }
 
 JsNativeCode* js_fn_native_ensure(JsFunction* fn);
@@ -188,6 +217,7 @@ JsAstBody* js_fn_ast_ensure(JsFunction* fn);
 JsBoundData* js_fn_bound_ensure(JsFunction* fn);
 JsClassData* js_fn_class_ensure(JsFunction* fn);
 JsWithData* js_fn_with_ensure(JsFunction* fn);
+JsEvalOrigin* js_fn_eval_origin_ensure(JsFunction* fn);
 
 #define JS_FUNCTION_LAYOUT_MAGIC 0x4A53464Eu
 
@@ -212,20 +242,22 @@ JsWithData* js_fn_with_ensure(JsFunction* fn);
 //     hook, which uses field names; the raw LAMBDA_GC_OFF_FUNCTION_* path in
 //     gc_heap.c runs only after that hook declines, i.e. for `Function`.
 //
-// The two historical pins below (func_ptr at 8, bound_this_store at 48) were
-// added with the scalar-GC-invariant work and back no reader found by this
-// inventory. They are kept as tripwires, not as an ABI contract: moving those
-// fields is safe once this block is updated in the same change.
+// The two historical pins (func_ptr at 8, bound_this_store at 48) were added
+// with the scalar-GC-invariant work and back no reader found by this
+// inventory, so JSCUO6 kept them as tripwires rather than an ABI contract and
+// said moving the fields is safe once this block is updated in the same
+// change. JSCUO9 took that route: `bound_this_store` moved into JsBoundData
+// (only a bound function has a bound receiver) and the remaining fields are
+// ordered by alignment, so neither pin survives. Only the two discrimination
+// offsets below are contractual.
 static_assert(offsetof(JsFunction, type_id) == 0,
               "JsFunction type tag must sit where every Item consumer reads it");
 static_assert(offsetof(JsFunction, layout_magic) == 4,
               "JsFunction layout discriminator is read before any field access");
 static_assert(offsetof(JsAccessorPair, layout_magic) == offsetof(JsFunction, layout_magic),
               "accessor pairs share the FUNC tag and must discriminate at the same offset");
-static_assert(offsetof(JsFunction, func_ptr) == 8,
-              "JsFunction prefix must preserve the compiled-function ABI");
-static_assert(offsetof(JsFunction, bound_this_store) == 48,
-              "JsFunction bound-this slot must preserve the shared ABI");
+static_assert(offsetof(JsFunction, type_id) < offsetof(JsFunction, func_ptr),
+              "the discrimination prefix must precede every other field");
 
 static inline void js_function_init_native_module_scope(JsFunction* fn) {
     if (!fn) return;
@@ -235,11 +267,24 @@ static inline void js_function_init_native_module_scope(JsFunction* fn) {
 }
 
 static inline void js_function_set_bound_this(JsFunction* fn, Item value) {
-    owned_item_slot_store(fn->bound_this_store, 1, 0, value);
+    JsBoundData* bound = js_fn_bound_ensure(fn);
+    if (bound) owned_item_slot_store(bound->this_store, 1, 0, value);
 }
 
 static inline Item js_function_get_bound_this(JsFunction* fn) {
-    return owned_item_slot_read(fn->bound_this_store, 1, 0, false);
+    // only a bound function has the home; anything else has no bound receiver
+    if (!fn || !fn->payload || !fn->payload->bound) return ItemNull;
+    return owned_item_slot_read(fn->payload->bound->this_store, 1, 0, false);
+}
+
+static inline String* js_fn_source_text(const JsFunction* fn) {
+    return fn ? fn->source_text : NULL;
+}
+
+// JSCUO9: only a method carries a home class, and its setter
+// js_set_function_home_class is MAY_GC, so it may mint the payload.
+static inline Item js_fn_home_class(const JsFunction* fn) {
+    return fn && fn->payload ? fn->payload->home_class : ItemNull;
 }
 
 #define JS_FUNC_FLAG_GENERATOR 1
