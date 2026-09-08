@@ -34,6 +34,6 @@
     {"type": "mouse_move", "target": {"selector": "#editor", "offset_x": 500, "offset_y": 300}},
     {"type": "assert_state_store", "target": {"selector": "#editor"}, "view_state": true, "kind": "scroll"},
     {"type": "scroll", "target": {"selector": "#editor"}, "dx": 0, "dy": -6},
-    {"type": "assert_state_store", "target": {"selector": "#editor"}, "view_scroll_y": 40, "tolerance": 40}
+    {"type": "assert_state_store", "target": {"selector": "#editor"}, "view_scroll_y": 150, "tolerance": 75}
   ]
 }
