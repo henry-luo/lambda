@@ -45,12 +45,16 @@ bool radiant_urls_match_without_fragment(const Url* first, const Url* second);
 
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);
 void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
+void* radiant_document_element_from_point(DomDocument* doc, float x, float y);
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value,
     double elapsed_time);
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
     const char* type, double client_x, double client_y, int button, int buttons,
     int mods, const char* pointer_type);
+extern "C" bool radiant_dispatch_event_sim_touch(UiContext* uicon, View* target,
+    const char* type, double client_x, double client_y, int mods,
+    bool is_active, double timestamp_ms);
 extern "C" bool radiant_dispatch_event_sim_mouse(UiContext* uicon, View* target,
     const char* type, double client_x, double client_y, int button, int buttons,
     int mods, int detail, double timestamp_ms);

@@ -467,17 +467,32 @@ void process_font_resource(NetworkResource* res, const struct CssFontFaceDescrip
     source.path = res->local_path;
     source.format = NULL;
 
+    FontFaceUnicodeRange* unicode_ranges = nullptr;
+    if (font_face->unicode_range_count > 0 && font_face->unicode_ranges) {
+        unicode_ranges = (FontFaceUnicodeRange*)mem_calloc(
+            (size_t)font_face->unicode_range_count, sizeof(FontFaceUnicodeRange), MEM_CAT_NETWORK);
+        if (unicode_ranges) {
+            for (int i = 0; i < font_face->unicode_range_count; i++) {
+                unicode_ranges[i].start_codepoint = font_face->unicode_ranges[i].start_codepoint;
+                unicode_ranges[i].end_codepoint = font_face->unicode_ranges[i].end_codepoint;
+            }
+        }
+    }
+
     FontFaceDesc face_desc = {};
     face_desc.family = font_face->family_name ? font_face->family_name : "unknown";
     face_desc.weight = fw;
     face_desc.slant = fs;
     face_desc.sources = &source;
     face_desc.source_count = 1;
+    face_desc.unicode_ranges = unicode_ranges;
+    face_desc.unicode_range_count = unicode_ranges ? font_face->unicode_range_count : 0;
 
     if (font_face_register(uicon->font_ctx, &face_desc)) {
         log_debug("network: registered font local path for '%s': %s",
                   face_desc.family, res->local_path);
     }
+    if (unicode_ranges) mem_free(unicode_ranges);
 
     // schedule reflow for document to apply new font
     if (res->manager && res->manager->document) {

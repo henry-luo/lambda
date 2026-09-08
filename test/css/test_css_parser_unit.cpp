@@ -18,6 +18,7 @@
 #include "lambda/network/font_resource_faces.h"
 
 extern "C" {
+#include "lib/memtrack.h"
 #include "lambda/input/css/css_parser.hpp"
 #include "lambda/input/css/css_style.hpp"
 #include "lambda/input/css/css_value_parser.hpp"
@@ -877,6 +878,47 @@ TEST_F(CssParserUnitTest, FontFace_NumericWeightPreservesDistinctFace) {
 
     css_font_face_descriptor_free(light);
     css_font_face_descriptor_free(regular);
+}
+
+TEST_F(CssParserUnitTest, FontFace_ParsesUnicodeRangeList) {
+    CssFontFaceDescriptor* descriptor = css_parse_font_face_content(
+        "{ font-family: Subset; src: url(subset.woff2); "
+        "unicode-range: U +0000 -00FF, U +4E00 -9FFF, U +1F600; }", nullptr);
+
+    ASSERT_NE(descriptor, nullptr);
+    ASSERT_EQ(descriptor->unicode_range_count, 3);
+    EXPECT_EQ(descriptor->unicode_ranges[0].start_codepoint, 0x0000u);
+    EXPECT_EQ(descriptor->unicode_ranges[0].end_codepoint, 0x00FFu);
+    EXPECT_EQ(descriptor->unicode_ranges[1].start_codepoint, 0x4E00u);
+    EXPECT_EQ(descriptor->unicode_ranges[1].end_codepoint, 0x9FFFu);
+    EXPECT_EQ(descriptor->unicode_ranges[2].start_codepoint, 0x1F600u);
+    EXPECT_EQ(descriptor->unicode_ranges[2].end_codepoint, 0x1F600u);
+    css_font_face_descriptor_free(descriptor);
+}
+
+TEST_F(CssParserUnitTest, FontFace_ParsesUnicodeRangeListBeyondThirtyTwoEntries) {
+    CssFontFaceDescriptor* descriptor = css_parse_font_face_content(
+        "{ font-family: LargeSubset; src: url(subset.woff2); unicode-range: "
+        "U+0000, U+0001, U+0002, U+0003, U+0004, U+0005, U+0006, U+0007, "
+        "U+0008, U+0009, U+000A, U+000B, U+000C, U+000D, U+000E, U+000F, "
+        "U+0010, U+0011, U+0012, U+0013, U+0014, U+0015, U+0016, U+0017, "
+        "U+0018, U+0019, U+001A, U+001B, U+001C, U+001D, U+001E, U+001F, "
+        "U+0020; }", nullptr);
+
+    ASSERT_NE(descriptor, nullptr);
+    ASSERT_NE(descriptor->unicode_ranges, nullptr);
+    ASSERT_EQ(descriptor->unicode_range_count, 33);
+    EXPECT_EQ(descriptor->unicode_ranges[32].start_codepoint, 0x20u);
+    css_font_face_descriptor_free(descriptor);
+}
+
+TEST_F(CssParserUnitTest, FontFace_FileUrlResolvesToLocalPath) {
+    char* resolved = css_resolve_font_url(
+        "file:///fixture/fonts/Example%20Sans.ttf", "/fixture/styles.css", nullptr);
+
+    ASSERT_NE(resolved, nullptr);
+    EXPECT_STREQ(resolved, "/fixture/fonts/Example Sans.ttf");
+    mem_free(resolved);
 }
 
 typedef struct FontResourceWeightSet {

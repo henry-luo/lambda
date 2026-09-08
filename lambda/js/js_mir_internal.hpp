@@ -21,6 +21,7 @@ extern int g_js_force_document_interp;
 // Tune6: in a document/Radiant context (cold vendor JS), use the MIR interpreter
 // for modules above this (moderate) insn count — see Transpile_Js_Tune6_AST.md §0.2d.
 #define JM_RADIANT_INTERP_INSN_THRESHOLD MIR_RADIANT_INTERP_INSN_THRESHOLD
+#define JM_RADIANT_AST_NODE_THRESHOLD MIR_RADIANT_AST_NODE_THRESHOLD
 extern "C" int g_mir_interp_mode;
 extern "C" void ensure_jit_imports_initialized(void);
 

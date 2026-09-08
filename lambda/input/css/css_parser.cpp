@@ -105,12 +105,16 @@ static char* css_parser_unescape_url_component(const char* str, size_t len, Pool
     return result;
 }
 
-static const char* css_unicode_skip_comment(const char* p, const char* end) {
+static const char* css_unicode_skip_ignorable(const char* p, const char* end) {
     if (!p || !end) return p;
-    while (p < end && p + 1 < end && p[0] == '/' && p[1] == '*') {
+    for (;;) {
+        while (p < end && (p[0] == ' ' || p[0] == '\t' || p[0] == '\n' ||
+                           p[0] == '\r' || p[0] == '\f')) p++;
+        if (p + 1 >= end || p[0] != '/' || p[1] != '*') break;
         p += 2;
         while (p < end && p + 1 < end && !(p[0] == '*' && p[1] == '/')) p++;
-        if (p + 1 < end) p += 2;
+        if (p + 1 >= end) return end;
+        p += 2;
     }
     return p;
 }
@@ -164,20 +168,21 @@ static const char* css_unicode_make_range(uint32_t start, uint32_t end, bool has
     return pool_strdup(pool, result);
 }
 
-/** parse one CSS <unicode-range> and return its CSSOM canonical spelling. */
-const char* css_parse_unicode_range_canonical(const char* input, size_t length, Pool* pool) {
-    if (!input || length == 0 || !pool) return NULL;
+static bool css_parse_unicode_range_parts(const char* input, size_t length,
+                                          uint32_t* out_start, uint32_t* out_end,
+                                          bool* out_has_range) {
+    if (!input || length == 0 || !out_start || !out_end || !out_has_range) return false;
 
     const char* p = input;
     const char* end = input + length;
     while (p < end && (p[0] == ' ' || p[0] == '\t')) p++;
-    if (p >= end || (p[0] != 'u' && p[0] != 'U')) return NULL;
+    if (p >= end || (p[0] != 'u' && p[0] != 'U')) return false;
     p++;
 
-    p = css_unicode_skip_comment(p, end);
-    if (p >= end || p[0] != '+') return NULL;
+    p = css_unicode_skip_ignorable(p, end);
+    if (p >= end || p[0] != '+') return false;
     p++;
-    p = css_unicode_skip_comment(p, end);
+    p = css_unicode_skip_ignorable(p, end);
 
     char start_chars[7];
     int start_count = 0;
@@ -186,51 +191,74 @@ const char* css_parse_unicode_range_canonical(const char* input, size_t length, 
         p++;
     }
 
-    p = css_unicode_skip_comment(p, end);
+    p = css_unicode_skip_ignorable(p, end);
     int wildcard_count = 0;
     while (p < end && p[0] == '?') {
         wildcard_count++;
         p++;
     }
-    if (start_count + wildcard_count == 0 || start_count + wildcard_count > 6) return NULL;
+    if (start_count + wildcard_count == 0 || start_count + wildcard_count > 6) return false;
 
-    p = css_unicode_skip_comment(p, end);
+    p = css_unicode_skip_ignorable(p, end);
     uint32_t start = css_unicode_parse_hex(start_chars, start_count);
     if (wildcard_count > 0) {
         // a wildcard range must end at the declaration/rule boundary.
         const char* rest = p;
-        while (rest < end && (rest[0] == ' ' || rest[0] == '\t')) rest++;
-        if (rest < end && rest[0] != ';' && rest[0] != '}') return NULL;
+        rest = css_unicode_skip_ignorable(rest, end);
+        if (rest < end && rest[0] != ';' && rest[0] != '}') return false;
 
         for (int i = 0; i < wildcard_count; i++) start <<= 4;
         uint32_t finish = css_unicode_parse_hex(start_chars, start_count);
         for (int i = 0; i < wildcard_count; i++) finish = (finish << 4) | 0xF;
-        return css_unicode_make_range(start, finish, true, pool);
+        *out_start = start;
+        *out_end = finish;
+        *out_has_range = true;
+        return true;
     }
 
     // more than six leading hex digits are not a valid unicode-range.
-    if (p < end && css_unicode_is_hex(p[0])) return NULL;
+    if (p < end && css_unicode_is_hex(p[0])) return false;
 
-    p = css_unicode_skip_comment(p, end);
+    p = css_unicode_skip_ignorable(p, end);
     bool has_range = p < end && p[0] == '-';
     uint32_t finish = start;
     if (has_range) {
         p++;
-        p = css_unicode_skip_comment(p, end);
+        p = css_unicode_skip_ignorable(p, end);
         char end_chars[7];
         int end_count = 0;
         while (p < end && css_unicode_is_hex(p[0]) && end_count < 6) {
             end_chars[end_count++] = p[0];
             p++;
         }
-        if (end_count == 0 || (p < end && css_unicode_is_hex(p[0]))) return NULL;
-        if (p < end && p[0] == '?') return NULL;
+        if (end_count == 0 || (p < end && css_unicode_is_hex(p[0]))) return false;
+        if (p < end && p[0] == '?') return false;
         finish = css_unicode_parse_hex(end_chars, end_count);
     }
 
-    while (p < end && (p[0] == ' ' || p[0] == '\t')) p++;
-    if (p < end && p[0] != ';' && p[0] != '}') return NULL;
-    return css_unicode_make_range(start, finish, has_range, pool);
+    p = css_unicode_skip_ignorable(p, end);
+    if (p < end && p[0] != ';' && p[0] != '}') return false;
+    *out_start = start;
+    *out_end = finish;
+    *out_has_range = has_range;
+    return true;
+}
+
+bool css_parse_unicode_range_bounds(const char* input, size_t length,
+                                    uint32_t* out_start, uint32_t* out_end) {
+    bool has_range = false;
+    return css_parse_unicode_range_parts(input, length, out_start, out_end, &has_range);
+}
+
+/** parse one CSS <unicode-range> and return its CSSOM canonical spelling. */
+const char* css_parse_unicode_range_canonical(const char* input, size_t length, Pool* pool) {
+    if (!pool) return NULL;
+
+    uint32_t start = 0;
+    uint32_t end = 0;
+    bool has_range = false;
+    if (!css_parse_unicode_range_parts(input, length, &start, &end, &has_range)) return NULL;
+    return css_unicode_make_range(start, end, has_range, pool);
 }
 
 // helper: map a functional pseudo-class name to its selector type
@@ -1877,6 +1905,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                     selector->type = CSS_SELECTOR_PSEUDO_DISABLED;
                 } else if (strcmp(pseudo_name, "checked") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_CHECKED;
+                } else if (strcmp(pseudo_name, "selected") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_SELECTED;
                 } else if (strcmp(pseudo_name, "indeterminate") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_INDETERMINATE;
                 } else if (strcmp(pseudo_name, "valid") == 0) {

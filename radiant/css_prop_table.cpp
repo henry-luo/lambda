@@ -792,8 +792,15 @@ bool dom_ensure_computed(DomElement* element, bool needs_used_value) {
 
     if (needs_used_value && s_cssom_used_value_sync &&
             s_cssom_used_value_sync(element->doc)) {
-        // CSSOM width/height resolve to used values for displayed boxes.
-        return true;
+        if (!element->doc->js.host_driven_loop) {
+            // CSSOM width/height resolve to used values for displayed boxes.
+            return true;
+        }
+        // EventSim deliberately retains its committed geometry through a
+        // handler. Re-cascade the declaration tree so a live CSSStyleDeclaration
+        // observes the write without advancing that geometry snapshot.
+        radiant_cascade_styles_for_element(element);
+        return false;
     }
 
     // A declaration read still recascades when no usable layout snapshot exists.

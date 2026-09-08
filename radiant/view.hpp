@@ -2780,6 +2780,8 @@ typedef struct FontFaceDescriptor {
     CssEnum font_style;         // normal, italic, oblique
     CssEnum font_weight;        // 100-900, normal, bold
     CssEnum font_display;       // auto, block, swap, fallback, optional
+    FontFaceUnicodeRange* unicode_ranges;
+    int unicode_range_count;
     bool is_loaded;              // loading state
 } FontFaceDescriptor;
 

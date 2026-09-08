@@ -5,9 +5,11 @@
  */
 
 #include "css_font_face.hpp"
+#include "css_parser.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/memtrack.h"
 #include "../../../lib/str.h"
+#include "../../../lib/url.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -31,6 +33,79 @@ static void css_font_face_clear_heap_src(CssFontFaceDescriptor* descriptor) {
         descriptor->src_urls = nullptr;
     }
     descriptor->src_count = 0;
+}
+
+static void css_font_face_clear_heap_unicode_ranges(CssFontFaceDescriptor* descriptor) {
+    if (!descriptor) return;
+    if (descriptor->unicode_ranges) {
+        mem_free(descriptor->unicode_ranges);
+        descriptor->unicode_ranges = nullptr;
+    }
+    descriptor->unicode_range_count = 0;
+}
+
+static const char* css_font_face_find_range_separator(const char* cursor, const char* end) {
+    while (cursor < end) {
+        if (cursor + 1 < end && cursor[0] == '/' && cursor[1] == '*') {
+            cursor += 2;
+            while (cursor + 1 < end && !(cursor[0] == '*' && cursor[1] == '/')) cursor++;
+            if (cursor + 1 < end) cursor += 2;
+            continue;
+        }
+        if (cursor[0] == ',') return cursor;
+        cursor++;
+    }
+    return end;
+}
+
+static int css_font_face_count_unicode_ranges(const char* value) {
+    if (!value) return 0;
+
+    const char* cursor = value;
+    const char* end = value + strlen(value);
+    int count = 0;
+    while (cursor < end) {
+        const char* separator = css_font_face_find_range_separator(cursor, end);
+        uint32_t start = 0;
+        uint32_t finish = 0;
+        if (!css_parse_unicode_range_bounds(cursor, (size_t)(separator - cursor),
+                                            &start, &finish)) {
+            return 0;
+        }
+        count++;
+        if (separator == end) {
+            cursor = end;
+        } else {
+            cursor = separator + 1;
+            if (cursor == end) return 0;
+        }
+    }
+
+    // CSS permits an empty descriptor only by omitting it, not by trailing commas.
+    return cursor == end ? count : 0;
+}
+
+static bool css_font_face_parse_unicode_ranges(const char* value,
+                                               CssFontFaceUnicodeRange* ranges,
+                                               int range_count) {
+    if (!value || !ranges || range_count <= 0) return false;
+
+    const char* cursor = value;
+    const char* end = value + strlen(value);
+    for (int index = 0; index < range_count; index++) {
+        const char* separator = css_font_face_find_range_separator(cursor, end);
+        uint32_t start = 0;
+        uint32_t finish = 0;
+        if (!css_parse_unicode_range_bounds(cursor, (size_t)(separator - cursor),
+                                            &start, &finish)) {
+            return false;
+        }
+        ranges[index].start_codepoint = start;
+        ranges[index].end_codepoint = finish;
+        if (separator == end) return index + 1 == range_count;
+        cursor = separator + 1;
+    }
+    return false;
 }
 
 // Helper: trim whitespace and quotes from a string
@@ -292,6 +367,19 @@ static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int
 
 char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
     if (!url) return nullptr;
+
+    // file URLs are absolute; convert them before the font loader opens the source.
+    if (strncmp(url, "file:", 5) == 0) {
+        Url* file_url = url_parse(url);
+        char* local_path = file_url ? url_to_local_path(file_url) : nullptr;
+        if (file_url) url_destroy(file_url);
+        if (!local_path) return nullptr;
+        if (!pool) return local_path;
+
+        char* result = pool_strdup(pool, local_path);
+        mem_free(local_path);
+        return result;
+    }
 
     // Preserve remote URLs - they will be downloaded to cache by the layout engine
     if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) {
@@ -606,6 +694,29 @@ CssFontFaceDescriptor* css_parse_font_face_content(const char* content, Pool* po
             // For now, we just skip it since the enum values aren't defined
             log_debug("[CSS FontFace]   font-display: (skipped)");
         }
+        else if (prop_len == 13 && strncmp(prop_start, "unicode-range", 13) == 0) {
+            int range_count = css_font_face_count_unicode_ranges(val_start);
+            if (range_count == 0) {
+                log_warn("[CSS FontFace] invalid unicode-range descriptor");
+                continue;
+            }
+
+            if (!pool) css_font_face_clear_heap_unicode_ranges(descriptor);
+            descriptor->unicode_ranges = pool
+                ? (CssFontFaceUnicodeRange*)pool_calloc(pool,
+                    (size_t)range_count * sizeof(CssFontFaceUnicodeRange))
+                : (CssFontFaceUnicodeRange*)mem_calloc((size_t)range_count,
+                    sizeof(CssFontFaceUnicodeRange), MEM_CAT_INPUT_CSS);
+            if (!descriptor->unicode_ranges) continue;
+            if (!css_font_face_parse_unicode_ranges(val_start,
+                                                    descriptor->unicode_ranges,
+                                                    range_count)) {
+                if (!pool) css_font_face_clear_heap_unicode_ranges(descriptor);
+                log_warn("[CSS FontFace] failed to parse unicode-range descriptor");
+                continue;
+            }
+            descriptor->unicode_range_count = range_count;
+        }
     }
 
     // Validate: must have family_name
@@ -731,6 +842,7 @@ void css_font_face_descriptor_free(CssFontFaceDescriptor* descriptor) {
         }
         mem_free(descriptor->src_urls);
     }
+    if (descriptor->unicode_ranges) mem_free(descriptor->unicode_ranges);
 
     mem_free(descriptor);
 }

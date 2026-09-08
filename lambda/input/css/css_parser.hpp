@@ -208,6 +208,7 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_ENABLED,       // :enabled
     CSS_SELECTOR_PSEUDO_DISABLED,      // :disabled
     CSS_SELECTOR_PSEUDO_CHECKED,       // :checked
+    CSS_SELECTOR_PSEUDO_SELECTED,      // :selected
     CSS_SELECTOR_PSEUDO_INDETERMINATE, // :indeterminate
     CSS_SELECTOR_PSEUDO_VALID,         // :valid
     CSS_SELECTOR_PSEUDO_INVALID,       // :invalid
@@ -542,6 +543,8 @@ CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length
 CssDeclaration* css_parse_property_declaration(const char* property, size_t property_length,
                                                const char* value, size_t value_length,
                                                Pool* pool);
+bool css_parse_unicode_range_bounds(const char* input, size_t length,
+                                    uint32_t* out_start, uint32_t* out_end);
 const char* css_parse_unicode_range_canonical(const char* input, size_t length, Pool* pool);
 
 // Color parsing

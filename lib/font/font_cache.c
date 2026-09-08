@@ -532,6 +532,14 @@ FontHandle* font_resolve_authored_for_codepoint(FontContext* ctx,
     while (font_family_list_next(&cursor, family, sizeof(family))) {
         FontStyleDesc candidate = *style;
         candidate.family = family;
+        if (font_face_family_registered(ctx, family)) {
+            // An authored face shadows an installed namesake even when its
+            // unicode-range excludes this glyph; continue with the next family.
+            FontHandle* document = font_resolve_document_face_for_codepoint(
+                ctx, &candidate, codepoint);
+            if (document) return document;
+            continue;
+        }
         FontHandle* handle = font_resolve_single(ctx, &candidate, false, NULL);
         if (handle && font_has_codepoint(handle, codepoint)) return handle;
         if (handle) font_handle_release(handle);

@@ -66,24 +66,23 @@ static RdtMatrix4 transform_function_matrix_3d(TransformFunction* function,
     switch (function->type) {
         case TRANSFORM_TRANSLATE:
         case TRANSFORM_TRANSLATEX:
-        case TRANSFORM_TRANSLATEY: {
-            float x = function->params.translate.x;
-            float y = function->params.translate.y;
+        case TRANSFORM_TRANSLATEY:
+        case TRANSFORM_TRANSLATE3D: {
+            bool is_3d_translate = function->type == TRANSFORM_TRANSLATE3D;
+            float x = is_3d_translate ? function->params.translate3d.x
+                                      : function->params.translate.x;
+            float y = is_3d_translate ? function->params.translate3d.y
+                                      : function->params.translate.y;
             if (!isnan(function->translate_x_percent)) {
                 x = function->translate_x_percent * width / 100.0f;
             }
             if (!isnan(function->translate_y_percent)) {
                 y = function->translate_y_percent * height / 100.0f;
             }
-            matrix = rdt_matrix4_translate(x, y, 0.0f);
+            matrix = rdt_matrix4_translate(
+                x, y, is_3d_translate ? function->params.translate3d.z : 0.0f);
             break;
         }
-        case TRANSFORM_TRANSLATE3D:
-            matrix = rdt_matrix4_translate(
-                function->params.translate3d.x,
-                function->params.translate3d.y,
-                function->params.translate3d.z);
-            break;
         case TRANSFORM_TRANSLATEZ:
             matrix = rdt_matrix4_translate(0.0f, 0.0f,
                 function->params.translate3d.z);

@@ -425,6 +425,12 @@ static void sim_flush_pending_reflow(DomDocument* doc) {
     }
 }
 
+static SelectorMatcher* sim_create_dom_selector_matcher(DomDocument* doc) {
+    // Automation assertions must use the DOM resolver so option:selected sees
+    // live IDL selectedness rather than only the layout StateStore bit.
+    return doc ? (SelectorMatcher*)dom_create_selector_matcher_bridge(doc) : NULL;
+}
+
 // Find nth element matching a CSS selector in the document (0-based index)
 static View* find_element_by_selector(DomDocument* doc, const char* selector_text, int index = 0) {
     if (!doc || !doc->view_tree || !doc->view_tree->root || !selector_text) return NULL;
@@ -447,9 +453,8 @@ static View* find_element_by_selector(DomDocument* doc, const char* selector_tex
         return NULL;
     }
 
-    SelectorMatcher* matcher = selector_matcher_create(pool);
+    SelectorMatcher* matcher = sim_create_dom_selector_matcher(doc);
     if (!matcher) return NULL;
-    state_configure_selector_matcher((DocState*)doc->state, matcher);
 
     SimSelectorCtx ctx = {0};
     ctx.selector = selector;
@@ -497,9 +502,8 @@ static int count_elements_by_selector(DomDocument* doc, const char* selector_tex
     CssSelector* selector = css_parse_selector_with_combinators(tokens, &pos, (int)token_count, pool);
     if (!selector) return 0;
 
-    SelectorMatcher* matcher = selector_matcher_create(pool);
+    SelectorMatcher* matcher = sim_create_dom_selector_matcher(doc);
     if (!matcher) return 0;
-    state_configure_selector_matcher((DocState*)doc->state, matcher);
 
     SimCountCtx ctx = {0};
     ctx.selector = selector;
@@ -1237,6 +1241,10 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         ev->pointer_type = mem_strdup(pointer_type ? pointer_type : "touch", MEM_CAT_LAYOUT);
         int steps = reader.get("steps").asInt32();
         ev->drag_steps = steps > 0 ? steps : 5;
+        int duration_ms = reader.get("duration_ms").asInt32();
+        // A drag action describes placement. Fixtures that need a flick can
+        // opt into a shorter duration; ordinary drags must not gain momentum.
+        ev->drag_duration_ms = duration_ms > 0 ? duration_ms : 500;
         parse_target(reader, ev);
         parse_to_target(reader, ev, false);
     }
@@ -3739,36 +3747,30 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                                  ev->button, ev->mods, false);
                 break;
             }
-            bool pointer_down_prevented = radiant_dispatch_event_sim_pointer(uicon, target, "pointerdown",
+            radiant_dispatch_event_sim_pointer(uicon, target, "pointerdown",
                 drag_x, drag_y, ev->button, 1, ev->mods, pointer_type);
-            // Without TouchEvent, libraries select legacy mouse drag handlers.
-            // Pointer Events require a compatibility mouse stream unless the
-            // primary pointerdown was canceled, so keep both API families live.
-            bool dispatch_compat_mouse = !pointer_down_prevented;
+            // Touch contact delivers PointerEvents and TouchEvents, but never
+            // a simultaneous mouse drag. Legacy touch listeners need the
+            // latter stream while pointer-aware widgets consume the former.
             double gesture_timestamp_ms = js_performance_now_ms();
-            if (dispatch_compat_mouse) {
-                radiant_dispatch_event_sim_mouse(uicon, target, "mousedown",
-                    drag_x, drag_y, ev->button, 1, ev->mods, 1,
-                    gesture_timestamp_ms);
-            }
+            double touch_step_ms = (double)ev->drag_duration_ms / (double)steps;
+            radiant_dispatch_event_sim_touch(uicon, target, "touchstart",
+                drag_x, drag_y, ev->mods, true, gesture_timestamp_ms);
             for (int step = 1; step <= steps; step++) {
                 float x = drag_x + (drag_to_x - drag_x) * step / (float)steps;
                 float y = drag_y + (drag_to_y - drag_y) * step / (float)steps;
                 radiant_dispatch_event_sim_pointer(uicon, target, "pointermove",
                     x, y, ev->button, 1, ev->mods, pointer_type);
-                if (dispatch_compat_mouse) {
-                    radiant_dispatch_event_sim_mouse(uicon, target, "mousemove",
-                        x, y, ev->button, 1, ev->mods, 0,
-                        gesture_timestamp_ms + 50.0 * (double)step / (double)steps);
-                }
+                radiant_dispatch_event_sim_touch(uicon, target, "touchmove",
+                    x, y, ev->mods, true,
+                    gesture_timestamp_ms + touch_step_ms * (double)step);
+                sim_input_turn_drain(uicon);
             }
             radiant_dispatch_event_sim_pointer(uicon, target, "pointerup",
                 drag_to_x, drag_to_y, ev->button, 0, ev->mods, pointer_type);
-            if (dispatch_compat_mouse) {
-                radiant_dispatch_event_sim_mouse(uicon, target, "mouseup",
-                    drag_to_x, drag_to_y, ev->button, 0, ev->mods, 1,
-                    gesture_timestamp_ms + 60.0);
-            }
+            radiant_dispatch_event_sim_touch(uicon, target, "touchend",
+                drag_to_x, drag_to_y, ev->mods, false,
+                gesture_timestamp_ms + (double)ev->drag_duration_ms + touch_step_ms);
             break;
         }
 

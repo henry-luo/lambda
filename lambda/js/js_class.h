@@ -108,6 +108,7 @@ enum JsClass : uint8_t {
     JS_CLASS_COMPOSITION_EVENT,
     JS_CLASS_INPUT_EVENT,
     JS_CLASS_POINTER_EVENT,
+    JS_CLASS_TOUCH_EVENT,
     JS_CLASS_STATIC_RANGE,
     JS_CLASS_CLIPBOARD_EVENT,
     JS_CLASS_PERMISSION_STATUS,
@@ -214,6 +215,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "FocusEvent", 10)) return JS_CLASS_FOCUS_EVENT;
             if (!strncmp(nm, "WheelEvent", 10)) return JS_CLASS_WHEEL_EVENT;
             if (!strncmp(nm, "InputEvent", 10)) return JS_CLASS_INPUT_EVENT;
+            if (!strncmp(nm, "TouchEvent", 10)) return JS_CLASS_TOUCH_EVENT;
             break;
         case 11:
             if (!strncmp(nm, "AbortSignal", 11)) return JS_CLASS_ABORT_SIGNAL;
@@ -368,6 +370,7 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_COMPOSITION_EVENT: return "CompositionEvent";
         case JS_CLASS_INPUT_EVENT: return "InputEvent";
         case JS_CLASS_POINTER_EVENT: return "PointerEvent";
+        case JS_CLASS_TOUCH_EVENT: return "TouchEvent";
         case JS_CLASS_STATIC_RANGE: return "StaticRange";
         case JS_CLASS_CLIPBOARD_EVENT: return "ClipboardEvent";
         case JS_CLASS_PERMISSION_STATUS: return "PermissionStatus";
@@ -419,6 +422,7 @@ static inline bool js_class_is_event_like(JsClass cls) {
         case JS_CLASS_COMPOSITION_EVENT:
         case JS_CLASS_INPUT_EVENT:
         case JS_CLASS_POINTER_EVENT:
+        case JS_CLASS_TOUCH_EVENT:
         case JS_CLASS_CLIPBOARD_EVENT:
         // CSS event constructors are Event subclasses even though they do not
         // inherit from UIEvent in the DOM interface hierarchy.
@@ -440,6 +444,7 @@ static inline bool js_class_is_ui_event_like(JsClass cls) {
         case JS_CLASS_COMPOSITION_EVENT:
         case JS_CLASS_INPUT_EVENT:
         case JS_CLASS_POINTER_EVENT:
+        case JS_CLASS_TOUCH_EVENT:
             return true;
         default:
             return false;

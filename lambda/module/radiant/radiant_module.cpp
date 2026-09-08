@@ -3575,6 +3575,9 @@ extern "C" void dom_engine_reset_wrapper_cache(void) { radiant_dom_reset_wrapper
 extern "C" bool dom_engine_exec_command(void* d, const char* c, const char* v) {
     return radiant_dom_exec_command(d, c, v);
 }
+extern "C" void* dom_engine_element_from_point(DomDocument* d, float x, float y) {
+    return radiant_document_element_from_point(d, x, y);
+}
 
 PROVIDE(bool, history_initialize, (DomDocument* d), (d))
 PROVIDE(int, history_length, (DomDocument* d), (d))
