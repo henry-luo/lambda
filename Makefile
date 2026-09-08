@@ -2485,7 +2485,7 @@ audit-editable-ownership:
 # D7.2.5 requires package failure to leave rich-edit defaults unavailable,
 # while author beforeinput listeners still observe the platform request.
 editable-package-disabled: build-test
-	@env RADIANT_DOM_PKG=0 ./lambda.exe view test/html/editable-dom-package-disabled.html --event-file test/ui/test_editing_contenteditable_package_disabled.json --event-result temp/editable-package-disabled-result.json --headless --no-log --font-dir test/layout/data/font
+	@env RADIANT_DOM_PKG=0 ./lambda.exe view test/ui/ce/editable-dom-package-disabled.html --event-file test/ui/test_editing_contenteditable_package_disabled.json --event-result temp/editable-package-disabled-result.json --headless --no-log --font-dir test/layout/data/font
 
 # Focused UA coverage is intentionally separate from the existing editor
 # regressions: it runs only promoted no-emulation corpus cases plus direct

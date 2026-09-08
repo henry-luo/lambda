@@ -1,6 +1,6 @@
 {
   "name": "designMode uses the document body as the editing host",
-  "html": "test/html/editable-dom-designmode.html",
+  "html": "test/ui/ce/editable-dom-designmode.html",
   "viewport": {"width": 640, "height": 240},
   "events": [
     {"type": "log", "message": "=== contenteditable_designmode ==="},

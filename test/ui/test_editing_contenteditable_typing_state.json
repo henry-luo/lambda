@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable collapsed format state feeds the shared text plan",
-  "html": "test/html/editable-dom-typing-state.html",
+  "html": "test/ui/ce/editable-dom-typing-state.html",
   "viewport": {"width": 640, "height": 140},
   "events": [
     {"type": "log", "message": "=== contenteditable_typing_state ==="},

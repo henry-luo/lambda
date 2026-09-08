@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable removeFormat removes nested formatting shells",
-  "html": "test/html/editable-dom-remove-format.html",
+  "html": "test/ui/ce/editable-dom-remove-format.html",
   "viewport": {"width": 640, "height": 140},
   "events": [
     {"type": "log", "message": "=== contenteditable_remove_format ==="},

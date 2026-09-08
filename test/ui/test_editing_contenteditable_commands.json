@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable execCommand runs the dom package command set",
-  "html": "test/html/editable-dom-commands.html",
+  "html": "test/ui/ce/editable-dom-commands.html",
   "viewport": {
     "width": 640,
     "height": 240

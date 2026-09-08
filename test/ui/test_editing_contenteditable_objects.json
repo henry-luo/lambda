@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable object commands use generic wrappers and fragments",
-  "html": "test/html/editable-dom-objects.html",
+  "html": "test/ui/ce/editable-dom-objects.html",
   "viewport": {"width": 640, "height": 180},
   "events": [
     {"type": "log", "message": "=== contenteditable_objects ==="},

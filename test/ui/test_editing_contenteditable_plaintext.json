@@ -1,6 +1,6 @@
 {
   "name": "Plaintext-only contenteditable uses descriptor policy",
-  "html": "test/html/editable-dom-plaintext.html",
+  "html": "test/ui/ce/editable-dom-plaintext.html",
   "viewport": { "width": 480, "height": 180 },
   "events": [
     { "type": "set_editing_selection", "target": { "selector": "#surface" }, "start": 0, "end": 4 },
