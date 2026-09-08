@@ -40,6 +40,8 @@
 #include "../validator/validator.hpp"
 #include "../input/input.hpp"
 #include "../input/html5/html5_parser.h"
+#include "../io/target.h"
+#include "../jube/jube_interface.h"
 
 extern __thread EvalContext* context;
 extern "C" void cow_profile_note_mutable_value(void);
@@ -1487,6 +1489,7 @@ static Type* item_static_type_for_is(Item item, Type* scratch) {
         return decimal && decimal->unlimited == DECIMAL_BIGINT ?
             &TYPE_INTEGER_VALUE : &TYPE_DECIMAL;
     }
+    type_id = item_semantic_type_id(type_id);
     scratch->type_id = type_id;
     scratch->kind = 0;
     if (type_id == LMD_TYPE_NUM_SIZED) {
@@ -1606,6 +1609,10 @@ bool lambda_type_matches(Item item, Type* expected) {
     if (expected == &TYPE_MAP && actual_id == LMD_TYPE_VMAP) {
         // Host-backed VMaps implement Lambda's map interface but retain a distinct
         // physical tag; the global map contract must not reject them at a native call.
+        return true;
+    }
+    if ((expected == (Type*)&TYPE_ARRAY && actual_id == LMD_TYPE_VARRAY) ||
+            (expected == &TYPE_ELMT && actual_id == LMD_TYPE_VELMT)) {
         return true;
     }
 
@@ -1877,7 +1884,8 @@ Bool fn_is(Item a, Item b) {
     case LMD_TYPE_ELEMENT:
         if (type_b == &LIT_TYPE_ARRAY) {
             return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY ||
-                a_type_id == LMD_TYPE_ARRAY_NUM ? BOOL_TRUE : BOOL_FALSE;
+                a_type_id == LMD_TYPE_ARRAY_NUM || a_type_id == LMD_TYPE_VARRAY
+                ? BOOL_TRUE : BOOL_FALSE;
         }
         if (type_b == &LIT_TYPE_LIST) return BOOL_FALSE;
         if (type_nominal_record(type_b->type)) {
@@ -2099,6 +2107,233 @@ static Bool element_eq(Element* a, Element* b, int depth) {
     return BOOL_TRUE;
 }
 
+static bool element_text_equal(Item a, Item b) {
+    if (!is_text_type_id(get_type_id(a)) || !is_text_type_id(get_type_id(b))) {
+        return false;
+    }
+    uint32_t a_len = a.get_len();
+    uint32_t b_len = b.get_len();
+    return a_len == b_len && (!a_len || memcmp(a.get_chars(), b.get_chars(), a_len) == 0);
+}
+
+static ShapeEntry* materialized_element_attr_at(Element* element, int64_t index) {
+    if (!element || !element->type || index < 0) return NULL;
+    int64_t current = 0;
+    FOR_EACH_MAP_FIELD((TypeMap*)element->type, field) {
+        if (!field->name) continue;
+        if (current++ == index) return field;
+    }
+    return NULL;
+}
+
+static int64_t element_attr_count_for(Item item) {
+    if (get_type_id(item) == LMD_TYPE_VELMT) return velmt_attr_count(item.velmt);
+    Element* element = item.element;
+    if (!element || !element->type) return 0;
+    int64_t count = 0;
+    FOR_EACH_MAP_FIELD((TypeMap*)element->type, field) {
+        if (field->name) count++;
+    }
+    return count;
+}
+
+static VirtualOpStatus element_attr_key_at_for(Item item, int64_t index, Item* out) {
+    if (out) *out = ItemNull;
+    if (get_type_id(item) == LMD_TYPE_VELMT) {
+        return velmt_attr_key_at(item.velmt, index, out);
+    }
+    ShapeEntry* field = materialized_element_attr_at(item.element, index);
+    if (!field || !field->name || !out) return field ? VIRTUAL_OP_ERROR : VIRTUAL_OP_MISSING;
+    Symbol* key = heap_create_symbol(field->name->str, field->name->length);
+    if (!key) return VIRTUAL_OP_ERROR;
+    key->ns = field->ns;
+    *out = {.item = y2it(key)};
+    return VIRTUAL_OP_OK;
+}
+
+static VirtualOpStatus element_attr_value_at_for(Item item, int64_t index, Item* out) {
+    if (out) *out = ItemNull;
+    if (get_type_id(item) == LMD_TYPE_VELMT) {
+        return velmt_attr_value_at(item.velmt, index, out);
+    }
+    ShapeEntry* field = materialized_element_attr_at(item.element, index);
+    if (!field || !out) return field ? VIRTUAL_OP_ERROR : VIRTUAL_OP_MISSING;
+    *out = _map_field_value((TypeMap*)item.element->type, item.element->data, field);
+    return VIRTUAL_OP_OK;
+}
+
+static VirtualOpStatus materialized_element_attr_get(Element* element, Item key,
+        Item* out) {
+    if (out) *out = ItemNull;
+    if (!element || !element->type || !out || !is_text_type_id(get_type_id(key))) {
+        return VIRTUAL_OP_MISSING;
+    }
+    const char* chars = key.get_chars();
+    uint32_t length = key.get_len();
+    Symbol* symbol = get_type_id(key) == LMD_TYPE_SYMBOL ? key.get_safe_symbol() : NULL;
+    Target* ns = symbol ? symbol->ns : NULL;
+    FOR_EACH_MAP_FIELD((TypeMap*)element->type, field) {
+        if (!field->name || field->name->length != length ||
+                !target_equal(field->ns, ns)) continue;
+        if (!length || memcmp(field->name->str, chars, length) == 0) {
+            *out = _map_field_value((TypeMap*)element->type, element->data, field);
+            return VIRTUAL_OP_OK;
+        }
+    }
+    return VIRTUAL_OP_MISSING;
+}
+
+static VirtualOpStatus element_attr_get_for(Item item, Item key, Item* out) {
+    if (get_type_id(item) == LMD_TYPE_VELMT) {
+        if (out) *out = ItemNull;
+        if (!item.velmt || !item.velmt->vtable ||
+                !item.velmt->vtable->element.attrs.get) return VIRTUAL_OP_MISSING;
+        return item.velmt->vtable->element.attrs.get(item.velmt->data, key, out);
+    }
+    return materialized_element_attr_get(item.element, key, out);
+}
+
+static VirtualOpStatus element_tag_for(Item item, Item* out) {
+    if (out) *out = ItemNull;
+    if (get_type_id(item) == LMD_TYPE_VELMT) return velmt_tag(item.velmt, out);
+    TypeElmt* type = item.element ? (TypeElmt*)item.element->type : NULL;
+    if (!type || !out) return VIRTUAL_OP_MISSING;
+    Symbol* tag = heap_create_symbol(type->name.str ? type->name.str : "", type->name.length);
+    if (!tag) return VIRTUAL_OP_ERROR;
+    *out = {.item = y2it(tag)};
+    return VIRTUAL_OP_OK;
+}
+
+static int element_namespace_cmp(Item a_item, Item b_item, bool* failed) {
+    RootFrame roots(4);
+    Rooted<Item> a_root(roots, a_item);
+    Rooted<Item> b_root(roots, b_item);
+    Rooted<Item> a_ns(roots, ItemNull);
+    Rooted<Item> b_ns(roots, ItemNull);
+    StrBuf* a_buf = strbuf_new();
+    StrBuf* b_buf = strbuf_new();
+    const char* a_chars = "";
+    const char* b_chars = "";
+    size_t a_len = 0;
+    size_t b_len = 0;
+
+    if (get_type_id(a_root.get()) == LMD_TYPE_VELMT) {
+        Item namespace_item = ItemNull;
+        VirtualOpStatus status = velmt_namespace_uri(a_root.get().velmt, &namespace_item);
+        a_ns.set(namespace_item);
+        if (status == VIRTUAL_OP_ERROR ||
+                (status == VIRTUAL_OP_OK && get_type_id(a_ns.get()) != LMD_TYPE_NULL &&
+                    !is_text_type_id(get_type_id(a_ns.get())))) {
+            *failed = true;
+        } else if (status == VIRTUAL_OP_OK && is_text_type_id(get_type_id(a_ns.get()))) {
+            a_chars = a_ns.get().get_chars();
+            a_len = a_ns.get().get_len();
+        }
+    } else {
+        TypeElmt* type = a_root.get().element ? (TypeElmt*)a_root.get().element->type : NULL;
+        if (type && type->ns && target_to_url_string(type->ns, a_buf)) {
+            a_chars = a_buf->str;
+            a_len = a_buf->length;
+        }
+    }
+
+    if (get_type_id(b_root.get()) == LMD_TYPE_VELMT) {
+        Item namespace_item = ItemNull;
+        VirtualOpStatus status = velmt_namespace_uri(b_root.get().velmt, &namespace_item);
+        b_ns.set(namespace_item);
+        if (status == VIRTUAL_OP_ERROR ||
+                (status == VIRTUAL_OP_OK && get_type_id(b_ns.get()) != LMD_TYPE_NULL &&
+                    !is_text_type_id(get_type_id(b_ns.get())))) {
+            *failed = true;
+        } else if (status == VIRTUAL_OP_OK && is_text_type_id(get_type_id(b_ns.get()))) {
+            b_chars = b_ns.get().get_chars();
+            b_len = b_ns.get().get_len();
+        }
+    } else {
+        TypeElmt* type = b_root.get().element ? (TypeElmt*)b_root.get().element->type : NULL;
+        if (type && type->ns && target_to_url_string(type->ns, b_buf)) {
+            b_chars = b_buf->str;
+            b_len = b_buf->length;
+        }
+    }
+
+    size_t min_len = a_len < b_len ? a_len : b_len;
+    int cmp = min_len ? memcmp(a_chars, b_chars, min_len) : 0;
+    if (!cmp) cmp = (a_len > b_len) - (a_len < b_len);
+    strbuf_free(a_buf);
+    strbuf_free(b_buf);
+    return cmp < 0 ? -1 : cmp > 0 ? 1 : 0;
+}
+
+// S5.4.3: virtual and materialized elements share one structural relation.
+static Bool element_semantic_eq(Item a_item, Item b_item, int depth) {
+    RootFrame roots(5);
+    Rooted<Item> a_root(roots, a_item);
+    Rooted<Item> b_root(roots, b_item);
+    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> value_a_root(roots, ItemNull);
+    Rooted<Item> value_b_root(roots, ItemNull);
+
+    Item tag_a = ItemNull;
+    VirtualOpStatus tag_a_status = element_tag_for(a_root.get(), &tag_a);
+    key_root.set(tag_a);
+    Item tag_b = ItemNull;
+    VirtualOpStatus tag_b_status = element_tag_for(b_root.get(), &tag_b);
+    value_a_root.set(tag_b);
+    if (tag_a_status == VIRTUAL_OP_ERROR || tag_b_status == VIRTUAL_OP_ERROR) return BOOL_ERROR;
+    if (tag_a_status != VIRTUAL_OP_OK || tag_b_status != VIRTUAL_OP_OK ||
+            !element_text_equal(key_root.get(), value_a_root.get())) return BOOL_FALSE;
+
+    bool namespace_failed = false;
+    int namespace_cmp = element_namespace_cmp(a_root.get(), b_root.get(), &namespace_failed);
+    if (namespace_failed) return BOOL_ERROR;
+    if (namespace_cmp != 0) return BOOL_FALSE;
+
+    int64_t attr_count_a = element_attr_count_for(a_root.get());
+    int64_t attr_count_b = element_attr_count_for(b_root.get());
+    if (attr_count_a != attr_count_b) return BOOL_FALSE;
+    for (int64_t i = 0; i < attr_count_a; i++) {
+        Item key = ItemNull;
+        VirtualOpStatus key_status = element_attr_key_at_for(a_root.get(), i, &key);
+        key_root.set(key);
+        if (key_status == VIRTUAL_OP_ERROR) return BOOL_ERROR;
+        if (key_status != VIRTUAL_OP_OK) return BOOL_FALSE;
+
+        Item value_a = ItemNull;
+        VirtualOpStatus value_a_status = element_attr_value_at_for(a_root.get(), i, &value_a);
+        value_a_root.set(value_a);
+        Item value_b = ItemNull;
+        VirtualOpStatus value_b_status = element_attr_get_for(
+            b_root.get(), key_root.get(), &value_b);
+        value_b_root.set(value_b);
+        if (value_a_status == VIRTUAL_OP_ERROR || value_b_status == VIRTUAL_OP_ERROR) {
+            return BOOL_ERROR;
+        }
+        if (value_a_status != VIRTUAL_OP_OK || value_b_status != VIRTUAL_OP_OK) {
+            return BOOL_FALSE;
+        }
+        Bool attr_equal = fn_eq_depth(value_a_root.get(), value_b_root.get(), depth + 1);
+        if (attr_equal != BOOL_TRUE) return attr_equal;
+    }
+
+    int64_t child_count_a = get_type_id(a_root.get()) == LMD_TYPE_VELMT
+        ? velmt_child_count(a_root.get().velmt) : a_root.get().element->length;
+    int64_t child_count_b = get_type_id(b_root.get()) == LMD_TYPE_VELMT
+        ? velmt_child_count(b_root.get().velmt) : b_root.get().element->length;
+    if (child_count_a != child_count_b) return BOOL_FALSE;
+    for (int64_t i = 0; i < child_count_a; i++) {
+        Item child_a = get_type_id(a_root.get()) == LMD_TYPE_VELMT
+            ? velmt_child_get(a_root.get().velmt, i) : a_root.get().element->items[i];
+        value_a_root.set(child_a);
+        Item child_b = get_type_id(b_root.get()) == LMD_TYPE_VELMT
+            ? velmt_child_get(b_root.get().velmt, i) : b_root.get().element->items[i];
+        value_b_root.set(child_b);
+        Bool child_equal = fn_eq_depth(value_a_root.get(), value_b_root.get(), depth + 1);
+        if (child_equal != BOOL_TRUE) return child_equal;
+    }
+    return BOOL_TRUE;
+}
+
 // helper: structural equality for VMaps (virtual maps)
 static Bool vmap_eq(VMap* a, VMap* b, int depth) {
     if (a == b) return BOOL_TRUE;
@@ -2129,6 +2364,7 @@ static inline Item seq_get_element(Item item, TypeId tid, int64_t i) {
     switch (tid) {
     case LMD_TYPE_ARRAY:        return array_get(item.array, i);
     case LMD_TYPE_ARRAY_NUM:   return array_num_get(item.array_num, i);
+    case LMD_TYPE_VARRAY:       return varray_get(item.varray, i);
     case LMD_TYPE_RANGE:
         return item.range->is_char
             ? fn_chr((Item){.item = i2it(item.range->start + i)})
@@ -2144,6 +2380,7 @@ static inline int64_t seq_get_length(Item item, TypeId tid) {
     switch (tid) {
     case LMD_TYPE_ARRAY:        return item.array->length;
     case LMD_TYPE_ARRAY_NUM:   return array_num_iter_count(item.array_num);
+    case LMD_TYPE_VARRAY:       return varray_count(item.varray);
     case LMD_TYPE_RANGE:       return item.range->length;
     default:                   return -1;
     }
@@ -2253,14 +2490,25 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
             TypeType* tt = (TypeType*)type_item.type;
             return (tt->type->type_id == get_type_id(value_item)) ? BOOL_TRUE : BOOL_FALSE;
         }
+        if (is_element_family_type_id(a_type_id) &&
+                is_element_family_type_id(b_type_id)) {
+            TypeNominal* nominal_a = lambda_value_nominal(a_type_id,
+                (const void*)(uintptr_t)a_item.item);
+            TypeNominal* nominal_b = lambda_value_nominal(b_type_id,
+                (const void*)(uintptr_t)b_item.item);
+            if (nominal_a != nominal_b) return BOOL_FALSE;
+            return element_semantic_eq(a_item, b_item, depth);
+        }
         // cross-type sequence comparison: range, list, and array types
         // all represent ordered sequences and can be compared element-wise
         TypeId a_tid = a_type_id;
         TypeId b_tid = b_type_id;
         bool a_is_seq = (a_tid == LMD_TYPE_ARRAY ||
-                         a_tid == LMD_TYPE_ARRAY_NUM || a_tid == LMD_TYPE_RANGE);
+                         a_tid == LMD_TYPE_ARRAY_NUM || a_tid == LMD_TYPE_VARRAY ||
+                         a_tid == LMD_TYPE_RANGE);
         bool b_is_seq = (b_tid == LMD_TYPE_ARRAY ||
-                         b_tid == LMD_TYPE_ARRAY_NUM || b_tid == LMD_TYPE_RANGE);
+                         b_tid == LMD_TYPE_ARRAY_NUM || b_tid == LMD_TYPE_VARRAY ||
+                         b_tid == LMD_TYPE_RANGE);
         if (a_is_seq && b_is_seq) {
             return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
         }
@@ -2329,9 +2577,11 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         if (a_tid != b_tid) {
             // cross-type sequence comparison (array[int] vs array[float], list vs range, etc.)
             bool a_is_seq = (a_tid == LMD_TYPE_ARRAY ||
-                             a_tid == LMD_TYPE_ARRAY_NUM || a_tid == LMD_TYPE_RANGE);
+                             a_tid == LMD_TYPE_ARRAY_NUM || a_tid == LMD_TYPE_VARRAY ||
+                             a_tid == LMD_TYPE_RANGE);
             bool b_is_seq = (b_tid == LMD_TYPE_ARRAY ||
-                             b_tid == LMD_TYPE_ARRAY_NUM || b_tid == LMD_TYPE_RANGE);
+                             b_tid == LMD_TYPE_ARRAY_NUM || b_tid == LMD_TYPE_VARRAY ||
+                             b_tid == LMD_TYPE_RANGE);
             if (a_is_seq && b_is_seq) {
                 return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
             }
@@ -2353,6 +2603,9 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         if (a_tid == LMD_TYPE_ARRAY) {
             return list_eq(a_item.array, b_item.array, depth);
         }
+        if (a_tid == LMD_TYPE_VARRAY) {
+            return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
+        }
         // generic array (array of Items) structural equality
         if (a_tid == LMD_TYPE_ARRAY) {
             return list_eq((List*)a_item.array, (List*)b_item.array, depth);
@@ -2368,6 +2621,9 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         // element structural equality (tag + attrs + children)
         if (a_tid == LMD_TYPE_ELEMENT) {
             return element_eq(a_item.element, b_item.element, depth);
+        }
+        if (a_tid == LMD_TYPE_VELMT) {
+            return element_semantic_eq(a_item, b_item, depth);
         }
         // vmap structural equality
         if (a_tid == LMD_TYPE_VMAP) {
@@ -2439,6 +2695,7 @@ static int total_type_rank(Item item) {
     case LMD_TYPE_STRING: return 6;
     case LMD_TYPE_BINARY: return 7;
     case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_VARRAY:
         return 8;
     case LMD_TYPE_MAP: case LMD_TYPE_VMAP:
         // S6.2.1: `object` is its own ORDER BAND between map and element. Since
@@ -2446,7 +2703,7 @@ static int total_type_rank(Item item) {
         // selected by the record rather than by the tag.
         return lambda_value_nominal(tid, (const void*)(uintptr_t)item.item)
             ? 10 : 9;
-    case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_ELEMENT: case LMD_TYPE_VELMT:
         return lambda_value_nominal(tid, (const void*)(uintptr_t)item.item)
             ? 10 : 11;
     case LMD_TYPE_TYPE:
@@ -2563,6 +2820,152 @@ static int map_data_total_cmp(TypeMap* type_a, void* data_a, TypeMap* type_b, vo
     return 0;
 }
 
+static int target_total_cmp(Target* a, Target* b) {
+    if (target_equal(a, b)) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    StrBuf* a_buf = strbuf_new();
+    StrBuf* b_buf = strbuf_new();
+    target_to_url_string(a, a_buf);
+    target_to_url_string(b, b_buf);
+    size_t min_len = a_buf->length < b_buf->length ? a_buf->length : b_buf->length;
+    int cmp = min_len ? memcmp(a_buf->str, b_buf->str, min_len) : 0;
+    if (!cmp) cmp = (a_buf->length > b_buf->length) -
+        (a_buf->length < b_buf->length);
+    strbuf_free(a_buf);
+    strbuf_free(b_buf);
+    return cmp < 0 ? -1 : cmp > 0 ? 1 : 0;
+}
+
+static int element_attr_key_cmp(Item a, Item b) {
+    Target* a_ns = get_type_id(a) == LMD_TYPE_SYMBOL && a.get_safe_symbol()
+        ? a.get_safe_symbol()->ns : NULL;
+    Target* b_ns = get_type_id(b) == LMD_TYPE_SYMBOL && b.get_safe_symbol()
+        ? b.get_safe_symbol()->ns : NULL;
+    int ns_cmp = target_total_cmp(a_ns, b_ns);
+    if (ns_cmp) return ns_cmp;
+    if (!is_text_type_id(get_type_id(a)) || !is_text_type_id(get_type_id(b))) {
+        return total_cmp(a, b);
+    }
+    uint32_t a_len = a.get_len();
+    uint32_t b_len = b.get_len();
+    uint32_t min_len = a_len < b_len ? a_len : b_len;
+    int cmp = min_len ? memcmp(a.get_chars(), b.get_chars(), min_len) : 0;
+    if (cmp) return cmp < 0 ? -1 : 1;
+    return (a_len > b_len) - (a_len < b_len);
+}
+
+static bool element_attr_key_cmp_at(Item element_a, int64_t index_a,
+        Item element_b, int64_t index_b, int* out_cmp) {
+    RootFrame roots(4);
+    Rooted<Item> a_root(roots, element_a);
+    Rooted<Item> b_root(roots, element_b);
+    Rooted<Item> key_a_root(roots, ItemNull);
+    Rooted<Item> key_b_root(roots, ItemNull);
+    Item key_a = ItemNull;
+    VirtualOpStatus status_a = element_attr_key_at_for(a_root.get(), index_a, &key_a);
+    key_a_root.set(key_a);
+    Item key_b = ItemNull;
+    VirtualOpStatus status_b = element_attr_key_at_for(b_root.get(), index_b, &key_b);
+    key_b_root.set(key_b);
+    if (status_a != VIRTUAL_OP_OK || status_b != VIRTUAL_OP_OK) return false;
+    *out_cmp = element_attr_key_cmp(key_a_root.get(), key_b_root.get());
+    return true;
+}
+
+static int64_t element_next_sorted_attr(Item element, int64_t previous) {
+    int64_t count = element_attr_count_for(element);
+    int64_t best = -1;
+    for (int64_t candidate = 0; candidate < count; candidate++) {
+        int cmp = 0;
+        if (previous >= 0 &&
+                (!element_attr_key_cmp_at(element, candidate, element, previous, &cmp) ||
+                 cmp <= 0)) continue;
+        if (best < 0 ||
+                (element_attr_key_cmp_at(element, candidate, element, best, &cmp) && cmp < 0)) {
+            best = candidate;
+        }
+    }
+    return best;
+}
+
+static int element_attr_total_cmp(Item a_item, Item b_item) {
+    RootFrame roots(4);
+    Rooted<Item> a_root(roots, a_item);
+    Rooted<Item> b_root(roots, b_item);
+    Rooted<Item> value_a_root(roots, ItemNull);
+    Rooted<Item> value_b_root(roots, ItemNull);
+    int64_t count_a = element_attr_count_for(a_root.get());
+    int64_t count_b = element_attr_count_for(b_root.get());
+    if (count_a != count_b) return (count_a > count_b) - (count_a < count_b);
+    int64_t previous_a = -1;
+    int64_t previous_b = -1;
+    for (int64_t i = 0; i < count_a; i++) {
+        int64_t index_a = element_next_sorted_attr(a_root.get(), previous_a);
+        int64_t index_b = element_next_sorted_attr(b_root.get(), previous_b);
+        if (index_a < 0 || index_b < 0) return (index_a > index_b) - (index_a < index_b);
+        int key_cmp = 0;
+        if (!element_attr_key_cmp_at(a_root.get(), index_a,
+                b_root.get(), index_b, &key_cmp)) {
+            return (index_a > index_b) - (index_a < index_b);
+        }
+        if (key_cmp) return key_cmp;
+        Item value_a = ItemNull;
+        Item value_b = ItemNull;
+        VirtualOpStatus status_a = element_attr_value_at_for(a_root.get(), index_a, &value_a);
+        value_a_root.set(value_a);
+        VirtualOpStatus status_b = element_attr_value_at_for(b_root.get(), index_b, &value_b);
+        value_b_root.set(value_b);
+        if (status_a != VIRTUAL_OP_OK || status_b != VIRTUAL_OP_OK) {
+            return (status_a > status_b) - (status_a < status_b);
+        }
+        int value_cmp = total_cmp(value_a_root.get(), value_b_root.get());
+        if (value_cmp) return value_cmp;
+        previous_a = index_a;
+        previous_b = index_b;
+    }
+    return 0;
+}
+
+static int element_semantic_total_cmp(Item a_item, Item b_item) {
+    RootFrame roots(4);
+    Rooted<Item> a_root(roots, a_item);
+    Rooted<Item> b_root(roots, b_item);
+    Rooted<Item> value_a_root(roots, ItemNull);
+    Rooted<Item> value_b_root(roots, ItemNull);
+    Item tag_a = ItemNull;
+    VirtualOpStatus tag_status_a = element_tag_for(a_root.get(), &tag_a);
+    value_a_root.set(tag_a);
+    Item tag_b = ItemNull;
+    VirtualOpStatus tag_status_b = element_tag_for(b_root.get(), &tag_b);
+    value_b_root.set(tag_b);
+    if (tag_status_a != tag_status_b) return (tag_status_a > tag_status_b) -
+        (tag_status_a < tag_status_b);
+    int tag_cmp = element_attr_key_cmp(value_a_root.get(), value_b_root.get());
+    if (tag_cmp) return tag_cmp;
+    bool namespace_failed = false;
+    int namespace_cmp = element_namespace_cmp(a_root.get(), b_root.get(), &namespace_failed);
+    if (namespace_cmp) return namespace_cmp;
+    int attr_cmp = element_attr_total_cmp(a_root.get(), b_root.get());
+    if (attr_cmp) return attr_cmp;
+    int64_t count_a = get_type_id(a_root.get()) == LMD_TYPE_VELMT
+        ? velmt_child_count(a_root.get().velmt) : a_root.get().element->length;
+    int64_t count_b = get_type_id(b_root.get()) == LMD_TYPE_VELMT
+        ? velmt_child_count(b_root.get().velmt) : b_root.get().element->length;
+    int64_t min_count = count_a < count_b ? count_a : count_b;
+    for (int64_t i = 0; i < min_count; i++) {
+        Item child_a = get_type_id(a_root.get()) == LMD_TYPE_VELMT
+            ? velmt_child_get(a_root.get().velmt, i) : a_root.get().element->items[i];
+        value_a_root.set(child_a);
+        Item child_b = get_type_id(b_root.get()) == LMD_TYPE_VELMT
+            ? velmt_child_get(b_root.get().velmt, i) : b_root.get().element->items[i];
+        value_b_root.set(child_b);
+        int child_cmp = total_cmp(value_a_root.get(), value_b_root.get());
+        if (child_cmp) return child_cmp;
+    }
+    return (count_a > count_b) - (count_a < count_b);
+}
+
 int total_cmp(Item a_item, Item b_item) {
     TypeId total_a_tid = get_type_id(a_item);
     TypeId total_b_tid = get_type_id(b_item);
@@ -2664,22 +3067,8 @@ int total_cmp(Item a_item, Item b_item) {
         }
         return (len_a > len_b) - (len_a < len_b);
     }
-    if (a_tid == LMD_TYPE_ELEMENT) {
-        TypeElmt* type_a = (TypeElmt*)a_item.element->type;
-        TypeElmt* type_b = (TypeElmt*)b_item.element->type;
-        int tag_cmp = strview_total_cmp(type_a->name, type_b->name);
-        if (tag_cmp != 0) return tag_cmp;
-        int attr_cmp = map_data_total_cmp((TypeMap*)type_a, a_item.element->data,
-                                          (TypeMap*)type_b, b_item.element->data);
-        if (attr_cmp != 0) return attr_cmp;
-        int64_t len_a = a_item.element->length;
-        int64_t len_b = b_item.element->length;
-        int64_t min_len = len_a < len_b ? len_a : len_b;
-        for (int64_t i = 0; i < min_len; i++) {
-            int child_cmp = total_cmp(a_item.element->items[i], b_item.element->items[i]);
-            if (child_cmp != 0) return child_cmp;
-        }
-        return (len_a > len_b) - (len_a < len_b);
+    if (is_element_family_type_id(a_tid) && is_element_family_type_id(b_tid)) {
+        return element_semantic_total_cmp(a_item, b_item);
     }
     if (a_tid == LMD_TYPE_TYPE) {
         TypeType* at = (TypeType*)a_item.type;
@@ -3417,7 +3806,7 @@ String* fn_string(Item itm) {
 }
 
 Type* base_type(TypeId type_id) {
-    return (type_id <= 0 || type_id > LMD_TYPE_ERROR) ?
+    return (type_id <= 0 || type_id >= LMD_TYPE_COUNT) ?
         &LIT_TYPE_ERROR : ((TypeInfo*)context->type_info)[type_id].lit_type;
 }
 
@@ -3465,7 +3854,8 @@ Type* fn_type(Item item) {
     TypeType *type = (TypeType *)heap_calloc(sizeof(TypeType) + sizeof(Type), LMD_TYPE_TYPE);
     Type *item_type = (Type *)((uint8_t *)type + sizeof(TypeType));
     type->type = item_type;  type->type_id = LMD_TYPE_TYPE;
-    TypeId resolved_type = get_type_id(item);
+    TypeId storage_type = get_type_id(item);
+    TypeId resolved_type = storage_type;
     // C16 surface rule: the poison values `int` and `float` share report as the
     // narrower domain, the same convention that makes `type(1)` be `int`. Only
     // the surface answer moves -- the decoder still sees them as doubles.
@@ -3473,7 +3863,7 @@ Type* fn_type(Item item) {
     // D2.6.6v2 phase 2: a nominal value reports its DECLARED type, whatever its
     // structural kind, so `name(type(p))` is still "Point". Checked before the
     // structural arms below, which would otherwise collapse it to map/element.
-    if (lambda_value_nominal(resolved_type, (const void*)(uintptr_t)item.item)) {
+    if (lambda_value_nominal(storage_type, (const void*)(uintptr_t)item.item)) {
         type->type = (Type*)item.element->type;
         return (Type*)type;
     }
@@ -3498,6 +3888,7 @@ Type* fn_type(Item item) {
             return (Type*)type;
         }
     }
+    resolved_type = item_semantic_type_id(resolved_type);
     if (resolved_type != LMD_TYPE_RAW_POINTER) {
         // self-tagged floats do not carry LMD_TYPE_FLOAT in the raw high byte.
         item_type->type_id = resolved_type;
@@ -4190,11 +4581,13 @@ Item fn_index(Item item, Item index_item) {
         switch (item_type) {
         case LMD_TYPE_ARRAY:
         case LMD_TYPE_ARRAY_NUM:
+        case LMD_TYPE_VARRAY:
         case LMD_TYPE_RANGE:
         // S8.2.1v3: a nominal value exposes the same two faces as its
         // structural kind, so an IntKey selects a content child here rather
         // than reading as null.
         case LMD_TYPE_ELEMENT:
+        case LMD_TYPE_VELMT:
         case LMD_TYPE_STRING:
         case LMD_TYPE_SYMBOL:
         case LMD_TYPE_BINARY:
@@ -4244,9 +4637,36 @@ Item fn_index(Item item, Item index_item) {
 // All dynamic member stores enter through this boundary so a key-domain
 // mismatch cannot be truncated into index zero (or silently dropped by a map
 // setter). Reads remain total in fn_index; writes are hard language errors.
+static Item virtual_member_write_result(VirtualOpStatus status, Item result,
+        const char* face, bool indexed, int64_t index) {
+    if (status == VIRTUAL_OP_OK) return ItemNull;
+    if (status == VIRTUAL_OP_ERROR) {
+        return item_is_error(result) ? result : ItemError;
+    }
+    if (status == VIRTUAL_OP_MISSING) {
+        if (indexed) {
+            set_runtime_error(ERR_INDEX_OUT_OF_BOUNDS,
+                "%s write index %lld is out of bounds", face, (long long)index);
+        } else {
+            set_runtime_error(ERR_TYPE_MISMATCH, "%s does not accept this key", face);
+        }
+    } else {
+        set_runtime_error(ERR_TYPE_MISMATCH, "%s is read-only", face);
+    }
+    return ItemError;
+}
+
 Item fn_index_set(Item item, Item key, Item value) {
     TypeId item_type = get_type_id(item);
     if (item_type == LMD_TYPE_ERROR) return item;
+
+    if (item_type == LMD_TYPE_VMAP) {
+        // VMap's established hash backend accepts arbitrary Item keys. Keep
+        // that ABI while the new VArray/Velmt carriers enforce face-specific
+        // key domains (D7.4.5v2).
+        vmap_set(item, key, value);
+        return ItemNull;
+    }
 
     int64_t index = 0;
     bool has_index_key = lambda_item_to_int64_exact(key, &index);
@@ -4260,6 +4680,16 @@ Item fn_index_set(Item item, Item key, Item value) {
         }
         return fn_array_set(item.array, index, value);
     }
+    if (item_type == LMD_TYPE_VARRAY) {
+        if (!has_index_key || index < 0) {
+            set_runtime_error(ERR_TYPE_MISMATCH,
+                "invalid virtual array member write: key must be an exact non-negative integer");
+            return ItemError;
+        }
+        Item result = ItemNull;
+        VirtualOpStatus status = varray_set(item.varray, index, value, &result);
+        return virtual_member_write_result(status, result, "virtual array", true, index);
+    }
     if (item_type == LMD_TYPE_ELEMENT) {
         if (has_index_key) return fn_array_set(item.array, index, value);
         if (has_name_key) return fn_map_set(item, key, value);
@@ -4267,8 +4697,26 @@ Item fn_index_set(Item item, Item key, Item value) {
             "invalid element member write: key must be an exact integer or string/symbol");
         return ItemError;
     }
-    if (item_type == LMD_TYPE_MAP ||
-            item_type == LMD_TYPE_VMAP) {
+    if (item_type == LMD_TYPE_VELMT) {
+        Item result = ItemNull;
+        if (has_index_key && index >= 0) {
+            VirtualOpStatus status = velmt_child_set(item.velmt, index, value, &result);
+            return virtual_member_write_result(status, result,
+                "virtual element child face", true, index);
+        }
+        if (has_name_key) {
+            if (virtual_host_member_set(item, key, value, &result)) {
+                return item_is_error(result) ? result : ItemNull;
+            }
+            VirtualOpStatus status = velmt_attr_set(item.velmt, key, value, &result);
+            return virtual_member_write_result(status, result,
+                "virtual element attribute face", false, 0);
+        }
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "invalid virtual element member write: key must be an exact non-negative integer or string/symbol");
+        return ItemError;
+    }
+    if (item_type == LMD_TYPE_MAP) {
         if (has_name_key) return fn_map_set(item, key, value);
         set_runtime_error(ERR_TYPE_MISMATCH,
             "invalid named member write: key must be string or symbol");
@@ -4611,14 +5059,20 @@ Item fn_member(Item item, Item key) {
         if (!vm || (!vm->host_type && !vm->vtable)) return ItemNull;
         return vmap_get_by_item(vm, key);
     }
+    case LMD_TYPE_VELMT: {
+        Item projected = ItemNull;
+        if (jube_member_projected_get(item, key, &projected)) return projected;
+        if (is_text_type_id(get_type_id(key))) return velmt_attr_get(item.velmt, key);
+        return ItemNull;
+    }
     case LMD_TYPE_ARRAY:
-    case LMD_TYPE_ARRAY_NUM: {
+    case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_VARRAY: {
         // Handle built-in properties for List type
         if (is_text_type_id(key._type_id)) {
             const char* k = key.get_chars();
             if (k && strcmp(k, "length") == 0) {
-                List *list = item.array;
-                return {.item = i2it(list->length)};
+                return {.item = i2it(fn_len(item))};
             }
         }
         int64_t index = -1;
@@ -4681,6 +5135,9 @@ int64_t fn_len(Item item) {
     case LMD_TYPE_ARRAY:
         size = item.array->length;
         break;
+    case LMD_TYPE_VARRAY:
+        size = varray_count(item.varray);
+        break;
     case LMD_TYPE_RANGE:
         size = item.range->length;
         break;
@@ -4706,6 +5163,9 @@ int64_t fn_len(Item item) {
         size = map_attr_count((Map*)item.element) + item.element->length;
         break;
     }
+    case LMD_TYPE_VELMT:
+        size = velmt_attr_count(item.velmt) + velmt_child_count(item.velmt);
+        break;
     case LMD_TYPE_BINARY:
         // Binary length is a byte count, including embedded NUL bytes.
         size = item.get_len();
@@ -7182,8 +7642,8 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
             titem.symbol = value.get_safe_symbol();
             break;
         case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_RANGE:
-        case LMD_TYPE_MAP: case LMD_TYPE_VMAP:
-        case LMD_TYPE_ELEMENT: 
+        case LMD_TYPE_MAP: case LMD_TYPE_VMAP: case LMD_TYPE_VARRAY:
+        case LMD_TYPE_ELEMENT: case LMD_TYPE_VELMT:
             titem.container = value.container;
             break;
         case LMD_TYPE_TYPE:
@@ -7202,7 +7662,8 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         *(TypedItem*)field_ptr = titem;
         break;
     }
-    case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_VARRAY:
+    case LMD_TYPE_VELMT: case LMD_TYPE_DECIMAL:
     case LMD_TYPE_TYPE: {
         // store as opaque pointer (low 56 bits)
         *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFF);
@@ -7542,6 +8003,8 @@ bool cow_item_is_container(Item value) {
     case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT:
     case LMD_TYPE_VMAP:
+    case LMD_TYPE_VARRAY:
+    case LMD_TYPE_VELMT:
         return true;
     default:
         return false;
@@ -7643,6 +8106,10 @@ static uint64_t cow_one_level_copy_bytes(Item value) {
         // Backend storage is opaque here; snapshot count records the exact
         // backend event while this is the stable VMap header cost.
         return sizeof(VMap);
+    case LMD_TYPE_VARRAY:
+        return sizeof(VArray);
+    case LMD_TYPE_VELMT:
+        return sizeof(Velmt);
     default:
         return 0;
     }
@@ -9496,14 +9963,14 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             //     break JIT-compiled code that uses hardcoded byte_offset = slot*8.
             {
                 bool old_is_ptr = (field_type == LMD_TYPE_NULL || field_type == LMD_TYPE_MAP ||
-                    field_type == LMD_TYPE_VMAP ||
-                    field_type == LMD_TYPE_ELEMENT ||
+                    field_type == LMD_TYPE_VMAP || field_type == LMD_TYPE_VARRAY ||
+                    field_type == LMD_TYPE_ELEMENT || field_type == LMD_TYPE_VELMT ||
                     field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_ARRAY_NUM ||
                     field_type == LMD_TYPE_RANGE ||
                     field_type == LMD_TYPE_UNDEFINED || field_type == LMD_TYPE_BOOL);
                 bool new_is_ptr = (value_type == LMD_TYPE_NULL || value_type == LMD_TYPE_MAP ||
-                    value_type == LMD_TYPE_VMAP ||
-                    value_type == LMD_TYPE_ELEMENT ||
+                    value_type == LMD_TYPE_VMAP || value_type == LMD_TYPE_VARRAY ||
+                    value_type == LMD_TYPE_ELEMENT || value_type == LMD_TYPE_VELMT ||
                     value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_NUM ||
                     value_type == LMD_TYPE_RANGE ||
                     value_type == LMD_TYPE_UNDEFINED || value_type == LMD_TYPE_BOOL);

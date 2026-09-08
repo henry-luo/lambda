@@ -1379,9 +1379,9 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
                 replacement = pn_splice_cow(owner, (Item){.item = values[0]},
                     (Item){.item = values[1]});
             } else {
-                // VMap owns its storage behind a vtable, so map_set_cow cannot
-                // model its snapshot. vmap_set_cow is the matching COW bridge.
-                replacement = vmap_set_cow(owner, (Item){.item = values[0]},
+                // Virtual member writes dispatch by the receiver's physical
+                // carrier so Velmt attributes do not fall into the VMap ABI.
+                replacement = member_set_cow(owner, (Item){.item = values[0]},
                     (Item){.item = values[1]});
             }
             if (item_is_error(replacement)) return replacement;

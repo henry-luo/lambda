@@ -51,15 +51,8 @@ void* dom_get_ui_context(void);
 void dom_set_host_driven_loop(bool enabled);
 bool dom_is_host_driven_loop(void);
 
-/**
- * Return whether an Array is a DOM-owned live collection whose property reads
- * can refresh named or indexed values from the current document tree.
- */
-bool dom_collection_has_live_property_state(Item collection);
-
-// Expose one NamedNodeMap entry through the current materialized collection
-// representation. DOM attribute names are supported property keys in JS.
-void dom_attribute_collection_expose_named(Item collection, Item name, Item attr);
+// Live NamedNodeMap VArray over the element's native attribute storage.
+Item dom_attribute_collection_bridge(void* elem);
 
 // DOMRect-shaped object: x/y/top/left/right/bottom/width/height as doubles,
 // on interned keys. dom.cpp, dom_observers.cpp and dom_selection.cpp
@@ -408,6 +401,15 @@ Item dom_is_same_node(Item node, Item other);
 void dom_shutdown(void);
 void dom_batch_reset(void);
 void dom_collections_release_context(void);
+
+// Wrap a materialized creation-time membership list as an immutable NodeList
+// VArray. The backend precisely traces the retained list (D5.2.1v3/D7.4.5v2).
+Item dom_static_node_list_from_array(Item items);
+Item dom_static_radio_node_list_from_array(Item items);
+Item dom_static_rect_list_from_array(Item items);
+// Static DOM collection views share the same precisely traced backend; the
+// caller supplies the declared Jube collection brand.
+Item dom_static_collection_from_array(Item items, const void* host_type);
 void dom_foreign_documents_release_context(void);
 
 /** Element-state queries used by the native event and form paths. */

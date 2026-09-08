@@ -256,6 +256,7 @@ Item js_set_key_core(Item object, Item key, Item value,
                                    Item receiver);
 Item js_set_completion_with_key(Item target, Item key, Item value,
                                 Item receiver);
+Item js_dataset_owner(Item dataset);
 Item js_set_primitive_completion(Item target, Item key, Item value);
 Item js_set_function_prototype_completion(Item target, Item value);
 Item js_set_error_property_completion(Item target, Item key, Item value);

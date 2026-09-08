@@ -100,7 +100,7 @@ typedef struct RadiantVelmtHost {
     uint64_t magic;
     uint64_t pass_id;
     int depth;
-    Velmt velmt;
+    RadiantVelmt velmt;
 } RadiantVelmtHost;
 
 typedef struct RadiantCustomPaintResource {
@@ -152,8 +152,8 @@ static Item radiant_obj_new(void) {
 static void radiant_obj_set(Item obj, const char* key, Item value) {
     if (!radiant_host_api || !radiant_host_api->value || !key) return;
     Item key_item = radiant_key_item(key);
-    // custom layout Velmt values are plain Lambda VMaps so Lambda callbacks can
-    // read them without entering JS object storage.
+    // Helper records remain plain VMaps so Lambda callbacks can read them
+    // without entering JS object storage; the layout handle itself is Velmt.
     if (get_type_id(obj) == LMD_TYPE_VMAP && obj.vmap) {
         vmap_set(obj, key_item, value);
         return;
@@ -180,12 +180,17 @@ static Item radiant_obj_get(Item obj, const char* key) {
     if (radiant_item_is_missing(obj)) return ItemNull;
     Item key_item = radiant_key_item(key);
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map) {
-        // lambda custom layout callbacks may pass Velmt-shaped maps; JS property_get
-        // assumes JS object metadata and can crash on plain Lambda maps.
+        // Lambda custom-layout callbacks may return plain result maps; JS
+        // property_get assumes JS object metadata and cannot read those maps.
         return map_get(obj.map, key_item);
     }
     if (get_type_id(obj) == LMD_TYPE_VMAP && obj.vmap) {
         return vmap_get_by_item(obj.vmap, key_item);
+    }
+    if (get_type_id(obj) == LMD_TYPE_VELMT && obj.velmt) {
+        // Custom-layout callbacks execute in Lambda without a JS realm. Use the
+        // carrier's Lambda projection so a Velmt read cannot lazily create one.
+        return item_attr(obj, key);
     }
     return radiant_host_api->value->property_get(obj, key_item);
 }
@@ -412,7 +417,7 @@ static Item radiant_layout_text_item(DomNode* node) {
     return result;
 }
 
-static Item radiant_layout_edges_item(const VelmtEdges* edges) {
+static Item radiant_layout_edges_item(const RadiantVelmtEdges* edges) {
     if (!radiant_host_api || !radiant_host_api->value || !edges) return ItemNull;
     RootFrame roots(1);
     Rooted<Item> rooted_obj(roots, radiant_obj_new());
@@ -423,7 +428,7 @@ static Item radiant_layout_edges_item(const VelmtEdges* edges) {
     return rooted_obj.get();
 }
 
-static Item radiant_layout_box_item(const VelmtBox* box) {
+static Item radiant_layout_box_item(const RadiantVelmtBox* box) {
     if (!radiant_host_api || !radiant_host_api->value || !box) return ItemNull;
     RootFrame roots(1);
     Rooted<Item> rooted_obj(roots, radiant_obj_new());
@@ -479,17 +484,18 @@ static Item radiant_layout_style_item(DomElement* elem) {
     return rooted_style.get();
 }
 
-static Item radiant_layout_velmt_host_item_depth(const Velmt* velmt, int depth);
+static Item radiant_layout_velmt_host_item_depth(const RadiantVelmt* velmt, int depth);
 static Item radiant_layout_view_children_item(View* view, int depth);
+static int radiant_layout_view_child_count(View* view);
 
 static bool radiant_is_velmt_host_item(Item item) {
-    return get_type_id(item) == LMD_TYPE_VMAP && item.vmap &&
-        item.vmap->host_type == radiant_velmt_host_type();
+    return get_type_id(item) == LMD_TYPE_VELMT &&
+        virtual_host_type(item) == radiant_velmt_host_type();
 }
 
 static RadiantVelmtHost* radiant_velmt_host_from_item(Item item) {
     if (!radiant_is_velmt_host_item(item)) return nullptr;
-    RadiantVelmtHost* host = (RadiantVelmtHost*)item.vmap->host_data;
+    RadiantVelmtHost* host = (RadiantVelmtHost*)virtual_host_data(item);
     if (!host || host->magic != RADIANT_VELMT_MAGIC) return nullptr;
     return host;
 }
@@ -510,27 +516,255 @@ static void radiant_velmt_host_destroy(void* native) {
     mem_free(host);
 }
 
-static Item radiant_layout_velmt_host_item_depth(const Velmt* velmt, int depth) {
+static bool radiant_layout_attr_is_internal(const char* name) {
+    return name && strncmp(name, "__lambda_", 9) == 0;
+}
+
+static const char* radiant_layout_attr_name_at(DomElement* elem, int64_t wanted) {
+    if (!elem || wanted < 0) return nullptr;
+    int source_count = 0;
+    const char** names = elem->attribute_names(&source_count);
+    int64_t visible = 0;
+    for (int i = 0; names && i < source_count; i++) {
+        if (radiant_layout_attr_is_internal(names[i])) continue;
+        if (visible++ == wanted) return names[i];
+    }
+    return nullptr;
+}
+
+static int64_t radiant_layout_velmt_attr_count(void* data) {
+    RadiantVelmtHost* host = (RadiantVelmtHost*)data;
+    if (!host || host->magic != RADIANT_VELMT_MAGIC ||
+            host->pass_id != g_radiant_velmt_active_pass_id) return 0;
+    int source_count = 0;
+    const char** names = host->velmt.element
+        ? host->velmt.element->attribute_names(&source_count) : nullptr;
+    int64_t visible = 0;
+    for (int i = 0; names && i < source_count; i++) {
+        if (!radiant_layout_attr_is_internal(names[i])) visible++;
+    }
+    return visible;
+}
+
+static VirtualOpStatus radiant_layout_velmt_attr_get(void* data, Item key,
+                                                      Item* out) {
+    RadiantVelmtHost* host = (RadiantVelmtHost*)data;
+    if (!host || host->magic != RADIANT_VELMT_MAGIC ||
+            host->pass_id != g_radiant_velmt_active_pass_id || !out ||
+            !is_text_type_id(get_type_id(key))) return VIRTUAL_OP_MISSING;
+    DomElement* elem = host->velmt.element;
+    const char* chars = key.get_chars();
+    uint32_t length = key.get_len();
+    int source_count = 0;
+    const char** names = elem ? elem->attribute_names(&source_count) : nullptr;
+    for (int i = 0; names && i < source_count; i++) {
+        const char* name = names[i];
+        if (!name || radiant_layout_attr_is_internal(name) ||
+                strlen(name) != length || memcmp(name, chars, length) != 0) continue;
+        const char* value = elem->get_attribute(name);
+        *out = radiant_string_item(value ? value : "");
+        return VIRTUAL_OP_OK;
+    }
+    return VIRTUAL_OP_MISSING;
+}
+
+static VirtualOpStatus radiant_layout_readonly_set(
+        void* data, Item key, Item value, Item* out) {
+    (void)data; (void)key; (void)value; (void)out;
+    return VIRTUAL_OP_READONLY;
+}
+
+static VirtualOpStatus radiant_layout_attr_has(void* data, Item key, bool* out) {
+    Item ignored = ItemNull;
+    VirtualOpStatus status = radiant_layout_velmt_attr_get(data, key, &ignored);
+    if (out) *out = status == VIRTUAL_OP_OK;
+    return status == VIRTUAL_OP_ERROR ? status : VIRTUAL_OP_OK;
+}
+
+static VirtualOpStatus radiant_layout_readonly_remove(
+        void* data, Item key, bool* out) {
+    (void)data; (void)key;
+    if (out) *out = false;
+    return VIRTUAL_OP_READONLY;
+}
+
+static VirtualOpStatus radiant_layout_attr_key_at(void* data, int64_t index,
+                                                   Item* out) {
+    RadiantVelmtHost* host = (RadiantVelmtHost*)data;
+    const char* name = host && host->magic == RADIANT_VELMT_MAGIC &&
+        host->pass_id == g_radiant_velmt_active_pass_id
+        ? radiant_layout_attr_name_at(host->velmt.element, index) : nullptr;
+    if (!name || !out) return out ? VIRTUAL_OP_MISSING : VIRTUAL_OP_ERROR;
+    *out = radiant_string_item(name);
+    return VIRTUAL_OP_OK;
+}
+
+static VirtualOpStatus radiant_layout_attr_value_at(void* data, int64_t index,
+                                                     Item* out) {
+    RadiantVelmtHost* host = (RadiantVelmtHost*)data;
+    const char* name = host && host->magic == RADIANT_VELMT_MAGIC &&
+        host->pass_id == g_radiant_velmt_active_pass_id
+        ? radiant_layout_attr_name_at(host->velmt.element, index) : nullptr;
+    if (!name || !out) return out ? VIRTUAL_OP_MISSING : VIRTUAL_OP_ERROR;
+    const char* value = host->velmt.element->get_attribute(name);
+    *out = radiant_string_item(value ? value : "");
+    return VIRTUAL_OP_OK;
+}
+
+static VirtualOpStatus radiant_layout_velmt_tag(void* data, Item* out) {
+    RadiantVelmtHost* host = (RadiantVelmtHost*)data;
+    if (!host || host->magic != RADIANT_VELMT_MAGIC ||
+            host->pass_id != g_radiant_velmt_active_pass_id || !out) {
+        return VIRTUAL_OP_MISSING;
+    }
+    *out = radiant_string_item(host->velmt.view ? host->velmt.view->node_name() : "");
+    return VIRTUAL_OP_OK;
+}
+
+static VirtualOpStatus radiant_layout_velmt_namespace(void* data, Item* out) {
+    RadiantVelmtHost* host = (RadiantVelmtHost*)data;
+    if (!host || host->magic != RADIANT_VELMT_MAGIC ||
+            host->pass_id != g_radiant_velmt_active_pass_id || !out ||
+            !host->velmt.element) return VIRTUAL_OP_MISSING;
+    const char* uri = host->velmt.element->get_attribute("__lambda_ns_uri");
+    if (!uri || !uri[0]) return VIRTUAL_OP_MISSING;
+    *out = radiant_string_item(uri);
+    return VIRTUAL_OP_OK;
+}
+
+static int64_t radiant_layout_velmt_child_count(void* data) {
+    RadiantVelmtHost* host = (RadiantVelmtHost*)data;
+    if (!host || host->magic != RADIANT_VELMT_MAGIC ||
+            host->pass_id != g_radiant_velmt_active_pass_id || host->depth <= 0) return 0;
+    return radiant_layout_view_child_count(host->velmt.view);
+}
+
+static VirtualOpStatus radiant_layout_child_item_at(View* view, int depth,
+                                                     int64_t index, Item* out) {
+    if (!out || index < 0 || depth <= 0 || !view || !view->is_element()) {
+        return VIRTUAL_OP_MISSING;
+    }
+    DomElement* elem = view->as_element();
+    int64_t visible = 0;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        View* child_view = (View*)child;
+        if (!child_view || child_view->view_type == RDT_VIEW_NONE) continue;
+        if (visible++ != index) continue;
+        RadiantVelmt child_velmt;
+        custom_layout_fill_radiant_velmt_from_view(
+            &child_velmt, child_view, (int)index, false); // INT_CAST_OK: bounded layout child index.
+        *out = radiant_layout_velmt_host_item_depth(&child_velmt, depth - 1);
+        return get_type_id(*out) == LMD_TYPE_VELMT ? VIRTUAL_OP_OK : VIRTUAL_OP_ERROR;
+    }
+    return VIRTUAL_OP_MISSING;
+}
+
+static VirtualOpStatus radiant_layout_velmt_child_get(void* data, int64_t index,
+                                                       Item* out) {
+    RadiantVelmtHost* host = (RadiantVelmtHost*)data;
+    if (!host || host->magic != RADIANT_VELMT_MAGIC ||
+            host->pass_id != g_radiant_velmt_active_pass_id || host->depth <= 0 ||
+            !out) return VIRTUAL_OP_MISSING;
+    return radiant_layout_child_item_at(host->velmt.view, host->depth, index, out);
+}
+
+static VirtualOpStatus radiant_layout_readonly_array_set(
+        void* data, int64_t index, Item value, Item* out) {
+    (void)data; (void)index; (void)value; (void)out;
+    return VIRTUAL_OP_READONLY;
+}
+
+static VirtualOpStatus radiant_layout_readonly_splice(
+        void* data, int64_t start, int64_t remove_count,
+        const Item* values, int64_t value_count, Item* out) {
+    (void)data; (void)start; (void)remove_count;
+    (void)values; (void)value_count; (void)out;
+    return VIRTUAL_OP_READONLY;
+}
+
+static const VelmtVtable radiant_layout_velmt_vtable = {
+    {LAMBDA_VIRTUAL_ABI_VERSION, LMD_TYPE_VELMT, {0, 0, 0},
+     nullptr, nullptr, nullptr},
+    {radiant_layout_velmt_tag,
+     radiant_layout_velmt_namespace,
+     {radiant_layout_velmt_attr_get,
+      radiant_layout_readonly_set,
+      radiant_layout_attr_has,
+      radiant_layout_readonly_remove,
+      radiant_layout_velmt_attr_count,
+      radiant_layout_attr_key_at,
+      radiant_layout_attr_value_at},
+     {radiant_layout_velmt_child_count,
+      radiant_layout_velmt_child_get,
+      radiant_layout_readonly_array_set,
+      radiant_layout_readonly_splice}}
+};
+
+typedef struct RadiantLayoutChildrenHost {
+    uint32_t magic;
+    uint64_t pass_id;
+    View* view;
+    int depth;
+} RadiantLayoutChildrenHost;
+
+#define RADIANT_LAYOUT_CHILDREN_MAGIC 0x56415252u
+
+static void radiant_layout_children_destroy(void* data) {
+    RadiantLayoutChildrenHost* host = (RadiantLayoutChildrenHost*)data;
+    if (!host) return;
+    host->magic = 0;
+    mem_free(host);
+}
+
+static bool radiant_layout_children_active(const RadiantLayoutChildrenHost* host) {
+    return host && host->magic == RADIANT_LAYOUT_CHILDREN_MAGIC &&
+        host->pass_id != 0 && host->pass_id == g_radiant_velmt_active_pass_id;
+}
+
+static int64_t radiant_layout_children_count(void* data) {
+    RadiantLayoutChildrenHost* host = (RadiantLayoutChildrenHost*)data;
+    return radiant_layout_children_active(host) && host->depth > 0
+        ? radiant_layout_view_child_count(host->view) : 0;
+}
+
+static VirtualOpStatus radiant_layout_children_get(void* data, int64_t index,
+                                                    Item* out) {
+    RadiantLayoutChildrenHost* host = (RadiantLayoutChildrenHost*)data;
+    if (!radiant_layout_children_active(host)) return VIRTUAL_OP_MISSING;
+    return radiant_layout_child_item_at(host->view, host->depth, index, out);
+}
+
+static const VArrayVtable radiant_layout_children_vtable = {
+    {LAMBDA_VIRTUAL_ABI_VERSION, LMD_TYPE_VARRAY, {0, 0, 0},
+     radiant_layout_children_destroy, nullptr, nullptr},
+    {radiant_layout_children_count,
+     radiant_layout_children_get,
+     radiant_layout_readonly_array_set,
+     radiant_layout_readonly_splice}
+};
+
+static Item radiant_layout_velmt_host_item_depth(const RadiantVelmt* velmt, int depth) {
     if (!radiant_host_api || !radiant_host_api->value || !velmt ||
         g_radiant_velmt_active_pass_id == 0) {
         return ItemNull;
     }
-    Item obj = radiant_host_api->value->vmap_new();
-    if (get_type_id(obj) != LMD_TYPE_VMAP || !obj.vmap) return ItemNull;
-
     RadiantVelmtHost* host = (RadiantVelmtHost*)mem_calloc(
         1, sizeof(RadiantVelmtHost), MEM_CAT_EVAL);
     if (!host) return ItemNull;
     host->magic = RADIANT_VELMT_MAGIC;
     host->pass_id = g_radiant_velmt_active_pass_id;
     host->depth = depth;
-    memcpy(&host->velmt, velmt, sizeof(Velmt));
-    obj.vmap->host_type = radiant_velmt_host_type();
-    obj.vmap->host_data = host;
+    memcpy(&host->velmt, velmt, sizeof(RadiantVelmt));
+    Item obj = radiant_host_api->value->native_object_new(
+        (const JubeTypeDef*)radiant_velmt_host_type(), host);
+    if (get_type_id(obj) != LMD_TYPE_VELMT) {
+        radiant_velmt_host_destroy(host);
+        return ItemNull;
+    }
     return obj;
 }
 
-static Item radiant_velmt_project_property(const Velmt* velmt, int depth, const char* key) {
+static Item radiant_velmt_project_property(const RadiantVelmt* velmt, int depth, const char* key) {
     if (!velmt || !key) return ItemNull;
     if (strcmp(key, "index") == 0) return radiant_int_item(velmt->index);
     if (strcmp(key, "tag") == 0 || strcmp(key, "node_name") == 0) {
@@ -639,33 +873,28 @@ static int radiant_layout_view_child_count(View* view) {
 }
 
 static Item radiant_layout_view_children_item(View* view, int depth) {
-    if (!radiant_host_api || !radiant_host_api->value) return ItemNull;
-    int child_count = depth > 0 ? radiant_layout_view_child_count(view) : 0;
-    RootFrame roots(1);
-    Rooted<Item> rooted_children(roots, radiant_array_new_item(child_count));
-    if (!view || !view->is_element() || depth <= 0) return rooted_children.get();
-
-    DomElement* elem = view->as_element();
-    int index = 0;
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        View* child_view = (View*)child;
-        if (!child_view || child_view->view_type == RDT_VIEW_NONE) continue;
-        Velmt child_velmt;
-        custom_layout_fill_velmt_from_view(&child_velmt, child_view, index, false);
-        Item child_item = radiant_layout_velmt_host_item_depth(&child_velmt, depth - 1);
-        radiant_array_push_item(rooted_children.get(), child_item);
-        index++;
+    RadiantLayoutChildrenHost* host = (RadiantLayoutChildrenHost*)mem_calloc(
+        1, sizeof(RadiantLayoutChildrenHost), MEM_CAT_EVAL);
+    if (!host) return ItemNull;
+    host->magic = RADIANT_LAYOUT_CHILDREN_MAGIC;
+    host->pass_id = g_radiant_velmt_active_pass_id;
+    host->view = view;
+    host->depth = depth;
+    Item result = varray_new(&radiant_layout_children_vtable, host, nullptr, nullptr);
+    if (get_type_id(result) != LMD_TYPE_VARRAY) {
+        radiant_layout_children_destroy(host);
+        return ItemNull;
     }
-    return rooted_children.get();
+    return result;
 }
 
-static Item radiant_layout_velmt_host_item(const Velmt* velmt) {
+static Item radiant_layout_velmt_host_item(const RadiantVelmt* velmt) {
     return radiant_layout_velmt_host_item_depth(velmt, RADIANT_VELMT_CHILD_DEPTH);
 }
 
 static Item radiant_layout_parent_item(const CustomLayoutContext* context) {
     if (!radiant_host_api || !radiant_host_api->value || !context || !context->parent) return ItemNull;
-    Velmt parent;
+    RadiantVelmt parent;
     memset(&parent, 0, sizeof(parent));
     parent.view = (View*)context->parent;
     parent.element = context->parent;
@@ -693,14 +922,9 @@ static Item radiant_layout_parent_item(const CustomLayoutContext* context) {
 }
 
 static Item radiant_layout_children_item(const CustomLayoutContext* context) {
-    if (!radiant_host_api || !radiant_host_api->value || !context) return ItemNull;
-    RootFrame roots(1);
-    Rooted<Item> rooted_arr(roots, radiant_array_new_item(context->child_count));
-    for (int i = 0; i < context->child_count; i++) {
-        Item child = radiant_layout_velmt_host_item(&context->children[i]);
-        radiant_array_push_item(rooted_arr.get(), child);
-    }
-    return rooted_arr.get();
+    if (!context) return ItemNull;
+    return radiant_layout_view_children_item((View*)context->parent,
+                                              RADIANT_VELMT_CHILD_DEPTH);
 }
 
 static Item radiant_layout_context_item(const CustomLayoutContext* context) {
@@ -3018,7 +3242,7 @@ RADIANT_C_API Item fn_radiant_render_svg(Item html_item, Item width_item, Item h
 RADIANT_C_API Item fn_radiant_box(Item node_item) {
     DomNode* node = radiant_dom_node_from_item(node_item, "BOX");
     if (!node || node->view_type == RDT_VIEW_NONE) return ItemNull;
-    VelmtBox box;
+    RadiantVelmtBox box;
     box.x = node->x;
     box.y = node->y;
     box.width = node->width;
@@ -3215,7 +3439,8 @@ static void radiant_custom_layout_heap_cleanup(void* heap_ptr) {
 }
 
 static const JubeTypeDef radiant_types[] = {
-    {"dom_node", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"dom_node", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
+     JUBE_CARRIER_VELMT},
     {"range", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     {"selection", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     // DOM3: style hosts are record-driven; no hand-written host ops remain
@@ -3224,17 +3449,47 @@ static const JubeTypeDef radiant_types[] = {
     {"stylesheet", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     {"css_rule", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     {"rule_style_decl", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"document", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"foreign_document", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"velmt", JUBE_TYPE_OWNING_NATIVE, NULL, radiant_velmt_host_destroy},
-    {"character_data", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"svg_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"input_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"select_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"textarea_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"option_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
-    {"html_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"document", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
+     JUBE_CARRIER_VELMT},
+    {"foreign_document", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
+     JUBE_CARRIER_VELMT},
+    {"velmt", JUBE_TYPE_OWNING_NATIVE, &radiant_layout_velmt_vtable,
+     radiant_velmt_host_destroy, JUBE_CARRIER_VELMT},
+    {"character_data", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
+     JUBE_CARRIER_VELMT},
+    {"svg_element", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
+     JUBE_CARRIER_VELMT},
+    {"input_element", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
+     JUBE_CARRIER_VELMT},
+    {"select_element", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
+     JUBE_CARRIER_VELMT},
+    {"textarea_element", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
+     JUBE_CARRIER_VELMT},
+    {"option_element", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
+     JUBE_CARRIER_VELMT},
+    {"html_element", JUBE_TYPE_NON_OWNING_HOST, &radiant_dom_node_velmt_vtable, NULL,
+     JUBE_CARRIER_VELMT},
     {"event", JUBE_TYPE_OWNING_NATIVE, NULL, radiant_dom_event_destroy},
+    {"node_list", JUBE_TYPE_NON_OWNING_HOST, &dom_child_collection_varray_vtable, NULL,
+     JUBE_CARRIER_VARRAY},
+    {"html_collection", JUBE_TYPE_NON_OWNING_HOST, &dom_child_collection_varray_vtable, NULL,
+     JUBE_CARRIER_VARRAY},
+    {"html_options_collection", JUBE_TYPE_NON_OWNING_HOST,
+     &dom_child_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
+    {"html_form_controls_collection", JUBE_TYPE_NON_OWNING_HOST,
+     &dom_child_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
+    {"named_node_map", JUBE_TYPE_NON_OWNING_HOST,
+     &dom_child_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
+    {"dom_token_list", JUBE_TYPE_NON_OWNING_HOST,
+     &dom_child_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
+    {"radio_node_list", JUBE_TYPE_NON_OWNING_HOST,
+     &dom_static_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
+    {"dom_rect_list", JUBE_TYPE_NON_OWNING_HOST,
+     &dom_static_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
+    {"style_sheet_list", JUBE_TYPE_NON_OWNING_HOST,
+     &dom_cssom_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
+    {"css_rule_list", JUBE_TYPE_NON_OWNING_HOST,
+     &dom_cssom_collection_varray_vtable, NULL, JUBE_CARRIER_VARRAY},
 };
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void) {
@@ -3313,6 +3568,46 @@ RADIANT_C_API const void* radiant_dom_event_host_type(void) {
     return &radiant_types[18];
 }
 
+RADIANT_C_API const void* radiant_dom_node_list_host_type(void) {
+    return &radiant_types[19];
+}
+
+RADIANT_C_API const void* radiant_dom_html_collection_host_type(void) {
+    return &radiant_types[20];
+}
+
+RADIANT_C_API const void* radiant_dom_html_options_collection_host_type(void) {
+    return &radiant_types[21];
+}
+
+RADIANT_C_API const void* radiant_dom_html_form_controls_collection_host_type(void) {
+    return &radiant_types[22];
+}
+
+RADIANT_C_API const void* radiant_dom_named_node_map_host_type(void) {
+    return &radiant_types[23];
+}
+
+RADIANT_C_API const void* radiant_dom_token_list_host_type(void) {
+    return &radiant_types[24];
+}
+
+RADIANT_C_API const void* radiant_dom_radio_node_list_host_type(void) {
+    return &radiant_types[25];
+}
+
+RADIANT_C_API const void* radiant_dom_rect_list_host_type(void) {
+    return &radiant_types[26];
+}
+
+RADIANT_C_API const void* radiant_dom_style_sheet_list_host_type(void) {
+    return &radiant_types[27];
+}
+
+RADIANT_C_API const void* radiant_dom_css_rule_list_host_type(void) {
+    return &radiant_types[28];
+}
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
 static const JubeFuncDef radiant_functions[] = {
@@ -3329,35 +3624,35 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_poc_attr(Item path)", (fn_ptr)fn_radiant_poc_attr},
     {"register_layout", "fn(name: string, callback: fn) -> bool", (fn_ptr)fn_radiant_register_layout, JUBE_FN_NONE,
      "Item fn_radiant_register_layout(Item name, Item callback)", (fn_ptr)fn_radiant_register_layout},
-    {"velmt_index", "fn(velmt: map) -> int|null", (fn_ptr)fn_radiant_velmt_index, JUBE_FN_NONE,
+    {"velmt_index", "fn(velmt: velmt) -> int|null", (fn_ptr)fn_radiant_velmt_index, JUBE_FN_NONE,
      "Item fn_radiant_velmt_index(Item velmt)", (fn_ptr)fn_radiant_velmt_index},
-    {"velmt_tag", "fn(velmt: map) -> string|null", (fn_ptr)fn_radiant_velmt_tag, JUBE_FN_NONE,
+    {"velmt_tag", "fn(velmt: velmt) -> string|null", (fn_ptr)fn_radiant_velmt_tag, JUBE_FN_NONE,
      "Item fn_radiant_velmt_tag(Item velmt)", (fn_ptr)fn_radiant_velmt_tag},
-    {"velmt_id", "fn(velmt: map) -> string|null", (fn_ptr)fn_radiant_velmt_id, JUBE_FN_NONE,
+    {"velmt_id", "fn(velmt: velmt) -> string|null", (fn_ptr)fn_radiant_velmt_id, JUBE_FN_NONE,
      "Item fn_radiant_velmt_id(Item velmt)", (fn_ptr)fn_radiant_velmt_id},
-    {"velmt_attr", "fn(velmt: map, name: string) -> any", (fn_ptr)fn_radiant_velmt_attr, JUBE_FN_NONE,
+    {"velmt_attr", "fn(velmt: velmt, name: string) -> any", (fn_ptr)fn_radiant_velmt_attr, JUBE_FN_NONE,
      "Item fn_radiant_velmt_attr(Item velmt, Item name)", (fn_ptr)fn_radiant_velmt_attr},
-    {"velmt_attr_or", "fn(velmt: map, name: string, default_value: any) -> any", (fn_ptr)fn_radiant_velmt_attr_or, JUBE_FN_NONE,
+    {"velmt_attr_or", "fn(velmt: velmt, name: string, default_value: any) -> any", (fn_ptr)fn_radiant_velmt_attr_or, JUBE_FN_NONE,
      "Item fn_radiant_velmt_attr_or(Item velmt, Item name, Item default_value)", (fn_ptr)fn_radiant_velmt_attr_or},
-    {"velmt_width", "fn(velmt: map) -> float|null", (fn_ptr)fn_radiant_velmt_width, JUBE_FN_NONE,
+    {"velmt_width", "fn(velmt: velmt) -> float|null", (fn_ptr)fn_radiant_velmt_width, JUBE_FN_NONE,
      "Item fn_radiant_velmt_width(Item velmt)", (fn_ptr)fn_radiant_velmt_width},
-    {"velmt_height", "fn(velmt: map) -> float|null", (fn_ptr)fn_radiant_velmt_height, JUBE_FN_NONE,
+    {"velmt_height", "fn(velmt: velmt) -> float|null", (fn_ptr)fn_radiant_velmt_height, JUBE_FN_NONE,
      "Item fn_radiant_velmt_height(Item velmt)", (fn_ptr)fn_radiant_velmt_height},
-    {"velmt_box", "fn(velmt: map) -> map|null", (fn_ptr)fn_radiant_velmt_box, JUBE_FN_NONE,
+    {"velmt_box", "fn(velmt: velmt) -> map|null", (fn_ptr)fn_radiant_velmt_box, JUBE_FN_NONE,
      "Item fn_radiant_velmt_box(Item velmt)", (fn_ptr)fn_radiant_velmt_box},
-    {"velmt_children", "fn(velmt: map) -> array|null", (fn_ptr)fn_radiant_velmt_children, JUBE_FN_NONE,
+    {"velmt_children", "fn(velmt: velmt) -> array|null", (fn_ptr)fn_radiant_velmt_children, JUBE_FN_NONE,
      "Item fn_radiant_velmt_children(Item velmt)", (fn_ptr)fn_radiant_velmt_children},
-    {"velmt_text", "fn(velmt: map) -> string", (fn_ptr)fn_radiant_velmt_text, JUBE_FN_NONE,
+    {"velmt_text", "fn(velmt: velmt) -> string", (fn_ptr)fn_radiant_velmt_text, JUBE_FN_NONE,
      "Item fn_radiant_velmt_text(Item velmt)", (fn_ptr)fn_radiant_velmt_text},
-    {"velmt_style", "fn(velmt: map, name: string) -> any", (fn_ptr)fn_radiant_velmt_style, JUBE_FN_NONE,
+    {"velmt_style", "fn(velmt: velmt, name: string) -> any", (fn_ptr)fn_radiant_velmt_style, JUBE_FN_NONE,
      "Item fn_radiant_velmt_style(Item velmt, Item name)", (fn_ptr)fn_radiant_velmt_style},
-    {"velmt_style_or", "fn(velmt: map, name: string, default_value: any) -> any", (fn_ptr)fn_radiant_velmt_style_or, JUBE_FN_NONE,
+    {"velmt_style_or", "fn(velmt: velmt, name: string, default_value: any) -> any", (fn_ptr)fn_radiant_velmt_style_or, JUBE_FN_NONE,
      "Item fn_radiant_velmt_style_or(Item velmt, Item name, Item default_value)", (fn_ptr)fn_radiant_velmt_style_or},
-    {"velmt_margin", "fn(velmt: map) -> map|null", (fn_ptr)fn_radiant_velmt_margin, JUBE_FN_NONE,
+    {"velmt_margin", "fn(velmt: velmt) -> map|null", (fn_ptr)fn_radiant_velmt_margin, JUBE_FN_NONE,
      "Item fn_radiant_velmt_margin(Item velmt)", (fn_ptr)fn_radiant_velmt_margin},
-    {"velmt_border", "fn(velmt: map) -> map|null", (fn_ptr)fn_radiant_velmt_border, JUBE_FN_NONE,
+    {"velmt_border", "fn(velmt: velmt) -> map|null", (fn_ptr)fn_radiant_velmt_border, JUBE_FN_NONE,
      "Item fn_radiant_velmt_border(Item velmt)", (fn_ptr)fn_radiant_velmt_border},
-    {"velmt_padding", "fn(velmt: map) -> map|null", (fn_ptr)fn_radiant_velmt_padding, JUBE_FN_NONE,
+    {"velmt_padding", "fn(velmt: velmt) -> map|null", (fn_ptr)fn_radiant_velmt_padding, JUBE_FN_NONE,
      "Item fn_radiant_velmt_padding(Item velmt)", (fn_ptr)fn_radiant_velmt_padding},
 };
 #pragma clang diagnostic pop

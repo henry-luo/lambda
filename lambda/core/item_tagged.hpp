@@ -13,9 +13,11 @@ template<> struct TagToType<LMD_TYPE_BINARY> { typedef Binary type; };
 template<> struct TagToType<LMD_TYPE_RANGE> { typedef Range type; };
 template<> struct TagToType<LMD_TYPE_ARRAY_NUM> { typedef ArrayNum type; };
 template<> struct TagToType<LMD_TYPE_ARRAY> { typedef Array type; };
+template<> struct TagToType<LMD_TYPE_VARRAY> { typedef VArray type; };
 template<> struct TagToType<LMD_TYPE_MAP> { typedef Map type; };
 template<> struct TagToType<LMD_TYPE_VMAP> { typedef VMap type; };
 template<> struct TagToType<LMD_TYPE_ELEMENT> { typedef Element type; };
+template<> struct TagToType<LMD_TYPE_VELMT> { typedef Velmt type; };
 template<> struct TagToType<LMD_TYPE_TYPE> { typedef Type type; };
 template<> struct TagToType<LMD_TYPE_FUNC> { typedef Function type; };
 
@@ -35,11 +37,15 @@ inline ArrayNum* item_payload<LMD_TYPE_ARRAY_NUM>(Item raw) { return raw.array_n
 template<>
 inline Array* item_payload<LMD_TYPE_ARRAY>(Item raw) { return raw.array; }
 template<>
+inline VArray* item_payload<LMD_TYPE_VARRAY>(Item raw) { return raw.varray; }
+template<>
 inline Map* item_payload<LMD_TYPE_MAP>(Item raw) { return raw.map; }
 template<>
 inline VMap* item_payload<LMD_TYPE_VMAP>(Item raw) { return raw.vmap; }
 template<>
 inline Element* item_payload<LMD_TYPE_ELEMENT>(Item raw) { return raw.element; }
+template<>
+inline Velmt* item_payload<LMD_TYPE_VELMT>(Item raw) { return raw.velmt; }
 template<>
 inline Type* item_payload<LMD_TYPE_TYPE>(Item raw) { return raw.type; }
 template<>

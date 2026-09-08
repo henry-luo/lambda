@@ -148,9 +148,11 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
         *(Container**)field_ptr = value.container;
         break;
     case LMD_TYPE_VMAP:
-        // Branded DOM VMaps are host-object pointers, not Map payloads; using
-        // value.map here installs an own slot that reads back as JS null.
-        *(VMap**)field_ptr = value.vmap;
+    case LMD_TYPE_VARRAY:
+    case LMD_TYPE_VELMT:
+        // D7.4.5v2 virtual carriers are host-object pointers, not materialized
+        // Map/Array/Element payloads; preserve their exact carrier identity.
+        *(VirtualContainer**)field_ptr = virtual_container_from_item(value);
         break;
     case LMD_TYPE_FUNC:
         *(Function**)field_ptr = value.function;
@@ -190,7 +192,8 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
             titem.binary = item.get_safe_binary();
             break;
         case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-        case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:   {
+        case LMD_TYPE_MAP:  case LMD_TYPE_VMAP: case LMD_TYPE_VARRAY:
+        case LMD_TYPE_ELEMENT: case LMD_TYPE_VELMT: {
             Container *container = item.container;
             titem.container = container;
             break;

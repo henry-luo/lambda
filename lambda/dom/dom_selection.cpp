@@ -457,6 +457,7 @@ JS_DOM_SELF_ALIAS(js_range_to_string, dom_range_to_string_value)
 
 struct RangeClientRectCollector {
     Item array;
+    LambdaMutableHandle<Item>* array_handle;
     uint32_t count;
     float left;
     float top;
@@ -469,7 +470,9 @@ static void js_range_collect_rect(float x, float y, float w, float h,
     RangeClientRectCollector* collector =
         (RangeClientRectCollector*)userdata;
     if (!collector) return;
-    js_array_push(collector->array, dom_make_rect(x, y, w, h));
+    Item array = collector->array_handle
+        ? collector->array_handle->get() : collector->array;
+    js_array_push(array, dom_make_rect(x, y, w, h));
     if (collector->count == 0) {
         collector->left = x;
         collector->top = y;
@@ -487,20 +490,30 @@ static void js_range_collect_rect(float x, float y, float w, float h,
 static RangeClientRectCollector js_range_collect_client_rects(DomRange* r) {
     RangeClientRectCollector collector;
     memset(&collector, 0, sizeof(collector));
-    collector.array = js_array_new(0);
-    if (!r) return collector;
+    RootFrame roots(1);
+    Rooted<Item> array_root(roots, js_array_new(0));
+    LambdaMutableHandle<Item> array_handle(array_root);
+    collector.array_handle = &array_handle;
+    if (!r) {
+        collector.array = array_root.get();
+        collector.array_handle = nullptr;
+        return collector;
+    }
     DomDocument* doc = node_owning_doc(r->start.node);
     if (!doc) doc = node_owning_doc(r->end.node);
-    if (doc && !dom_has_committed_geometry_snapshot(doc)) return collector;
-    if (!dom_range_resolve_layout(r)) return collector;
-    dom_range_for_each_rect(r, nullptr, js_range_collect_rect, &collector);
+    if ((!doc || dom_has_committed_geometry_snapshot(doc)) &&
+            dom_range_resolve_layout(r)) {
+        dom_range_for_each_rect(r, nullptr, js_range_collect_rect, &collector);
+    }
+    collector.array = array_root.get();
+    collector.array_handle = nullptr;
     return collector;
 }
 
 extern "C" Item js_range_get_client_rects(Item self_v) {
     RangeClientRectCollector collector =
         js_range_collect_client_rects(range_from(self_v));
-    return collector.array;
+    return dom_static_rect_list_from_array(collector.array);
 }
 
 extern "C" Item js_range_get_bounding_client_rect(Item self_v) {

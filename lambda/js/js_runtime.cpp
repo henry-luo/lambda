@@ -262,8 +262,6 @@ static Item js_invoke_mir_state(void* func_ptr, Item* env, Item input,
 }
 // Tune8 §2.2: js_private_property_set now takes a strict flag (0 = sloppy,
 // 1 = strict with proxy-throw); js_private_property_set_strict removed.
-extern "C" void js_array_exotic_before_property_get(Item object, Item key);
-extern "C" void js_array_exotic_before_property_set(Item object, Item key, Item value);
 extern "C" Item js_new_async_function_from_string(Item* args, int argc);
 extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int is_async);
 extern "C" void js_intrinsic_note_prototype_mutation(Item object);
@@ -283,10 +281,8 @@ extern "C" void js_map_promote_descriptor_kind(Map* m) {
 JS_FORWARD_STATIC_EXPRESSION(Item, js_runtime_make_string_item, (const char* str, int len), ((Item){.item = s2it(heap_strcpy((char*)str, len))}))
 
 const JubeTypeDef* js_host_object_type(Item object) {
-    if (get_type_id(object) != LMD_TYPE_VMAP || !object.vmap || !object.vmap->host_type) {
-        return NULL;
-    }
-    return jube_find_type_by_host_type(object.vmap->host_type);
+    const void* host_type = virtual_host_type(object);
+    return host_type ? jube_find_type_by_host_type(host_type) : NULL;
 }
 
 bool js_host_object_get_property(Item object, Item key, Item* out) {
@@ -821,8 +817,7 @@ extern "C" bool js_is_object_value(Item value) {
     // Object-valued intrinsics share this lane, including numeric arrays and host maps.
     return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
         js_is_ordinary_numeric_array(value) || type == LMD_TYPE_FUNC ||
-        type == LMD_TYPE_ELEMENT ||
-        type == LMD_TYPE_VMAP;
+        type == LMD_TYPE_ELEMENT || is_virtual_container_type_id(type);
 }
 
 static Item js_class_internal_property(Item class_item, const char* name,
@@ -2277,7 +2272,7 @@ static Item js_typed_array_create_with_constructor(Item constructor, int length)
 static bool js_can_host_private_slots(Item object) {
     TypeId type = get_type_id(object);
     return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC ||
-        type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP;
+        type == LMD_TYPE_ELEMENT || is_virtual_container_type_id(type);
 }
 
 static Item js_private_storage_object(Item object) {
@@ -5068,7 +5063,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 receiver_root.get(), ItemNull, ItemNull, false, &out)) {
             return out;
         }
-    } else if (type == LMD_TYPE_VMAP && js_host_object_type(object)) {
+    } else if (is_virtual_container_type_id(type) && js_host_object_type(object)) {
         Item out = ItemNull;
         if (js_dispatch_property_op(JS_EXOTIC_GET, object, 0, key,
                 receiver_root.get(), ItemNull, ItemNull, false, &out)) {
@@ -5080,7 +5075,6 @@ extern "C" Item js_get_key_core(Item object, Item key,
         if (js_property_key_needs_object_to_key(key)) {
             JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
         }
-        js_array_exotic_before_property_get(object, key);
         // Array index access
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
@@ -6391,7 +6385,6 @@ static Item js_set_array_core(Item object, Item key, Item value,
     if (js_property_key_needs_object_to_key(key)) {
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     }
-    js_array_exotic_before_property_set(object, key, value);
     if (js_is_ordinary_numeric_array(object)) {
         // Numeric storage can retain its representation only for a present
         // numeric overwrite/append with no descriptor or prototype callback.
@@ -6696,6 +6689,14 @@ static Item js_set_array_core(Item object, Item key, Item value,
 
 // ES45: the second dataset assignment path, routed the same way as the one in
 // js_globals.cpp -- unwrap the proxy here, write through the catalog's row.
+extern "C" Item js_dataset_owner(Item dataset) {
+    if (get_type_id(dataset) != LMD_TYPE_MAP || !dataset.map) return ItemNull;
+    bool found = false;
+    Item owner = js_map_shape_lookup_ext(dataset.map,
+        "__lambda_dataset_element", 24, &found);
+    return found ? owner : ItemNull;
+}
+
 static bool js_dataset_set_via_api(Item dataset, Item key, Item value) {
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
     String* key_string = it2s(key);
@@ -6704,8 +6705,8 @@ static bool js_dataset_set_via_api(Item dataset, Item key, Item value) {
          strncmp(key_string->chars, "__lambda_dataset_element", 24) == 0)) {
         return false;
     }
-    Item owner = js_get_key_cstr(dataset, "__lambda_dataset_element");
-    if (get_type_id(owner) != LMD_TYPE_VMAP) return false;
+    Item owner = js_dataset_owner(dataset);
+    if (!is_element_family_type_id(get_type_id(owner))) return false;
     jube_internal_host_api()->dom_catalog->set_data(owner, key, value);
     return true;
 }
@@ -7409,7 +7410,7 @@ static Item js_set_storage_mode(Item object, Item key,
                                      bypass_accessor_dispatch, strict);
     }
 
-    if (type == LMD_TYPE_VMAP) {
+    if (is_virtual_container_type_id(type)) {
         Item out = ItemNull;
         if (js_dispatch_property_op(JS_EXOTIC_SET, object, 0, key, receiver,
                 ItemNull, value, bypass_accessor_dispatch, &out)) {
@@ -7726,7 +7727,6 @@ extern "C" Item js_get_reference(Item object, Item key) {
         if (js_key_as_array_index(key, &idx)) {
             // Live DOM collections must refresh before dense array fast reads;
             // otherwise optimized member access can observe stale option slots.
-            js_array_exotic_before_property_get(object, key);
             Item dense_value = ItemNull;
             if (js_array_fast_own_dense_get(object, idx, &dense_value)) {
                 return dense_value;
@@ -8105,8 +8105,7 @@ static inline Map* js_named_fast_receiver_map(Item object, const char* name,
     if (type == LMD_TYPE_ARRAY && js_named_fast_array_name_allowed(name,
             name_len)) {
         Array* arr = object.array;
-        if (!arr || !js_array_has_props(arr) ||
-                dom_collection_has_live_property_state(object)) return NULL;
+        if (!arr || !js_array_has_props(arr)) return NULL;
         if (out_receiver_kind) {
             *out_receiver_kind = JS_NAMED_FAST_RECEIVER_ARRAY_PROPS;
         }
@@ -8817,7 +8816,6 @@ extern "C" Item js_elements_get(Item array, Item index) {
     }
     // Live DOM collections share array storage but must refresh before any
     // indexed read; MIR fallback can call this helper directly.
-    js_array_exotic_before_property_get(array, index);
 
     // ES spec: boolean keys are coerced to "true"/"false" string property names,
     // not numeric indices. Route to companion map lookup.
@@ -8871,7 +8869,6 @@ extern "C" Item js_elements_get_int(Item array, int64_t index) {
     if (get_type_id(array) == LMD_TYPE_ARRAY) {
         // Live DOM collections share array storage but must refresh before any
         // indexed read; optimized MIR array access calls this fallback directly.
-        js_array_exotic_before_property_get(array, (Item){.item = i2it((int)index)});
         if (index < 0 || index > 0xFFFFFFFELL) {
             int idx_len = 0;
             const char* idx_buf = js_property_index_chars(index, &idx_len);
@@ -14408,7 +14405,9 @@ static Item js_array_like_arg_count(Item args_array, int* argc) {
         *argc = (int)args_array.array->length;
         return js_status_ok();
     }
-    if (args_type == LMD_TYPE_MAP || args_type == LMD_TYPE_FUNC || args_type == LMD_TYPE_ELEMENT) {
+    if (args_type == LMD_TYPE_MAP || args_type == LMD_TYPE_FUNC ||
+            args_type == LMD_TYPE_ELEMENT ||
+            is_virtual_container_type_id(args_type)) {
         JS_ASSIGN_OR_RETURN(len_val, js_get_name_key(args_array, "length", 6));
         TypeId len_type = get_type_id(len_val);
         if (len_type == LMD_TYPE_INT || len_type == LMD_TYPE_FLOAT) {
@@ -19759,10 +19758,11 @@ static Item js_collection_canonical_key(Item key) {
 static bool js_can_be_held_weakly(Item key) {
     TypeId kt = get_type_id(key);
     if (kt == LMD_TYPE_MAP || js_is_js_array(key) ||
-        kt == LMD_TYPE_FUNC || kt == LMD_TYPE_ELEMENT || kt == LMD_TYPE_VMAP) {
+        kt == LMD_TYPE_FUNC || kt == LMD_TYPE_ELEMENT ||
+        is_virtual_container_type_id(kt)) {
         // Numeric arrays carry ARRAY_NUM, but WeakMap's CanBeHeldWeakly sees
         // their ECMAScript Array identity rather than the physical lane tag.
-        // DOM host objects are VMAP-backed and follow the same object rule.
+        // All virtual carriers are ECMAScript objects and follow the same rule.
         return true;
     }
     if (kt == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
@@ -27402,7 +27402,8 @@ extern "C" Item js_to_object(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
         js_is_ordinary_numeric_array(value) ||
-        type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP) return value;
+        type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT ||
+        is_virtual_container_type_id(type)) return value;
     if (type == LMD_TYPE_BOOL) return js_new_boolean_wrapper(value);
     // Symbol wrapper must be checked before number (symbols are encoded as negative ints)
     if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
@@ -27534,7 +27535,7 @@ extern "C" Item js_get_prototype(Item object) {
         }
         return js_get_intrinsic_prototype_for_class(JS_CLASS_PROMISE);
     }
-    if (get_type_id(object) == LMD_TYPE_VMAP) {
+    if (is_virtual_container_type_id(get_type_id(object))) {
         Item host_proto = ItemNull;
         if (js_host_object_prototype(object, &host_proto)) {
             if (get_type_id(host_proto) == LMD_TYPE_MAP) return host_proto;
@@ -27591,8 +27592,8 @@ extern "C" Item js_get_prototype(Item object) {
 // when the explicit `__proto__` slot holds the null sentinel).
 static Item js_object_get_prototype_chain(Item object) {
     TypeId object_type = get_type_id(object);
-    if (object_type == LMD_TYPE_VMAP && js_host_object_type(object)) {
-        // Host VMaps have no ordinary __proto__ slot; prototype-chain reads
+    if (is_virtual_container_type_id(object_type) && js_host_object_type(object)) {
+        // Host virtual containers have no ordinary __proto__ slot; prototype-chain reads
         // must start from the module-supplied host prototype instead of stopping.
         return js_get_prototype(object);
     }
@@ -28792,6 +28793,9 @@ static bool js_array_iterator_next_is_default() {
 }
 
 static Item js_array_iterator_source_length(Item source) {
+    if (get_type_id(source) == LMD_TYPE_VARRAY) {
+        return (Item){.item = i2it(varray_count(source.varray))};
+    }
     if (!js_is_js_array(source)) return (Item){.item = i2it(0)};
     if (get_type_id(source) == LMD_TYPE_ARRAY_NUM) {
         return (Item){.item = i2it(js_array_length(source))};
@@ -28986,6 +28990,12 @@ static Item js_get_iterator_impl(Item iterable, bool cache_next) {
             return js_iterator_return_checked(iterator, cache_next,
                 "iterator is not an object");
         }
+        return js_create_fixed_iterator(iterable, JS_CLASS_MAP_ITERATOR, -1);
+    }
+
+    // WebIDL collection VArrays are iterable array-like objects without
+    // acquiring JavaScript Array identity (D1.3/D7.4.5v2).
+    if (tid == LMD_TYPE_VARRAY) {
         return js_create_fixed_iterator(iterable, JS_CLASS_MAP_ITERATOR, -1);
     }
 

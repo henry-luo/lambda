@@ -39,6 +39,13 @@ static bool vmap_host_set_by_item(VMap* vm, Item key, Item value, Item* out) {
     return false;
 }
 
+extern "C" bool virtual_host_member_set(Item owner, Item key, Item value,
+                                          Item* out) {
+    if (!out || !is_virtual_container_type_id(get_type_id(owner)) ||
+            !virtual_host_type(owner)) return false;
+    return jube_member_set(owner, key, value, out) != 0;
+}
+
 static void append_host_key(SymbolKeyList* keys, Item key_item) {
     const char* chars = nullptr;
     uint32_t len = 0;
@@ -310,6 +317,44 @@ extern "C" Item vmap_new() {
     log_debug("vmap_new: creating empty VMap");
     VMap* vm = vmap_alloc();
     return {.vmap = vm};
+}
+
+extern "C" Item varray_new(const VArrayVtable* vtable, void* data,
+                            const void* host_type, void* host_data) {
+    if (!vtable || vtable->common.abi_version != LAMBDA_VIRTUAL_ABI_VERSION ||
+            vtable->common.carrier_type != LMD_TYPE_VARRAY ||
+            !vtable->items.count || !vtable->items.get_at) {
+        log_error("VARRAY_NEW_INVALID_VTABLE: missing or incompatible structural callbacks");
+        return ItemNull;
+    }
+    VArray* array = (VArray*)heap_calloc(sizeof(VArray), LMD_TYPE_VARRAY);
+    if (!array) return ItemNull;
+    array->type_id = LMD_TYPE_VARRAY;
+    array->data = data;
+    array->vtable = vtable;
+    array->host_type = host_type;
+    array->host_data = host_data;
+    return {.varray = array};
+}
+
+extern "C" Item velmt_new(const VelmtVtable* vtable, void* data,
+                           const void* host_type, void* host_data) {
+    if (!vtable || vtable->common.abi_version != LAMBDA_VIRTUAL_ABI_VERSION ||
+            vtable->common.carrier_type != LMD_TYPE_VELMT ||
+            !vtable->element.tag || !vtable->element.attrs.count ||
+            !vtable->element.attrs.get || !vtable->element.attrs.key_at ||
+            !vtable->element.children.count || !vtable->element.children.get_at) {
+        log_error("VELMT_NEW_INVALID_VTABLE: missing or incompatible structural callbacks");
+        return ItemNull;
+    }
+    Velmt* element = (Velmt*)heap_calloc(sizeof(Velmt), LMD_TYPE_VELMT);
+    if (!element) return ItemNull;
+    element->type_id = LMD_TYPE_VELMT;
+    element->data = data;
+    element->vtable = vtable;
+    element->host_type = host_type;
+    element->host_data = host_data;
+    return {.velmt = element};
 }
 
 // create a VMap from an array/list of alternating [k1, v1, k2, v2, ...]

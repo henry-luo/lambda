@@ -463,8 +463,12 @@ static void event_listener_release_roots(EventListener* listener) {
 }
 
 static bool dom_event_is_document_target(Item target) {
-    if (get_type_id(target) == LMD_TYPE_VMAP && target.vmap && target.vmap->host_type) {
-        const JubeTypeDef* type = jube_find_type_by_host_type(target.vmap->host_type);
+    if (is_virtual_container_type_id(get_type_id(target)) &&
+            virtual_host_type(target)) {
+        // D7.4.5v2: document identity follows carrier-neutral host metadata;
+        // DOM Node-family wrappers are Velmt rather than VMap.
+        const JubeTypeDef* type = jube_find_type_by_host_type(
+            virtual_host_type(target));
         if (type && type->name) {
             return strcmp(type->name, "document") == 0 ||
                    strcmp(type->name, "foreign_document") == 0;
@@ -476,8 +480,8 @@ static bool dom_event_is_document_target(Item target) {
 
 // get the key pointer for a target item
 static void* get_event_target_key(Item target) {
-    // document wrappers are host VMAPs; key them through the registry instead
-    // of the old proxy-brand predicate so listener storage follows host types.
+    // Document wrappers are host virtual carriers; key them through the
+    // registry so listener storage follows host types.
     if (dom_event_is_document_target(target)) {
         return (void*)&_document_sentinel;
     }
@@ -1513,36 +1517,47 @@ extern "C" Item js_create_native_composition_event(const char* type,
 extern "C" Item js_ctor_static_range_fn(Item init) {
     // StaticRange has a branded immutable snapshot lane; leaving it as a plain
     // map makes InputEvent treat script-created boundaries as live DOM nodes.
-    Item obj = dom_realm_new_object_of_class(JS_CLASS_STATIC_RANGE);
-    Item start_container = init_item(init, "startContainer");
-    Item end_container = init_item(init, "endContainer");
-    int start_offset = init_int(init, "startOffset", 0);
-    int end_offset = init_int(init, "endOffset", 0);
-    event_set_item(obj, "startContainer", start_container);
-    event_set_int (obj, "startOffset",    start_offset);
-    event_set_item(obj, "endContainer",   end_container);
-    event_set_int (obj, "endOffset",      end_offset);
-    bool collapsed = (start_container.item == end_container.item) &&
+    RootFrame roots(4);
+    Rooted<Item> init_root(roots, init);
+    Rooted<Item> obj_root(roots,
+        dom_realm_new_object_of_class(JS_CLASS_STATIC_RANGE));
+    Rooted<Item> start_root(roots,
+        init_item(init_root.get(), "startContainer"));
+    Rooted<Item> end_root(roots,
+        init_item(init_root.get(), "endContainer"));
+    int start_offset = init_int(init_root.get(), "startOffset", 0);
+    int end_offset = init_int(init_root.get(), "endOffset", 0);
+    event_set_item(obj_root.get(), "startContainer", start_root.get());
+    event_set_int (obj_root.get(), "startOffset",    start_offset);
+    event_set_item(obj_root.get(), "endContainer",   end_root.get());
+    event_set_int (obj_root.get(), "endOffset",      end_offset);
+    bool collapsed = (start_root.get().item == end_root.get().item) &&
                      (start_offset == end_offset);
-    event_set_bool(obj, "collapsed", collapsed);
-    event_mark_non_writable(obj, "startContainer");
-    event_mark_non_writable(obj, "startOffset");
-    event_mark_non_writable(obj, "endContainer");
-    event_mark_non_writable(obj, "endOffset");
-    event_mark_non_writable(obj, "collapsed");
-    return obj;
+    event_set_bool(obj_root.get(), "collapsed", collapsed);
+    event_mark_non_writable(obj_root.get(), "startContainer");
+    event_mark_non_writable(obj_root.get(), "startOffset");
+    event_mark_non_writable(obj_root.get(), "endContainer");
+    event_mark_non_writable(obj_root.get(), "endOffset");
+    event_mark_non_writable(obj_root.get(), "collapsed");
+    return obj_root.get();
 }
 
 static Item js_input_event_get_target_ranges(Item* args, int argc);
 static void js_input_event_install_target_ranges(Item ev, Item target_ranges);
 
 static Item js_input_event_snapshot_range(Item range) {
-    Item init = js_new_object();
-    event_set_item(init, "startContainer", init_item(range, "startContainer"));
-    event_set_int(init, "startOffset", init_int(range, "startOffset", 0));
-    event_set_item(init, "endContainer", init_item(range, "endContainer"));
-    event_set_int(init, "endOffset", init_int(range, "endOffset", 0));
-    return js_ctor_static_range_fn(init);
+    RootFrame roots(2);
+    Rooted<Item> range_root(roots, range);
+    Rooted<Item> init_root(roots, js_new_object());
+    event_set_item(init_root.get(), "startContainer",
+        init_item(range_root.get(), "startContainer"));
+    event_set_int(init_root.get(), "startOffset",
+        init_int(range_root.get(), "startOffset", 0));
+    event_set_item(init_root.get(), "endContainer",
+        init_item(range_root.get(), "endContainer"));
+    event_set_int(init_root.get(), "endOffset",
+        init_int(range_root.get(), "endOffset", 0));
+    return js_ctor_static_range_fn(init_root.get());
 }
 
 static bool js_input_event_is_static_range(Item range) {
@@ -1552,52 +1567,69 @@ static bool js_input_event_is_static_range(Item range) {
 JS_FORWARD_STATIC_ITEM(js_input_event_throw_dom_exception, (const char* name, const char* message), js_throw_named_error_text, (name ? name : "InvalidStateError", message ? message : ""))
 
 static Item js_input_event_live_target_ranges(Item target_ranges) {
-    Item ranges = js_array_new(0);
-    if (get_type_id(target_ranges) != LMD_TYPE_ARRAY) return ranges;
+    RootFrame roots(3);
+    Rooted<Item> source_root(roots, target_ranges);
+    Rooted<Item> ranges_root(roots, js_array_new(0));
+    Rooted<Item> range_root(roots, ItemNull);
+    if (get_type_id(source_root.get()) != LMD_TYPE_ARRAY) {
+        return ranges_root.get();
+    }
 
-    int64_t len = js_array_length(target_ranges);
+    int64_t len = js_array_length(source_root.get());
     for (int64_t i = 0; i < len; i++) {
-        Item range = js_elements_get_int(target_ranges, i);
-        TypeId range_type = get_type_id(range);
+        range_root.set(js_elements_get_int(source_root.get(), i));
+        TypeId range_type = get_type_id(range_root.get());
         if (range_type != LMD_TYPE_MAP &&
             range_type != LMD_TYPE_VMAP) {
             continue;
         }
-        Item start_container = init_item(range, "startContainer");
-        Item end_container = init_item(range, "endContainer");
-        bool static_range = js_input_event_is_static_range(range);
+        Item start_container = init_item(range_root.get(), "startContainer");
+        Item end_container = init_item(range_root.get(), "endContainer");
+        bool static_range = js_input_event_is_static_range(range_root.get());
         bool static_range_has_dom_boundary =
             dom_unwrap_element(start_container) ||
             dom_unwrap_element(end_container);
         if (static_range && !static_range_has_dom_boundary) {
-            js_array_push(ranges, js_input_event_snapshot_range(range));
+            js_array_push(ranges_root.get(),
+                js_input_event_snapshot_range(range_root.get()));
             continue;
         }
         const char* exc = nullptr;
         JS_ASSIGN_OR_RETURN(live_range, dom_create_live_range_from_boundaries(
             start_container,
-            init_int(range, "startOffset", 0),
+            init_int(range_root.get(), "startOffset", 0),
             end_container,
-            init_int(range, "endOffset", 0),
+            init_int(range_root.get(), "endOffset", 0),
             &exc));
         if (live_range.item == ItemNull.item) {
             return js_input_event_throw_dom_exception(exc ? exc : "InvalidStateError",
                 "Invalid InputEvent targetRanges boundary");
         }
-        js_array_push(ranges, live_range);
+        js_array_push(ranges_root.get(), live_range);
     }
-    return ranges;
+    return ranges_root.get();
 }
 
 extern "C" Item js_ctor_input_event_fn(Item type_arg, Item init_arg) {
-    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, "InputEvent"));
-    event_set_item(ev, "data", init_nullable_str_item(init_arg, "data"));
-    event_set_str(ev, "inputType", init_str(init_arg, "inputType", ""));
-    event_set_bool(ev, "isComposing", init_bool(init_arg, "isComposing", false));
-    event_set_item(ev, "dataTransfer", init_item(init_arg, "dataTransfer"));
-    JS_ASSIGN_OR_RETURN(target_ranges, js_input_event_live_target_ranges(init_item(init_arg, "targetRanges")));
-    js_input_event_install_target_ranges(ev, target_ranges);
-    return ev;
+    RootFrame roots(4);
+    Rooted<Item> type_root(roots, type_arg);
+    Rooted<Item> init_root(roots, init_arg);
+    Rooted<Item> event_root(roots, build_ui_event(fn_to_cstr(type_root.get()),
+        init_root.get(), "InputEvent"));
+    if (item_is_error(event_root.get())) return event_root.get();
+    event_set_item(event_root.get(), "data",
+        init_nullable_str_item(init_root.get(), "data"));
+    event_set_str(event_root.get(), "inputType",
+        init_str(init_root.get(), "inputType", ""));
+    event_set_bool(event_root.get(), "isComposing",
+        init_bool(init_root.get(), "isComposing", false));
+    event_set_item(event_root.get(), "dataTransfer",
+        init_item(init_root.get(), "dataTransfer"));
+    Rooted<Item> ranges_root(roots, js_input_event_live_target_ranges(
+        init_item(init_root.get(), "targetRanges")));
+    if (item_is_error(ranges_root.get())) return ranges_root.get();
+    js_input_event_install_target_ranges(event_root.get(), ranges_root.get());
+    return event_root.get();
 }
 
 extern "C" Item js_ctor_pointer_event_fn(Item type_arg, Item init_arg) {
@@ -1820,14 +1852,17 @@ static Item js_input_event_get_target_ranges(Item* args, int argc) {
 }
 
 static void js_input_event_install_target_ranges(Item ev, Item target_ranges) {
-    Item ranges = target_ranges;
-    if (get_type_id(ranges) != LMD_TYPE_ARRAY) {
-        ranges = js_array_new(0);
+    RootFrame roots(4);
+    Rooted<Item> event_root(roots, ev);
+    Rooted<Item> ranges_root(roots, target_ranges);
+    if (get_type_id(ranges_root.get()) != LMD_TYPE_ARRAY) {
+        ranges_root.set(js_array_new(0));
     }
-    dom_realm_set_name(ev, "__target_ranges", ranges);
-    Item gtr_key = js_name_item("getTargetRanges");
-    dom_realm_set(ev, gtr_key,
+    dom_realm_set_name(event_root.get(), "__target_ranges", ranges_root.get());
+    Rooted<Item> key_root(roots, js_name_item("getTargetRanges"));
+    Rooted<Item> method_root(roots,
         js_new_native_span_function(js_input_event_get_target_ranges));
+    dom_realm_set(event_root.get(), key_root.get(), method_root.get());
 }
 
 extern "C" Item js_create_native_input_event(const char* type,

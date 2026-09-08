@@ -357,7 +357,9 @@ static void js_util_inspect_append_styled(StrBuf* sb, JsInspectContext* ctx,
 
 static bool js_util_inspect_is_object_like(Item value) {
     TypeId type = get_type_id(value);
-    return type == LMD_TYPE_MAP || is_array_family_type_id(type) || type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP;
+    return type == LMD_TYPE_MAP || is_materialized_array_type_id(type) ||
+        type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT ||
+        is_virtual_container_type_id(type);
 }
 
 #define js_util_inspect_is_undefined(value) (get_type_id(value) == LMD_TYPE_UNDEFINED)
@@ -587,7 +589,7 @@ static void js_util_inspect_append_named_value(StrBuf* sb, const char* name, Ite
         js_util_inspect_append_assertion_string(sb, value, assertion_string_limit);
         return;
     }
-    if (assertion_string && is_array_family_type_id(get_type_id(value)) &&
+    if (assertion_string && is_materialized_array_type_id(get_type_id(value)) &&
             js_array_length(value) > 50) {
         // AssertionError's property suffix is a compact summary; expanding
         // large actual/expected arrays hides the useful constructor tag.
@@ -629,7 +631,7 @@ static Item js_util_inspect_assertion_error(Item obj_item, JsInspectContext* ctx
     js_util_inspect_append_named_value(sb, "code", code, ctx, depth_left, &first, false);
     Item actual = js_get_key_cstr(obj_item, "actual");
     Item expected = js_get_key_cstr(obj_item, "expected");
-    bool multiline_expected = is_array_family_type_id(get_type_id(actual)) &&
+    bool multiline_expected = is_materialized_array_type_id(get_type_id(actual)) &&
         js_array_length(actual) > 50 && !js_util_inspect_is_undefined(expected);
     js_util_inspect_append_named_value(sb, "actual", actual,
         ctx, depth_left, &first, true, assertion_string_limit);
@@ -687,7 +689,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool, js_util_is_arguments_exotic, (Item value), (j
 static bool js_util_is_arguments_deep_value(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_MAP) return js_class_id(value) == JS_CLASS_ARGUMENTS;
-    if (is_array_family_type_id(type)) return js_util_is_arguments_exotic(value);
+    if (is_materialized_array_type_id(type)) return js_util_is_arguments_exotic(value);
     return false;
 }
 
@@ -1027,7 +1029,7 @@ static Item js_util_inspect_value(Item obj_item, JsInspectContext* ctx, int dept
     }
     // array-family: an all-numeric array is LMD_TYPE_ARRAY_NUM and would otherwise
     // fall through to js_json_stringify, printing [1,2] instead of Node's [ 1, 2 ]
-    if (is_array_family_type_id(tid)) return js_util_inspect_array(obj_item, ctx, depth_left);
+    if (is_materialized_array_type_id(tid)) return js_util_inspect_array(obj_item, ctx, depth_left);
     if (js_is_typed_array(obj_item)) return js_util_inspect_typed_array(obj_item, ctx, depth_left);
     if (js_util_inspect_is_object_like(obj_item)) return js_util_inspect_object(obj_item, ctx, depth_left);
 
@@ -1057,7 +1059,7 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
 JS_UTIL_TYPE_TEST(js_util_types_isDate, js_class_id(value) == JS_CLASS_DATE)
 JS_UTIL_TYPE_TEST(js_util_types_isRegExp, js_class_id(value) == JS_CLASS_REGEXP)
 // array-family: an all-numeric or empty array is stored in LMD_TYPE_ARRAY_NUM
-JS_UTIL_TYPE_TEST(js_util_types_isArray, is_array_family_type_id(get_type_id(value)))
+JS_UTIL_TYPE_TEST(js_util_types_isArray, is_materialized_array_type_id(get_type_id(value)))
 JS_UTIL_TYPE_TEST(js_util_types_isMap, js_class_id(value) == JS_CLASS_MAP)
 JS_UTIL_TYPE_TEST(js_util_types_isSet, js_class_id(value) == JS_CLASS_SET)
 #undef JS_UTIL_TYPE_TEST
@@ -1321,8 +1323,9 @@ JS_FORWARD_STATIC_EXPRESSION(bool, js_util_is_abort_signal, (Item signal), (js_c
 
 static bool js_util_is_resource_object(Item resource) {
     TypeId type = get_type_id(resource);
-    return type == LMD_TYPE_MAP || is_array_family_type_id(type) ||
-           type == LMD_TYPE_FUNC || type == LMD_TYPE_VMAP || type == LMD_TYPE_ELEMENT;
+    return type == LMD_TYPE_MAP || is_materialized_array_type_id(type) ||
+           type == LMD_TYPE_FUNC || is_virtual_container_type_id(type) ||
+           type == LMD_TYPE_ELEMENT;
 }
 
 static Item js_util_invalid_arg_rejection(const char* name, const char* expected) {
@@ -1434,7 +1437,9 @@ extern "C" Item js_util_inherits(Item ctor_item, Item super_item) {
     // validate superCtor.prototype
     Item super_proto = js_get_key_cstr(super_item, "prototype");
     TypeId proto_tid = get_type_id(super_proto);
-    if (proto_tid != LMD_TYPE_MAP && !is_array_family_type_id(proto_tid)) {
+    if (proto_tid != LMD_TYPE_MAP &&
+            !is_materialized_array_type_id(proto_tid) &&
+            !is_virtual_container_type_id(proto_tid)) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"superCtor.prototype\" property must be of type object. Received undefined");
     }
@@ -1550,7 +1555,9 @@ static bool js_util_is_host_singleton_object(Item value) {
 // numeric (and a freshly built []) is stored in the LMD_TYPE_ARRAY_NUM lane,
 // so testing the generic tag alone drops such an array to the primitive path
 // and compares Item pointers — deepStrictEqual([1,2],[1,2]) was false.
-JS_FORWARD_STATIC_EXPRESSION(bool, js_util_deep_equal_is_object_like_type, (TypeId type), (type == LMD_TYPE_MAP || is_array_family_type_id(type) || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_util_deep_equal_is_object_like_type, (TypeId type),
+    (type == LMD_TYPE_MAP || is_materialized_array_type_id(type) ||
+     type == LMD_TYPE_ELEMENT || is_virtual_container_type_id(type)))
 
 static bool js_util_is_nan_number(Item value) {
     TypeId type = get_type_id(value);
@@ -1997,11 +2004,11 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsObjectPairTraversal* ctx,
         return (Item){.item = b2it(equal)};
     }
 
-    if (is_array_family_type_id(ta)) {
+    if (is_materialized_array_type_id(ta)) {
         // an all-numeric array lands in LMD_TYPE_ARRAY_NUM and a mixed one in
         // LMD_TYPE_ARRAY; both are the same JS array to the language, so the
         // lanes must compare across each other, not just within.
-        if (!is_array_family_type_id(tb)) {
+        if (!is_materialized_array_type_id(tb)) {
             ctx->leave();
             return (Item){.item = b2it(false)};
         }

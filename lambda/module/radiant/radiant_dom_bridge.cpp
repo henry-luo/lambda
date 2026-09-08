@@ -127,6 +127,7 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_get_selection radiant_host_api->dom_catalog->get_selection
 #define dom_doc_has_browsing_context radiant_host_api->dom_catalog->doc_has_browsing_context
 #define dom_live_child_collection_bridge radiant_host_api->realm->live_child_collection_bridge
+#define dom_attribute_collection_bridge radiant_host_api->realm->attribute_collection_bridge
 #define dom_live_document_get_elements_by_tag_name_bridge radiant_host_api->realm->live_document_get_elements_by_tag_name_bridge
 #define dom_live_document_get_elements_by_class_name_bridge radiant_host_api->realm->live_document_get_elements_by_class_name_bridge
 #define dom_live_document_get_elements_by_name_bridge radiant_host_api->realm->live_document_get_elements_by_name_bridge
@@ -607,37 +608,172 @@ static int64_t radiant_dom_script_visible_element_child_count(DomElement* elem) 
     return count;
 }
 
-static Item radiant_dom_attributes_item(DomElement* elem) {
-    RootFrame roots(4);
-    Rooted<Item> arr_root(roots, radiant_dom_array_item());
-    Rooted<Item> pair_root(roots, ItemNull);
-    Rooted<Item> name_root(roots, ItemNull);
-    Rooted<Item> value_root(roots, ItemNull);
-
-    int attr_count = 0;
-    const char** attr_names = elem->attribute_names(&attr_count);
-    for (int i = 0; attr_names && i < attr_count; i++) {
-        const char* name = attr_names[i];
-        if (radiant_dom_is_internal_attr(name)) continue;
-        const char* value = elem->get_attribute(name);
-        pair_root.set(radiant_host_api->value->new_object());
-        name_root.set(radiant_dom_string_item(name));
-        value_root.set(radiant_dom_string_item(value));
-        radiant_host_api->value->property_set(pair_root.get(),
-            (Item){.item = s2it(heap_create_name("name"))}, name_root.get());
-        radiant_host_api->value->property_set(pair_root.get(),
-            (Item){.item = s2it(heap_create_name("value"))}, value_root.get());
-        // Attr is a Node: sanitizers consume nodeName/nodeValue even when the
-        // bridge represents NamedNodeMap entries as lightweight objects.
-        radiant_host_api->value->property_set(pair_root.get(),
-            (Item){.item = s2it(heap_create_name("nodeName"))}, name_root.get());
-        radiant_host_api->value->property_set(pair_root.get(),
-            (Item){.item = s2it(heap_create_name("nodeValue"))}, value_root.get());
-        radiant_host_api->value->array_push(arr_root.get(), pair_root.get());
-        dom_attribute_collection_expose_named(arr_root.get(),
-            name_root.get(), pair_root.get());
+static const char* radiant_dom_structural_attr_name_at(DomNode* node,
+                                                        int64_t wanted) {
+    DomElement* elem = node && node->is_element() ? node->as_element() : nullptr;
+    if (!elem || wanted < 0) return nullptr;
+    int source_count = 0;
+    const char** names = elem->attribute_names(&source_count);
+    int64_t visible = 0;
+    for (int i = 0; names && i < source_count; i++) {
+        if (radiant_dom_is_internal_attr(names[i])) continue;
+        if (visible++ == wanted) return names[i];
     }
-    return arr_root.get();
+    return nullptr;
+}
+
+static int64_t radiant_dom_velmt_attr_count(void* data) {
+    DomNode* node = (DomNode*)data;
+    DomElement* elem = node && node->is_element() ? node->as_element() : nullptr;
+    if (!elem) return 0;
+    int source_count = 0;
+    const char** names = elem->attribute_names(&source_count);
+    int64_t visible = 0;
+    for (int i = 0; names && i < source_count; i++) {
+        if (!radiant_dom_is_internal_attr(names[i])) visible++;
+    }
+    return visible;
+}
+
+static VirtualOpStatus radiant_dom_velmt_attr_get(void* data, Item key,
+                                                   Item* out) {
+    DomNode* node = (DomNode*)data;
+    DomElement* elem = node && node->is_element() ? node->as_element() : nullptr;
+    if (!elem || !out || !is_text_type_id(get_type_id(key))) {
+        return VIRTUAL_OP_MISSING;
+    }
+    const char* chars = key.get_chars();
+    uint32_t length = key.get_len();
+    int source_count = 0;
+    const char** names = elem->attribute_names(&source_count);
+    for (int i = 0; names && i < source_count; i++) {
+        const char* name = names[i];
+        if (radiant_dom_is_internal_attr(name) || !name) continue;
+        size_t name_length = strlen(name);
+        if (name_length != length || memcmp(name, chars, length) != 0) continue;
+        const char* value = elem->get_attribute(name);
+        *out = radiant_dom_string_item(value ? value : "");
+        return VIRTUAL_OP_OK;
+    }
+    return VIRTUAL_OP_MISSING;
+}
+
+static VirtualOpStatus radiant_dom_velmt_attr_set_readonly(
+        void* data, Item key, Item value, Item* out) {
+    (void)data; (void)key; (void)value; (void)out;
+    return VIRTUAL_OP_READONLY;
+}
+
+static VirtualOpStatus radiant_dom_velmt_attr_has(void* data, Item key,
+                                                   bool* out) {
+    Item ignored = ItemNull;
+    VirtualOpStatus status = radiant_dom_velmt_attr_get(data, key, &ignored);
+    if (out) *out = status == VIRTUAL_OP_OK;
+    return status == VIRTUAL_OP_ERROR ? status : VIRTUAL_OP_OK;
+}
+
+static VirtualOpStatus radiant_dom_velmt_attr_remove_readonly(
+        void* data, Item key, bool* out) {
+    (void)data; (void)key;
+    if (out) *out = false;
+    return VIRTUAL_OP_READONLY;
+}
+
+static VirtualOpStatus radiant_dom_velmt_attr_key_at(void* data, int64_t index,
+                                                      Item* out) {
+    if (!out) return VIRTUAL_OP_ERROR;
+    const char* name = radiant_dom_structural_attr_name_at((DomNode*)data, index);
+    if (!name) return VIRTUAL_OP_MISSING;
+    *out = radiant_dom_string_item(name);
+    return VIRTUAL_OP_OK;
+}
+
+static VirtualOpStatus radiant_dom_velmt_attr_value_at(void* data, int64_t index,
+                                                        Item* out) {
+    const char* name = radiant_dom_structural_attr_name_at((DomNode*)data, index);
+    if (!name || !out) return name ? VIRTUAL_OP_ERROR : VIRTUAL_OP_MISSING;
+    const char* value = ((DomNode*)data)->as_element()->get_attribute(name);
+    *out = radiant_dom_string_item(value ? value : "");
+    return VIRTUAL_OP_OK;
+}
+
+static int64_t radiant_dom_velmt_child_count(void* data) {
+    DomNode* node = (DomNode*)data;
+    DomElement* elem = node && node->is_element() ? node->as_element() : nullptr;
+    int64_t count = 0;
+    for (DomNode* child = radiant_dom_first_script_visible_child(elem); child;
+         child = radiant_dom_next_script_visible_sibling(child)) count++;
+    return count;
+}
+
+static VirtualOpStatus radiant_dom_velmt_child_get(void* data, int64_t index,
+                                                    Item* out) {
+    DomNode* node = (DomNode*)data;
+    DomElement* elem = node && node->is_element() ? node->as_element() : nullptr;
+    if (!out || index < 0) return out ? VIRTUAL_OP_MISSING : VIRTUAL_OP_ERROR;
+    DomNode* child = radiant_dom_first_script_visible_child(elem);
+    while (child && index-- > 0) child = radiant_dom_next_script_visible_sibling(child);
+    if (!child) return VIRTUAL_OP_MISSING;
+    *out = radiant_dom_node_item(child);
+    return VIRTUAL_OP_OK;
+}
+
+static VirtualOpStatus radiant_dom_velmt_children_readonly(
+        void* data, int64_t index, Item value, Item* out) {
+    (void)data; (void)index; (void)value; (void)out;
+    return VIRTUAL_OP_READONLY;
+}
+
+static VirtualOpStatus radiant_dom_velmt_splice_readonly(
+        void* data, int64_t start, int64_t remove_count,
+        const Item* values, int64_t value_count, Item* out) {
+    (void)data; (void)start; (void)remove_count;
+    (void)values; (void)value_count; (void)out;
+    return VIRTUAL_OP_READONLY;
+}
+
+static VirtualOpStatus radiant_dom_velmt_tag(void* data, Item* out) {
+    DomNode* node = (DomNode*)data;
+    if (!node || !out) return VIRTUAL_OP_MISSING;
+    const char* name = node->is_element() && node->as_element()->tag_name
+        ? node->as_element()->tag_name : node->node_name();
+    *out = radiant_dom_string_item(name ? name : "");
+    return VIRTUAL_OP_OK;
+}
+
+static VirtualOpStatus radiant_dom_velmt_namespace(void* data, Item* out) {
+    DomNode* node = (DomNode*)data;
+    DomElement* elem = node && node->is_element() ? node->as_element() : nullptr;
+    if (!elem || !out) return VIRTUAL_OP_MISSING;
+    const char* uri = elem->get_attribute("__lambda_ns_uri");
+    if (!uri || !uri[0]) {
+        uri = radiant_dom_host_type_for_node(node) == radiant_dom_svg_element_host_type()
+            ? "http://www.w3.org/2000/svg" : "http://www.w3.org/1999/xhtml";
+    }
+    *out = radiant_dom_string_item(uri);
+    return VIRTUAL_OP_OK;
+}
+
+extern "C" const VelmtVtable radiant_dom_node_velmt_vtable = {
+    {LAMBDA_VIRTUAL_ABI_VERSION, LMD_TYPE_VELMT, {0, 0, 0},
+     nullptr, nullptr, nullptr},
+    {radiant_dom_velmt_tag,
+     radiant_dom_velmt_namespace,
+     {radiant_dom_velmt_attr_get,
+      radiant_dom_velmt_attr_set_readonly,
+      radiant_dom_velmt_attr_has,
+      radiant_dom_velmt_attr_remove_readonly,
+      radiant_dom_velmt_attr_count,
+      radiant_dom_velmt_attr_key_at,
+      radiant_dom_velmt_attr_value_at},
+     {radiant_dom_velmt_child_count,
+      radiant_dom_velmt_child_get,
+      radiant_dom_velmt_children_readonly,
+      radiant_dom_velmt_splice_readonly}}
+};
+
+static Item radiant_dom_attributes_item(DomElement* elem) {
+    return dom_attribute_collection_bridge(elem);
 }
 
 static bool radiant_dom_label_contains_control(DomElement* label,
@@ -979,7 +1115,7 @@ static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
     Item wrapper = (Item){.item = entry->item};
     // document teardown frees arena-owned DOM nodes; retained wrappers must
     // keep their JS identity but lose the native payload through the husk protocol.
-    if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap && wrapper.vmap->host_type) {
+    if (virtual_host_type(wrapper)) {
         radiant_dom_host_invalidate(wrapper);
     }
     radiant_host_api->gc->unregister_weak(&entry->item);
@@ -1036,10 +1172,10 @@ RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem) {
     Item cached = radiant_dom_lookup_wrapper(node);
     if (cached.item != ITEM_NULL) return cached;
 
-    Item wrapper = radiant_host_api->value->vmap_new();
-    if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
-        wrapper.vmap->host_type = radiant_dom_host_type_for_node(node);
-        wrapper.vmap->host_data = dom_elem;
+    const JubeTypeDef* host_type =
+        (const JubeTypeDef*)radiant_dom_host_type_for_node(node);
+    Item wrapper = radiant_host_api->value->native_object_new(host_type, dom_elem);
+    if (get_type_id(wrapper) == LMD_TYPE_VELMT && wrapper.velmt) {
         // Cache identity before initialization because inline handlers and
         // native DOM state attach expandos to this same wrapper recursively.
         radiant_dom_cache_wrapper(node, wrapper);
@@ -1048,15 +1184,15 @@ RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem) {
         radiant_host_api->gc->unregister_root(&wrapper.item);
         return wrapper;
     }
-    // Phase 7 removes the DOM-node map shell; a failed VMap allocation must
+    // A failed Velmt allocation must
     // not recreate the stale compatibility carrier or runtime dispatch diverges.
     return ItemNull;
 }
 
 RADIANT_C_API void* radiant_dom_unwrap_node(Item item) {
-    if (get_type_id(item) == LMD_TYPE_VMAP && item.vmap &&
-        radiant_dom_is_node_host_type(item.vmap->host_type)) {
-        return item.vmap->host_data;
+    if (get_type_id(item) == LMD_TYPE_VELMT &&
+        radiant_dom_is_node_host_type(virtual_host_type(item))) {
+        return virtual_host_data(item);
     }
     // Generic event/property paths probe arbitrary JS values before Radiant is
     // requested; an inactive module has no DOM bridge table to delegate to.
@@ -1068,11 +1204,11 @@ RADIANT_C_API void* radiant_dom_unwrap_node(Item item) {
 }
 
 RADIANT_C_API DomDocument* radiant_dom_item_document(Item item) {
-    if (get_type_id(item) != LMD_TYPE_VMAP || !item.vmap ||
-            !radiant_dom_is_node_host_type(item.vmap->host_type)) {
+    if (get_type_id(item) != LMD_TYPE_VELMT ||
+            !radiant_dom_is_node_host_type(virtual_host_type(item))) {
         return nullptr;
     }
-    DomNode* node = (DomNode*)item.vmap->host_data;
+    DomNode* node = (DomNode*)virtual_host_data(item);
     if (!node || !s_radiant_dom_wrapper_index) return nullptr;
     RadiantDomWrapperCacheIndexEntry probe = {.node = node, .entry = nullptr};
     const RadiantDomWrapperCacheIndexEntry* found =
@@ -1129,7 +1265,10 @@ static RadiantEvtKey radiant_dom_event_item_to_key(Item value) {
     void* node = radiant_dom_unwrap_node(value);
     if (node) { key.kind = RADIANT_EVT_KEY_NODE; key.ptr = node; return key; }
     if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_VMAP) {
-        if (value.item == radiant_host_api->script->global_this().item) {
+        // Plain EventTarget dispatch is available without loading Radiant.
+        // Only consult the host realm when the module boundary is active.
+        if (radiant_host_api && radiant_host_api->script &&
+                value.item == radiant_host_api->script->global_this().item) {
             key.kind = RADIANT_EVT_KEY_WINDOW;
         } else {
             key.kind = RADIANT_EVT_KEY_CONTAINER; key.ptr = value.container;
@@ -1272,6 +1411,11 @@ static bool radiant_dom_event_set_field(Item receiver, const char* name,
 RADIANT_C_API Item radiant_dom_event_create(const char* type, bool bubbles,
                                             bool cancelable, bool composed,
                                             int class_id) {
+    const void* event_host_type = radiant_dom_event_host_type();
+    // Event constructors can run before any document-backed operation. Ensure
+    // the Jube type and its host API are active before the native record is
+    // initialized or its prototype/expando writes would miss host dispatch.
+    if (!jube_find_type_by_host_type(event_host_type)) return ItemNull;
     Item event = vmap_new();
     if (get_type_id(event) != LMD_TYPE_VMAP || !event.vmap) return ItemNull;
 
@@ -1287,7 +1431,7 @@ RADIANT_C_API Item radiant_dom_event_create(const char* type, bool bubbles,
     record->cancelable = cancelable;
     record->composed = composed;
     record->class_id = class_id;
-    event.vmap->host_type = radiant_dom_event_host_type();
+    event.vmap->host_type = event_host_type;
     event.vmap->host_data = record;
     return event;
 }
@@ -1522,9 +1666,9 @@ RADIANT_C_API int radiant_dom_event_call(Item receiver, const char* name,
 }
 
 RADIANT_C_API bool radiant_dom_is_node(Item item) {
-    if (get_type_id(item) == LMD_TYPE_VMAP && item.vmap &&
-        radiant_dom_is_node_host_type(item.vmap->host_type)) {
-        return item.vmap->host_data != nullptr;
+    if (get_type_id(item) == LMD_TYPE_VELMT &&
+        radiant_dom_is_node_host_type(virtual_host_type(item))) {
+        return virtual_host_data(item) != nullptr;
     }
     return false;
 }
@@ -2516,8 +2660,9 @@ RADIANT_C_API int radiant_dom_member_text_content(Item receiver, Item* out) {
 // lambda/dom/dom_api.def -- so the ordinal is a dispatch encoding for the JS
 // long tail (ES40) and the body behind it is the one body (ES38).
 //
-// childNodes is deliberately NOT here: JS requires a live NodeList and Lambda
-// requires a snapshot (S9.2.2), so that one genuinely differs by door.
+// childNodes remains module-owned because its live NodeList brand is a Jube
+// adapter concern; both JS and Lambda read the same direct VArray backend
+// while Lambda holds the DOM fixed under D7.4.5v2.
 // ---------------------------------------------------------------------------
 #define RADIANT_DOM_MEMBER_FROM_CATALOG(fn_name, catalog_op)                  \
     RADIANT_C_API int fn_name(Item receiver, Item* out) {                     \
@@ -2572,9 +2717,7 @@ RADIANT_C_API int radiant_dom_member_previous_sibling_any(Item receiver, Item* o
 RADIANT_C_API int radiant_dom_member_child_nodes_any(Item receiver, Item* out) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
     if (!node || !out) return 0;
-    *out = node->is_element()
-        ? dom_live_child_collection_bridge((void*)node->as_element(), false)
-        : radiant_dom_array_item();
+    *out = dom_live_child_collection_bridge((void*)node, false);
     return 1;
 }
 
@@ -2962,9 +3105,9 @@ RADIANT_C_API Item radiant_dom_host_prototype(Item object) {
 }
 
 RADIANT_C_API void radiant_dom_host_invalidate(Item object) {
-    if (get_type_id(object) == LMD_TYPE_VMAP && object.vmap &&
-        radiant_dom_is_node_host_type(object.vmap->host_type)) {
-        object.vmap->host_data = nullptr;
+    if (get_type_id(object) == LMD_TYPE_VELMT &&
+        radiant_dom_is_node_host_type(virtual_host_type(object))) {
+        virtual_host_set(object, virtual_host_type(object), nullptr);
     }
 }
 
@@ -3021,15 +3164,18 @@ RADIANT_C_API int radiant_dom_foreign_document_set_property(Item object,
 // to dom_swap_active_document made the active document a DomNode* -- the crash
 // that took down every script, reported only as a recovered JIT fault.
 static void* radiant_dom_doc_from_wrapper(Item object) {
-    if (get_type_id(object) != LMD_TYPE_VMAP || !object.vmap || !object.vmap->host_data) {
+    void* native = virtual_host_data(object);
+    const void* host_type = virtual_host_type(object);
+    if (!native) {
         return nullptr;
     }
-    if (object.vmap->host_type == radiant_dom_document_host_type()) {
-        DomNode* n = (DomNode*)object.vmap->host_data;
+    if (host_type == radiant_dom_document_host_type() ||
+            host_type == radiant_dom_foreign_document_host_type()) {
+        DomNode* n = (DomNode*)native;
         DomElement* e = (n && n->is_element()) ? n->as_element() : nullptr;
         return e ? (void*)e->doc : nullptr;
     }
-    return object.vmap->host_data;
+    return native;
 }
 
 RADIANT_C_API int radiant_dom_document_host_get_property(Item object, Item key, Item* out) {
@@ -3333,7 +3479,7 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
         }
         const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !doc || !doc->document_pool) {
-            *out = radiant_dom_array_item();
+            *out = dom_static_node_list_from_array(radiant_dom_array_item());
             return 1;
         }
         CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->document_pool);
@@ -3345,6 +3491,7 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
         ArrayList* results = arraylist_new(16);
         Item arr_item = radiant_dom_array_item();
         Array* arr = arr_item.array;
+        radiant_host_api->gc->register_root(&arr_item.item);
         if (results) {
             radiant_dom_selector_group_collect_all(
                 matcher, selector_group, root, results, true);
@@ -3353,7 +3500,8 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
             }
             arraylist_free(results);
         }
-        *out = arr_item;
+        *out = dom_static_node_list_from_array(arr_item);
+        radiant_host_api->gc->unregister_root(&arr_item.item);
         return 1;
     }
 

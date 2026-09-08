@@ -1,3 +1,7 @@
 fresh:3
 live:3
 tail:true
+array:false
+nodeList:true
+childrenArray:false
+htmlCollection:true

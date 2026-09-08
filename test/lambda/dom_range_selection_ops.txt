@@ -1,15 +1,15 @@
 {
   b1: {
-    start_container: {},
+    start_container: <p id: "intro", <#text>>,
     start_offset: 0,
-    end_container: {},
+    end_container: <p id: "intro", <#text>>,
     end_offset: 1
   },
   c1: true,
   sb: {
-    anchor_node: {},
+    anchor_node: <#text>,
     anchor_offset: 2,
-    focus_node: {},
+    focus_node: <#text>,
     focus_offset: 2
   },
   cnt: 1,

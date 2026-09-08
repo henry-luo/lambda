@@ -201,22 +201,29 @@ static void heap_assert_raw_item_allocation(void* ptr, TypeId type_id) {
     assert_raw_item_pointer(ptr);
 }
 
-static void gc_finalize_vmap_host_payload(VMap* vm) {
-    if (!vm || !vm->host_type || !vm->host_data) return;
-    const JubeTypeDef* type = jube_find_type_by_host_type(vm->host_type);
+static void gc_finalize_virtual_host_payload(VirtualContainer* container) {
+    if (!container || !container->host_type || !container->host_data) return;
+    const JubeTypeDef* type = jube_find_type_by_host_type(container->host_type);
     if (!type || !(type->flags & JUBE_TYPE_OWNING_NATIVE)) return;
     void (*destroy)(void*) = type->destroy;
     if (!destroy) return;
-    void* native = vm->host_data;
-    // owning host VMAPs store native payload beside the backing map, so GC must
-    // finalize host_data before freeing the backing store or the payload leaks.
-    vm->host_data = NULL;
+    void* native = container->host_data;
+    // Host payload ownership is independent of a carrier's structural backend.
+    container->host_data = NULL;
     destroy(native);
 }
 
-static void gc_destroy_vmap_object(void* obj, void* data) {
-    gc_finalize_vmap_host_payload((VMap*)obj);
-    vmap_gc_destroy(obj, data);
+static void gc_destroy_virtual_object(void* obj, void* data) {
+    if (!obj) return;
+    TypeId type_id = ((Container*)obj)->type_id;
+    gc_finalize_virtual_host_payload((VirtualContainer*)obj);
+    if (type_id == LMD_TYPE_VMAP) {
+        vmap_gc_destroy(obj, data);
+        return;
+    }
+    VirtualContainer* container = (VirtualContainer*)obj;
+    const VirtualVtable* vtable = (const VirtualVtable*)container->vtable;
+    if (vtable && vtable->destroy) vtable->destroy(data);
 }
 
 static JsTypedArray* gc_typed_array_from_map(Map* map) {
@@ -430,7 +437,7 @@ static void heap_finish_init(void) {
     heap_configure_gc_force_schedule(context->heap->gc);
     heap_configure_gc_poisoning(context->heap->gc);
     context->heap->gc->vmap_trace = vmap_gc_trace;
-    context->heap->gc->vmap_destroy = gc_destroy_vmap_object;
+    context->heap->gc->vmap_destroy = gc_destroy_virtual_object;
     context->heap->gc->error_trace = err_gc_trace;
     context->heap->gc->error_destroy = err_gc_destroy;
     context->heap->gc->js_native_trace = js_native_map_gc_trace;
@@ -630,7 +637,7 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     if (!ptr) return NULL;
     // mark containers as heap-owned so free_container can distinguish from arena-owned
     // Note: Function and Type have different byte-1 layout (not Container flags), skip them
-    if (type_id >= LMD_TYPE_CONTAINER && type_id != LMD_TYPE_FUNC && type_id != LMD_TYPE_TYPE) {
+    if (is_container_type_id(type_id)) {
         ((Container*)ptr)->is_heap = 1;
     }
     heap_assert_raw_item_allocation(ptr, type_id);
@@ -681,7 +688,7 @@ extern "C" void* heap_calloc_class(size_t size, TypeId type_id, int cls) {
     size_t slot_size = sizeof(gc_header_t) + class_size;
     void* ptr = gc_heap_bump_alloc(gc, slot_size, size, type_id, cls);
     if (!ptr) return NULL;
-    if (type_id >= LMD_TYPE_CONTAINER && type_id != LMD_TYPE_FUNC && type_id != LMD_TYPE_TYPE) {
+    if (is_container_type_id(type_id)) {
         ((Container*)ptr)->is_heap = 1;
     }
     heap_assert_raw_item_allocation(ptr, type_id);
@@ -1287,13 +1294,18 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
             gc->external_destroy(obj, tag);
         }
 
-        if (tag == LMD_TYPE_VMAP) {
-            VMap *vm = (VMap*)obj;
-            // Host payload ownership is independent of the optional lazy map backing.
-            gc_finalize_vmap_host_payload(vm);
-            if (vm->vtable && vm->data) {
-                vm->vtable->destroy(vm->data);
-                vm->data = NULL;
+        if (is_virtual_container_type_id((TypeId)tag)) {
+            VirtualContainer* container = (VirtualContainer*)obj;
+            gc_finalize_virtual_host_payload(container);
+            if (container->data) {
+                if (tag == LMD_TYPE_VMAP) {
+                    VMap* vm = (VMap*)obj;
+                    if (vm->vtable && vm->vtable->destroy) vm->vtable->destroy(vm->data);
+                } else {
+                    const VirtualVtable* vtable = (const VirtualVtable*)container->vtable;
+                    if (vtable && vtable->destroy) vtable->destroy(container->data);
+                }
+                container->data = NULL;
             }
         }
         else if (tag == LMD_TYPE_ERROR) {

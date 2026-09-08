@@ -1405,7 +1405,7 @@ extern "C" Item js_delete(Item target, JsPropertyLane lane,
     bool object_like = target_type == LMD_TYPE_MAP ||
         js_props_is_array(target_root.get()) || target_type == LMD_TYPE_FUNC ||
         target_type == LMD_TYPE_ELEMENT ||
-        target_type == LMD_TYPE_VMAP || target_type == LMD_TYPE_ERROR;
+        is_virtual_container_type_id(target_type) || target_type == LMD_TYPE_ERROR;
     if (!object_like && target_type != LMD_TYPE_NULL &&
             target_type != LMD_TYPE_UNDEFINED) {
         // DeleteProperty on a primitive property reference succeeds after the

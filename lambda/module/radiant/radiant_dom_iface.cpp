@@ -15,6 +15,7 @@
 extern const JubeHostAPI* radiant_host_api;
 extern "C" const void* radiant_dom_range_host_type(void);
 extern "C" const void* radiant_dom_selection_host_type(void);
+extern "C" Item dom_realm_constructor_prototype(const char* ctor_name);
 
 extern const char radiant_dom_interface_decl[];
 const char radiant_dom_interface_decl[] =
@@ -311,6 +312,70 @@ const char radiant_dom_interface_decl[] =
     "type foreign_document : document {\n"
     "}\n"
     "type velmt {\n"
+    "    index: int,\n"
+    "    tag: string,\n"
+    "    id: any,\n"
+    "    width: float,\n"
+    "    height: float,\n"
+    "    wd: float,\n"
+    "    hg: float,\n"
+    "    box: map,\n"
+    "    children: array,\n"
+    "    text: string,\n"
+    "    style: map,\n"
+    "    margin: map,\n"
+    "    border: map,\n"
+    "    padding: map,\n"
+    "    attrs: map\n"
+    "}\n"
+    "type node_list {\n"
+    "    length: int,\n"
+    "    item: fn(index: int) any\n"
+    "}\n"
+    "type radio_node_list {\n"
+    "    length: int,\n"
+    "    item: fn(index: int) any\n"
+    "}\n"
+    "type dom_rect_list {\n"
+    "    length: int,\n"
+    "    item: fn(index: int) any\n"
+    "}\n"
+    "type style_sheet_list {\n"
+    "    length: int,\n"
+    "    item: fn(index: int) any\n"
+    "}\n"
+    "type css_rule_list {\n"
+    "    length: int,\n"
+    "    item: fn(index: int) any\n"
+    "}\n"
+    "type html_collection {\n"
+    "    length: int,\n"
+    "    item: fn(index: int) any,\n"
+    "    named_item: fn(name: string) any\n"
+    "}\n"
+    "type html_options_collection {\n"
+    "    length: int,\n"
+    "    selected_index: int,\n"
+    "    item: fn(index: int) any,\n"
+    "    named_item: fn(name: string) any,\n"
+    "    add: fn(element: any, before: any) any\n"
+    "}\n"
+    "type html_form_controls_collection {\n"
+    "    length: int,\n"
+    "    item: fn(index: int) any,\n"
+    "    named_item: fn(name: string) any\n"
+    "}\n"
+    "type named_node_map {\n"
+    "    length: int,\n"
+    "    item: fn(index: int) any,\n"
+    "    get_named_item: fn(name: string) any\n"
+    "}\n"
+    "type dom_token_list {\n"
+    "    length: int, value: string,\n"
+    "    item: fn(index: int) any, add: fn(token: string) any,\n"
+    "    remove: fn(token: string) any, toggle: fn(token: string, force: any) any,\n"
+    "    contains: fn(token: string) bool, replace: fn(old: string, next: string) bool,\n"
+    "    to_string: fn() string\n"
     "}\n";
 
 // ---- adapters: JubeMemberBind handler shape -> host API behavior entries ----
@@ -1630,6 +1695,213 @@ static Item radiant_velmt_no_prototype(void) {
     return ItemNull;
 }
 
+#define RADIANT_VELMT_GETTER(fn, property)                                  \
+    static int fn(Item receiver, Item* out) {                               \
+        return radiant_velmt_host_get_property(                             \
+            receiver, radiant_dom_doc_key(property), out);                  \
+    }
+
+RADIANT_VELMT_GETTER(radiant_velmt_get_index, "index")
+RADIANT_VELMT_GETTER(radiant_velmt_get_tag, "tag")
+RADIANT_VELMT_GETTER(radiant_velmt_get_id, "id")
+RADIANT_VELMT_GETTER(radiant_velmt_get_width, "width")
+RADIANT_VELMT_GETTER(radiant_velmt_get_height, "height")
+RADIANT_VELMT_GETTER(radiant_velmt_get_wd, "wd")
+RADIANT_VELMT_GETTER(radiant_velmt_get_hg, "hg")
+RADIANT_VELMT_GETTER(radiant_velmt_get_box, "box")
+RADIANT_VELMT_GETTER(radiant_velmt_get_children, "children")
+RADIANT_VELMT_GETTER(radiant_velmt_get_text, "text")
+RADIANT_VELMT_GETTER(radiant_velmt_get_style, "style")
+RADIANT_VELMT_GETTER(radiant_velmt_get_margin, "margin")
+RADIANT_VELMT_GETTER(radiant_velmt_get_border, "border")
+RADIANT_VELMT_GETTER(radiant_velmt_get_padding, "padding")
+RADIANT_VELMT_GETTER(radiant_velmt_get_attrs, "attrs")
+
+static const JubeMemberBind radiant_velmt_members[] = {
+    BIND_FIELD("index", radiant_velmt_get_index),
+    BIND_FIELD("tag", radiant_velmt_get_tag),
+    BIND_FIELD("id", radiant_velmt_get_id),
+    BIND_FIELD("width", radiant_velmt_get_width),
+    BIND_FIELD("height", radiant_velmt_get_height),
+    BIND_FIELD("wd", radiant_velmt_get_wd),
+    BIND_FIELD("hg", radiant_velmt_get_hg),
+    BIND_FIELD("box", radiant_velmt_get_box),
+    BIND_FIELD("children", radiant_velmt_get_children),
+    BIND_FIELD("text", radiant_velmt_get_text),
+    BIND_FIELD("style", radiant_velmt_get_style),
+    BIND_FIELD("margin", radiant_velmt_get_margin),
+    BIND_FIELD("border", radiant_velmt_get_border),
+    BIND_FIELD("padding", radiant_velmt_get_padding),
+    BIND_FIELD("attrs", radiant_velmt_get_attrs),
+};
+
+extern "C" int dom_child_collection_named_get(Item receiver, Item key, Item* out);
+extern "C" int dom_child_collection_named_has(Item receiver, Item key, Item* out);
+extern "C" Item dom_options_collection_selected_index(Item collection);
+extern "C" Item dom_options_collection_set_selected_index(
+    Item collection, Item value);
+extern "C" Item dom_options_collection_add(
+    Item collection, Item element, Item before);
+
+static int radiant_collection_length_get(Item receiver, Item* out) {
+    if (!out || get_type_id(receiver) != LMD_TYPE_VARRAY) return 0;
+    *out = (Item){.item = i2it(fn_len(receiver))};
+    return 1;
+}
+
+static int radiant_collection_indexed_get(Item receiver, int64_t index, Item* out) {
+    if (!out || get_type_id(receiver) != LMD_TYPE_VARRAY) return 0;
+    // WebIDL indexed properties are absent outside the current collection
+    // bounds. Reporting a successful Lambda null here turns a JS miss into
+    // `null`, which breaks array-like consumers that require `undefined`.
+    if (index < 0 || index >= varray_count(receiver.varray)) return 0;
+    *out = item_at(receiver, index);
+    return 1;
+}
+
+static int radiant_collection_item(Item receiver, Item* args, int argc, Item* out) {
+    if (!out || get_type_id(receiver) != LMD_TYPE_VARRAY) return 0;
+    int64_t index = argc > 0 ? fn_int64_index(args[0]) : INT64_MIN;
+    *out = index == INT64_MIN ? ItemNull : item_at(receiver, index);
+    return 1;
+}
+
+static int radiant_collection_named_item(Item receiver, Item* args, int argc, Item* out) {
+    if (!out || get_type_id(receiver) != LMD_TYPE_VARRAY) return 0;
+    if (argc <= 0 || !dom_child_collection_named_get(receiver, args[0], out)) {
+        *out = ItemNull;
+    }
+    return 1;
+}
+
+static Item radiant_node_list_prototype(void) {
+    return dom_realm_constructor_prototype("NodeList");
+}
+
+static Item radiant_html_collection_prototype(void) {
+    return dom_realm_constructor_prototype("HTMLCollection");
+}
+
+static Item radiant_html_options_collection_prototype(void) {
+    return dom_realm_constructor_prototype("HTMLOptionsCollection");
+}
+
+static Item radiant_html_form_controls_collection_prototype(void) {
+    return dom_realm_constructor_prototype("HTMLFormControlsCollection");
+}
+
+static Item radiant_named_node_map_prototype(void) {
+    return dom_realm_constructor_prototype("NamedNodeMap");
+}
+
+static Item radiant_dom_token_list_prototype(void) {
+    return dom_realm_constructor_prototype("DOMTokenList");
+}
+
+static Item radiant_radio_node_list_prototype(void) {
+    return dom_realm_constructor_prototype("RadioNodeList");
+}
+
+static Item radiant_dom_rect_list_prototype(void) {
+    return dom_realm_constructor_prototype("DOMRectList");
+}
+
+static Item radiant_style_sheet_list_prototype(void) {
+    return dom_realm_constructor_prototype("StyleSheetList");
+}
+
+static Item radiant_css_rule_list_prototype(void) {
+    return dom_realm_constructor_prototype("CSSRuleList");
+}
+
+#define RADIANT_TOKEN_LIST_METHOD(name, operation)                            \
+static int name(Item receiver, Item* args, int argc, Item* out) {             \
+    if (!out || !radiant_host_api || !radiant_host_api->realm ||              \
+            !radiant_host_api->realm->token_list_operation) return 0;         \
+    *out = radiant_host_api->realm->token_list_operation(                      \
+        receiver, operation, args, argc);                                     \
+    return 1;                                                                 \
+}
+
+RADIANT_TOKEN_LIST_METHOD(radiant_token_list_add, JUBE_DOM_TOKEN_LIST_ADD)
+RADIANT_TOKEN_LIST_METHOD(radiant_token_list_remove, JUBE_DOM_TOKEN_LIST_REMOVE)
+RADIANT_TOKEN_LIST_METHOD(radiant_token_list_toggle, JUBE_DOM_TOKEN_LIST_TOGGLE)
+RADIANT_TOKEN_LIST_METHOD(radiant_token_list_contains, JUBE_DOM_TOKEN_LIST_CONTAINS)
+RADIANT_TOKEN_LIST_METHOD(radiant_token_list_replace, JUBE_DOM_TOKEN_LIST_REPLACE)
+RADIANT_TOKEN_LIST_METHOD(radiant_token_list_to_string, JUBE_DOM_TOKEN_LIST_TO_STRING)
+
+static int radiant_token_list_value_get(Item receiver, Item* out) {
+    return radiant_token_list_to_string(receiver, NULL, 0, out);
+}
+
+static int radiant_options_selected_index_get(Item receiver, Item* out) {
+    if (!out) return 0;
+    *out = dom_options_collection_selected_index(receiver);
+    return 1;
+}
+
+static int radiant_options_selected_index_set(
+        Item receiver, Item value, Item* out) {
+    if (!out) return 0;
+    *out = dom_options_collection_set_selected_index(receiver, value);
+    return 1;
+}
+
+static int radiant_options_add(
+        Item receiver, Item* args, int argc, Item* out) {
+    if (!out) return 0;
+    *out = dom_options_collection_add(receiver,
+        radiant_iface_arg(args, argc, 0), radiant_iface_arg(args, argc, 1));
+    return 1;
+}
+
+static const JubeMemberBind radiant_node_list_members[] = {
+    BIND_FIELD("length", radiant_collection_length_get),
+    {"item", NULL, NULL, NULL, radiant_collection_item, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+};
+
+static const JubeMemberBind radiant_html_collection_members[] = {
+    BIND_FIELD("length", radiant_collection_length_get),
+    {"item", NULL, NULL, NULL, radiant_collection_item, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"named_item", "namedItem", NULL, NULL, radiant_collection_named_item, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+};
+
+static const JubeMemberBind radiant_html_options_collection_members[] = {
+    BIND_FIELD("length", radiant_collection_length_get),
+    BIND_FIELD_SET("selected_index", radiant_options_selected_index_get,
+                   radiant_options_selected_index_set),
+    {"item", NULL, NULL, NULL, radiant_collection_item, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"named_item", "namedItem", NULL, NULL, radiant_collection_named_item, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    BIND_CALL("add", radiant_options_add),
+};
+
+static const JubeMemberBind radiant_named_node_map_members[] = {
+    BIND_FIELD("length", radiant_collection_length_get),
+    {"item", NULL, NULL, NULL, radiant_collection_item, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"get_named_item", "getNamedItem", NULL, NULL, radiant_collection_named_item, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+};
+
+static const JubeMemberBind radiant_dom_token_list_members[] = {
+    BIND_FIELD("length", radiant_collection_length_get),
+    BIND_FIELD("value", radiant_token_list_value_get),
+    {"item", NULL, NULL, NULL, radiant_collection_item, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    BIND_CALL("add", radiant_token_list_add),
+    BIND_CALL("remove", radiant_token_list_remove),
+    BIND_CALL("toggle", radiant_token_list_toggle),
+    BIND_CALL("contains", radiant_token_list_contains),
+    BIND_CALL("replace", radiant_token_list_replace),
+    {"to_string", "toString", NULL, NULL, radiant_token_list_to_string, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+};
+
 extern const JubeTypeBinding radiant_dom_type_bindings[] = {
     {"range", NULL, radiant_range_members,
      (int32_t)(sizeof(radiant_range_members) / sizeof(radiant_range_members[0])),
@@ -1725,12 +1997,69 @@ extern const JubeTypeBinding radiant_dom_type_bindings[] = {
      radiant_dom_document_host_has_property, radiant_dom_document_host_delete_property,
      radiant_dom_document_host_own_property_descriptor, radiant_dom_document_host_own_property_names,
      radiant_dom_document_prototype},
-    {"velmt", NULL, NULL, 0,
+    {"velmt", NULL, radiant_velmt_members,
+     (int32_t)(sizeof(radiant_velmt_members) / sizeof(radiant_velmt_members[0])),
      radiant_velmt_host_get_property, radiant_velmt_host_set_property,
      NULL, NULL, radiant_velmt_no_prototype, radiant_velmt_host_has_property,
      NULL, NULL, radiant_velmt_host_delete_property,
      radiant_velmt_host_own_property_descriptor, radiant_velmt_host_own_property_names,
      NULL},
+    {"node_list", NULL, radiant_node_list_members,
+     (int32_t)(sizeof(radiant_node_list_members) / sizeof(radiant_node_list_members[0])),
+     NULL, NULL, radiant_collection_indexed_get, NULL,
+     radiant_node_list_prototype, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL},
+    {"radio_node_list", NULL, radiant_node_list_members,
+     (int32_t)(sizeof(radiant_node_list_members) / sizeof(radiant_node_list_members[0])),
+     NULL, NULL, radiant_collection_indexed_get, NULL,
+     radiant_radio_node_list_prototype, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL},
+    {"dom_rect_list", NULL, radiant_node_list_members,
+     (int32_t)(sizeof(radiant_node_list_members) / sizeof(radiant_node_list_members[0])),
+     NULL, NULL, radiant_collection_indexed_get, NULL,
+     radiant_dom_rect_list_prototype, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL},
+    {"style_sheet_list", NULL, radiant_node_list_members,
+     (int32_t)(sizeof(radiant_node_list_members) / sizeof(radiant_node_list_members[0])),
+     NULL, NULL, radiant_collection_indexed_get, NULL,
+     radiant_style_sheet_list_prototype, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL},
+    {"css_rule_list", NULL, radiant_node_list_members,
+     (int32_t)(sizeof(radiant_node_list_members) / sizeof(radiant_node_list_members[0])),
+     NULL, NULL, radiant_collection_indexed_get, NULL,
+     radiant_css_rule_list_prototype, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL},
+    {"html_collection", NULL, radiant_html_collection_members,
+     (int32_t)(sizeof(radiant_html_collection_members) /
+               sizeof(radiant_html_collection_members[0])),
+     dom_child_collection_named_get, NULL, radiant_collection_indexed_get, NULL,
+     radiant_html_collection_prototype, dom_child_collection_named_has,
+     NULL, NULL, NULL, NULL, NULL, NULL},
+    {"html_options_collection", NULL, radiant_html_options_collection_members,
+     (int32_t)(sizeof(radiant_html_options_collection_members) /
+               sizeof(radiant_html_options_collection_members[0])),
+     dom_child_collection_named_get, NULL, radiant_collection_indexed_get, NULL,
+     radiant_html_options_collection_prototype, dom_child_collection_named_has,
+     NULL, NULL, NULL, NULL, NULL, NULL},
+    {"html_form_controls_collection", NULL, radiant_html_collection_members,
+     (int32_t)(sizeof(radiant_html_collection_members) /
+               sizeof(radiant_html_collection_members[0])),
+     dom_child_collection_named_get, NULL, radiant_collection_indexed_get, NULL,
+     radiant_html_form_controls_collection_prototype,
+     dom_child_collection_named_has,
+     NULL, NULL, NULL, NULL, NULL, NULL},
+    {"named_node_map", NULL, radiant_named_node_map_members,
+     (int32_t)(sizeof(radiant_named_node_map_members) /
+               sizeof(radiant_named_node_map_members[0])),
+     dom_child_collection_named_get, NULL, radiant_collection_indexed_get, NULL,
+     radiant_named_node_map_prototype, dom_child_collection_named_has,
+     NULL, NULL, NULL, NULL, NULL, NULL},
+    {"dom_token_list", NULL, radiant_dom_token_list_members,
+     (int32_t)(sizeof(radiant_dom_token_list_members) /
+               sizeof(radiant_dom_token_list_members[0])),
+     NULL, NULL, radiant_collection_indexed_get, NULL,
+     radiant_dom_token_list_prototype, NULL,
+     NULL, NULL, NULL, NULL, NULL, NULL},
 };
 
 extern const int32_t radiant_dom_type_binding_count =

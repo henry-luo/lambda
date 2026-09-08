@@ -115,9 +115,11 @@ extern "C" const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_RANGE: return "range";
         case LMD_TYPE_ARRAY_NUM: return "array[num]";
         case LMD_TYPE_ARRAY: return "array";
+        case LMD_TYPE_VARRAY: return "array";
         case LMD_TYPE_MAP: return "map";
         case LMD_TYPE_VMAP: return "map";  // VMap appears as "map" to Lambda scripts
         case LMD_TYPE_ELEMENT: return "element";
+        case LMD_TYPE_VELMT: return "element";
         case LMD_TYPE_TYPE: return "type";
         case LMD_TYPE_FUNC: return "function";
         case LMD_TYPE_ANY: return "any";
@@ -279,14 +281,16 @@ void init_type_info() {
     type_info[LMD_TYPE_STRING] = {sizeof(char*), "string", &TYPE_STRING, (Type*)&LIT_TYPE_STRING};
     type_info[LMD_TYPE_BINARY] = {sizeof(char*), "binary", &TYPE_BINARY, (Type*)&LIT_TYPE_BINARY};
     type_info[LMD_TYPE_RANGE] = {sizeof(void*), "range", &TYPE_RANGE, (Type*)&LIT_TYPE_RANGE};
-    type_info[LMD_TYPE_ARRAY] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
     type_info[LMD_TYPE_ARRAY_NUM] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
+    type_info[LMD_TYPE_ARRAY] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
+    type_info[LMD_TYPE_VARRAY] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
     type_info[LMD_TYPE_MAP] = {sizeof(void*), "map", &TYPE_MAP, (Type*)&LIT_TYPE_MAP};
     // VMap values are container pointers even though they present as Lambda maps;
     // shape fields need pointer-sized metadata or later map rebuilds pack them as
     // zero-byte unknown fields and corrupt ordinary maps that store VMaps.
     type_info[LMD_TYPE_VMAP] = {sizeof(void*), "map", &TYPE_MAP, (Type*)&LIT_TYPE_MAP};
     type_info[LMD_TYPE_ELEMENT] = {sizeof(void*), "element", &TYPE_ELMT, (Type*)&LIT_TYPE_ELMT};
+    type_info[LMD_TYPE_VELMT] = {sizeof(void*), "element", &TYPE_ELMT, (Type*)&LIT_TYPE_ELMT};
     type_info[LMD_TYPE_TYPE] = {sizeof(void*), "type", &TYPE_TYPE, (Type*)&LIT_TYPE_TYPE};
     type_info[LMD_TYPE_FUNC] = {sizeof(void*), "function", &TYPE_FUNC, (Type*)&LIT_TYPE_FUNC};
     type_info[LMD_TYPE_ANY] = {sizeof(TypedItem), "any", &TYPE_ANY, (Type*)&LIT_TYPE_ANY};
@@ -558,7 +562,7 @@ void array_set(Array* arr, int64_t index, Item itm) {
         break;
     }
     default:
-        if (LMD_TYPE_CONTAINER <= type_id && type_id <= LMD_TYPE_ELEMENT) {
+        if (is_container_type_id(type_id)) {
         }
     }
 }
@@ -803,9 +807,10 @@ void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
         }
         case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
         case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
+        case LMD_TYPE_VARRAY: case LMD_TYPE_VELMT:
         case LMD_TYPE_ELEMENT:   {
             TypeId item_type = get_type_id(item);
-            if (item_type >= LMD_TYPE_RANGE && item_type <= LMD_TYPE_ELEMENT) {
+            if (is_container_type_id(item_type)) {
                 *(Container**)field_ptr = item.container;
             } else {
                 *(Container**)field_ptr = nullptr;
@@ -872,6 +877,7 @@ void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
                 break;
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
             case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
+            case LMD_TYPE_VARRAY: case LMD_TYPE_VELMT:
             case LMD_TYPE_ELEMENT:   {
                 Container *container = item.container;
                 titem.container = container;
@@ -994,6 +1000,7 @@ Item typeditem_to_item(TypedItem *titem) {
         return ptr_val ? (Item){.item = (uint64_t)(uintptr_t)ptr_val} : ItemNull;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_VMAP:
+    case LMD_TYPE_VARRAY: case LMD_TYPE_VELMT:
     case LMD_TYPE_ELEMENT:  
         memcpy(&item_val, ((char*)titem) + 1, sizeof(uint64_t));
         if (item_val) {
@@ -1191,9 +1198,9 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
             result.container->type_id = type_id;
         }
         break;
-    case LMD_TYPE_VMAP:
-        // VMap is a host-object pointer, not a Container; reading it through
-        // the generic container arm turns named DOM collection slots into null.
+    case LMD_TYPE_VMAP: case LMD_TYPE_VARRAY: case LMD_TYPE_VELMT:
+        // Virtual carriers are direct pointers with their physical tag in the
+        // common Container prefix.
         memcpy(&ptr_val, field_ptr, sizeof(void*));
         result.vmap = (VMap*)ptr_val;
         break;
