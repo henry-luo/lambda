@@ -118,6 +118,7 @@ Item js_ctor_keyboard_event_fn(Item type, Item init);
 Item js_ctor_composition_event_fn(Item type, Item init);
 Item js_ctor_input_event_fn(Item type, Item init);
 Item js_ctor_pointer_event_fn(Item type, Item init);
+Item js_ctor_touch_event_fn(Item type, Item init);
 Item js_ctor_transition_event_fn(Item type, Item init);
 Item js_ctor_animation_event_fn(Item type, Item init);
 Item js_ctor_static_range_fn(Item init);
@@ -143,6 +144,13 @@ Item js_create_native_pointer_event(const char* type,
     int button, int buttons,
     bool ctrl, bool shift, bool alt, bool meta,
     const char* pointer_type, int pointer_id, bool is_primary);
+
+// Native touch events carry a one-contact snapshot for host-driven gestures.
+// `is_active` selects whether the contact remains in touches/targetTouches.
+Item js_create_native_touch_event(const char* type,
+    double client_x, double client_y,
+    bool ctrl, bool shift, bool alt, bool meta,
+    bool is_active);
 
 Item js_create_native_css_event(const char* type, const char* detail_name,
     const char* detail_value, double elapsed_time);

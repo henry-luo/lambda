@@ -688,8 +688,18 @@ extern "C" bool dom_has_committed_geometry_snapshot(void* dom_doc) {
 static thread_local bool dom_geometry_flush_in_progress = false;
 
 static bool dom_ensure_geometry_snapshot(DomDocument* doc) {
-    UiContext* uicon = _js_current_ui_context;
-    if (!doc || !uicon || !uicon->headless || _js_host_driven_loop) {
+    // The host loop's committed snapshot is authoritative during a simulated
+    // event turn. Do this before consulting the ambient JS Runtime, whose
+    // context scope may already have ended for a native EventSim assertion.
+    if (!doc || doc->js.host_driven_loop) {
+        return dom_has_committed_geometry_snapshot(doc);
+    }
+    // Native callers (including headless EventSim assertions) can run after
+    // the script runtime has released its ambient UI pointer. The document's
+    // host context remains the owner of its view tree in either call path.
+    UiContext* uicon = doc && doc->js.host_ui_context
+        ? (UiContext*)doc->js.host_ui_context : _js_current_ui_context;
+    if (!uicon || !uicon->headless) {
         return dom_has_committed_geometry_snapshot(doc);
     }
     if (dom_geometry_flush_in_progress) {
@@ -701,8 +711,8 @@ static bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     dom_geometry_flush_in_progress = true;
 
     // CSSOM View geometry reads synchronously flush style and layout. The
-    // initial load has no view tree yet, while later reads may have pending
-    // DOM mutations from the same script turn.
+    // host-driven loop owns its event-turn checkpoint, so its readers retain
+    // the committed geometry snapshot until the handler has returned.
     if (doc->view_tree && doc->view_tree->root) {
         if (doc->js.mutation_count > 0) {
             dom_engine_reconcile_dom_mutations(uicon, doc);
@@ -13437,10 +13447,19 @@ static Item dom_boundary_from_point(DomElement* elem,
 extern "C" void* dom_document_element_from_point_native(void* doc_ptr,
                                                             float x, float y) {
     DomDocument* doc = (DomDocument*)doc_ptr;
-    if (!doc || !dom_has_committed_geometry_snapshot(doc) ||
+    if (!doc) return nullptr;
+    // elementFromPoint is a CSSOM View read, so it must not inspect boxes from
+    // before a synchronous script mutation in the current event turn.
+    dom_ensure_geometry_snapshot(doc);
+    if (!dom_has_committed_geometry_snapshot(doc) ||
         !doc->view_tree || !doc->view_tree->root) {
         return nullptr;
     }
+
+    // The engine's target picker owns paint-order, positioned descendants and
+    // pointer-events policy; use it so elementFromPoint agrees with input.
+    DomElement* engine_hit = (DomElement*)dom_engine_element_from_point(doc, x, y);
+    if (engine_hit) return engine_hit;
 
     DomElement* shadow_hit = dom_shadow_element_from_document_point_walk(
         static_cast<DomNode*>(doc->root), x, y);
