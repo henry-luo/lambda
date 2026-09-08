@@ -171,11 +171,10 @@ the complete namespace migration:
    `test/lambda/negative/semantic/lambda_namespace_root.ls`; focused probes
    cover the registry, built-in alias, document package, and reserved-root
    paths. The affected DOM package regressions pass 5/5; `test_lambda_gtest`
-   passes 837/837, input passes 2104/2104, and MathLive passes 921/921.
-   `make test-lambda-baseline` reports 5074/5075 because the only remaining
-   failure is the unrelated `test_js_gtest` case
-   `dom_3d_transform_inline_rect`; `make test262-baseline` passes 40261/40261
-   with zero regressions.
+   passes 837/837, input passes 2104/2104, MathLive passes 921/921, and
+   `make test-lambda-baseline` passes 5075/5075. The previously failing
+   `test_js_gtest` case `dom_3d_transform_inline_rect` now passes; additionally,
+   `make test262-baseline` passes 40261/40261 with zero regressions.
 
 
 ## 4. Numbers, decimal & datetime (LR_04)
