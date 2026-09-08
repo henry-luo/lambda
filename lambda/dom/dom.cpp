@@ -702,6 +702,11 @@ static bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     if (!uicon || !uicon->headless) {
         return dom_has_committed_geometry_snapshot(doc);
     }
+    if (dom_engine_layout_active(doc)) {
+        // Resize/Intersection observers sample a completed pass before its
+        // scratch scope unwinds. Reconciliation here would reset that live tree.
+        return dom_has_committed_geometry_snapshot(doc);
+    }
     if (dom_geometry_flush_in_progress) {
         return dom_has_committed_geometry_snapshot(doc);
     }
@@ -1750,6 +1755,7 @@ extern "C" void dom_set_document(void* dom_doc) {
         dom_install_window_frames_global();
         dom_install_window_dialog_globals();
         dom_install_window_computed_style_global();
+        dom_install_custom_elements_global();
         // install FormData constructor
         extern void js_formdata_install_globals(void);
         js_formdata_install_globals();

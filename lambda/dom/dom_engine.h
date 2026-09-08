@@ -72,9 +72,11 @@ void dom_engine_input_value_validate(const char* type, const char* value,
 // rather than answering false at the top level (ESO109).
 bool dom_engine_event_cascade_active(void);
 
-// view tree: commit pending mutations, resolve a native hit target, refresh a pseudo-class flag
+// view tree: commit pending mutations, resolve a native hit target, report an
+// active layout, or refresh a pseudo-class flag
 void dom_engine_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
 void* dom_engine_element_from_point(DomDocument* doc, float x, float y);
+bool dom_engine_layout_active(DomDocument* doc);
 void dom_engine_sync_pseudo_state(void* view, uint32_t pseudo_flag, bool set);
 
 // HTML image loading: the engine owns decoding and intrinsic-image state; the

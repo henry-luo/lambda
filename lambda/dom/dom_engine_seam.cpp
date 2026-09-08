@@ -46,6 +46,7 @@ DOM_ENGINE_WEAK void dom_engine_reconcile_dom_mutations(UiContext* u, DomDocumen
 DOM_ENGINE_WEAK void* dom_engine_element_from_point(DomDocument* d, float x, float y) {
     (void)d; (void)x; (void)y; return nullptr;
 }
+DOM_ENGINE_WEAK bool dom_engine_layout_active(DomDocument* d) { (void)d; return false; }
 DOM_ENGINE_WEAK void dom_engine_sync_pseudo_state(void* v, uint32_t f, bool set) {
     (void)v; (void)f; (void)set;
 }
