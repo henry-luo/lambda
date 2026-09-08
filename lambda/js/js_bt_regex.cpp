@@ -12,6 +12,7 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/utf.h"
 #include "js_regex_generated_properties.h"
+#include "js_regex_wrapper.h"   // JsRegexScratch (LR09-30)
 #include <utf8proc.h>
 #include <stdlib.h>
 #include <string.h>
@@ -899,8 +900,11 @@ static int bt_repeat_simple(MatchCtx& ctx, const RxNode* node, int pos, const Co
 static int bt_repeat_inner(MatchCtx& ctx, const RxNode* node, int min, int max, int pos, const Cont* k, int dir) {
     // reset captures of parens contained in the quantified child for this iteration
     int lo = node->paren_lo, hi = node->paren_hi;
-    int saved_s[256], saved_e[256]; int nsaved = 0;
-    if (hi >= lo) {
+    int span = (hi >= lo) ? (hi - lo + 1) : 0;
+    JsRegexScratch<int> saved_s_buf(span), saved_e_buf(span);
+    int* saved_s = saved_s_buf.slots; int* saved_e = saved_e_buf.slots;
+    int nsaved = 0;
+    if (hi >= lo && saved_s_buf.count >= span && saved_e_buf.count >= span) {
         for (int g = lo; g <= hi && g <= ctx.ngroups; g++) {
             saved_s[nsaved] = ctx.cap_start[g]; saved_e[nsaved] = ctx.cap_end[g]; nsaved++;
             ctx.cap_start[g] = -1; ctx.cap_end[g] = -1;
@@ -1028,7 +1032,9 @@ static int bt_match(MatchCtx& ctx, const RxNode* node, int pos, const Cont* k, i
         int subdir = node->look_behind ? -1 : 1;
         // save all captures
         int n = ctx.ngroups + 1;
-        int sv_s[256], sv_e[256];
+        JsRegexScratch<int> sv_s_buf(n), sv_e_buf(n);
+        if (sv_s_buf.count < n || sv_e_buf.count < n) return -1;
+        int* sv_s = sv_s_buf.slots; int* sv_e = sv_e_buf.slots;
         for (int i = 0; i < n; i++) { sv_s[i] = ctx.cap_start[i]; sv_e[i] = ctx.cap_end[i]; }
         int r = bt_match_disj(ctx, node->disj, pos, NULL, subdir);
         bool matched = (r >= 0);
@@ -1125,8 +1131,13 @@ extern "C" int js_bt_exec(JsBtRegex* bt, const char* input, int input_len, int s
                           bool anchor_start, int* match_starts, int* match_ends, int max_groups) {
     if (!bt || !bt->root) return 0;
     int ng = bt->group_count;
-    if (ng + 1 > 256) return 0; // beyond our fixed capture buffers — fall back
-    int cap_start[256], cap_end[256];
+    // LR09-30: this used to `return 0` above 255 groups — reported as "no
+    // match", so a lookahead over a large pattern silently failed instead of
+    // falling back to anything. The capture arrays are sized from the pattern.
+    JsRegexScratch<int> cap_start_buf(ng + 1), cap_end_buf(ng + 1);
+    if (cap_start_buf.count < ng + 1 || cap_end_buf.count < ng + 1) return 0;
+    int* cap_start = cap_start_buf.slots;
+    int* cap_end = cap_end_buf.slots;
     MatchCtx ctx;
     ctx.input = input; ctx.input_len = input_len;
     ctx.cap_start = cap_start; ctx.cap_end = cap_end; ctx.ngroups = ng;

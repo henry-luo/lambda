@@ -361,6 +361,21 @@ JsMirTranspiler* jm_create_mir_transpiler(
 
 void jm_destroy_mir_transpiler(JsMirTranspiler* mt) {
     jm_cleanup_mir_transpiler_state(mt);
+    // §9.3: the capture list and its save journal are separate allocations now
+    if (mt) {
+        if (mt->last_closure.captures) mem_free(mt->last_closure.captures);
+        if (mt->closure_journal) mem_free(mt->closure_journal);
+        if (mt->tdz_closure_captures) mem_free(mt->tdz_closure_captures);
+        if (mt->gen_state_labels) mem_free(mt->gen_state_labels);
+        mt->gen_state_labels = NULL;
+        mt->gen_state_label_capacity = 0;
+        mt->tdz_closure_captures = NULL;
+        mt->tdz_closure_capture_capacity = 0;
+        mt->last_closure.captures = NULL;
+        mt->last_closure.capacity = 0;
+        mt->closure_journal = NULL;
+        mt->closure_journal_capacity = 0;
+    }
     mem_free(mt);
 }
 
@@ -951,57 +966,79 @@ JsMirVarEntry* jm_find_var_at(JsMirTranspiler* mt, const char* name,
     return found ? &found->var : NULL;
 }
 
+// The capture list grows, so there is no capacity to clamp to any more; only
+// the negative guard remains meaningful.
 int jm_last_closure_capture_count_clamped(int count) {
-    if (count < 0) return 0;
-    if (count > JS_MIR_LAST_CLOSURE_CAPTURE_MAX) {
-        return JS_MIR_LAST_CLOSURE_CAPTURE_MAX;
-    }
-    return count;
+    return count < 0 ? 0 : count;
 }
 
+// Reserve room for `n` captures. The list grows by doubling; nothing outside
+// the transpiler holds a pointer into it across a reserve.
+bool jm_closure_tracker_reserve(JsClosureTracker* tracker, int n) {
+    if (!tracker || n < 0) return false;
+    if (n <= tracker->capacity) return true;
+    int capacity = tracker->capacity ? tracker->capacity : 8;
+    while (capacity < n) capacity *= 2;
+    JsClosureCapture* grown = (JsClosureCapture*)mem_realloc(tracker->captures,
+        (size_t)capacity * sizeof(JsClosureCapture), MEM_CAT_JS_RUNTIME);
+    if (!grown) return false;
+    memset(grown + tracker->capacity, 0,
+           (size_t)(capacity - tracker->capacity) * sizeof(JsClosureCapture));
+    tracker->captures = grown;
+    tracker->capacity = capacity;
+    return true;
+}
+
+// Push the live captures onto the journal and record where they start.
 void jm_save_last_closure_snapshot(JsMirTranspiler* mt,
         JsMirLastClosureSnapshot* snapshot) {
     if (!mt || !snapshot) return;
-    snapshot->has_env = mt->last_closure_has_env;
-    snapshot->env_reg = mt->last_closure_env_reg;
-    snapshot->capture_count = jm_last_closure_capture_count_clamped(
-        mt->last_closure_capture_count);
-    for (int i = 0; i < snapshot->capture_count; i++) {
-        snapshot->capture_names[i] = jm_persist_name(
-            mt->last_closure_capture_names[i]);
-        snapshot->capture_bindings[i] = mt->last_closure_capture_bindings[i];
-        snapshot->capture_slots[i] = mt->last_closure_capture_slots[i];
-        snapshot->capture_is_transitive[i] =
-            mt->last_closure_capture_is_transitive[i];
-        snapshot->capture_is_nfe[i] = mt->last_closure_capture_is_nfe[i];
-        snapshot->capture_is_assigned[i] =
-            mt->last_closure_capture_is_assigned[i];
+    snapshot->has_env = mt->last_closure.has_env;
+    snapshot->env_reg = mt->last_closure.env_reg;
+    snapshot->capture_count = mt->last_closure.count;
+    snapshot->journal_mark = mt->closure_journal_count;
+    int needed = mt->closure_journal_count + mt->last_closure.count;
+    if (needed > mt->closure_journal_capacity) {
+        int capacity = mt->closure_journal_capacity ? mt->closure_journal_capacity : 16;
+        while (capacity < needed) capacity *= 2;
+        JsClosureCapture* grown = (JsClosureCapture*)mem_realloc(mt->closure_journal,
+            (size_t)capacity * sizeof(JsClosureCapture), MEM_CAT_JS_RUNTIME);
+        if (!grown) { snapshot->capture_count = 0; return; }
+        mt->closure_journal = grown;
+        mt->closure_journal_capacity = capacity;
+    }
+    for (int i = 0; i < mt->last_closure.count; i++) {
+        JsClosureCapture entry = mt->last_closure.captures[i];
+        entry.name = jm_persist_name(entry.name);
+        mt->closure_journal[mt->closure_journal_count++] = entry;
     }
 }
 
 void jm_clear_last_closure_snapshot(JsMirTranspiler* mt) {
     if (!mt) return;
-    mt->last_closure_has_env = false;
-    mt->last_closure_env_reg = 0;
-    mt->last_closure_capture_count = 0;
+    mt->last_closure.has_env = false;
+    mt->last_closure.env_reg = 0;
+    mt->last_closure.count = 0;
 }
 
+// Copy the saved captures back and drop them from the journal.
 void jm_restore_last_closure_snapshot(JsMirTranspiler* mt,
         const JsMirLastClosureSnapshot* snapshot) {
     if (!mt || !snapshot) return;
-    mt->last_closure_has_env = snapshot->has_env;
-    mt->last_closure_env_reg = snapshot->env_reg;
-    mt->last_closure_capture_count = snapshot->capture_count;
+    mt->last_closure.has_env = snapshot->has_env;
+    mt->last_closure.env_reg = snapshot->env_reg;
+    if (!jm_closure_tracker_reserve(&mt->last_closure, snapshot->capture_count)) {
+        mt->last_closure.count = 0;
+        return;
+    }
+    mt->last_closure.count = snapshot->capture_count;
     for (int i = 0; i < snapshot->capture_count; i++) {
-        mt->last_closure_capture_names[i] = jm_persist_name(
-            snapshot->capture_names[i]);
-        mt->last_closure_capture_bindings[i] = snapshot->capture_bindings[i];
-        mt->last_closure_capture_slots[i] = snapshot->capture_slots[i];
-        mt->last_closure_capture_is_transitive[i] =
-            snapshot->capture_is_transitive[i];
-        mt->last_closure_capture_is_nfe[i] = snapshot->capture_is_nfe[i];
-        mt->last_closure_capture_is_assigned[i] =
-            snapshot->capture_is_assigned[i];
+        JsClosureCapture entry = mt->closure_journal[snapshot->journal_mark + i];
+        entry.name = jm_persist_name(entry.name);
+        mt->last_closure.captures[i] = entry;
+    }
+    if (snapshot->journal_mark < mt->closure_journal_count) {
+        mt->closure_journal_count = snapshot->journal_mark;
     }
 }
 

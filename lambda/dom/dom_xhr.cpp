@@ -47,8 +47,11 @@ struct XhrState {
     bool    async_dispatching;
     uint32_t request_token;
     char*   request_body;
-    XhrHeader req_headers[MAX_HEADERS];
+    // JSCUO5: grown on demand. The fixed 64-header table was 1,024 B of the
+    // record's 1,136 B, paid by every XHR whether it set a header or not.
+    XhrHeader* req_headers;
     int     req_header_count;
+    int     req_header_capacity;
     int     ready_state;    // 0=UNSENT, 1=OPENED, 2=HEADERS_RECEIVED, 3=LOADING, 4=DONE
     long    status;
     char*   status_text;
@@ -64,9 +67,12 @@ struct XhrState {
 // tokens, so they belong to the realm that owns their JS wrappers. Access is
 // direct through the bound context; XHR calls do not synchronize with other
 // contexts or add atomic work to request dispatch.
+// JSCUO5: the pool grows on demand. It was 64 records of 1,136 B — 72,720 B in
+// every realm that merely loaded the XHR binding.
 struct JsXhrRuntimeState {
-    XhrState pool[MAX_XHR] = {};
+    XhrState* pool = nullptr;
     int count = 0;
+    int capacity = 0;
     char* base_url = nullptr;
 };
 
@@ -89,6 +95,7 @@ static bool js_xhr_runtime_state_ensure() {
 #define js_xhr_state ((JsXhrRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_XHR))
 #define _xhr_pool (js_xhr_state->pool)
 #define _xhr_count (js_xhr_state->count)
+#define _xhr_capacity (js_xhr_state->capacity)
 #define _xhr_base_url (js_xhr_state->base_url)
 static XhrState* xhr_state_from_this();
 
@@ -192,6 +199,12 @@ static void xhr_free_state(XhrState* xhr) {
         if (xhr->req_headers[i].value) mem_free(xhr->req_headers[i].value);
     }
     xhr->req_header_count = 0;
+    // JSCUO5: the header table is a separate allocation now
+    if (xhr->req_headers) {
+        mem_free(xhr->req_headers);
+        xhr->req_headers = nullptr;
+        xhr->req_header_capacity = 0;
+    }
     xhr->in_use = false;
 }
 
@@ -341,9 +354,13 @@ static void xhr_complete_response(XhrState* xhr, long status,
 
 extern "C" Item js_xhr_new(void) {
     if (!js_xhr_runtime_state_ensure()) return ItemNull;
-    if (_xhr_count >= MAX_XHR) {
-        log_error("xhr: pool exhausted (max %d)", MAX_XHR);
-        return ItemNull;
+    if (_xhr_count >= _xhr_capacity) {
+        int capacity = _xhr_capacity ? _xhr_capacity * 2 : 8;
+        XhrState* grown = (XhrState*)mem_realloc(_xhr_pool,
+            (size_t)capacity * sizeof(XhrState), MEM_CAT_JS_RUNTIME);
+        if (!grown) return ItemNull;
+        _xhr_pool = grown;
+        _xhr_capacity = capacity;
     }
 
     int id = _xhr_count++;
@@ -485,9 +502,18 @@ extern "C" Item js_xhr_set_request_header(Item name_arg, Item value_arg) {
     const char* value = fn_to_cstr(value_arg);
     if (!name || !value) return make_js_undef();
 
-    if (xhr->req_header_count >= MAX_HEADERS) {
-        log_error("xhr: too many request headers (max %d)", MAX_HEADERS);
-        return make_js_undef();
+    if (xhr->req_header_count >= xhr->req_header_capacity) {
+        int capacity = xhr->req_header_capacity ? xhr->req_header_capacity * 2 : 8;
+        XhrHeader* grown = (XhrHeader*)mem_realloc(xhr->req_headers,
+            (size_t)capacity * sizeof(XhrHeader), MEM_CAT_JS_RUNTIME);
+        if (!grown) {
+            log_error("xhr: cannot grow request headers");
+            return make_js_undef();
+        }
+        memset(grown + xhr->req_header_capacity, 0,
+               (size_t)(capacity - xhr->req_header_capacity) * sizeof(XhrHeader));
+        xhr->req_headers = grown;
+        xhr->req_header_capacity = capacity;
     }
 
     xhr->req_headers[xhr->req_header_count].name = xhr_mem_strdup(name);
@@ -604,8 +630,14 @@ extern "C" Item js_xhr_send(Item body_arg) {
         config.body_size = strlen(body_str);
     }
 
-    // headers: build "Name: Value" strings
-    char* header_strs[MAX_HEADERS];
+    // headers: build "Name: Value" strings.
+    // JSCUO5: this was a stack array sized by the old 64-header cap; with the
+    // cap gone it would be unbounded, so it is sized to the actual count.
+    char** header_strs = xhr->req_header_count > 0
+        ? (char**)mem_calloc((size_t)xhr->req_header_count, sizeof(char*),
+                             MEM_CAT_JS_RUNTIME)
+        : nullptr;
+    if (xhr->req_header_count > 0 && !header_strs) return make_js_undef();
     for (int i = 0; i < xhr->req_header_count; i++) {
         size_t nlen = strlen(xhr->req_headers[i].name);
         size_t vlen = strlen(xhr->req_headers[i].value);
@@ -638,6 +670,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
             // File requests bypass http_fetch, but their synthesized header
             // lines have the same per-send ownership as network requests.
             xhr_free_request_header_lines(header_strs, xhr->req_header_count);
+            if (header_strs) mem_free(header_strs);
             if (path) mem_free(path);
             if (file_url) url_destroy(file_url);
             return make_js_undef();
@@ -651,6 +684,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
 
     // free header strings
     xhr_free_request_header_lines(header_strs, xhr->req_header_count);
+    if (header_strs) mem_free(header_strs);
 
     if (resp) {
         // store response headers for getResponseHeader/getAllResponseHeaders
@@ -811,5 +845,7 @@ static void js_xhr_capsule_destroy(void* capsule) {
     if (state->count || state->base_url) {
         log_error("xhr: context destroyed before request state was reset");
     }
+    // JSCUO5: the pool is a separate allocation now
+    if (state->pool) mem_free(state->pool);
     mem_free(state);
 }

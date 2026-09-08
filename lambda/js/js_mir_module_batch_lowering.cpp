@@ -2906,9 +2906,9 @@ static int js_mir_lower(void* opaque) {
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
     mt->eval_local_frame_reg = 0;
-    mt->last_closure_has_env = false;
-    mt->last_closure_env_reg = 0;
-    mt->last_closure_capture_count = 0;
+    mt->last_closure.has_env = false;
+    mt->last_closure.env_reg = 0;
+    mt->last_closure.count = 0;
     mt->in_main = true;
     mt->func_error_lane_label = 0;  // reset for js_main
 

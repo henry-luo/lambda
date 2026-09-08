@@ -16052,7 +16052,8 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
     }
     if (rd->bt) {
         // spec backtracking matcher for backref / hard-lookbehind patterns
-        int starts[JS_REGEX_MAX_GROUPS], ends[JS_REGEX_MAX_GROUPS];
+        JsRegexScratch<int> starts_buf(num_groups), ends_buf(num_groups);
+        int* starts = starts_buf.slots; int* ends = ends_buf.slots;
         bool anchor_start = (anchor == re2::RE2::ANCHOR_START);
         int result = js_bt_exec(rd->bt, input, input_len, start_pos, anchor_start,
                                 starts, ends, num_groups);
@@ -16068,7 +16069,8 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
     }
     if (rd->wrapper && rd->wrapper->has_filters) {
         // use wrapper with post-filter verification
-        int starts[JS_REGEX_MAX_GROUPS], ends[JS_REGEX_MAX_GROUPS];
+        JsRegexScratch<int> starts_buf(num_groups), ends_buf(num_groups);
+        int* starts = starts_buf.slots; int* ends = ends_buf.slots;
         bool anchor_start = (anchor == re2::RE2::ANCHOR_START);
         int result = js_regex_wrapper_exec(rd->wrapper, input, input_len, start_pos, anchor_start,
                                     starts, ends, num_groups);
@@ -16119,8 +16121,8 @@ static void js_regex_reset_stale_repeated_captures(JsRegexData* rd,
         int parent;
         bool repeated;
     };
-    RegexGroupInfo groups[JS_REGEX_MAX_GROUPS];
-    int stack[JS_REGEX_MAX_GROUPS];
+    RegexGroupInfo groups[JS_REGEX_ANALYSIS_GROUPS];
+    int stack[JS_REGEX_ANALYSIS_GROUPS];
     int stack_depth = 0;
     int group_count = 0;
     bool in_class = false;
@@ -16144,16 +16146,16 @@ static void js_regex_reset_stale_repeated_captures(JsRegexData* rd,
         if (ch == '(') {
             int idx = 0;
             if (js_regex_pattern_group_is_capturing(pattern, i) &&
-                group_count + 1 < JS_REGEX_MAX_GROUPS) {
+                group_count + 1 < JS_REGEX_ANALYSIS_GROUPS) {
                 group_count++;
                 idx = group_count;
                 groups[idx].parent = stack_depth > 0 ? stack[stack_depth - 1] : 0;
                 groups[idx].repeated = false;
             }
-            if (stack_depth < JS_REGEX_MAX_GROUPS) stack[stack_depth++] = idx;
+            if (stack_depth < JS_REGEX_ANALYSIS_GROUPS) stack[stack_depth++] = idx;
         } else if (ch == ')' && stack_depth > 0) {
             int idx = stack[--stack_depth];
-            if (idx > 0 && idx < JS_REGEX_MAX_GROUPS) {
+            if (idx > 0 && idx < JS_REGEX_ANALYSIS_GROUPS) {
                 groups[idx].repeated = js_regex_pattern_has_quantifier_after(pattern, i + 1);
             }
         }
@@ -16169,7 +16171,7 @@ static void js_regex_reset_stale_repeated_captures(JsRegexData* rd,
             if (child == parent || !matches[child].data()) continue;
             int ancestor = groups[child].parent;
             bool inside_parent = false;
-            while (ancestor > 0 && ancestor < JS_REGEX_MAX_GROUPS) {
+            while (ancestor > 0 && ancestor < JS_REGEX_ANALYSIS_GROUPS) {
                 if (ancestor == parent) {
                     inside_parent = true;
                     break;
@@ -18541,8 +18543,9 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     }
 
     int num_groups = js_regex_num_groups(rd);
-    if (num_groups > JS_REGEX_MAX_GROUPS) num_groups = JS_REGEX_MAX_GROUPS;
-    re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
+    JsRegexScratch<re2::StringPiece> matches_buf(num_groups);
+    num_groups = matches_buf.count;
+    re2::StringPiece* matches = matches_buf.slots;
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
     int match_start_pos = utf16_subject ?
         js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
@@ -18799,8 +18802,9 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
 
     // perform match with captures
     int num_groups = js_regex_num_groups(rd);
-    if (num_groups > JS_REGEX_MAX_GROUPS) num_groups = JS_REGEX_MAX_GROUPS;
-    re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
+    JsRegexScratch<re2::StringPiece> matches_buf(num_groups);
+    num_groups = matches_buf.count;
+    re2::StringPiece* matches = matches_buf.slots;
     // sticky: must match at exactly start_pos (ANCHOR_START from start_pos)
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
     int match_start_pos = code_unit_indices ?
@@ -21674,8 +21678,9 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
         // regex-based replace
         re2::StringPiece input(s->chars, s->len);
         int ngroups = js_regex_num_groups(rd);
-        if (ngroups > JS_REGEX_MAX_GROUPS) ngroups = JS_REGEX_MAX_GROUPS;
-        re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
+        JsRegexScratch<re2::StringPiece> matches_buf(ngroups);
+        ngroups = matches_buf.count;
+        re2::StringPiece* matches = matches_buf.slots;
         StrBuf* buf = strbuf_new();
         int pos = 0;
         bool found_match = false;
@@ -23113,8 +23118,9 @@ static Item js_string_intrinsic_algorithm(Item str,
                 Item result = js_array_new(0);
                 int offset = 0;
                 int num_groups = js_regex_num_groups(rd);
-                if (num_groups > JS_REGEX_MAX_GROUPS) num_groups = JS_REGEX_MAX_GROUPS;
-                re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
+                JsRegexScratch<re2::StringPiece> matches_buf(num_groups);
+                num_groups = matches_buf.count;
+                re2::StringPiece* matches = matches_buf.slots;
                 while (offset < (int)s->len) {
                     bool matched = js_regex_match_internal(rd, s->chars, (int)s->len, offset,
                         re2::RE2::UNANCHORED, matches, num_groups);

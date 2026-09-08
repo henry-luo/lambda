@@ -2039,29 +2039,31 @@ struct LiveLookupCollectionEntry {
 
 static const int SELECT_COLLECTION_OPTIONS = 1;
 static const int SELECT_COLLECTION_SELECTED_OPTIONS = 2;
-static const int SELECT_OPTIONS_OWNER_CACHE_SIZE = 4096;
 static const int LIVE_CHILD_COLLECTION_CHILDREN = 1;
 static const int LIVE_CHILD_COLLECTION_CHILD_NODES = 2;
-static const int LIVE_CHILD_COLLECTION_CACHE_SIZE = 4096;
 static const int LIVE_FORM_COLLECTION_DOCUMENT_FORMS = 1;
 static const int LIVE_FORM_COLLECTION_FORM_ELEMENTS = 2;
-static const int LIVE_FORM_COLLECTION_CACHE_SIZE = 4096;
 static const int LIVE_LOOKUP_COLLECTION_TAG = 1;
 static const int LIVE_LOOKUP_COLLECTION_CLASS = 2;
 static const int LIVE_LOOKUP_COLLECTION_NAME = 3;
-static const int LIVE_LOOKUP_COLLECTION_CACHE_SIZE = 4096;
 // Live collection tables retain weak JS-array homes and native-node pins. They
 // are lazy per-document-realm state, so property reads keep direct local table
 // access and never contend with another context.
+// JSCUO5: the four tables grow on demand. They were 4,096 entries each —
+// 753,696 B in every realm that merely touched a live collection.
 struct JsDomCollectionRuntimeState {
-    SelectOptionsOwnerEntry select_options_owners[SELECT_OPTIONS_OWNER_CACHE_SIZE] = {};
+    SelectOptionsOwnerEntry* select_options_owners = nullptr;
     int select_options_owner_count = 0;
-    LiveChildCollectionEntry live_child_collections[LIVE_CHILD_COLLECTION_CACHE_SIZE] = {};
+    int select_options_owner_capacity = 0;
+    LiveChildCollectionEntry* live_child_collections = nullptr;
     int live_child_collection_count = 0;
-    LiveFormCollectionEntry live_form_collections[LIVE_FORM_COLLECTION_CACHE_SIZE] = {};
+    int live_child_collection_capacity = 0;
+    LiveFormCollectionEntry* live_form_collections = nullptr;
     int live_form_collection_count = 0;
-    LiveLookupCollectionEntry live_lookup_collections[LIVE_LOOKUP_COLLECTION_CACHE_SIZE] = {};
+    int live_form_collection_capacity = 0;
+    LiveLookupCollectionEntry* live_lookup_collections = nullptr;
     int live_lookup_collection_count = 0;
+    int live_lookup_collection_capacity = 0;
     int refresh_depth = 0;
 };
 
@@ -2085,6 +2087,10 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_collection_runtime_state_ensure, (), (dom
 #define dom_collection_rt_state ((JsDomCollectionRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_COLLECTION))
 #define s_select_options_owners (dom_collection_rt_state->select_options_owners)
 #define s_select_options_owner_count (dom_collection_rt_state->select_options_owner_count)
+#define s_select_options_owner_capacity (dom_collection_rt_state->select_options_owner_capacity)
+#define s_live_child_collection_capacity (dom_collection_rt_state->live_child_collection_capacity)
+#define s_live_form_collection_capacity (dom_collection_rt_state->live_form_collection_capacity)
+#define s_live_lookup_collection_capacity (dom_collection_rt_state->live_lookup_collection_capacity)
 #define s_live_child_collections (dom_collection_rt_state->live_child_collections)
 #define s_live_child_collection_count (dom_collection_rt_state->live_child_collection_count)
 #define s_live_form_collections (dom_collection_rt_state->live_form_collections)
@@ -2147,20 +2153,58 @@ static void reset_live_dom_collections() {
         live_collection_unpin(s_live_lookup_collections[i].doc,
                               &s_live_lookup_collections[i].root_ref);
     }
-    memset(s_select_options_owners, 0, sizeof(s_select_options_owners));
-    s_select_options_owner_count = 0;
-    memset(s_live_child_collections, 0, sizeof(s_live_child_collections));
-    s_live_child_collection_count = 0;
-    memset(s_live_form_collections, 0, sizeof(s_live_form_collections));
-    s_live_form_collection_count = 0;
-    memset(s_live_lookup_collections, 0, sizeof(s_live_lookup_collections));
-    s_live_lookup_collection_count = 0;
+    // JSCUO5: these are pointers now, so `sizeof` on them is 8 — zero the live
+    // prefix by count instead. The storage itself is kept for reuse and is
+    // released by the capsule teardown.
+    #define JS_DOM_CLEAR_COLLECTION_TABLE(table, count_field) \
+        if (table) memset(table, 0, (size_t)(count_field) * sizeof(*(table))); \
+        count_field = 0;
+    JS_DOM_CLEAR_COLLECTION_TABLE(s_select_options_owners, s_select_options_owner_count)
+    JS_DOM_CLEAR_COLLECTION_TABLE(s_live_child_collections, s_live_child_collection_count)
+    JS_DOM_CLEAR_COLLECTION_TABLE(s_live_form_collections, s_live_form_collection_count)
+    JS_DOM_CLEAR_COLLECTION_TABLE(s_live_lookup_collections, s_live_lookup_collection_count)
+    #undef JS_DOM_CLEAR_COLLECTION_TABLE
+}
+
+// JSCUO5: grow a live-collection table. Each entry's `array` is a weak GC slot
+// registered BY ADDRESS, so moving the block must unregister at the old
+// addresses and re-register at the new ones — a plain realloc would leave the
+// collector holding pointers into freed memory. Nothing else in an entry is
+// known to the collector.
+template <typename Entry>
+static bool dom_collection_table_grow(Entry** entries, int count, int* capacity) {
+    if (!entries || !capacity) return false;
+    int next = *capacity ? *capacity * 2 : 16;
+    for (int i = 0; i < count; i++) {
+        if ((*entries)[i].array) heap_unregister_gc_weak((uint64_t*)&(*entries)[i].array);
+    }
+    Entry* grown = (Entry*)mem_realloc(*entries, (size_t)next * sizeof(Entry),
+                                       MEM_CAT_JS_RUNTIME);
+    if (!grown) {
+        // realloc left the original block intact; restore its registrations
+        for (int i = 0; i < count; i++) {
+            if ((*entries)[i].array) {
+                heap_register_gc_weak((uint64_t*)&(*entries)[i].array, nullptr, nullptr);
+            }
+        }
+        return false;
+    }
+    memset(grown + *capacity, 0, (size_t)(next - *capacity) * sizeof(Entry));
+    *entries = grown;
+    *capacity = next;
+    for (int i = 0; i < count; i++) {
+        if (grown[i].array) {
+            heap_register_gc_weak((uint64_t*)&grown[i].array, nullptr, nullptr);
+        }
+    }
+    return true;
 }
 
 template <typename Entry>
 static void dom_register_owner_collection(Item collection, DomElement* owner,
-        int kind, Entry* entries, int* count, int capacity) {
+        int kind, Entry** entries_ref, int* count, int* capacity) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
+    Entry* entries = *entries_ref;
     for (int i = 0; i < *count; i++) {
         if (entries[i].array == collection.array) {
             if (entries[i].owner != owner) {
@@ -2185,7 +2229,9 @@ static void dom_register_owner_collection(Item collection, DomElement* owner,
             break;
         }
     }
-    if (entry_index >= capacity) return;
+    if (entry_index >= *capacity &&
+            !dom_collection_table_grow(entries_ref, *count, capacity)) return;
+    entries = *entries_ref;   // growth may have moved the block
     Entry* entry = &entries[entry_index];
     if (!live_collection_pin(owner->doc, owner, &entry->owner_ref)) return;
     entry->array = collection.array;
@@ -2200,12 +2246,12 @@ static void name(Item collection, DomElement* owner, int kind) { \
     JsDomCollectionRuntimeState* state = dom_collection_runtime_state_get(); \
     if (!state) state = dom_collection_state_ensure_ptr(); \
     if (!state) return; \
-    dom_register_owner_collection(collection, owner, kind, state->entries, \
-        &state->count, capacity); \
+    dom_register_owner_collection(collection, owner, kind, &state->entries, \
+        &state->count, &state->capacity); \
 }
 JS_DOM_REGISTER_OWNER_COLLECTION(_register_select_options_owner,
     select_options_owners, select_options_owner_count,
-    SELECT_OPTIONS_OWNER_CACHE_SIZE)
+    select_options_owner_capacity)
 
 template <typename Entry>
 static DomElement* dom_collection_owner(Entry* entries, int count,
@@ -2227,7 +2273,7 @@ static DomElement* _select_options_owner(Item collection, int* out_kind) {
 }
 JS_DOM_REGISTER_OWNER_COLLECTION(_register_live_child_collection,
     live_child_collections, live_child_collection_count,
-    LIVE_CHILD_COLLECTION_CACHE_SIZE)
+    live_child_collection_capacity)
 #undef JS_DOM_REGISTER_OWNER_COLLECTION
 
 static DomElement* _live_child_collection_owner(Item collection, int* out_kind) {
@@ -2270,9 +2316,10 @@ struct JsDomLiveCollectionTraits<LiveLookupCollectionEntry> {
 
 template <typename Entry>
 static void dom_register_live_collection(Item collection, DomDocument* doc,
-        DomElement* subject, int kind, Entry* entries, int* count, int capacity) {
+        DomElement* subject, int kind, Entry** entries_ref, int* count, int* capacity) {
     if (!dom_collection_runtime_state_ensure()) return;
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return;
+    Entry* entries = *entries_ref;
     if (!doc && subject) doc = subject->doc;
     if (!doc && !subject) return;
     DomElement* pin_owner = subject ? subject : doc->root;
@@ -2303,7 +2350,9 @@ static void dom_register_live_collection(Item collection, DomDocument* doc,
             break;
         }
     }
-    if (entry_index >= capacity) return;
+    if (entry_index >= *capacity &&
+            !dom_collection_table_grow(entries_ref, *count, capacity)) return;
+    entries = *entries_ref;   // growth may have moved the block
     Entry* entry = &entries[entry_index];
     if (!live_collection_pin(doc, pin_owner,
             JsDomLiveCollectionTraits<Entry>::pin_ref(entry))) return;
@@ -2320,8 +2369,8 @@ static void _register_live_form_collection(Item collection, DomDocument* doc,
     // the realm state before those arguments are evaluated (D5.2).
     if (!dom_collection_runtime_state_ensure()) return;
     dom_register_live_collection(collection, doc, owner, kind,
-        s_live_form_collections, &s_live_form_collection_count,
-        LIVE_FORM_COLLECTION_CACHE_SIZE);
+        &s_live_form_collections, &s_live_form_collection_count,
+        &s_live_form_collection_capacity);
 }
 
 template <typename Entry>
@@ -2354,8 +2403,8 @@ static void _register_live_lookup_collection(Item collection, DomDocument* doc,
     if (!dom_collection_runtime_state_ensure()) return;
     String* query_name = heap_create_name(query);
     dom_register_live_collection(collection, doc, root, kind,
-        s_live_lookup_collections, &s_live_lookup_collection_count,
-        LIVE_LOOKUP_COLLECTION_CACHE_SIZE);
+        &s_live_lookup_collections, &s_live_lookup_collection_count,
+        &s_live_lookup_collection_capacity);
     LiveLookupCollectionEntry* entry = _live_lookup_collection_entry(collection);
     if (!entry) return;
     entry->query = query_name;
@@ -16556,6 +16605,20 @@ static void dom_destroy_context_state(void* capsule, bool has_entries,
 
 static void dom_collection_capsule_destroy(void* capsule) {
     JsDomCollectionRuntimeState* state = (JsDomCollectionRuntimeState*)capsule;
+    // JSCUO5: the four tables are separate allocations now. Their `array` slots
+    // are weak GC registrations, so drop those before the storage goes away.
+    #define JS_DOM_FREE_COLLECTION_TABLE(field, count_field) \
+        for (int i = 0; i < state->count_field; i++) { \
+            if (state->field[i].array) { \
+                heap_unregister_gc_weak((uint64_t*)&state->field[i].array); \
+            } \
+        } \
+        if (state->field) mem_free(state->field);
+    JS_DOM_FREE_COLLECTION_TABLE(select_options_owners, select_options_owner_count)
+    JS_DOM_FREE_COLLECTION_TABLE(live_child_collections, live_child_collection_count)
+    JS_DOM_FREE_COLLECTION_TABLE(live_form_collections, live_form_collection_count)
+    JS_DOM_FREE_COLLECTION_TABLE(live_lookup_collections, live_lookup_collection_count)
+    #undef JS_DOM_FREE_COLLECTION_TABLE
     dom_destroy_context_state(capsule,
         state->select_options_owner_count || state->live_child_collection_count ||
         state->live_form_collection_count || state->live_lookup_collection_count,

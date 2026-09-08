@@ -1031,6 +1031,21 @@ static void jm_emit_resumable_this_arguments(JsMirTranspiler* mt,
 
 static MIR_label_t jm_emit_resumable_state_dispatch(JsMirTranspiler* mt,
         int state_count, bool needs_error_lane) {
+    // states are 0..state_count inclusive, so the array must hold one more
+    int needed = state_count + 1;
+    if (needed > mt->gen_state_label_capacity) {
+        MIR_label_t* grown = (MIR_label_t*)mem_realloc(mt->gen_state_labels,
+            (size_t)needed * sizeof(MIR_label_t), MEM_CAT_JS_RUNTIME);
+        if (!grown) {
+            log_error("js-mir: cannot size generator resume labels for %d states",
+                      state_count);
+            return 0;
+        }
+        memset(grown + mt->gen_state_label_capacity, 0,
+               (size_t)(needed - mt->gen_state_label_capacity) * sizeof(MIR_label_t));
+        mt->gen_state_labels = grown;
+        mt->gen_state_label_capacity = needed;
+    }
     for (int si = 0; si <= state_count; si++) {
         mt->gen_state_labels[si] = jm_new_label(mt);
     }
@@ -1430,7 +1445,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // +1 for implicit "param binding" yield that separates param destructuring
         // from body execution (ES spec: FunctionDeclarationInstantiation is eager)
         int yield_count = jm_count_yields(mt, fn->body) + (fn->is_async ? jm_count_awaits(mt, fn->body) : 0) + 1;
-        if (yield_count > 63) yield_count = 63;  // safety cap matching gen_state_labels size
+        // §9.3: the old `if (yield_count > 63) yield_count = 63;` safety cap
+        // matched a fixed 64-label array and truncated SILENTLY — a 100-yield
+        // generator ran only its first 62 states and returned a wrong result.
+        // The label array is exact-sized from this count now, so it stands.
 
         // Collect local variable names for env slot assignment
         struct hashmap* gen_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
@@ -1672,7 +1690,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     if (fn->is_async && !fn->is_generator) {
         int await_count = jm_count_awaits(mt, fn->body);
         if (await_count > 0) {
-            if (await_count > 63) await_count = 63;  // safety cap matching gen_state_labels size
+            // §9.3: same silent-truncation bug as the yield cap above; the
+            // resume-label array is exact-sized from this count now.
 
             // Collect local variable names for env slot assignment
             struct hashmap* async_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
@@ -1931,7 +1950,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->var_hoist_depth = -1;
     mt->eval_completion_reg = 0;  // disable completion tracking in function bodies
     mt->eval_local_frame_reg = 0;
-    mt->last_closure_has_env = false;  // clear stale closure env from previous function
+    mt->last_closure.has_env = false;  // clear stale closure env from previous function
 
     // Collection assigns the source-owned class ID to methods, nested
     // functions, and synthetic field initializers; resolving it here preserves
