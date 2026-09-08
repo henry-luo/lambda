@@ -255,6 +255,7 @@ struct SimEvent {
     bool has_expected_attribute_presence;
     bool expected_attribute_present;
     int drag_steps;              // number of intermediate mouse_move steps (default 5)
+    int drag_duration_ms;        // pointer_drag duration; default preserves a drag instead of a flick
     // editing_text_drag_drop range fields. Offsets are UTF-8 byte offsets,
     // matching form-control and contenteditable selection internals.
     int drag_source_start;

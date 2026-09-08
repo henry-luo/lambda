@@ -208,6 +208,7 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_ENABLED,       // :enabled
     CSS_SELECTOR_PSEUDO_DISABLED,      // :disabled
     CSS_SELECTOR_PSEUDO_CHECKED,       // :checked
+    CSS_SELECTOR_PSEUDO_SELECTED,      // :selected
     CSS_SELECTOR_PSEUDO_INDETERMINATE, // :indeterminate
     CSS_SELECTOR_PSEUDO_VALID,         // :valid
     CSS_SELECTOR_PSEUDO_INVALID,       // :invalid

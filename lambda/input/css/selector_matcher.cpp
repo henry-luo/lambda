@@ -827,6 +827,10 @@ bool selector_matcher_matches_pseudo_class(SelectorMatcher* matcher,
             return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_DISABLED);
         case CSS_SELECTOR_PSEUDO_CHECKED:
             return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_CHECKED);
+        case CSS_SELECTOR_PSEUDO_SELECTED:
+            // :selected reads the option's live IDL selectedness, not its
+            // defaultSelected content attribute.
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_SELECTED);
         case CSS_SELECTOR_PSEUDO_REQUIRED:
             return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_REQUIRED);
         case CSS_SELECTOR_PSEUDO_OPTIONAL:
@@ -1233,6 +1237,7 @@ CssSpecificity selector_matcher_calculate_specificity(SelectorMatcher* matcher,
                 case CSS_SELECTOR_PSEUDO_FOCUS:
                 case CSS_SELECTOR_PSEUDO_VISITED:
                 case CSS_SELECTOR_PSEUDO_LINK:
+                case CSS_SELECTOR_PSEUDO_SELECTED:
                 case CSS_SELECTOR_PSEUDO_FIRST_CHILD:
                 case CSS_SELECTOR_PSEUDO_LAST_CHILD:
                 case CSS_SELECTOR_PSEUDO_NTH_CHILD:

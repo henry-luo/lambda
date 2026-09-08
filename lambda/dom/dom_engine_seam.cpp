@@ -43,6 +43,9 @@ DOM_ENGINE_WEAK void dom_engine_input_value_validate(const char* t, const char* 
     (void)t; (void)v; (void)mn; (void)mx; (void)st; (void)out;
 }
 DOM_ENGINE_WEAK void dom_engine_reconcile_dom_mutations(UiContext* u, DomDocument* d) { (void)u; (void)d; }
+DOM_ENGINE_WEAK void* dom_engine_element_from_point(DomDocument* d, float x, float y) {
+    (void)d; (void)x; (void)y; return nullptr;
+}
 DOM_ENGINE_WEAK bool dom_engine_layout_active(DomDocument* d) { (void)d; return false; }
 DOM_ENGINE_WEAK void dom_engine_sync_pseudo_state(void* v, uint32_t f, bool set) {
     (void)v; (void)f; (void)set;

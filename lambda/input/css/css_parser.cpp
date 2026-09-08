@@ -1905,6 +1905,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                     selector->type = CSS_SELECTOR_PSEUDO_DISABLED;
                 } else if (strcmp(pseudo_name, "checked") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_CHECKED;
+                } else if (strcmp(pseudo_name, "selected") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_SELECTED;
                 } else if (strcmp(pseudo_name, "indeterminate") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_INDETERMINATE;
                 } else if (strcmp(pseudo_name, "valid") == 0) {

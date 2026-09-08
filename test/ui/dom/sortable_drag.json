@@ -4,6 +4,6 @@
   "viewport": {"width": 640, "height": 480},
   "events": [
     {"type": "mouse_drag", "target": {"selector": "#sort-one"}, "dx": 0, "dy": 40, "button": 0},
-    {"type": "assert_text", "target": {"selector": "#order"}, "equals": "two,three,one"}
+    {"type": "assert_text", "target": {"selector": "#order"}, "equals": "two,one,three"}
   ]
 }

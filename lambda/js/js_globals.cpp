@@ -15764,6 +15764,7 @@ JS_DEFINE_HOST_CTOR_BODY_2(keyboard_event, js_ctor_keyboard_event_fn)
 JS_DEFINE_HOST_CTOR_BODY_2(composition_event, js_ctor_composition_event_fn)
 JS_DEFINE_HOST_CTOR_BODY_2(input_event, js_ctor_input_event_fn)
 JS_DEFINE_HOST_CTOR_BODY_2(pointer_event, js_ctor_pointer_event_fn)
+JS_DEFINE_HOST_CTOR_BODY_2(touch_event, js_ctor_touch_event_fn)
 JS_DEFINE_HOST_CTOR_BODY_1(static_range, js_ctor_static_range_fn)
 JS_DEFINE_HOST_CTOR_BODY_2(transition_event, js_ctor_transition_event_fn)
 JS_DEFINE_HOST_CTOR_BODY_2(animation_event, js_ctor_animation_event_fn)
@@ -15974,7 +15975,8 @@ static void js_proto_snapshot_bootstrap_constructors() {
         JS_CLASS_EVENT, JS_CLASS_CUSTOM_EVENT, JS_CLASS_EVENT_TARGET,
         JS_CLASS_UI_EVENT, JS_CLASS_FOCUS_EVENT, JS_CLASS_MOUSE_EVENT,
         JS_CLASS_WHEEL_EVENT, JS_CLASS_KEYBOARD_EVENT, JS_CLASS_COMPOSITION_EVENT,
-        JS_CLASS_INPUT_EVENT, JS_CLASS_POINTER_EVENT, JS_CLASS_STATIC_RANGE,
+        JS_CLASS_INPUT_EVENT, JS_CLASS_POINTER_EVENT, JS_CLASS_TOUCH_EVENT,
+        JS_CLASS_STATIC_RANGE,
         JS_CLASS_TRANSITION_EVENT, JS_CLASS_ANIMATION_EVENT,
         0
     };
@@ -16785,6 +16787,7 @@ static JsClass js_intrinsic_prototype_parent_class(JsClass cls) {
         case JS_CLASS_KEYBOARD_EVENT:
         case JS_CLASS_COMPOSITION_EVENT:
         case JS_CLASS_INPUT_EVENT:
+        case JS_CLASS_TOUCH_EVENT:
             return JS_CLASS_UI_EVENT;
         case JS_CLASS_WHEEL_EVENT:
         case JS_CLASS_POINTER_EVENT:
