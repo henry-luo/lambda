@@ -2417,19 +2417,6 @@ uint64_t radiant_model_edit_surface_bind(DomElement* target,
     return handle_id;
 }
 
-void radiant_model_edit_surface_bindings_destroy(DocState* state) {
-    if (!state) return;
-    ModelEditSurfaceBinding* binding = state->editing.model_edit_surfaces;
-    while (binding) {
-        ModelEditSurfaceBinding* next = binding->next;
-        mem_free(binding->host_key);
-        mem_free(binding);
-        binding = next;
-    }
-    state->editing.model_edit_surfaces = nullptr;
-    state->editing.next_model_edit_surface_id = 0;
-}
-
 static bool model_edit_surface_revision(Item result, uint64_t* out_revision) {
     if (!out_revision) return false;
     Item revision = radiant_edit_result_field(result, "model_revision");

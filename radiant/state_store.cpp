@@ -59,6 +59,21 @@ static void view_state_set_hovered_internal(DocState* state, View* view, bool ho
 static void view_state_set_active_internal(DocState* state, View* view, bool active,
                                            bool assert_after_mutation);
 
+// The list lives inside DocState; keeping its destructor here lets every
+// state owner tear down without depending on the event dispatcher.
+static void state_store_destroy_model_edit_surface_bindings(DocState* state) {
+    if (!state) return;
+    ModelEditSurfaceBinding* binding = state->editing.model_edit_surfaces;
+    while (binding) {
+        ModelEditSurfaceBinding* next = binding->next;
+        mem_free(binding->host_key);
+        mem_free(binding);
+        binding = next;
+    }
+    state->editing.model_edit_surfaces = nullptr;
+    state->editing.next_model_edit_surface_id = 0;
+}
+
 typedef struct DumpNodeState {
     void* node;
     uint64_t flags;
@@ -1858,7 +1873,7 @@ void DocState::destroy() {
     // document-owned snapshots before this state's DOM/storage dependencies
     // begin teardown (D5.3.3).
     dom_edit_discard_retained_deltas(this);
-    radiant_model_edit_surface_bindings_destroy(this);
+    state_store_destroy_model_edit_surface_bindings(this);
 
     if (editing.dom_edit_session_rooted) {
         heap_unregister_gc_root(&editing.dom_edit_session_root);

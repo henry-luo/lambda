@@ -694,7 +694,6 @@ char* radiant_edit_result_string_copy(Item result, const char* name);
 uint64_t radiant_model_edit_surface_bind(DomElement* target,
                                          uint64_t model_revision);
 bool radiant_finish_model_edit(Item surface_handle, Item edit_result);
-void radiant_model_edit_surface_bindings_destroy(DocState* state);
 
 typedef enum DomBoundaryOrder {
     DOM_BOUNDARY_BEFORE   = -1,
