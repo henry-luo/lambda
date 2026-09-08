@@ -22,6 +22,7 @@ import lambda.editor.mod_doc
 import lambda.editor.mod_editor
 import lambda.editor.mod_md_schema
 import lambda.editor.mod_source_pos
+import dom
 
 let SOURCE_PATH = './test/input/simple.md'
 let initial_doc = input(SOURCE_PATH, 'markdown') ^ { null }
@@ -77,74 +78,30 @@ let initial_title_len = len(doc_text(node_at(initial_editor_doc, [0])))
 let initial_selection = text_selection(pos([0, 0], initial_title_len), pos([0, 0], initial_title_len))
 let initial_editor = edit_open(initial_editor_doc, html5_subset_schema, initial_selection)
 
-fn valid_source_pos(doc, p) {
-  if (p == null) { false }
-  else {
-    let n = node_at(doc, p.path)
-    if (n == null) { false }
-    else {
-      let max_offset = if (is_text(n)) { len(n.text) } else if (is_node(n)) { len(n.content) } else { -1 }
-      if (max_offset < 0) { false }
-      else if (p.offset < 0) { false }
-      else if (max_offset < p.offset) { false }
-      else { true }
-    }
-  }
+let toolbar_commands = [
+  {button: "btn-bold", input_type: "formatBold", payload: {}},
+  {button: "btn-italic", input_type: "formatItalic", payload: {}},
+  {button: "btn-underline", input_type: "formatUnderline", payload: {}},
+  {button: "btn-ul", input_type: "insertUnorderedList", payload: {kind: 'bullet'}},
+  {button: "btn-ol", input_type: "insertOrderedList", payload: {kind: 'ordered'}},
+  {button: "btn-quote", input_type: "formatBlockquote", payload: {}},
+  {button: "btn-code", input_type: "insertCodeBlock", payload: {data: ""}},
+  {button: "btn-link", input_type: "insertLink",
+   payload: {href: "https://example.com", title: "", label: "Example"}},
+  {button: "btn-image", input_type: "insertImage",
+   payload: {src: "https://example.com/image.png", alt: "Example image"}},
+  {button: "btn-table", input_type: "insertTable", payload: {rows: 2, cols: 2, header: true}},
+  {button: "btn-undo", input_type: "historyUndo", payload: {}},
+  {button: "btn-redo", input_type: "historyRedo", payload: {}}
+]
+
+fn toolbar_command_at(button, index) {
+  if (index >= len(toolbar_commands)) null
+  else if (toolbar_commands[index].button == button) toolbar_commands[index]
+  else toolbar_command_at(button, index + 1)
 }
 
-fn normalize_source_pos(doc, p) {
-  if (p == null) { null }
-  else if (valid_source_pos(doc, p)) { p }
-  else if (node_at(doc, p.path) != null and is_text(node_at(doc, p.path))) {
-    let leaf = node_at(doc, p.path)
-    if (p.offset < 0) { pos(p.path, 0) } else { pos(p.path, len(leaf.text)) }
-  }
-  else if (len(p.path) == 0) { null }
-  else { normalize_source_pos(doc, pos(parent_path(p.path), p.offset)) }
-}
-
-fn valid_source_selection(doc, sel) {
-  if (sel == null) { false }
-  else if (sel.kind == 'text') { valid_source_pos(doc, sel.anchor) and valid_source_pos(doc, sel.head) }
-  else if (sel.kind == 'node') { node_at(doc, sel.path) != null }
-  else if (sel.kind == 'all') { true }
-  else { false }
-}
-
-fn normalize_source_selection(doc, sel) {
-  if (sel == null) { null }
-  else if (sel.kind == 'text') {
-    let anchor = normalize_source_pos(doc, sel.anchor)
-    let head = normalize_source_pos(doc, sel.head)
-    if (anchor != null and head != null) { text_selection(anchor, head) } else { null }
-  }
-  else if (valid_source_selection(doc, sel)) { sel }
-  else { null }
-}
-
-fn event_selection_for_doc(doc, evt, fallback) {
-  let sel = normalize_source_selection(doc, evt.source_selection)
-  if (sel != null) { sel }
-  else {
-    let p = normalize_source_pos(doc, evt.source_pos)
-    if (p != null) { text_selection(p, p) } else { fallback }
-  }
-}
-
-fn source_selection_is_range(sel) =>
-  sel != null and (sel.kind != 'text' or not pos_equal(sel.anchor, sel.head))
-
-fn click_selection_for_doc(doc, evt, fallback) {
-  let sel = normalize_source_selection(doc, evt.source_selection)
-  let p = normalize_source_pos(doc, evt.source_pos)
-  if (p != null) { text_selection(p, p) }
-  else if (source_selection_is_range(sel)) { sel }
-  else if (sel != null) { sel }
-  else { fallback }
-}
-
-fn editor_with_event_selection(ed, evt) map | error => edit_set_selection(ed, event_selection_for_doc(ed.doc, evt, ed.selection))
-fn editor_with_click_selection(ed, evt) map | error => edit_set_selection(ed, click_selection_for_doc(ed.doc, evt, ed.selection))
+fn toolbar_command(button) => toolbar_command_at(button, 0)
 
 // ============================================================================
 // Per-tag render templates — markdown Mark tree -> HTML
@@ -238,7 +195,7 @@ on click() {
 // Top-level reactive editor application
 // ============================================================================
 
-edit <rte_app> state editor: initial_editor, status: ("opened:" ++ SOURCE_PATH), markdown_output: "", drag_selection: null, drag_moved: false {
+edit <rte_app> state editor: initial_editor, status: ("opened:" ++ SOURCE_PATH), markdown_output: "" {
   <div class:"rte-app",
     <div id:"toolbar", class:"toolbar",
       apply(<toolbar_button cmd:"btn-bold",      label:"B">)
@@ -262,134 +219,43 @@ edit <rte_app> state editor: initial_editor, status: ("opened:" ++ SOURCE_PATH),
     <div id:"status", status>
   >
 }
-on mousemove(evt) {
-  let sel = normalize_source_selection(editor.doc, evt.source_selection)
-  if (evt.selection_press_in_range and source_selection_is_range(sel)) {
-    drag_selection = sel
-    drag_moved = true
-    status = "dragging"
-  } else if (evt.selection_press_in_range and drag_selection != null) {
-    drag_moved = true
-    status = "dragging"
-  }
-}
-on mouseup(evt) {
-  if (drag_selection != null and drag_moved) {
-    let drop_pos = normalize_source_pos(editor.doc, evt.source_pos)
-    if (drop_pos != null) {
-      let moved_text = selection_to_string(editor.doc, drag_selection)
-      let delete_editor = edit_set_selection(editor, drag_selection)
-      if (edit_can_exec(delete_editor, edit_cmd_delete_forward())) {
-        let after_delete = edit_exec(delete_editor, edit_cmd_delete_forward())
-        let drop_after_delete = normalize_source_pos(after_delete.doc, drop_pos)
-        if (drop_after_delete != null) {
-          let insert_editor = edit_set_selection(after_delete, text_selection(drop_after_delete, drop_after_delete))
-          if (edit_can_exec(insert_editor, edit_cmd_insert_text(moved_text))) {
-            editor = edit_exec(insert_editor, edit_cmd_insert_text(moved_text))
-            set_selection(editor.selection)
-            status = "drag-moved"
-          } else {
-            status = "drag-insert-null:" ++ moved_text
-          }
-        } else {
-          status = "drag-drop-null:" ++ moved_text
-        }
-      } else {
-        let move_cmd = edit_cmd_move_text_selection(drag_selection, drop_pos)
-        if (edit_can_exec(editor, move_cmd)) {
-          editor = edit_exec(editor, move_cmd)
-          set_selection(editor.selection)
-          status = "drag-moved"
-        } else {
-          status = "drag-delete-null:" ++ moved_text
-        }
-      }
-    }
-  }
-  drag_selection = null
-  drag_moved = false
-}
 on beforeinput(evt) {
-  if (evt.input_intent != null) {
-    let next_editor = edit_dispatch(editor_with_event_selection(editor, evt), evt.input_intent)
-    editor = next_editor
-    set_selection(next_editor.selection)
-    status = evt.input_type
-  } else {
-    status = evt.input_type
-  }
-  return 'prevent-default'
+  return 'pass'
 }
-on click(evt) {
-  if ((evt.target_tag == null or evt.target_tag != "button") and (evt.source_selection != null or evt.source_pos != null)) {
-    editor = editor_with_click_selection(editor, evt)
-    status = "selected"
-  }
+on editaction(evt) {
+  let run = edit_handle_dom_action(editor, evt)
+  editor = run.editor
+  status = if (run.result.failure == null) evt.input_type else run.result.failure
+  return run.result
 }
 on selectionchange(evt) {
   if (evt.source_selection != null or evt.source_pos != null) {
-    editor = editor_with_event_selection(editor, evt)
-    set_selection(editor.selection)
+    if (not editor.mounted) {
+      editor = edit_mount(editor, evt.target, 'html5_subset')
+    }
+    let accepted = edit_accept_dom_selection(editor, evt)
+    if (accepted.changed) { editor = accepted.editor }
   }
 }
 on rte_cmd(evt) {
-  // S2.1 dispatch stub — proves toolbar -> state path. S2.2 replaces these
-  // branches with `editor = edit_exec(editor, edit_cmd_*())` from the
-  // imported `mod_editor` module.
   let cmd = evt
   if (cmd == "btn-save") {
     markdown_output = doc_text(editor.doc)
     status = "saved"
-  } else if (cmd == "btn-bold") {
-    editor = edit_exec(editor, edit_cmd_toggle_mark('strong', true))
-    set_selection(editor.selection)
-    status = cmd
-  } else if (cmd == "btn-italic") {
-    editor = edit_exec(editor, edit_cmd_toggle_mark('em', true))
-    set_selection(editor.selection)
-    status = cmd
-  } else if (cmd == "btn-underline") {
-    editor = edit_exec(editor, edit_cmd_toggle_mark('u', true))
-    set_selection(editor.selection)
-    status = cmd
-  } else if (cmd == "btn-ul") {
-    editor = edit_exec(editor, edit_cmd_wrap_list('bullet'))
-    set_selection(editor.selection)
-    status = cmd
-  } else if (cmd == "btn-ol") {
-    editor = edit_exec(editor, edit_cmd_wrap_list('ordered'))
-    set_selection(editor.selection)
-    status = cmd
-  } else if (cmd == "btn-quote") {
-    editor = edit_exec(editor, edit_cmd_wrap_blockquote())
-    set_selection(editor.selection)
-    status = cmd
-  } else if (cmd == "btn-code") {
-    editor = edit_exec(editor, edit_cmd_insert_code_block(""))
-    set_selection(editor.selection)
-    status = cmd
-  } else if (cmd == "btn-link") {
-    editor = edit_exec(editor, edit_cmd_insert_link("https://example.com", "", "Example"))
-    set_selection(editor.selection)
-    status = cmd
-  } else if (cmd == "btn-image") {
-    editor = edit_exec(editor, edit_cmd_insert_image("https://example.com/image.png", "Example image"))
-    set_selection(editor.selection)
-    status = cmd
-  } else if (cmd == "btn-table") {
-    editor = edit_exec(editor, edit_cmd_insert_table(2, 2, true))
-    set_selection(editor.selection)
-    status = cmd
-  } else if (cmd == "btn-undo") {
-    editor = edit_exec(editor, edit_cmd_history_undo())
-    set_selection(editor.selection)
-    status = cmd
-  } else if (cmd == "btn-redo") {
-    editor = edit_exec(editor, edit_cmd_history_redo())
-    set_selection(editor.selection)
-    status = cmd
   } else {
-    status = cmd
+    let descriptor = toolbar_command(cmd)
+    if (descriptor == null) { status = cmd }
+    else {
+      let request = edit_request_from_toolbar(descriptor.input_type, descriptor.payload)
+      let run = edit_handle_request(editor, request)
+      editor = run.editor
+      status = if (run.result.failure == null) cmd else run.result.failure
+      if (editor.surface_handle != null and
+          not dom.finish_model_edit(editor.surface_handle, run.result)) {
+        status = "model-completion-failed"
+      }
+      return null
+    }
   }
 }
 

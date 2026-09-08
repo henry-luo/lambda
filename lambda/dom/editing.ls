@@ -8,52 +8,15 @@
 // An intent this file does not handle returns 'pass' and the native applier
 // runs unchanged, so the flip can land one input type at a time.
 import dom
+import text_policy: lambda.dom.edit_text_policy
 
-// --- word boundaries -------------------------------------------------------
-
-// Same classification the native scanner used: letters, digits and underscore
-// are word characters, and so is any non-ASCII codepoint — a full UCD lookup
-// would be the correct answer, but this matches what browsers do for
-// double-click and word-delete across most scripts.
-fn is_word_char(c) {
-    let o = ord(c);
-    (o >= 48 and o <= 57) or (o >= 65 and o <= 90) or
-        (o >= 97 and o <= 122) or o == 95 or o >= 128
-}
-
-// Walk left from `i` while the codepoint before it classifies as `want`.
-fn scan_back(text, i, want) {
-    if (i <= 0) { 0 }
-    else if (is_word_char(slice(text, i - 1, i)) == want) { scan_back(text, i - 1, want) }
-    else { i }
-}
-
-// Walk right from `i` while the codepoint at it classifies as `want`.
-fn scan_fwd(text, i, want) {
-    if (i >= len(text)) { len(text) }
-    else if (is_word_char(slice(text, i, i + 1)) == want) { scan_fwd(text, i + 1, want) }
-    else { i }
-}
-
-// A word delete consumes the separators beside the caret first, then the word
-// itself, so deleting at "abc   |" removes the spaces and "abc" together.
-pub fn word_start(text, pos) { scan_back(text, scan_back(text, pos, false), true) }
-pub fn word_end(text, pos) { scan_fwd(text, scan_fwd(text, pos, false), true) }
-
-// Line boundaries, for the cmd/ctrl line deletes. A textarea is the only
-// control that can hold a newline, so on a single-line input these land on 0
-// and len() — which is the whole value, exactly as they should.
-pub fn line_start(text, pos) {
-    if (pos <= 0) { 0 }
-    else if (slice(text, pos - 1, pos) == "\n") { pos }
-    else { line_start(text, pos - 1) }
-}
-
-pub fn line_end(text, pos) {
-    if (pos >= len(text)) { len(text) }
-    else if (slice(text, pos, pos + 1) == "\n") { pos }
-    else { line_end(text, pos + 1) }
-}
+// Preserve the public helpers while their implementation lives in the shared
+// pure module used by both editing backends.
+pub fn word_start(text, pos) => text_policy.word_start(text, pos)
+pub fn word_end(text, pos) => text_policy.word_end(text, pos)
+pub fn line_start(text, pos) => text_policy.line_start(text, pos)
+pub fn line_end(text, pos) => text_policy.line_end(text, pos)
+pub fn sanitize(text, multiline) => text_policy.sanitize(text, multiline)
 
 // Every delete is the same shape once its boundary is known: a non-empty
 // selection is removed wholesale, otherwise the span between the caret and the
@@ -88,27 +51,6 @@ pn delete_span(elem, s, e, target) {
     else { 'pass' }
 }
 
-// --- single-line newline policy --------------------------------------------
-
-// A single-line control cannot hold a newline. Native's paste path turns CR and
-// LF into *spaces* rather than dropping them, so a two-line paste stays legible
-// on one line instead of running words together; the same rule applies to any
-// insertion that reaches a single-line control.
-pub fn sanitize(text, multiline) {
-    if (multiline) {
-        // A textarea's value holds only LF (HTML value normalization), so a
-        // CRLF and a bare CR both become one LF. Leaving them alone would put
-        // a raw CR in the value — which is what this did before, masked only
-        // because the native paste path normalized first.
-        replace(replace(text, "\r\n", "\n"), "\r", "\n")
-    }
-    else {
-        // CRLF collapses first, so a Windows line ending yields one space
-        // rather than two
-        replace(replace(replace(text, "\r\n", " "), "\n", " "), "\r", " ")
-    }
-}
-
 // --- maxlength -------------------------------------------------------------
 
 // `maxlength` caps what *user input* may add (HTML 4.10.5.5). A deletion is
@@ -131,13 +73,7 @@ fn max_len(elem) {
 // Trim `data` to the budget remaining once the replaced range is gone.
 fn fit(elem, data, text_len, sel_len) {
     let m = max_len(elem);
-    if (m == null) { data }
-    else {
-        let budget = m - (text_len - sel_len);
-        if (budget <= 0) { "" }
-        else if (len(data) <= budget) { data }
-        else { slice(data, 0, budget) }
-    }
+    text_policy.fit_insertion(data, text_len, sel_len, m)
 }
 
 // --- commit (change-on-blur) ------------------------------------------------
@@ -195,7 +131,7 @@ pub pn apply_fn(elem, evt, multiline) {
         // is also what makes typing over a selection collapse it.
         // sanitize before measuring: the newline policy decides what the text
         // *is*, and only then does maxlength decide how much of it fits
-        let data = sanitize(if (evt.data == null) "" else evt.data, multiline);
+        let data = text_policy.sanitize(if (evt.data == null) "" else evt.data, multiline);
         let fitted = fit(elem, data, len(text), e - s);
         dom.edit_replace_range(elem, s, e, fitted)
         reveal_last_typed(elem, s, fitted)
@@ -217,16 +153,16 @@ pub pn apply_fn(elem, evt, multiline) {
         delete_span(elem, s, e, if (s < len(text)) s + 1 else s)
     }
     else if (t == "deleteWordBackward") {
-        delete_span(elem, s, e, word_start(text, s))
+        delete_span(elem, s, e, text_policy.word_start(text, s))
     }
     else if (t == "deleteWordForward") {
-        delete_span(elem, s, e, word_end(text, s))
+        delete_span(elem, s, e, text_policy.word_end(text, s))
     }
     else if (t == "deleteSoftLineBackward" or t == "deleteHardLineBackward") {
-        delete_span(elem, s, e, line_start(text, s))
+        delete_span(elem, s, e, text_policy.line_start(text, s))
     }
     else if (t == "deleteSoftLineForward" or t == "deleteHardLineForward") {
-        delete_span(elem, s, e, line_end(text, s))
+        delete_span(elem, s, e, text_policy.line_end(text, s))
     }
     else if (t == "historyUndo" or t == "historyRedo") {
         // ES17: the engine owns the ring and the cursor and hands over the

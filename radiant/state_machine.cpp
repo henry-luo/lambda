@@ -330,6 +330,11 @@ bool drag_transition(DocState* state,
                                                     args->source_end,
                                                     args->press_offset);
                 }
+                if (args->has_source_dom_range) {
+                    doc_state_set_drag_source_dom_range(
+                        state, &args->source_dom_start,
+                        &args->source_dom_end);
+                }
                 break;
             case DRAG_TRANSITION_UPDATE_DROP_MOTION:
                 if (!args) return false;

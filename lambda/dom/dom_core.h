@@ -173,6 +173,8 @@ Item dom_engine_edit_release_delta(Item a, Item b);
 Item dom_engine_clear_editing_focus(Item a);
 Item dom_engine_edit_session(Item a);
 Item dom_engine_set_edit_session(Item a, Item b);
+Item dom_engine_bind_model_edit_surface(Item a, Item b);
+Item dom_engine_finish_model_edit(Item a, Item b);
 Item dom_engine_is_focusable(Item a);
 Item dom_engine_dispatch_event(Item n, Item type, Item bubbles, Item cancelable);
 Item dom_engine_keyboard_click(Item n);

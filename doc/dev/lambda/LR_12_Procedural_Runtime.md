@@ -1,10 +1,10 @@
 # Lambda Runtime — The Procedural Runtime
 
-> **Last verified against tree:** 2026-08-24 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-09-08 *(editable selection callback retirement)*
 
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the *procedural* half of Lambda: the `pn` procedure flavour, the `run script.ls` / `main()` entry path, and the three machinery clusters that make procedural scripts possible on top of an otherwise pure-functional, JIT-compiled language — the IO/side-effect builtins in `lambda-proc.cpp`, the in-place growable-array mutation builtins `push()`/`splice()`, the for-*statement* loop form (`for i in a to b { arr[i] = v }`), and the static `safety_analyzer` that decides which functions get a stack-overflow guard. It explains what distinguishes procedural code from functional code at the language and codegen level, and where the procedural-specific lowering lives.
 >
-> **Primary sources:** `lambda/lambda-proc.cpp` (the `pn_*` IO/side-effect builtins: `pn_print`/`pn_output*`/`pn_fetch`/`pn_cmd*`/`pn_io_*`/`pn_clock`), `lambda/concurrency.cpp` / `.h` (tasks, scopes, scheduler, mailboxes, suspension and async file I/O), `lambda/concurrency_js.cpp` / `.h` (Promise membrane), `lambda/lambda-data.cpp` (the mutation builtins `pn_push`/`pn_splice`), `lambda/build_ast.cpp` (`build_for_stam` and concurrency analysis), `lambda/transpile-mir.cpp` (`transpile_for`, resumable procedure lowering, the `AST_NODE_INDEX_ASSIGN_STAM` lowering, `emit_null_item_reg`), `lambda/safety_analyzer.cpp`/`.hpp` (the conservative stack-check gate and the unwired TCO analysis), `lambda/sys_func_registry.c` (the `SYSPROC_*` table rows).
+> **Primary sources:** `lambda/runtime/lambda-proc.cpp` (the `pn_*` IO/side-effect builtins: `pn_print`/`pn_output*`/`pn_fetch`/`pn_cmd*`/`pn_io_*`/`pn_clock`), `lambda/runtime/concurrency.cpp` / `.h` (tasks, scopes, scheduler, mailboxes, suspension and async file I/O), `lambda/runtime/concurrency_js.cpp` / `.h` (Promise membrane), `lambda/core/lambda-data.cpp` (the mutation builtins `pn_push`/`pn_splice`), `lambda/runtime/build_ast.cpp` (`build_for_stam` and concurrency analysis), `lambda/runtime/transpile-mir.cpp` (`transpile_for`, resumable procedure lowering, the `AST_NODE_INDEX_ASSIGN_STAM` lowering, `emit_null_item_reg`), `lambda/runtime/safety_analyzer.cpp`/`.hpp` (the conservative stack-check gate and the unwired TCO analysis), `lambda/runtime/sys_func_registry.c` (the `SYSPROC_*` table rows).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names.
 
 ---
@@ -26,7 +26,12 @@ The CLI entry decides which path runs. `lambda script.ls` runs the script as a f
 `lambda-proc.cpp` is the home of the `pn_*` builtins — the procedures a script reaches through `print`, `output`, `fetch`, `cmd`, the `io.*` module, and `clock`. They are registered as `SYSPROC_*` / side-effect rows in `sys_func_defs[]` (`sys_func_registry.c`), most flagged `can_raise` and returning a `RetItem` so an IO failure propagates as an error through the `T^E` return machinery ([LR_10 — Error Handling]). The whole file is gated for testing by a single global `g_dry_run` (`lambda-proc.cpp:23`): when set, each IO procedure returns a fabricated result (`dry_run_fabricated_output`/`_fetch`/`_cmd`, `:36`–`:52`) instead of touching the filesystem or network, so fuzz/test runs still exercise the result-processing code paths without side effects.
 
 - **`pn_print`** (`:56`) — the procedural `print()`: stringifies the Item via `fn_string` and writes it to stdout. It is the one sanctioned `printf` in the runtime (annotated `PRINTF_OK`, `:61`), an explicit exception to the project's `log_*`-only rule, because `print` *is* the user-facing output channel. Returns `ItemNull`.
-- **`pn_emit`** (`:72`) / **`pn_set_selection`** (`:81`) — dispatch a custom event / push a selection back to the live DOM, delegating to `dispatch_emit`/`dispatch_set_selection` in `radiant/event.cpp`; these are the procedural hooks for the reactive document editor, not general scripting primitives.
+- **`pn_emit`** — dispatches a custom event through the lower-owned
+  `runtime/radiant_event_hook`. The former `pn_set_selection` side channel is
+  retired: D7.5.3 requires model selection completion to cross the declared
+  `radiant-dom` operations as a revisioned `EditResult`, with D5.3.3 rooting
+  across reactive regeneration. See
+  [Lambda DOM Editable](../../../vibe/Lambda_Design_DOM_Editable.md).
 - **`pn_clock`** (`:85`) — returns a monotonic wall-clock double (`clock_gettime(CLOCK_MONOTONIC)`), typed `C_RET_DOUBLE` in the registry so it returns a native `D` register; the benchmark suite uses it for timing.
 - **`output`** — `pn_output2`/`pn_output3`/`pn_output_append` (`:540` and siblings) all funnel into `pn_output_internal` (`:137`): validate the target is a String/Symbol/Path, resolve it to a local path through `item_to_target`/`target_to_local_path`, reject remote URLs, create parent dirs, then write with optional format conversion, append, and atomic (temp-file-then-rename) modes. Returns a bytes-written count or `ItemError`.
 - **`pn_fetch`** (`:564`) — HTTP fetch with a JS-`fetch`-style options map; the response is turned into an Item by `fetch_response_to_item` (`:547`), which today returns the body as a bare String (see §6, the `:551` TODO).
@@ -101,7 +106,7 @@ The ledger carries the verification status of each entry (OPEN / PARTIAL / RESOL
 
 | File | Responsibility (this doc) |
 |---|---|
-| `lambda/lambda-proc.cpp` | The `pn_*` IO/side-effect builtins: `pn_print`, `pn_emit`/`pn_set_selection`, `pn_clock`, `pn_output_internal`/`pn_output2/3`/`pn_output_append`, `pn_fetch`/`fetch_response_to_item`, `pn_cmd1/2`, the `pn_io_*` filesystem procedures, and the `g_dry_run` gate. |
+| `lambda/runtime/lambda-proc.cpp` | The `pn_*` IO/side-effect builtins: `pn_print`, `pn_emit`, `pn_clock`, `pn_output_internal`/`pn_output2/3`/`pn_output_append`, `pn_fetch`/`fetch_response_to_item`, `pn_cmd1/2`, the `pn_io_*` filesystem procedures, and the `g_dry_run` gate. Model selection completion is intentionally absent (D7.5.3). |
 | `lambda/concurrency.cpp` / `.h` | Cooperative task scheduler, VMap handles, bounded FIFO mailboxes, structured task scopes, cancellation, async frames, wait/select/sleep, completion observers, and libuv-backed `io.read`. |
 | `lambda/concurrency_js.cpp` / `.h` | Lambda task-handle to JS Promise adaptation and JS Promise to parked-Lambda-task reactions. |
 | `lambda/lambda-data.cpp` | The in-place growable-array mutation builtins `pn_push` (`:629`) and `pn_splice` (`:652`, generic-`Array` shift and `ArrayNum` `memmove` with the view/N-D guard). |

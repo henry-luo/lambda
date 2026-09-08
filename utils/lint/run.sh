@@ -34,6 +34,7 @@ STRUCTURAL_CHECKS=(
   "state-machine:python3 $ROOT/utils/check_state_machine.py"
   "gc-effects:python3 $ROOT/utils/check_gc_effects.py"
   "gc-root-hazards:python3 $ROOT/utils/check_gc_root_hazards.py"
+  "dom-editable-architecture:python3 $ROOT/utils/lint/rules/structural/check_dom_editable_architecture.py"
   "no-new-per-file-header:python3 $ROOT/utils/lint/rules/structural/no_new_per_file_header.py"
   "static-module-architecture:python3 $ROOT/utils/check_static_module_architecture.py"
   "module-boundary-link:make -C $ROOT check-module-boundary"

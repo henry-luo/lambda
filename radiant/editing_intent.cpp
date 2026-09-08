@@ -26,7 +26,8 @@ InputIntent::InputIntent()
       edit_invocation_id(0),
       edit_query_kind(nullptr),
       edit_plaintext_only(false),
-      context_menu_item(-1) {}
+      context_menu_item(-1),
+      drag_move(false) {}
 
 InputIntent::~InputIntent() {
     // paste/drop intents may own payload copies; scope cleanup keeps every
@@ -59,6 +60,7 @@ bool input_intent_clone(const InputIntent* source, InputIntent* destination) {
     destination->edit_query_kind = source->edit_query_kind;
     destination->edit_plaintext_only = source->edit_plaintext_only;
     destination->context_menu_item = source->context_menu_item;
+    destination->drag_move = source->drag_move;
     if (source->data) {
         destination->owned_data = mem_strdup(source->data, MEM_CAT_TEMP);
         if (!destination->owned_data) goto fail;
@@ -94,6 +96,7 @@ static void input_intent_reset(InputIntent* intent) {
     intent->edit_query_kind = nullptr;
     intent->edit_plaintext_only = false;
     intent->context_menu_item = -1;
+    intent->drag_move = false;
 }
 
 typedef struct InputIntentName {

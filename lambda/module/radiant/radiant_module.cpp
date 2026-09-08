@@ -2086,6 +2086,26 @@ RADIANT_C_API Item fn_radiant_dom_set_edit_session(Item node_item,
     return session_root.get();
 }
 
+RADIANT_C_API Item fn_radiant_bind_model_edit_surface(Item node_item,
+                                                       Item revision_item) {
+    DomElement* element = radiant_dom_element_from_item(
+        node_item, "BIND_MODEL_EDIT_SURFACE");
+    int64_t revision = it2l(revision_item);
+    if (!element || revision < 0) return ItemNull;
+    uint64_t handle = radiant_model_edit_surface_bind(
+        element, (uint64_t)revision);
+    return handle == 0 ? ItemNull : radiant_int_item((int64_t)handle);
+}
+
+RADIANT_C_API Item fn_radiant_finish_model_edit(Item surface_item,
+                                                Item result_item) {
+    RootFrame roots(1);
+    Rooted<Item> result_root(roots, result_item);
+    if (!roots.valid()) return radiant_bool_item(false);
+    return radiant_bool_item(radiant_finish_model_edit(
+        surface_item, result_root.get()));
+}
+
 // The text node an editing dispatch resolved to, and its range. Three scalar
 // accessors rather than one map, matching selection_start/selection_end: the
 // module has no map-building idiom, and a template reads these once each.
@@ -3442,6 +3462,8 @@ RADIANT_PROVIDE_ENGINE_4(edit_replay_delta, fn_radiant_dom_edit_replay_delta)
 RADIANT_PROVIDE_ENGINE_2(edit_release_delta, fn_radiant_dom_edit_release_delta)
 RADIANT_PROVIDE_ENGINE_1(edit_session, fn_radiant_dom_edit_session)
 RADIANT_PROVIDE_ENGINE_2(set_edit_session, fn_radiant_dom_set_edit_session)
+RADIANT_PROVIDE_ENGINE_2(bind_model_edit_surface, fn_radiant_bind_model_edit_surface)
+RADIANT_PROVIDE_ENGINE_2(finish_model_edit, fn_radiant_finish_model_edit)
 
 // is_focusable has no radiant.* spelling to forward to: the engine keeps the
 // predicate internal and publishes only focus_candidates, the whole list. A
