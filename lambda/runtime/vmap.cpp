@@ -1,9 +1,11 @@
 // vmap.cpp — VMap (Virtual Map) implementation with HashMap backend
-// Provides a dynamic hash-map type for Lambda with arbitrary key types.
+// Provides a dynamic hash-map type for Lambda with canonical name and integer keys.
 // Uses lib/hashmap.h (Robin Hood open-addressed hash table) as the backing store.
 
 #include "../lambda.hpp"
 #include "../core/lambda-decimal.hpp"
+#include "lambda-number-runtime.hpp"
+#include "lambda-error.h"
 #include "../../lib/memtrack.h"
 #include "../lambda-data.hpp"
 #include "../../lib/hashmap.h"
@@ -16,8 +18,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
+#include <math.h>
+#include <mpdecimal.h>
 
 extern __thread EvalContext* context;
+extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* message);
 
 static bool item_key_chars(Item key, const char** chars, uint32_t* len) {
     TypeId type_id = get_type_id(key);
@@ -69,11 +74,51 @@ struct HashMapData {
     ArrayList* key_order;        // insertion-order list of Item keys
     ArrayList* num_values;       // heap-owned numeric key/value storage
     int64_t count;
+    bool lambda_key_domain;      // false only for host raw backing stores
 };
 
 // ============================================================================
 // Hash and Compare Functions
 // ============================================================================
+
+static bool vmap_key_is_name(Item key) {
+    TypeId type_id = get_type_id(key);
+    return type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL;
+}
+
+static bool vmap_key_is_integer(Item key) {
+    LambdaNumericRuntimePart part;
+    if (lambda_numeric_runtime_part(key, &part)) {
+        return part.kind != LAMBDA_NUM_PART_FLOAT ||
+            (isfinite(part.float_value) && floor(part.float_value) == part.float_value);
+    }
+    if (get_type_id(key) != LMD_TYPE_DECIMAL) return false;
+    Decimal* decimal = key.get_decimal();
+    return decimal && decimal->dec_val && !mpd_isnan(decimal->dec_val) &&
+        !mpd_isinfinite(decimal->dec_val) && mpd_isinteger(decimal->dec_val);
+}
+
+static bool vmap_key_is_supported(Item key) {
+    return vmap_key_is_name(key) || vmap_key_is_integer(key);
+}
+
+static Item vmap_invalid_key_error() {
+    set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+        "invalid VMap key: expected a string/symbol name or a finite exact integer");
+    return ItemError;
+}
+
+static int vmap_compare_name_keys(Item a, Item b) {
+    const char* chars_a = a.get_chars();
+    const char* chars_b = b.get_chars();
+    uint32_t len_a = a.get_len();
+    uint32_t len_b = b.get_len();
+    if (!chars_a || !chars_b || len_a != len_b) return 1;
+    if (len_a > 0 && memcmp(chars_a, chars_b, len_a) != 0) return 1;
+    Target* ns_a = get_type_id(a) == LMD_TYPE_SYMBOL ? a.get_symbol()->ns : NULL;
+    Target* ns_b = get_type_id(b) == LMD_TYPE_SYMBOL ? b.get_symbol()->ns : NULL;
+    return target_equal(ns_a, ns_b) ? 0 : 1;
+}
 
 // hash an Item key for use in the hash table
 static uint64_t vmap_hash_item(const void* entry, uint64_t seed0, uint64_t seed1) {
@@ -85,6 +130,11 @@ static uint64_t vmap_hash_item(const void* entry, uint64_t seed0, uint64_t seed1
 static int vmap_compare_item(const void* a, const void* b, void* udata) {
     const HashMapEntry* ea = (const HashMapEntry*)a;
     const HashMapEntry* eb = (const HashMapEntry*)b;
+    HashMapData* hd = (HashMapData*)udata;
+    if (hd && hd->lambda_key_domain &&
+            vmap_key_is_name(ea->key) && vmap_key_is_name(eb->key)) {
+        return vmap_compare_name_keys(ea->key, eb->key);
+    }
     return lambda_item_compare(ea->key, eb->key);
 }
 
@@ -92,13 +142,14 @@ static int vmap_compare_item(const void* a, const void* b, void* udata) {
 // HashMapData Lifecycle
 // ============================================================================
 
-static HashMapData* hashmap_data_new() {
+static HashMapData* hashmap_data_new(bool lambda_key_domain) {
     HashMapData* hd = (HashMapData*)mem_calloc(1, sizeof(HashMapData), MEM_CAT_EVAL);
     hd->table = hashmap_new(sizeof(HashMapEntry), 8, 0, 0,
-                            vmap_hash_item, vmap_compare_item, NULL, NULL);
+                            vmap_hash_item, vmap_compare_item, NULL, hd);
     hd->key_order = arraylist_new(8);
     hd->num_values = NULL;  // lazily allocated when needed
     hd->count = 0;
+    hd->lambda_key_domain = lambda_key_domain;
     return hd;
 }
 
@@ -279,11 +330,11 @@ static VMap* vmap_alloc() {
     return vm;
 }
 
-static bool vmap_ensure_hashmap_data(VMap* vm) {
+static bool vmap_ensure_hashmap_data(VMap* vm, bool lambda_key_domain) {
     if (!vm) return false;
     if (vm->data) return true;
     // Host-branded VMaps are projection shells; only real map mutation needs backing storage.
-    vm->data = hashmap_data_new();
+    vm->data = hashmap_data_new(lambda_key_domain);
     return vm->data != nullptr;
 }
 
@@ -307,7 +358,7 @@ extern "C" bool vmap_backing_has(VMap* vm, Item key) {
 
 extern "C" bool vmap_backing_set(VMap* vm, Item key, Item value) {
     if (!vm || !vm->vtable) return false;
-    if (!vmap_ensure_hashmap_data(vm)) return false;
+    if (!vmap_ensure_hashmap_data(vm, false)) return false;
     vm->vtable->set(vm->data, key, value);
     return true;
 }
@@ -396,12 +447,15 @@ extern "C" Item vmap_from_array(Item array_item) {
         return ItemNull;
     }
     VMap* vm = vmap_alloc();
-    if (!vmap_ensure_hashmap_data(vm)) return ItemNull;
+    if (!vmap_ensure_hashmap_data(vm, true)) return ItemNull;
     HashMapData* hd = (HashMapData*)vm->data;
 
     for (int64_t i = 0; i < len; i += 2) {
         Item key = list->items[i];
         Item value = list->items[i + 1];
+        if (!vmap_key_is_supported(key)) {
+            return vmap_invalid_key_error();
+        }
         hashmap_data_set(hd, key, value);
     }
 
@@ -410,34 +464,38 @@ extern "C" Item vmap_from_array(Item array_item) {
 }
 
 // in-place mutation: insert or update an entry in the VMap (for procedural m.set(k, v))
-extern "C" void vmap_set(Item vmap_item, Item key, Item value) {
+extern "C" Item vmap_set(Item vmap_item, Item key, Item value) {
     log_debug("vmap_set: in-place insert on VMap");
     TypeId type_id = get_type_id(vmap_item);
 
     if (type_id != LMD_TYPE_VMAP) {
-        log_error("vmap_set: expected vmap, got type %s", get_type_name(type_id));
-        return;
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH, "vmap_set: expected VMap receiver");
+        return ItemError;
     }
     VMap* vm = vmap_item.vmap;
     if (!vm || !vm->vtable) {
-        log_error("vmap_set: null vmap or vtable");
-        return;
+        set_runtime_error_no_trace(ERR_RUNTIME_ERROR, "vmap_set: invalid VMap receiver");
+        return ItemError;
     }
     // Task handles are capability identities, not user-extensible maps; their
     // VMap carrier is intentionally opaque and immutable.
     if (lambda_task_handle_is(vmap_item)) {
-        log_error("vmap_set: task handles are immutable");
-        return;
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH, "vmap_set: task handles are immutable");
+        return ItemError;
     }
     Item host_result = ItemNull;
     if (vmap_host_set_by_item(vm, key, value, &host_result)) {
-        return;
+        return get_type_id(host_result) == LMD_TYPE_ERROR ? host_result : ItemNull;
     }
-    if (!vmap_ensure_hashmap_data(vm)) {
-        log_error("vmap_set: failed to allocate backing hashmap");
-        return;
+    if (!vmap_key_is_supported(key)) {
+        return vmap_invalid_key_error();
+    }
+    if (!vmap_ensure_hashmap_data(vm, true)) {
+        set_runtime_error_no_trace(ERR_OUT_OF_MEMORY, "vmap_set: failed to allocate backing hashmap");
+        return ItemError;
     }
     vm->vtable->set(vm->data, key, value);
+    return ItemNull;
 }
 
 extern "C" Item vmap_clone_for_cow(Item source) {
@@ -464,16 +522,20 @@ extern "C" Item vmap_clone_for_cow(Item source) {
         Item value = src->vtable->value_at(src->data, index);
         cow_mark_shared(key);
         cow_mark_shared(value);
-        vmap_set(rooted_clone.get(), key, value);
+        if (get_type_id(vmap_set(rooted_clone.get(), key, value)) == LMD_TYPE_ERROR) {
+            return ItemError;
+        }
     }
     return rooted_clone.get();
 }
 
 extern "C" Item vmap_set_cow(Item owner, Item key, Item value) {
     if (get_type_id(owner) != LMD_TYPE_VMAP || !owner.vmap) return ItemError;
+    if (!vmap_key_is_supported(key)) return vmap_invalid_key_error();
     Item replacement = cow_prepare_write(owner);
     if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
-    vmap_set(replacement, key, value);
+    Item result = vmap_set(replacement, key, value);
+    if (get_type_id(result) == LMD_TYPE_ERROR) return result;
     return replacement;
 }
 
@@ -513,6 +575,7 @@ Item vmap_get_by_item(VMap* vm, Item key) {
     if (!vm) return ItemNull;
     Item host_result = ItemNull;
     if (vmap_host_get_by_item(vm, key, &host_result)) return host_result;
+    if (!vmap_key_is_supported(key)) return ItemNull;
     if (!vm->data || !vm->vtable) return ItemNull;
     return vm->vtable->get(vm->data, key);
 }

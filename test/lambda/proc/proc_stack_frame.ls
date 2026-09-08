@@ -10,7 +10,7 @@ fn make_reader(value) {
 fn make_scalar_map() => map([
     9223372036854775807i64, 9223372036854775806i64,
     18446744073709551615u64, 18446744073709551614u64,
-    t'2026-07-15T12:34:56Z', 9223372036854775805i64
+    "stamp", 9223372036854775805i64
 ])
 
 pn maybe_wide(ok) i64^ {
@@ -65,7 +65,7 @@ pn main() {
     print([
         scalar_map[9223372036854775807i64],
         scalar_map[18446744073709551615u64],
-        scalar_map[t'2026-07-15T12:34:56Z']
+        scalar_map["stamp"]
     ])
     print([latest, latest_u, indirect(), tiny(), -tiny(), type(wide()), type(uwide())])
 }

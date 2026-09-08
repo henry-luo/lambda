@@ -17859,8 +17859,10 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 // map([k1, v1, ...]) -> vmap_from_array(arr)
                 arg = call_node->argument;
                 MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
-                RETURN_CALL_VALUE(emit_call_1(mt, "vmap_from_array", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1)));
+                MIR_reg_t result = emit_call_1(mt, "vmap_from_array", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
+                if (!mt->in_handler_operand) emit_return_if_item_error(mt, result);
+                RETURN_CALL_VALUE(result);
             }
         }
         // ==== virtual member mutation: m.set(k, v) ====
@@ -17878,7 +17880,19 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
-                emit_return_if_item_error(mt, replacement);
+                MIR_label_t skip_publish = new_label(mt);
+                if (mt->in_handler_operand) {
+                    MIR_reg_t type_id = emit_item_tag(mt, replacement);
+                    MIR_reg_t is_error = new_reg(mt, "vmap_cow_error", MIR_T_I64);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                        MIR_new_reg_op(mt->ctx, is_error), MIR_new_reg_op(mt->ctx, type_id),
+                        MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, skip_publish),
+                        MIR_new_reg_op(mt->ctx, is_error)));
+                } else {
+                    emit_return_if_item_error(mt, replacement);
+                }
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, cow_root->reg),
                     MIR_new_reg_op(mt->ctx, replacement)));
@@ -17887,6 +17901,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 cow_root->cow_marked = false;
                 cow_root->cow_children_may_be_shared = true;
                 update_gc_root_slot(mt, cow_root);
+                emit_label(mt, skip_publish);
                 RETURN_CALL_VALUE(replacement);
             }
             MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
@@ -17897,10 +17912,12 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             arg = arg->next;
             MIR_reg_t boxed_a3 = transpile_box_item(mt, arg);
 
-            RETURN_CALL_VALUE(emit_call_3(mt, "fn_index_set", MIR_T_I64,
+            MIR_reg_t result = emit_call_3(mt, "fn_index_set", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3)));
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3));
+            if (!mt->in_handler_operand) emit_return_if_item_error(mt, result);
+            RETURN_CALL_VALUE(result);
         }
 
         if (info->fn == SYSPROC_PUSH || info->fn == SYSPROC_SPLICE) {

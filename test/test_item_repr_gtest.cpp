@@ -609,7 +609,8 @@ TEST_F(RuntimeShapeTransition, VMapMutationStabilizesWideValues) {
     ASSERT_NE(vmap_item.vmap, nullptr);
 
     int64_t wide_value = INT64_MAX;
-    vmap_set(vmap_item, {.item = s2it(late_flag)}, {.item = l2it(&wide_value)});
+    ASSERT_EQ(get_type_id(vmap_set(vmap_item, {.item = s2it(late_flag)},
+        {.item = l2it(&wide_value)})), LMD_TYPE_NULL);
     ASSERT_NE(vmap_item.vmap->data, nullptr);
     Item stored = vmap_item.vmap->vtable->get(vmap_item.vmap->data,
         {.item = s2it(late_flag)});
@@ -661,6 +662,16 @@ TEST(ItemRepresentation, Uint64DeepEqualityUsesPayloadValue) {
 
     EXPECT_TRUE(item_deep_equal(left, right));
     EXPECT_FALSE(item_deep_equal(left, other));
+}
+
+TEST(ItemRepresentation, StrictDeepEqualityDoesNotPromoteNumericRanks) {
+    double floating_one = 1.0;
+    Item integer_one = {.item = i2it(1)};
+    Item float_one = {.item = d2it(&floating_one)};
+
+    EXPECT_EQ(fn_eq(integer_one, float_one), BOOL_TRUE);
+    EXPECT_EQ(fn_eq_strict(integer_one, float_one), BOOL_FALSE);
+    EXPECT_FALSE(item_deep_equal(integer_one, float_one));
 }
 
 TEST(ItemRepresentation, MapOwnedWideScalarsPreserveOwnerStorage) {

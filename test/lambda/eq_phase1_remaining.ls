@@ -32,6 +32,21 @@ m[1.0]
 'decimal key'
 m[1n]
 
-let d = map([0.1m, "dec"])
+let d = map([1.0m, "dec"])
 'decimal map float key'
-d[0.1]
+d[1.0]
+
+'=== vmap canonical keys ==='
+1.0m == 1.00m
+let decimal_order = (1.0m < 1.00m)
+decimal_order
+let scaled = map([1, "int", 1.0, "float", 1.0m, "decimal", 1.00m, "scaled", 1n, "integer"]);
+[len(scaled), scaled[1], scaled[1.0], scaled[1.00m], scaled[1n]]
+let named = map(["name", "string", 'name', "symbol"]);
+[len(named), named["name"], named['name']]
+let fractional_key = map([1.5, "fractional"]) ^ { ^ }
+fractional_key is error
+let decimal_key = map([1.5m, "decimal"]) ^ { ^ }
+decimal_key is error
+let negative_key = map([-1, "negative"])
+negative_key[-1]

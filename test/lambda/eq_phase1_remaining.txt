@@ -26,3 +26,11 @@ true
 "float"
 'decimal map float key'
 "dec"
+'=== vmap canonical keys ==='
+true
+false
+[1, "integer", "integer", "integer", "integer"]
+[1, "symbol", "symbol"]
+true
+true
+"negative"

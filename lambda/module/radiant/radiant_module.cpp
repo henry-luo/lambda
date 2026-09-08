@@ -72,7 +72,7 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
 #define dom_select_set_selected_index radiant_host_api->dom_catalog->select_set_selected_index_bridge
 
 extern "C" Item vmap_new(void);
-extern "C" void vmap_set(Item vmap_item, Item key, Item value);
+extern "C" Item vmap_set(Item vmap_item, Item key, Item value);
 #ifdef __APPLE__
 extern "C" Item radiant_lambda_fn_call3_into(Function* fn, Item a, Item b, Item c,
                                                uint64_t* result_home) asm("_fn_call3_into");

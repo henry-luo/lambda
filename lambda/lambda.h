@@ -2560,6 +2560,7 @@ extern "C" {
     Item op_or(Bool a, Bool b);
 
     Bool fn_eq(Item a, Item b);
+    Bool fn_eq_strict(Item a, Item b);
     Bool fn_ne(Item a, Item b);
     Bool fn_str_eq_ptr(String* a, String* b);
     Bool fn_sym_eq_ptr(Symbol* a, Symbol* b);
@@ -3018,7 +3019,7 @@ extern "C" {
     Item vmap_new();
     Item vmap_from_array(Item array_item);
     bool virtual_host_member_set(Item owner, Item key, Item value, Item* out);
-    void vmap_set(Item vmap_item, Item key, Item value);
+    Item vmap_set(Item vmap_item, Item key, Item value);
     Item vmap_set_cow(Item owner, Item key, Item value);
     Item vmap_clone_for_cow(Item source);
 

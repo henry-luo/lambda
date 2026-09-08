@@ -242,7 +242,7 @@ never consults the registry. Probe (release `lambda.exe`, commit `ababcb674`,
 `temp/probe_bare_member2.ls`): on `let m = {a: 1, b: 2}`, `m.len()` → `2`
 while bare `m.len` → `null` and `m.len == null` → `true`.
 
-Why it matters: S8.2.1v3 now makes `obj["m"]` the dynamic form of `obj.m`,
+Why it matters: S8.2.1v4 now makes `obj["m"]` the dynamic form of `obj.m`,
 reaching the type's methods. That is only safe because the builtin tier is
 call-only — otherwise `m[key]` probing on a plain map would return a bound
 builtin whenever `key` happened to spell one, instead of `null`. Any future
@@ -266,19 +266,6 @@ every use fails to parse.
 
 
 ## 3. Value & type model (LR_03)
-
-<a id="lr03-1"></a>**LR03-1 · `item_deep_equal` is a weaker second equality walker · OPEN**
-`item_deep_equal` (`lambda/core/lambda-data.cpp:1346`) remains a shallower
-walker than `fn_eq`, with a single caller — Radiant's no-op elision
-(`radiant/event.cpp:2300`). Its missing cases (`MAP`, `DECIMAL`, `DTIME`,
-`UINT64`, `RANGE`, `VMAP`) fall to pointer equality and err conservatively
-there: a missed elision forces a spurious DOM rebuild, never a wrong answer.
-Remaining work (tracked as **[OI-1](#15-design-gaps-inherited-from-the-retired-outstanding-rollup-oi)**):
-reimplement over a *strict* `fn_eq` variant with cross-rank promotion disabled
-(elision must not equate `1` with `1.0`), no `set_runtime_error` side effect on
-the depth cap, and defined next to `fn_eq` so `LAMBDA_STATIC` input builds don't
-pick up the dependency. Verify VMap key hashing agrees with `fn_eq` across
-numeric ranks.
 
 <a id="lr03-2"></a>**LR03-2 · Hard-coded capacity caps · OPEN**
 `TYPEMAP_HASH_CAPACITY` 32 and `TYPEMAP_HASH_DYNAMIC_MAX_CAPACITY` 32768
@@ -701,10 +688,10 @@ rather than driven from the table.
 The scalar comparators enumerate numeric/datetime/string cases and return
 `BOOL_ERROR` for other types, bool and null included
 (`lambda/runtime/lambda-eval.cpp:1650`, `:1811`) — cross-family `<` is an error
-while cross-family `==` is `false`, the Python-style split. Residual
-value-semantics work is tracked as **OI-1**: VMap key eq/hash rank consistency
-and [LR03-1](#lr03-1). The former conversion-failure case is retained in the
-fixed archive as [LR04-4](<Lambda_Issue_Ledger(fixed).md#lr04-4>).
+while cross-family `==` is `false`, the Python-style split. The former
+strict-equality and VMap key-domain residue is resolved in
+[OI-1-R1](<Lambda_Issue_Ledger(fixed).md#oi1-r1>); the conversion-failure case
+is retained as [LR04-4](<Lambda_Issue_Ledger(fixed).md#lr04-4>).
 
 <a id="lr09-4"></a>**LR09-4 · `fn_index` swallows invalid indices · OPEN**
 A non-integral `FLOAT` index, an out-of-range index, or an unrecognized index
@@ -1243,17 +1230,6 @@ and points at the generator that actually conflicts.
 > ADR before code, not point defects — none was re-verified in the 2026-08-25
 > pass unless noted.
 
-- **OI-1 · Value equality & ordering contract.** The operator surface is sound
-  (verified 2026-07-16): `fn_eq` structural and cross-rank-exact, `fn_lt_scalar`
-  and `total_cmp` raw-byte and mutually consistent, `array_num_eq` width-correct
-  and NaN-aware. Residue: (a) `item_deep_equal` dedup over a new `fn_eq_strict`
-  — its only caller is Radiant no-op elision, where gaps cost missed elision, not
-  wrong answers; (b) **VMap key eq/hash rank consistency** — `fn_eq(1, 1.0)` is
-  true, so map lookup/hashing must agree across numeric ranks or the rule must be
-  stated; (c) equal-value different-scale decimals must agree across `==`, `<`
-  and key use. The former conversion-failure case is archived as
-  [LR04-4](<Lambda_Issue_Ledger(fixed).md#lr04-4>). Cross-refs:
-  [LR03-1](#lr03-1), [LR09-3](#lr09-3).
 - **OI-2 · JS object model: internal metadata + GC lifetime.** (a) The
   marker→shape-flag migration is half-done — class identity, accessors,
   iterators and Promise branding still ride `__class_name__`/`__ctor__`/`__arr__`
@@ -1355,7 +1331,6 @@ together, not individually.
 |---|---|---|
 | **Honest static types** | LR07-7, LR08-3, LR11-6, LR12-3 | The collector, the TCO gate, and the stack-check gate all trust transpiler type classification. Until that is provable, all three stay pessimistic. Fix per CLAUDE.md rule 15 with precise `RootFrame`/`Rooted` ownership. |
 | **Representation ↔ semantics coupling** | LR03-3, LR07-1, LR07-5, LR07-14 | Expression results carry no `ValueRep`; each consumer re-derives it. See [Result32 lane-parity + Tune19], [Compiling lane design]. |
-| **Value-semantics residue (OI-1)** | LR03-1, LR09-3 | Second equality walker and VMap key eq/hash rank consistency. The former LR04-4 conversion-failure case is archived in the fixed ledger. Tracked as OI-1 in this ledger's [§15](#15-design-gaps-inherited-from-the-retired-outstanding-rollup-oi). |
 | **`INT64_MAX` sentinel collision** | LR03-4, LR07-4 | `INT64_ERROR == INT64_MAX` and `INT_LANE_INF` share one bit pattern; index OOB also lands on `INT64_MAX`. The former LR10-5 entry is a preserved alias for LR03-4. See [v5 int migration in flight]. |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
 | **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
