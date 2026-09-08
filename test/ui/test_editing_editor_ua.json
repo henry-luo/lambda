@@ -1,7 +1,7 @@
 {
   "name": "UA WYSIWYG editor toolbar uses contenteditable commands",
   "html": "test/html/editor-ua.html",
-  "viewport": {"width": 1100, "height": 720},
+  "viewport": {"width": 1100, "height": 480},
   "events": [
     {"type": "assert_attribute", "target": {"selector": "#editor"}, "attribute": "contenteditable", "equals": "true"},
     {"type": "assert_text", "target": {"selector": "#ua-mode"}, "equals": "UA mode: ready"},
@@ -29,6 +29,11 @@
     {"type": "set_editing_selection", "target": {"selector": "#list-target"}, "start": 0, "end": 4},
     {"type": "click", "target": {"selector": "#toolbar-ul"}},
     {"type": "assert_count", "target": {"selector": "#editor > ul"}, "equals": 2},
-    {"type": "assert_count", "target": {"selector": "#editor > ul > li > #list-target"}, "equals": 1}
+    {"type": "assert_count", "target": {"selector": "#editor > ul > li > #list-target"}, "equals": 1},
+
+    {"type": "mouse_move", "target": {"selector": "#editor", "offset_x": 500, "offset_y": 300}},
+    {"type": "assert_state_store", "target": {"selector": "#editor"}, "view_state": true, "kind": "scroll"},
+    {"type": "scroll", "target": {"selector": "#editor"}, "dx": 0, "dy": -6},
+    {"type": "assert_state_store", "target": {"selector": "#editor"}, "view_scroll_y": 40, "tolerance": 40}
   ]
 }
