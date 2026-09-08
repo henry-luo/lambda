@@ -103,7 +103,7 @@ void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
     MIR_reg_t last_env = 0;
     int last_slot = -1;
     if (mt->last_closure.has_env && mt->last_closure.env_reg != 0) {
-        int capture_count = jm_last_closure_capture_count_clamped(mt->last_closure.count);
+        int capture_count = mt->last_closure.count;
         for (int i = 0; i < capture_count; i++) {
             if (mt->last_closure.captures[i].is_nfe) continue;
             if (mt->last_closure.captures[i].binding != binding) continue;

@@ -46,7 +46,6 @@ extern "C" int js_is_diagnose_enabled(void) {
 // Adaptive gen interface: large functions (>N insns) compile at opt=1 to avoid
 // O(n²) SSA/GVN cost, while small functions get full optimization.
 // Threshold: 10K MIR insns → functions above this use opt=1.
-#define JM_LARGE_FUNC_INSN_THRESHOLD 10000
 
 // POC: MIR interpreter mode — set from mir.c
 extern "C" int g_mir_interp_mode;

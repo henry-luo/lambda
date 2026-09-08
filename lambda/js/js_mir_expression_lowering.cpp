@@ -4475,8 +4475,7 @@ bool jm_resolve_transitive_capture_env(JsMirVarEntry* var,
 void jm_readback_closure_env(JsMirTranspiler* mt) {
     if (!mt->last_closure.has_env) return;
     if (mt->last_closure.env_reg == 0) return;
-    int readback_count = jm_last_closure_capture_count_clamped(
-        mt->last_closure.count);
+    int readback_count = mt->last_closure.count;
     MIR_label_t readback_done = jm_new_label(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
         MIR_new_label_op(mt->ctx, readback_done),

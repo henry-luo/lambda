@@ -239,7 +239,6 @@ static inline int jm_scope_env_slot_for_capture(const JsFuncCollected* fc,
 #define JM_CAPTURE_COUNT(fc) (jm_function_analysis(fc)->capture_count)
 #define JM_JS_FACT(fc, field) (jm_function_analysis(fc)->js_##field)
 #define JM_PARAM_COUNT(fc) (jm_function_analysis(fc)->param_count)
-#define JM_JS_CACHE(fc, field) (jm_function_analysis(fc)->js_cached_##field)
 
 static inline FnParamTypeInfo* jm_param_info(JsFuncCollected* fc, int index) {
     FnAnalysis* analysis = jm_function_analysis(fc);

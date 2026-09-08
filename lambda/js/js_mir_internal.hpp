@@ -352,7 +352,6 @@ JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
     JsVarScopeEntry* entry);
 JsMirVarEntry* jm_find_var_at(JsMirTranspiler* mt, const char* name,
     int depth);
-int jm_last_closure_capture_count_clamped(int count);
 bool jm_closure_tracker_reserve(JsClosureTracker* tracker, int n);
 void jm_save_last_closure_snapshot(JsMirTranspiler* mt,
     JsMirLastClosureSnapshot* snapshot);

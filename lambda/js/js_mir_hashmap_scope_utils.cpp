@@ -978,12 +978,6 @@ JsMirVarEntry* jm_find_var_at(JsMirTranspiler* mt, const char* name,
     return found ? &found->var : NULL;
 }
 
-// The capture list grows, so there is no capacity to clamp to any more; only
-// the negative guard remains meaningful.
-int jm_last_closure_capture_count_clamped(int count) {
-    return count < 0 ? 0 : count;
-}
-
 // Reserve room for `n` captures. The list grows by doubling; nothing outside
 // the transpiler holds a pointer into it across a reserve.
 bool jm_closure_tracker_reserve(JsClosureTracker* tracker, int n) {

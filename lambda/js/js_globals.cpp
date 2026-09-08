@@ -5978,7 +5978,6 @@ JS_FORWARD_RETURN(bool, js_is_typed_array_ctor_name, (const char* name, int len)
 
 using JsFuncFlagsAccess = JsFunction;
 #define JS_FUNC_FLAG_GENERATOR_EARLY 1
-#define JS_FUNC_FLAG_ASYNC_EARLY     128
 
 static Item js_setup_dynamic_function_prototype(Item proto, Item ctor_fn,
         const char* ctor_name) {
@@ -6233,11 +6232,6 @@ static Item js_reflect_create_list_from_array_like(Item array_like, Item** out_a
 
 // Check if a function value is a constructor (has [[Construct]] internal method).
 // Arrow functions, generators, and built-in prototype methods are NOT constructors.
-#define JS_FUNC_FLAG_GENERATOR_G 1
-#define JS_FUNC_FLAG_ARROW_G     2
-#define JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G 4
-#define JS_FUNC_FLAG_METHOD_G    32
-#define JS_FUNC_FLAG_ASYNC_G     128
 
 using JsFunctionLayout = JsFunction;
 JS_FORWARD_STATIC_RETURN(bool, js_func_is_constructor, (Item func_item), js_has_construct_capability, (func_item))
