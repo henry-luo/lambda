@@ -1,10 +1,10 @@
 // commands_basic.ls — exercise the editing commands (Phase R4)
-import lambda.package.editor.mod_doc
-import lambda.package.editor.mod_step
-import lambda.package.editor.mod_transaction
-import lambda.package.editor.mod_source_pos
-import lambda.package.editor.mod_commands
-import lambda.package.editor.mod_md_schema
+import lambda.editor.mod_doc
+import lambda.editor.mod_step
+import lambda.editor.mod_transaction
+import lambda.editor.mod_source_pos
+import lambda.editor.mod_commands
+import lambda.editor.mod_md_schema
 
 let d0 = node('doc', [
   node('paragraph', [text("Hello, world.")]),

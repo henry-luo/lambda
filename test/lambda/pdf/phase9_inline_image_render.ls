@@ -4,7 +4,7 @@
 // interpreter path. Supported 8-bit RGB inline images should render as
 // SVG pixel rects instead of the older placeholder rectangle.
 
-import interp: lambda.package.pdf.interp
+import interp: lambda.pdf.interp
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

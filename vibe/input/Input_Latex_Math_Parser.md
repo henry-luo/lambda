@@ -47,7 +47,7 @@ runtime target is a direct C parser, not a smaller Tree-sitter grammar.
 ### Goals
 
 - Parse LaTeX documents and standalone math directly into the existing Mark
-  AST, preserving the output consumed by the formatters and `lambda/package`
+  AST, preserving the output consumed by the formatters and `lambda.doc.math`
   renderers.
 - Share one small LaTeX scanner between document mode and math mode.
 - Use the established `Input` dispatch, `InputContext`, `SourceTracker`,

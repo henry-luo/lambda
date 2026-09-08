@@ -1,6 +1,6 @@
 // Phase 64 - inline Separation image pixels use grayscale tint fallback.
 
-import image: lambda.package.pdf.image
+import image: lambda.pdf.image
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

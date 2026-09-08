@@ -434,10 +434,21 @@ static void heap_finish_init(void) {
     if (!ascii_char_table_initialized) init_ascii_char_table();
 }
 
+// Monotonic across every heap this process creates, so a replaced heap can
+// never be mistaken for its predecessor even when the allocator reuses the
+// same address.
+static uint64_t heap_generation_next = 0;
+
+extern "C" uint64_t heap_generation_for(Context* runtime) {
+    EvalContext* owner = (EvalContext*)runtime;
+    return owner && owner->heap && owner->heap->gc ? owner->heap->generation : 0;
+}
+
 void heap_init() {
     log_debug("heap init: %p", context);
     context->heap = (Heap*)mem_calloc(1, sizeof(Heap), MEM_CAT_EVAL);
     if (!context->heap) return;
+    context->heap->generation = ++heap_generation_next;
     context->heap->pool = mem_pool_create(NULL, MEM_ROLE_RUNTIME_HEAP,
                                           "eval.runtime.pool");
     context->heap->gc = mem_gc_heap_create(NULL, MEM_ROLE_RUNTIME_HEAP, "eval.heap");

@@ -1,4 +1,4 @@
-// Port of lambda/package/editor/mod_source_pos.ls
+// Port of lambda/editor/mod_source_pos.ls
 //
 // SourcePath = number[]
 // SourcePos  = { path: SourcePath, offset: number }

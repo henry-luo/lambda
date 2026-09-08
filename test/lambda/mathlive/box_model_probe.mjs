@@ -66,9 +66,9 @@ function lambdaString(value) {
 
 function buildLambdaScript(opts) {
   const ctxFn = opts.display ? 'display_context' : 'text_context';
-  return `import render_pkg: lambda.package.math.render
-import ctx: lambda.package.math.context
-import opt: lambda.package.math.optimize
+  return `import render_pkg: lambda.doc.math.render
+import ctx: lambda.doc.math.context
+import opt: lambda.doc.math.optimize
 let formula = ${lambdaString(opts.formula)}
 let parsed = parse(formula, {type: "math", flavor: "latex"}) ^ { ^ }
 let result = if (parsed is error) {

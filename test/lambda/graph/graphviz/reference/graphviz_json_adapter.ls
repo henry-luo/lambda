@@ -1,6 +1,6 @@
 // Graphviz JSON maintenance references to renderer-neutral Graph Scene Mark.
 
-import model: lambda.package.graph.model
+import model: lambda.graph.model
 
 fn first(values) => if (len(values) > 0) values[0] else null
 

@@ -1,8 +1,8 @@
 // D7.2.5: command aliases, descriptors, and plan/result records remain
 // package data. This fixture has no DOM invocation; it pins the pure registry.
-import commands: lambda.package.dom.commands
-import plan: lambda.package.dom.edit_plan
-import result: lambda.package.dom.edit_result
+import commands: lambda.dom.commands
+import plan: lambda.dom.edit_plan
+import result: lambda.dom.edit_result
 
 let bold = commands.descriptor("FORMATBOLD");
 let font_name = commands.descriptor("fontName");

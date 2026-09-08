@@ -4,7 +4,7 @@
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers three cohesive sub-areas that share one paint pipeline: the `RdtVector` immediate-mode vector API and active ThorVG backend, with an excluded CoreGraphics implementation retained for future exploration; the inline-SVG renderer that walks a *Radiant-parsed* SVG element tree and records it into that API (plus the easily-confused opposite-direction view-tree→SVG-text serializer); and Lambda graph layout whose routed edges enter Radiant as generated SVG paint layers.
 >
-> **Primary sources:** `radiant/render.hpp`, `radiant/rdt_vector_tvg.cpp`, `radiant/rdt_vector_cg.mm`, `radiant/render_svg_inline.cpp`, `radiant/render_svg.cpp`, `radiant/render_vector_path.cpp`, `radiant/render_path.cpp`, `lambda/package/graph/layout.ls`, `lambda/package/graph/dagre.ls`, `lambda/package/graph/transform.ls`, and `radiant/graph_bridge.cpp`.
+> **Primary sources:** `radiant/render.hpp`, `radiant/rdt_vector_tvg.cpp`, `radiant/rdt_vector_cg.mm`, `radiant/render_svg_inline.cpp`, `radiant/render_svg.cpp`, `radiant/render_vector_path.cpp`, `radiant/render_path.cpp`, `lambda/graph/layout.ls`, `lambda/graph/dagre.ls`, `lambda/graph/transform.ls`, and `radiant/graph_bridge.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -119,7 +119,7 @@ The resulting document retains its Lambda runtime, heap, JIT code, callback, and
 
 <img alt="Dagre-inspired five phase graph layout" src="diagram/rad14_dagre_phases.svg" width="720">
 
-`lambda/package/graph/dagre.ls` is **Dagre-inspired, not a faithful port of the JS Dagre library**. It normalizes nodes and edges, assigns longest-path ranks, creates layers, performs a barycenter ordering sweep, assigns centered coordinates, transforms those coordinates for TB/BT/LR/RL, clips endpoints to node rectangles, and emits orthogonal paths.
+`lambda/graph/dagre.ls` is **Dagre-inspired, not a faithful port of the JS Dagre library**. It normalizes nodes and edges, assigns longest-path ranks, creates layers, performs a barycenter ordering sweep, assigns centered coordinates, transforms those coordinates for TB/BT/LR/RL, clips endpoints to node rectangles, and emits orthogonal paths.
 
 Network-simplex ranking, dummy nodes for long edges, Brandes-Kopf coordinate assignment, shape-specific clipping, parallel-edge separation, self-loop routing, clusters, and edge-label placement are not yet implemented. Long or cyclic graphs can therefore produce weaker ordering and routes than Graphviz or JS Dagre.
 
@@ -136,7 +136,7 @@ Network-simplex ranking, dummy nodes for long edges, Brandes-Kopf coordinate ass
 ## 9. Known Issues & Future Improvements
 
 1. **`render_svg_inline.cpp` is a 5633-line monolith.** It mixes SVG parsing, CSS style resolution, path/arc geometry, gradients/patterns, filters, clips/masks, and text glyph rendering in one file. *Improvement:* split along the natural seams — path parsing, filters/masks, gradients/patterns, and text — into separate TUs sharing `SvgInlineRenderContext`.
-2. **Graph layout is Dagre-inspired, not a faithful port** (`lambda/package/graph/dagre.ls`). It still lacks network-simplex ranking, dummy nodes, Brandes-Kopf x-assignment, clusters, parallel-edge separation, and self-loop routing. *Improvement:* normalize long edges through dummy ranks before repeated crossing-reduction sweeps.
+2. **Graph layout is Dagre-inspired, not a faithful port** (`lambda/graph/dagre.ls`). It still lacks network-simplex ranking, dummy nodes, Brandes-Kopf x-assignment, clusters, parallel-edge separation, and self-loop routing. *Improvement:* normalize long edges through dummy ranks before repeated crossing-reduction sweeps.
 3. **Backend caps parity gaps** (`rdt_vector_tvg.cpp:774` vs `rdt_vector_cg.mm:273`). Both leave `opacity_group`, `blend_modes`, `color_matrix_filters`, and `native_text_runs` = false, so those effects silently no-op or fall back to raster (§5.2). The ThorVG native `gaussian_blur` cap is `__APPLE__`-only (`rdt_vector_tvg.cpp:787-791`) — the CSS-filter blur path degrades on Linux/Windows ThorVG builds (but inline-SVG `<feGaussianBlur>` does not; see §5.4).
 4. **Fixed clip-stack depth in the ThorVG backend.** `RDT_MAX_CLIP_DEPTH` is hard-coded to 8 (`rdt_vector_tvg.cpp:1461`); overflow is logged and the clip dropped (`:1476`). Deeply nested SVG clip paths beyond depth 8 silently lose clipping.
 5. **Two directions named "SVG" are easy to confuse.** `render_svg_inline.cpp` is SVG *input* (element tree → pixels); `render_svg.cpp` is SVG *output* (view tree → SVG text). They share only the `PaintSvgSubscene` builder. *Improvement:* rename `render_svg.cpp` to something like `render_svg_output.cpp` to make the direction unmistakable.
@@ -155,8 +155,8 @@ Network-simplex ranking, dummy nodes for long edges, Brandes-Kopf coordinate ass
 | `radiant/render.hpp` / `render_svg_inline.cpp` | Inline-SVG declarations and implementation: element dispatch, path/arc/transform parsing, gradients/patterns/filters/clips/masks, dual-path text, and record/replay into `RdtVector`. |
 | `radiant/render.hpp` / `render_svg.cpp` | View-tree → SVG-text declarations and serializer (`render_view_tree_to_svg`, `svg_make_backend`) with raster fallback for inexpressible effects. |
 | `radiant/render_path.cpp`, `radiant/render_vector_path.cpp` | Rounded-rect/clip path construction and CSS `VectorPathProp` rendering through `rdt_*`. |
-| `lambda/package/graph/layout.ls`, `dagre.ls` | Pure canonical graph geometry, ranking, coordinates, and edge routing. |
-| `lambda/package/graph/transform.ls`, `transform/*` | Semantic HTML, custom-layout installation, themes, and generated SVG edge layers. |
+| `lambda/graph/layout.ls`, `dagre.ls` | Pure canonical graph geometry, ranking, coordinates, and edge routing. |
+| `lambda/graph/transform.ls`, `transform/*` | Semantic HTML, custom-layout installation, themes, and generated SVG edge layers. |
 | `radiant/graph_bridge.cpp` | Shared graph-file to Lambda-document bridge for render, view, layout, and generic loading. |
 | `radiant/stacking_order.cpp` | Stable signed-z merge of generated layers and measured node views. |
 

@@ -178,7 +178,7 @@ extern "C" void lambda_compiler_timing_get(LambdaCompilerTiming* out) {
 // Lambda Home Path
 // ============================================================================
 // g_lambda_home is the directory containing Lambda's runtime assets
-// (package/, input/).
+// (package trees, input/).
 //
 //   Dev default  : "./lambda"   (assets live next to source)
 //   Release      : "./lmd"      (set via -DLAMBDA_HOME_RELEASE compile flag,

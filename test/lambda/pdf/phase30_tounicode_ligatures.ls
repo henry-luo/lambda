@@ -1,7 +1,7 @@
 // Phase 30 — ToUnicode ligature decomposition parity.
 
-import font:   lambda.package.pdf.font
-import interp: lambda.package.pdf.interp
+import font:   lambda.pdf.font
+import interp: lambda.pdf.interp
 
 fn name(s) { { kind: "name", value: s } }
 fn hex(s) { { kind: "hex", value: s } }

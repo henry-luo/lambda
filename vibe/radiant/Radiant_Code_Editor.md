@@ -179,7 +179,7 @@ Source layout (mirrors `test/editor-js/`): `test/codepad/src/{model,view,modes,s
 ### 6.3 Synergies
 
 - **Static fence highlighting:** the same registry can colorize `<code type="block" language=…>` in any rendered markdown — first in CodePad's own preview pane (script pass over the preview subtree), later as a general `lambda view` enhancement. This finally consumes the `language` attribute the parser has always emitted.
-- **Find/replace decorations (M4):** match highlighting reuses the decoration concept already modeled in `lambda/package/editor/mod_decorations.ls` / the JS editor — as extra classed spans merged into line rendering, positions mapped through deltas.
+- **Find/replace decorations (M4):** match highlighting reuses the decoration concept already modeled in `lambda/editor/mod_decorations.ls` / the JS editor — as extra classed spans merged into line rendering, positions mapped through deltas.
 
 ### 6.4 Tree-sitter v2 criteria
 
@@ -283,4 +283,4 @@ Native items get GTest coverage: span fidelity per format (§7.2), convert bridg
 - **OQ2** — Span granularity for M3: block-level only vs block + inline runs. Start block-level (enough for scroll/click sync); inline spans only if caret-highlight proves too coarse.
 - **OQ3** — Preview fidelity path: keep `format_html` + innerHTML, or build the parse-to-DOM-subtree bridge (math pass included) in v2. Decide on M2 measurements + math importance.
 - **OQ4** — `edit` on `.ls` files: is "preview" ever a run/REPL output pane, or nothing? Out of scope now; worth a note when the shell grows panes.
-- **OQ5** — Where the CodePad source ultimately lives (`test/codepad/` like the rich editor, vs promotion toward `lambda/package/`): follow whatever resolution Stage 4B reaches for the rich editor's own "reference vs shipping" placement.
+- **OQ5** — Where the CodePad source ultimately lives (`test/codepad/` like the rich editor, vs promotion toward `lambda/`): follow whatever resolution Stage 4B reaches for the rich editor's own "reference vs shipping" placement.

@@ -177,7 +177,7 @@ npm run generate:ast        # Generate AST references
 The test runner renders formulas through Lambda's supported math package:
 
 ```bash
-import math: lambda.package.math.math
+import math: lambda.doc.math.math
 let ast = parse("\\frac{a}{b}", {type: "math", flavor: "latex"})
 let rendered = math.render_display(ast)
 ```
@@ -331,7 +331,7 @@ fi
 - **npm packages**:
   - `jsdom`: HTML parsing
   - `puppeteer`: Browser automation (for MathLive)
-- **Lambda**: `lambda.package.math.math` package
+- **Lambda**: `lambda.doc.math.math` package
 
 ## Future Enhancements
 

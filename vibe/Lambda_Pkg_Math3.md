@@ -28,13 +28,13 @@ The failures decompose into six structurally distinct clusters, ordered here by 
 
 | # | Cluster | Cases | Single point of fix |
 |---|---------|-----:|-----------|
-| **B** | Spurious `lm_strut--bottom` emission | 159 | [box.ls:346](lambda/package/math/box.ls) `make_struts()` |
-| **A** | `lm_mathit` emitted where `lm_cmr` expected | 98 + ~95 in cluster G | [render.ls:544](lambda/package/math/render.ls) `symbol_font_class()` |
-| **G-metric** | Same class set, different `em` values | 182 (subset of "other") | [metrics.ls](lambda/package/math/metrics.ls) — strut/vlist measurements |
+| **B** | Spurious `lm_strut--bottom` emission | 159 | [box.ls:346](lambda/doc/math/box.ls) `make_struts()` |
+| **A** | `lm_mathit` emitted where `lm_cmr` expected | 98 + ~95 in cluster G | [render.ls:544](lambda/doc/math/render.ls) `symbol_font_class()` |
+| **G-metric** | Same class set, different `em` values | 182 (subset of "other") | [metrics.ls](lambda/doc/math/metrics.ls) — strut/vlist measurements |
 | **C** | Parser emits `lm_error` (unrecognized command) | 48 | LaTeX parser command tables |
-| **D** | `lm_small-op` emitted where `lm_large-op` expected | 46 | Displaystyle propagation in [scripts.ls](lambda/package/math/atoms/scripts.ls) |
+| **D** | `lm_small-op` emitted where `lm_large-op` expected | 46 | Displaystyle propagation in [scripts.ls](lambda/doc/math/atoms/scripts.ls) |
 | **E** | `lm_msubsup` variant differs | 23 | Script positioning rules |
-| **F** | `lm_align_environment` missing | 4 | [atoms/array.ls](lambda/package/math/atoms/array.ls) |
+| **F** | `lm_align_environment` missing | 4 | [atoms/array.ls](lambda/doc/math/atoms/array.ls) |
 | **G-structural** | Other small class-set divergences | 83 | Scattered (`lcGreek`, `lm_close`, `lm_ams`) |
 
 The first three clusters alone account for ~440 of the 643 failures (68%). They are the highest-yield targets.
@@ -44,7 +44,7 @@ The first three clusters alone account for ~440 of the 643 failures (68%). They 
 Lambda's `make_struts()` always emits both the top strut and the bottom strut:
 
 ```lambda
-// lambda/package/math/box.ls:346
+// lambda/doc/math/box.ls:346
 pub fn make_struts(bx) {
     let h = bx.height
     let d = bx.depth
@@ -71,10 +71,10 @@ The Lambda strut is harmless visually (`height:0.78em;vertical-align:-0.08em` re
 
 ### Cluster A — `lm_mathit` over-application (98 strict + ~95 "other") 
 
-[`symbol_font_class()`](lambda/package/math/render.ls) hard-codes font-class assignment for ~12 specific symbol names and falls through to the current font (typically `lm_mathit`) for everything else. MathLive maintains a **per-symbol** font-class table that knows e.g. that `\nabla`, `\cdot`, `\ell`, `\partial` are upright (`lm_cmr` or `lm_ams`), not italic.
+[`symbol_font_class()`](lambda/doc/math/render.ls) hard-codes font-class assignment for ~12 specific symbol names and falls through to the current font (typically `lm_mathit`) for everything else. MathLive maintains a **per-symbol** font-class table that knows e.g. that `\nabla`, `\cdot`, `\ell`, `\partial` are upright (`lm_cmr` or `lm_ams`), not italic.
 
 ```lambda
-// lambda/package/math/render.ls:544
+// lambda/doc/math/render.ls:544
 fn symbol_font_class(cmd_text, context) {
     let name_str = ...
     if (name_str == "alpha") "lcGreek lm_mathit"
@@ -102,7 +102,7 @@ The dominant pattern (109 of the 182) is strut height:
 expected: style="height:Xem"  vs  actual: style="height:Yem"
 ```
 
-These trace to [metrics.ls](lambda/package/math/metrics.ls) using approximate height/depth values that don't match MathLive's tables for many symbols and atoms. For example, `\frac{a}{b}` produces matching DOM structure but Lambda's `0.94em` strut becomes `1.15em`.
+These trace to [metrics.ls](lambda/doc/math/metrics.ls) using approximate height/depth values that don't match MathLive's tables for many symbols and atoms. For example, `\frac{a}{b}` produces matching DOM structure but Lambda's `0.94em` strut becomes `1.15em`.
 
 ### Cluster C — parser coverage gaps (48 cases, 26 unique tokens)
 
@@ -121,7 +121,7 @@ The truncation pattern (top 27 of 48 occurrences) is a **single root cause**: th
 
 ### Cluster D — `lm_small-op` vs `lm_large-op` (46 cases)
 
-The renderer at [scripts.ls:41](lambda/package/math/atoms/scripts.ls) and [scripts.ls:116](lambda/package/math/atoms/scripts.ls) both pick the operator size based on a `ctx.is_display(context)` check. The check exists; what's wrong is that **`is_display` returns `false` more often than MathLive does**. MathLive's mathstyle propagation through fractions/scripts/environments is more permissive about staying in displaystyle for large operators. Symptom: `\sum_{i=1}^n` renders with full-size summation in MathLive but small-style in Lambda.
+The renderer at [scripts.ls:41](lambda/doc/math/atoms/scripts.ls) and [scripts.ls:116](lambda/doc/math/atoms/scripts.ls) both pick the operator size based on a `ctx.is_display(context)` check. The check exists; what's wrong is that **`is_display` returns `false` more often than MathLive does**. MathLive's mathstyle propagation through fractions/scripts/environments is more permissive about staying in displaystyle for large operators. Symptom: `\sum_{i=1}^n` renders with full-size summation in MathLive but small-style in Lambda.
 
 ### Clusters E + F — script positioning, environment classes (27 cases)
 
@@ -131,7 +131,7 @@ The renderer at [scripts.ls:41](lambda/package/math/atoms/scripts.ls) and [scrip
 
 ### R1 — Centralize font-variant resolution
 
-Replace the ad-hoc `symbol_font_class()` at [render.ls:544](lambda/package/math/render.ls) with a **single lookup** keyed on the command name:
+Replace the ad-hoc `symbol_font_class()` at [render.ls:544](lambda/doc/math/render.ls) with a **single lookup** keyed on the command name:
 
 ```
 symbol_font_class(cmd, ctx)
@@ -139,7 +139,7 @@ symbol_font_class(cmd, ctx)
   symbols.font_class_of(cmd)         // pure data lookup — defaults to ctx.font
 ```
 
-Move the table itself to [symbols.ls](lambda/package/math/symbols.ls) so it lives alongside the Unicode mappings. MathLive maintains this in `src/core/font-metrics.ts` and `src/latex-commands/symbols.ts`; port the relevant subset.
+Move the table itself to [symbols.ls](lambda/doc/math/symbols.ls) so it lives alongside the Unicode mappings. MathLive maintains this in `src/core/font-metrics.ts` and `src/latex-commands/symbols.ts`; port the relevant subset.
 
 Concretely:
 
@@ -179,7 +179,7 @@ Predicted impact: ~190 cases (clusters A + the lcGreek subset of G-structural).
 
 ### R2 — Conditional bottom strut
 
-Change [`make_struts()`](lambda/package/math/box.ls) to emit `lm_strut--bottom` only when depth is positive:
+Change [`make_struts()`](lambda/doc/math/box.ls) to emit `lm_strut--bottom` only when depth is positive:
 
 ```lambda
 pub fn make_struts(bx) {
@@ -216,7 +216,7 @@ Predicted impact: ~31 cases (the `\left*` and `\big*` families).
 
 ### R4 — Add missing symbol commands to the command table
 
-Once R3 is in, the command lexer will deliver e.g. `\twoheadleftarrow` as a whole token, but the renderer still needs to know what to do with it. Adding entries to [symbols.ls](lambda/package/math/symbols.ls) and the matching font-variant table (R1) gives them glyphs and classes.
+Once R3 is in, the command lexer will deliver e.g. `\twoheadleftarrow` as a whole token, but the renderer still needs to know what to do with it. Adding entries to [symbols.ls](lambda/doc/math/symbols.ls) and the matching font-variant table (R1) gives them glyphs and classes.
 
 Tokens to add (from the diagnostics): `\twoheadleftarrow`, `\twoheadrightarrow`, `\boxplus`, `\boxtimes`, `\boxminus`, `\boxdot`, `\preceq`, `\succeq`, `\nmid`, `\rightsquigarrow`, `\pmod`, `\bmod`, `\boldsymbol`, plus the uppercase-Greek Unicode-letter aliases (`Alpha`, `Beta`, `Epsilon`, `Zeta`, `Eta`, etc.).
 
@@ -226,7 +226,7 @@ Predicted impact: ~17 additional cases (cluster C minus the truncation family mi
 
 ### R5 — Tighten mathstyle propagation for large operators
 
-Audit `ctx.is_display(context)` callers. The check at [render.ls:243](lambda/package/math/render.ls) and the analogous one in [scripts.ls](lambda/package/math/atoms/scripts.ls) need to return `true` more often, specifically:
+Audit `ctx.is_display(context)` callers. The check at [render.ls:243](lambda/doc/math/render.ls) and the analogous one in [scripts.ls](lambda/doc/math/atoms/scripts.ls) need to return `true` more often, specifically:
 
 - For top-level math when the input is `$$…$$`, `\[…\]`, or a display environment (`equation`, `align`, `gather`, `multline`).
 - Inside fraction numerators/denominators when the enclosing style is displaystyle (e.g., `\dfrac` should produce displaystyle children).
@@ -238,7 +238,7 @@ Predicted impact: 46 cases (cluster D).
 
 ### R6 — Metric table parity
 
-Replace [metrics.ls](lambda/package/math/metrics.ls)'s approximate values with a port of MathLive's `font-metrics.ts` for the Computer Modern family (KaTeX-derived). Key tables:
+Replace [metrics.ls](lambda/doc/math/metrics.ls)'s approximate values with a port of MathLive's `font-metrics.ts` for the Computer Modern family (KaTeX-derived). Key tables:
 
 - Per-character height/depth/italic-correction for `cmr10` (text) and `cmmi10` (math italic) — at minimum.
 - Sigma values for displaystyle/textstyle/scriptstyle/scriptscriptstyle (already partially present; extend to match upstream sigmas).
@@ -248,19 +248,19 @@ Predicted impact: ~109 strut-height cases plus most of the residual "other" metr
 
 ### R7 — Final cleanup: `lm_msubsup`, `lm_align_environment`, `lm_close`, scattered classes
 
-Once R1–R6 land, the residual 80–100 cases will be focused enough to fix one-by-one. Categorize by the missing/extra class set after R1–R6 are merged, and dispatch the remaining diffs to specific atom renderers ([scripts.ls](lambda/package/math/atoms/scripts.ls), [delimiters.ls](lambda/package/math/atoms/delimiters.ls), [array.ls](lambda/package/math/atoms/array.ls)).
+Once R1–R6 land, the residual 80–100 cases will be focused enough to fix one-by-one. Categorize by the missing/extra class set after R1–R6 are merged, and dispatch the remaining diffs to specific atom renderers ([scripts.ls](lambda/doc/math/atoms/scripts.ls), [delimiters.ls](lambda/doc/math/atoms/delimiters.ls), [array.ls](lambda/doc/math/atoms/array.ls)).
 
 ## Phased plan with predicted yield
 
 | Phase | Work | Files touched | Predicted ΔPass | Cumulative |
 |------:|------|---------------|----------------:|----------:|
 | 0 | Baseline pass run (already done) | — | — | 278/921 |
-| 1 | R2 — conditional bottom strut | [box.ls](lambda/package/math/box.ls) | +159 | 437/921 |
-| 2 | R1 — centralize font-variant table | [symbols.ls](lambda/package/math/symbols.ls), [render.ls](lambda/package/math/render.ls) | +190 | 627/921 |
+| 1 | R2 — conditional bottom strut | [box.ls](lambda/doc/math/box.ls) | +159 | 437/921 |
+| 2 | R1 — centralize font-variant table | [symbols.ls](lambda/doc/math/symbols.ls), [render.ls](lambda/doc/math/render.ls) | +190 | 627/921 |
 | 3 | R3 — longest-match command lexer | tree-sitter grammar + [input-latex-ts.cpp](lambda/input/input-latex-ts.cpp) | +31 | 658/921 |
-| 4 | R4 — add missing AMS / mod / box symbols | [symbols.ls](lambda/package/math/symbols.ls) + [input-latex-tables.cpp](lambda/input/input-latex-tables.cpp) | +17 | 675/921 |
-| 5 | R5 — fix displaystyle propagation | [context.ls](lambda/package/math/context.ls), [scripts.ls](lambda/package/math/atoms/scripts.ls) | +46 | 721/921 |
-| 6 | R6 — port MathLive metric tables | [metrics.ls](lambda/package/math/metrics.ls) | +109 | 830/921 |
+| 4 | R4 — add missing AMS / mod / box symbols | [symbols.ls](lambda/doc/math/symbols.ls) + [input-latex-tables.cpp](lambda/input/input-latex-tables.cpp) | +17 | 675/921 |
+| 5 | R5 — fix displaystyle propagation | [context.ls](lambda/doc/math/context.ls), [scripts.ls](lambda/doc/math/atoms/scripts.ls) | +46 | 721/921 |
+| 6 | R6 — port MathLive metric tables | [metrics.ls](lambda/doc/math/metrics.ls) | +109 | 830/921 |
 | 7 | R7 — sub/sup, env, misc residuals | scripts/array/delim atom renderers | +85 | **915/921** |
 | 8 | Inspect the last 6 (genuinely-unsupported: `\label`, `\cbrt`, `\tr` × 2, `\varheartsuit`, `\bigwedge` edge) | discretion | +6 or leave as `expectedError=unknown-command` agreed | **921/921** |
 
@@ -281,7 +281,7 @@ The phase is **done** when:
 1. `node test/lambda/mathlive/run_lambda_mathlive_markup.mjs` reports **≥99%** pass rate on the full 921-case corpus (≥912 passing). 100% if the 6 genuinely-unsupported cases are accepted as `expectedError=unknown-command` rather than rendered.
 2. Per-category breakdown shows **zero categories below 95%**.
 3. **Zero regressions** on the upstream 206-case corpus (current 100% rate maintained).
-4. The font-variant table at [symbols.ls](lambda/package/math/symbols.ls) is referenced (not duplicated) by [render.ls](lambda/package/math/render.ls) — no ad-hoc per-symbol conditionals remain in `symbol_font_class()`.
+4. The font-variant table at [symbols.ls](lambda/doc/math/symbols.ls) is referenced (not duplicated) by [render.ls](lambda/doc/math/render.ls) — no ad-hoc per-symbol conditionals remain in `symbol_font_class()`.
 5. `make_struts()` emits the bottom strut only when `depth > 0`.
 6. The `\left`/`\big` truncation bug is gone — `node test/lambda/mathlive/run_lambda_mathlive_markup.mjs --list | grep "lm_error"` is empty for any token that isn't in the agreed `unknown-command` whitelist.
 7. A frozen `baseline.txt` snapshot of the passing 912+ cases is committed so future runs gate on regressions.
@@ -357,7 +357,7 @@ The original cluster taxonomy aged well. Cluster-level final results:
 
 | Cluster | Original prediction | Status | Notes |
 |---|---:|---:|---|
-| **A** lm_mathit→lm_cmr (font_class_map) | 98 + 95 from G | **partially resolved** | Centralized `font_class_map` in [symbols.ls](lambda/package/math/symbols.ls) with ~110 entries. Remaining lm_mathit cases need font-aware text rendering. |
+| **A** lm_mathit→lm_cmr (font_class_map) | 98 + 95 from G | **partially resolved** | Centralized `font_class_map` in [symbols.ls](lambda/doc/math/symbols.ls) with ~110 entries. Remaining lm_mathit cases need font-aware text rendering. |
 | **B** Spurious `lm_strut--bottom` | 159 | **partially resolved** | `make_struts()` now conditional on `depth != 0`. Many cases recovered. Remaining cases have non-zero depth from operator metrics. |
 | **C** Parser `lm_error` tokens | 48 | **mostly resolved** | Added 9 AMS symbols, 18+ fonts/relations, vertical/horizontal arrows. Remaining: parser truncation for `\left*`/`\big*` requires tree-sitter grammar surgery (R3 — attempted, blocked on cascading renderer rewrites). |
 | **D** lm_small-op vs lm_large-op | 46 | **resolved** | Always-large for big-ops outside script context (matches MathLive's actual behavior — both inline-math and math modes use large-op). |
@@ -368,23 +368,23 @@ The original cluster taxonomy aged well. Cluster-level final results:
 ### What landed (kept in the math package)
 
 ```
-lambda/package/math/box.ls                       | +180 lines  (metric tables, descender
+lambda/doc/math/box.ls                       | +180 lines  (metric tables, descender
                                                                 detection, font-aware
                                                                 text_height_for/text_depth_for)
-lambda/package/math/symbols.ls                   | +130 lines  (font_class_map,
+lambda/doc/math/symbols.ls                   | +130 lines  (font_class_map,
                                                                 AMS symbols, ‖→∥ fix)
-lambda/package/math/render.ls                    |   +9 lines  (symbol_font_class
+lambda/doc/math/render.ls                    |   +9 lines  (symbol_font_class
                                                                 delegation, relation
                                                                 command-lookup,
                                                                 large-op outside script)
-lambda/package/math/atoms/scripts.ls             |  +30 lines  (always-limit for big-ops,
+lambda/doc/math/atoms/scripts.ls             |  +30 lines  (always-limit for big-ops,
                                                                 descender-aware depth)
-lambda/package/math/atoms/fraction.ls            |  +78 lines  (short-body fraction spec
+lambda/doc/math/atoms/fraction.ls            |  +78 lines  (short-body fraction spec
                                                                 + numeric-box detection)
-lambda/package/math/metrics_data.ls              | NEW 22 KB   (640 character metrics
+lambda/doc/math/metrics_data.ls              | NEW 22 KB   (640 character metrics
                                                                 across Main-Regular,
                                                                 Math-Italic, AMS-Regular)
-lambda/package/math/util.ls                      |  +19 lines  (fmt_em_ceil2 helper
+lambda/doc/math/util.ls                      |  +19 lines  (fmt_em_ceil2 helper
                                                                 — not wired in)
 test/lambda/mathlive/generate_metrics_data.mjs   | NEW 160 lines (regeneration script)
 ```
@@ -406,7 +406,7 @@ Now that all "easy" fixes have been tried, the remaining 493 failures cluster in
 
 ### Issue 1 — Hardcoded em constants vs. MathLive's metric-driven layout
 
-MathLive computes every layout quantity (fraction shifts, script positions, accent placement, etc.) from per-character font metrics and a small set of `mathstyle` sigma constants (`AXIS_HEIGHT`, `X_HEIGHT`, etc.). Lambda's math package contains approximately **200 hardcoded em constants** — `numer_child_height: 0.65`, `denom_top: -2.31`, `vlist_height: 1.66`, `depth_holder: 1.42`, etc. — across [fraction.ls](lambda/package/math/atoms/fraction.ls), [scripts.ls](lambda/package/math/atoms/scripts.ls), [atoms/array.ls](lambda/package/math/atoms/array.ls), [atoms/enclose.ls](lambda/package/math/atoms/enclose.ls), and [atoms/delimiters.ls](lambda/package/math/atoms/delimiters.ls).
+MathLive computes every layout quantity (fraction shifts, script positions, accent placement, etc.) from per-character font metrics and a small set of `mathstyle` sigma constants (`AXIS_HEIGHT`, `X_HEIGHT`, etc.). Lambda's math package contains approximately **200 hardcoded em constants** — `numer_child_height: 0.65`, `denom_top: -2.31`, `vlist_height: 1.66`, `depth_holder: 1.42`, etc. — across [fraction.ls](lambda/doc/math/atoms/fraction.ls), [scripts.ls](lambda/doc/math/atoms/scripts.ls), [atoms/array.ls](lambda/doc/math/atoms/array.ls), [atoms/enclose.ls](lambda/doc/math/atoms/enclose.ls), and [atoms/delimiters.ls](lambda/doc/math/atoms/delimiters.ls).
 
 These constants were tuned over many iterations against specific test outputs. They work for the cases that drove their tuning but drift on adjacent cases. Crucially, they **interlock**: changing one (e.g., `+` operator height from 0.69 to its true cmr metric 0.59) cascades into ~20 downstream constants that were calibrated against the original value.
 
@@ -424,7 +424,7 @@ function toString(arg1, arg2) {
 }
 ```
 
-Every height/depth/vertical-align/top/margin value goes through `Math.ceil(value * 100) / 100` before string formatting. Lambda's [util.ls](lambda/package/math/util.ls) `fmt_em` uses `Math.round` (half-up) at 5-decimal precision.
+Every height/depth/vertical-align/top/margin value goes through `Math.ceil(value * 100) / 100` before string formatting. Lambda's [util.ls](lambda/doc/math/util.ls) `fmt_em` uses `Math.round` (half-up) at 5-decimal precision.
 
 A helper `fmt_em_ceil2` matching MathLive's rule was added during the structural rewrite but **not wired in** — switching the strut emission to `fmt_em_ceil2` regresses 35+ upstream cases because Lambda's hardcoded `1.144999`-style constants get CEILed to `1.15` while MathLive's computed `1.14000` rounds to `1.14`.
 
@@ -445,7 +445,7 @@ For `\left. x + 1\right.`:
 - Lambda (current): with rounded constants `max = 0.65`, depth `0.08`. h+d = 0.73 exact. Emit: `0.73em` ✓
 - Lambda (full-precision metric + CEIL@2 emission): `max = 0.64444` ✓ MATCH — **but Lambda's hbox internally rounds at each step**, producing `0.74` somewhere upstream due to the strut_total flow.
 
-The hbox/strut formula needs to carry full precision through ALL intermediate steps. This requires audit of every `+ ` `max(` `min(` operation in [box.ls](lambda/package/math/box.ls) and replacing pre-rounded inputs with raw metric values.
+The hbox/strut formula needs to carry full precision through ALL intermediate steps. This requires audit of every `+ ` `max(` `min(` operation in [box.ls](lambda/doc/math/box.ls) and replacing pre-rounded inputs with raw metric values.
 
 ### Issue 4 — TypeScript→Lambda Script paradigm mismatch
 
@@ -480,26 +480,26 @@ Port the following MathLive TypeScript modules into Lambda Script equivalents:
 
 | MathLive file | LoC | Purpose | Lambda equivalent | Port complexity |
 |---|---:|---|---|---|
-| [core/box.ts](ref/mathlive/src/core/box.ts) | 816 | `Box` class — render primitive (dimensions, classes, CSS, SVG, caret, mutation methods, `toMarkup`) | [box.ls](lambda/package/math/box.ls) (partial) | **large** |
-| [core/v-box.ts](ref/mathlive/src/core/v-box.ts) | 392 | `VBox` subclass — vertical stacking (5 positioning modes: individualShift, top, bottom, shift, firstBaseline) | inline helpers in [box.ls](lambda/package/math/box.ls) | medium |
-| [core/context.ts](ref/mathlive/src/core/context.ts) | 401 | Render context — mathstyle, color, registers, isPhantom, atomIdsSettings, smartFence | [context.ls](lambda/package/math/context.ls) (132 LoC) | medium |
-| [core/mathstyle.ts](ref/mathlive/src/core/mathstyle.ts) | 162 | Mathstyle enum (D, D′, T, T′, S, S′, SS, SS′) with sizeDelta, cramped flag, per-style FontMetrics | partial in [context.ls](lambda/package/math/context.ls) | small |
-| [core/font-metrics.ts](ref/mathlive/src/core/font-metrics.ts) | 411 | `getCharacterMetrics(font, fontSize, codepoint)` with cascading lookup over Main/Math/AMS/Size1–4 | [metrics.ls](lambda/package/math/metrics.ls) | medium |
-| [core/font-metrics-data.ts](ref/mathlive/src/core/font-metrics-data.ts) | 2,366 | Per-codepoint metric tables (mechanical data) | [metrics_data.ls](lambda/package/math/metrics_data.ls) (665 LoC, reduced) | large (mechanical) |
-| [core/inter-box-spacing.ts](ref/mathlive/src/core/inter-box-spacing.ts) | 140 | TeXBook 7×7 spacing matrix + mbin→mord promotion + DFS traversal | [spacing_table.ls](lambda/package/math/spacing_table.ls) (subset) | small |
+| [core/box.ts](ref/mathlive/src/core/box.ts) | 816 | `Box` class — render primitive (dimensions, classes, CSS, SVG, caret, mutation methods, `toMarkup`) | [box.ls](lambda/doc/math/box.ls) (partial) | **large** |
+| [core/v-box.ts](ref/mathlive/src/core/v-box.ts) | 392 | `VBox` subclass — vertical stacking (5 positioning modes: individualShift, top, bottom, shift, firstBaseline) | inline helpers in [box.ls](lambda/doc/math/box.ls) | medium |
+| [core/context.ts](ref/mathlive/src/core/context.ts) | 401 | Render context — mathstyle, color, registers, isPhantom, atomIdsSettings, smartFence | [context.ls](lambda/doc/math/context.ls) (132 LoC) | medium |
+| [core/mathstyle.ts](ref/mathlive/src/core/mathstyle.ts) | 162 | Mathstyle enum (D, D′, T, T′, S, S′, SS, SS′) with sizeDelta, cramped flag, per-style FontMetrics | partial in [context.ls](lambda/doc/math/context.ls) | small |
+| [core/font-metrics.ts](ref/mathlive/src/core/font-metrics.ts) | 411 | `getCharacterMetrics(font, fontSize, codepoint)` with cascading lookup over Main/Math/AMS/Size1–4 | [metrics.ls](lambda/doc/math/metrics.ls) | medium |
+| [core/font-metrics-data.ts](ref/mathlive/src/core/font-metrics-data.ts) | 2,366 | Per-codepoint metric tables (mechanical data) | [metrics_data.ls](lambda/doc/math/metrics_data.ls) (665 LoC, reduced) | large (mechanical) |
+| [core/inter-box-spacing.ts](ref/mathlive/src/core/inter-box-spacing.ts) | 140 | TeXBook 7×7 spacing matrix + mbin→mord promotion + DFS traversal | [spacing_table.ls](lambda/doc/math/spacing_table.ls) (subset) | small |
 | `core/parser.ts` + atom modules | ~7,200 | LaTeX parsing + atom-class hierarchy (handled in Lambda via tree-sitter) | tree-sitter-latex-math + build_ast.cpp | **out of scope** for the layout port |
-| [atoms/genfrac.ts](ref/mathlive/src/atoms/genfrac.ts) | 323 | `\frac`, `\binom`, `\genfrac` with TeXBook Rule 15a–c | [fraction.ls](lambda/package/math/atoms/fraction.ls) (934 LoC, hardcoded specs) | large |
-| [atoms/subsup.ts](ref/mathlive/src/atoms/subsup.ts) | 69 | Superscript/subscript via TeXBook Rule 18 | [scripts.ls](lambda/package/math/atoms/scripts.ls) (453 LoC) | medium |
-| [atoms/surd.ts](ref/mathlive/src/atoms/surd.ts) | 247 | `\sqrt` with index — chooses small/built-up radical, scriptscript index, cramped body | inline `render_radical()` in [render.ls](lambda/package/math/render.ls) | medium |
-| [atoms/accent.ts](ref/mathlive/src/atoms/accent.ts) | ~250 | Math/text accents with skew correction and stretchy SVG | inline `render_accent()` in [render.ls](lambda/package/math/render.ls) | medium |
-| [atoms/leftright.ts](ref/mathlive/src/atoms/leftright.ts) | 240 | `\left…\right` matched delimiters with auto-sizing | `render_delimiter_group()` in [render.ls](lambda/package/math/render.ls) | medium |
-| [atoms/extensible-symbol.ts](ref/mathlive/src/atoms/extensible-symbol.ts) | 127 | Large operators that grow (`\int`, `\sum`, `\prod`, `\bigcup`) with display/inline size split | inline in [render.ls](lambda/package/math/render.ls) | medium |
-| [atoms/overunder.ts](ref/mathlive/src/atoms/overunder.ts) | 220 | `\overbrace`/`\underbrace`/`\overset`/`\underset` with stretchy SVG | inline in [render.ls](lambda/package/math/render.ls) | medium |
-| [atoms/array.ts](ref/mathlive/src/atoms/array.ts) | ~640 | Array/matrix/cases environments with column-format, arraystretch, baseline alignment | [atoms/array.ls](lambda/package/math/atoms/array.ls) (659 LoC) | large |
-| [atoms/enclose.ts](ref/mathlive/src/atoms/enclose.ts) | 471 | `\boxed`, `\cancel`, `\sout`, `\not`, longdiv (18 notation variants) — generates SVG strokes | [atoms/enclose.ls](lambda/package/math/atoms/enclose.ls) (358 LoC) | large |
-| [atoms/spacing.ts](ref/mathlive/src/atoms/spacing.ts) | 83 | `\,` `\!` `\:` `\;` `\quad` `\qquad` etc. | [atoms/spacing.ls](lambda/package/math/atoms/spacing.ls) | small |
-| [atoms/phantom.ts](ref/mathlive/src/atoms/phantom.ts) | 80 | `\phantom`, `\vphantom`, `\hphantom`, `\smash` | partial in [enclose.ls](lambda/package/math/atoms/enclose.ls) | small |
-| [atoms/operator.ts](ref/mathlive/src/atoms/operator.ts) | 116 | Named operators (`\sin`, `\cos`, `\lim`) with limits placement | inline in [render.ls](lambda/package/math/render.ls) | small |
+| [atoms/genfrac.ts](ref/mathlive/src/atoms/genfrac.ts) | 323 | `\frac`, `\binom`, `\genfrac` with TeXBook Rule 15a–c | [fraction.ls](lambda/doc/math/atoms/fraction.ls) (934 LoC, hardcoded specs) | large |
+| [atoms/subsup.ts](ref/mathlive/src/atoms/subsup.ts) | 69 | Superscript/subscript via TeXBook Rule 18 | [scripts.ls](lambda/doc/math/atoms/scripts.ls) (453 LoC) | medium |
+| [atoms/surd.ts](ref/mathlive/src/atoms/surd.ts) | 247 | `\sqrt` with index — chooses small/built-up radical, scriptscript index, cramped body | inline `render_radical()` in [render.ls](lambda/doc/math/render.ls) | medium |
+| [atoms/accent.ts](ref/mathlive/src/atoms/accent.ts) | ~250 | Math/text accents with skew correction and stretchy SVG | inline `render_accent()` in [render.ls](lambda/doc/math/render.ls) | medium |
+| [atoms/leftright.ts](ref/mathlive/src/atoms/leftright.ts) | 240 | `\left…\right` matched delimiters with auto-sizing | `render_delimiter_group()` in [render.ls](lambda/doc/math/render.ls) | medium |
+| [atoms/extensible-symbol.ts](ref/mathlive/src/atoms/extensible-symbol.ts) | 127 | Large operators that grow (`\int`, `\sum`, `\prod`, `\bigcup`) with display/inline size split | inline in [render.ls](lambda/doc/math/render.ls) | medium |
+| [atoms/overunder.ts](ref/mathlive/src/atoms/overunder.ts) | 220 | `\overbrace`/`\underbrace`/`\overset`/`\underset` with stretchy SVG | inline in [render.ls](lambda/doc/math/render.ls) | medium |
+| [atoms/array.ts](ref/mathlive/src/atoms/array.ts) | ~640 | Array/matrix/cases environments with column-format, arraystretch, baseline alignment | [atoms/array.ls](lambda/doc/math/atoms/array.ls) (659 LoC) | large |
+| [atoms/enclose.ts](ref/mathlive/src/atoms/enclose.ts) | 471 | `\boxed`, `\cancel`, `\sout`, `\not`, longdiv (18 notation variants) — generates SVG strokes | [atoms/enclose.ls](lambda/doc/math/atoms/enclose.ls) (358 LoC) | large |
+| [atoms/spacing.ts](ref/mathlive/src/atoms/spacing.ts) | 83 | `\,` `\!` `\:` `\;` `\quad` `\qquad` etc. | [atoms/spacing.ls](lambda/doc/math/atoms/spacing.ls) | small |
+| [atoms/phantom.ts](ref/mathlive/src/atoms/phantom.ts) | 80 | `\phantom`, `\vphantom`, `\hphantom`, `\smash` | partial in [enclose.ls](lambda/doc/math/atoms/enclose.ls) | small |
+| [atoms/operator.ts](ref/mathlive/src/atoms/operator.ts) | 116 | Named operators (`\sin`, `\cos`, `\lim`) with limits placement | inline in [render.ls](lambda/doc/math/render.ls) | small |
 
 **Layout-relevant TypeScript LoC to translate: ~13,000–14,000.** This excludes the editor, virtual-keyboard, accessibility, and mhchem subsystems. Lambda's current math package is ~8,400 LoC; the port would replace approximately 5,500 LoC of Lambda code while adding ~4,000–5,000 net.
 
@@ -536,7 +536,7 @@ Lambda LaTeX input
    box.ls toMarkup() → HTML
 ```
 
-The `Atom` model is the key new abstraction. Currently Lambda dispatches on AST element name (`case 'fraction':`, `case 'subsup':`, etc.) in [render.ls](lambda/package/math/render.ls). MathLive uses a polymorphic `Atom` hierarchy where each subclass owns its `render(context)` method. Lambda Script can't subclass, but the same effect can be achieved with a dispatch table keyed on atom type.
+The `Atom` model is the key new abstraction. Currently Lambda dispatches on AST element name (`case 'fraction':`, `case 'subsup':`, etc.) in [render.ls](lambda/doc/math/render.ls). MathLive uses a polymorphic `Atom` hierarchy where each subclass owns its `render(context)` method. Lambda Script can't subclass, but the same effect can be achieved with a dispatch table keyed on atom type.
 
 ### Phased plan
 
@@ -547,7 +547,7 @@ Build a tool that emits BOTH Lambda's render AND MathLive's render (via Node `co
 Port [font-metrics-data.ts](ref/mathlive/src/core/font-metrics-data.ts) (mechanical, possibly via a TS→Lambda codegen script) and [font-metrics.ts](ref/mathlive/src/core/font-metrics.ts) (cascade lookup over Main/Math/AMS/Size1–4) as a pure data module. Existing render.ls can call into it without changing emission. Feature-flagged: the existing 428 passing cases stay green.
 
 **Phase 2 — Constants from metrics (140–240h)**
-Replace the ~200 hardcoded em constants in [fraction.ls](lambda/package/math/atoms/fraction.ls), [scripts.ls](lambda/package/math/atoms/scripts.ls), [atoms/array.ls](lambda/package/math/atoms/array.ls), [atoms/enclose.ls](lambda/package/math/atoms/enclose.ls) **one spec branch at a time**, each replacement derived from the new metric layer. Every replacement gated by the full 921-case suite. Expected outcome: 428 → ~600–700 passing as TeXBook Rule 15a–c, Rule 18, italic correction become metric-driven instead of hand-tuned. **This is where the biggest correctness win lives.**
+Replace the ~200 hardcoded em constants in [fraction.ls](lambda/doc/math/atoms/fraction.ls), [scripts.ls](lambda/doc/math/atoms/scripts.ls), [atoms/array.ls](lambda/doc/math/atoms/array.ls), [atoms/enclose.ls](lambda/doc/math/atoms/enclose.ls) **one spec branch at a time**, each replacement derived from the new metric layer. Every replacement gated by the full 921-case suite. Expected outcome: 428 → ~600–700 passing as TeXBook Rule 15a–c, Rule 18, italic correction become metric-driven instead of hand-tuned. **This is where the biggest correctness win lives.**
 
 **Phase 3 — Context + mathstyle (50–90h)**
 Port [context.ts](ref/mathlive/src/core/context.ts) and [mathstyle.ts](ref/mathlive/src/core/mathstyle.ts) as immutable Lambda records with `derive`/`clone` helpers. Thread through render.ls. Enables proper cramped-style cascading and superscript scaling that currently rely on Lambda's simpler `display`/`text`/`script`/`scriptscript` string discriminator.
@@ -562,13 +562,13 @@ Port [delimiters.ts](ref/mathlive/src/atoms/delim.ts), [leftright.ts](ref/mathli
 Port [surd.ts](ref/mathlive/src/atoms/surd.ts), [accent.ts](ref/mathlive/src/atoms/accent.ts), [overunder.ts](ref/mathlive/src/atoms/overunder.ts), [overlap.ts](ref/mathlive/src/atoms/overlap.ts), [phantom.ts](ref/mathlive/src/atoms/phantom.ts). Each fixes a specific failure cluster.
 
 **Phase 7 — Genfrac + subsup full ports (110–240h)**
-Replace [fraction.ls](lambda/package/math/atoms/fraction.ls) and [scripts.ls](lambda/package/math/atoms/scripts.ls) with TeXBook-faithful Rule 15/18 implementations backed by the metric layer. These are the largest single-file ports and where Lambda's current pass rate has the most ceiling.
+Replace [fraction.ls](lambda/doc/math/atoms/fraction.ls) and [scripts.ls](lambda/doc/math/atoms/scripts.ls) with TeXBook-faithful Rule 15/18 implementations backed by the metric layer. These are the largest single-file ports and where Lambda's current pass rate has the most ceiling.
 
 **Phase 8 — Array/environments (80–220h)**
 Port [array.ts](ref/mathlive/src/atoms/array.ts) (the largest single atom file) with column-format parsing, `arraystretch`, `arraycolsep`, baseline alignment, all environment types (matrix, pmatrix, bmatrix, cases, dcases, align, gather, multline).
 
 **Phase 9 — Inter-box spacing + mtype promotion (30–50h)**
-Replace [spacing_table.ls](lambda/package/math/spacing_table.ls) with the full TeXBook 7×7 matrix + `adjustType()` mbin→mord promotion + DFS traversal from [inter-box-spacing.ts](ref/mathlive/src/core/inter-box-spacing.ts).
+Replace [spacing_table.ls](lambda/doc/math/spacing_table.ls) with the full TeXBook 7×7 matrix + `adjustType()` mbin→mord promotion + DFS traversal from [inter-box-spacing.ts](ref/mathlive/src/core/inter-box-spacing.ts).
 
 **Phase 10 — Enclose + color + residual atoms (80–160h)**
 Port [enclose.ts](ref/mathlive/src/atoms/enclose.ts) variants (18 notations), color blending, mode handlers, error/tooltip/macro atoms as needed by the test suite.
@@ -677,27 +677,27 @@ Lambda corpus                           359 / 715   (50.2%)   — up from 222 / 
 - Tree-mode (`--tree`) prints both renders as indented S-expressions for structural comparison.
 - Batch (`--batch <file>`) and report-driven (`--from-report <path> --top N`) modes for sweeping failures.
 
-**Phase 1 — Metric layer port** ([lambda/package/math/metrics.ls](lambda/package/math/metrics.ls)):
+**Phase 1 — Metric layer port** ([lambda/doc/math/metrics.ls](lambda/doc/math/metrics.ls)):
 - `get_character_metrics(ch, font_name)` — full cascade lookup with `EXTRA_CHARACTER_MAP` (Latin-1 + Cyrillic substitutions) and CJK detection.
 - `code_point()` via Lambda's `ord()` built-in.
 - Mathstyle transition helpers: `sup_style`, `sub_style`, `frac_num_style`, `frac_den_style`, `cramp`, `is_cramped`, `base_style`.
 - Sigma constants table already matched MathLive's `FONT_METRICS` exactly — kept as-is.
 
 **Phase 2a — Raw-precision strut emission** (cross-cutting):
-- Regenerated [lambda/package/math/metrics_data.ls](lambda/package/math/metrics_data.ls) to include `height_raw` and `depth_raw` (5dp full precision) as elements 5–6 of each metric tuple. Italic correction now rounded via CEIL@2 (matches MathLive's `toString()`).
-- `text_box` ([lambda/package/math/box.ls:48](lambda/package/math/box.ls:48)) populates `height_raw`/`depth_raw` from metric lookup (single char) or per-char max (multi-char operator names like `sin`/`cos`/`arcsin`).
+- Regenerated [lambda/doc/math/metrics_data.ls](lambda/doc/math/metrics_data.ls) to include `height_raw` and `depth_raw` (5dp full precision) as elements 5–6 of each metric tuple. Italic correction now rounded via CEIL@2 (matches MathLive's `toString()`).
+- `text_box` ([lambda/doc/math/box.ls:48](lambda/doc/math/box.ls:48)) populates `height_raw`/`depth_raw` from metric lookup (single char) or per-char max (multi-char operator names like `sin`/`cos`/`arcsin`).
 - `+`/`-`/`−` get truthful raw values (0.58333) for strut purposes while keeping the rounded `height = 0.69` heuristic for fraction/script layout calculations — this is the surgical move that closes the cascade.
-- `hbox` ([lambda/package/math/box.ls:512](lambda/package/math/box.ls:512)) propagates max raw height/depth across children, initialized with the first child's value so negative depths (arrows extending above baseline) preserve.
+- `hbox` ([lambda/doc/math/box.ls:512](lambda/doc/math/box.ls:512)) propagates max raw height/depth across children, initialized with the first child's value so negative depths (arrows extending above baseline) preserve.
 - `skip_box`, `with_class`, `with_style`, `with_scale`, `with_color`, `box_with_type`, `coalesce` all forward `height_raw`/`depth_raw`.
-- `math.ls` strut emission ([lambda/package/math/math.ls:34](lambda/package/math/math.ls:34)) detects raw availability and emits `fmt_em_ceil2(h_raw + d_raw)` for strut-bottom-height, `fmt_em_ceil2(-d_raw)` for vertical-align. Falls back to the previous rounded path for boxes with `strut_total` or `strut_depth_em` overrides, or when raw values weren't propagated.
+- `math.ls` strut emission ([lambda/doc/math/math.ls:34](lambda/doc/math/math.ls:34)) detects raw availability and emits `fmt_em_ceil2(h_raw + d_raw)` for strut-bottom-height, `fmt_em_ceil2(-d_raw)` for vertical-align. Falls back to the previous rounded path for boxes with `strut_total` or `strut_depth_em` overrides, or when raw values weren't propagated.
 
-**Phase 2 structural — Italic correction & operator names** ([lambda/package/math/box.ls:203](lambda/package/math/box.ls:203)):
+**Phase 2 structural — Italic correction & operator names** ([lambda/doc/math/box.ls:203](lambda/doc/math/box.ls:203)):
 - `text_style()` now derives italic correction from metric data for both `lm_mathit` and `lm_cmr` characters — replacing the hardcoded ~10-letter map. Adds margin-right for `w`, `r`, `v`, `\partial`, `\int`, AMS arrows, etc.
 - Multi-character operator names (`sin`/`cos`/`tan`/`arcsin`/`sinh`/etc.) now compute height as max per-char metric instead of a hardcoded lookup — closes `\sinh u` vs `\sin x` height mismatch.
 
 **Phase 2 structural — Small misc**:
-- `\ominus`/`\oslash`/`\boxplus`/`\boxminus`/`\boxtimes`/`\boxdot` mapped to `lm_cmr` font class ([lambda/package/math/symbols.ls:278](lambda/package/math/symbols.ls:278)).
-- ASCII `*` → `∗` (U+2217) at render time ([lambda/package/math/render.ls:170](lambda/package/math/render.ls:170)).
+- `\ominus`/`\oslash`/`\boxplus`/`\boxminus`/`\boxtimes`/`\boxdot` mapped to `lm_cmr` font class ([lambda/doc/math/symbols.ls:278](lambda/doc/math/symbols.ls:278)).
+- ASCII `*` → `∗` (U+2217) at render time ([lambda/doc/math/render.ls:170](lambda/doc/math/render.ls:170)).
 - `smallmatrix` environment gets leading/trailing `lm_arraycolsep` separators at width 0.2em (matches MathLive's `colSeparationType='small'`).
 
 ### Pass-rate timeline this session
@@ -733,7 +733,7 @@ The proposal's analysis was correct in two key ways:
 
 ### Phase 2b (genfrac/subsup constant replacement) — recommended next
 
-The proposal's Phase 2b — replace the ~30 hardcoded em constants in [fraction.ls](lambda/package/math/atoms/fraction.ls) and [scripts.ls](lambda/package/math/atoms/scripts.ls) with TeXBook Rule 15/18 implementations driven by mathstyle sigma constants — is now de-risked because Phase 1's metric layer is in place. Expected to close another ~40–80 cases. Estimated effort: 80–140 hours.
+The proposal's Phase 2b — replace the ~30 hardcoded em constants in [fraction.ls](lambda/doc/math/atoms/fraction.ls) and [scripts.ls](lambda/doc/math/atoms/scripts.ls) with TeXBook Rule 15/18 implementations driven by mathstyle sigma constants — is now de-risked because Phase 1's metric layer is in place. Expected to close another ~40–80 cases. Estimated effort: 80–140 hours.
 
 ### Phase 2b — composite-box raw propagation post-mortem
 
@@ -769,7 +769,7 @@ A subsequent attempt at the full Phase 2b port took the proposal's recommended a
 **Result**: 12 / 27 branches pass (+4), and **+9 corpus tests pass (581 → 590)**.
 
 **Subsequent session extended Phase 2b to script/limit derivations**:
-- `sub_child_height` in [scripts.ls](lambda/package/math/atoms/scripts.ls) `render_large_op_limits_vlist` now derives from `ceil2(sub_box.height_raw * 0.7)` — matches MathLive's emission rule for the script-style sub wrapper.
+- `sub_child_height` in [scripts.ls](lambda/doc/math/atoms/scripts.ls) `render_large_op_limits_vlist` now derives from `ceil2(sub_box.height_raw * 0.7)` — matches MathLive's emission rule for the script-style sub wrapper.
 - `depth_holder` and `box_depth` now derive from `sub_child_height + offset` (offset varies by has-descender / both-limits vs sub-only).
 - Added support for SUB-ONLY and SUP-ONLY big-op limits (e.g., `\sum_n a_n`) — Lambda previously dispatched these to a flat vbox structure; now routes through `render_large_op_limits_vlist` with conditional sub/sup span emission, matching MathLive's stacked-vlist output for inline sum with single limit.
 - Integral inline-script (`render_integral_inline_scripts`): `sup_inner_h` now derives from `ceil2(sup_box.height_raw * 0.7)` (previously hardcoded 0.46em). `vlist_height` and `box_h` scale with `sup_inner_h` (1.09 + sup_inner_h pattern). Closes `\int_a^b`, `\int_0^\infty`, and similar cases where the sup is a tall letter or symbol.
@@ -808,7 +808,7 @@ Upstream baseline                 206 / 206  (100%)  — held throughout
 
 A subsequent push focused on the actual structural mismatch in subscripts: Lambda's `render_sub_only` emitted a simple `<span style="display:inline-block;vertical-align:Xem;font-size:70%">` wrapper around the subscript content, while MathLive emits the proper `lm_vlist-t lm_vlist-t2 > lm_vlist-r > lm_vlist > ...` structure for ALL subscripts (not just complex ones).
 
-**Changes in [scripts.ls](lambda/package/math/atoms/scripts.ls) `render_sub_only`**:
+**Changes in [scripts.ls](lambda/doc/math/atoms/scripts.ls) `render_sub_only`**:
 - Rewrote the wrapper to emit MathLive's vlist structure: `lm_vlist-t2 > lm_vlist-r > lm_vlist > [span > pstrut + content] > lm_vlist-s > lm_vlist-r > lm_vlist (depth_holder)`.
 - `sub_shift` now uses `sub_box.height * font_scale` (script-style scaled) rather than the parent-scale height, matching MathLive's metric semantics. Previously Lambda over-estimated sub_shift for compound subs.
 - `child_h` (wrapper height) derives from `ceil2((sub.height_raw + sub.depth_raw) * font_scale)` for descender atoms, `ceil2(sub.height_raw * font_scale)` otherwise. Matches MathLive's per-content sizing.
@@ -838,7 +838,7 @@ After the sub_only rewrite, a parallel push restructured `render_sup_only` to de
 - `vlist_height = -sup_top - 3 + ceil2(sup.h_raw * font_scale) = 0.41 + ceil2(sup.h_raw * font_scale)`.
 - `child_h = ceil2((sup.h_raw + sup.d_raw) * font_scale)` for descender atoms; `ceil2(sup.h_raw * font_scale)` otherwise.
 
-**Implementation** ([scripts.ls:579](lambda/package/math/atoms/scripts.ls:579) `render_sup_only`):
+**Implementation** ([scripts.ls:579](lambda/doc/math/atoms/scripts.ls:579) `render_sup_only`):
 - Added derived path with the above formulas. Returns `height_raw = 0.41 + sup.h_raw * font_scale` (pre-ceil) so the outer strut emits via CEIL@2 of (h_raw + d_raw) — closes the 0.01em drift in expressions where the sup pairs with a descender sibling (e.g., `x^n+y^n`).
 - Gated `use_derived` to skip tall_script / tall_base / fraction-child contexts which retain hardcoded values.
 - Legacy path returns `height_raw = null` so the outer strut falls back to fmt_em on the rounded value — preserves previous emission for tall_script cases like `x^{2-\frac{1}{2}}`.
@@ -865,7 +865,7 @@ After the sup_only rewrite, work continued on the script-style fraction branches
 - `denom_child_h` same pattern
 - `depth_holder = 0.54` base, bumped by `ceil2(denom.d_raw * 5/7)` for descender denom
 
-**Implementation** ([fraction.ls:225-298](lambda/package/math/atoms/fraction.ls:225)):
+**Implementation** ([fraction.ls:225-298](lambda/doc/math/atoms/fraction.ls:225)):
 - Added `script_frac_child_h_metric()` and `script_frac_depth_holder_metric()` helpers.
 - **B1** (script + script_container) and **B3** (scriptscript-style) now use metric-driven children.
 - Reduced drift in `a_{\frac{x}{y}}` from 10 findings to 3 (the remaining 3 are precision drifts in the outer sub_only wrapper, not the fraction itself).
@@ -909,16 +909,16 @@ Estimated remaining work: **60–100 hours** for full Phase 2b completion. The f
 | Area | Start here |
 |------|-----------|
 | Diff harness (Phase 0) | [test/lambda/mathlive/diff_harness.mjs](test/lambda/mathlive/diff_harness.mjs) |
-| Metric API (Phase 1a/1b) | [lambda/package/math/metrics.ls](lambda/package/math/metrics.ls) — `get_character_metrics`, mathstyle helpers |
-| Strut full precision (Phase 2a) | [lambda/package/math/math.ls:34](lambda/package/math/math.ls:34) — `use_raw` gate and `fmt_em_ceil2` emission |
-| Box raw-field propagation | [lambda/package/math/box.ls:48](lambda/package/math/box.ls:48) `text_box`; [lambda/package/math/box.ls:512](lambda/package/math/box.ls:512) `hbox` |
-| Italic correction metric-driven | [lambda/package/math/box.ls:203](lambda/package/math/box.ls:203) `text_style` |
-| Multi-char operator heights | [lambda/package/math/box.ls:131](lambda/package/math/box.ls:131) `text_height_for` → `max_char_height` |
-| Per-symbol big-op metrics | [lambda/package/math/render.ls:251](lambda/package/math/render.ls:251) `render_limit_operator_symbol` + `large_op_metrics`/`small_op_metrics` |
-| Integral inline-limits (side msubsup) | [lambda/package/math/atoms/scripts.ls:50](lambda/package/math/atoms/scripts.ls:50) `render_integral_inline_scripts` |
-| Tall-base accent positioning | [lambda/package/math/render.ls:1143](lambda/package/math/render.ls:1143) `render_simple_accent` |
-| Prime as msubsup script | [lambda/package/math/render.ls:171](lambda/package/math/render.ls:171) `render_prime_script` |
-| Fraction descender-aware depth/depth_holder | [lambda/package/math/atoms/fraction.ls:577](lambda/package/math/atoms/fraction.ls:577) short-body / [:526](lambda/package/math/atoms/fraction.ls:526) compound-denom / [:633](lambda/package/math/atoms/fraction.ls:633) default branches with `ceil2()` helper |
+| Metric API (Phase 1a/1b) | [lambda/doc/math/metrics.ls](lambda/doc/math/metrics.ls) — `get_character_metrics`, mathstyle helpers |
+| Strut full precision (Phase 2a) | [lambda/doc/math/math.ls:34](lambda/doc/math/math.ls:34) — `use_raw` gate and `fmt_em_ceil2` emission |
+| Box raw-field propagation | [lambda/doc/math/box.ls:48](lambda/doc/math/box.ls:48) `text_box`; [lambda/doc/math/box.ls:512](lambda/doc/math/box.ls:512) `hbox` |
+| Italic correction metric-driven | [lambda/doc/math/box.ls:203](lambda/doc/math/box.ls:203) `text_style` |
+| Multi-char operator heights | [lambda/doc/math/box.ls:131](lambda/doc/math/box.ls:131) `text_height_for` → `max_char_height` |
+| Per-symbol big-op metrics | [lambda/doc/math/render.ls:251](lambda/doc/math/render.ls:251) `render_limit_operator_symbol` + `large_op_metrics`/`small_op_metrics` |
+| Integral inline-limits (side msubsup) | [lambda/doc/math/atoms/scripts.ls:50](lambda/doc/math/atoms/scripts.ls:50) `render_integral_inline_scripts` |
+| Tall-base accent positioning | [lambda/doc/math/render.ls:1143](lambda/doc/math/render.ls:1143) `render_simple_accent` |
+| Prime as msubsup script | [lambda/doc/math/render.ls:171](lambda/doc/math/render.ls:171) `render_prime_script` |
+| Fraction descender-aware depth/depth_holder | [lambda/doc/math/atoms/fraction.ls:577](lambda/doc/math/atoms/fraction.ls:577) short-body / [:526](lambda/doc/math/atoms/fraction.ls:526) compound-denom / [:633](lambda/doc/math/atoms/fraction.ls:633) default branches with `ceil2()` helper |
 
 ---
 
@@ -942,14 +942,14 @@ Upstream baseline                        206 / 206  (100%)
 
 ### What was built (Phase 2b)
 
-**Per-symbol big-op metrics** ([lambda/package/math/render.ls:285](lambda/package/math/render.ls:285)):
+**Per-symbol big-op metrics** ([lambda/doc/math/render.ls:285](lambda/doc/math/render.ls:285)):
 - Ported MathLive's font-metrics-data.ts Size2/Size1 tables for `\int`, `\sum`, `\prod`, `\oint`, `\bigcap`, `\bigcup`, etc.
 - Replaced the previous one-size-fits-all heuristic (h=1.61, d=0.2) with truthful per-symbol metrics:
   - `\int` Size2: h=1.36, d=0.86, italic=0.45 → emits the `margin-right:0.45em` MathLive does.
   - `\sum`/`\prod`/`\bigcup`/etc. Size2: h=1.05, d=0.55, no italic.
 - The italic correction is emitted as inline style on the operator symbol span.
 
-**Integral inline side-limits** ([lambda/package/math/atoms/scripts.ls:50](lambda/package/math/atoms/scripts.ls:50) `render_integral_inline_scripts`):
+**Integral inline side-limits** ([lambda/doc/math/atoms/scripts.ls:50](lambda/doc/math/atoms/scripts.ls:50) `render_integral_inline_scripts`):
 - New render path for `\int_X^Y` (and `\oint`, `\iint`, `\iiint`, etc.) in textstyle: emits `lm_op-group > lm_op-symbol[margin-right] + lm_msubsup` SIBLING (not stacked vlist), matching MathLive's `subsupPlacement: 'adjacent'`.
 - Sub/sup positioning differs by configuration:
   - Both limits: sub `margin-left:-0.44em` (nestle into italic gap).
@@ -958,17 +958,17 @@ Upstream baseline                        206 / 206  (100%)
 - Box h/d differ per configuration: both → 1.55/0.89, sub-only → 1.36/0.89222 (the slightly-higher d_raw makes CEIL@2(h+d) produce MathLive's 2.26).
 - `\sum`, `\prod`, etc. keep the existing stacked-limits behavior (matches MathLive's auto-placement, which keeps them above/below in display/text style).
 
-**Tall-base accent positioning** ([lambda/package/math/render.ls:1143](lambda/package/math/render.ls:1143) `render_simple_accent`):
+**Tall-base accent positioning** ([lambda/doc/math/render.ls:1143](lambda/doc/math/render.ls:1143) `render_simple_accent`):
 - Previously hardcoded `height:0.44em` for the base wrapper inside `\hat`/`\vec`/`\bar` accents — this over-shrank uppercase letter bases (`\vec{F}` rendered F at 0.44em instead of its actual 0.69em).
 - Now uses `base_box.height` for the wrapper; accent_top shifts up by `(base.height - 0.44)` so taller bases push the accent up; vlist height grows accordingly.
 
-**Prime as msubsup** ([lambda/package/math/render.ls:171](lambda/package/math/render.ls:171) `render_prime_script`):
+**Prime as msubsup** ([lambda/doc/math/render.ls:171](lambda/doc/math/render.ls:171) `render_prime_script`):
 - ASCII `'` (apostrophe) at the AST punctuation level is now rendered as a `lm_msubsup` containing the Unicode prime `′` (U+2032) in a 70%-scaled superscript-style vlist — matches MathLive's behavior for `x'`, `f'(x)`, etc.
 - Closes a structural mismatch where Lambda emitted `<span class="lm_cmr">'</span>` as a flat sibling.
 
 ### What was DEFERRED in Phase 2b
 
-The original Phase 2b — replace the ~30 hardcoded em-constant branches in [fraction.ls](lambda/package/math/atoms/fraction.ls) with TeXBook Rule 15d formulas — was attempted but deferred. The dispatch table contains per-context tuning (e.g., specific branches for colorbox-content fractions, script-style nested fractions, mixed numerator descender cases). Replacing branches wholesale produced significant regressions because adjacent branches depend on neighboring constants.
+The original Phase 2b — replace the ~30 hardcoded em-constant branches in [fraction.ls](lambda/doc/math/atoms/fraction.ls) with TeXBook Rule 15d formulas — was attempted but deferred. The dispatch table contains per-context tuning (e.g., specific branches for colorbox-content fractions, script-style nested fractions, mixed numerator descender cases). Replacing branches wholesale produced significant regressions because adjacent branches depend on neighboring constants.
 
 A FUTURE Phase 2b refactor should:
 1. Build a per-branch test fixture: take each of the ~30 dispatch keys, generate 3-5 representative test cases, and gate the refactor on them passing.
@@ -1042,7 +1042,7 @@ box depth bump by `ceil2(depth_raw*0.7)`).
 
 The `e^{-x^2}` / `x^{x^2}` nested-superscript over-computation (the documented
 hard residual) was resolved by making `render_sup_only`
-([scripts.ls](lambda/package/math/atoms/scripts.ls)) mathstyle-aware:
+([scripts.ls](lambda/doc/math/atoms/scripts.ls)) mathstyle-aware:
 
 - **Style-dependent script shift** — the sup baseline offset is 0.41 at the
   first script level (top `-3.41`) and 0.43 one level deeper (top `-3.43`),
@@ -1084,10 +1084,10 @@ tables from MathLive's `font-metrics-data.ts`:
   `sans` to them. (Also re-added `width_raw_of` to the generator — a manual
   edit had been clobbered by an earlier regeneration, briefly zeroing the
   accent margins.)
-- **`font_from_class`** ([box.ls](lambda/package/math/box.ls)) maps the
+- **`font_from_class`** ([box.ls](lambda/doc/math/box.ls)) maps the
   `lm_mathbf`/`lm_tt`/`lm_frak`/`lm_script`/`lm_cal`/`lm_sans` classes to those
   fonts, so single-char height/width lookups hit real metrics.
-- **Italic correction** ([box.ls](lambda/package/math/box.ls) `text_style`)
+- **Italic correction** ([box.ls](lambda/doc/math/box.ls) `text_style`)
   now emits the per-font italic margin-right for Script/Caligraphic/Fraktur/
   Bold capitals — closes `\mathscr{F}` (`margin-right:0.14em`).
 
@@ -1102,20 +1102,20 @@ Upstream baseline 206 / 206 (100%)*
   inside math `lm_cmr` spans, but escapes `<`/`>` in text-mode / `\not{...}`
   overlay targets. Lambda's global `escape_html` couldn't do both. Resolved
   with a private-use sentinel (U+E000/U+E001): `render_relation`
-  ([render.ls](lambda/package/math/render.ls)) emits the sentinel for `<`/`>`,
-  `escape_html` ([to_html.ls](lambda/package/latex/to_html.ls)) maps it back to
+  ([render.ls](lambda/doc/math/render.ls)) emits the sentinel for `<`/`>`,
+  `escape_html` ([to_html.ls](lambda/latex/to_html.ls)) maps it back to
   raw *after* entity-escaping, and a new `text_embedded` context flag (threaded
   through `ctx.derive`) suppresses the sentinel for inline math inside
   `\text{...}`. `box.text_box` de-sentinelizes for metric lookup so the `<`
   glyph keeps its real height. **This finally cleared the upstream baseline to
   a true 206/206** (the long-standing `a\not{<>} b` snap mismatch is gone).
 - **Negative-depth superscripts** — `child_h` in `render_sup_only`
-  ([scripts.ls](lambda/package/math/atoms/scripts.ls)) now always spans
+  ([scripts.ls](lambda/doc/math/atoms/scripts.ls)) now always spans
   `(h+d)×scale`; for glyphs that sit above the baseline with negative depth
   (`\circ`, d=-0.0555) this shrinks the wrapper, closing `90^\circ` (0.28 not
   0.32).
 - **Radical index scriptscript scale** — `render_sqrt_index`
-  ([render.ls](lambda/package/math/render.ls)) derives the index wrapper height
+  ([render.ls](lambda/doc/math/render.ls)) derives the index wrapper height
   from `ceil2(index.height_raw × 0.5)` (scriptscript) instead of a hardcoded
   0.33, and the vlist height follows as `-top-3+child_h`. Closes `\sqrt[n]{x}`.
 
@@ -1130,17 +1130,17 @@ Net across this conversation's "continue to fix" rounds: **614 → 754
 
 - **Display-mode integrals (biggest win, +7)** — integrals now place limits to
   the SIDE (`lm_msubsup` adjacent) in BOTH inline and display mode
-  ([scripts.ls](lambda/package/math/atoms/scripts.ls) — dropped the
+  ([scripts.ls](lambda/doc/math/atoms/scripts.ls) — dropped the
   `not ctx.is_display` guard). MathLive never stacks integral limits by
   default, so the many display `\int_{-\infty}^{\infty} e^{-x^2} dx` cases now
   pass.
-- **`\begin{equation}` environment** ([array.ls](lambda/package/math/atoms/array.ls))
+- **`\begin{equation}` environment** ([array.ls](lambda/doc/math/atoms/array.ls))
   — added the leading+trailing 0.5em `lm_arraycolsep` MathLive wraps the single
   column in, and a content-derived `equation_table_metrics` that centers the
   row on the math axis (height = content.height, depth ≈ content.height − 0.51,
   depth-holder one notch deeper for the vlist-s baseline). Closes `E = mc^2`,
   `ax^2+bx+c=0`, etc.
-- **Unknown commands with arguments** ([render.ls](lambda/package/math/render.ls)
+- **Unknown commands with arguments** ([render.ls](lambda/doc/math/render.ls)
   `render_unknown_command_node`) — an unknown `\cmd{...}` now renders the way
   MathLive does: an `lm_error lm_cmr` span carrying `\cmd` (with backslash,
   height/depth from the cmr `\` glyph 0.75/0.25), a 0.17em gap, then the
@@ -1168,16 +1168,16 @@ dispatch branches.
 
 After the first Phase 3 batch landed at 707/921, a follow-up targeted accents and continued fractions:
 
-- **Accent centering margin** ([render.ls](lambda/package/math/render.ls) `accent_margin_left`): ported MathLive's formula `(base.width − accent.width)/2` (accent.ts:120). Accent glyph widths from Main-Regular (0.5 for most, 0.27778 for the single dot). The base width uses a new full-precision `width_raw` metric field (regenerated via [generate_metrics_data.mjs](test/lambda/mathlive/generate_metrics_data.mjs)) so the ÷2 doesn't lose a half-pixel — `\vec{v}` now emits margin-left:0 (not -0.01). **+11 cases** (replaced the hardcoded 0.04/0.15 margins).
-- **Accent VBox height** ([render.ls](lambda/package/math/render.ls) `render_simple_accent`): `vlist = ceil2(base.height_raw − clearance + accent.height_raw)`, `clearance = min(base.height, X_HEIGHT)`. Uses raw accent metric heights (hat 0.69444, ddot 0.66786, check 0.62847, etc.). Closes `\ddot{b}`/`\hat{A}` strut drift. **+3 cases**.
-- **`\cfrac`** ([fraction.ls](lambda/package/math/atoms/fraction.ls) `wrap_cfrac_fraction`): emits only the opening nulldelimiter (continued-fraction left-alignment). Also guarded the `denom≥0.75, numer<0.75` branch so short single-letter numerators (`\frac{e}{f}`) fall through to the 0.94-height short-numer branch. **+3 cases**.
-- **Prime `'` display style** ([render.ls](lambda/package/math/render.ls) `render_prime_script`): display-mode primes use top -3.36 / vlist 0.76 (vs inline -3.41 / 0.81). Closes `\begin{bmatrix} x' \\ y' \end{bmatrix}`. **+2 cases**.
+- **Accent centering margin** ([render.ls](lambda/doc/math/render.ls) `accent_margin_left`): ported MathLive's formula `(base.width − accent.width)/2` (accent.ts:120). Accent glyph widths from Main-Regular (0.5 for most, 0.27778 for the single dot). The base width uses a new full-precision `width_raw` metric field (regenerated via [generate_metrics_data.mjs](test/lambda/mathlive/generate_metrics_data.mjs)) so the ÷2 doesn't lose a half-pixel — `\vec{v}` now emits margin-left:0 (not -0.01). **+11 cases** (replaced the hardcoded 0.04/0.15 margins).
+- **Accent VBox height** ([render.ls](lambda/doc/math/render.ls) `render_simple_accent`): `vlist = ceil2(base.height_raw − clearance + accent.height_raw)`, `clearance = min(base.height, X_HEIGHT)`. Uses raw accent metric heights (hat 0.69444, ddot 0.66786, check 0.62847, etc.). Closes `\ddot{b}`/`\hat{A}` strut drift. **+3 cases**.
+- **`\cfrac`** ([fraction.ls](lambda/doc/math/atoms/fraction.ls) `wrap_cfrac_fraction`): emits only the opening nulldelimiter (continued-fraction left-alignment). Also guarded the `denom≥0.75, numer<0.75` branch so short single-letter numerators (`\frac{e}{f}`) fall through to the 0.94-height short-numer branch. **+3 cases**.
+- **Prime `'` display style** ([render.ls](lambda/doc/math/render.ls) `render_prime_script`): display-mode primes use top -3.36 / vlist 0.76 (vs inline -3.41 / 0.81). Closes `\begin{bmatrix} x' \\ y' \end{bmatrix}`. **+2 cases**.
 
 \* The single failure flagged as `NOT 14/15` is a stale snap-vs-live mismatch: the local snap files escape `>` as `&gt;` for `a\not{<>} b`, but live MathLive emits the raw `>`. Lambda now matches live MathLive; the snap should be regenerated.
 
 ### What was built (Phase 3)
 
-**Sized-delim word reconstruction** ([lambda/package/math/render.ls](lambda/package/math/render.ls) `try_sized_delim_word_combine`):
+**Sized-delim word reconstruction** ([lambda/doc/math/render.ls](lambda/doc/math/render.ls) `try_sized_delim_word_combine`):
 - The tree-sitter math grammar greedily matches `\big` as a sized-delim prefix, leaving `cup`/`oplus`/etc. as plain symbols/strings. The render-children scan now walks forward from `sized_delimiter(\big|\Big|\bigg|\Bigg)` collecting alpha letters from both bare strings and `symbol`/`word` elements (Lambda's AST emits the suffix letters as raw strings). It tries progressively shorter prefixes against `sym.lookup_symbol("\\big" + prefix)` and constructs a synthetic `<command name: ...>` element so the existing big-op renderer reuses its lm_op-group + limits structure.
 - When the reconstructed command is followed by a `subsup` whose base is the missing final letter (e.g., `\bigcup_{i\in I}` parses as `... p_{i\in I}` — the `_` attaches to `p`), the helper steals the base letter and emits a synthetic `<subsup base: bigcup_cmd, sub:..., sup:...>`, then dispatches through `scripts.render` so limits stack correctly.
 
@@ -1190,28 +1190,28 @@ After the first Phase 3 batch landed at 707/921, a follow-up targeted accents an
 **`text_group` brace strip** (`render_text_group` dispatch case):
 - AST elements like `<text_group "{", "text", "}">` (used as argument to `\mathit`, `\mathbf`, etc.) had their literal `{`/`}` strings leaking into the rendered output. The new handler filters them.
 
-**Font-class table updates** ([lambda/package/math/symbols.ls](lambda/package/math/symbols.ls)):
+**Font-class table updates** ([lambda/doc/math/symbols.ls](lambda/doc/math/symbols.ls)):
 - Added ~25 new `font_class_map` entries to match MathLive's upright rendering: `circ`, `bullet`, `star`, `ast`, `oplus`, `otimes`, `odot`, `oslash`, `cap`, `cup`, `sqcap`, `sqcup`, `vee`, `wedge`, `setminus`, `Re`, `Im`, `wp`, `flat`, `natural`, `sharp`, `clubsuit`, `diamondsuit`, `heartsuit`, `spadesuit`, `degree`, `langle`, `rangle`, `lceil`, `rceil`, `lfloor`, `rfloor`, `lbrace`, `rbrace`, `backslash`, `surd`, `ll`, `gg`, `prec`, `succ`, `lor`, `land`, `sqsubseteq`, `sqsupseteq`, `bowtie`, `models`, `vdash`, `dashv`, `doteq`, `trianglelefteq`, `trianglerighteq`.
 - `\imath`/`\jmath` switched from `lm_cmr` to `lm_cmr lm_it` (matches MathLive's italic dotless-i/j rendering).
 - `\preceq`/`\succeq` moved from `lm_ams` to `lm_cmr` (MathLive uses Main-Regular for these in math mode).
 - `\triangle` moved from `misc_symbols` (mord) to `relations` (mrel) so it gets thickspace before following atoms.
 
-**ASCII punctuation classification** ([render.ls](lambda/package/math/render.ls) `render_punct`/`render_operator`):
+**ASCII punctuation classification** ([render.ls](lambda/doc/math/render.ls) `render_punct`/`render_operator`):
 - ASCII `|` → `∣` (U+2223) classified as `mord` instead of `mpunct`, eliminating the unwanted 0.17em punct gap in `|x|`.
 - ASCII `/` classified as `mord` instead of `mbin` — MathLive treats `/` as ordinary, so spacing in `\frac{a}{b} / c` matches.
 - ASCII `:` in math mode classified as `mrel` (TeX default for colon in math) so `f: A \mapsto B` gets thickspace.
 
-**`\mathbb` metric lookup** ([box.ls](lambda/package/math/box.ls) `font_from_class`):
+**`\mathbb` metric lookup** ([box.ls](lambda/doc/math/box.ls) `font_from_class`):
 - Mapped `lm_bb` to the AMS-Regular font table — MathLive's blackboard letters come from AMS-Regular and have slightly different depth (0.16) than Main-Regular (0.19). Closes the strut depth drift on `\mathbb{N}`/`\mathbb{Q}`/etc.
 
-**Short-fraction content-aware sizing** ([atoms/fraction.ls](lambda/package/math/atoms/fraction.ls)):
+**Short-fraction content-aware sizing** ([atoms/fraction.ls](lambda/doc/math/atoms/fraction.ls)):
 - The `numer_total >= 0.95 and denom_total < 0.95` branch previously hardcoded `denom_child_height: 0.7`. Now uses `denom_box.height` for descender-less short denoms — closes `\frac{n(n+1)}{2}` style cases where the denom is a digit (0.65em emit).
 - The default branch (`else`) previously hardcoded `numer_child_height: 0.65` and `height: 1.15`. Now derives them from `numer_box.height` when the numer has no descender and max char height < 0.65 — closes `\frac{numerator}{denominator}` (lowercase-word numer renders at 0.62 not 0.65, frac height 1.12 not 1.15).
 
-**Multi-char repeated-char metric** ([box.ls](lambda/package/math/box.ls) `text_height_for`):
+**Multi-char repeated-char metric** ([box.ls](lambda/doc/math/box.ls) `text_height_for`):
 - For text consisting of one repeated character (e.g., `...`, `---`, `,,`), look up that character's actual metric instead of falling through to the 0.7em heuristic. Closes `...` rendering (0.11em strut).
 
-**Large-op vlist formula** ([atoms/scripts.ls](lambda/package/math/atoms/scripts.ls) `render_large_op_limits_vlist`):
+**Large-op vlist formula** ([atoms/scripts.ls](lambda/doc/math/atoms/scripts.ls) `render_large_op_limits_vlist`):
 - The sub+sup vlist height was hardcoded 1.66em (calibrated for short letter sups like `n`). For taller sups (uppercase `X`, digit `2`), MathLive uses `CEIL@2(sup_child + 1.35)`. The formula now matches MathLive across all sup heights.
 - The sup-only large-op case (e.g., `\sum^{X}`) previously emitted depth=0 with no bottom strut, while MathLive emits 0.55em op-symbol descent. Added a sup-only branch in `depth_holder`/`box_depth`.
 

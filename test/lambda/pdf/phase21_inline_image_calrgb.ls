@@ -1,6 +1,6 @@
 // Phase 21 — inline CalRGB images use RGB component fallback.
 
-import image: lambda.package.pdf.image
+import image: lambda.pdf.image
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

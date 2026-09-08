@@ -1,8 +1,8 @@
-import layout: lambda.package.graph.layout
-import model: lambda.package.graph.model
-import graph_style: lambda.package.graph.style
-import paint: lambda.package.graph.transform.paint
-import transform: lambda.package.graph.transform
+import layout: lambda.graph.layout
+import model: lambda.graph.model
+import graph_style: lambda.graph.style
+import paint: lambda.graph.transform.paint
+import transform: lambda.graph.transform
 
 let parsed = graph_style.parse(
   "fill:rgb(10, 20, 30),stroke:#abc,stroke-width:2px,opacity:.5," ++

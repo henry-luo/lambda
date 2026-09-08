@@ -1,4 +1,4 @@
-// Port of lambda/package/editor/mod_step.ls
+// Port of lambda/editor/mod_step.ls
 //
 // Seven typed, invertible Steps. Every step supports:
 //

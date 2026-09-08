@@ -3,7 +3,7 @@
 // Verifies Standard 14 lookup, BaseFont heuristics (with subset prefix),
 // and hex/literal string decoding fallbacks (no /ToUnicode CMap).
 
-import font: lambda.package.pdf.font
+import font: lambda.pdf.font
 
 pn main() {
     let h  = font.standard14("Helvetica")

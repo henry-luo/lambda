@@ -35,7 +35,7 @@ way to reach a shadowed builtin — deferred as SO37 with the direction fixed:
 **Why `lambda.sys.*` over the alternatives.** `sys.*`, `lang.*` and
 `sys.func.*` were considered. Plain `lambda.*` for the functions themselves
 was ruled out because that root is already the package tree (`import
-lambda.package.editor.mod_doc`), so `lambda.len` would mix builtins with
+lambda.editor.mod_doc`), so `lambda.len` would mix builtins with
 shipped packages and a future `lambda.len.*` package would collide.
 `sys.func.*` pre-pays for a collision the conventions avoid — adjacent
 facilities get their own modules (`math`, `io`) rather than becoming `sys`
@@ -43,9 +43,10 @@ members. `lambda.sys.*` keeps one root, matches the established terminology
 (`doc/Lambda_Sys_Func.md`, spec §S17, `is_sys_func_name` in the runtime), and
 extends the module machinery that `math`/`io` already use.
 
-**The `math` collision, and its resolution.** Shortening `lambda.package.math`
-to `lambda.math` collided with the built-in math module: the shipped package
-is the LaTeX math *typesetting* library (`lambda/package/math/` — boxes,
+**The `math` collision, and its resolution.** Shortening the former
+`lambda.package.math` path to `lambda.math` collided with the built-in math
+module: the shipped package is the LaTeX math *typesetting* library
+(`lambda/doc/math/` — boxes,
 atoms, CSS), while built-in `math` is `sqrt`/`pi`. Ruled: the typesetting
 package moves to **`lambda.doc.math`**, leaving `lambda.math` for the
 built-in module. Hence D7.2.4's rule that a path names exactly one thing.
@@ -74,7 +75,10 @@ import .mod1, .mod2                // multiple imports
 - **Relative paths** start with `.` — dots are converted to `/` with `.ls` appended.
   - `import .utils.readability` → loads `./utils/readability.ls`
 - **Quoted paths** are also supported: `import "./utils/readability.ls"`
-- **Absolute module paths** (no leading dot) are logged as errors — not yet supported.
+- **Lambda absolute module paths** use the reserved `lambda.*` root. Built-in
+  modules (`lambda.math`, `lambda.io`) resolve through the registry, shipped
+  packages (`lambda.editor`, `lambda.graph`, …) resolve through `LAMBDA_HOME`,
+  and document packages use `lambda.doc.*`.
 - Imports must appear at the **top of the document**, before any other content.
 
 ### Visibility
@@ -472,13 +476,12 @@ The `_a` variable is declared as a global, but `_err` is not declared. The trans
 
 **Workaround**: Use `let doc = input(...)?` with the error propagation operator `?` instead of error destructuring.
 
-### 6.3 Absolute Module Paths Not Supported
+### 6.3 Absolute Module Paths
 
-**Status**: Stub only — logs error and fails.
-
-**Symptom**: `import std.math` (no leading dot) fails with an error log.
-
-**Root cause**: Only relative imports (starting with `.`) are implemented. The module path resolution code in `build_ast.cpp` only handles dot-to-slash conversion for relative paths. There is no standard library path, package registry, or module resolution algorithm for non-relative paths.
+The reserved `lambda.*` root is now the supported absolute package/module
+namespace. Its loader maps the logical path below `lambda` into the configured
+`LAMBDA_HOME`; `lambda.math` and `lambda.io` are built-in module aliases, while
+the typesetting package is exposed at `lambda.doc.math`.
 
 ---
 

@@ -250,26 +250,6 @@ change that lets bare member access fall through to the registry silently
 breaks that guarantee. Recorded as an observation, not a defect: nothing to
 fix, but the property must not regress. [OB5, [Type_Object §16](Lambda_Type_Object.md)]
 
-<a id="lr02-16"></a>**LR02-16 · `lambda.*` namespace not implemented · OPEN**
-Ruled 2026-08-27 as **S17.2.1/S17.2.2** (semantics v16.2.0) and **D7.2.4**
-(design v1.38.0); deliberation in `vibe/Lambda_Package.md` §1b. Work items:
-
-1. **`lambda.sys.*`** — expose the sys-func registry as a built-in module so
-   `lambda.sys.sum(xs)` resolves to the same row the prelude provides
-   unqualified. This is what makes a shadowed builtin reachable (S12.3.7).
-2. **Reserve the `lambda` root** — add it to the capture-real bar in
-   `lambda_lexer_word_bars_binding` so `let lambda = …` is E201 and the
-   escape can never be shadowed.
-3. **Shorten package paths** — `lambda.package.<name>` → `lambda.<name>`
-   across ~541 import sites plus the `lambda/package/` directory layout;
-   built-in module aliasing so `import math` ≡ `import lambda.math`.
-4. **Move the typesetting package** — `lambda.package.math` →
-   `lambda.doc.math`, freeing `lambda.math` for the built-in module. Its
-   corpus lives under `test/lambda/math/`.
-
-Sequencing note: item 2 is a one-line change but adds a reserved word, so it
-rides the same migration pass as [LR02-14](<Lambda_Issue_Ledger(fixed).md#lr02-14>).
-
 **LR02-14/15 outcome (2026-08-27).** Both landed; baseline **3966/3966**.
 S16.10.1 was narrowed to **v2** (spec 18.0.0) twice during implementation:
 first from the whole keyword table to *capture-real* words only (the full ban
@@ -1235,7 +1215,7 @@ together, not individually.
 | **Value-semantics residue (OI-1)** | LR03-1, LR09-3 | Second equality walker and VMap key eq/hash rank consistency. The former LR04-4 conversion-failure case is archived in the fixed ledger. Tracked as OI-1 in this ledger's [§15](#15-design-gaps-inherited-from-the-retired-outstanding-rollup-oi). |
 | **`INT64_MAX` sentinel collision** | LR03-4, LR07-4 | `INT64_ERROR == INT64_MAX` and `INT_LANE_INF` share one bit pattern; index OOB also lands on `INT64_MAX`. The former LR10-5 entry is a preserved alias for LR03-4. See [v5 int migration in flight]. |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
-| **Surface syntax (S16) residue** | LR02-16, S16.9.5, i8-genafterlet, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
+| **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
 | **Process globals** | LR01-12, LR12-6 | `g_template_registry` and `g_dry_run` block concurrent runtimes. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |
 
 ---

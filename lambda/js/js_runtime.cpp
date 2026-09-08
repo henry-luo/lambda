@@ -13500,7 +13500,8 @@ Item js_intrinsic_262_realm_regexp_get_hasindices_body(Item callee,
 }
 
 static void js_super_this_binding_push(Item initial_this) {
-    if (js_super_this_bound_depth >= 128) return;
+    // the parallel bound-flag array is fixed; refuse deeper nesting explicitly
+    if (js_super_this_bound_depth >= JS_SUPER_THIS_STACK_MAX) return;
     if (!js_item_stack_push(&js_runtime_state.super_this_values, initial_this)) {
         log_error("js-super-this: failed to publish constructor binding root");
         return;
@@ -13519,7 +13520,7 @@ static Item js_super_this_binding_finish(Item result) {
     if (js_super_this_bound_depth <= 0) return result;
     int idx = js_super_this_bound_depth - 1;
     bool initialized = js_super_this_bound_stack[idx];
-    Item bound_this = js_super_this_value_stack[idx];
+    Item bound_this = js_super_this_value_at(idx);
     js_super_this_bound_stack[idx] = false;
     js_item_stack_pop(&js_runtime_state.super_this_values);
 
@@ -13550,11 +13551,11 @@ extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
         }
         if (!js_is_object_value(bound_this) &&
             (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&
-            js_is_object_value(js_super_this_value_stack[idx])) {
-            bound_this = js_super_this_value_stack[idx];
+            js_is_object_value(js_super_this_value_at(idx))) {
+            bound_this = js_super_this_value_at(idx);
         }
         js_super_this_bound_stack[idx] = true;
-        js_super_this_value_stack[idx] = bound_this;
+        js_super_this_value_at(idx) = bound_this;
     }
     js_current_this = bound_this;
     return bound_this;
@@ -13563,7 +13564,7 @@ extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
 extern "C" Item js_get_super_this_value(void) {
     if (js_super_this_bound_depth > 0) {
         int idx = js_super_this_bound_depth - 1;
-        return js_super_this_value_stack[idx];
+        return js_super_this_value_at(idx);
     }
     return js_get_this();
 }
@@ -29461,8 +29462,8 @@ extern "C" Item js_iterable_to_array(Item iterable) {
 #define js_domain_current (js_runtime_state.promises.domain_current)
 #define js_domain_namespace (js_runtime_state.promises.domain_namespace)
 #define js_domain_stack_state (js_runtime_state.promises.domain_stack)
-#define js_domain_stack (js_domain_stack_state.roots.slots)
-#define js_domain_stack_count (js_domain_stack_state.depth)
+#define js_domain_stack_at(i) js_item_stack_at(&js_domain_stack_state, (i))
+#define js_domain_stack_count js_item_stack_depth(&js_domain_stack_state)
 
 JS_FORWARD_STATIC_EXPRESSION(JsPromise*, js_promise_from_vmap_data,
     (void* data), (JsPromise*)data)
@@ -29721,7 +29722,7 @@ static void js_domain_sync_visible_state(void) {
     // each allocation instead of relying only on the persistent state slots.
     RootFrame roots(3);
     Rooted<Item> domain_root(roots, js_domain_stack_count > 0
-        ? js_domain_stack[js_domain_stack_count - 1]
+        ? js_domain_stack_at(js_domain_stack_count - 1)
         : make_js_undefined());
     Rooted<Item> process_root(roots, ItemNull);
     Rooted<Item> stack_root(roots, ItemNull);
@@ -29733,7 +29734,7 @@ static void js_domain_sync_visible_state(void) {
     if (js_domain_namespace.item != 0) {
         stack_root.set(js_array_new(0));
         for (int i = 0; i < js_domain_stack_count; i++) {
-            js_array_push(stack_root.get(), js_domain_stack[i]);
+            js_array_push(stack_root.get(), js_domain_stack_at(i));
         }
         js_set_key_cstr(js_domain_namespace, "_stack", stack_root.get());
     }
@@ -29743,7 +29744,7 @@ extern "C" Item js_domain_capture_stack(void) {
     RootFrame roots(1);
     Rooted<Item> stack_root(roots, js_array_new(0));
     for (int i = 0; i < js_domain_stack_count; i++) {
-        js_array_push(stack_root.get(), js_domain_stack[i]);
+        js_array_push(stack_root.get(), js_domain_stack_at(i));
     }
     return stack_root.get();
 }
@@ -29757,7 +29758,6 @@ extern "C" Item js_domain_capture_async_stack(void) {
 static void js_domain_apply_stack(Item stack) {
     RootFrame roots(1);
     Rooted<Item> stack_root(roots, stack);
-    if (!js_root_range_ensure_registered(&js_domain_stack_state.roots)) return;
     js_item_stack_clear(&js_domain_stack_state);
     if (get_type_id(stack_root.get()) == LMD_TYPE_ARRAY) {
         int64_t len = js_array_length(stack_root.get());
@@ -29804,7 +29804,6 @@ extern "C" Item js_domain_set_current(Item domain) {
         domain_type == LMD_TYPE_NULL || domain.item == ItemNull.item) {
         js_item_stack_clear(&js_domain_stack_state);
     } else {
-        if (!js_root_range_ensure_registered(&js_domain_stack_state.roots)) return previous;
         js_item_stack_clear(&js_domain_stack_state);
         js_item_stack_push(&js_domain_stack_state, domain);
     }
@@ -29840,7 +29839,7 @@ static Item js_domain_emit_error_at(Item domain, Item error, int parent_count, b
     if (item_is_error(handler_result)) {
         Item thrown = js_error_lane_payload(handler_result);
         if (parent_count > 0) {
-            Item parent = js_domain_stack[parent_count - 1];
+            Item parent = js_domain_stack_at(parent_count - 1);
             return js_domain_emit_error_at(parent, thrown, parent_count - 1, out_handled);
         }
         return js_throw_value(thrown);
@@ -29851,16 +29850,16 @@ static Item js_domain_emit_error_at(Item domain, Item error, int parent_count, b
 
 static Item js_domain_emit_error(Item domain, Item error, bool* out_handled) {
     int parent_count = js_domain_stack_count;
-    while (parent_count > 0 && js_domain_stack[parent_count - 1].item == domain.item) parent_count--;
+    while (parent_count > 0 && js_domain_stack_at(parent_count - 1).item == domain.item) parent_count--;
     return js_domain_emit_error_at(domain, error, parent_count, out_handled);
 }
 
 extern "C" int js_domain_emit_current_error(Item error) {
     if (js_domain_stack_count <= 0) return 0;
     Item previous = js_domain_capture_stack();
-    Item domain = js_domain_stack[js_domain_stack_count - 1];
+    Item domain = js_domain_stack_at(js_domain_stack_count - 1);
     int parent_count = js_domain_stack_count;
-    while (parent_count > 0 && js_domain_stack[parent_count - 1].item == domain.item) parent_count--;
+    while (parent_count > 0 && js_domain_stack_at(parent_count - 1).item == domain.item) parent_count--;
     bool handled = false;
     Item emit_status = js_domain_emit_error_at(domain, error, parent_count, &handled);
     if (item_is_error(emit_status)) return 0;

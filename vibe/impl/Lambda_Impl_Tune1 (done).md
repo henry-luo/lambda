@@ -26,11 +26,11 @@ Pre-tuning direct profile:
 |-----|-----:|
 | `test_math_html_output.ls` direct run | 22.54 s real |
 
-The biggest single hotspot was `lambda/package/math/metrics_data.ls`:
+The biggest single hotspot was `lambda/doc/math/metrics_data.ls`:
 
 | Script | Parse | AST | Transpile | Total |
 |--------|------:|----:|----------:|------:|
-| `lambda/package/math/metrics_data.ls` | 57.045 ms | 268.604 ms | 15,780.468 ms | 16,175.588 ms |
+| `lambda/doc/math/metrics_data.ls` | 57.045 ms | 268.604 ms | 15,780.468 ms | 16,175.588 ms |
 
 The imported scripts were already compiled in parallel by import level. For level 0, the runner launched 15 jobs with 15 worker threads against an 8 CPU cap, but the elapsed time was still 16,185 ms because `metrics_data.ls` was one very large static-data module:
 
@@ -111,7 +111,7 @@ Post-tuning `metrics_data.ls` profile:
 
 | Script | Parse | AST | Transpile | Total |
 |--------|------:|----:|----------:|------:|
-| `lambda/package/math/metrics_data.ls` | 12.647 ms | 40.362 ms | 152.167 ms | 206.927 ms |
+| `lambda/doc/math/metrics_data.ls` | 12.647 ms | 40.362 ms | 152.167 ms | 206.927 ms |
 
 The key hotspot improved from 15,780.468 ms transpile time to 152.167 ms:
 

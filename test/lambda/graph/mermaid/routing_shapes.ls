@@ -1,4 +1,4 @@
-import layout: lambda.package.graph.layout
+import layout: lambda.graph.layout
 
 let result = layout.compute({
   nodes: [

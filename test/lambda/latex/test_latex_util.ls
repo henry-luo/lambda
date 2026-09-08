@@ -3,7 +3,7 @@
 //   is_parbreak, is_whitespace, trim_children, find_child, find_descendant,
 //   children_array, attr_or, text_of_child, parse_kv_options, lookup
 
-import util: lambda.package.latex.util
+import util: lambda.latex.util
 
 "===== LATEX UTIL TESTS ====="
 

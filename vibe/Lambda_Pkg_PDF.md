@@ -1,11 +1,11 @@
 # Lambda PDF Package Proposal
 
-> **Location:** `lambda/package/pdf/`
+> **Location:** `lambda/pdf/`
 > **References:**
 > - Existing C++ PDF parser: `lambda/input/input-pdf.cpp` (~3,200 lines)
 > - Existing C++ PDF→ViewTree pipeline: `radiant/pdf/` (~3,400 lines: `pdf_to_view.cpp`, `operators.cpp`, `pages.cpp`, `fonts.cpp`, `coords.cpp`)
 > - PDF.js (`ref/pdf.js/`) — Mozilla's reference JavaScript implementation
-> - LaTeX/Chart packages (`lambda/package/latex/`, `lambda/package/chart/`) — proven Lambda package patterns
+> - LaTeX/Chart packages (`lambda/latex/`, `lambda/chart/`) — proven Lambda package patterns
 > - Prior design docs: `vibe/Pdf_to_View.md`, `vibe/Pdf_View_Design.md`
 > **Goal:** Convert a parsed PDF (Lambda element tree produced by the existing C/C++ parser) to **SVG (primary)** and **HTML (secondary)** for display under Radiant, written entirely in Lambda Script.
 
@@ -15,7 +15,7 @@
 
 ### 1.1 Primary Goal
 
-Build a **pure Lambda Script package** at `lambda/package/pdf/` that takes the Lambda data tree produced by the existing C/C++ PDF parser (`input-pdf.cpp`) and emits **SVG** elements (one `<svg>` per page, optionally wrapped in an `<html>` shell) suitable for:
+Build a **pure Lambda Script package** at `lambda/pdf/` that takes the Lambda data tree produced by the existing C/C++ PDF parser (`input-pdf.cpp`) and emits **SVG** elements (one `<svg>` per page, optionally wrapped in an `<html>` shell) suitable for:
 
 - Display under Radiant via the existing SVG/HTML rendering pipeline
 - Standalone browser display
@@ -176,7 +176,7 @@ For accessibility (screen readers), emit `<title>` inside each line's `<text>` c
                      │  Item (Map: version, objects[], trailer, …)
                      ▼  [LAMBDA — NEW PACKAGE]
 ┌─────────────────────────────────────────┐
-│  lambda/package/pdf/                    │
+│  lambda/pdf/                    │
 │                                         │
 │  pdf.ls          (entry, dispatcher)    │
 │   │                                     │
@@ -207,10 +207,10 @@ For accessibility (screen readers), emit `<title>` inside each line's `<text>` c
 └─────────────────────────────────────────┘
 ```
 
-### 3.2 Module Layout (mirrors `lambda/package/latex/` and `chart/`)
+### 3.2 Module Layout (mirrors `lambda/latex/` and `chart/`)
 
 ```
-lambda/package/pdf/
+lambda/pdf/
 ├── pdf.ls          // public API: pdf_to_html(tree), pdf_to_svg(tree, page_idx)
 ├── resolve.ls      // indirect-ref dereferencing, page-tree walk, get_page(n)
 ├── interp.ls       // operator dispatch via match; graphics state stack
@@ -230,7 +230,7 @@ Estimated **~3,500–4,500 lines of Lambda Script**, replacing **~2,000–2,500 
 ### 3.3 Public API
 
 ```lambda
-// lambda/package/pdf/pdf.ls
+// lambda/pdf/pdf.ls
 
 // Convert a parsed PDF (output of input(path, 'pdf')) into an HTML document
 // containing one <svg> per page plus optional text-selection layer.
@@ -481,7 +481,7 @@ C++ retired: ~2,000 lines from `radiant/pdf/pdf_to_view.cpp` + parts of `operato
 
 - **`widths` arrays as first-class field** in font dicts at the parser level (alongside the now-implemented `to_unicode`). Avoids the Lambda font module re-walking arrays for every text run.
 
-- **Reuse the chart package's SVG element builders.** `lambda/package/chart/svg.ls` already has helpers for `<svg>`, `<g>`, `<path>`, `<text>`. Either share via a common util or copy-then-extend.
+- **Reuse the chart package's SVG element builders.** `lambda/chart/svg.ls` already has helpers for `<svg>`, `<g>`, `<path>`, `<text>`. Either share via a common util or copy-then-extend.
 
 - **Build a small testing corpus early.** 5–10 representative PDFs (text-only, vector-graphics-only, mixed, scanned image, multi-page, kerning-heavy) committed to `test/lambda/pdf/`. Each PDF gets a `.svg.txt` golden output for the first page. Use `make test-lambda` to lock in regressions.
 
@@ -506,8 +506,8 @@ C++ retired: ~2,000 lines from `radiant/pdf/pdf_to_view.cpp` + parts of `operato
 
 | Pattern | Used by | This package |
 |---------|---------|--------------|
-| Pure-Lambda transformation pkg over C parser | `lambda/package/latex/` (over tree-sitter-latex) | Same: Lambda over `input-pdf.cpp` |
-| Element-tree builder + `format(_, target)` | `lambda/package/chart/` (→ SVG) | Same: → SVG, then HTML wrapper |
+| Pure-Lambda transformation pkg over C parser | `lambda/latex/` (over tree-sitter-latex) | Same: Lambda over `input-pdf.cpp` |
+| Element-tree builder + `format(_, target)` | `lambda/chart/` (→ SVG) | Same: → SVG, then HTML wrapper |
 | `match` on tag for dispatch | `latex/render.ls`, `chart/mark.ls` | `interp.ls` matches PDF op names |
 | Immutable state passed through fns | Math package context | Graphics state passed through interpreter |
 | C-side parser produces clean Lambda tree | `input-latex-ts.cpp`, `input-json.cpp` | `input-pdf.cpp` (already done — see [`input-pdf.cpp`](lambda/input/input-pdf.cpp)) |

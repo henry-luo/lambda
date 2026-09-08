@@ -1,8 +1,8 @@
-import layout: lambda.package.graph.layout
-import model: lambda.package.graph.model
-import normalize: lambda.package.graph.normalize
-import paint: lambda.package.graph.transform.paint
-import transform: lambda.package.graph.transform
+import layout: lambda.graph.layout
+import model: lambda.graph.model
+import normalize: lambda.graph.normalize
+import paint: lambda.graph.transform.paint
+import transform: lambda.graph.transform
 
 fn source_for(value) => parse(
   "digraph G { graph [splines=\"" ++ value ++ "\"] a -> b }",

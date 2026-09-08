@@ -364,7 +364,7 @@ Gates at close: `test_lambda_gtest` 728/728, `test_lambda_errors_gtest` 108/108,
 `lib_tabulator` failure and the 11 conc/proc E221 baseline failures pre-exist
 at HEAD — verified by stash-and-rebuild.)
 
-Corpus repair, per TI6 no-staging: `lambda/package/editor/mod_commands.ls` —
+Corpus repair, per TI6 no-staging: `lambda/editor/mod_commands.ls` —
 six boolean predicates (`sel_collapsed`, `sel_single_leaf`,
 `sel_same_parent_leaves`, `jlist_is_list`, `is_list_node`, `same_list_kind`)
 gained `or false` containment. IP1's `and` union stopped hiding a real error
@@ -651,8 +651,8 @@ repaired are **not real**.
 
 Replacing the plain-differing-arms ANY with
 `lambda_type_union_normalized(then, else)` produced 156 script failures,
-driven by 109 E208s across ~14 library files (`lambda/package/editor/*`,
-`lambda/package/graph/*`, `lambda/package/latex/*`, `lambda/package/math/*`).
+driven by 109 E208s across ~14 library files (`lambda/editor/*`,
+`lambda/graph/*`, `lambda/latex/*`, `lambda/doc/math/*`).
 
 Top reported callees: `caret` ×28, `float` ×20, `node` ×15, `child_text` ×12.
 

@@ -415,27 +415,27 @@ struct JsDomEventRuntimeState {
     uint64_t registration_order = 0;
 };
 
+static void dom_event_capsule_destroy(void* capsule);
+static const ContextCapsuleOps dom_event_capsule_ops = {
+    "js-dom-events", CONTEXT_CAPSULE_LIFETIME_REALM, sizeof(JsDomEventRuntimeState),
+    NULL, NULL, dom_event_capsule_destroy
+};
+
 static JsDomEventRuntimeState* dom_event_runtime_state_get() {
-    if (!js_active_runtime_state) return nullptr;
-    return (JsDomEventRuntimeState*)js_runtime_state.dom_event_state;
+    return (JsDomEventRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_EVENT);
 }
 
 static bool dom_event_runtime_state_ensure() {
     if (!js_active_runtime_state) return false;
-    if (dom_event_runtime_state_get()) return true;
-    JsDomEventRuntimeState* state = (JsDomEventRuntimeState*)mem_calloc(1,
-        sizeof(JsDomEventRuntimeState), MEM_CAT_JS_RUNTIME);
-    if (!state) {
-        log_error("js-dom-events: failed to allocate context state");
-        return false;
-    }
-    js_runtime_state.dom_event_state = state;
+    JsDomEventRuntimeState* state = (JsDomEventRuntimeState*)context_capsule_ensure(
+        context, CONTEXT_CAPSULE_DOM_EVENT, &dom_event_capsule_ops);
+    if (!state) return false;
     return true;
 }
 
 // These aliases retain the compact legacy implementation while each expands
 // to a direct field of the already-bound context-local capsule.
-#define dom_event_rt_state ((JsDomEventRuntimeState*)js_runtime_state.dom_event_state)
+#define dom_event_rt_state ((JsDomEventRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_EVENT))
 #define _entries (dom_event_rt_state->entries)
 #define _entry_count (dom_event_rt_state->entry_count)
 #define _entry_capacity (dom_event_rt_state->entry_capacity)
@@ -2345,15 +2345,12 @@ void dom_events_reset(void) {
 #undef _type_counts
 #undef _event_registration_order
 
-extern "C" void dom_events_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->dom_event_state) return;
-    JsDomEventRuntimeState* state =
-        (JsDomEventRuntimeState*)runtime_state->dom_event_state;
+static void dom_event_capsule_destroy(void* capsule) {
+    JsDomEventRuntimeState* state = (JsDomEventRuntimeState*)capsule;
     // js_runtime_state_release_heap_resources() resets listener roots before
     // heap destruction; only the empty context-local capsule remains here.
     if (state->entries || state->entry_index) {
         log_error("js-dom-events: context destroyed before listener roots were released");
     }
     mem_free(state);
-    runtime_state->dom_event_state = nullptr;
 }

@@ -1,6 +1,6 @@
-import layout: lambda.package.graph.layout
-import model: lambda.package.graph.model
-import transform: lambda.package.graph.transform
+import layout: lambda.graph.layout
+import model: lambda.graph.model
+import transform: lambda.graph.transform
 
 let source = (input("test/lambda/graph/mermaid/multi_node_length.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }

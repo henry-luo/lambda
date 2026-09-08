@@ -758,7 +758,7 @@ tests, the three focused metadata/diagnostic tests, all 12 MIR emission fixtures
 MIR emission (12/12), ratchet (15/15), error-system (90/90), and the new focused scripts,
 but ends 3,432/3,665: `dom_module_props` is the pre-existing DOM expectation failure and
 232 Lambda script failures remain from unconverted package firewalls (for example
-`lambda/package/graph/style.ls:parse`). Do not mark Phase 3 complete until those package
+`lambda/graph/style.ls:parse`). Do not mark Phase 3 complete until those package
 firewalls are migrated and the standing Lambda baseline is clean apart from the documented
 DOM expectation.
 

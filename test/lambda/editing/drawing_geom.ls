@@ -1,6 +1,6 @@
 // Stage-4 geometry + shape helpers + geometric hit-test (mod_geom).
-import lambda.package.editor.mod_doc
-import lambda.package.editor.mod_geom
+import lambda.editor.mod_doc
+import lambda.editor.mod_geom
 
 // 1. pure geometry
 "rect_contains_in:"; rect_contains(rect(0.0,0.0,10.0,10.0), v2(5.0,5.0))

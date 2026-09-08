@@ -2,7 +2,7 @@
 
 Issues in the Lambda **language / parser / MIR transpiler / runtime** encountered
 while porting MathLive's `makeStackedDelim` (extensible vertical-bar delimiters)
-into `lambda/package/math/atoms/delimiters.ls`. Continues the numbering from
+into `lambda/doc/math/atoms/delimiters.ls`. Continues the numbering from
 `Lambda_Issues5 (retired).md` (last issue #30).
 
 These are pure-`.ls` package edits (no C++ rebuild), so every issue below is

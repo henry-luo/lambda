@@ -2584,7 +2584,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
         // their statements as graph nodes silently corrupts the common Graph IR.
         add_graph_attribute(input, graph, "status", "unsupported");
         ctx.addErrorCode(graph_start, "mermaid.chart-family",
-            "Mermaid %s diagrams belong to lambda.package.chart", diagram_type);
+            "Mermaid %s diagrams belong to lambda.chart", diagram_type);
         graph_set_source_span(ctx, graph, graph_start, tracker.location(), false);
         graph_append_diagnostics(ctx, graph, "mermaid.syntax");
         input->root = {.element = graph};

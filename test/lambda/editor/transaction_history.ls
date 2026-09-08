@@ -1,9 +1,9 @@
 // Transactions, multi-step composition, and history (Phase R3)
-import lambda.package.editor.mod_doc
-import lambda.package.editor.mod_step
-import lambda.package.editor.mod_source_pos
-import lambda.package.editor.mod_transaction
-import lambda.package.editor.mod_history
+import lambda.editor.mod_doc
+import lambda.editor.mod_step
+import lambda.editor.mod_source_pos
+import lambda.editor.mod_transaction
+import lambda.editor.mod_history
 
 let d0 = node('doc', [
   node('paragraph', [text("Hello, world.")]),

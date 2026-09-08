@@ -1,4 +1,4 @@
-import transform: lambda.package.graph.transform
+import transform: lambda.graph.transform
 
 let source = (input("test/input/simple_flowchart.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }

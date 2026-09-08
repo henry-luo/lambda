@@ -7,9 +7,9 @@
 //   - texts: at least one decoded string
 //   - the stroked rectangle keeps the line-width set by `w`
 
-import resolve: lambda.package.pdf.resolve
-import interp:  lambda.package.pdf.interp
-import coords:  lambda.package.pdf.coords
+import resolve: lambda.pdf.resolve
+import interp:  lambda.pdf.interp
+import coords:  lambda.pdf.coords
 
 pn main() {
     let doc = input("test/input/simple_test.pdf", 'pdf') ^ { null }

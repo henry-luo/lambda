@@ -9,7 +9,7 @@
 
 ## 1. Objective
 
-Stage 1 specified the schema / position / step / transaction / input‑intent layers and landed the Lambda‑side editor module set under [lambda/package/editor/](../lambda/package/editor/) (`mod_editor.ls`, `mod_commands.ls`, `mod_step.ls`, `mod_transaction.ls`, `mod_history.ls`, `mod_input_intent.ls`, `mod_md_schema.ls`, `mod_paste.ls`, `mod_html_paste.ls`, `mod_decorations.ls`, `mod_dom_bridge.ls`, `mod_source_pos.ls`, `mod_doc.ls`, `mod_collab.ls`).
+Stage 1 specified the schema / position / step / transaction / input‑intent layers and landed the Lambda‑side editor module set under [lambda/editor/](../lambda/editor/) (`mod_editor.ls`, `mod_commands.ls`, `mod_step.ls`, `mod_transaction.ls`, `mod_history.ls`, `mod_input_intent.ls`, `mod_md_schema.ls`, `mod_paste.ls`, `mod_html_paste.ls`, `mod_decorations.ls`, `mod_dom_bridge.ls`, `mod_source_pos.ls`, `mod_doc.ls`, `mod_collab.ls`).
 
 Stage 2 turns that machinery into a **runnable Slate/ProseMirror‑class prototype** that:
 
@@ -34,13 +34,13 @@ The prototype reuses the existing HTML DOM / Radiant text‑control / `state_sto
 | Capability | Where | Status |
 |---|---|---|
 | Mark/Lambda source tree as the model | [lambda/lambda-data.hpp](../lambda/lambda-data.hpp) | reused as‑is |
-| Schema (markdown / commonmark / html5 subsets) | [mod_md_schema.ls](../lambda/package/editor/mod_md_schema.ls), [mod_edit_schema.ls](../lambda/package/editor/mod_edit_schema.ls) | shipped |
-| `SourcePos` / `SourcePath` / `resolve_pos` | [mod_source_pos.ls](../lambda/package/editor/mod_source_pos.ls) | shipped |
-| Steps (replace, replace‑around, mark add/remove, set‑node‑type) with `apply` / `invert` / `map` | [mod_step.ls](../lambda/package/editor/mod_step.ls) | shipped |
-| Transactions + history (compression, selection restore) | [mod_transaction.ls](../lambda/package/editor/mod_transaction.ls), [mod_history.ls](../lambda/package/editor/mod_history.ls) | shipped |
-| High‑level commands (insert text, split block, toggle mark, list indent, paste text/html, insert image/link/code/table, …) | [mod_commands.ls](../lambda/package/editor/mod_commands.ls) | shipped |
-| `beforeinput`‑style intent mapper | [mod_input_intent.ls](../lambda/package/editor/mod_input_intent.ls) | shipped |
-| Public façade (`edit_open` / `edit_exec` / `edit_dispatch` / `edit_set_decorations` / `edit_can_*`) | [mod_editor.ls](../lambda/package/editor/mod_editor.ls) | shipped |
+| Schema (markdown / commonmark / html5 subsets) | [mod_md_schema.ls](../lambda/editor/mod_md_schema.ls), [mod_edit_schema.ls](../lambda/editor/mod_edit_schema.ls) | shipped |
+| `SourcePos` / `SourcePath` / `resolve_pos` | [mod_source_pos.ls](../lambda/editor/mod_source_pos.ls) | shipped |
+| Steps (replace, replace‑around, mark add/remove, set‑node‑type) with `apply` / `invert` / `map` | [mod_step.ls](../lambda/editor/mod_step.ls) | shipped |
+| Transactions + history (compression, selection restore) | [mod_transaction.ls](../lambda/editor/mod_transaction.ls), [mod_history.ls](../lambda/editor/mod_history.ls) | shipped |
+| High‑level commands (insert text, split block, toggle mark, list indent, paste text/html, insert image/link/code/table, …) | [mod_commands.ls](../lambda/editor/mod_commands.ls) | shipped |
+| `beforeinput`‑style intent mapper | [mod_input_intent.ls](../lambda/editor/mod_input_intent.ls) | shipped |
+| Public façade (`edit_open` / `edit_exec` / `edit_dispatch` / `edit_set_decorations` / `edit_can_*`) | [mod_editor.ls](../lambda/editor/mod_editor.ls) | shipped |
 | JS‑backed text control runtime context fix | [lambda/js/js_dom_selection.cpp](../lambda/js/js_dom_selection.cpp) | shipped |
 
 What is **missing for a real prototype**:
@@ -78,7 +78,7 @@ Stage 2 fills exactly those gaps.
                          │ apply / on click / on keydown / emit
                          ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│  lambda/package/editor/mod_editor.ls   (Stage 1, reused as-is)     │
+│  lambda/editor/mod_editor.ls   (Stage 1, reused as-is)     │
 │  • edit_open / edit_exec / edit_dispatch / edit_can_exec           │
 │  • command_tx for every cmd in §6                                  │
 │  • history (undo/redo) + selection mapping                         │
@@ -193,7 +193,7 @@ The body of the script ends with the literal HTML page that hosts the templates:
 |---|---|---|
 | Markdown parser | `lambda/input/input-markdown.cpp` | `input(path, 'markdown)` |
 | Markdown formatter | `lambda/format/format-markdown.cpp` | `output(doc, 'markdown)` on save |
-| Editor module set | `lambda/package/editor/mod_editor.ls` (and siblings) | `edit_open`, `edit_exec`, `edit_can_exec`, `edit_dispatch`, all `edit_cmd_*` |
+| Editor module set | `lambda/editor/mod_editor.ls` (and siblings) | `edit_open`, `edit_exec`, `edit_can_exec`, `edit_dispatch`, all `edit_cmd_*` |
 | Reactive UI runtime | `lambda/template_registry.{h,cpp}`, `lambda/render_map.{h,c}` | `view`/`edit` template dispatch, dirty-tracking, incremental DOM patch |
 | Selection / caret | `radiant/dom_range.hpp`, `radiant/state_store.hpp`, `radiant/text_control.{hpp,cpp}` | Visual caret + selection paint; `evt.caret_pos`, `evt.selection_start/end` already wired in `todo2.ls` |
 | Event simulation | `radiant/event_sim.cpp` (events `click`, `tripleclick`, `key_press`, `key_combo`, `paste_text`, `assert_*`) | UI automation against the prototype |
@@ -207,8 +207,8 @@ Only Lambda script — **no C/C++, no JS**:
 | [test/ui/rte_prototype.ls](../test/ui/rte_prototype.ls) | ~400 | The whole prototype: imports + templates + page shell. |
 | [test/ui/rte_prototype.css](../test/ui/rte_prototype.css) | ~80 | Toolbar layout, active-button state, table/figure visuals, selection ring. |
 | [test/ui/rte_prototype.json](../test/ui/rte_prototype.json) | ~100 | End-to-end smoke (see §7). |
-| Schema entry for `<u>` mark in [mod_md_schema.ls](../lambda/package/editor/mod_md_schema.ls) | ~10 | Underline support (the only schema gap). |
-| `edit_cmd_wrap_list(kind)` in [mod_editor.ls](../lambda/package/editor/mod_editor.ls) | ~6 | Toolbar-friendly list wrapping (delegates to existing list helpers). |
+| Schema entry for `<u>` mark in [mod_md_schema.ls](../lambda/editor/mod_md_schema.ls) | ~10 | Underline support (the only schema gap). |
+| `edit_cmd_wrap_list(kind)` in [mod_editor.ls](../lambda/editor/mod_editor.ls) | ~6 | Toolbar-friendly list wrapping (delegates to existing list helpers). |
 
 > The Stage 1 design's `js_edit_session.cpp` and the JS-facing `RTE.*` surface are **dropped** in this revision. They belonged to a JS-driven shell that we no longer need: the `view`/`edit` templates already give us the same dispatch surface, in-language and JIT-compiled.
 
@@ -226,7 +226,7 @@ Reuse Radiant's clipboard event surface (already consumed by `text_control.cpp`)
 - **Copy** = `output(slice(editor.doc, sel), 'markdown)` placed on the clipboard via Radiant's existing clipboard write.
 - **Paste** = clipboard read → `edit_exec(editor, edit_cmd_paste_html(html, fallback_text))` if `text/html` present, else `edit_cmd_paste_text(text)`.
 
-All three commands already exist in [mod_editor.ls](../lambda/package/editor/mod_editor.ls); Stage 2 only wires the toolbar `Cut/Copy/Paste` buttons (and `Cmd+X/C/V` in the `edit <rte_doc>` `on keydown` handler) to them.
+All three commands already exist in [mod_editor.ls](../lambda/editor/mod_editor.ls); Stage 2 only wires the toolbar `Cut/Copy/Paste` buttons (and `Cmd+X/C/V` in the `edit <rte_doc>` `on keydown` handler) to them.
 
 ---
 

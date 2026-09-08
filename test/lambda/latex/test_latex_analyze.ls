@@ -1,7 +1,7 @@
 // test_latex_analyze.ls — Test document structure analysis
 // Coverage: analyze.ls — analyze (walk AST to extract doc info)
 
-import analyze: lambda.package.latex.analyze
+import analyze: lambda.latex.analyze
 
 "===== LATEX ANALYZE TESTS ====="
 

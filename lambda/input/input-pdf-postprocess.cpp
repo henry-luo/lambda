@@ -2,7 +2,7 @@
 //
 // Runs after the raw parser (input-pdf.cpp) has produced the indirect-object
 // table. Performs two structural enrichments that consumers (notably the
-// upcoming `lambda/package/pdf/` Lambda Script package) would otherwise have
+// upcoming `lambda/pdf/` Lambda Script package) would otherwise have
 // to redo for every consumer:
 //
 //   1. Page-tree flattening   — resolves /Root → /Pages and recursively walks

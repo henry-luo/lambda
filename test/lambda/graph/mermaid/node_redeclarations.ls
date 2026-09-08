@@ -1,6 +1,6 @@
-import model: lambda.package.graph.model
-import normalize: lambda.package.graph.normalize
-import transform: lambda.package.graph.transform
+import model: lambda.graph.model
+import normalize: lambda.graph.normalize
+import transform: lambda.graph.transform
 
 let source = (input("test/lambda/graph/mermaid/node_redeclarations.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }

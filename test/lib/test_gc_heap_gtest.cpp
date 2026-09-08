@@ -23,6 +23,8 @@
 #include "../../lambda/lambda-data.hpp"
 #include "../../lambda/core/lambda-decimal.hpp"
 #include "../../lambda/runtime/heap_api.h"
+#include "../../lambda/runtime/transpiler.hpp"
+#include "../../lambda/runtime/root_vector.h"
 
 extern "C" {
 #include "../../lambda/lambda.h"
@@ -468,6 +470,79 @@ TEST_F(GCHeapTest, SideRootAllocationZerosAndKeepsItemsAlive) {
     EXPECT_GT(runtime.side_root_commit_limit, checkpoint.root_top);
     lambda_side_stack_restore_for(&runtime, checkpoint);
     lambda_side_stack_reset_for(&runtime);
+}
+
+// JSCU12: the one growable rooted vector. Blocks are address-stable across
+// growth, registered before their first Item is published, cleared on pop,
+// dropped and re-registered when the owning heap is replaced, and released
+// on destroy.
+TEST_F(GCHeapTest, RootVectorGrowsAddressStableAndFollowsHeapReplacement) {
+    EvalContext runtime{};
+    Heap heap{};
+    heap.gc = gc;
+    heap.generation = 1;
+    runtime.heap = &heap;
+
+    RootVector v;
+    root_vector_init(&v, (Context*)&runtime, "gtest");
+    int ranges_before = gc->root_range_count;
+    const int64_t n = 3 * ROOT_VECTOR_BLOCK_SLOTS + 5;   // spans four blocks
+    Item* first = nullptr;
+    for (int64_t i = 0; i < n; i++) {
+        void* object = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
+        ASSERT_NE(object, nullptr);
+        Item value;
+        value.item = string_item(object);
+        ASSERT_TRUE(root_vector_push(&v, value));
+        if (i == 0) first = root_vector_at(&v, 0);
+    }
+    EXPECT_EQ(root_vector_count(&v), n);
+    EXPECT_EQ(root_vector_high_water(&v), n);
+    EXPECT_EQ(gc->root_range_count, ranges_before + 4);
+    // growth never moved the first block
+    EXPECT_EQ(root_vector_at(&v, 0), first);
+    EXPECT_EQ(root_vector_at(&v, n), nullptr);
+
+    // the registered blocks are the only roots: everything survives
+    gc_collect_with_root_region(gc, NULL, 0, NULL, 0);
+    EXPECT_EQ(gc->object_count, (size_t)n);
+
+    // pop clears the vacated slot, so the popped object is collectable
+    root_vector_pop(&v);
+    EXPECT_EQ(root_vector_count(&v), n - 1);
+    gc_collect_with_root_region(gc, NULL, 0, NULL, 0);
+    EXPECT_EQ(gc->object_count, (size_t)(n - 1));
+
+    // shrink drops a tail of Items the same way
+    root_vector_shrink(&v, 10);
+    EXPECT_EQ(root_vector_count(&v), 10);
+    gc_collect_with_root_region(gc, NULL, 0, NULL, 0);
+    EXPECT_EQ(gc->object_count, 10u);
+
+    // a heap replacement retires every Item; observing it is allocation-free
+    // (no registration yet), and the next push re-registers the retained
+    // blocks with the live heap before publishing
+    gc_heap_t* gc2 = gc_heap_create();
+    ASSERT_NE(gc2, nullptr);
+    heap.gc = gc2;
+    heap.generation = 2;
+    EXPECT_EQ(root_vector_count(&v), 0);
+    EXPECT_EQ(gc2->root_range_count, 0);
+    void* object2 = gc_heap_alloc(gc2, 32, LMD_TYPE_STRING);
+    ASSERT_NE(object2, nullptr);
+    Item value2;
+    value2.item = string_item(object2);
+    ASSERT_TRUE(root_vector_push(&v, value2));
+    EXPECT_EQ(gc2->root_range_count, 4);
+    EXPECT_EQ(root_vector_at(&v, 0), first);   // the retained block is reused
+    gc_collect_with_root_region(gc2, NULL, 0, NULL, 0);
+    EXPECT_EQ(gc2->object_count, 1u);
+
+    // destroy unregisters from the live heap and frees the blocks
+    root_vector_destroy(&v);
+    EXPECT_EQ(gc2->root_range_count, 0);
+    EXPECT_EQ(root_vector_count(&v), 0);
+    gc_heap_destroy(gc2);
 }
 
 // ============================================================================

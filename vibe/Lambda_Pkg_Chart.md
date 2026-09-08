@@ -277,7 +277,7 @@ The chart rendering pipeline consists of these stages, each implemented as a pur
 ### Module Structure
 
 ```
-lambda/package/chart/
+lambda/chart/
 ├── chart.ls              # Main entry point: chart.render(spec) → SVG
 ├── parse.ls              # Parse and validate <chart> element tree
 ├── transform.ls          # Data transforms (aggregate, bin, filter, calculate, sort, fold, flatten)
@@ -296,7 +296,7 @@ lambda/package/chart/
 #### Simple Bar Chart
 
 ```lambda
-import chart: .lambda.package.chart.chart;
+import chart: .lambda.chart.chart;
 
 let sales = [
     {category: "A", amount: 28},

@@ -1,6 +1,6 @@
 // source_pos_bridge.cpp — C-side scaffolding for the editor source-position
 // bridge (Phase R7, Radiant integration step 1). The pure-Lambda half lives
-// in lambda/package/editor/mod_dom_bridge.ls.
+// in lambda/editor/mod_dom_bridge.ls.
 //
 // What this file provides:
 //   * SourcePathC / SourcePosC value lifecycle (init/free/clone/equal).
@@ -528,7 +528,7 @@ bool dom_boundary_from_source_pos(DomNode* dom_root,
 
 // ---------------------------------------------------------------------------
 // MarkBuilder helpers (C++ only). Build the Lambda `pos` and `selection`
-// shapes used by lambda/package/editor/mod_source_pos.ls:
+// shapes used by lambda/editor/mod_source_pos.ls:
 //   pos       = { path: [int, ...], offset: int }
 //   selection = { kind: 'text', anchor: pos, head: pos }   (text)
 //             | { kind: 'node', path: [int, ...] }         (node)

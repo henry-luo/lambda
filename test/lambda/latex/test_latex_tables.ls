@@ -1,6 +1,6 @@
 // test_latex_tables.ls — Regression test for LaTeX tabular parsing.
 
-import latex: lambda.package.latex.latex
+import latex: lambda.latex.latex
 
 let html = latex.render_file_to_html("test/input/test_latex_table.tex")
 

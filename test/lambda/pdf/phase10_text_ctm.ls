@@ -1,6 +1,6 @@
 // Phase 10 — text operators share the graphics-state CTM walk.
 
-import interp: lambda.package.pdf.interp
+import interp: lambda.pdf.interp
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 fn name(s) { { kind: "name", value: s } }

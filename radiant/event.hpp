@@ -4146,7 +4146,7 @@ struct SmTransitionGuard {
 //
 // Phase R7 (Radiant integration step 1) of the rich-text editor work
 // described in vibe/Radiant_Rich_Text_Editing.md. Pure-Lambda algorithms
-// live in lambda/package/editor/mod_dom_bridge.ls; this header documents
+// live in lambda/editor/mod_dom_bridge.ls; this header documents
 // the C++ seam that converts (DomNode*, dom_offset) ↔ (source_path, offset)
 // via render_map.
 //
@@ -4274,7 +4274,7 @@ void source_pos_bridge_reset(void);
 // MarkBuilder helpers (C++ only).
 //
 // These build the Lambda-side `pos` / `selection` shapes that match
-// lambda/package/editor/mod_source_pos.ls so handlers receive structured
+// lambda/editor/mod_source_pos.ls so handlers receive structured
 // caret/selection data:
 //   pos       = { path: [int, ...], offset: int }
 //   selection = { kind: 'text', anchor: pos, head: pos }    (text)

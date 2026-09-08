@@ -1,5 +1,5 @@
 // Test: scatter chart with tooltip
-import chart: lambda.package.chart.chart
+import chart: lambda.chart.chart
 
 let spec =
 <chart width: 400, height: 300,

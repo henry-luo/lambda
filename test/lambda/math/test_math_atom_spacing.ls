@@ -1,7 +1,7 @@
 // test_math_atom_spacing.ls — Test math spacing commands
 // Coverage: atoms/spacing.ls — render (quad, qquad, thinspace, etc.)
 
-import sp: lambda.package.math.atoms.spacing
+import sp: lambda.doc.math.atoms.spacing
 
 "===== MATH ATOM SPACING TESTS ====="
 

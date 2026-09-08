@@ -1,4 +1,4 @@
-import conformance: lambda.package.graph.conformance
+import conformance: lambda.graph.conformance
 
 fn scene_case(test_case) => string(test_case.policy) == "scene-semantic"
 
