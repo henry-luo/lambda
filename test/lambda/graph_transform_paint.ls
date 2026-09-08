@@ -1,5 +1,5 @@
-import graph_layout: lambda.package.graph.layout
-import paint: lambda.package.graph.transform.paint
+import graph_layout: lambda.graph.layout
+import paint: lambda.graph.transform.paint
 
 let result = graph_layout.compute({
   nodes: [

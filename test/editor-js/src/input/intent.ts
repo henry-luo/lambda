@@ -1,6 +1,6 @@
 // Input-intent dispatcher.
 //
-// Mirrors lambda/package/editor/mod_input_intent.ls: a single discriminated
+// Mirrors lambda/editor/mod_input_intent.ls: a single discriminated
 // union representing all editor-bound intents (mapped from beforeinput events,
 // keyboard shortcuts, clipboard, drag-drop, etc.) plus a `dispatchIntent`
 // function that routes each one to the right command.

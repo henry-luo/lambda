@@ -1,6 +1,6 @@
-import model: lambda.package.graph.model
-import normalize: lambda.package.graph.normalize
-import conformance: lambda.package.graph.conformance
+import model: lambda.graph.model
+import normalize: lambda.graph.normalize
+import conformance: lambda.graph.conformance
 import adapter: .reference.graphviz_json_adapter
 
 fn run_case(test_case) {

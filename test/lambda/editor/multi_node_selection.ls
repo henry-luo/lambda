@@ -1,10 +1,10 @@
 // MultiNodeSelection model addition (Stage 4 §2.2). Constructor, selection_paths,
 // selection_to_string over several nodes, and mapping through a step
 // (shift survivors, drop deleted). Port of the JS reference behaviour.
-import lambda.package.editor.mod_doc
-import lambda.package.editor.mod_step
-import lambda.package.editor.mod_source_pos
-import lambda.package.editor.mod_transaction
+import lambda.editor.mod_doc
+import lambda.editor.mod_step
+import lambda.editor.mod_source_pos
+import lambda.editor.mod_transaction
 
 let d = node('doc', [
   node('paragraph', [text("A")]),

@@ -27,10 +27,10 @@ backend-parity work.
 The Lambda graph package is split into two public modules with separate
 responsibilities:
 
-- `lambda.package.graph.layout` computes graph geometry from node sizes and
+- `lambda.graph.layout` computes graph geometry from node sizes and
   relationships. It owns ranking, ordering, node coordinates, edge routing,
   clipping, and graph bounds.
-- `lambda.package.graph.transform` converts graph data into a semantic HTML
+- `lambda.graph.transform` converts graph data into a semantic HTML
   element tree, installs the Radiant custom layout callback, and converts routed
   edge geometry into generated SVG paint layers.
 
@@ -84,7 +84,7 @@ path now enters the Lambda HTML transform and normal Radiant renderer.
 ## 4. Module Structure
 
 ```text
-lambda/package/graph/
+lambda/graph/
   graph.ls                 compatibility facade
   layout.ls                public graph geometry API
   dagre.ls                 initial layered algorithm and orthogonal routing
@@ -452,7 +452,7 @@ not required for the first release.
 The graph package is installed explicitly:
 
 ```lambda
-import graph_transform: lambda.package.graph.transform
+import graph_transform: lambda.graph.transform
 
 let installed = graph_transform.install()
 graph_transform.to_html(graph_data)
@@ -519,7 +519,7 @@ The graph bridge uses the postfix handler surface required by
 **S7.6.5v2**.
 
 ```lambda
-import graph_transform: lambda.package.graph.transform
+import graph_transform: lambda.graph.transform
 
 let graph = input("diagram.mmd", {type: "mermaid"}) ^ { null }
 let installed = graph_transform.install()
@@ -651,19 +651,19 @@ The first graph package release is complete when:
 
 Stage 2 evolves the working rich-node path into a format-independent graph
 pipeline with broad Mermaid graph support. It does not put every Mermaid diagram
-inside `lambda.package.graph`; package ownership follows the required layout
+inside `lambda.graph`; package ownership follows the required layout
 model rather than the source language name.
 
 ### 18.1 Package ownership
 
-`lambda.package.graph` owns diagrams whose defining problem is graph topology:
+`lambda.graph` owns diagrams whose defining problem is graph topology:
 node ranking or free placement, recursive grouping, relationship routing, ports,
 markers, and overlap avoidance. Mermaid flowcharts are the first conformance
 target. Class, state, entity-relationship, requirement, architecture, block,
 mindmap, and other topology-oriented Mermaid families may reuse the graph IR and
 graph layout with family-specific transforms.
 
-`lambda.package.chart` owns Sequence, Gantt, pie, Sankey, timeline, XY, and
+`lambda.chart` owns Sequence, Gantt, pie, Sankey, timeline, XY, and
 other data-, axis-, or time-oriented Mermaid families. The existing chart
 package already accepts `<chart>` Mark and renders SVG. Those families require
 new chart adapters and specialized chart layouts; they must not be represented
@@ -680,7 +680,7 @@ Mermaid source
 ```
 
 The graph proposal specifies only the graph-oriented branch and the boundary by
-which chart-oriented source-stage Mark is handed to `lambda.package.chart`.
+which chart-oriented source-stage Mark is handed to `lambda.chart`.
 
 ### 18.2 Stage 2 pipeline
 
@@ -796,7 +796,7 @@ The package should grow along established boundaries rather than enlarge
 `dagre.ls` indefinitely:
 
 ```text
-lambda/package/graph/
+lambda/graph/
   graph.ls                     compatibility facade
   model.ls                     Mark Graph IR queries and constructors
   normalize.ls                 validation and canonicalization
@@ -1084,7 +1084,7 @@ checked-in references during a normal test invocation.
   common Mark Graph IR;
 - reuse rich HTML nodes, generated paint, stacking, routing, and the semantic
   runner;
-- route chart-oriented Mermaid ASTs to `lambda.package.chart` and test that
+- route chart-oriented Mermaid ASTs to `lambda.chart` and test that
   dispatch independently in the chart suite.
 
 The first Stage 2E tranche implements Mermaid `classDiagram`. The manual parser
@@ -1229,7 +1229,7 @@ The initial Stage 2 tranche is implemented as follows:
   graph shape vocabulary while other shape names remain available to later
   renderers;
 - chart-oriented Mermaid headers produce an `unsupported` graph result and a
-  diagnostic identifying `lambda.package.chart` as their owner, rather than
+  diagnostic identifying `lambda.chart` as their owner, rather than
   being parsed as fake flowcharts;
 - `graph/model.ls` provides recursive node, edge, subgraph, style, class, and
   direction queries over Mark without replacing the public IR with maps;
@@ -1393,7 +1393,7 @@ remain state follow-up work. Requirement, architecture, block, and mindmap
 adapters also remain subsequent Stage 2E tranches. Chart-oriented family
 dispatch is already rejected with structured ownership diagnostics, but detailed sequence,
 Gantt, pie, Sankey, timeline, and XY support belongs to
-`lambda.package.chart` and its independent test suites.
+`lambda.chart` and its independent test suites.
 
 ## 19. Stage 3 - Graphviz DOT Support
 
@@ -1794,7 +1794,7 @@ directly queryable on graph objects.
 Add the following package modules:
 
 ```text
-lambda/package/graph/graphviz/
+lambda/graph/graphviz/
   normalize.ls              source order, identity, defaults, edge expansion
   attributes.ls             typed attribute interpretation and unit conversion
   labels.ls                 plain, record, and Graphviz HTML-like labels
@@ -2401,7 +2401,7 @@ adaptation.
 - `formatter.ls` verifies source formatter idempotence and semantic canonical
   round trips, including quoted, numeric, and HTML IDs plus Graphviz backslash
   label escapes;
-- `lambda.package.graph.conformance` now owns manifest discovery, comparison
+- `lambda.graph.conformance` now owns manifest discovery, comparison
   policy defaults, retained installation, render/compare execution, and final
   scene sanity checks. Mermaid and Graphviz retain only their format-specific
   source/reference adapters.

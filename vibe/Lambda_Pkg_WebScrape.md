@@ -87,7 +87,7 @@ machinery to close them already exists in-tree.** Evidence, capability-by-capabi
 | **Regex** | RE2-backed string patterns: `\d+`, `[n,m]`, char classes, alternation, anchoring; `find`/`replace`/`split` accept patterns. | `lambda/re2_wrapper.cpp`, `test/lambda/string_pattern.ls` |
 | **Error handling** | `T^E` return types, `raise`, `^` propagation, `let a^err` destructure, errors are falsy (`f() or default`). Fetch/parse/io all raise and enforce handling. | `doc/Lambda_Error_Handling.md` |
 | **Schema validation** | Define record shape in Lambda type syntax, `validate(schema, data)` → `{valid, errors[]}`; element/document schemas too. | `lambda/validator/`, `doc/Lambda_Validator_Guide.md` |
-| **Module/package system** | `import alias: lambda.package.<name>.<name>`, `pub` exports, script-relative resolution, seven existing package precedents (chart/graph/latex/math/pdf/openapi/editor). | `lambda/package/`, `vibe/Lambda_Package2.md` |
+| **Module/package system** | `import alias: lambda.<name>.<name>`, `pub` exports, script-relative resolution, seven existing package precedents (chart/graph/latex/math/pdf/openapi/editor). | `lambda/`, `vibe/Lambda_Package2.md` |
 | **Output formats** | `format(data, 'json'|'yaml'|'xml'|'html'|'markdown'|...)`, `output(data, path)`. | `doc/Lambda_Sys_Func.md` |
 | **Content extraction** | A **1,701-line Mozilla Readability port already exists in Lambda** — main-content/title/byline extraction works today. | `utils/readability2.ls` |
 | **Network machinery (in-tree, not yet script-exposed)** | RFC-6265 cookie jar + public-suffix, ETag/Cache-Control LRU cache, exponential-backoff retry, `CURLSH` connection pool + HTTP/2 multiplex, per-origin concurrency caps, curl-multi async backend. | `lambda/network/` (cookie_jar, enhanced_file_cache, network_downloader, network_scheduler) |
@@ -126,7 +126,7 @@ headless runtime already exist; the work is surfacing them to scripts.
 ### 4.1 Layered stack
 
 ```
-  User Lambda script  (import scrape: lambda.package.scrape.scrape)
+  User Lambda script  (import scrape: lambda.scrape.scrape)
       │
   ┌───────────────────────────────────────────────────────────────────────┐
   │ [L4]  ORCHESTRATION  (Lambda)                                          │
@@ -199,8 +199,8 @@ seed URLs ──▶ [frontier: bounded mailbox + seen-set dedup]
 
 ## 5. Components and API
 
-Package lives at `lambda/package/scrape/` (matching the chart/graph/latex convention), entry module
-`scrape.ls`. Imported as `import scrape: lambda.package.scrape.scrape`.
+Package lives at `lambda/scrape/` (matching the chart/graph/latex convention), entry module
+`scrape.ls`. Imported as `import scrape: lambda.scrape.scrape`.
 
 All examples use **verified** Lambda syntax. Signatures are written in Lambda type syntax (which
 doubles as machine-checkable docs, per the package convention).
@@ -208,7 +208,7 @@ doubles as machine-checkable docs, per the package convention).
 ### 5.1 Tier 1 — one-shot (requests + BeautifulSoup style)
 
 ```lambda
-import scrape: lambda.package.scrape.scrape
+import scrape: lambda.scrape.scrape
 
 pn main() {
     // fetch → full response object (G1), then CSS-query the DOM (G3)
@@ -540,4 +540,4 @@ CPU/mem probe sysfunc), resumable frontier (KeyValueStore persistence), and a ro
 | `lambda/concurrency.cpp`, `test/lambda/conc/` | crawler worker pool / frontier |
 | `lambda/validator/`, `doc/Lambda_Validator_Guide.md` | item schema validation |
 | `utils/readability2.ls` | main-content extraction (existing Lambda port) |
-| `lambda/package/{chart,graph,latex}/` | package layout precedent |
+| `lambda/{chart,graph,latex}/` | package layout precedent |

@@ -1,6 +1,6 @@
 // Phase 19 — inline Indexed images map packed indexes through the palette.
 
-import image: lambda.package.pdf.image
+import image: lambda.pdf.image
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

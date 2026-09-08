@@ -5,10 +5,10 @@
   "events": [
     {"type": "wait", "ms": 300},
     {"type": "assert_count", "target": {"selector": ".rdt-surface td"}, "equals": 6},
-    {"type": "click", "target": {"text": "Alpha"}},
+    {"type": "click", "target": {"selector": ".rdt-surface td", "index": 0}},
     {"type": "wait", "ms": 80},
     {"type": "assert_attribute", "target": {"selector": ".rdt-surface"}, "attribute": "data-rdt-last-cell", "contains": "2,0,0"},
-    {"type": "click", "target": {"text": "Beta"}, "mods_str": "shift"},
+    {"type": "click", "target": {"selector": ".rdt-surface td", "index": 1}, "mods_str": "shift"},
     {"type": "wait", "ms": 120},
     {"type": "assert_attribute", "target": {"selector": ".rdt-surface"}, "attribute": "data-rdt-selection", "contains": "multi-node"},
     {"type": "assert_count", "target": {"selector": ".rdt-surface td.rdt-cell-selected"}, "equals": 2},

@@ -1,6 +1,6 @@
 // SourceSelection text extraction & node walks (Phase R2)
-import lambda.package.editor.mod_source_pos
-import lambda.package.editor.mod_doc
+import lambda.editor.mod_source_pos
+import lambda.editor.mod_doc
 
 // Sample doc:
 //   <doc

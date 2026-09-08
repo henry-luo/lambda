@@ -440,7 +440,7 @@ static bool write_lambda_page_script(const PdfFileInfo* pdf, int page_index, int
 
     lambda_string_escape(pdf->path, pdf_path_escaped, sizeof(pdf_path_escaped));
     snprintf(script, sizeof(script),
-             "import pdf: lambda.package.pdf.pdf\n"
+             "import pdf: lambda.pdf.pdf\n"
              "\n"
              "let doc = input(\"%s\", 'pdf') ^ { null }\n"
              "let page = pdf.pdf_to_svg(doc, %d, {show_label: false})\n"

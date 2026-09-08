@@ -3,7 +3,7 @@
 // Smoke-tests both real invoice PDFs through the Lambda PDF package and
 // checks for stable structural markers rather than comparing full HTML.
 
-import pdf: lambda.package.pdf.pdf
+import pdf: lambda.pdf.pdf
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

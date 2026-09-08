@@ -1073,7 +1073,7 @@ changes an `S#`/`D#` ruling.
 - **JSCUO3 — Who constructs DOM capsules when no JS realm exists.** JSCU17
   says "whichever language first touches them"; the observer delivery path
   and XHR turn tokens today assume `js_active_runtime_state`. The Lambda
-  DOM package (`lambda/package/dom`) is the test case: a Lambda page with a
+  DOM package (`lambda/dom`) is the test case: a Lambda page with a
   `ResizeObserver` and no script.
 - **JSCUO4 — Three 512-entry closure snapshot forms.**
   `JsMirTranspiler::last_closure_*` (`js_mir_context.hpp:480`),

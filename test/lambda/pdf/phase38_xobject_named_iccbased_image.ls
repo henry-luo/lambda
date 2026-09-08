@@ -1,6 +1,6 @@
 // Phase 38 — raw Image XObjects resolve named ICCBased color spaces.
 
-import interp: lambda.package.pdf.interp
+import interp: lambda.pdf.interp
 
 fn ref(n) { { type: "indirect_ref", object_num: n } }
 fn name(s) { { kind: "name", value: s } }

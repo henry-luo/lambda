@@ -1,7 +1,7 @@
 # Lambda LaTeX Package Proposal
 
-> **Location:** `lambda/package/latex/`  
-> **References:** Math package (`lambda/package/math/`), LaTeX.js (`ref/latex-js/`), LaTeXML (`ref/latexml/`), C++ implementation (`lambda/input/input-latex-ts.cpp`, `lambda/tex/`)  
+> **Location:** `lambda/latex/`
+> **References:** Math package (`lambda/doc/math/`), LaTeX.js (`ref/latex-js/`), LaTeXML (`ref/latexml/`), C++ implementation (`lambda/input/input-latex-ts.cpp`, `lambda/tex/`)
 > **Goal:** Full LaTeX document → HTML conversion, written entirely in Lambda Script, reusing the existing tree-sitter LaTeX parser for AST generation
 
 ---
@@ -10,7 +10,7 @@
 
 ### 1.1 Primary Goal
 
-Build a **pure Lambda Script package** at `lambda/package/latex/` that converts a LaTeX document AST (produced by tree-sitter-latex + tree-sitter-latex-math via the existing C++ parser) into semantic HTML elements. The package takes parsed Lambda elements as input and produces an `<html>` element tree as output, serializable via `format(result, 'html')`.
+Build a **pure Lambda Script package** at `lambda/latex/` that converts a LaTeX document AST (produced by tree-sitter-latex + tree-sitter-latex-math via the existing C++ parser) into semantic HTML elements. The package takes parsed Lambda elements as input and produces an `<html>` element tree as output, serializable via `format(result, 'html')`.
 
 ### 1.2 Why Migrate from C++ to Lambda Script?
 
@@ -300,7 +300,7 @@ pub fn postprocess(html, ctx) {
 ### 3.3 Module Structure
 
 ```
-lambda/package/latex/
+lambda/latex/
 ├── latex.ls              # Main entry point: pub fn render(ast, options)    (146 lines) ✅ Done
 ├── render.ls            # Core dispatcher: AST tag → handler (stateless)  (1,162 lines) ✅ Done
 ├── analyze.ls            # Pass 1: counters, headings, labels, theorems    (355 lines) ✅ Done
@@ -337,7 +337,7 @@ lambda/package/latex/
 
 ```lambda
 // User API
-import latex: .lambda.package.latex.latex
+import latex: .lambda.latex.latex
 
 // Parse LaTeX source → AST (C++ tree-sitter, unchanged)
 let ast = input("paper.tex", 'latex)
@@ -401,7 +401,7 @@ pub fn derive(parent, overrides) => {
 Delegates math rendering to the existing `math` package:
 
 ```lambda
-import math: .lambda.package.math.math
+import math: .lambda.doc.math.math
 
 pub fn render_inline(node, ctx) {
     let math_ast = node.ast  // pre-parsed by tree-sitter-latex-math in C++
@@ -859,7 +859,7 @@ During migration, validate Lambda output against existing C++ output:
 ./lambda.exe convert test.tex -t html -o output_cpp.html
 
 # Lambda path
-./lambda.exe -e 'import latex: .lambda.package.latex.latex
+./lambda.exe -e 'import latex: .lambda.latex.latex
 let ast = input("test.tex", 'latex)
 format(latex.render(ast, {standalone: true}), 'html)' > output_lambda.html
 
@@ -1203,21 +1203,21 @@ The runtime emits repeated `expected a map, got data of type map` warnings durin
 **Status:** Fixed — set `current_dir` on new `Runtime` instances  
 **Severity:** High — prevents any script with imports from running
 
-When creating a new `Runtime` instance programmatically (e.g., in the `convert` command handler) to execute a Lambda script, the `current_dir` field defaults to `NULL`. Relative imports like `.lambda.package.latex.latex` are resolved by prepending `current_dir`, producing paths like `(null)lambda/package/latex/latex.ls`:
+When creating a new `Runtime` instance programmatically (e.g., in the `convert` command handler) to execute a Lambda script, the `current_dir` field defaults to `NULL`. Relative imports like `.lambda.latex.latex` are resolved by prepending `current_dir`, producing paths like `(null)lambda/latex/latex.ls`:
 
 ```cpp
 // BROKEN — current_dir is NULL after runtime_init
 Runtime lambda_runtime;
 runtime_init(&lambda_runtime);
 run_script_mir(&lambda_runtime, nullptr, script_path, false);
-// Error: Error opening file: (null)lambda/package/latex/latex.ls
+// Error: Error opening file: (null)lambda/latex/latex.ls
 
 // FIXED — set current_dir before running any script with imports
 Runtime lambda_runtime;
 runtime_init(&lambda_runtime);
 lambda_runtime.current_dir = const_cast<char*>("./");
 run_script_mir(&lambda_runtime, nullptr, script_path, false);
-// Imports resolve correctly: ./lambda/package/latex/latex.ls
+// Imports resolve correctly: ./lambda/latex/latex.ls
 ```
 
 **Root cause:** `runtime_init()` zero-initializes the struct, leaving `current_dir = NULL`. The main CLI path (`main.cpp` line 829) sets `runtime.current_dir = "./"`, but any additional `Runtime` instances (e.g., for the `convert` command) must set it manually.

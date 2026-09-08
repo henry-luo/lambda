@@ -1,7 +1,7 @@
-import expression: lambda.package.graph.structurizr.expressions
-import layout: lambda.package.graph.layout
-import model: lambda.package.graph.model
-import structurizr: lambda.package.graph.structurizr.structurizr
+import expression: lambda.graph.structurizr.expressions
+import layout: lambda.graph.layout
+import model: lambda.graph.model
+import structurizr: lambda.graph.structurizr.structurizr
 
 fn children(value, wanted) => [
   for (child in model.element_children(value) where model.tag(child) == wanted) child

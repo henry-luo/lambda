@@ -1,4 +1,4 @@
-// Port of lambda/package/editor/mod_history.ls
+// Port of lambda/editor/mod_history.ls
 //
 // Undo/redo stacks holding inverted transactions. All operations are pure:
 // each push/undo/redo returns a new history value alongside the new doc state.

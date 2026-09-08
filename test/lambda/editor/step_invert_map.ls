@@ -1,7 +1,7 @@
 // Step inversion and position mapping (Phase R3)
-import lambda.package.editor.mod_doc
-import lambda.package.editor.mod_step
-import lambda.package.editor.mod_source_pos
+import lambda.editor.mod_doc
+import lambda.editor.mod_step
+import lambda.editor.mod_source_pos
 
 let d = node('doc', [
   node('paragraph', [text("Hello, world.")]),

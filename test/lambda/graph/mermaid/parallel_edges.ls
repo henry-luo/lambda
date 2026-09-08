@@ -1,5 +1,5 @@
-import layout: lambda.package.graph.layout
-import model: lambda.package.graph.model
+import layout: lambda.graph.layout
+import model: lambda.graph.model
 
 let source = (input("test/lambda/graph/mermaid/parallel_edges.mmd",
   {type: "graph", flavor: "mermaid"})) ^ { null }

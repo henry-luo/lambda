@@ -59,15 +59,15 @@ linearizer) and not heuristic git-style merge (does not converge across N peers)
 
 ### 1.1 Editor model — substantially built
 
-The Stage-1/2 modules under [lambda/package/editor/](../lambda/package/editor/) already
+The Stage-1/2 modules under [lambda/editor/](../lambda/editor/) already
 implement a credible PM-shaped core:
 
 | Concern | File | Reality |
 |---|---|---|
-| Doc model (`{kind:'node'…}` / `{kind:'text'…}`) | [mod_doc.ls](../lambda/package/editor/mod_doc.ls) | shipped |
-| Positions, `resolve_pos`, `resolve_before/after`, ancestors | [mod_source_pos.ls](../lambda/package/editor/mod_source_pos.ls) | shipped (partial $pos surface — §3.4) |
-| 7 step kinds with `apply`/`invert`/`map`/`map_bias` | [mod_step.ls](../lambda/package/editor/mod_step.ls) | shipped (no `Mapping`/`MapResult` — §3.1) |
-| Transaction (`tx_begin/step/invert/map_pos`, meta) | [mod_transaction.ls](../lambda/package/editor/mod_transaction.ls) | shipped (no accumulated `Mapping`, no `storedMarks` — §3.5) |
+| Doc model (`{kind:'node'…}` / `{kind:'text'…}`) | [mod_doc.ls](../lambda/editor/mod_doc.ls) | shipped |
+| Positions, `resolve_pos`, `resolve_before/after`, ancestors | [mod_source_pos.ls](../lambda/editor/mod_source_pos.ls) | shipped (partial $pos surface — §3.4) |
+| 7 step kinds with `apply`/`invert`/`map`/`map_bias` | [mod_step.ls](../lambda/editor/mod_step.ls) | shipped (no `Mapping`/`MapResult` — §3.1) |
+| Transaction (`tx_begin/step/invert/map_pos`, meta) | [mod_transaction.ls](../lambda/editor/mod_transaction.ls) | shipped (no accumulated `Mapping`, no `storedMarks` — §3.5) |
 | History, schema (md / commonmark / html5), commands, paste, decorations, collab skeleton | `mod_history.ls`, `mod_md_schema.ls`, `mod_edit_schema.ls`, `mod_commands.ls` (84 KB), `mod_paste.ls`, `mod_html_paste.ls`, `mod_decorations.ls`, `mod_collab.ls` | shipped |
 | C↔Lambda position bridge | [radiant/source_pos_bridge.hpp](../radiant/source_pos_bridge.hpp) | header + contract; DOM-side glue still no-ops pending `render_map` path field |
 
@@ -172,7 +172,7 @@ develops this; the subsections below state the decision and the PM fallback.
 
 ### 3.1 Position mapping with deletion tracking — **path-native (Slate), not integer `StepMap` (PM)** *(highest priority)*
 
-**Today:** `step_map(step, pos) → pos` ([mod_step.ls:304](../lambda/package/editor/mod_step.ls))
+**Today:** `step_map(step, pos) → pos` ([mod_step.ls:304](../lambda/editor/mod_step.ls))
 returns only a position. `mod_transaction.tx_map_pos` re-walks the step list each
 call. `mod_collab.mapping` is a bare step list. None can express "this endpoint was
 deleted."

@@ -1,4 +1,4 @@
-// Port of lambda/package/editor/mod_doc.ls
+// Port of lambda/editor/mod_doc.ls
 //
 // Document shape (immutable, JSON-native):
 //   TextLeaf = { kind: 'text', text: string, marks: Mark[] }

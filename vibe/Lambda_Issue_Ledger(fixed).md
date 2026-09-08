@@ -153,6 +153,30 @@ registry lookup), the shadow warning, and a regression test for the
 crash shape.
 
 
+<a id="lr02-16"></a>**LR02-16 · `lambda.*` namespace not implemented · RESOLVED 2026-09-08**
+Ruled 2026-08-27 as **S17.2.1/S17.2.2** (semantics v16.2.0) and **D7.2.4**
+(design v1.38.0); deliberation in `vibe/Lambda_Package.md` §1b. Implemented
+the complete namespace migration:
+
+1. `lambda.sys.*` resolves directly to the existing system-function registry,
+   including the S12.3.7 shadow escape; `lambda.math` and `lambda.io` use the
+   same built-in module rows as their bare aliases.
+2. `lambda` is barred from binding declarations by the direct lexer’s
+   reservation check, yielding E201 while member/data-name positions remain
+   available.
+3. Shipped packages moved from `lambda/package/` to their `lambda/` roots,
+   with typesetting moved specifically to `lambda/doc/math/`; all live imports,
+   bridge scripts, tests, and release packaging now use the canonical paths.
+4. Regression coverage is in `test/lambda/lambda_namespace.ls` and
+   `test/lambda/negative/semantic/lambda_namespace_root.ls`; focused probes
+   cover the registry, built-in alias, document package, and reserved-root
+   paths. The affected DOM package regressions pass 5/5; `test_lambda_gtest`
+   passes 837/837, input passes 2104/2104, MathLive passes 921/921, and
+   `make test-lambda-baseline` passes 5075/5075. The previously failing
+   `test_js_gtest` case `dom_3d_transform_inline_rect` now passes; additionally,
+   `make test262-baseline` passes 40261/40261 with zero regressions.
+
+
 ## 4. Numbers, decimal & datetime (LR_04)
 
 <a id="lr04-1"></a>**LR04-1 · "Unlimited" decimal is a 200-digit cap · RESOLVED 2026-08-28**

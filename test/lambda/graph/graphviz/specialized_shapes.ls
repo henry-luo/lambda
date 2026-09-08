@@ -1,7 +1,7 @@
-import layout: lambda.package.graph.layout
-import model: lambda.package.graph.model
-import normalize: lambda.package.graph.normalize
-import transform: lambda.package.graph.transform
+import layout: lambda.graph.layout
+import model: lambda.graph.model
+import normalize: lambda.graph.normalize
+import transform: lambda.graph.transform
 
 fn children(value, wanted) => [
   for (child in model.element_children(value) where model.tag(child) == wanted) child

@@ -4,8 +4,8 @@
 //   Tf_size * sqrt(Tm.a^2 + Tm.b^2)
 // so a scaled 90-degree text matrix [0 2 -2 0 ...] renders at 2x size.
 
-import text: lambda.package.pdf.text
-import util: lambda.package.pdf.util
+import text: lambda.pdf.text
+import util: lambda.pdf.util
 
 fn name(s) { { kind: "name", value: s } }
 fn str(s)  { { kind: "string", value: s } }

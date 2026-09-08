@@ -56,6 +56,7 @@ import { gapSelection, multiNodeSelection, pos, textSelection } from '../src/mod
 import { cmdResizeImage, cmdInsertImage, cmdIndentListItem, cmdOutdentListItem, cmdInsertInlineAtom, cmdMergeCells, cmdSplitCell, cmdMoveNode, cmdSetColumnWidth } from '../src/commands/structural-commands'
 import { cmdPasteSlice } from '../src/commands/paste'
 import { parseHtmlToDoc, serializeDocToHtml } from '../src/view/html-parser'
+import { historyShortcutForKey } from '../src/view/history-shortcut'
 import { isNode, isText, nodeAt } from '../src/model/doc'
 import type { EditorState } from '../src/commands/types'
 import type {
@@ -305,11 +306,15 @@ export function FullEditor(props: FullEditorProps) {
       runCmd(e.shiftKey ? cmdOutdentListItem : cmdIndentListItem)
       return
     }
+    const historyShortcut = historyShortcutForKey(e)
+    if (historyShortcut !== null) {
+      e.preventDefault()
+      dispatch({ type: historyShortcut })
+      return
+    }
     const meta = e.metaKey || e.ctrlKey
     if (!meta) return
-    if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); dispatch({ type: 'undo' }) }
-    else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); dispatch({ type: 'redo' }) }
-    else if (e.key === 'b') { e.preventDefault(); runCmd(cmdFormatBold) }
+    if (e.key === 'b') { e.preventDefault(); runCmd(cmdFormatBold) }
     else if (e.key === 'i') { e.preventDefault(); runCmd(cmdFormatItalic) }
     else if (e.key === 'u') { e.preventDefault(); runCmd(cmdFormatUnderline) }
   }, [])

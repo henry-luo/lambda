@@ -3151,7 +3151,7 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     // behavior mode spans only this load, so the page's own templates keep
     // registering as author templates
     template_registry_set_behavior_mode(g_template_registry, true);
-    const char* source = "import dom: lambda.package.dom.dom\nnull\n";
+    const char* source = "import dom: lambda.dom.dom\nnull\n";
     Input* package_result = run_script_mir(rt, source, (char*)"<dom-package>", false);
     // The package result is only a compile/evaluation carrier; its returned
     // value is retained by the runtime, so release the carrier's registries

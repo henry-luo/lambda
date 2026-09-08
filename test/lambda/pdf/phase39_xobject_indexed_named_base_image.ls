@@ -1,6 +1,6 @@
 // Phase 39 — raw Indexed Image XObjects resolve named base color spaces.
 
-import interp: lambda.package.pdf.interp
+import interp: lambda.pdf.interp
 
 fn ref(n) { { type: "indirect_ref", object_num: n } }
 fn name(s) { { kind: "name", value: s } }

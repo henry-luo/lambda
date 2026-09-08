@@ -1,6 +1,6 @@
-import model: lambda.package.graph.model
-import normalize: lambda.package.graph.normalize
-import transform: lambda.package.graph.transform
+import model: lambda.graph.model
+import normalize: lambda.graph.normalize
+import transform: lambda.graph.transform
 
 fn direct_children(value, wanted) => [
   for (child in model.element_children(value) where model.tag(child) == wanted) child

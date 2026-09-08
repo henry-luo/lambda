@@ -1,8 +1,8 @@
 // Collab primitives — Mapping, step rebase, serialisation (Phase R6)
-import lambda.package.editor.mod_doc
-import lambda.package.editor.mod_source_pos
-import lambda.package.editor.mod_step
-import lambda.package.editor.mod_collab
+import lambda.editor.mod_doc
+import lambda.editor.mod_source_pos
+import lambda.editor.mod_step
+import lambda.editor.mod_collab
 
 let d = node('doc', [
   node('paragraph', [text("Hello, world.")]),

@@ -222,27 +222,10 @@ static int parse_mods_string(const char* mods_str) {
     return mods;
 }
 
-// Helper: recursively find text view containing target string and get its absolute position
-// Returns true if found, sets out_x and out_y to center of first match
-// block_abs_x/y tracks the absolute position of the nearest block ancestor,
-// matching how target_text_view uses evcon->block.x/y + text_rect->x/y.
+// Helper: recursively find text view containing target string and get its visual position.
 static bool find_text_position_recursive(View* view, const char* target_text,
-                                         float block_abs_x, float block_abs_y,
                                          float* out_x, float* out_y) {
     if (!view || !target_text) return false;
-
-    // Only block views contribute to the absolute offset.
-    // Inline spans and text nodes have x/y that duplicate their TextRect positions
-    // (both are relative to the containing block), so we must not accumulate them.
-    float child_block_abs_x = block_abs_x;
-    float child_block_abs_y = block_abs_y;
-    if (view->is_block()) {
-        child_block_abs_x = block_abs_x + view->x;
-        child_block_abs_y = block_abs_y + view->y;
-    }
-
-    log_debug("find_text: view_type=%d, x=%.1f, y=%.1f, block_abs=(%.1f, %.1f)",
-              view->view_type, view->x, view->y, child_block_abs_x, child_block_abs_y);
 
     // check if this is a text view with matching text
     if (view->view_type == RDT_VIEW_TEXT) {
@@ -251,8 +234,7 @@ static bool find_text_position_recursive(View* view, const char* target_text,
             log_debug("find_text: text='%.30s...', searching for '%s'", text_view->text, target_text);
             const char* match = strstr(text_view->text, target_text);
             if (match) {
-                // Found a match - calculate position of the target text within the TextRect
-                // TextRect x/y are relative to containing block, matching the hit test
+                // Found a match - calculate position of the target text within the TextRect.
                 TextRect* rect = text_view->rect;
                 if (rect) {
                     // Find the character offset of the match within the text
@@ -264,22 +246,24 @@ static bool find_text_position_recursive(View* view, const char* target_text,
                         int rect_end = rect_start + rect->length;
 
                         if (match_offset >= rect_start && match_offset < rect_end) {
-                            // Match is in this TextRect - calculate x position
-                            // Use block_abs + rect position to match hit test coordinate system
-                            float text_x = child_block_abs_x + rect->x;
                             int chars_before = match_offset - rect_start;
 
-                            // Use average char width, but only to find the start position
-                            // (not the center) to minimize error
-                            float avg_char_width = rect->width / rect->length;
-                            float match_start_x = text_x + chars_before * avg_char_width;
+                            // TextRect coordinates are local to the nearest formatting
+                            // block; use the common view-geometry mapper so table-cell
+                            // offsets are included as they are for editor hit testing.
+                            float text_width = view_geometry_text_rect_width(text_view, rect);
+                            float local_x = rect->x +
+                                chars_before * text_width / rect->length;
+                            RdtLogicalPoint text_origin =
+                                view_geometry_local_to_block_viewport(
+                                    view, {local_x, rect->y});
 
                             // Position a few pixels into the first character of target
                             // This ensures we hit the target text reliably
-                            float click_x = match_start_x + 3.0f;  // 3 pixels into first char
+                            float click_x = text_origin.x + 3.0f;  // 3 pixels into first char
 
                             *out_x = click_x;
-                            *out_y = child_block_abs_y + rect->y + rect->height / 2;
+                            *out_y = text_origin.y + rect->height / 2;
                             log_info("event_sim: found target_text '%s' at (%.1f, %.1f), match_offset=%d, rect=(%.1f, %.1f, %.1f, %.1f)",
                                      target_text, *out_x, *out_y, match_offset, rect->x, rect->y, rect->width, rect->height);
                             return true;
@@ -288,8 +272,12 @@ static bool find_text_position_recursive(View* view, const char* target_text,
                     }
                     // Match not found in any rect - fallback to first rect center
                     rect = text_view->rect;
-                    *out_x = child_block_abs_x + rect->x + rect->width / 2;
-                    *out_y = child_block_abs_y + rect->y + rect->height / 2;
+                    RdtLogicalPoint text_origin =
+                        view_geometry_local_to_block_viewport(
+                            view, {rect->x, rect->y});
+                    *out_x = text_origin.x +
+                        view_geometry_text_rect_width(text_view, rect) / 2;
+                    *out_y = text_origin.y + rect->height / 2;
                     log_warn("event_sim: target_text '%s' found in text but not in any TextRect, using center", target_text);
                     return true;
                 } else {
@@ -299,13 +287,11 @@ static bool find_text_position_recursive(View* view, const char* target_text,
         }
     }
 
-    // Pass block absolute position to children
-    // Only block views shift the coordinate origin; inline views don't
     DomElement* elem = view->as_element();
     if (elem) {
         View* child = static_cast<View*>(elem->first_child);
         while (child) {
-            if (find_text_position_recursive(child, target_text, child_block_abs_x, child_block_abs_y, out_x, out_y)) {
+            if (find_text_position_recursive(child, target_text, out_x, out_y)) {
                 return true;
             }
             child = static_cast<View*>(child->next_sibling);
@@ -318,7 +304,7 @@ static bool find_text_position_recursive(View* view, const char* target_text,
 // Find position of text in document
 static bool find_text_position(DomDocument* doc, const char* target_text, float* out_x, float* out_y) {
     if (!doc || !doc->view_tree || !doc->view_tree->root) return false;
-    return find_text_position_recursive(static_cast<View*>(doc->view_tree->root), target_text, 0, 0, out_x, out_y);
+    return find_text_position_recursive(static_cast<View*>(doc->view_tree->root), target_text, out_x, out_y);
 }
 
 static View* sim_find_text_descendant(View* view, const char* target_text) {
@@ -971,6 +957,32 @@ static bool resolve_target(SimEvent* ev, DomDocument* doc, float* out_x, float* 
     return true;
 }
 
+static bool resolve_to_target_position(SimEvent* ev, DomDocument* doc,
+                                       float* out_x, float* out_y) {
+    if (ev->to_target_selector && doc) {
+        View* elem = find_element_by_selector(doc, ev->to_target_selector);
+        if (!elem) {
+            log_error("event_sim: to_target selector '%s' not found", ev->to_target_selector);
+            return false;
+        }
+        if (ev->has_to_target_offset) {
+            float x = 0.0f, y = 0.0f, width = 0.0f, height = 0.0f;
+            get_element_rect_abs(elem, &x, &y, &width, &height);
+            *out_x = x + ev->to_target_offset_x;
+            *out_y = y + ev->to_target_offset_y;
+        } else {
+            get_element_center_abs(elem, out_x, out_y);
+        }
+        return true;
+    }
+    if (ev->to_target_text && doc) {
+        if (find_text_position(doc, ev->to_target_text, out_x, out_y)) return true;
+        log_error("event_sim: to_target text '%s' not found", ev->to_target_text);
+        return false;
+    }
+    return false;
+}
+
 static bool resolve_drag_positions(SimEvent* ev, DomDocument* doc,
                                    float* start_x, float* start_y,
                                    float* end_x, float* end_y) {
@@ -986,26 +998,8 @@ static bool resolve_drag_positions(SimEvent* ev, DomDocument* doc,
         *end_x = *start_x + ev->drag_dx;
         *end_y = *start_y + ev->drag_dy;
     }
-    if (ev->to_target_selector && doc) {
-        View* elem = find_element_by_selector(doc, ev->to_target_selector);
-        if (!elem) {
-            log_error("event_sim: to_target selector '%s' not found", ev->to_target_selector);
-            return false;
-        }
-        float x = 0.0f, y = 0.0f;
-        get_element_center_abs(elem, &x, &y);
-        *end_x = x;
-        *end_y = y;
-        return true;
-    }
-    if (ev->to_target_text && doc) {
-        float x = 0.0f, y = 0.0f;
-        if (!find_text_position(doc, ev->to_target_text, &x, &y)) {
-            log_error("event_sim: to_target text '%s' not found", ev->to_target_text);
-            return false;
-        }
-        *end_x = x;
-        *end_y = y;
+    if (ev->to_target_selector || ev->to_target_text) {
+        return resolve_to_target_position(ev, doc, end_x, end_y);
     }
     return true;
 }
@@ -1087,6 +1081,11 @@ static void parse_to_target(MapReader& reader, SimEvent* ev,
     if (selector) ev->to_target_selector = mem_strdup(selector, MEM_CAT_LAYOUT);
     const char* text = target.get("text").cstring();
     if (text) ev->to_target_text = mem_strdup(text, MEM_CAT_LAYOUT);
+    if (target.has("offset_x") || target.has("offset_y")) {
+        ev->to_target_offset_x = sim_number_as_float(target.get("offset_x"));
+        ev->to_target_offset_y = sim_number_as_float(target.get("offset_y"));
+        ev->has_to_target_offset = true;
+    }
     if (with_text_range) {
         ev->drag_target_start = target.get("start").asInt32();
         ev->drag_target_end = target.has("end")
@@ -3813,23 +3812,18 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     break;
                 }
             }
-            // Resolve drop target element
-            View* dst_view = nullptr;
-            if (ev->to_target_selector) {
-                dst_view = find_element_by_selector(doc, ev->to_target_selector);
-            }
-            if (!dst_view) {
+            float dst_x = 0.0f;
+            float dst_y = 0.0f;
+            if (!resolve_to_target_position(ev, doc, &dst_x, &dst_y)) {
                 log_error("event_sim: drag_and_drop - drop target '%s' not found",
-                    ev->to_target_selector ? ev->to_target_selector : "(null)");
+                          ev->to_target_selector ? ev->to_target_selector : "(null)");
                 ctx->fail_count++;
                 break;
             }
-            // Get source and destination centers
-            float src_fx, src_fy, dst_fx, dst_fy;
+            // Get source center and requested destination position.
+            float src_fx, src_fy;
             get_element_center_abs(src_view, &src_fx, &src_fy);
-            get_element_center_abs(dst_view, &dst_fx, &dst_fy);
             float src_x = src_fx, src_y = src_fy;
-            float dst_x = dst_fx, dst_y = dst_fy;
             log_info("event_sim: drag_and_drop from '%s' (%.2f,%.2f) to '%s' (%.2f,%.2f)",
                 ev->target_selector, src_x, src_y, ev->to_target_selector, dst_x, dst_y);
             // Dispatch: mouse_down on source

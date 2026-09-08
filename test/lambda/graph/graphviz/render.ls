@@ -1,5 +1,5 @@
-import model: lambda.package.graph.model
-import transform: lambda.package.graph.transform
+import model: lambda.graph.model
+import transform: lambda.graph.transform
 
 fn children(value, wanted) => [
   for (child in model.element_children(value) where model.tag(child) == wanted) child

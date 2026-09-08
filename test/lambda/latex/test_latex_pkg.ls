@@ -1,6 +1,6 @@
 // test_latex_pkg.ls — End-to-end functional test for the LaTeX package
 
-import latex: lambda.package.latex.latex
+import latex: lambda.latex.latex
 
 // use a checked-in document so the functional test covers the parser and
 // package renderer together.

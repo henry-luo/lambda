@@ -1,7 +1,7 @@
 # Lambda Math Package Proposal
 
-> **Location:** `lambda/package/math/`  
-> **Reference:** MathLive (`ref/mathlive/`), Chart package (`lambda/package/chart/`)  
+> **Location:** `lambda/doc/math/`
+> **Reference:** MathLive (`ref/mathlive/`), Chart package (`lambda/chart/`)
 > **Goal:** Turn LaTeX math into static (and eventually editable) HTML, written entirely in Lambda Script
 
 ---
@@ -10,7 +10,7 @@
 
 ### 1.1 Primary Goal
 
-Build a **pure Lambda Script package** at `lambda/package/math/` that converts a LaTeX math AST (already produced by tree-sitter-latex-math) into MathLive-compatible HTML elements. The package takes parsed Lambda elements as input and produces `<span>` element trees as output, which can be serialized to HTML via `format(result, 'html')`.
+Build a **pure Lambda Script package** at `lambda/doc/math/` that converts a LaTeX math AST (already produced by tree-sitter-latex-math) into MathLive-compatible HTML elements. The package takes parsed Lambda elements as input and produces `<span>` element trees as output, which can be serialized to HTML via `format(result, 'html')`.
 
 ### 1.2 Why a Lambda Package?
 
@@ -114,7 +114,7 @@ MathLive uses detailed font metrics (height, depth, italic correction, kern pair
 ### 3.1 Module Structure
 
 ```
-lambda/package/math/
+lambda/doc/math/
 ├── math.ls              # Main entry point: pub fn render(ast), pub fn render_latex(str)
 ├── parse.ls             # AST normalization: tree-sitter elements → internal representation
 ├── context.ls           # Rendering context: math style, font, color, size
@@ -411,8 +411,8 @@ Even though Phase 1 is static-only, the design anticipates editing:
 MathLive's `test/markup.test.ts` contains ~30 test groups with LaTeX → HTML snapshot tests. These can be ported as Lambda integration tests:
 
 ```lambda
-// test/lambda/package/test_math_fractions.ls
-import math: .lambda.package.math.math
+// test/lambda/test_math_fractions.ls
+import math: .lambda.doc.math.math
 
 // Test: \frac{a}{b}
 let ast = input("\\frac{a}{b}", {type: 'math', flavor: 'latex'})
@@ -420,7 +420,7 @@ let html = math.render(ast)
 format(html, 'html')
 ```
 
-Expected output files (`test/lambda/package/test_math_fractions.txt`) contain the HTML string to match.
+Expected output files (`test/lambda/test_math_fractions.txt`) contain the HTML string to match.
 
 ### 5.2 Test Categories (from MathLive)
 
@@ -560,12 +560,12 @@ The following node types in `tree-sitter-latex-math/grammar.js` fall through to 
     \binom{n}{k}                    # binomial
     ```
 
-4. **Package auto-discovery** — Currently `lambda/package/chart/` is imported via `import chart: .lambda.package.chart.chart`. Consider if there should be a package registry or convention (`import 'math'` resolving to `lambda/package/math/math.ls`).
+4. **Package auto-discovery** — Currently `lambda/chart/` is imported via `import chart: .lambda.chart.chart`. Consider if there should be a package registry or convention (`import 'math'` resolving to `lambda/doc/math/math.ls`).
 
 5. **Consider a `render_latex(string)` convenience function** — That calls `input()` + `render()` in one step:
 
     ```lambda
-    import math: .lambda.package.math.math
+    import math: .lambda.doc.math.math
     math.render_latex("\\frac{a}{b}")   // → HTML element tree
     ```
 
@@ -596,9 +596,9 @@ The following node types in `tree-sitter-latex-math/grammar.js` fall through to 
 
 | Artifact | Location |
 |----------|----------|
-| Math package modules | `lambda/package/math/*.ls` |
-| Test scripts | `test/lambda/package/test_math_*.ls` |
-| Expected outputs | `test/lambda/package/test_math_*.txt` |
+| Math package modules | `lambda/doc/math/*.ls` |
+| Test scripts | `test/lambda/test_math_*.ls` |
+| Expected outputs | `test/lambda/test_math_*.txt` |
 
 ---
 
@@ -995,7 +995,7 @@ Delimiters use CSS class `ML__small-delim` and are assembled with `box.hbox()`.
 
 ### 11.5 Critical Bug Discovery: `array` Is a Reserved Word
 
-**Root cause:** Using `import array: .lambda.package.math.atoms.array` causes JIT corruption. The alias name `array` conflicts with Lambda's built-in `array` type, causing all return values from functions called via the `array.` prefix to be corrupted.
+**Root cause:** Using `import array: .lambda.doc.math.atoms.array` causes JIT corruption. The alias name `array` conflicts with Lambda's built-in `array` type, causing all return values from functions called via the `array.` prefix to be corrupted.
 
 **Symptoms:**
 - `unknown type error in set_fields` (3× per function call)
@@ -1005,7 +1005,7 @@ Delimiters use CSS class `ML__small-delim` and are assembled with `box.hbox()`.
 
 **Isolation method:** Systematically simplified `array.ls` to a 10-line stub → still errored. Moved the function inline to `render.ls` → worked. Changed import alias from `array` to `arr_mod` → worked. Confirmed the alias name `array` is the sole cause.
 
-**Fix:** `import arr_mod: .lambda.package.math.atoms.array` in `render.ls`.
+**Fix:** `import arr_mod: .lambda.doc.math.atoms.array` in `render.ls`.
 
 **Rule added:** Never use `array`, `list`, `map`, `string`, `int`, `float`, `bool`, `null`, or other built-in type names as import aliases.
 
@@ -1097,12 +1097,12 @@ Internal algorithm:
 ### 12.3 Modified Files
 
 #### `render.ls` Changes
-- Added `import delims: .lambda.package.math.atoms.delimiters`
+- Added `import delims: .lambda.doc.math.atoms.delimiters`
 - `render_delimiter_group`: Now uses `delims.render_stretchy()` for `\left`/`\right` delimiters. Calculates `content_height = content.height + content.depth` and passes to delimiter renderer for size selection.
 - `render_sized_delim`: Now uses `delims.render_at_scale()` for `\big`/`\Big`/`\bigg`/`\Bigg` commands.
 
 #### `math.ls` Changes
-- Added `import opt: .lambda.package.math.optimize`
+- Added `import opt: .lambda.doc.math.optimize`
 - Render pipeline now: `render_node(ast)` → `opt.coalesce()` → `box.make_struts()` → wrap in `<span class: ML__latex>`
 
 ### 12.4 Architecture Decisions
@@ -1211,7 +1211,7 @@ This limits coalescing to multi-child levels only. Single-child wrapper chains (
 ### 12.8 Module Inventory (Phase 4 Complete)
 
 ```
-lambda/package/math/
+lambda/doc/math/
 ├── math.ls              # Entry point (48 lines)
 ├── render.ls            # Core renderer (398 lines)
 ├── box.ls               # Box model (233 lines)

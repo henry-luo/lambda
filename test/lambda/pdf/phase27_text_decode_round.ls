@@ -1,7 +1,7 @@
 // Phase 27 — parser/font text decoding parity round.
 
-import font:   lambda.package.pdf.font
-import interp: lambda.package.pdf.interp
+import font:   lambda.pdf.font
+import interp: lambda.pdf.interp
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

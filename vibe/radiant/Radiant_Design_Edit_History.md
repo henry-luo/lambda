@@ -1128,7 +1128,7 @@ Rejected for the canonical schema. A chronological entry array plus cursor
 represents the same linear history with one ordering source, makes redo
 invalidation a suffix deletion, and makes dependency-safe pruning explicit.
 
-### 15.6 Reuse `lambda/package/editor/mod_step.ls` unchanged
+### 15.6 Reuse `lambda/editor/mod_step.ls` unchanged
 
 Rejected. Its paths address an immutable editor model, while UA history must
 address live DOM nodes, element-boundary offsets, form-control values, and

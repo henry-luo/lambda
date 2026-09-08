@@ -3,224 +3,289 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Radiant UA contenteditable test</title>
+  <title>Radiant UA WYSIWYG editor</title>
   <style>
     :root {
+      --accent: #2563eb;
       --border: #d8dee8;
-      --surface: #fff;
-      --page: #eef2f7;
-      --bar: #f8fafc;
+      --canvas: #eef2f7;
+      --panel: #ffffff;
+      --toolbar: #f8fafc;
       --text: #172033;
       --muted: #64748b;
-      --accent: #2563eb;
-      --blocked: #fff7ed;
     }
     * { box-sizing: border-box; }
-    html, body { min-height: 100%; }
+    html, body { height: 100%; }
     body {
       margin: 0;
-      background: var(--page);
+      background: var(--canvas);
       color: var(--text);
-      font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+      font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      overflow: hidden;
     }
-    main {
-      width: min(960px, calc(100% - 32px));
+    #app {
+      height: 100%;
+      max-width: 1100px;
       margin: 0 auto;
-      padding: 24px 0 40px;
+      background: var(--panel);
+      border-left: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      box-shadow: 0 0 26px rgba(15, 23, 42, 0.08);
     }
-    header {
-      margin-bottom: 16px;
-      padding: 18px 20px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
+    .editor-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow: hidden;
     }
-    h1, h2, p { margin: 0; }
-    h1 { font-size: 22px; }
-    h2 { font-size: 15px; margin-bottom: 6px; }
-    header p { color: var(--muted); margin-top: 6px; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .panel {
-      margin-top: 12px;
-      padding: 14px 16px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
+    .editor-header { padding: 14px 20px; border-bottom: 1px solid var(--border); }
+    .editor-header h1 { margin: 0; font-size: 19px; }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      flex: 0 0 auto;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding: 8px 12px;
+      background: var(--toolbar);
+      border-bottom: 1px solid var(--border);
     }
-    .hint { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
-    .ua-surface {
-      min-height: 34px;
-      padding: 8px 10px;
-      border: 1px solid #aeb9c9;
+    .toolbar button,
+    .toolbar select,
+    .toolbar input {
+      height: 30px;
+      border: 1px solid transparent;
       border-radius: 6px;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+    }
+    .toolbar button {
+      min-width: 30px;
+      padding: 0 8px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .toolbar button:hover,
+    .toolbar button.is-active { background: #dbeafe; border-color: #bfdbfe; color: var(--accent); }
+    .toolbar button:focus-visible,
+    .toolbar select:focus-visible,
+    .toolbar input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .toolbar select {
+      min-width: 112px;
+      padding: 0 7px;
+      border-color: var(--border);
       background: #fff;
+      cursor: pointer;
+    }
+    .toolbar input[type="url"] {
+      width: 176px;
+      padding: 0 8px;
+      border-color: var(--border);
+      background: #fff;
+    }
+    .toolbar .color-swatch { width: 30px; min-width: 30px; padding: 0; font-weight: 700; }
+    .toolbar .color-swatch span { padding-bottom: 1px; border-bottom: 3px solid currentColor; }
+    .toolbar .text-color { color: #2563eb; }
+    .toolbar .highlight-color { background: #fef08a; color: #854d0e; }
+    .toolbar .separator { width: 1px; height: 22px; margin: 0 3px; background: var(--border); }
+    .toolbar .toolbar-label { color: var(--muted); font-size: 12px; }
+    #editor {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      padding: 30px 38px 44px;
       outline: none;
+      font-size: 16px;
+      line-height: 1.65;
     }
-    .ua-surface:focus { border-color: var(--accent); box-shadow: 0 0 0 2px #dbeafe; }
-    .ua-surface[contenteditable="false"] { background: var(--blocked); }
-    .ua-surface p { margin: 0 0 8px; }
-    .ua-surface p:last-child { margin-bottom: 0; }
-    .ua-surface ul, .ua-surface ol { margin: 0; padding-left: 24px; }
-    .ua-surface li + li { margin-top: 4px; }
-    .report {
-      display: block;
-      margin-top: 8px;
-      padding: 7px 9px;
-      background: var(--bar);
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      color: #334155;
-      font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
+    #editor:focus { box-shadow: inset 0 0 0 2px #dbeafe; }
+    #editor h1 { margin: 0 0 12px; font-size: 30px; line-height: 1.25; }
+    #editor h2 { margin: 25px 0 8px; font-size: 21px; line-height: 1.3; }
+    #editor p { margin: 0 0 13px; }
+    #editor blockquote {
+      margin: 16px 0;
+      padding: 5px 16px;
+      border-left: 4px solid #93c5fd;
+      color: #475569;
+      background: #f8fafc;
     }
-    #event-log {
-      min-height: 32px;
-      white-space: pre-wrap;
+    #editor ul, #editor ol { margin: 0 0 14px; padding-left: 27px; }
+    #editor li + li { margin-top: 4px; }
+    #editor a { color: var(--accent); }
+    #editor code { padding: 1px 4px; border-radius: 4px; background: #f1f5f9; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .status {
+      display: flex;
+      flex: 0 0 auto;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 6px 12px;
+      border-top: 1px solid var(--border);
+      background: var(--toolbar);
+      color: var(--muted);
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
     }
-    #ready { color: #166534; }
+    .status output { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #ua-mode { color: #166534; }
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <h1>Radiant user-agent <code>contenteditable</code></h1>
-      <p>
-        These surfaces intentionally have observational listeners only. They do not cancel
-        <code>beforeinput</code>, call <code>execCommand</code>, or rewrite their contents.
-        Every edit below must therefore come from Radiant's package-owned UA default action.
-      </p>
-      <output id="ready" class="report">ready:0</output>
-      <output id="event-log" class="report">events:none</output>
-    </header>
+  <main id="app">
+    <section class="editor-shell" aria-label="Radiant user-agent rich text editor">
+      <header class="editor-header">
+        <h1>Radiant UA WYSIWYG editor</h1>
+      </header>
 
-    <section class="panel">
-      <h2>Printable insertion and range replacement</h2>
-      <p class="hint">Typing uses the physical keydown → text-input route; the selection is supplied by the event driver.</p>
-      <div id="typing-surface" class="ua-surface" contenteditable="true" tabindex="0">hello</div>
-      <output id="typing-report" class="report"></output>
-      <div id="replace-surface" class="ua-surface" contenteditable="true" tabindex="0">abcdef</div>
-      <output id="replace-report" class="report"></output>
-    </section>
+      <nav id="toolbar" class="toolbar" aria-label="Text formatting">
+        <button id="toolbar-undo" type="button" data-command="undo" title="Undo">↶</button>
+        <button id="toolbar-redo" type="button" data-command="redo" title="Redo">↷</button>
+        <span class="separator" aria-hidden="true"></span>
 
-    <section class="panel">
-      <h2>Deletion and structural default actions</h2>
-      <div id="backspace-surface" class="ua-surface" contenteditable="true" tabindex="0">abc</div>
-      <output id="backspace-report" class="report"></output>
-      <div id="forward-surface" class="ua-surface" contenteditable="true" tabindex="0">abc</div>
-      <output id="forward-report" class="report"></output>
-      <div id="paragraph-surface" class="ua-surface" contenteditable="true" tabindex="0"><p>hello</p></div>
-      <output id="paragraph-report" class="report"></output>
-      <div id="line-surface" class="ua-surface" contenteditable="true" tabindex="0"><p>hello</p></div>
-      <output id="line-report" class="report"></output>
-    </section>
+        <select id="block-format" aria-label="Block format">
+          <option value="p">Paragraph</option>
+          <option value="h1">Heading 1</option>
+          <option value="h2">Heading 2</option>
+          <option value="h3">Heading 3</option>
+          <option value="blockquote">Quote</option>
+          <option value="pre">Preformatted</option>
+        </select>
+        <span class="separator" aria-hidden="true"></span>
 
-    <section class="panel">
-      <h2>Keyboard formatting, history, and clipboard</h2>
-      <div id="format-surface" class="ua-surface" contenteditable="true" tabindex="0">format me</div>
-      <output id="format-report" class="report"></output>
-      <div id="history-surface" class="ua-surface" contenteditable="true" tabindex="0">seed</div>
-      <output id="history-report" class="report"></output>
-      <div id="clipboard-surface" class="ua-surface" contenteditable="true" tabindex="0">tail</div>
-      <output id="clipboard-report" class="report"></output>
-    </section>
+        <button id="toolbar-bold" type="button" data-command="bold" title="Bold"><strong>B</strong></button>
+        <button id="toolbar-italic" type="button" data-command="italic" title="Italic"><em>I</em></button>
+        <button id="toolbar-underline" type="button" data-command="underline" title="Underline"><u>U</u></button>
+        <button id="toolbar-strike" type="button" data-command="strikeThrough" title="Strikethrough"><s>S</s></button>
+        <button id="toolbar-text-color" class="color-swatch text-color" type="button" data-command="foreColor" data-value="#2563eb" title="Text color: blue" aria-label="Text color: blue"><span>A</span></button>
+        <button id="toolbar-highlight-color" class="color-swatch highlight-color" type="button" data-command="hiliteColor" data-value="#fef08a" title="Highlight color: yellow" aria-label="Highlight color: yellow"><span>A</span></button>
+        <span class="separator" aria-hidden="true"></span>
 
-    <section class="panel">
-      <h2>Composition and editing boundaries</h2>
-      <div id="composition-surface" class="ua-surface" contenteditable="true" tabindex="0">seed</div>
-      <output id="composition-report" class="report"></output>
-      <div id="plain-surface" class="ua-surface" contenteditable="plaintext-only" tabindex="0">plain</div>
-      <output id="plain-report" class="report"></output>
-      <div id="false-surface" class="ua-surface" contenteditable="true" tabindex="0">a<span id="false-island" contenteditable="false">LOCK</span>b</div>
-      <output id="false-report" class="report"></output>
-      <div id="list-surface" class="ua-surface" contenteditable="true" tabindex="0"><ul><li>one</li><li>two</li></ul></div>
-      <output id="list-report" class="report"></output>
+        <button id="toolbar-ul" type="button" data-command="insertUnorderedList" title="Bulleted list">• List</button>
+        <button id="toolbar-ol" type="button" data-command="insertOrderedList" title="Numbered list">1. List</button>
+        <button id="toolbar-outdent" type="button" data-command="outdent" title="Outdent">←</button>
+        <button id="toolbar-indent" type="button" data-command="indent" title="Indent">→</button>
+        <span class="separator" aria-hidden="true"></span>
+
+        <input id="link-url" type="url" value="https://example.com" aria-label="Link URL">
+        <button id="toolbar-link" type="button" data-command="createLink" title="Create link">Link</button>
+        <button id="toolbar-unlink" type="button" data-command="unlink" title="Remove link">Unlink</button>
+      </nav>
+
+      <article id="editor" contenteditable="true" tabindex="0" aria-label="Editable document">
+        <h1 id="document-title">A native rich-text document</h1>
+        <p id="toolbar-target">Select this short paragraph to exercise native toolbar commands.</p>
+        <p id="italic-target">Use this separate paragraph to test italic selection formatting.</p>
+        <p id="heading-target">Turn this paragraph into a heading from the block menu.</p>
+        <p>
+          The content stays in the DOM: type normally, use <strong>keyboard shortcuts</strong>,
+          format a <em>selection</em>, and insert ordinary document structure.
+        </p>
+        <blockquote>Formatting decisions live in the UA command package, while this page is only a thin editor shell.</blockquote>
+        <h2>Structured content</h2>
+        <ul>
+          <li>Bold, italic, underline, and strike-through preserve the selected run.</li>
+          <li>Lists, indentation, undo, and redo operate on the same editable tree.</li>
+        </ul>
+        <p id="list-target">Turn this sentence into a list item with the toolbar.</p>
+        <p>Inline <code>contenteditable</code> remains available for ordinary typing and composition.</p>
+      </article>
+
+      <footer class="status">
+        <output id="ua-mode">UA mode: ready</output>
+        <output id="ua-status">selection: none</output>
+      </footer>
     </section>
   </main>
 
   <script>
     (function() {
-      var surfaces = [
-        'typing', 'replace', 'backspace', 'forward', 'paragraph', 'line',
-        'format', 'history', 'clipboard', 'composition', 'plain', 'false', 'list'
-      ];
-      var eventLog = [];
-      var perSurfaceLog = {};
+      var editor = document.getElementById('editor');
+      var toolbar = document.getElementById('toolbar');
+      var blockFormat = document.getElementById('block-format');
+      var status = document.getElementById('ua-status');
+      var savedRange = null;
 
-      function surfaceFor(name) {
-        return document.getElementById(name + '-surface');
+      function selectionInsideEditor() {
+        var selection = window.getSelection();
+        return selection && selection.rangeCount > 0 && selection.anchorNode &&
+          editor.contains(selection.anchorNode);
       }
 
-      function reportFor(name) {
-        return document.getElementById(name + '-report');
+      function rememberSelection() {
+        var selection = window.getSelection();
+        if (selectionInsideEditor()) savedRange = selection.getRangeAt(0).cloneRange();
       }
 
-      function updateSurface(name) {
-        var surface = surfaceFor(name);
-        var report = reportFor(name);
-        if (!surface || !report) return;
-        var entries = perSurfaceLog[name] || [];
-        var html = surface.innerHTML;
-        surface.setAttribute('data-ua-text', surface.textContent);
-        surface.setAttribute('data-ua-html', html);
-        surface.setAttribute('data-ua-events', entries.join('|'));
-        report.textContent = 'text=' + surface.textContent + '|html=' + html +
-          '|events=' + (entries.length ? entries.join('|') : 'none');
+      function restoreSelection() {
+        // Reinstall only a selection displaced by a form control. Clearing a
+        // live selection would create a selection-only history entry.
+        if (selectionInsideEditor() || !savedRange) return;
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(savedRange);
       }
 
-      function record(name, phase, event) {
-        var inputType = event && event.inputType ? ':' + event.inputType : '';
-        var data = event && event.data ? ':' + event.data : '';
-        var item = phase + inputType + data;
-        if (!perSurfaceLog[name]) perSurfaceLog[name] = [];
-        perSurfaceLog[name].push(item);
-        eventLog.push(name + ':' + item);
-        document.getElementById('event-log').textContent = 'events:' + eventLog.join('|');
-        updateSurface(name);
+      function commandState(command) {
+        return document.queryCommandState(command) ? '1' : '0';
       }
 
-      function install(name) {
-        var surface = surfaceFor(name);
-        if (!surface) return;
-        perSurfaceLog[name] = [];
-        surface.addEventListener('beforeinput', function(event) {
-          record(name, 'beforeinput', event);
-        });
-        surface.addEventListener('input', function(event) {
-          record(name, 'input', event);
-        });
-        surface.addEventListener('keydown', function(event) {
-          record(name, 'keydown:' + event.key, event);
-        });
-        surface.addEventListener('compositionstart', function(event) {
-          record(name, 'compositionstart', event);
-        });
-        surface.addEventListener('compositionupdate', function(event) {
-          record(name, 'compositionupdate', event);
-        });
-        surface.addEventListener('compositionend', function(event) {
-          record(name, 'compositionend', event);
-        });
-        updateSurface(name);
-      }
-
-      document.addEventListener('selectionchange', function() {
-        var selection = document.getSelection();
-        if (!selection || !selection.anchorNode) return;
-        for (var i = 0; i < surfaces.length; i++) {
-          var name = surfaces[i];
-          var surface = surfaceFor(name);
-          if (surface && surface.contains(selection.anchorNode)) {
-            eventLog.push(name + ':selectionchange');
-            document.getElementById('event-log').textContent = 'events:' + eventLog.join('|');
-            updateSurface(name);
-            return;
-          }
+      function syncToolbar() {
+        var states = [
+          ['toolbar-bold', 'bold'],
+          ['toolbar-italic', 'italic'],
+          ['toolbar-underline', 'underline'],
+          ['toolbar-strike', 'strikeThrough'],
+          ['toolbar-ul', 'insertUnorderedList'],
+          ['toolbar-ol', 'insertOrderedList']
+        ];
+        for (var i = 0; i < states.length; i++) {
+          var button = document.getElementById(states[i][0]);
+          var active = commandState(states[i][1]) == '1';
+          button.classList.toggle('is-active', active);
+          button.setAttribute('aria-pressed', active ? 'true' : 'false');
         }
-      });
+      }
 
-      for (var i = 0; i < surfaces.length; i++) install(surfaces[i]);
-      document.getElementById('ready').textContent = 'ready:' + surfaces.length;
+      function snapshot(action, applied) {
+        status.textContent = 'action: ' + action + ' | applied: ' + applied +
+          ' | chars: ' + editor.textContent.length;
+      }
+
+      function runCommand(command, value) {
+        restoreSelection();
+        var applied = document.execCommand(command, false, value == null ? '' : value);
+        snapshot(command, applied);
+        rememberSelection();
+      }
+
+      function preserveEditorSelection(event) {
+        // A toolbar click must retain the range the command operates on.
+        event.preventDefault();
+      }
+
+      var commandButtons = toolbar.querySelectorAll('button[data-command]');
+      for (var i = 0; i < commandButtons.length; i++) {
+        commandButtons[i].addEventListener('mousedown', preserveEditorSelection);
+        commandButtons[i].addEventListener('click', function() {
+          var command = this.getAttribute('data-command');
+          var value = null;
+          if (command == 'createLink') value = document.getElementById('link-url').value;
+          else value = this.getAttribute('data-value');
+          runCommand(command, value);
+        });
+      }
+
+      blockFormat.addEventListener('change', function() {
+        runCommand('formatBlock', '<' + blockFormat.value + '>');
+      });
+      editor.addEventListener('keyup', function() {
+        rememberSelection();
+        syncToolbar();
+      });
+      editor.addEventListener('mouseup', function() {
+        rememberSelection();
+        syncToolbar();
+      });
+      snapshot('ready', true);
     }());
   </script>
 </body>

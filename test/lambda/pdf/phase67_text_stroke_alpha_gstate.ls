@@ -1,6 +1,6 @@
 // Phase 67 - ExtGState CA applies to stroked text SVG opacity.
 
-import interp: lambda.package.pdf.interp
+import interp: lambda.pdf.interp
 
 fn name(s) { { kind: "name", value: s } }
 fn str(s) { { kind: "string", value: s } }

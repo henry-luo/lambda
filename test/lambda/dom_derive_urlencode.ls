@@ -14,7 +14,7 @@
 // interesting boundaries are the unreserved set and the UTF-8 escape: encoding
 // a code point instead of its bytes produces a body the server decodes as
 // mojibake, and that is precisely what this said before it was compared.
-import ue: lambda.package.dom.urlencode
+import ue: lambda.dom.urlencode
 
 let ascii = [for (c in 32 to 126) c]
 let words = ["", "abc", "a b", "a+b", "a&b=c", "hello world!", "*-._",

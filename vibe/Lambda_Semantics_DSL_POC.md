@@ -435,13 +435,13 @@ that building the model is itself the hardening instrument:
 
   **The blast radius is the real finding.** Because a *purely* spread-built
   element (`<graph *:attrs, ...>` — the shape every canonicalizing builder in
-  `lambda/package/graph/` produces) has *only* a nameless slot, `item_keys`
+  `lambda/graph/` produces) has *only* a nameless slot, `item_keys`
   returned the **empty list** for it. The graph schema validator walks
   `for (key, attr_value in map(value))` to type-check attributes, so for every
   canonical graph it iterated nothing and reported `valid: true` having checked
   **zero attributes**. Fourteen `graphviz_*` fixtures had captured that vacuous
   pass as their golden. Turning iteration on immediately exposed a second,
-  independent latent bug in `lambda/package/graph/schema.ls`
+  independent latent bug in `lambda/graph/schema.ls`
   (`present_attr_diagnostics` type-checked null-valued — i.e. absent —
   attributes, contradicting its own `required_attr_missing`); with both fixed
   the baseline is 3982/3982.

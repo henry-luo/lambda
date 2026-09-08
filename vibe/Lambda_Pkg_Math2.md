@@ -2,11 +2,11 @@
 
 ## Goal
 
-Advance `lambda/package/math/` from a working Lambda-side math HTML renderer into a MathLive snapshot-compatible renderer, while keeping Lambda's own class namespace stable as `lm_`.
+Advance `lambda/doc/math/` from a working Lambda-side math HTML renderer into a MathLive snapshot-compatible renderer, while keeping Lambda's own class namespace stable as `lm_`.
 
 This proposal builds on `vibe/Lambda_Pkg_Math.md` and the current implementation:
 
-- `lambda/package/math/` has 2,723 lines of Lambda code across renderer, box model, metrics, spacing, symbols, and atom modules.
+- `lambda/doc/math/` has 2,723 lines of Lambda code across renderer, box model, metrics, spacing, symbols, and atom modules.
 - Existing focused Lambda tests live in `test/lambda/math/`.
 - MathLive's upstream test corpus has been mirrored from `ref/mathlive/test/` into `test/lambda/mathlive/`.
 - The local class prefix has been changed from MathLive's upstream `ML__` to Lambda's `lm_`.
@@ -30,9 +30,9 @@ Examples:
 
 Updated areas:
 
-- `lambda/package/math/css.ls`
-- literal spacing classes in `lambda/package/math/spacing_table.ls`
-- comments in `lambda/package/math/math.ls` and `lambda/package/math/atoms/array.ls`
+- `lambda/doc/math/css.ls`
+- literal spacing classes in `lambda/doc/math/spacing_table.ls`
+- comments in `lambda/doc/math/math.ls` and `lambda/doc/math/atoms/array.ls`
 - focused expected outputs in `test/lambda/math/*.txt`
 - focused test inputs with literal class names in `test/lambda/math/*.ls`
 
@@ -106,7 +106,7 @@ MathLive's `markup.test.ts` covers a broader behavioral surface than Lambda curr
 Before chasing individual failures, build a repeatable harness.
 
 1. Extract formulas and expected snapshots from `test/lambda/mathlive/markup.test.ts` and `test/lambda/mathlive/__snapshots__/markup.test.ts.snap`.
-2. Render each formula through the Lambda LaTeX parser and `lambda/package/math`.
+2. Render each formula through the Lambda LaTeX parser and `lambda/doc/math`.
 3. Normalize HTML for comparison:
    - ignore insignificant whitespace
    - preserve tag order, text, class lists, styles, and data attributes
@@ -220,7 +220,7 @@ These should come after the markup corpus is mostly green:
 1. **Lock the prefix contract**
    - Keep all Lambda output classes under `lm_`.
    - Keep MathLive mirror snapshots normalized to `lm_`.
-   - Add a small check that fails if `ML__` reappears under `lambda/package/math` or `test/lambda/math`.
+   - Add a small check that fails if `ML__` reappears under `lambda/doc/math` or `test/lambda/math`.
 
 2. **Build the MathLive markup harness**
    - Start with `markup.test.ts`.
@@ -253,7 +253,7 @@ These should come after the markup corpus is mostly green:
 
 The enhancement is complete when:
 
-- `lambda/package/math` emits only `lm_` math classes.
+- `lambda/doc/math` emits only `lm_` math classes.
 - Existing `test/lambda/math/*.ls` scripts pass against expected `.txt` files.
 - `test/lambda/mathlive/` contains a reproducible MathLive-derived test corpus.
 - A MathLive markup runner reports pass/fail by category.

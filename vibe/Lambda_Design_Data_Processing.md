@@ -11,7 +11,7 @@
 
 **Scope corrections from the audit** (things Lambda already has, contrary to first impressions):
 - **Regex** — supported through **string patterns** (`doc/Lambda_Type.md` §String Patterns): named, regex-like pattern types integrated into the type system.
-- **Charts** — `lambda/package/chart/` is a working Vega-style chart library (13 mark types incl. bar/line/area/point/arc/boxplot/errorbar/errorband/rect, with scales/axes/legends/stacking) rendering to SVG.
+- **Charts** — `lambda/chart/` is a working Vega-style chart library (13 mark types incl. bar/line/area/point/arc/boxplot/errorbar/errorband/rect, with scales/axes/legends/stacking) rendering to SVG.
 - **SQL source** — basic SQLite connectivity exists via `input('file.db')` (`input-rdb.cpp`, driver vtable, read-only; `Lambda_IO_RDB.md`).
 
 ---
@@ -43,7 +43,7 @@
 | SIMD auto-vectorization on `ArrayNum`, mutable views | Typed Array 4 |
 | CSV/TSV input; SQLite input via RDB driver vtable (read-only, for→SQL pushdown) | `input-csv.cpp`, `input-rdb.cpp` |
 | String patterns (regex-family validation in the type system) | `doc/Lambda_Type.md` |
-| Charts to SVG (13 marks, scales/axes/legends) | `lambda/package/chart/` |
+| Charts to SVG (13 marks, scales/axes/legends) | `lambda/chart/` |
 | Hash maps, sorting infrastructure | `lib/hashmap.h`, existing `order by` |
 
 **Missing — what this proposal adds:** `group by` (any form), relational join (any form), window/rolling functions (any form), pivot/melt, the DataFrame type itself (proposal exists, unimplemented).

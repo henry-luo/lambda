@@ -1,7 +1,7 @@
-import layout: lambda.package.graph.layout
-import normalize: lambda.package.graph.normalize
-import paint: lambda.package.graph.transform.paint
-import transform: lambda.package.graph.transform
+import layout: lambda.graph.layout
+import normalize: lambda.graph.normalize
+import paint: lambda.graph.transform.paint
+import transform: lambda.graph.transform
 
 fn item_by_id(items, id) {
   let matches = [for (item in items where item.id == id) item];

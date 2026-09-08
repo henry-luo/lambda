@@ -47,7 +47,7 @@ That target also opens `view.gv` through the CLI's in-memory graph bridge in
 headless mode, covering `.gv` extension dispatch without creating a window.
 Manifest discovery, comparison defaults, retained render execution, and scene
 sanity checks are shared with Mermaid through
-`lambda.package.graph.conformance`; Graphviz keeps only its JSON adapter and
+`lambda.graph.conformance`; Graphviz keeps only its JSON adapter and
 format-specific case summaries.
 
 Upstream grammar reference: `rydesun/tree-sitter-dot` at

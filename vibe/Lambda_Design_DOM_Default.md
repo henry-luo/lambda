@@ -13,7 +13,7 @@
 
 ### 1.1 Purpose
 
-Radiant's UA behavior is split across three code homes — the native engine, the `lambda/package/dom` behavior templates, and the JS realm's own dispatch layer — and until now no single place said which of them owns a given default action, or whether one exists at all. The result is a class of bug that is invisible from any one home: a behavior implemented twice in two homes that quietly disagree (the F1 double-toggle, the F11b keyboard/mouse split, `radiant_uncheck_radio_group`'s shadow copy of radio exclusivity), and a behavior implemented in *no* home that every reader assumes lives in another (form submission, `:target`, contenteditable's Enter key).
+Radiant's UA behavior is split across three code homes — the native engine, the `lambda/dom` behavior templates, and the JS realm's own dispatch layer — and until now no single place said which of them owns a given default action, or whether one exists at all. The result is a class of bug that is invisible from any one home: a behavior implemented twice in two homes that quietly disagree (the F1 double-toggle, the F11b keyboard/mouse split, `radiant_uncheck_radio_group`'s shadow copy of radio exclusivity), and a behavior implemented in *no* home that every reader assumes lives in another (form submission, `:target`, contenteditable's Enter key).
 
 This ledger closes both. §3 lists every event class with an entry per half — dispatch and default action — and a status. §5 lists the cases where an implementation exists but does not follow the spec, which are more dangerous than the absences because they fail silently on ordinary pages. §6 carries the open issues.
 
@@ -321,7 +321,7 @@ Selection policy is the package's: `form.ls` owns plain, additive (Ctrl/Cmd) and
 
 ### 2.8 Mouse focus and selection policy (ES32)
 
-**Ruling (user direction, 2026-09-06).** `lambda/package/dom/mouse.ls`
+**Ruling (user direction, 2026-09-06).** `lambda/dom/mouse.ls`
 owns every `mousedown` **decision**: whether the hit target (or its nearest
 programmatically focusable ancestor) receives mouse focus; whether a primary
 press starts, extends, word-selects, line-selects, or selects all; and the
@@ -354,7 +354,7 @@ table.
 
 ### 2.9 Scroll input policy (ES33)
 
-**Ruling (user direction, 2026-09-06).** `lambda/package/dom/scroll.ls`
+**Ruling (user direction, 2026-09-06).** `lambda/dom/scroll.ls`
 owns every user-input **scroll decision**: the existing key mapping, whether an
 uncancelled wheel delta triggers the scroll chain, and the mapping from a
 scrollbar's geometry-reported `horizontalBefore` / `horizontalThumb` /
@@ -386,7 +386,7 @@ remain native geometry mechanisms rather than input policy.
 
 ### 2.10 Overlay execution and dismissal policy (ES34)
 
-**Ruling (user direction, 2026-09-06).** `lambda/package/dom/menu.ls`
+**Ruling (user direction, 2026-09-06).** `lambda/dom/menu.ls`
 owns every **context-menu decision after the popup opens**: physical row 0–4
 maps to the shared `deleteByCut`, `copy`, `insertFromPaste`,
 `deleteContentForward`, or `selectAll` command vocabulary, and every selected,
@@ -427,7 +427,7 @@ author `contextmenu` remains cancelable at the opening boundary.
 
 ### 2.11 Incomplete non-form text-input fallback (ES35)
 
-**Ruling (user direction, 2026-09-06).** `lambda/package/dom/caret.ls`
+**Ruling (user direction, 2026-09-06).** `lambda/dom/caret.ls`
 owns the remaining legacy `TextInput` fallback after the rich-text and form
 appliers decline. It deliberately maps that callback only to
 `moveCharacterForward`: the shared caret waist collapses a projected selection
@@ -466,7 +466,7 @@ this deliberately no-text-mutation behavior as a divergence.
 
 ## 3. The ledger
 
-Verified against the tree at 2026-09-06 (`event.cpp`, `lambda/package/dom/*.ls`, `lambda/dom/dom_events.cpp`). Anchors are `file:line` at that revision — treat them as pointers to the right neighborhood, not as stable addresses.
+Verified against the tree at 2026-09-06 (`event.cpp`, `lambda/dom/*.ls`, `lambda/dom/dom_events.cpp`). Anchors are `file:line` at that revision — treat them as pointers to the right neighborhood, not as stable addresses.
 
 ### 3.1 Input & editing
 
@@ -761,7 +761,7 @@ New rows start at ESO48; ESO1–ESO47 remain in DOM_State §7. Rows here are def
 | ESO53 | ~~**`:target` is never set.**~~ **landed 2026-09-01 (ES31)** | package snapshot resolution supplies the fragment element (or `null`) to the native transaction. It clears the prior target, writes exactly one `STATE_TARGET`, invalidates selectors, and queues native geometry-aware scrolling |
 | ESO54 | **contenteditable implements a strict subset of the text-control intent set.** §4 — plain clipboard/drop now claim the raw DOM range; word/line deletes, indent/outdent, and undo/redo still reach `domedit` and decline | tree-aware word/line operations remain; `historyUndo`/`historyRedo` additionally need the ring hoisted out of `FormControlProp` (ESO43) |
 | ESO55 | ~~**`ondblclick` / `onselect` were inert and `contextmenu` could not be canceled.**~~ **landed 2026-09-01** — `dblclick` is emitted after the final primary click, text-control selection writes already queue `select`, and a cancelable DOM `contextmenu` now precedes the F10 hook. `onkeypress` is removed because `keypress` remains deliberately unsupported | — |
-| ESO56 | ~~**`<details>` / `<summary>` has no toggle behavior**~~ **landed 2026-08-31 (F15)** — `lambda/package/dom/details.ls` claims `click` on `view <summary>`, writes the parent's `open` through `set_attr`, and dispatches `toggle` on the details. ESO3 was not in fact a blocker: `set_attr` has gone through the DOM operation path with mutation notices since F7. Two prerequisites were wrong in the tree rather than absent — the disclosure marker was pinned to `disclosure-closed` so the triangle never turned, and `set_attr`'s null-clear was dead code (see the ESO62 row). Loading the package needed one more widening of the EO4/F9 `package_governs` gate: a `<details>` in a static document has no form control and no script, so the document owned no evaluator and the toggle silently did nothing — the same shape F9 fixed for rich editing. Residues split out as **ESO62** | proved by `test/ui/dom_pkg_details.json` (12/12 with the package, 9/12 under `RADIANT_DOM_PKG=0`) `dom_pkg_details_accordion.json` (20/20), and `dom_pkg_details_noscript.json` (6/6, the static-document path) |
+| ESO56 | ~~**`<details>` / `<summary>` has no toggle behavior**~~ **landed 2026-08-31 (F15)** — `lambda/dom/details.ls` claims `click` on `view <summary>`, writes the parent's `open` through `set_attr`, and dispatches `toggle` on the details. ESO3 was not in fact a blocker: `set_attr` has gone through the DOM operation path with mutation notices since F7. Two prerequisites were wrong in the tree rather than absent — the disclosure marker was pinned to `disclosure-closed` so the triangle never turned, and `set_attr`'s null-clear was dead code (see the ESO62 row). Loading the package needed one more widening of the EO4/F9 `package_governs` gate: a `<details>` in a static document has no form control and no script, so the document owned no evaluator and the toggle silently did nothing — the same shape F9 fixed for rich editing. Residues split out as **ESO62** | proved by `test/ui/dom_pkg_details.json` (12/12 with the package, 9/12 under `RADIANT_DOM_PKG=0`) `dom_pkg_details_accordion.json` (20/20), and `dom_pkg_details_noscript.json` (6/6, the static-document path) |
 | ESO62 | **`<details>` openness is claimed only where the package decides it — the click.** Three gaps follow. (a) A script write (`d.open = true`, `setAttribute('open','')`) does not close the `name=` group; (b) a document that *loads* with two open members of one group keeps both; (c) activation accepts any direct summary child, not strictly the first | (a) has no cheap seam: of the ~20 `DOM_JS_MUTATION_ATTRIBUTE` notify sites most carry no attribute name, so an `openchange` hook there would hand Lambda every attribute write to filter — the same "no chokepoint" finding F7 made for `state_change`, and the identical residue radio exclusivity carries (§5.2). (b) wants the `init` hook, but that phase visits only `elem->form_control()` elements (EO4) and `<details>` is not one. (c) waits on `:first-of-type` in the selector engine, which would tighten `resolve_css_style.cpp`'s marker rule in the same change |
 | ESO70 | **New browsing contexts cannot execute.** ES31 resolves `_blank` and unmatched target names to `target_kind:"new"`, but `UiContext` owns one current document and exposes no window/tab/context factory | add a host-level context creation API that returns a new browsing session/window, names it when requested, then execute the already-resolved `new` request without a DOM re-search |
 | ESO71 | **Form POST transport is incomplete.** The package constructs form data and selects the request method, but the browsing waist currently accepts only URL/target | extend the native request/execution seam with method, headers, and body ownership; this is transport work, not a second activation policy |
@@ -812,7 +812,7 @@ Of these, only ESO71's submission transport residue (F4), link activation (DOM_S
 The status column is not maintained by inspection of the design docs, which is how the pre-absorption Appendix B acquired two stale rows (§4's clipboard claim; Pointer Events marked ❌ while three pointer types were being dispatched). It is maintained against the tree:
 
 - **"Dispatched"** means a call site constructs the event and reaches `js_dom_dispatch_event` — in practice `radiant_dispatch_built_event` (`event.cpp:5806`) or `radiant_dispatch_window_event`. Registering an `on<type>` content attribute in `script_runner.cpp` is *not* evidence of dispatch; the ESO55 audit removed the unsupported `onkeypress` registration rather than keeping an inert attribute.
-- **"Default action implemented"** means a package handler accepts it (`lambda/package/dom/*.ls`), or a native block performs it and is reachable. A migrated package handler that declines leaves no native copy behind and is therefore *not* implemented (§5.6).
+- **"Default action implemented"** means a package handler accepts it (`lambda/dom/*.ls`), or a native block performs it and is reachable. A migrated package handler that declines leaves no native copy behind and is therefore *not* implemented (§5.6).
 - **A JS-layer implementation is recorded as such**, not as "implemented", because it is unreachable without a live JS dispatch scope and lives in the wrong home (§5.2).
 - **A state written by nobody is not implemented** even when the selector engine matches it — the `:target` / `:visited` shape. Grep for writers of the `STATE_*` name, not for the pseudo-class.
 

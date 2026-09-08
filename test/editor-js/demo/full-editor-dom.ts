@@ -38,6 +38,7 @@ import {
 } from '../src/commands/structural-commands.js'
 import { cmdPasteSlice } from '../src/commands/paste.js'
 import { parseHtmlToDoc, serializeDocToHtml } from '../src/view/html-parser.js'
+import { historyShortcutForKey } from '../src/view/history-shortcut.js'
 import { isNode, isText, nodeAt } from '../src/model/doc.js'
 import type { EditorState } from '../src/commands/types.js'
 import type { Doc, MarkDict, Selection, SourcePath, Transaction } from '../src/model/types.js'
@@ -487,11 +488,15 @@ export class FullEditorDom {
       if (tx !== null && (c.selection?.kind === 'gap' || tx.sel_after?.kind === 'gap')) { e.preventDefault(); this.dispatch({ type: 'apply', tx }); return }
     }
     if (e.key === 'Tab') { e.preventDefault(); this.runCmd(e.shiftKey ? cmdOutdentListItem : cmdIndentListItem); return }
+    const historyShortcut = historyShortcutForKey(e)
+    if (historyShortcut !== null) {
+      e.preventDefault()
+      this.dispatch({ type: historyShortcut })
+      return
+    }
     const meta = e.metaKey || e.ctrlKey
     if (!meta) return
-    if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); this.dispatch({ type: 'undo' }) }
-    else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); this.dispatch({ type: 'redo' }) }
-    else if (e.key === 'b') { e.preventDefault(); this.runCmd(cmdFormatBold) }
+    if (e.key === 'b') { e.preventDefault(); this.runCmd(cmdFormatBold) }
     else if (e.key === 'i') { e.preventDefault(); this.runCmd(cmdFormatItalic) }
     else if (e.key === 'u') { e.preventDefault(); this.runCmd(cmdFormatUnderline) }
   }
