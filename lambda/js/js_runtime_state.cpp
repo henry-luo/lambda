@@ -391,6 +391,9 @@ static void js_root_range_set_storage(JsRootRange* range, Item* slots, int slot_
 // The state capsule has self-referential range descriptors. Initialize those
 // pointers after the final global object exists; copying a default-initialized
 // subobject would otherwise leave a descriptor pointing at a temporary.
+
+
+
 static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     if (!state) return;
     // Keep every precise root descriptor in one catalog so a new state cache
@@ -402,15 +405,15 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     M(&state->builtin_cache->roots, state->builtin_cache->entries, JS_INTRINSIC_BINDING_COUNT, "intrinsic binding function cache") \
     M(&state->readline->roots, &state->readline->namespace_object, 3 + 2 * JS_READLINE_INPUT_MAP_MAX, "readline namespaces and input map") \
     M(&state->buffer.roots, &state->buffer.namespace_object, 2, "Buffer namespace and prototype") \
-    M(&state->https.roots, &state->https.agent_prototype, 2, "HTTPS namespace and Agent prototype") \
+    M(&state->https.roots, &state->https.namespace_object, 2, "HTTPS namespace and Agent prototype") \
     M(&state->util.roots, &state->util.namespace_object, 1, "util namespace") \
     M(&state->crypto.roots, &state->crypto.namespace_object, 1, "crypto namespace") \
     M(&state->child_process.roots, &state->child_process.namespace_object, 1, "child_process namespace") \
     M(&state->tls.roots, &state->tls.namespace_object, 5, "TLS namespace and certificate caches") \
-    M(&state->stream.roots, &state->stream.key_on, 44, "stream keys, prototypes, and namespaces") \
-    M(&state->http.roots, &state->http.server_prototype, 5, "HTTP namespace and prototypes") \
-    M(&state->net.roots, &state->net.socket_prototype, 5, "net namespace and prototypes") \
-    M(&state->fs.roots, &state->fs.internal_binding_namespace, 7, "fs namespaces and prototypes") \
+    M(&state->stream.roots, &state->stream.namespace_object, 45, "stream keys, prototypes, and namespaces") \
+    M(&state->http.roots, &state->http.namespace_object, 5, "HTTP namespace and prototypes") \
+    M(&state->net.roots, &state->net.namespace_object, 5, "net namespace and prototypes") \
+    M(&state->fs.roots, &state->fs.namespace_object, 7, "fs namespaces and prototypes") \
     M(&state->clipboard.roots, &state->clipboard.blob_prototype, 7, "clipboard prototypes and drag session") \
     M(&state->dom.roots, &state->dom.implementation, 4, "DOM singleton wrappers") \
     M(&state->string_concat->roots, &state->string_concat->last_four_byte_escape, 273, "string concatenation fast caches") \
@@ -427,6 +430,27 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     JS_RUNTIME_ROOT_STORAGE(JS_SET_RUNTIME_ROOT)
 #undef JS_RUNTIME_ROOT_STORAGE
 #undef JS_SET_RUNTIME_ROOT
+
+    // A JsNamespaceState-derived cache lays its inherited `namespace_object`
+    // out FIRST, before the fields the subsystem adds, so a range registered at
+    // the first DERIVED field leaves the namespace itself unrooted and scans one
+    // Item past the struct. That is exactly how `require("stream")` came back
+    // with an empty namespace under LAMBDA_GC_FORCE_EVERY (fixed 2026-09-08).
+    // These states are not standard-layout, so offsetof on them is ill-formed;
+    // check the start/count pair against the real addresses once at setup (D5.3).
+#define JS_CHECK_NAMESPACE_ROOT_RANGE(field, last_field, count) \
+    if (&state->field.namespace_object + ((count) - 1) != &state->field.last_field) { \
+        log_error("js-root-range: %s range must start at namespace_object and end at %s", \
+                  #field, #last_field); \
+    }
+    JS_CHECK_NAMESPACE_ROOT_RANGE(stream, internal_add_abort_signal_namespace, 45)
+    JS_CHECK_NAMESPACE_ROOT_RANGE(http, outgoing_message_prototype, 5)
+    JS_CHECK_NAMESPACE_ROOT_RANGE(https, agent_prototype, 2)
+    JS_CHECK_NAMESPACE_ROOT_RANGE(net, stream_socket_constructor, 5)
+    JS_CHECK_NAMESPACE_ROOT_RANGE(fs, internal_promises_namespace, 7)
+    JS_CHECK_NAMESPACE_ROOT_RANGE(tls, ca_default, 5)
+    JS_CHECK_NAMESPACE_ROOT_RANGE(buffer, prototype, 2)
+#undef JS_CHECK_NAMESPACE_ROOT_RANGE
 }
 
 bool js_root_range_register_reset(JsRootRange* range, void* owner,

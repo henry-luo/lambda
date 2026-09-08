@@ -6,6 +6,7 @@
  */
 #include "node_os.hpp"
 #include "../../jube/jube_registry.h"
+#include "node_core_common.hpp"
 #include "../../../lib/shell.h"
 
 #include <cstring>
@@ -573,6 +574,11 @@ extern "C" Item js_os_version(void) {
 // os.networkInterfaces() — returns object keyed by interface name
 extern "C" Item js_os_networkInterfaces(void) {
     Item result = js_new_object();
+    // result accumulates across the whole scan and every step below allocates,
+    // so it needs a root for the duration (D5.4.2)
+    JubeScopedRoots result_roots(node_os_host, 1);
+    uint64_t* result_root = result_roots.slot(result);
+    if (!result_root) return result;
 #if !defined(_WIN32)
     struct ifaddrs* ifap = NULL;
     if (getifaddrs(&ifap) != 0) return result;
@@ -643,29 +649,38 @@ extern "C" Item js_os_networkInterfaces(void) {
 
         bool internal = (ifa->ifa_flags & IFF_LOOPBACK) != 0;
 
-        // build the entry object
+        // build the entry object; it is reachable from nothing until it is
+        // pushed, and each install allocates, so it stays rooted throughout
         Item entry = js_new_object();
-        js_set_key_default(entry, make_string_item("address"), make_string_item(addr));
-        js_set_key_default(entry, make_string_item("netmask"), make_string_item(netmask));
-        js_set_key_default(entry, make_string_item("family"), make_string_item(fam_str));
-        js_set_key_default(entry, make_string_item("mac"), make_string_item(mac));
-        js_set_key_default(entry, make_string_item("internal"), (Item){.item = b2it(internal)});
-        js_set_key_default(entry, make_string_item("cidr"),
-            make_string_item(addr)); // will build full cidr below
+        JubeScopedRoots entry_roots(node_os_host, 3);
+        uint64_t* entry_root = entry_roots.slot(entry);
+        if (!entry_root) continue;
+        jube_node_object_set(node_os_host, entry, "address", make_string_item(addr));
+        jube_node_object_set(node_os_host, entry, "netmask", make_string_item(netmask));
+        jube_node_object_set(node_os_host, entry, "family", make_string_item(fam_str));
+        jube_node_object_set(node_os_host, entry, "mac", make_string_item(mac));
+        jube_node_object_set(node_os_host, entry, "internal", (Item){.item = b2it(internal)});
 
         // build cidr string: "addr/prefix"
         char cidr_str[INET6_ADDRSTRLEN + 8];
         snprintf(cidr_str, sizeof(cidr_str), "%s/%d", addr, cidr);
-        js_set_key_default(entry, make_string_item("cidr"), make_string_item(cidr_str));
+        jube_node_object_set(node_os_host, entry, "cidr", make_string_item(cidr_str));
 
-        // get or create array for this interface name
+        // get or create array for this interface name; the key must survive the
+        // lookup and the array creation, and the array the store before the push
         Item iface_key = make_string_item(ifa->ifa_name);
-        Item iface_arr = js_get_key_default(result, iface_key);
+        uint64_t* iface_key_root = entry_roots.slot(iface_key);
+        if (!iface_key_root) continue;
+        Item iface_arr = js_get_key_default(result, jube_root_item(iface_key_root));
+        uint64_t* iface_arr_root = entry_roots.slot(iface_arr);
+        if (!iface_arr_root) continue;
         if (iface_arr.item == 0 || get_type_id(iface_arr) == LMD_TYPE_UNDEFINED) {
             iface_arr = js_array_new(0);
-            js_set_key_default(result, iface_key, iface_arr);
+            *iface_arr_root = iface_arr.item;
+            js_set_key_default(result, jube_root_item(iface_key_root),
+                               jube_root_item(iface_arr_root));
         }
-        js_array_push(iface_arr, entry);
+        js_array_push(jube_root_item(iface_arr_root), jube_root_item(entry_root));
     }
 
     freeifaddrs(ifap);
@@ -680,21 +695,25 @@ extern "C" Item js_os_userInfo(Item options) {
         if (item_is_error(encoding)) return encoding;
     }
     Item obj = js_new_object();
+    // reachable from nothing while its five properties are installed (D5.4.2)
+    JubeScopedRoots obj_roots(node_os_host, 1);
+    uint64_t* obj_root = obj_roots.slot(obj);
+    if (!obj_root) return obj;
 #ifdef _WIN32
     const char* username = shell_getenv("USERNAME");
     const char* homedir = shell_getenv("USERPROFILE");
-    js_set_key_default(obj, make_string_item("uid"), (Item){.item = i2it(-1)});
-    js_set_key_default(obj, make_string_item("gid"), (Item){.item = i2it(-1)});
-    js_set_key_default(obj, make_string_item("username"), make_string_item(username ? username : ""));
-    js_set_key_default(obj, make_string_item("homedir"), make_string_item(homedir ? homedir : ""));
-    js_set_key_default(obj, make_string_item("shell"), ItemNull);
+    jube_node_object_set(node_os_host, obj, "uid", (Item){.item = i2it(-1)});
+    jube_node_object_set(node_os_host, obj, "gid", (Item){.item = i2it(-1)});
+    jube_node_object_set(node_os_host, obj, "username", make_string_item(username ? username : ""));
+    jube_node_object_set(node_os_host, obj, "homedir", make_string_item(homedir ? homedir : ""));
+    jube_node_object_set(node_os_host, obj, "shell", ItemNull);
 #else
     struct passwd* pw = getpwuid(getuid());
-    js_set_key_default(obj, make_string_item("uid"), (Item){.item = i2it((int64_t)getuid())});
-    js_set_key_default(obj, make_string_item("gid"), (Item){.item = i2it((int64_t)getgid())});
-    js_set_key_default(obj, make_string_item("username"), make_string_item(pw ? pw->pw_name : ""));
-    js_set_key_default(obj, make_string_item("homedir"), make_string_item(pw ? pw->pw_dir : ""));
-    js_set_key_default(obj, make_string_item("shell"), make_string_item(pw ? pw->pw_shell : ""));
+    jube_node_object_set(node_os_host, obj, "uid", (Item){.item = i2it((int64_t)getuid())});
+    jube_node_object_set(node_os_host, obj, "gid", (Item){.item = i2it((int64_t)getgid())});
+    jube_node_object_set(node_os_host, obj, "username", make_string_item(pw ? pw->pw_name : ""));
+    jube_node_object_set(node_os_host, obj, "homedir", make_string_item(pw ? pw->pw_dir : ""));
+    jube_node_object_set(node_os_host, obj, "shell", make_string_item(pw ? pw->pw_shell : ""));
 #endif
     return obj;
 }

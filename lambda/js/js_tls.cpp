@@ -385,7 +385,10 @@ static Item tls_clone_unique_string_array(Item source, bool freeze_result) {
 static Item tls_get_bundled_certificates(void) {
     if (tls_ca_bundled_cache.item != 0) return tls_ca_bundled_cache;
     tls_ca_bundled_cache = js_array_new(0);
-    js_array_push(tls_ca_bundled_cache, make_string_item(tls_builtin_root_certificate));
+    // the push grows the array, and that allocation can reclaim the pem string
+    // while it is still only a bare local (D5.4.2)
+    JS_ROOTS(pem_roots, pem_root, make_string_item(tls_builtin_root_certificate));
+    js_array_push(tls_ca_bundled_cache, pem_root.get());
     js_object_freeze(tls_ca_bundled_cache);
     return tls_ca_bundled_cache;
 }
@@ -2861,12 +2864,14 @@ extern "C" Item js_get_tls_namespace(void) {
     js_set_key_cstr(tls_namespace, "DEFAULT_CIPHERS", make_string_item("TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256"));
     js_set_key_cstr(tls_namespace, "DEFAULT_ECDH_CURVE", make_string_item("auto"));
 
-    Item root_key = make_string_item("rootCertificates");
-    js_set_key_default(tls_namespace, root_key, tls_get_bundled_certificates());
-    js_mark_non_writable(tls_namespace, root_key);
+    // building the certificate bundle allocates, so the key it will be stored
+    // under has to outlive that call (D5.4.2)
+    JS_ROOTS(key_roots, root_key_root, make_string_item("rootCertificates"));
+    JS_ROOTS(certs_roots, certs_root, tls_get_bundled_certificates());
+    js_set_key_default(tls_namespace, root_key_root.get(), certs_root.get());
+    js_mark_non_writable(tls_namespace, root_key_root.get());
 
-    Item default_key = make_string_item("default");
-    js_set_key_default(tls_namespace, default_key, tls_namespace);
+    js_set_key_cstr(tls_namespace, "default", tls_namespace);
 
     return tls_namespace;
 }

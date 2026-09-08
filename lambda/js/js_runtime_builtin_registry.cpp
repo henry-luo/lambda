@@ -295,9 +295,9 @@ static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec
         const JsIntrinsicTargetSpec* target = js_intrinsic_target_find(
             spec->builtin_id);
         if (!target || !target->call_body) return ItemError;
-        fn->native_call = target->call_body;
-        fn->native_construct = target->construct_body;
-        fn->native_policy = JS_NATIVE_CALL_BODY;
+        js_fn_native_ensure(fn)->call = target->call_body;
+        js_fn_native_ensure(fn)->construct = target->construct_body;
+        js_fn_native_ensure(fn)->policy = JS_NATIVE_CALL_BODY;
     }
     fn->name = heap_create_name(display_name, strlen(display_name));
     fn->flags = spec->flags;
@@ -485,8 +485,8 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
         tag_getter->formal_length = -1;
         // The symbol accessor's spelling is observable metadata; its stored
         // body protects callable behavior from later name mutation.
-        tag_getter->native_call = js_intrinsic_typed_array_to_string_tag_body;
-        tag_getter->native_policy = JS_NATIVE_CALL_BODY;
+        js_fn_native_ensure(tag_getter)->call = js_intrinsic_typed_array_to_string_tag_body;
+        js_fn_native_ensure(tag_getter)->policy = JS_NATIVE_CALL_BODY;
         js_function_finalize_capabilities(tag_getter);
         Item getter_item = (Item){.function = (Function*)tag_getter};
         Item tag_name = js_well_known_symbol_key(4);

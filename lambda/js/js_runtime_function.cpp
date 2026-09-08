@@ -98,7 +98,7 @@ extern "C" bool js_function_has_own_prototype(Item function) {
         ((fn->flags & JS_FUNC_FLAG_METHOD) &&
             !(fn->flags & JS_FUNC_FLAG_GENERATOR)) ||
         (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD) ||
-        fn->native_construct == js_intrinsic_ctor_proxy_construct_body) {
+        js_fn_native(fn)->construct == js_intrinsic_ctor_proxy_construct_body) {
         return false;
     }
     if (fn->intrinsic_class == JS_CLASS_SYMBOL ||
@@ -165,11 +165,11 @@ void js_function_finalize_capabilities(JsFunction* fn) {
         fn->construct = NULL;
     } else if (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) {
         if (inherited_construct) fn->construct = js_construct_entry_bound;
-    } else if (fn->native_construct) {
+    } else if (js_fn_native(fn)->construct) {
         fn->construct = js_construct_entry_native;
     } else if (inherited_construct) {
         fn->construct = inherited_construct;
-    } else if (!fn->native_call && (fn->func_ptr ||
+    } else if (!js_fn_native(fn)->call && (fn->func_ptr ||
             fn->body_kind == JS_FUNCTION_BODY_AST)) {
         fn->construct = js_construct_entry_ordinary;
     }
@@ -233,9 +233,11 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
         gc_mark_item(gc, fn->klass->instance_prototype.item);
         gc_mark_item(gc, fn->klass->superclass.item);
     }
-    gc_mark_item(gc, fn->ast_lexical_this.item);
-    gc_mark_item(gc, fn->ast_lexical_new_target.item);
-    if (fn->interp_env) gc_mark_object_ptr(gc, fn->interp_env);
+    if (fn->ast) {
+        gc_mark_item(gc, fn->ast->lexical_this.item);
+        gc_mark_item(gc, fn->ast->lexical_new_target.item);
+        if (fn->ast->env) gc_mark_object_ptr(gc, fn->ast->env);
+    }
     return 1;
 }
 
@@ -248,6 +250,12 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     }                                                                          \
     return (fn)->field;
 
+JsNativeCode* js_fn_native_ensure(JsFunction* fn) {
+    JS_FN_PAYLOAD_ENSURE(fn, native, JsNativeCode)
+}
+JsAstBody* js_fn_ast_ensure(JsFunction* fn) {
+    JS_FN_PAYLOAD_ENSURE(fn, ast, JsAstBody)
+}
 JsBoundData* js_fn_bound_ensure(JsFunction* fn) {
     JS_FN_PAYLOAD_ENSURE(fn, bound, JsBoundData)
 }
@@ -256,6 +264,19 @@ JsClassData* js_fn_class_ensure(JsFunction* fn) {
 }
 JsWithData* js_fn_with_ensure(JsFunction* fn) {
     JS_FN_PAYLOAD_ENSURE(fn, with, JsWithData)
+}
+
+// A GC-backed value reaches the payload's Items through its tracer. A
+// pool-backed one is not traced at all, and its one-shot root registration may
+// already have run before this payload existed, so root the payload's own slots
+// here rather than re-entering that path (same contract as the eval origin).
+static void js_function_root_ast_payload(JsFunction* fn) {
+    if (!fn || !fn->ast) return;
+    if (context && context->heap && context->heap->gc &&
+            !gc_is_managed(context->heap->gc, fn)) {
+        heap_try_register_gc_root((uint64_t*)&fn->ast->lexical_this);
+        heap_try_register_gc_root((uint64_t*)&fn->ast->lexical_new_target);
+    }
 }
 
 extern "C" void js_function_set_eval_origin(JsFunction* fn, String* filename,
@@ -289,6 +310,8 @@ extern "C" void js_function_gc_destroy(void* data) {
     if (fn->bound) { mem_free(fn->bound); fn->bound = NULL; }
     if (fn->klass) { mem_free(fn->klass); fn->klass = NULL; }
     if (fn->with) { mem_free(fn->with); fn->with = NULL; }
+    if (fn->ast) { mem_free(fn->ast); fn->ast = NULL; }
+    if (fn->native) { mem_free(fn->native); fn->native = NULL; }
 }
 
 extern "C" int js_function_gc_compact(void* data, gc_heap_t* gc) {
@@ -496,17 +519,19 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     if (!fn) return ItemError;
     function_root.set((Item){.function = (Function*)fn});
     js_function_init_common(fn, param_count);
-    fn->ast_function = function;
-    fn->ast_script = script;
-    fn->interp_env = environment;
+    JsAstBody* ast = js_fn_ast_ensure(fn);
+    if (!ast) return ItemError;
+    ast->function = function;
+    ast->script = script;
+    ast->env = environment;
     fn->body_kind = JS_FUNCTION_BODY_AST;
     fn->flags = flags;
     fn->module_state_id = lambda_active_module_state_id();
     fn->home_global = js_get_global_this();
-    fn->ast_lexical_this = (flags & JS_FUNC_FLAG_ARROW)
-        ? js_get_this() : ItemNull;
-    fn->ast_lexical_new_target = (flags & JS_FUNC_FLAG_ARROW)
+    ast->lexical_this = (flags & JS_FUNC_FLAG_ARROW) ? js_get_this() : ItemNull;
+    ast->lexical_new_target = (flags & JS_FUNC_FLAG_ARROW)
         ? js_get_new_target() : ItemNull;
+    js_function_root_ast_payload(fn);
     fn->name = function->name;
     fn->formal_length = (int16_t)param_count;
     // AST closures created inside `with` use the same captured object
@@ -595,7 +620,7 @@ bool js_function_source_span(const char* source, size_t source_length,
             return ItemError; \
         } \
         params \
-        return fn->native_target.member call_args; \
+        return js_fn_native(fn)->target.member call_args; \
     }
 
 JS_DEFINE_NATIVE_CALL_ADAPTER(0, p0, (void)args;, ())
@@ -630,13 +655,15 @@ static Item js_new_native_function_impl(JsNativeTarget target,
     if (!fn) return ItemError;
     fn_root.set((Item){.function = (Function*)fn});
     js_function_init_common(fn, policy == JS_NATIVE_CALL_REST ? -arity : arity);
-    fn->native_target = target;
-    fn->native_call = call_body;
-    fn->native_construct = constructable
+    JsNativeCode* native = js_fn_native_ensure(fn);
+    if (!native) return ItemError;
+    native->target = target;
+    native->call = call_body;
+    native->construct = constructable
         ? (construct_body ? construct_body : js_native_construct_via_call_body)
         : NULL;
-    fn->native_arity = (uint8_t)arity;
-    fn->native_policy = (uint8_t)policy;
+    native->arity = (uint8_t)arity;
+    native->policy = (uint8_t)policy;
     // D6.2.2v2: host-native callbacks execute in the caller's module scope; assigning
     // the publication scope here makes nested eval copy from an unrelated
     // state and fails Test262's $262.evalScript/agent callbacks.
@@ -850,16 +877,16 @@ static Item js_native_call_span(Item fn_item, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
     (void)this_value; (void)result_home;
     JsFunction* fn = (JsFunction*)fn_item.function;
-    return fn && fn->native_target.span
-        ? fn->native_target.span(args, argc) : ItemError;
+    return fn && js_fn_native(fn)->target.span
+        ? js_fn_native(fn)->target.span(args, argc) : ItemError;
 }
 
 static Item js_native_call_this_span(Item fn_item, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
     (void)result_home;
     JsFunction* fn = (JsFunction*)fn_item.function;
-    return fn && fn->native_target.this_span
-        ? fn->native_target.this_span(this_value, args, argc) : ItemError;
+    return fn && js_fn_native(fn)->target.this_span
+        ? js_fn_native(fn)->target.this_span(this_value, args, argc) : ItemError;
 }
 
 Item js_new_native_span_function(JsNativeSpan target) {
@@ -910,7 +937,7 @@ Item js_new_native_payload_function(JsNativeCallBody call_body,
             return ItemError; \
         } \
         Item env_item = {.item = (uint64_t)(uintptr_t)fn->env}; \
-        return fn->native_target.member call_args; \
+        return js_fn_native(fn)->target.member call_args; \
     }
 
 JS_DEFINE_NATIVE_CLOSURE_ADAPTER(0, p1, (env_item))

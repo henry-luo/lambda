@@ -171,7 +171,7 @@ extern "C" Item dom_element_prototype_operation_body(Item callee, Item this_valu
     JsFunction* fn = get_type_id(callee) == LMD_TYPE_FUNC
         ? (JsFunction*)callee.function : NULL;
     JubeDomElementOperation operation = fn
-        ? (JubeDomElementOperation)fn->native_target.bits
+        ? (JubeDomElementOperation)js_fn_native(fn)->target.bits
         : (JubeDomElementOperation)0;
     return radiant_dom_element_operation(this_value, operation, args, argc);
 }
@@ -3930,7 +3930,7 @@ static Item js_classlist_operation_body(Item callee, Item this_value,
     JsFunction* fn = get_type_id(callee) == LMD_TYPE_FUNC
         ? (JsFunction*)callee.function : NULL;
     JsClassListOperation operation = fn
-        ? (JsClassListOperation)fn->native_target.bits : (JsClassListOperation)0;
+        ? (JsClassListOperation)js_fn_native(fn)->target.bits : (JsClassListOperation)0;
     return js_classlist_operation(this_value, operation, args, argc);
 }
 
@@ -7314,7 +7314,7 @@ static Item js_text_data_body(Item callee, Item this_value, Item* args,
     Item arg0 = argc > 0 ? args[0] : make_js_undefined();
     Item arg1 = argc > 1 ? args[1] : make_js_undefined();
     Item arg2 = argc > 2 ? args[2] : make_js_undefined();
-    switch ((JsTextDataOperation)fn->native_target.bits) {
+    switch ((JsTextDataOperation)js_fn_native(fn)->target.bits) {
     case JS_TEXT_DATA_REPLACE:
         return dom_text_replace_data_method(node->as_text(), arg0, arg1, arg2);
     case JS_TEXT_DATA_INSERT:
@@ -11474,7 +11474,7 @@ static Item dom_svg_matrix_operation(Item callee, Item this_value, Item* args,
     (void)result_home;
     JsFunction* fn = (JsFunction*)callee.function;
     JsSvgMatrixOperation operation = fn
-        ? (JsSvgMatrixOperation)fn->native_target.bits : JS_SVG_MATRIX_INVERSE;
+        ? (JsSvgMatrixOperation)js_fn_native(fn)->target.bits : JS_SVG_MATRIX_INVERSE;
     Item arg0 = argc > 0 ? args[0] : make_js_undefined();
     Item arg1 = argc > 1 ? args[1] : make_js_undefined();
     RdtMatrix matrix = dom_svg_matrix_from_item(dom_realm_receiver());

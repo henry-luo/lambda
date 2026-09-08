@@ -234,7 +234,7 @@ static Item jube_tramp_invoke(Item fn_item, Item this_value, Item* args,
     JsFunction* fn = get_type_id(fn_item) == LMD_TYPE_FUNC
         ? (JsFunction*)fn_item.function : NULL;
     JubeMemberRecord* rec = fn
-        ? (JubeMemberRecord*)(uintptr_t)fn->native_target.bits : NULL;
+        ? (JubeMemberRecord*)(uintptr_t)js_fn_native(fn)->target.bits : NULL;
     Item out = jube_undefined_item();
     if (rec && rec->bind && rec->bind->call) {
         rec->bind->call(this_value, args, argc, &out);

@@ -570,50 +570,53 @@ async function downloadPage(url, outputDir, htmlFilename = 'index.html') {
     console.log(`Open ${htmlPath} in a browser to view the page.`);
 }
 
-// CLI entry point
-const args = process.argv.slice(2);
+function main(args) {
+    let pageUrl = null;
+    let outputDir = null;
+    let htmlName = 'index.html';
 
-// parse options
-let pageUrl = null;
-let outputDir = null;
-let htmlName = 'index.html';
-
-for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--prefix' && args[i + 1]) {
-        resourcePrefix = args[i + 1];
-        i++;
-    } else if (args[i] === '--name' && args[i + 1]) {
-        htmlName = args[i + 1];
-        i++;
-    } else if (!pageUrl) {
-        pageUrl = args[i];
-    } else if (!outputDir) {
-        outputDir = args[i];
+    for (let i = 0; i < args.length; i++) {
+        if (args[i] === '--prefix' && args[i + 1]) {
+            resourcePrefix = args[i + 1];
+            i++;
+        } else if (args[i] === '--name' && args[i + 1]) {
+            htmlName = args[i + 1];
+            i++;
+        } else if (!pageUrl) {
+            pageUrl = args[i];
+        } else if (!outputDir) {
+            outputDir = args[i];
+        }
     }
+
+    if (!pageUrl || !outputDir) {
+        console.log('Usage: node download-page.js <url> <output-dir> [options]');
+        console.log('');
+        console.log('Options:');
+        console.log('  --prefix <prefix>   Add prefix to all resource filenames');
+        console.log('  --name <name>       Custom name for the HTML file (default: index.html)');
+        console.log('');
+        console.log('Example: node download-page.js https://example.com ./output --prefix example --name example.html');
+        process.exitCode = 1;
+        return;
+    }
+
+    try {
+        new URL(pageUrl);
+    } catch (e) {
+        console.error(`Error: Invalid URL: ${pageUrl}`);
+        process.exitCode = 1;
+        return;
+    }
+
+    downloadPage(pageUrl, path.resolve(outputDir), htmlName)
+        .catch(e => {
+            console.error(`Error: ${e.message}`);
+            process.exitCode = 1;
+        });
 }
 
-if (!pageUrl || !outputDir) {
-    console.log('Usage: node download-page.js <url> <output-dir> [options]');
-    console.log('');
-    console.log('Options:');
-    console.log('  --prefix <prefix>   Add prefix to all resource filenames');
-    console.log('  --name <name>       Custom name for the HTML file (default: index.html)');
-    console.log('');
-    console.log('Example: node download-page.js https://example.com ./output --prefix example --name example.html');
-    process.exit(1);
-}
+// share transport and filename rules with fixture vendoring without duplicating them.
+module.exports = { fetchResource: fetch, getExtension, toSafeFilename };
 
-// validate URL
-try {
-    new URL(pageUrl);
-} catch (e) {
-    console.error(`Error: Invalid URL: ${pageUrl}`);
-    process.exit(1);
-}
-
-// run
-downloadPage(pageUrl, path.resolve(outputDir), htmlName)
-    .catch(e => {
-        console.error(`Error: ${e.message}`);
-        process.exit(1);
-    });
+if (require.main === module) main(process.argv.slice(2));

@@ -1260,17 +1260,19 @@ static void dns_register_roots_once(void) {
 }
 
 static Item dns_array_copy(Item servers) {
-    Item copy = js_array_new(0);
-    if (get_type_id(servers) != LMD_TYPE_ARRAY) return copy;
-    int64_t len = js_array_length(servers);
+    JS_ROOTS(roots, servers_root, servers, copy_root, js_array_new(0));
+    if (get_type_id(servers_root.get()) != LMD_TYPE_ARRAY) return copy_root.get();
+    int64_t len = js_array_length(servers_root.get());
     for (int64_t i = 0; i < len; i++) {
-        js_array_push(copy, js_elements_get_int(servers, i));
+        js_array_push(copy_root.get(), js_elements_get_int(servers_root.get(), i));
     }
-    return copy;
+    return copy_root.get();
 }
 
 // windows uses the native resolver path and never parses /etc/resolv.conf.
 #ifndef _WIN32
+// The array grows before it takes the element, so the freshly built string has
+// to outlive that growth allocation (D5.4.2).
 static void dns_push_resolv_conf_server(Item servers, const char* start, const char* end) {
     while (start < end && (*start == ' ' || *start == '\t')) start++;
     while (end > start && (end[-1] == ' ' || end[-1] == '\t' ||
@@ -1279,12 +1281,18 @@ static void dns_push_resolv_conf_server(Item servers, const char* start, const c
     }
     if (end <= start) return;
     int len = (int)(end - start);
-    if (len > 0 && len < 128) js_array_push(servers, make_string_item(start, len));
+    if (len > 0 && len < 128) {
+        JS_ROOTS(roots, servers_root, servers, entry_root, make_string_item(start, len));
+        js_array_push(servers_root.get(), entry_root.get());
+    }
 }
 #endif
 
 static Item dns_load_system_servers(void) {
-    Item servers = js_array_new(0);
+    // the array is reachable from nothing while the file is parsed, and every
+    // parsed entry allocates twice (the string and the grown backing store)
+    JS_ROOTS(servers_roots, servers_root, js_array_new(0));
+    Item servers = servers_root.get();
 #ifndef _WIN32
     FILE* file = fopen("/etc/resolv.conf", "r");
     if (file) {
@@ -1304,10 +1312,11 @@ static Item dns_load_system_servers(void) {
         fclose(file);
     }
 #endif
-    if (js_array_length(servers) == 0) {
-        js_array_push(servers, make_string_item("127.0.0.1"));
+    if (js_array_length(servers_root.get()) == 0) {
+        JS_ROOTS(fallback_roots, fallback_root, make_string_item("127.0.0.1"));
+        js_array_push(servers_root.get(), fallback_root.get());
     }
-    return servers;
+    return servers_root.get();
 }
 
 static Item dns_get_default_servers(void) {
@@ -1323,18 +1332,18 @@ static Item dns_validated_servers_copy(Item servers_item) {
         return throw_invalid_servers_array_type(servers_item);
     }
 
-    Item copy = js_array_new(0);
-    int64_t len = js_array_length(servers_item);
+    JS_ROOTS(roots, source_root, servers_item, copy_root, js_array_new(0));
+    int64_t len = js_array_length(source_root.get());
     for (int64_t i = 0; i < len; i++) {
-        Item server = js_elements_get_int(servers_item, i);
+        Item server = js_elements_get_int(source_root.get(), i);
         if (get_type_id(server) != LMD_TYPE_STRING) {
             char name[32];
             snprintf(name, sizeof(name), "servers[%lld]", (long long)i);
             return js_throw_invalid_arg_type(name, "string", server);
         }
-        js_array_push(copy, server);
+        js_array_push(copy_root.get(), server);
     }
-    return copy;
+    return copy_root.get();
 }
 
 static Item dns_receiver_servers(Item receiver) {
@@ -1455,7 +1464,14 @@ extern "C" Item js_dns_setLocalAddress(Item ipv4_item, Item ipv6_item) {
 
 template <typename Target>
 JS_FORWARD_STATIC_VOID( dns_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
-JS_FORWARD_STATIC_VOID( dns_set_constant, (Item ns, const char* name, const char* value), js_set_key_default, (ns, make_string_item(name), make_string_item(value)))
+// The key and the value are both freshly allocated; argument evaluation order
+// is unspecified, so whichever is built first would be an unrooted temporary
+// while the other allocates (D5.4.2). Build the value under a root, then let
+// js_set_key_cstr own the key.
+static void dns_set_constant(Item ns, const char* name, const char* value) {
+    JS_ROOTS(roots, ns_root, ns, value_root, make_string_item(value));
+    js_set_key_cstr(ns_root.get(), name, value_root.get());
+}
 
 typedef struct DnsResolverMethodSpec {
     const char* name;

@@ -6,6 +6,7 @@
  */
 #include "node_path.hpp"
 #include "../../jube/jube_registry.h"
+#include "node_core_common.hpp"
 #include "../../../lib/file.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/path_str.h"
@@ -408,13 +409,18 @@ extern "C" Item js_path_parse(Item path_item) {
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
 
     Item obj = js_new_object();
+    // the fresh object is reachable from nothing while its five properties are
+    // installed, and every install allocates a key and a value (D5.4.2)
+    JubeScopedRoots obj_roots(node_path_host, 1);
+    uint64_t* obj_root = obj_roots.slot(obj);
+    if (!obj_root) return obj;
 
     if (!path || path[0] == '\0') {
-        js_set_key_default(obj, make_string_item("root"), make_string_item(""));
-        js_set_key_default(obj, make_string_item("dir"), make_string_item(""));
-        js_set_key_default(obj, make_string_item("base"), make_string_item(""));
-        js_set_key_default(obj, make_string_item("ext"), make_string_item(""));
-        js_set_key_default(obj, make_string_item("name"), make_string_item(""));
+        jube_node_object_set(node_path_host, obj, "root", make_string_item(""));
+        jube_node_object_set(node_path_host, obj, "dir", make_string_item(""));
+        jube_node_object_set(node_path_host, obj, "base", make_string_item(""));
+        jube_node_object_set(node_path_host, obj, "ext", make_string_item(""));
+        jube_node_object_set(node_path_host, obj, "name", make_string_item(""));
         return obj;
     }
 
@@ -455,11 +461,11 @@ extern "C" Item js_path_parse(Item path_item) {
     if (name_len < 0) name_len = 0;
     const char* base = stripped + base_start;
 
-    js_set_key_default(obj, make_string_item("root"), make_string_item(root));
-    js_set_key_default(obj, make_string_item("dir"), has_dir ? make_string_item(stripped, dir_len) : make_string_item(""));
-    js_set_key_default(obj, make_string_item("base"), make_string_item(base, base_len));
-    js_set_key_default(obj, make_string_item("ext"), ext_len > 0 ? make_string_item(stripped + ext_start, ext_len) : make_string_item(""));
-    js_set_key_default(obj, make_string_item("name"), make_string_item(base, name_len));
+    jube_node_object_set(node_path_host, obj, "root", make_string_item(root));
+    jube_node_object_set(node_path_host, obj, "dir", has_dir ? make_string_item(stripped, dir_len) : make_string_item(""));
+    jube_node_object_set(node_path_host, obj, "base", make_string_item(base, base_len));
+    jube_node_object_set(node_path_host, obj, "ext", ext_len > 0 ? make_string_item(stripped + ext_start, ext_len) : make_string_item(""));
+    jube_node_object_set(node_path_host, obj, "name", make_string_item(base, name_len));
 
     return obj;
 }
@@ -749,12 +755,17 @@ static Item js_path_win32_parse(Item path_item) {
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     Item obj = js_new_object();
+    // the fresh object is reachable from nothing while its five properties are
+    // installed, and every install allocates a key and a value (D5.4.2)
+    JubeScopedRoots obj_roots(node_path_host, 1);
+    uint64_t* obj_root = obj_roots.slot(obj);
+    if (!obj_root) return obj;
     if (!path || !path[0]) {
-        js_set_key_default(obj, make_string_item("root"), make_string_item(""));
-        js_set_key_default(obj, make_string_item("dir"), make_string_item(""));
-        js_set_key_default(obj, make_string_item("base"), make_string_item(""));
-        js_set_key_default(obj, make_string_item("ext"), make_string_item(""));
-        js_set_key_default(obj, make_string_item("name"), make_string_item(""));
+        jube_node_object_set(node_path_host, obj, "root", make_string_item(""));
+        jube_node_object_set(node_path_host, obj, "dir", make_string_item(""));
+        jube_node_object_set(node_path_host, obj, "base", make_string_item(""));
+        jube_node_object_set(node_path_host, obj, "ext", make_string_item(""));
+        jube_node_object_set(node_path_host, obj, "name", make_string_item(""));
         return obj;
     }
 
@@ -764,11 +775,11 @@ static Item js_path_win32_parse(Item path_item) {
     }
     if (only_separators) {
         Item root = make_string_item(path, 1);
-        js_set_key_default(obj, make_string_item("root"), root);
-        js_set_key_default(obj, make_string_item("dir"), root);
-        js_set_key_default(obj, make_string_item("base"), make_string_item(""));
-        js_set_key_default(obj, make_string_item("ext"), make_string_item(""));
-        js_set_key_default(obj, make_string_item("name"), make_string_item(""));
+        jube_node_object_set(node_path_host, obj, "root", root);
+        jube_node_object_set(node_path_host, obj, "dir", root);
+        jube_node_object_set(node_path_host, obj, "base", make_string_item(""));
+        jube_node_object_set(node_path_host, obj, "ext", make_string_item(""));
+        jube_node_object_set(node_path_host, obj, "name", make_string_item(""));
         return obj;
     }
 
@@ -807,11 +818,11 @@ static Item js_path_win32_parse(Item path_item) {
     if (base_is_all_dots) ext_at = -1;
     int ext_len = ext_at >= 0 ? end - ext_at : 0;
     int name_len = base_len - ext_len;
-    js_set_key_default(obj, make_string_item("root"), make_string_item(path, root_len));
-    js_set_key_default(obj, make_string_item("dir"), dir_len ? make_string_item(path, dir_len) : make_string_item(""));
-    js_set_key_default(obj, make_string_item("base"), make_string_item(path + base_start, base_len));
-    js_set_key_default(obj, make_string_item("ext"), ext_len ? make_string_item(path + ext_at, ext_len) : make_string_item(""));
-    js_set_key_default(obj, make_string_item("name"), make_string_item(path + base_start, name_len));
+    jube_node_object_set(node_path_host, obj, "root", make_string_item(path, root_len));
+    jube_node_object_set(node_path_host, obj, "dir", dir_len ? make_string_item(path, dir_len) : make_string_item(""));
+    jube_node_object_set(node_path_host, obj, "base", make_string_item(path + base_start, base_len));
+    jube_node_object_set(node_path_host, obj, "ext", ext_len ? make_string_item(path + ext_at, ext_len) : make_string_item(""));
+    jube_node_object_set(node_path_host, obj, "name", make_string_item(path + base_start, name_len));
     return obj;
 }
 
@@ -942,10 +953,16 @@ static Item js_path_win32_matches_glob(Item path_item, Item pattern_item) {
 template <typename Target>
 static void js_path_set_method(Item ns, const char* name, Target target,
         int adapter_arity) {
+    // building the function value allocates, so the namespace and the key it
+    // will be stored under both need roots across it (D5.4.2)
+    JubeScopedRoots roots(node_path_host, 2);
+    uint64_t* ns_root = roots.slot(ns);
+    if (!ns_root) return;
     Item key = make_string_item(name);
-    Item fn = jube_new_function(node_path_host->script, target,
-        adapter_arity);
-    js_set_key_default(ns, key, fn);
+    uint64_t* key_root = roots.slot(key);
+    if (!key_root) return;
+    Item fn = jube_new_function(node_path_host->script, target, adapter_arity);
+    js_set_key_default(jube_root_item(ns_root), jube_root_item(key_root), fn);
 }
 
 Item node_path_namespace(void) {
@@ -968,14 +985,20 @@ Item node_path_namespace(void) {
     js_path_set_method(path_namespace, "toNamespacedPath", js_path_toNamespacedPath, 1);
 
     // properties
-    js_set_key_default(path_namespace, make_string_item("sep"), js_path_get_sep());
-    js_set_key_default(path_namespace, make_string_item("delimiter"), js_path_get_delimiter());
+    jube_node_object_set(node_path_host, path_namespace, "sep", js_path_get_sep());
+    jube_node_object_set(node_path_host, path_namespace, "delimiter", js_path_get_delimiter());
 
     // path.posix = path (on POSIX systems, posix is the same as the default)
-    js_set_key_default(path_namespace, make_string_item("posix"), path_namespace);
+    jube_node_object_set(node_path_host, path_namespace, "posix", path_namespace);
 
-    // path.win32 — win32-specific path implementations
+    // path.win32 — win32-specific path implementations.
+    // path_namespace is already a persistent root (node_path_runtime_attach),
+    // but win32_ns is reachable from nothing until it is stored below, and each
+    // install allocates — it must be rooted for the whole build (D5.4.2).
     Item win32_ns = js_new_object();
+    JubeScopedRoots win32_roots(node_path_host, 1);
+    uint64_t* win32_root = win32_roots.slot(win32_ns);
+    if (!win32_root) return path_namespace;
     js_path_set_method(win32_ns, "basename",   js_path_win32_basename, 2);
     js_path_set_method(win32_ns, "dirname",    js_path_win32_dirname, 1);
     js_path_set_method(win32_ns, "extname",    js_path_win32_extname, 1);
@@ -988,13 +1011,12 @@ Item node_path_namespace(void) {
     js_path_set_method(win32_ns, "format",     js_path_win32_format, 1);
     js_path_set_method(win32_ns, "matchesGlob", js_path_win32_matches_glob, 2);
     js_path_set_method(win32_ns, "toNamespacedPath", js_path_win32_toNamespacedPath, 1);
-    js_set_key_default(win32_ns, make_string_item("sep"), make_string_item("\\"));
-    js_set_key_default(win32_ns, make_string_item("delimiter"), make_string_item(";"));
-    js_set_key_default(path_namespace, make_string_item("win32"), win32_ns);
+    jube_node_object_set(node_path_host, win32_ns, "sep", make_string_item("\\"));
+    jube_node_object_set(node_path_host, win32_ns, "delimiter", make_string_item(";"));
+    jube_node_object_set(node_path_host, path_namespace, "win32", win32_ns);
 
     // default export
-    Item default_key = make_string_item("default");
-    js_set_key_default(path_namespace, default_key, path_namespace);
+    jube_node_object_set(node_path_host, path_namespace, "default", path_namespace);
 
     return path_namespace;
 }

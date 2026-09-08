@@ -4866,24 +4866,30 @@ extern "C" Item js_assert_doesNotReject(Item asyncFnOrPromise, Item error_expect
 // assert Module Namespace
 // =============================================================================
 
+// D5.2/D6.2.2v2: native-method publication uses one exact-rooted shape —
+// building the function value allocates, so argument evaluation order must
+// never decide whether the key survives the collection (D5.4.2).
 template <typename Target>
 static void assert_set_method(Item ns, const char* name, Target target,
         int adapter_arity) {
-    Item key = assert_make_string(name);
-    Item fn = js_new_native_function(target, adapter_arity);
-    js_set_key_default(ns, key, fn);
+    JS_ROOTS(roots, ns_root, ns, key_root, assert_make_string(name));
+    JS_ROOTS(fn_roots, fn_root, js_new_native_function(target, adapter_arity));
+    js_set_key_default(ns_root.get(), key_root.get(), fn_root.get());
 }
 
 template <typename Target>
 static Item assert_set_fresh_method(Item ns, const char* name, Target target,
         int adapter_arity) {
-    Item key = assert_make_string(name);
-    Item fn = js_new_distinct_native_function(target);
-    js_set_formal_length(fn, adapter_arity);
-    js_set_key_default(ns, key, fn);
-    return fn;
+    JS_ROOTS(roots, ns_root, ns, key_root, assert_make_string(name));
+    JS_ROOTS(fn_roots, fn_root, js_new_distinct_native_function(target));
+    js_set_formal_length(fn_root.get(), adapter_arity);
+    js_set_key_default(ns_root.get(), key_root.get(), fn_root.get());
+    return fn_root.get();
 }
-JS_FORWARD_STATIC_VOID( assert_set_method_item, (Item ns, const char* name, Item fn), js_set_key_default, (ns, assert_make_string(name), fn))
+static void assert_set_method_item(Item ns, const char* name, Item fn) {
+    JS_ROOTS(roots, ns_root, ns, fn_root, fn, key_root, assert_make_string(name));
+    js_set_key_default(ns_root.get(), key_root.get(), fn_root.get());
+}
 
 #define JS_ASSERT_METHODS(M) \
     M("ok", js_assert_ok, 2) M("equal", js_assert_equal, 3) \
