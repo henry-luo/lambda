@@ -1,14 +1,16 @@
 {
   "name": "editor4b: native selectionchange is delivered to page-JS document listeners",
-  "html": "test/html/editor4b-selectionchange.html",
-  "viewport": {"width": 640, "height": 360},
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
   "events": [
-    {"type": "wait", "ms": 120},
-    {"type": "assert_text", "target": {"selector": "#log"}, "contains": "mounted"},
-    {"type": "click", "target": {"selector": "#surface"}},
+    {"type": "wait", "ms": 250},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface"}, "equals": 1},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
     {"type": "wait", "ms": 80},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "wait", "ms": 100},
-    {"type": "assert_text", "target": {"selector": "#log"}, "contains": "selchange"}
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface"}, "attribute": "data-rdt-selection", "contains": "\"kind\":\"text\""},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface"}, "attribute": "data-rdt-selection", "contains": "\"anchor\":{\"path\":[0,0],\"offset\":0"},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface"}, "attribute": "data-rdt-selection", "contains": "\"head\":{\"path\":[7,0]"}
   ]
 }

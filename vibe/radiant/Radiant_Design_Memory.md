@@ -208,7 +208,7 @@ struct LayoutPassScope {
 
 ## 6. Phased plan (incremental; every phase independently green)
 
-Gates for every phase: `make build` + `make test-radiant-baseline` 100% + `make layout suite=baseline` (layout phases) / `make editor-4c-js && make editor-4c-view` (state phases) + **`lambda.exe layout --mem-dump` leak report clean** + `make lint`.
+Gates for every phase: `make build` + `make test-radiant-baseline` 100% + `make layout suite=baseline` (layout phases) / `make editor-4c` (state phases) + **`lambda.exe layout --mem-dump` leak report clean** + `make lint`.
 
 - **M0 — Safety fixes (bugs first, no restructuring).** Fix S1 (free old doc on session navigate/back/forward — mirror event.cpp:8225), S2 (route early returns through cleanup), S3 (move owned-payload free loop into paint_list_clear/destroy), S4 (fix or delete radiant_state_reset), S9 (FloatBox fallback), S11 (register `WebViewProp.src`/`srcdoc` in retained_fields.hpp), and add the S8 null-handling decision (assert-and-abort vs propagate — pick one policy). Each fix gets a root-cause comment per CLAUDE.md rule 12. *S1 needs a batch-navigation test (navigate N times, assert RSS/mem-dump stable).*
 - **M1 — Lint hardening (R3/R4/R5 + OBJ_HEAP_OK warn mode).** Four small ast-grep rules + the alloca pattern fix. Radiant is already clean for R3/R4 except the 9 stragglers — fix those in the same PR so the rules land error-clean.

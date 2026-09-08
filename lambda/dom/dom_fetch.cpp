@@ -99,32 +99,42 @@ static char* js_fetch_base_dir_from_path(const char* dir_path) {
     return dup;
 }
 
+extern __thread EvalContext* context;
+static void* js_fetch_capsule_construct(EvalContext* owner);
+static void js_fetch_capsule_destroy(void* capsule);
+static const ContextCapsuleOps js_fetch_capsule_ops = {
+    "js-fetch", CONTEXT_CAPSULE_LIFETIME_REALM, sizeof(JsFetchRuntimeState),
+    js_fetch_capsule_construct, NULL, js_fetch_capsule_destroy
+};
+
 static JsFetchRuntimeState* js_fetch_runtime_state_get() {
-    if (!js_active_runtime_state) return NULL;
-    return (JsFetchRuntimeState*)js_runtime_state.fetch_state;
+    return (JsFetchRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_FETCH);
 }
 
-static bool js_fetch_runtime_state_ensure() {
-    if (!js_active_runtime_state) return false;
-    if (js_fetch_runtime_state_get()) return true;
+// Construction adopts the pre-realm bootstrap base path, so the capsule owns
+// that string from its first existence rather than from a later fixup.
+static void* js_fetch_capsule_construct(EvalContext* owner) {
+    (void)owner;
     JsFetchRuntimeState* state = (JsFetchRuntimeState*)mem_calloc(1,
         sizeof(JsFetchRuntimeState), MEM_CAT_JS_RUNTIME);
-    if (!state) {
-        log_error("js-fetch: failed to allocate context state");
-        return false;
-    }
+    if (!state) return NULL;
     if (js_fetch_bootstrap_base_path) {
         state->base_dir = js_fetch_base_dir_from_path(js_fetch_bootstrap_base_path);
         mem_free(js_fetch_bootstrap_base_path);
         js_fetch_bootstrap_base_path = NULL;
     }
-    js_runtime_state.fetch_state = state;
-    return true;
+    return state;
+}
+
+static bool js_fetch_runtime_state_ensure() {
+    if (!js_active_runtime_state) return false;
+    return context_capsule_ensure(context, CONTEXT_CAPSULE_DOM_FETCH,
+                                  &js_fetch_capsule_ops) != NULL;
 }
 
 static void js_fetch_set_current_base_path(const char* dir_path) {
     if (!js_fetch_runtime_state_ensure()) return;
-    if (js_runtime_state.fetch_state && js_fetch_runtime_state_get()->base_dir) {
+    if (context_capsule(context, CONTEXT_CAPSULE_DOM_FETCH) && js_fetch_runtime_state_get()->base_dir) {
         mem_free(js_fetch_runtime_state_get()->base_dir);
         js_fetch_runtime_state_get()->base_dir = NULL;
     }
@@ -134,7 +144,7 @@ extern "C" void js_fetch_apply_bootstrap_base_path(void) {
     if (js_fetch_bootstrap_base_path) (void)js_fetch_runtime_state_ensure();
 }
 
-#define js_fetch_state ((JsFetchRuntimeState*)js_runtime_state.fetch_state)
+#define js_fetch_state ((JsFetchRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_FETCH))
 #define g_fetch_base_dir (js_fetch_state->base_dir)
 #define response_bodies (js_fetch_state->response_bodies)
 #define response_body_lens (js_fetch_state->response_body_lens)
@@ -647,13 +657,11 @@ extern "C" void js_fetch_reset(void) {
 #undef response_types
 #undef pending_fetch_work
 
-extern "C" void js_fetch_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->fetch_state) return;
-    JsFetchRuntimeState* state = (JsFetchRuntimeState*)runtime_state->fetch_state;
+static void js_fetch_capsule_destroy(void* capsule) {
+    JsFetchRuntimeState* state = (JsFetchRuntimeState*)capsule;
     // Heap reset releases response payloads before this capsule can disappear.
     if (state->base_dir || state->response_body_count || state->pending_work) {
         log_error("js-fetch: context destroyed before response state was reset");
     }
     mem_free(state);
-    runtime_state->fetch_state = NULL;
 }

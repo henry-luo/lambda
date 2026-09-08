@@ -2497,7 +2497,7 @@ editable-package-disabled: build-test
 # regressions: it runs only promoted no-emulation corpus cases plus direct
 # package behavior fixtures.
 test-editable-ua-focused: audit-editable-ownership editable-package-disabled editable-unit editable-ui test-wpt-contenteditable test-chromium-contenteditable
-	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_blocks,test_editing_contenteditable_clipboard,test_editing_contenteditable_designmode,test_editing_contenteditable_format_values,test_editing_contenteditable_history,test_editing_contenteditable_structural_history,test_editing_contenteditable_structural_history_direction,test_editing_contenteditable_indent,test_editing_contenteditable_inline_formats,test_editing_contenteditable_justify,test_editing_contenteditable_lists,test_editing_contenteditable_objects,test_editing_contenteditable_plaintext,test_editing_contenteditable_queries,test_editing_contenteditable_remove_format,test_editing_contenteditable_rich_clipboard,test_editing_contenteditable_select_all,test_editing_contenteditable_settings,test_editing_contenteditable_typing_state" $(ARGS)
+	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_blocks,test_editing_contenteditable_clipboard,test_editing_contenteditable_designmode,test_editing_contenteditable_format_values,test_editing_contenteditable_history,test_editing_contenteditable_structural_history,test_editing_contenteditable_structural_history_direction,test_editing_contenteditable_indent,test_editing_contenteditable_inline_formats,test_editing_contenteditable_justify,test_editing_contenteditable_lists,test_editing_contenteditable_objects,test_editing_contenteditable_plaintext,test_editing_contenteditable_queries,test_editing_contenteditable_remove_format,test_editing_contenteditable_rich_clipboard,test_editing_contenteditable_select_all,test_editing_contenteditable_settings,test_editing_contenteditable_typing_state,test_editing_contenteditable_ua" $(ARGS)
 
 editable-form-regressions: build-test
 	@./test/test_ui_automation_gtest.exe --suite editor --test "test_form_input_typing,test_form_input_undo_redo,test_form_ime_compose,test_editing_paired_history_textarea" $(ARGS)
@@ -2533,47 +2533,25 @@ view-ui: build-test
 native-gui-ui: build-test
 	@./test/test_ui_automation_gtest.exe --suite native-gui --native-gui $(ARGS)
 
-# Stage 4C Phase A — the full plain-DOM editor suite headless under `lambda.exe js`.
-# The runner (test/editor-js/tools/run-phase-a.mjs) bundles each test group
-# (core/view/drawing + 6 tier corpora) to an IIFE, runs it, and aggregates the
-# in-engine harness summaries. React `.test.tsx` are excluded by construction.
-editor-4c-js: build
-	@echo "Running Stage 4C Phase A (plain-DOM suite under lambda.exe js)..."
+# Stage 4C — full editor conformance: parity (Phase A breadth + jsdom oracle
+# cross-check) + Phase B/C (view depth). The parity runner executes Phase A via
+# run-phase-a.mjs, then this target runs the event-driven view fixtures.
+editor-4c: build-test
+	@echo "Running Stage 4C parity report (Radiant Phase-A vs vitest/jsdom oracle)..."
 	@echo "=============================================================="
-	@cd test/editor-js && node tools/run-phase-a.mjs
+	@cd test/editor-js && node tools/parity-report.mjs --refresh-oracle
 	@echo "=============================================================="
-
-# Stage 4C Phase B/C — editor event-driven UI automation under lambda.exe view + event_sim.
-# Runs the 4B baseline set (test/ui/editor4b/*.json), the 4C Phase-B set
-# (test/ui/editor4c/*.json), and the Phase-C expansion set
-# (test/ui/editor4c_phase_c/*.json). Each fixture may name its own harness page
-# via the "html" field (default test/html/editor-dom.html).
-editor-4c-view: build-test
+	@echo "Running Stage 4C Phase B/C (editor view + event_sim)..."
+	@echo "=============================================================="
 	@./test/test_ui_automation_gtest.exe --suite editor --test "editor4b_*,editor4c_*,editor4c_phase_c_*" $(ARGS)
+	@echo "=============================================================="
+	@echo "Stage 4C complete: parity (Phase A + jsdom oracle) + Phase B/C (view + event_sim) all green."
 
 # Browser-library DOM fixtures run through the real Radiant input/event/layout loop.
 dom-ui: build-test dom-ui-run
 
 dom-ui-run: build-test
 	@./test/test_ui_automation_gtest.exe --suite dom $(if $(or $(test),$(TEST)),--test "$(or $(test),$(TEST))") $(ARGS)
-
-# Stage 4C Milestone 3 — parity report: cross-check the Radiant Phase-A pass-set
-# against the vitest/jsdom oracle (the editor's own suite under Node). Runs
-# Phase A (via run-phase-a.mjs) AND a fresh vitest oracle, reconciles per group,
-# writes vibe/editing/Stage4C_Parity_Report.md, and exits non-zero on any
-# unexplained divergence. React `.test.tsx` are the only intentional exclusion.
-editor-4c-parity: build
-	@echo "Running Stage 4C parity report (Radiant Phase-A vs vitest/jsdom oracle)..."
-	@echo "=============================================================="
-	@cd test/editor-js && node tools/parity-report.mjs --refresh-oracle
-	@echo "=============================================================="
-
-# Stage 4C — full editor conformance: parity (Phase A breadth + jsdom oracle
-# cross-check) + Phase B (view depth). Parity subsumes the Phase-A run, so
-# `editor-4c-js` is only needed for a quick Phase-A-only pass.
-editor-4c: editor-4c-parity editor-4c-view
-	@echo "=============================================================="
-	@echo "Stage 4C complete: parity (Phase A + jsdom oracle) + Phase B (view + event_sim) all green."
 
 # Save/check/diff layout suite snapshots for regression detection outside baseline
 layout-snapshot:

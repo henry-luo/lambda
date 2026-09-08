@@ -1725,8 +1725,8 @@ static JsCjsState* js_cjs_state_current(bool attach) {
 }
 
 #define js_cjs_module_stack_state (js_cjs_state_current(true)->module_stack)
-#define js_cjs_module_stack (js_cjs_module_stack_state.roots.slots)
-#define js_cjs_module_stack_count (js_cjs_module_stack_state.depth)
+#define js_cjs_module_stack_at(i) js_item_stack_at(&js_cjs_module_stack_state, (i))
+#define js_cjs_module_stack_count js_item_stack_depth(&js_cjs_module_stack_state)
 
 extern "C" void js_cjs_metadata_reset(void) {
     JsCjsState* state = js_cjs_state_current(false);
@@ -1735,7 +1735,7 @@ extern "C" void js_cjs_metadata_reset(void) {
 
 static Item js_cjs_current_module(void) {
     if (js_cjs_module_stack_count <= 0) return ItemNull;
-    return js_cjs_module_stack[js_cjs_module_stack_count - 1];
+    return js_cjs_module_stack_at(js_cjs_module_stack_count - 1);
 }
 
 static Item js_cjs_find_module(Item filename) {
@@ -1818,9 +1818,6 @@ static Item js_cjs_cached_value(Item specifier) {
 
 extern "C" Item js_cjs_enter(Item module, Item filename) {
     if (!js_cjs_state_current(true)) return (Item){.item = ITEM_JS_UNDEFINED};
-    if (!js_root_range_ensure_registered(&js_cjs_module_stack_state.roots)) {
-        return (Item){.item = ITEM_JS_UNDEFINED};
-    }
     if (get_type_id(module) != LMD_TYPE_MAP) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
@@ -1853,13 +1850,13 @@ extern "C" Item js_cjs_complete(Item module) {
 extern "C" Item js_cjs_leave(Item module) {
     if (js_cjs_module_stack_count > 0) {
         if (module.item == ItemNull.item ||
-            js_cjs_module_stack[js_cjs_module_stack_count - 1].item == module.item) {
+            js_cjs_module_stack_at(js_cjs_module_stack_count - 1).item == module.item) {
             js_item_stack_pop(&js_cjs_module_stack_state);
         } else {
             for (int i = js_cjs_module_stack_count - 1; i >= 0; i--) {
-                if (js_cjs_module_stack[i].item != module.item) continue;
+                if (js_cjs_module_stack_at(i).item != module.item) continue;
                 for (int j = i + 1; j < js_cjs_module_stack_count; j++) {
-                    js_cjs_module_stack[j - 1] = js_cjs_module_stack[j];
+                    js_cjs_module_stack_at(j - 1) = js_cjs_module_stack_at(j);
                 }
                 js_item_stack_shrink(&js_cjs_module_stack_state,
                                      js_cjs_module_stack_count - 1);

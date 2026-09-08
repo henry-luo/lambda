@@ -17,7 +17,6 @@ extern "C" int js_initial_call_stack_limit(void);
 extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_regex_cache_destroy_context(JsRuntimeState* state);
-extern "C" void js_xhr_destroy_context(JsRuntimeState* state);
 extern "C" void js_iterator_proto_cache_reset(void);
 extern "C" void js_history_reset(void);
 extern "C" void js_xhr_reset(void);
@@ -71,15 +70,12 @@ static void js_reset_core_module_caches(void) {
     js_assert_reset();
     js_node_test_reset();
 }
-extern "C" void js_history_destroy_context(JsRuntimeState* state);
 extern "C" void dom_window_dialog_reset(void);
 extern "C" void js_fetch_apply_bootstrap_base_path(void);
-extern "C" void js_fetch_destroy_context(JsRuntimeState* state);
 extern "C" void js_fs_pending_destroy_context(JsRuntimeState* state);
 extern "C" void js_tls_destroy_context(JsRuntimeState* state);
 extern "C" void js_net_destroy_context(JsRuntimeState* state);
 extern "C" void js_atomics_destroy_context(JsRuntimeState* state);
-extern "C" void js_canvas_destroy_context(JsRuntimeState* state);
 extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* state);
 static void js_release_input_resources(void);
 
@@ -129,6 +125,14 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
         }
         memset(runtime_context->js_state, 0, sizeof(JsRuntimeState));
         runtime_context->js_state->heap_epoch = 1;
+        js_item_stack_init(&runtime_context->js_state->super_this_values,
+            (Context*)runtime_context, "super-this values");
+        js_item_stack_init(&runtime_context->js_state->with_scope.stack,
+            (Context*)runtime_context, "with-scope stack");
+        js_item_stack_init(&runtime_context->js_state->promises.domain_stack,
+            (Context*)runtime_context, "domain stack");
+        js_eval_state_vectors_init(&runtime_context->js_state->eval,
+            (Context*)runtime_context);
         runtime_context->js_state->batch_test_module_state_id = UINT32_MAX;
         runtime_context->js_state->batch_preamble_module_state_id = UINT32_MAX;
         runtime_context->js_state->batch_preamble_var_count = 0;
@@ -234,18 +238,13 @@ void js_runtime_state_destroy_context(void) {
     jube_modules_runtime_detach();
     js_runtime_owned_cache_destroy_context(runtime_context->js_state);
     dom_platform_destroy_context(runtime_context->js_state);
-    dom_events_destroy_context(runtime_context->js_state);
-    dom_observers_destroy_context(runtime_context->js_state);
-    js_xhr_destroy_context(runtime_context->js_state);
-    js_history_destroy_context(runtime_context->js_state);
-    dom_collections_destroy_context(runtime_context->js_state);
-    dom_foreign_documents_destroy_context(runtime_context->js_state);
-    js_fetch_destroy_context(runtime_context->js_state);
+    // JSCU18: the DOM/web capsules leave through the directory's own walk
+    // instead of eight hand-maintained calls.
+    context_capsule_destroy_all(runtime_context);
     js_fs_pending_destroy_context(runtime_context->js_state);
     js_tls_destroy_context(runtime_context->js_state);
     js_net_destroy_context(runtime_context->js_state);
     js_atomics_destroy_context(runtime_context->js_state);
-    js_canvas_destroy_context(runtime_context->js_state);
     js_dynfunc_cache_destroy_context(runtime_context->js_state);
     jm_compile_recovery_state_destroy_context(runtime_context->js_state);
     js_runtime_prototype_snapshot_destroy_context(runtime_context->js_state);
@@ -260,6 +259,10 @@ void js_runtime_state_destroy_context(void) {
     }
     // Promise carriers are GC-owned; context teardown only drops queue and
     // async owners before the heap itself is released.
+    js_item_stack_destroy(&runtime_context->js_state->super_this_values);
+    js_item_stack_destroy(&runtime_context->js_state->with_scope.stack);
+    js_item_stack_destroy(&runtime_context->js_state->promises.domain_stack);
+    js_eval_state_vectors_destroy(&runtime_context->js_state->eval);
     mem_free(runtime_context->js_state);
     runtime_context->js_state = NULL;
     if (was_active) js_active_runtime_state = NULL;
@@ -277,29 +280,11 @@ static void js_root_range_set_storage(JsRootRange* range, Item* slots, int slot_
 // subobject would otherwise leave a descriptor pointing at a temporary.
 static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     if (!state) return;
-    JsEvalState* eval = &state->eval;
-    JsEvalSourceState* source = &eval->source;
-    JsEvalBridgeState* bridge = &eval->bridge;
-    JsEvalLocalState* local = &eval->local;
     // Keep every precise root descriptor in one catalog so a new state cache
     // cannot bypass the same initialization and GC registration invariant.
 #define JS_SET_RUNTIME_ROOT(range, slots, count, label) \
     js_root_range_set_storage(range, slots, count, label);
 #define JS_RUNTIME_ROOT_STORAGE(M) \
-    M(&source->filename_roots, source->filename_slots, JS_EVAL_SOURCE_STACK_MAX, "eval source filenames") \
-    M(&source->code_roots, source->code_slots, JS_EVAL_SOURCE_STACK_MAX, "eval source code") \
-    M(&bridge->env_key_roots, bridge->env_keys, JS_EVAL_ENV_BIND_MAX, "eval env keys") \
-    M(&bridge->env_old_value_roots, bridge->env_old_values, JS_EVAL_ENV_BIND_MAX, "eval env old values") \
-    M(&bridge->global_lexical_key_roots, bridge->global_lexical_keys, JS_EVAL_ENV_BIND_MAX, "eval global lexical keys") \
-    M(&bridge->global_lexical_old_value_roots, bridge->global_lexical_old_values, JS_EVAL_ENV_BIND_MAX, "eval global lexical old values") \
-    M(&bridge->private_unscoped_key_roots, bridge->private_unscoped_keys, JS_EVAL_PRIVATE_BIND_MAX, "eval private unscoped keys") \
-    M(&bridge->private_scoped_key_roots, bridge->private_scoped_keys, JS_EVAL_PRIVATE_BIND_MAX, "eval private scoped keys") \
-    M(&local->key_roots, local->keys, JS_EVAL_LOCAL_BIND_MAX, "eval local keys") \
-    M(&local->value_roots, local->values, JS_EVAL_LOCAL_BIND_MAX, "eval local values") \
-    M(&local->lexical_key_roots, local->lexical_keys, JS_EVAL_LEXICAL_BIND_MAX, "eval lexical keys") \
-    M(&local->immutable_key_roots, local->immutable_keys, JS_EVAL_IMMUTABLE_BIND_MAX, "eval immutable keys") \
-    M(&state->super_this_values.roots, state->super_this_value_slots, 128, "super-this values") \
-    M(&state->with_scope.stack.roots, state->with_scope.stack_slots, JS_WITH_STACK_MAX, "with-scope stack") \
     M(&state->with_scope.last_binding_roots, state->with_scope.last_binding_slots, 2, "with binding cache") \
     M(&state->builtin_cache.roots, state->builtin_cache.entries, JS_INTRINSIC_BINDING_COUNT, "intrinsic binding function cache") \
     M(&state->readline.roots, &state->readline.namespace_object, 3 + 2 * JS_READLINE_INPUT_MAP_MAX, "readline namespaces and input map") \
@@ -328,7 +313,6 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     M(&state->iterators.roots, &state->iterators.generator_return_marker, 11, "generator and iterator prototype caches") \
     M(&state->async_hooks.roots, &state->async_hooks.root_resource, 2 + JS_ASYNC_HOOK_STATE_MAX + JS_ASYNC_PENDING_DESTROY_STATE_MAX, "async hooks state") \
     M(&state->promises.roots, &state->promises.unhandled_storage, 3, "Promise unhandled queue and domain state") \
-    M(&state->promises.domain_stack.roots, state->promises.domain_stack_slots, JS_DOMAIN_STACK_MAX, "domain stack") \
     M(&state->async_local_storage.roots, state->async_local_storage.instances, JS_MAX_ALS_INSTANCES, "AsyncLocalStorage instances") \
     M(&state->event_loop_queue_roots, state->event_loop.queue_storage, 2, "JS async queue storage") \
     M(&state->event_loop_raf_roots, state->event_loop.raf_callback, JS_EVENT_RAF_CAPACITY, "JS animation frame callbacks")
@@ -392,65 +376,63 @@ void js_root_range_reset_all(void) {
         if (range->reset) range->reset(range->reset_owner);
     }
 }
-JS_FORWARD_STATIC_VOID( js_item_stack_reset_callback, (void* owner), js_item_stack_clear, ((JsItemStack*)owner))
+// JSCU14(b): the item stacks are RootVectors. Registration, vacated-slot
+// clearing and heap-replacement handling live in the primitive; the stacks
+// own only their LIFO discipline and their named reset in the lifecycle.
+void js_item_stack_init(JsItemStack* stack, Context* owner, const char* name) {
+    if (stack) root_vector_init(&stack->vec, owner, name);
+}
+
+void js_item_stack_destroy(JsItemStack* stack) {
+    if (stack) root_vector_destroy(&stack->vec);
+}
 
 bool js_item_stack_push(JsItemStack* stack, Item value) {
-    if (!stack || stack->depth < 0) return false;
-    if (!js_root_range_ensure_registered(&stack->roots)) return false;
-    // ensure prepares self-referential runtime-state descriptors before the
-    // slot-count check, so the super-this stack has no hidden init ordering.
-    if (!stack->roots.slots || stack->depth >= stack->roots.slot_count) return false;
-    if (!js_root_range_register_reset(&stack->roots, stack,
-                                      js_item_stack_reset_callback)) return false;
-    stack->roots.slots[stack->depth++] = value;
-    return true;
+    return stack && root_vector_push(&stack->vec, value);
 }
 
 void js_item_stack_pop(JsItemStack* stack) {
-    if (!stack || !stack->roots.slots || stack->depth <= 0) return;
-    // The registered fixed range is scanned in full, so vacated slots must not
-    // retain old heap Items across a later collection or heap replacement.
-    stack->roots.slots[--stack->depth] = ItemNull;
+    if (stack) root_vector_pop(&stack->vec);
 }
 
 void js_item_stack_clear(JsItemStack* stack) {
-    if (!stack || !stack->roots.slots) return;
-    for (int i = 0; i < stack->depth; i++) stack->roots.slots[i] = ItemNull;
-    stack->depth = 0;
+    if (stack) root_vector_clear(&stack->vec);
 }
 
 void js_item_stack_shrink(JsItemStack* stack, int depth) {
-    if (!stack || !stack->roots.slots) return;
-    if (depth < 0) depth = 0;
-    if (depth >= stack->depth) return;
-    for (int i = depth; i < stack->depth; i++) stack->roots.slots[i] = ItemNull;
-    stack->depth = depth;
+    if (stack) root_vector_shrink(&stack->vec, depth);
 }
 
-#define js_eval_source_filename_stack (js_runtime_state.eval.source.filename_slots)
-#define js_eval_source_code_stack (js_runtime_state.eval.source.code_slots)
+#define js_eval_source_filenames (js_runtime_state.eval.source.filenames)
+#define js_eval_source_codes (js_runtime_state.eval.source.codes)
 #define js_eval_source_line_offset_stack (js_runtime_state.eval.source.line_offset_slots)
 #define js_eval_source_column_offset_stack (js_runtime_state.eval.source.column_offset_slots)
 #define js_eval_source_compact_stack (js_runtime_state.eval.source.compact_slots)
-#define js_eval_source_stack_depth (js_runtime_state.eval.source.depth)
+#define js_eval_source_stack_depth ((int)root_vector_count(&js_eval_source_filenames))
+
+#define JS_EVAL_VECTOR_INIT(vec, label) root_vector_init(vec, owner, label);
+#define JS_EVAL_VECTOR_DESTROY(vec, label) root_vector_destroy(vec);
+#define JS_EVAL_VECTOR_CLEAR(vec, label) root_vector_clear(vec);
+
+void js_eval_state_vectors_init(JsEvalState* state, Context* owner) {
+    if (!state) return;
+    JS_EVAL_STATE_VECTORS(JS_EVAL_VECTOR_INIT, state)
+}
+
+void js_eval_state_vectors_destroy(JsEvalState* state) {
+    if (!state) return;
+    JS_EVAL_STATE_VECTORS(JS_EVAL_VECTOR_DESTROY, state)
+}
 
 void js_eval_state_reset(JsEvalState* state) {
     if (!state) return;
     js_runtime_state_prepare_root_ranges(js_active_runtime_state);
-    js_root_range_clear(&state->source.filename_roots);
-    js_root_range_clear(&state->source.code_roots);
+    JS_EVAL_STATE_VECTORS(JS_EVAL_VECTOR_CLEAR, state)
     memset(state->source.line_offset_slots, 0, sizeof(state->source.line_offset_slots));
     memset(state->source.column_offset_slots, 0, sizeof(state->source.column_offset_slots));
     memset(state->source.compact_slots, 0, sizeof(state->source.compact_slots));
-    state->source.depth = 0;
 
     JsEvalBridgeState* bridge = &state->bridge;
-    js_root_range_clear(&bridge->env_key_roots);
-    js_root_range_clear(&bridge->env_old_value_roots);
-    js_root_range_clear(&bridge->global_lexical_key_roots);
-    js_root_range_clear(&bridge->global_lexical_old_value_roots);
-    js_root_range_clear(&bridge->private_unscoped_key_roots);
-    js_root_range_clear(&bridge->private_scoped_key_roots);
     memset(bridge->env_had_own, 0, sizeof(bridge->env_had_own));
     memset(bridge->env_from_journal, 0, sizeof(bridge->env_from_journal));
     memset(bridge->env_frame_marks, 0, sizeof(bridge->env_frame_marks));
@@ -458,30 +440,21 @@ void js_eval_state_reset(JsEvalState* state) {
     memset(bridge->global_lexical_immutable, 0, sizeof(bridge->global_lexical_immutable));
     memset(bridge->global_lexical_frame_marks, 0, sizeof(bridge->global_lexical_frame_marks));
     memset(bridge->private_frame_marks, 0, sizeof(bridge->private_frame_marks));
-    bridge->env_count = 0;
     bridge->env_frame_depth = 0;
-    bridge->global_lexical_count = 0;
     bridge->global_lexical_frame_depth = 0;
-    bridge->private_count = 0;
     bridge->private_frame_depth = 0;
 
     JsEvalLocalState* local = &state->local;
-    js_root_range_clear(&local->key_roots);
-    js_root_range_clear(&local->value_roots);
-    js_root_range_clear(&local->lexical_key_roots);
-    js_root_range_clear(&local->immutable_key_roots);
     memset(local->frame_marks, 0, sizeof(local->frame_marks));
-    local->count = 0;
     local->frame_depth = 0;
-    local->lexical_count = 0;
-    local->immutable_count = 0;
 }
 
-void js_eval_state_assert_clear(const JsEvalState* state, const char* reset_name) {
+void js_eval_state_assert_clear(JsEvalState* state, const char* reset_name) {
     if (!state) return;
     const char* name = reset_name ? reset_name : "reset";
-    if (state->source.depth != 0) {
-        log_error("js-eval-state: %s left source depth=%d", name, state->source.depth);
+    int source_depth = (int)root_vector_count(&state->source.filenames);
+    if (source_depth != 0) {
+        log_error("js-eval-state: %s left source depth=%d", name, source_depth);
     }
     if (state->bridge.env_frame_depth != 0 || state->bridge.global_lexical_frame_depth != 0 ||
         state->bridge.private_frame_depth != 0) {
@@ -494,20 +467,17 @@ void js_eval_state_assert_clear(const JsEvalState* state, const char* reset_name
     }
 }
 
-static bool js_eval_source_register_roots(void) {
-    JsEvalSourceState* source = &js_runtime_state.eval.source;
-    return js_root_range_ensure_registered(&source->filename_roots) &&
-        js_root_range_ensure_registered(&source->code_roots);
-}
-
 static bool js_eval_source_push_mode(Item filename, Item source,
                                      int64_t line_offset, int64_t column_offset,
                                      bool compact_stack) {
-    if (!js_eval_source_register_roots()) return false;
-    if (js_eval_source_stack_depth >= JS_EVAL_SOURCE_STACK_MAX) return false;
-    int idx = js_eval_source_stack_depth++;
-    js_eval_source_filename_stack[idx] = filename;
-    js_eval_source_code_stack[idx] = source;
+    int idx = js_eval_source_stack_depth;
+    // the POD lanes are fixed; the depth is an explicit nesting policy
+    if (idx >= JS_EVAL_SOURCE_STACK_MAX) return false;
+    if (!root_vector_push(&js_eval_source_filenames, filename)) return false;
+    if (!root_vector_push(&js_eval_source_codes, source)) {
+        root_vector_pop(&js_eval_source_filenames);
+        return false;
+    }
     js_eval_source_line_offset_stack[idx] = line_offset;
     js_eval_source_column_offset_stack[idx] = column_offset;
     js_eval_source_compact_stack[idx] = compact_stack;
@@ -518,9 +488,9 @@ JS_FORWARD_EXPRESSION(int64_t, js_eval_source_push_compact, (Item filename, Item
 
 extern "C" void js_eval_source_pop(void) {
     if (js_eval_source_stack_depth <= 0) return;
-    int idx = --js_eval_source_stack_depth;
-    js_eval_source_filename_stack[idx] = ItemNull;
-    js_eval_source_code_stack[idx] = ItemNull;
+    int idx = js_eval_source_stack_depth - 1;
+    root_vector_pop(&js_eval_source_filenames);
+    root_vector_pop(&js_eval_source_codes);
     js_eval_source_line_offset_stack[idx] = 0;
     js_eval_source_column_offset_stack[idx] = 0;
     js_eval_source_compact_stack[idx] = false;
@@ -531,8 +501,8 @@ static bool js_eval_source_current(Item* out_filename, Item* out_source,
                                    bool* out_compact_stack) {
     if (js_eval_source_stack_depth <= 0) return false;
     int idx = js_eval_source_stack_depth - 1;
-    Item filename = js_eval_source_filename_stack[idx];
-    Item source = js_eval_source_code_stack[idx];
+    Item filename = *root_vector_at(&js_eval_source_filenames, idx);
+    Item source = *root_vector_at(&js_eval_source_codes, idx);
     if (get_type_id(filename) != LMD_TYPE_STRING || get_type_id(source) != LMD_TYPE_STRING) {
         return false;
     }
@@ -997,6 +967,11 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     js_dynfunc_cache_reset();
     if (full_reset) js_array_runtime_items_cleanup_all();
     js_root_range_reset_all();
+    // Stacks that left the reset registry keep the same named reset on both
+    // the full and the checkpoint path (super-this and with are cleared by
+    // the transient-call and globals resets above).
+    js_item_stack_clear(&js_runtime_state.promises.domain_stack);
+    js_cjs_metadata_reset();
     js_assert_batch_runtime_state_clear(reason, true);
 }
 

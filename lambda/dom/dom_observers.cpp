@@ -70,20 +70,17 @@ struct JsObserverRuntimeState {
     uint64_t roots_epoch = 0;
 };
 
+extern __thread EvalContext* context;
+static void dom_observer_capsule_destroy(void* capsule);
+static const ContextCapsuleOps dom_observer_capsule_ops = {
+    "dom-observer", CONTEXT_CAPSULE_LIFETIME_REALM, sizeof(JsObserverRuntimeState),
+    NULL, NULL, dom_observer_capsule_destroy
+};
+
 static JsObserverRuntimeState* js_observer_runtime_state() {
     if (!js_active_runtime_state) return nullptr;
-    JsObserverRuntimeState* state =
-        (JsObserverRuntimeState*)js_runtime_state.dom_observer_state;
-    if (!state) {
-        state = (JsObserverRuntimeState*)mem_calloc(1,
-            sizeof(JsObserverRuntimeState), MEM_CAT_JS_RUNTIME);
-        if (!state) {
-            log_error("dom-observer: failed to allocate context state");
-            return nullptr;
-        }
-        js_runtime_state.dom_observer_state = state;
-    }
-    return state;
+    return (JsObserverRuntimeState*)context_capsule_ensure(
+        context, CONTEXT_CAPSULE_DOM_OBSERVER, &dom_observer_capsule_ops);
 }
 
 #define observers (js_observer_runtime_state()->observers)
@@ -793,7 +790,7 @@ extern "C" void dom_observers_reset(void) {
     // Batch teardown must not instantiate the 64-observer table for scripts
     // that never used an observer; doing so made every test262 reset pay its
     // full zeroing cost.
-    if (!js_active_runtime_state || !js_runtime_state.dom_observer_state) return;
+    if (!js_active_runtime_state || !context_capsule(context, CONTEXT_CAPSULE_DOM_OBSERVER)) return;
     for (int i = 0; i < observer_count; i++) {
         JsObserverState* observer = &observers[i];
         for (int j = 0; j < observer->target_count; j++) {
@@ -814,10 +811,8 @@ extern "C" void dom_observers_reset(void) {
 #undef observer_delivery_scheduled
 #undef observer_roots_epoch
 
-extern "C" void dom_observers_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->dom_observer_state) return;
-    JsObserverRuntimeState* state =
-        (JsObserverRuntimeState*)runtime_state->dom_observer_state;
+static void dom_observer_capsule_destroy(void* capsule) {
+    JsObserverRuntimeState* state = (JsObserverRuntimeState*)capsule;
     for (int i = 0; i < state->observer_count; i++) {
         JsObserverState* observer = &state->observers[i];
         for (int j = 0; j < observer->target_count; j++) {
@@ -829,5 +824,4 @@ extern "C" void dom_observers_destroy_context(JsRuntimeState* runtime_state) {
         }
     }
     mem_free(state);
-    runtime_state->dom_observer_state = NULL;
 }

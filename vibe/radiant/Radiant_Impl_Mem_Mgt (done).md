@@ -30,7 +30,7 @@ Legend: ✅ done · ◑ partial · ❌ not done. Verified against the codebase; 
 
 ## 0. Ground rules (apply to every task)
 
-1. **Gates per PR:** `make build` · `make test-radiant-baseline` 100% · `make layout suite=baseline` for layout-touching tasks · `make editor-4c-js && make editor-4c-view` for event/state tasks · `./lambda.exe layout <file> --mem-dump` leak report clean · `make lint` green.
+1. **Gates per PR:** `make build` · `make test-radiant-baseline` 100% · `make layout suite=baseline` for layout-touching tasks · `make editor-4c` for event/state tasks · `./lambda.exe layout <file> --mem-dump` leak report clean · `make lint` green.
 2. **Every leak/UAF fix ships with a regression test** in the same PR (see §8 test plan). A fix without a test that fails-before/passes-after is not done.
 3. **Root-cause comment at every fix point** (CLAUDE.md/AGENTS.md rule 12) — state the invariant being protected, not what the code does.
 4. **Never "fix" V1–V5** (design §4): pool-only destroy of backdrop pools, shared-arena scratches, the detach-transient-owner machinery, the doc/view-tree pool aliasing guard, and the clipboard/log/undo/media patterns are verified correct. P1.6 documents them in-code so they survive future reviews.

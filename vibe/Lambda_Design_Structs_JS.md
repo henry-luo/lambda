@@ -400,6 +400,74 @@ LambdaJS instead has:
 
 ### 2.3 Rulings
 
+> **Status: JSCU12 LANDED, JSCU14(b) LANDED 2026-09-08.** The primitive is
+> `lambda/runtime/root_vector.{h,cpp}` (C-callable, in `lambda-rt`): a POD
+> index over fixed 64-slot blocks, each registered through
+> `heap_register_gc_root_range_for` before its first Item is published, never
+> moved, vacated slots zeroed, retained until destroy. The heap now owns its
+> epoch: `Heap::generation` is assigned once in `heap_init` from a process
+> monotonic counter and read through `heap_generation_for(Context*)`; a vector
+> compares that, not a private copy. Two operations were separated after the
+> rooting gate's NO_GC audit caught `js_with_restore_depth → shrink →
+> register → mem_realloc`: every non-publishing operation (`pop`, `at`,
+> `count`, `clear`, `shrink`) only *observes* a heap replacement (drops the
+> dead-heap Items, forgets the registration, allocation-free), and only
+> `push` re-registers the retained blocks. Unit test:
+> `GCHeapTest.RootVectorGrowsAddressStableAndFollowsHeapReplacement`.
+> Migrated (b): the four `JsItemStack`s — with-scope, super-this, domain and
+> the Node session's CommonJS module stack — are `RootVector`s; their fixed
+> slot arrays, three catalog entries and reset-registry callbacks are gone,
+> and their resets are named calls in `js_batch_reset_runtime_caches` on both
+> the full and checkpoint paths (super-this and with were already cleared by
+> the transient-call and globals resets). The super-this bound-flag array
+> stays a parallel POD array with an explicit `JS_SUPER_THIS_STACK_MAX`
+> nesting policy (JSCU13). `sizeof(JsRuntimeState)` 223,384 → 221,712 B.
+> Gates: `make test-gc-rooting-core` exit 0 (49 NO_GC imports verified,
+> 15,795 functions hazard-clean, MIR GC 107/107); GC heap 76/76; JS gtest
+> 369/370 (the one failure is the remote `dom_3d_transform_inline_rect`
+> fixture, `document is not defined`, pre-existing); Node module/domain slice
+> identical to pristine HEAD (30 pre-existing failures, 0 regressed); `with`,
+> derived `super` to depth 70, nested `require` and domains correct under
+> `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`; `make test-gc-rooting-python`
+> exit 0; test262 baseline **0 regressions** (40261/40261).
+>
+> **JSCU14(c) LANDED 2026-09-08.** The eval journals' twelve Item lanes
+> (source filenames/code, env keys/old values, global-lexical keys/old
+> values, private unscoped/scoped keys, local keys/values, lexical and
+> immutable keys) are `RootVector`s, cataloged once by
+> `JS_EVAL_STATE_VECTORS` for init/destroy/clear. Each group's binding
+> count is its key lane's count; the six `*_count` fields, the twelve
+> `JsRootRange`s and their catalog entries are gone. Allocation sites push
+> (key lane first, then the value lane, popping the key on failure); frame
+> pops shrink to the mark. The pop paths keep the exact old behaviour that
+> the entry is *invisible* during its restore (shrink first) while the popped
+> key/old value are held in a `RootFrame`, because the old fixed arrays were
+> scanned in full beyond the count and so kept them alive implicitly. The
+> POD columns (`had_own`, `from_journal`, `immutable`, offsets, frame marks)
+> stay parallel fixed arrays under the existing `*_BIND_MAX` checks
+> (JSCU13; growth is JSCUO7). `sizeof(JsEvalState)` **41,448 → 4,304 B**;
+> `sizeof(JsRuntimeState)` **221,712 → 184,568 B**. Gates: rooting gate exit
+> 0 (its eval scripts run under forced GC + poison); JS gtest 369/370; a
+> nested-direct-eval probe (journal var write-back, let/const, private names,
+> global lexical, indirect eval, 12-deep nested eval, 300-iteration journal
+> churn) identical plain and under `LAMBDA_GC_FORCE_EVERY=1
+> LAMBDA_GC_POISON_FREED=1`; test262 baseline **0 regressions**
+> (40261/40261).
+>
+> **Residue (census after (c)):** 5 `JsRootRange` fields (with-binding
+> cache, event-loop queue/RAF, plus the two on the Node session), 31 catalog
+> entries, 42 `js_root_range_ensure_registered` calls, all field-shaped or
+> id-keyed (RAF callbacks, global lexical bindings, async hooks, ALS,
+> readline, test262 agents). (d)/(e) split two ways: the array-shaped caches (RAF callbacks,
+> global lexical bindings, async hooks, ALS, readline, test262 agents) are
+> vector-shaped and can follow (c); the ~30 field-shaped ranges (namespace
+> and prototype Items registered as a range over struct fields) are not
+> vectors at all — they are roots registered at capsule construction, which
+> is item 3's lifecycle, so `JsRootRange`, the reset registry and the catalog
+> are deleted there, not here.
+
+### 2.3 Rulings (original)
+
 **JSCU12 — `RootVector` is a runtime primitive.** One record in
 `lambda/runtime` (beside `lambda-root-frame.hpp`), C-callable:
 
@@ -521,6 +589,52 @@ clearing checklist.
   page with observers and no script must construct a JS state to hold them.
 
 ### 3.3 Rulings
+
+> **Status: JSCU15 LANDED, JSCU17 LANDED, JSCU18 (partial) 2026-09-08.**
+> `lambda/runtime/context_capsule.{h,cpp}` is the directory: `EvalContext`
+> gains `capsules[]` plus `capsule_ops[]` at its tail (the frozen `Context`
+> prefix and the module-state offsets are untouched, D8.1.3v10), reading a
+> capsule is one indexed load, and construction is the only cold path.
+>
+> **Deviation from the design's literal shape, deliberately.** §4.1 sketches
+> one static `JsCapsuleOps context_capsule_ops[]` naming every constructor.
+> The tree's library split makes that wrong: a central table would force
+> every target linking the directory to carry every subsystem's symbols.
+> Instead each subsystem owns an immutable file-static `ContextCapsuleOps`
+> beside its implementation and passes it to `context_capsule_ensure`, which
+> publishes the ops pointer *with* the slot. The registry stays frozen and
+> process-global (D5.4.4) and the lifecycle is still a table walk — the
+> runtime simply never names a subsystem symbol. This is closer to JSCU15's
+> "one owner" intent than the central table was.
+>
+> **JSCU17 done:** the eight DOM/web capsules (event, observer, XHR, history,
+> collection, foreign-document, fetch, canvas) are context capsules with
+> `REALM` lifetime, registered under `lambda/dom`'s own id range. Their eight
+> `void*` slots leave `JsRuntimeState`, so DOM state is a *peer* of the JS
+> capsule rather than a child of it. Each subsystem's `X_destroy_context`
+> became a `destroy` op, and the eight calls in the teardown fan-out
+> collapsed to one `context_capsule_destroy_all` (JSCU18's shape, for these
+> subsystems). `EvalContext` is 600 B.
+>
+> What is *not* yet done: the ensure paths still guard on
+> `js_active_runtime_state`, so a Lambda-only page still constructs no DOM
+> capsule. Relaxing that guard is JSCUO3 and is a behaviour change, kept out
+> of a mechanism swap. The remaining seven JS-side `void*` capsules
+> (prototype snapshot, dynamic-function cache, compile recovery, the two
+> regex caches, atomics, TLS ticket state) and the ~50 embedded records of
+> JSCU16 are the next slices; `sizeof(JsRuntimeState)` is 184,504 B and the
+> ≤ 1 KB ratchet belongs to JSCU16.
+>
+> Gates: test262 baseline **0 regressions** (40261/40261); rooting gate exit
+> 0 (15,803 functions hazard-clean); JS gtest 369/370; DOM UI-automation
+> suite **116/119 identical to pristine HEAD** (the three failures
+> `dom_sortable_drag`, `dom_splide_swipe`, `dom_pkg_listbox` reproduce
+> unchanged on HEAD, as does `js_computed_style_table`). The aggregate
+> Radiant baseline is order-dependent — two consecutive runs of the same
+> binary produced different failure sets — so the per-suite A/B above is the
+> attribution, not the aggregate.
+
+### 3.3 Rulings (original)
 
 **JSCU15 — The capsule directory and its ops table live on
 `EvalContext`.** At the tail of `EvalContext` (after `execution_depth`,
