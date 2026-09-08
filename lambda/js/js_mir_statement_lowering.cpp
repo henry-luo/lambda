@@ -27,8 +27,8 @@ static void jm_install_for_generator_var(JsMirTranspiler* mt, MIR_reg_t value,
     memset(&entry, 0, sizeof(entry));
     char backend_name[32];
     mir_format_backend_name(backend_name, sizeof(backend_name), name_prefix,
-        (uint64_t)mt->em.label_counter);
-    entry.name = mir_em_persist_cstr(&mt->em, backend_name).str;
+        (uint64_t)mt->func_em->em.label_counter);
+    entry.name = mir_em_persist_cstr(&mt->func_em->em, backend_name).str;
     entry.var.reg = value;
     entry.var.from_env = true;
     entry.var.env_slot = env_slot;
@@ -1104,7 +1104,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
 
     jm_emit_branch(mt, MIR_BF, l_else, test_val);
     JsErrorLaneTrack branch_exc = jm_error_lane_state(mt);
-    MirValue branch_result = mt->last_call_result;
+    MirValue branch_result = mt->func_em->last_call_result;
 
     // Consequent
     if (if_node->consequent) {
@@ -1144,7 +1144,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
     // the alternate arm starts with the condition's result, not the
     // consequent arm's path-local throw result; without this bridge a normal
     // arm can test an Item written only by the sibling arm.
-    mt->last_call_result = branch_result;
+    mt->func_em->last_call_result = branch_result;
     if (if_node->alternate) {
         // Phase 3.5: narrow variable type inside the alternate when typeof !== guard matched
         bool alternate_narrowed = false;
@@ -1572,7 +1572,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         jm_clear_last_closure_snapshot(mt);
         TypeId upd_type = jm_get_effective_type(mt, for_node->update);
         if (jm_is_native_type(upd_type)) {
-            (void)em_apply_value_demand(&mt->em,
+            (void)em_apply_value_demand(&mt->func_em->em,
                 jm_transpile_expression_value(mt, for_node->update),
                 MIR_VALUE_DISCARD);
         } else {
@@ -2551,7 +2551,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         loop_var_env_slot = lv_slot;
         jm_install_for_generator_var(mt, iterator, 'i', iter_slot);
         jm_install_for_generator_var(mt, loop_var, 'v', lv_slot);
-        mt->em.label_counter++;
+        mt->func_em->em.label_counter++;
     }
 
     MIR_label_t l_test = jm_new_label(mt);
@@ -2587,7 +2587,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             int hret_slot = mt->gen_local_slot_count++;
             jm_install_for_generator_var(mt, forit_return_val, 'i', ret_slot);
             jm_install_for_generator_var(mt, forit_has_return, 'h', hret_slot);
-            mt->em.label_counter++;
+            mt->func_em->em.label_counter++;
         }
         jm_try_context_setup(tc, l_iter_error, 0, l_forit_ret,
             forit_return_val, forit_has_return, true, false, NULL, 0);
@@ -3282,7 +3282,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // expression statements inside control flow (for/while/if/switch)
             // propagate their value as the eval() result.
             if (mt->eval_completion_reg) {
-                em_move_value_to_destination(&mt->em, value,
+                em_move_value_to_destination(&mt->func_em->em, value,
                     mt->eval_completion_reg, VALUE_REP_ITEM);
             }
         }

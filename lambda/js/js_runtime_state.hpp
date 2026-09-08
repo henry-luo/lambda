@@ -910,7 +910,6 @@ struct JsRuntimeState {
     JsFsState fs = {};
     JsClipboardState clipboard = {};
     JsDomState dom = {};
-    JsDomPlatformState dom_platform = {};
     // Listener records contain native precise-root slots and DOM pins. Keep
     // their opaque storage with the owning realm; dispatch reads it directly
     // after the context has been bound, with no shared synchronization.

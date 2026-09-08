@@ -1,4 +1,5 @@
 #include "dom_platform.h"
+#include "../runtime/context_capsule.h"
 #include "realm/dom_realm.h"
 #include "dom_events.h"
 #include "../js/js_runtime.h"
@@ -17,18 +18,43 @@ typedef JsDomStorageEntry JsStorageEntry;
 typedef JsDomStorageState JsStorageState;
 typedef JsDomMediaQueryState JsMediaQueryState;
 
-#define dom_local_storage (js_runtime_state.dom_platform.local_storage)
-#define dom_session_storage (js_runtime_state.dom_platform.session_storage)
-#define dom_media_queries (js_runtime_state.dom_platform.media_queries)
-#define dom_media_query_count (js_runtime_state.dom_platform.media_query_count)
-
 extern "C" bool dom_evaluate_media_query(const char* query);
 extern "C" uint64_t js_get_heap_epoch(void);
 extern __thread EvalContext* context;
 
+// §14.1: localStorage, sessionStorage and media-query state are DOM-only —
+// a plain JS realm never touches them — so this is a lazy context capsule
+// rather than 5,680 B embedded in every JsRuntimeState. The ratchet asks for
+// records to leave the runtime state, not to be hidden behind a pointer that
+// is always allocated.
+static void dom_platform_capsule_destroy(void* capsule);
+static const ContextCapsuleOps dom_platform_capsule_ops = {
+    "dom-platform", CONTEXT_CAPSULE_LIFETIME_REALM, sizeof(JsDomPlatformState),
+    NULL, NULL, dom_platform_capsule_destroy
+};
+
+// Read paths must not materialise the capsule: a batch reset or a receiver
+// lookup in a realm that never touched storage would otherwise allocate one
+// just to clear or scan it, which is exactly the eager cost this move removes.
+static JsDomPlatformState* dom_platform_state_if_present(void) {
+    if (!js_active_runtime_state || !context) return nullptr;
+    return (JsDomPlatformState*)context_capsule(context, CONTEXT_CAPSULE_DOM_PLATFORM);
+}
+
+static JsDomPlatformState* dom_platform_state(void) {
+    if (!js_active_runtime_state || !context) return nullptr;
+    return (JsDomPlatformState*)context_capsule_ensure(
+        context, CONTEXT_CAPSULE_DOM_PLATFORM, &dom_platform_capsule_ops);
+}
+
+#define dom_local_storage (dom_platform_state()->local_storage)
+#define dom_session_storage (dom_platform_state()->session_storage)
+#define dom_media_queries (dom_platform_state()->media_queries)
+#define dom_media_query_count (dom_platform_state()->media_query_count)
+
 static bool dom_platform_ensure_roots(void) {
-    if (!js_active_runtime_state || !context) return false;
-    JsDomPlatformState* state = &js_runtime_state.dom_platform;
+    JsDomPlatformState* state = dom_platform_state();
+    if (!state) return false;
     uint64_t epoch = js_get_heap_epoch();
     if (state->roots_epoch == epoch) return true;
     if (!heap_try_register_gc_root(&state->local_storage.object.item) ||
@@ -61,8 +87,10 @@ static const char* platform_string(Item value) {
 
 static JsStorageState* storage_from_this(void) {
     Item receiver = dom_realm_receiver();
-    if (receiver.item == dom_local_storage.object.item) return &dom_local_storage;
-    if (receiver.item == dom_session_storage.object.item) return &dom_session_storage;
+    JsDomPlatformState* state = dom_platform_state_if_present();
+    if (!state) return nullptr;
+    if (receiver.item == state->local_storage.object.item) return &state->local_storage;
+    if (receiver.item == state->session_storage.object.item) return &state->session_storage;
     return nullptr;
 }
 
@@ -190,14 +218,20 @@ static void reset_storage(JsStorageState* storage) {
 }
 
 extern "C" void dom_storage_reset(void) {
-    reset_storage(&dom_local_storage);
-    reset_storage(&dom_session_storage);
+    JsDomPlatformState* state = dom_platform_state_if_present();
+    if (!state) return;   // nothing was ever stored in this realm
+    reset_storage(&state->local_storage);
+    reset_storage(&state->session_storage);
 }
 
 static JsMediaQueryState* media_query_from_this(void) {
+    JsDomPlatformState* state = dom_platform_state_if_present();
+    if (!state) return nullptr;
     Item receiver = dom_realm_receiver();
-    for (int i = 0; i < dom_media_query_count; i++) {
-        if (dom_media_queries[i].object.item == receiver.item) return &dom_media_queries[i];
+    for (int i = 0; i < state->media_query_count; i++) {
+        if (state->media_queries[i].object.item == receiver.item) {
+            return &state->media_queries[i];
+        }
     }
     return nullptr;
 }
@@ -286,9 +320,10 @@ extern "C" void dom_match_media_reset(void) {
     dom_media_query_count = 0;
 }
 
-extern "C" void dom_platform_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state) return;
-    JsDomPlatformState* state = &runtime_state->dom_platform;
+// The capsule directory owns the block; this releases what the entries own.
+static void dom_platform_capsule_destroy(void* capsule) {
+    JsDomPlatformState* state = (JsDomPlatformState*)capsule;
+    if (!state) return;
     for (int i = 0; i < state->local_storage.count; i++) {
         mem_free(state->local_storage.entries[i].key);
         mem_free(state->local_storage.entries[i].value);
@@ -300,5 +335,5 @@ extern "C" void dom_platform_destroy_context(JsRuntimeState* runtime_state) {
     for (int i = 0; i < state->media_query_count; i++) {
         if (state->media_queries[i].query) mem_free(state->media_queries[i].query);
     }
-    memset(state, 0, sizeof(*state));
+    mem_free(state);
 }

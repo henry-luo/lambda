@@ -439,7 +439,7 @@ static JsMirVarEntry* jm_set_current_scope_var_fresh(JsMirTranspiler* mt, const 
     }
     JsVarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
-    entry.name = mir_em_persist_cstr(&mt->em, name).str;
+    entry.name = mir_em_persist_cstr(&mt->func_em->em, name).str;
     entry.var.reg = reg;
     entry.var.mir_type = mir_type;
     entry.var.type_id = type_id;

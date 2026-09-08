@@ -24,7 +24,7 @@ MIR_reg_t jm_link_static_super_prototype(JsMirTranspiler* mt,
 static void jm_init_resumable_env_entry(JsMirTranspiler* mt,
         JsVarScopeEntry* entry, const char* name, MIR_reg_t value, int env_slot) {
     memset(entry, 0, sizeof(*entry));
-    entry->name = mir_em_persist_cstr(&mt->em, name).str;
+    entry->name = mir_em_persist_cstr(&mt->func_em->em, name).str;
     entry->var.reg = value;
     entry->var.from_env = true;
     entry->var.env_slot = env_slot;
@@ -42,7 +42,7 @@ static void jm_install_scope_env_binding(JsMirTranspiler* mt, const char* name,
         MIR_reg_t value, int env_slot) {
     JsVarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
-    entry.name = mir_em_persist_cstr(&mt->em, name).str;
+    entry.name = mir_em_persist_cstr(&mt->func_em->em, name).str;
     entry.var.reg = value;
     entry.var.mir_type = MIR_T_I64;
     entry.var.type_id = LMD_TYPE_ANY;
@@ -156,7 +156,7 @@ static MIR_reg_t jm_initialize_resumable_env(JsMirTranspiler* mt,
 
     if (has_captures) {
         MIR_reg_t outer_env = MIR_reg(mt->ctx, closure_env_param_name,
-            mt->em.func);
+            mt->func_em->em.func);
         for (int ci = 0; ci < JM_CAPTURE_COUNT(fc); ci++) {
             int src_slot = jm_capture_env_slot(&JM_CAPTURE_ARRAY(fc)[ci], ci);
             MIR_reg_t cap_val = jm_new_reg(mt, capture_reg_name, MIR_T_I64);
@@ -169,11 +169,11 @@ static MIR_reg_t jm_initialize_resumable_env(JsMirTranspiler* mt,
     for (int i = 0; i < param_count; i++) {
         char backend_name[32];
         jm_get_backend_param_name(i, backend_name, sizeof(backend_name));
-        MIR_reg_t preg = MIR_reg(mt->ctx, backend_name, mt->em.func);
+        MIR_reg_t preg = MIR_reg(mt->ctx, backend_name, mt->func_em->em.func);
         int env_slot = JM_CAPTURE_COUNT(fc) + i;
         jm_emit_store_i64(mt, env_slot * (int)sizeof(uint64_t), env, preg);
     }
-    jm_validate_destructured_params(mt, fn->params, param_count, mt->em.func);
+    jm_validate_destructured_params(mt, fn->params, param_count, mt->func_em->em.func);
 
     if (this_slot >= 0) {
         MIR_reg_t this_val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
@@ -233,7 +233,7 @@ static void jm_initialize_resumable_scope_env(JsMirTranspiler* mt,
 
     JsVarScopeEntry senv_entry;
     memset(&senv_entry, 0, sizeof(senv_entry));
-    senv_entry.name = mir_em_persist_cstr(&mt->em, "_scope_env").str;
+    senv_entry.name = mir_em_persist_cstr(&mt->func_em->em, "_scope_env").str;
     senv_entry.var.reg = mt->scope_env_reg;
     senv_entry.var.from_env = true;
     senv_entry.var.env_slot = scope_env_slot;
@@ -869,14 +869,14 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
     MIR_func_t wrapper_func = MIR_get_item_func(mt->ctx, wrapper_item);
     fc->func_item = wrapper_item;
     jm_register_local_func(mt, fc->name, wrapper_item);
-    mt->em.func_item = wrapper_item;
-    mt->em.func = wrapper_func;
+    mt->func_em->em.func_item = wrapper_item;
+    mt->func_em->em.func = wrapper_func;
     jm_begin_function_frame(mt, return_type, true, scalar_return_mode,
         MIR_reg(mt->ctx, "ctx", wrapper_func), true);
-    mt->em.frame.plan.entry_mode = MIR_ENTRY_CHECKED;
+    mt->func_em->em.frame.plan.entry_mode = MIR_ENTRY_CHECKED;
     FnVariantAnalysis* public_variant = fn_analysis_variant(jm_function_analysis(fc),
         FN_ENTRY_PUBLIC_WRAPPER);
-    em_plan_bind_return(&mt->em.frame.plan,
+    em_plan_bind_return(&mt->func_em->em.frame.plan,
         public_variant ? &public_variant->result : NULL, /*c_reachable=*/true);
 
     MIR_reg_t* args = call_param_count > 0
@@ -1110,7 +1110,7 @@ static JsMirResumableStateMachine jm_create_resumable_state_machine(
         JsMirTranspiler* mt, JsFuncCollected* fc, const char* prefix) {
     JsMirResumableStateMachine machine = {NULL, NULL, {0}};
     snprintf(machine.name, sizeof(machine.name), "%s_%s_%d", prefix, fc->name,
-        mt->em.label_counter++);
+        mt->func_em->em.label_counter++);
     MIR_var_t params[4] = {
         {MIR_T_P, "ctx", 0}, {MIR_T_I64, "gen_env", 0},
         {MIR_T_I64, "gen_input", 0}, {MIR_T_I64, "gen_state", 0}
@@ -1126,8 +1126,8 @@ static void jm_begin_resumable_state_machine(JsMirTranspiler* mt,
         JsFunctionNode* fn, JsFuncCollected* fc,
         const JsMirResumableLayout* layout, int state_count, bool is_async,
         bool reset_eval_local_frame, MIR_item_t func_item, MIR_func_t func) {
-    mt->em.func_item = func_item;
-    mt->em.func = func;
+    mt->func_em->em.func_item = func_item;
+    mt->func_em->em.func = func;
     mt->loop_depth = 0;
     mt->for_of_depth = 0;
     mt->pending_label_name = NULL;
@@ -1155,7 +1155,7 @@ static void jm_begin_resumable_state_machine(JsMirTranspiler* mt,
 
     jm_begin_function_frame(mt, MIR_T_I64, true, SCALAR_RETURN_DYNAMIC,
         MIR_reg(mt->ctx, "ctx", func), false);
-    mt->em.frame.plan.entry_kind = FN_ENTRY_RESUME;
+    mt->func_em->em.frame.plan.entry_kind = FN_ENTRY_RESUME;
     jm_push_scope(mt);
     mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", func);
     mt->gen_input_reg = MIR_reg(mt->ctx, "gen_input", func);
@@ -1188,7 +1188,7 @@ typedef struct JsMirFunctionStateSnapshot {
 // generator, async, native, or boxed function boundaries.
 static JsMirFunctionStateSnapshot jm_capture_function_state(JsMirTranspiler* mt) {
     JsMirFunctionStateSnapshot state = {
-        mt->em.func_item, mt->em.func, mt->scope_depth, mt->loop_depth,
+        mt->func_em->em.func_item, mt->func_em->em.func, mt->scope_depth, mt->loop_depth,
         mt->in_native_func, mt->in_main, mt->current_fc, mt->current_class,
         mt->scope_env_reg, mt->scope_env_slot_count,
         mt->in_generator, mt->in_async, mt->arguments_reg, mt->arguments_params,
@@ -1199,8 +1199,8 @@ static JsMirFunctionStateSnapshot jm_capture_function_state(JsMirTranspiler* mt)
 
 static void jm_restore_function_state(JsMirTranspiler* mt,
         const JsMirFunctionStateSnapshot* state) {
-    mt->em.func_item = state->func_item;
-    mt->em.func = state->func;
+    mt->func_em->em.func_item = state->func_item;
+    mt->func_em->em.func = state->func;
     mt->scope_depth = state->scope_depth;
     mt->loop_depth = state->loop_depth;
     mt->in_native_func = state->in_native_func;
@@ -1262,8 +1262,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         jm_register_local_func(mt, native_name, native_item);
 
         // Save transpiler state
-        MIR_item_t saved_item = mt->em.func_item;
-        MIR_func_t saved_func = mt->em.func;
+        MIR_item_t saved_item = mt->func_em->em.func_item;
+        MIR_func_t saved_func = mt->func_em->em.func;
         int saved_scope_depth = mt->scope_depth;
         int saved_loop_depth = mt->loop_depth;
         bool saved_in_native = mt->in_native_func;
@@ -1279,11 +1279,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Save exception label — must not leak from outer function into native version
         MIR_label_t saved_error_lane_label = mt->func_error_lane_label;
         JsErrorLaneTrack saved_error_lane_track = mt->error_lane_track;
-        MirValue saved_last_call_result = mt->last_call_result;
+        MirValue saved_last_call_result = mt->func_em->last_call_result;
         MIR_reg_t saved_func_error_lane_value = mt->func_error_lane_value_reg;
 
-        mt->em.func_item = native_item;
-        mt->em.func = native_func;
+        mt->func_em->em.func_item = native_item;
+        mt->func_em->em.func = native_func;
         mt->loop_depth = 0;
         mt->for_of_depth = 0;
         mt->pending_label_name = NULL;
@@ -1299,8 +1299,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         jm_begin_function_frame(mt, native_ret_type, false,
             SCALAR_RETURN_NONE, MIR_reg(mt->ctx, "ctx", native_func), true);
-        mt->em.frame.plan.entry_kind = FN_ENTRY_NATIVE_BODY;
-        mt->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
+        mt->func_em->em.frame.plan.entry_kind = FN_ENTRY_NATIVE_BODY;
+        mt->func_em->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
         jm_push_scope(mt);
 
         // Register parameters with their inferred native types
@@ -1406,8 +1406,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_finish_func(mt->ctx);
 
         // Restore state
-        mt->em.func_item = saved_item;
-        mt->em.func = saved_func;
+        mt->func_em->em.func_item = saved_item;
+        mt->func_em->em.func = saved_func;
         mt->scope_depth = saved_scope_depth;
         mt->loop_depth = saved_loop_depth;
         mt->in_native_func = saved_in_native;
@@ -1422,7 +1422,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->tco_jumped = false;
         mt->func_error_lane_label = saved_error_lane_label;  // restore outer function's error exit
         mt->error_lane_track = saved_error_lane_track;
-        mt->last_call_result = saved_last_call_result;
+        mt->func_em->last_call_result = saved_last_call_result;
         mt->func_error_lane_value_reg = saved_func_error_lane_value;
 
         log_debug("js-mir P4: generated native version %s (params: %d, ret: %s%s)",
@@ -1725,7 +1725,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             JsMirFunctionStateSnapshot saved_sm_state = jm_capture_function_state(mt);
             MIR_label_t saved_error_lane_label_sm = mt->func_error_lane_label;
             JsErrorLaneTrack saved_error_lane_track_sm = mt->error_lane_track;
-            MirValue saved_last_call_result_sm = mt->last_call_result;
+            MirValue saved_last_call_result_sm = mt->func_em->last_call_result;
             MIR_reg_t saved_func_error_lane_value_sm = mt->func_error_lane_value_reg;
 
             jm_begin_resumable_state_machine(mt, fn, fc, &layout, await_count, true, false,
@@ -1859,7 +1859,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_restore_function_state(mt, &saved_sm_state);
             mt->func_error_lane_label = saved_error_lane_label_sm;
             mt->error_lane_track = saved_error_lane_track_sm;
-            mt->last_call_result = saved_last_call_result_sm;
+            mt->func_em->last_call_result = saved_last_call_result_sm;
             mt->func_error_lane_value_reg = saved_func_error_lane_value_sm;
 
             hashmap_free(async_lexicals);
@@ -1929,8 +1929,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     jm_register_local_func(mt, fc->body_name, func_item);
 
     // Save transpiler state
-    MIR_item_t saved_item = mt->em.func_item;
-    MIR_func_t saved_func = mt->em.func;
+    MIR_item_t saved_item = mt->func_em->em.func_item;
+    MIR_func_t saved_func = mt->func_em->em.func;
     int saved_scope_depth = mt->scope_depth;
     int saved_var_hoist_depth = mt->var_hoist_depth;
     int saved_loop_depth = mt->loop_depth;
@@ -1957,8 +1957,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     // their PrivateEnvironment without re-scanning method entries (D8.2.4).
     mt->current_class = jm_function_owner_class(mt, fc);
 
-    mt->em.func_item = func_item;
-    mt->em.func = func;
+    mt->func_em->em.func_item = func_item;
+    mt->func_em->em.func = func;
     mt->loop_depth = 0;
     mt->for_of_depth = 0;
     mt->pending_label_name = NULL;
@@ -1970,9 +1970,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     jm_begin_function_frame(mt, ret_type, true, body_scalar_mode,
         MIR_reg(mt->ctx, "ctx", func), true);
-    mt->em.frame.plan.entry_kind = FN_ENTRY_BOXED_BODY;
-    mt->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
-    em_plan_bind_return(&mt->em.frame.plan,
+    mt->func_em->em.frame.plan.entry_kind = FN_ENTRY_BOXED_BODY;
+    mt->func_em->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
+    em_plan_bind_return(&mt->func_em->em.frame.plan,
         body_variant ? &body_variant->result : NULL, /*c_reachable=*/false);
     if (has_captures) {
         MIR_reg_t closure_env_reg = MIR_reg(mt->ctx, closure_env_param_name, func);
@@ -2011,7 +2011,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_emit_reg_op(mt, MIR_MOV, local_reg, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED));
             JsVarScopeEntry entry;
             memset(&entry, 0, sizeof(entry));
-            entry.name = mir_em_persist_cstr(&mt->em, ns->name).str;
+            entry.name = mir_em_persist_cstr(&mt->func_em->em, ns->name).str;
             entry.var.reg = local_reg;
             entry.var.mir_type = MIR_T_I64;
             entry.var.type_id = LMD_TYPE_ANY;
@@ -2097,7 +2097,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     jm_emit_load_i64(mt, cap_reg, src_slot * (int)sizeof(uint64_t), wrapper_env);
                     JsVarScopeEntry cap_entry;
                     memset(&cap_entry, 0, sizeof(cap_entry));
-                    cap_entry.name = mir_em_persist_cstr(&mt->em, JM_CAPTURE_ARRAY(fc)[ci].name).str;
+                    cap_entry.name = mir_em_persist_cstr(&mt->func_em->em, JM_CAPTURE_ARRAY(fc)[ci].name).str;
                     cap_entry.var.binding = JM_CAPTURE_ARRAY(fc)[ci].entry;
                     cap_entry.var.reg = cap_reg;
                     cap_entry.var.from_env = true;
@@ -2291,7 +2291,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
                 JsVarScopeEntry entry;
                 memset(&entry, 0, sizeof(entry));
-                entry.name = mir_em_persist_cstr(&mt->em, JM_CAPTURE_ARRAY(fc)[i].name).str;
+                entry.name = mir_em_persist_cstr(&mt->func_em->em, JM_CAPTURE_ARRAY(fc)[i].name).str;
                 entry.var.binding = JM_CAPTURE_ARRAY(fc)[i].entry;
                 entry.var.reg = cap_reg;
                 entry.var.from_env = true;
@@ -2820,8 +2820,8 @@ finish_boxed:
     jm_emit_public_function_wrapper(mt, fc, param_count, has_captures);
 
     // Restore state
-    mt->em.func_item = saved_item;
-    mt->em.func = saved_func;
+    mt->func_em->em.func_item = saved_item;
+    mt->func_em->em.func = saved_func;
     mt->scope_depth = saved_scope_depth;
     mt->var_hoist_depth = saved_var_hoist_depth;
     mt->loop_depth = saved_loop_depth;

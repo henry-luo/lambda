@@ -348,7 +348,6 @@ void js_runtime_state_destroy_context(void) {
     // optional Node session while its heap-backed state is still valid.
     jube_modules_runtime_detach();
     js_runtime_owned_cache_destroy_context(runtime_context->js_state);
-    dom_platform_destroy_context(runtime_context->js_state);
     // JSCU18: the DOM/web capsules leave through the directory's own walk
     // instead of eight hand-maintained calls.
     context_capsule_destroy_all(runtime_context);

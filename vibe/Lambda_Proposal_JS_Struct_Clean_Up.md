@@ -423,7 +423,13 @@ The existing dynamically sized captures and shared `FnAnalysis` are the directio
 
 ### 9.2 `JsMirTranspiler`
 
-**Reassess before spending this.** §9.3 took the record from 30,840 B to
+**First split LANDED 2026-09-08: `JsMirFunctionEmitter`.** See §14.1 for the
+result and the naming trap. The other four records this section names
+(`JsMirModuleEmitter`, `JsControlFlowState`, `JsGeneratorLoweringState`,
+`JsEvalLoweringState`) are still inline in a 664 B coordinator; the ratchet is
+met and further splitting is structure-only.
+
+**Earlier assessment, kept because it still applies to the remaining four:** §9.3 took the record from 30,840 B to
 **2,720 B**, so the size argument for the lifetime split is gone. What remains
 is the architectural case — D8.2.4/D8.2.5 lifetime hygiene, so that lowering
 consumes resolved IDs and facts rather than carrying analysis as mutable
@@ -631,6 +637,58 @@ Large resource records such as `JsSocket`, `JsTlsSocket`, and `JsSpawnProcess` a
 ## 14. Acceptance gates
 
 ### 14.1 Structural ratchets
+
+**Status 2026-09-08.** Twelve of thirteen ratchets are met; the one that
+misses is named below the table.
+
+| Ratchet | Target | Now | |
+|---|---:|---:|---|
+| `sizeof(JsObserverRuntimeState)` | ≤ 128 | **32** | met |
+| `sizeof(ParsedRequest)` → `HttpRequestHead` | ≤ 256 | **104** | met |
+| `sizeof(JsFunction)` | ≤ 160 | **128** | met, and it changed the GC size class (384 → 128) |
+| fixed DOM collection entries | 0 | **0** | met |
+| fixed XHR records | 0 | **0** | met |
+| fixed crypto handle slots | 0 | **0** | met |
+| generator / async / reset-registry capacities | none | **none** | met |
+| closure capture arrays copied by snapshots | 0 fixed | **0** | met |
+| `sizeof(JsMirTranspiler)` | ≤ 2,048 | **664** | met (§9.2 split) |
+| `sizeof(JsRuntimeState)` | ≤ 1,024 | **21,384** | **misses by 20,360** |
+
+**`JsMirTranspiler` — ratchet MET 2026-09-08 at 664 B.** §9.3 took it from
+30,840 to 2,720 B; §9.2's first split takes it to **664 B**, well under 2,048.
+`JsMirFunctionEmitter` (1,560 B) now holds the per-function lowering state:
+`MirEmitter em`, `MirValue last_call_result`, and the two 32-entry name caches
+with their counts and function-item guards. Those caches are what identified the
+boundary — each invalidates itself against `em.func_item`, which is the
+definition of per-function state sitting in a compilation-unit record. 319
+accesses were rewritten across eleven files.
+
+⚠ The member is named `func_em`, not `fn`: the call macros in
+`js_mir_internal.hpp` already bind a parameter called `fn`, so `(mt)->fn->em`
+expanded the macro argument into the member path and produced nonsense that
+still parsed at some sites.
+
+**Honest note on what this buys.** `JsMirTranspiler` is one instance per
+compilation unit, so the byte count was never memory pressure — the value is
+that the per-function boundary now has a name and one record to reset, instead
+of a dozen fields reset by scattered assignments. Lowering is sequential, so the
+emitter is allocated once and reused rather than reallocated per function; §14.1
+would object to that shape for a record every realm carries, but here the
+coordinator genuinely no longer contains state whose lifetime is a function
+body. The remaining four records §9.2 names — control flow, generator lowering,
+eval lowering — are still inline; they are small, and splitting them further
+buys structure rather than either bytes or a ratchet.
+
+**`JsRuntimeState` (21,384 B).** 38 records are still embedded by value,
+13,808 B of the total. The largest, `JsDomPlatformState` (5,680 B), left in this
+change: local/session storage and media-query state are DOM-only, so it is now a
+lazy **context capsule** rather than a pointer that is always allocated. The
+same test applies to the rest: a record that every realm uses is not honestly
+served by a pointer, and only the ones a plain JS realm never touches should
+become capsules. `JsEvalState` (4,304 B) is the next largest and *is* used by
+every realm, so it needs a different answer than either.
+
+The original table follows.
 
 | Metric | Current | Target |
 |---|---:|---:|
