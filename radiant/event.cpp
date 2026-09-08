@@ -1833,6 +1833,34 @@ static bool dom_event_bubbles(Item event) {
            js_is_truthy(bubbles);
 }
 
+static const char* dom_selection_origin_name(DomSelectionOrigin origin) {
+    switch (origin) {
+    case DOM_SELECTION_ORIGIN_POINTER: return "pointer";
+    case DOM_SELECTION_ORIGIN_KEYBOARD: return "keyboard";
+    case DOM_SELECTION_ORIGIN_MODEL_COMMIT: return "model-commit";
+    case DOM_SELECTION_ORIGIN_DOM_MUTATION: return "dom-mutation";
+    case DOM_SELECTION_ORIGIN_API:
+    default: return "api";
+    }
+}
+
+static const char* dom_selection_direction_name(DomSelectionDirection direction) {
+    switch (direction) {
+    case DOM_SEL_DIR_FORWARD: return "forward";
+    case DOM_SEL_DIR_BACKWARD: return "backward";
+    case DOM_SEL_DIR_NONE:
+    default: return "none";
+    }
+}
+
+static const char* dom_selection_kind_name(const DocState* state) {
+    if (!state || state->sel.kind == EDIT_SEL_NONE) return "none";
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) return "text-control";
+    return state->dom_selection && dom_selection_is_collapsed(state->dom_selection)
+        ? "caret"
+        : "range";
+}
+
 static Item build_dom_event_record(DomDocument* doc, View* target,
                                    const char* event_name, EventContext* evcon,
                                    const InputIntent* intent = nullptr,
@@ -1906,6 +1934,27 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     // absent-member error rather than a false value.  Always materialize this
     // captured host-mode fact so command policy remains a total expression.
     if (intent) mb.put("edit_plaintext_only", intent->edit_plaintext_only);
+    if (intent) mb.put("drag_move", intent->drag_move);
+
+    // The action snapshot and selectionchange projection share one canonical
+    // native revision. Model handlers use this to reject their own completion
+    // echo without clearing stored marks (D7.5.3).
+    DocState* selection_state = doc->state ? (DocState*)doc->state : nullptr;
+    if (selection_state &&
+        (intent || (event_name && strcmp(event_name, "selectionchange") == 0))) {
+        mb.put("selection_revision",
+               (int64_t)selection_state->selection_mutation_seq);
+        mb.put("selection_origin",
+               dom_selection_origin_name(selection_state->selection_origin));
+        mb.put("model_revision",
+               (int64_t)selection_state->selection_model_revision);
+        mb.put("dom_selection_direction",
+               dom_selection_direction_name(
+                   selection_state->dom_selection
+                       ? selection_state->dom_selection->direction
+                       : DOM_SEL_DIR_NONE));
+        mb.put("selection_kind", dom_selection_kind_name(selection_state));
+    }
 
     // F9: a caret-key notification carries no edit intent either — only the key
     // and modifiers the template maps to an operation.
@@ -2174,6 +2223,33 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         }
     }
 
+    // The model action consumes the same immutable target ranges exposed to
+    // InputEvent.getTargetRanges(). Project them once while the pre-action DOM
+    // is live; schema code never reconstructs a target from post-notification
+    // selection state (D7.2.5, D7.5.3).
+    if (evcon && evcon->editing_target_ranges_active) {
+        ArrayBuilder projected_ranges = builder.array();
+        bool projection_complete = true;
+        for (uint32_t i = 0; i < evcon->editing_target_range_count; i++) {
+            SourcePosC start_pos = {};
+            SourcePosC end_pos = {};
+            const EditingTargetRange& range = evcon->editing_target_ranges[i];
+            bool have_start = source_pos_from_dom_boundary(&range.start, &start_pos);
+            bool have_end = source_pos_from_dom_boundary(&range.end, &end_pos);
+            if (have_start && have_end) {
+                projected_ranges.append(source_text_selection_to_item(
+                    builder, &start_pos, &end_pos));
+            } else {
+                projection_complete = false;
+            }
+            source_pos_free(&start_pos);
+            source_pos_free(&end_pos);
+        }
+        mb.put("source_target_ranges", projected_ranges.final());
+        mb.put("source_projection_status",
+               projection_complete ? "complete" : "partial");
+    }
+
     DocState* st_press = doc && doc->state ? (DocState*)doc->state : nullptr;
     mb.put("selection_press_in_range",
            event_uses_hit_source_pos && selection_press_in_range_pending(st_press, NULL, NULL));
@@ -2250,17 +2326,169 @@ typedef struct EmitHandlerContext {
     Item model_item;            // current handler's model item
     const char* template_ref;   // current handler's template reference
     EventContext* evcon;        // event context for passing to nested handlers
-    bool has_pending_selection; // selection to re-apply after reactive rebuild
-    Item pending_selection;
+    bool has_nested_model_selection;
+    Rooted<Item>* nested_model_selection_root;
+    uint64_t nested_model_revision;
 } EmitHandlerContext;
 
 static __thread EmitHandlerContext* g_emit_handler_ctx = nullptr;
 
-static bool dom_node_is_within_root(DomNode* node, DomNode* root) {
-    for (DomNode* cur = node; cur; cur = cur->parent) {
-        if (cur == root) return true;
+static bool handler_verdict_is(Item verdict, const char* word);
+static bool model_edit_surface_revision(Item result, uint64_t* out_revision);
+
+static Item source_selection_from_edit_result(Item result) {
+    Item space = radiant_edit_result_field(result, "selection_space");
+    if (!handler_verdict_is(space, "source")) return ItemNull;
+    return radiant_edit_result_field(result, "selection_after");
+}
+
+static bool stage_source_selection_from_edit_result(EmitHandlerContext* emit_ctx,
+                                                    Item result) {
+    if (!emit_ctx || !emit_ctx->nested_model_selection_root) return false;
+    Item selection = source_selection_from_edit_result(result);
+    uint64_t revision = 0;
+    if (get_type_id(selection) == LMD_TYPE_NULL ||
+        !model_edit_surface_revision(result, &revision)) {
+        return false;
     }
-    return false;
+    emit_ctx->nested_model_selection_root->set(selection);
+    emit_ctx->nested_model_revision = revision;
+    emit_ctx->has_nested_model_selection = true;
+    return true;
+}
+
+static ModelEditSurfaceBinding* model_edit_surface_find(DocState* state,
+                                                        uint64_t handle_id) {
+    if (!state || handle_id == 0) return nullptr;
+    for (ModelEditSurfaceBinding* binding = state->editing.model_edit_surfaces;
+         binding; binding = binding->next) {
+        if (binding->handle_id == handle_id) return binding;
+    }
+    return nullptr;
+}
+
+static ModelEditSurfaceBinding* model_edit_surface_find_host(
+        DocState* state, const char* host_key) {
+    if (!state || !host_key || !host_key[0]) return nullptr;
+    for (ModelEditSurfaceBinding* binding = state->editing.model_edit_surfaces;
+         binding; binding = binding->next) {
+        if (binding->host_key && strcmp(binding->host_key, host_key) == 0) {
+            return binding;
+        }
+    }
+    return nullptr;
+}
+
+uint64_t radiant_model_edit_surface_bind(DomElement* target,
+                                         uint64_t model_revision) {
+    if (!target || !target->doc || !target->doc->state) return 0;
+    EditingSurface surface;
+    editing_surface_clear(&surface);
+    if (!editing_surface_from_target(static_cast<View*>(target), &surface) ||
+        !editing_surface_is_rich(&surface) || !surface.owner ||
+        !surface.owner->id || !surface.owner->id[0]) {
+        return 0;
+    }
+
+    DocState* state = (DocState*)target->doc->state;
+    ModelEditSurfaceBinding* existing = model_edit_surface_find_host(
+        state, surface.owner->id);
+    if (existing) {
+        if (model_revision > existing->model_revision) {
+            existing->model_revision = model_revision;
+        }
+        return existing->handle_id;
+    }
+
+    ModelEditSurfaceBinding* binding = (ModelEditSurfaceBinding*)mem_calloc(
+        1, sizeof(ModelEditSurfaceBinding), MEM_CAT_LAYOUT);
+    if (!binding) return 0;
+    uint64_t handle_id = ++state->editing.next_model_edit_surface_id;
+    if (handle_id == 0) handle_id = ++state->editing.next_model_edit_surface_id;
+    binding->host_key = mem_strdup(surface.owner->id, MEM_CAT_LAYOUT);
+    if (!binding->host_key) {
+        mem_free(binding);
+        return 0;
+    }
+    binding->handle_id = handle_id;
+    binding->model_revision = model_revision;
+    binding->next = state->editing.model_edit_surfaces;
+    state->editing.model_edit_surfaces = binding;
+    return handle_id;
+}
+
+static bool model_edit_surface_revision(Item result, uint64_t* out_revision) {
+    if (!out_revision) return false;
+    Item revision = radiant_edit_result_field(result, "model_revision");
+    TypeId type = get_type_id(revision);
+    if (type != LMD_TYPE_INT && type != LMD_TYPE_INT64) return false;
+    int64_t value = it2l(revision);
+    if (value < 0) return false;
+    *out_revision = (uint64_t)value;
+    return true;
+}
+
+static void model_edit_surface_accept_result(DocState* state,
+                                             DomElement* owner,
+                                             Item result) {
+    if (!state || !owner || !owner->id || !owner->id[0]) return;
+    ModelEditSurfaceBinding* binding = model_edit_surface_find_host(
+        state, owner->id);
+    uint64_t revision = 0;
+    if (binding && model_edit_surface_revision(result, &revision) &&
+        revision >= binding->model_revision) {
+        binding->model_revision = revision;
+    }
+}
+
+bool radiant_finish_model_edit(Item surface_handle, Item edit_result) {
+    if (!g_emit_handler_ctx || !g_emit_handler_ctx->doc ||
+        !g_emit_handler_ctx->doc->state) {
+        log_debug("model edit finish: no active handler document");
+        return false;
+    }
+    TypeId handle_type = get_type_id(surface_handle);
+    if (handle_type != LMD_TYPE_INT && handle_type != LMD_TYPE_INT64) {
+        log_debug("model edit finish: invalid handle type=%d", handle_type);
+        return false;
+    }
+    int64_t raw_handle = it2l(surface_handle);
+    if (raw_handle <= 0) {
+        log_debug("model edit finish: empty handle");
+        return false;
+    }
+
+    DocState* state = (DocState*)g_emit_handler_ctx->doc->state;
+    ModelEditSurfaceBinding* binding = model_edit_surface_find(
+        state, (uint64_t)raw_handle);
+    if (!binding || !binding->host_key) {
+        log_debug("model edit finish: handle not bound id=%lld", (long long)raw_handle);
+        return false;
+    }
+    DomElement* live_owner = dom_find_element_by_id(
+        g_emit_handler_ctx->doc->root, binding->host_key);
+    EditingSurface live_surface;
+    editing_surface_clear(&live_surface);
+    if (!live_owner ||
+        !editing_surface_from_target(static_cast<View*>(live_owner),
+                                     &live_surface) ||
+        !editing_surface_is_rich(&live_surface) ||
+        live_surface.owner != live_owner) {
+        log_debug("model edit finish: live host validation failed key=%s",
+                  binding->host_key);
+        return false;
+    }
+    uint64_t revision = 0;
+    if (!model_edit_surface_revision(edit_result, &revision) ||
+        revision < binding->model_revision ||
+        !stage_source_selection_from_edit_result(
+            g_emit_handler_ctx, edit_result)) {
+        log_debug("model edit finish: result validation failed id=%lld",
+                  (long long)raw_handle);
+        return false;
+    }
+    binding->model_revision = revision;
+    return true;
 }
 
 static DomNode* source_selection_scope_root(DomDocument* doc, DocState* state) {
@@ -2279,18 +2507,24 @@ static DomNode* source_selection_scope_root(DomDocument* doc, DocState* state) {
     if (!surface || !surface->owner) return doc_root;
 
     DomElement* owner = surface->owner;
-    if (!dom_node_is_within_root(static_cast<DomNode*>(owner), doc_root) &&
-        owner->id && owner->id[0]) {
+    bool owner_is_live = view_tree_contains_view(
+        doc_root, static_cast<View*>(owner));
+    if (!owner_is_live && owner->id && owner->id[0]) {
         DomElement* live_owner = dom_find_element_by_id(doc->root, owner->id);
-        if (live_owner) owner = live_owner;
+        if (live_owner) {
+            owner = live_owner;
+            owner_is_live = true;
+        }
     }
 
-    return dom_node_is_within_root(static_cast<DomNode*>(owner), doc_root)
+    return owner_is_live
         ? static_cast<DomNode*>(owner)
         : doc_root;
 }
 
-static bool apply_source_selection_to_doc(UiContext* uicon, DomDocument* doc, Item selection) {
+static bool apply_source_selection_to_doc(UiContext* uicon, DomDocument* doc,
+                                          Item selection,
+                                          uint64_t model_revision) {
     if (!doc || !doc->root) return false;
     DocState* state = (DocState*)doc->state;
     if (!state || !state->dom_selection) return false;
@@ -2298,6 +2532,9 @@ static bool apply_source_selection_to_doc(UiContext* uicon, DomDocument* doc, It
     if (!root || !dom_selection_apply_source_selection(state->dom_selection, root, selection)) {
         return false;
     }
+    state_store_tag_selection_origin(state,
+                                     DOM_SELECTION_ORIGIN_MODEL_COMMIT,
+                                     model_revision);
     update_caret_visual_position(uicon, state);
     return true;
 }
@@ -2376,15 +2613,24 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
 
                                     uint64_t mutation_epoch = edit_bridge_mutation_epoch();
 
-                                    // invoke parent handler with (parent_source_item, event_data)
-                                    call_template_event_handler(h,
-                                        lookup.source_item, event_data);
+                                    // Keep the nested return rooted until its
+                                    // explicit source-selection completion has
+                                    // been staged on the outer handler frame.
+                                    RootFrame emit_result_roots(1);
+                                    Rooted<Item> emit_result(emit_result_roots,
+                                        call_template_event_handler(h,
+                                            lookup.source_item, event_data));
+                                    stage_source_selection_from_edit_result(
+                                        g_emit_handler_ctx, emit_result.get());
 
                                     if (tmpl->is_edit &&
                                         edit_bridge_mutation_epoch() != mutation_epoch) {
                                         render_map_mark_dirty(lookup.source_item, lookup.template_ref);
                                     }
 
+                                    // emit() is a notification primitive. Its
+                                    // nested result is consumed above and must
+                                    // not escape the RootFrame as an Item.
                                     return ItemNull;
                                 }
                             }
@@ -2400,33 +2646,8 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
     return ItemNull;
 }
 
-/**
- * dispatch_set_selection — called from pn_set_selection() (lambda-proc.cpp).
- * Push a Lambda SourceSelection back to the live DomSelection so the
- * visual caret/highlight follows after an edit. See
- * Radiant_Rich_Text_Editing.md §7.4 (Source → DOM sync).
- *
- * Resolves the active document via the thread-local handler context, then
- * delegates the parsing + boundary lookup to
- * `dom_selection_apply_source_selection` (source_pos_bridge.cpp).
- */
-extern "C" Item dispatch_set_selection(Item selection) {
-    if (!g_emit_handler_ctx || !g_emit_handler_ctx->doc) {
-        log_error("dispatch_set_selection: no handler context — set_selection() called outside handler");
-        return ItemNull;
-    }
-
-    g_emit_handler_ctx->pending_selection = selection;
-    g_emit_handler_ctx->has_pending_selection = true;
-
-    // Editor handlers update their source model before requesting a caret.
-    // Applying that new path to the old DOM can target a shifted sibling, so
-    // wait until dispatch finishes rebuilding the live tree.
-    return ItemNull;
-}
-
 void radiant_register_event_hooks() {
-    lambda_radiant_event_register(dispatch_emit, dispatch_set_selection);
+    lambda_radiant_event_register(dispatch_emit);
 }
 
 /**
@@ -2466,6 +2687,42 @@ static bool handler_verdict_is(Item verdict, const char* word) {
     return len == want && memcmp(text, word, want) == 0;
 }
 
+Item radiant_edit_result_field(Item result, const char* name) {
+    if (get_type_id(result) != LMD_TYPE_MAP || !result.map || !name) return ItemNull;
+    return map_get(result.map,
+        (Item){.item = s2it(heap_create_name(name))});
+}
+
+bool radiant_edit_result_bool(Item result, const char* name) {
+    Item field = radiant_edit_result_field(result, name);
+    return get_type_id(field) == LMD_TYPE_BOOL && it2b(field);
+}
+
+char* radiant_edit_result_string_copy(Item result, const char* name) {
+    Item field = radiant_edit_result_field(result, name);
+    if (get_type_id(field) == LMD_TYPE_NULL) return nullptr;
+    const char* text = fn_to_cstr(field);
+    return text ? mem_strdup(text, MEM_CAT_TEMP) : nullptr;
+}
+
+static bool apply_edit_result_source_selection(EventContext* evcon,
+                                               DomDocument* doc,
+                                               Item result) {
+    Item selection = source_selection_from_edit_result(result);
+    uint64_t revision = 0;
+    if (get_type_id(selection) == LMD_TYPE_NULL ||
+        !model_edit_surface_revision(result, &revision)) {
+        return false;
+    }
+    if (!apply_source_selection_to_doc(evcon ? evcon->ui_context : nullptr,
+                                       doc, selection, revision)) {
+        log_error("model edit completion: source selection did not resolve");
+        return false;
+    }
+    if (evcon) evcon->need_repaint = true;
+    return true;
+}
+
 static Item event_context_dom_event(EventContext* evcon, const char* event_name) {
     if (!evcon || !radiant_dom_event_is(evcon->dom_event) ||
         !radiant_dom_event_type_is(evcon->dom_event, event_name)) {
@@ -2489,6 +2746,38 @@ static void event_context_set_dom_event(EventContext* evcon, Item event) {
         }
     }
     evcon->dom_event = event;
+}
+
+static void event_context_stage_model_selection(EventContext* evcon,
+                                                DomDocument* doc,
+                                                Item selection,
+                                                uint64_t model_revision) {
+    if (!evcon || get_type_id(selection) == LMD_TYPE_NULL) return;
+    if (evcon->dom_event_root_lifetime && !evcon->model_edit_selection_root_gc) {
+        Runtime* runtime = dom_document_script_runtime(doc);
+        if (runtime && runtime_heap(runtime) && runtime_heap(runtime)->gc) {
+            gc_register_root(runtime_heap(runtime)->gc,
+                             &evcon->model_edit_selection.item);
+            evcon->model_edit_selection_root_gc = runtime_heap(runtime)->gc;
+        }
+    }
+    evcon->model_edit_selection = selection;
+    evcon->model_edit_revision = model_revision;
+    evcon->model_edit_selection_pending = true;
+}
+
+static bool event_context_apply_model_selection(EventContext* evcon,
+                                                DomDocument* doc) {
+    if (!evcon || !evcon->model_edit_selection_pending) return false;
+    evcon->model_edit_selection_pending = false;
+    bool applied = apply_source_selection_to_doc(
+        evcon->ui_context, doc, evcon->model_edit_selection,
+        evcon->model_edit_revision);
+    evcon->model_edit_selection = ItemNull;
+    evcon->model_edit_revision = 0;
+    if (applied) evcon->need_repaint = true;
+    else log_error("model edit completion: deferred source selection did not resolve");
+    return applied;
 }
 
 // F18 keeps reactive regeneration outside the author cascade. Rebuilding while
@@ -2545,9 +2834,15 @@ static bool settle_template_retransform(EventContext* evcon,
 
 static bool settle_pending_author_templates(EventContext* evcon,
                                             bool* out_model_reconciled = nullptr) {
-    if (!evcon || !evcon->dom_event_author_dirty) return false;
-    evcon->dom_event_author_dirty = false;
-    return settle_template_retransform(evcon, out_model_reconciled);
+    if (!evcon) return false;
+    bool reconciled = false;
+    if (evcon->dom_event_author_dirty) {
+        evcon->dom_event_author_dirty = false;
+        reconciled = settle_template_retransform(evcon, out_model_reconciled);
+    }
+    event_context_apply_model_selection(
+        evcon, event_context_target_document(evcon));
+    return reconciled;
 }
 
 // An author handler may rebuild the template subtree that owns the hit-tested
@@ -2680,11 +2975,12 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     // F17: author/UA handlers receive the in-flight host record. When no JS
     // stage created it (a Lambda-only document), create the same record shape
     // here instead of rebuilding a separate Mark map.
-    RootFrame event_roots(2);
+    RootFrame event_roots(3);
     Rooted<Item> event_root(event_roots,
         build_dom_event_record(doc, target, event_name, evcon, intent,
             event_context_dom_event(evcon, event_name)));
     Rooted<Item> result_root(event_roots, ItemNull);
+    Rooted<Item> nested_model_selection_root(event_roots, ItemNull);
     Item event_item = event_root.get();
     event_context_set_dom_event(evcon, event_item);
 
@@ -2695,8 +2991,9 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     emit_ctx.model_item = model_item;
     emit_ctx.template_ref = template_ref;
     emit_ctx.evcon = evcon;
-    emit_ctx.has_pending_selection = false;
-    emit_ctx.pending_selection = ItemNull;
+    emit_ctx.has_nested_model_selection = false;
+    emit_ctx.nested_model_selection_root = &nested_model_selection_root;
+    emit_ctx.nested_model_revision = 0;
     EmitHandlerContext* saved_emit_ctx = g_emit_handler_ctx;
     g_emit_handler_ctx = &emit_ctx;
 
@@ -2730,12 +3027,32 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
         settle_template_retransform(evcon, out_model_reconciled);
     }
 
-    if (emit_ctx.has_pending_selection) {
-        if (evcon && apply_source_selection_to_doc(evcon->ui_context, doc, emit_ctx.pending_selection)) {
-            log_debug("dispatch_lambda_handler: applied pending source selection");
+    // A structured model result is the explicit source→DOM completion
+    // channel. Apply only after the handler's reactive regeneration settled.
+    Item result_selection = source_selection_from_edit_result(result_root.get());
+    if (cascade) {
+        uint64_t result_revision = 0;
+        if (model_edit_surface_revision(result_root.get(), &result_revision)) {
+            event_context_stage_model_selection(
+                evcon, doc, result_selection, result_revision);
+        }
+    } else {
+        apply_edit_result_source_selection(evcon, doc, result_root.get());
+    }
+
+    if (emit_ctx.has_nested_model_selection) {
+        if (cascade) {
+            event_context_stage_model_selection(
+                evcon, doc, nested_model_selection_root.get(),
+                emit_ctx.nested_model_revision);
+        } else if (evcon && apply_source_selection_to_doc(
+                                 evcon->ui_context, doc,
+                                 nested_model_selection_root.get(),
+                                 emit_ctx.nested_model_revision)) {
+            log_debug("dispatch_lambda_handler: applied nested model selection");
             evcon->need_repaint = true;
         } else {
-            log_debug("dispatch_lambda_handler: pending source selection did not resolve");
+            log_debug("dispatch_lambda_handler: nested model selection did not resolve");
         }
     }
 
@@ -3588,16 +3905,6 @@ extern "C" bool radiant_dispatch_behavior_key_intent(View* target,
 // F14.1: the legacy command seam. Behavior-only and context-free like the two
 // above — `document.execCommand` is a method call, not an event, so there is no
 // EventContext and nothing has been preventDefault'd ahead of it.
-static bool editing_result_claimed(Item result, bool fallback) {
-    if (get_type_id(result) != LMD_TYPE_MAP || !result.map) return fallback;
-    // Package record literals are structural Maps, not runtime VMapped host
-    // objects. Reading the union through `vmap` treated a shape word as a
-    // hashmap pointer and crashed the first execCommand bridge call.
-    Item claimed = map_get(result.map,
-        (Item){.item = s2it(heap_create_name("claimed"))});
-    return get_type_id(claimed) == LMD_TYPE_BOOL && it2b(claimed);
-}
-
 extern "C" bool radiant_dispatch_behavior_exec_command(View* target,
                                                        const InputIntent* intent,
                                                        Item* out_result) {
@@ -3607,7 +3914,8 @@ extern "C" bool radiant_dispatch_behavior_exec_command(View* target,
     if (out_result) *out_result = result;
     // An EditResult is the command bridge contract. Retain the legacy verdict
     // fallback only for behavior templates that predate the package result.
-    return editing_result_claimed(result, matched);
+    if (get_type_id(result) != LMD_TYPE_MAP || !result.map) return matched;
+    return radiant_edit_result_bool(result, "claimed");
 }
 
 // designMode is a document IDL operation, not a command alias. It uses the
@@ -4114,6 +4422,11 @@ static bool event_document_has_js_runtime(EventContext* evcon) {
 
 static bool dispatch_contenteditable_event(EventContext* evcon, View* target,
                                             const InputIntent* intent);
+static bool dispatch_contenteditable_plain_event(
+    EventContext* evcon, View* target, const InputIntent* intent,
+    const EditingSurface* surface,
+    const EditingTargetRange* prepared_ranges,
+    uint32_t prepared_range_count);
 static bool dispatch_contenteditable_composition_event(
         EventContext* evcon, const EditingSurface* surface,
         const EditingIntent* intent);
@@ -5410,7 +5723,33 @@ static void dispatch_selectstart(EventContext* evcon, View* target) {
 
 static void dispatch_selectionchange(EventContext* evcon, DocState* state, View* target) {
     if (!evcon || !selection_has(state) || !target) return;
-    if (dispatch_lambda_handler(evcon, target, "selectionchange")) {
+    DomSelectionOrigin origin = state->selection_origin;
+    if (evcon->event.type == RDT_EVENT_MOUSE_DOWN ||
+        evcon->event.type == RDT_EVENT_MOUSE_UP ||
+        evcon->event.type == RDT_EVENT_MOUSE_MOVE ||
+        evcon->event.type == RDT_EVENT_MOUSE_DRAG ||
+        evcon->event.type == RDT_EVENT_CLICK ||
+        evcon->event.type == RDT_EVENT_DBL_CLICK) {
+        origin = DOM_SELECTION_ORIGIN_POINTER;
+    } else if (evcon->event.type == RDT_EVENT_KEY_DOWN ||
+               evcon->event.type == RDT_EVENT_KEY_UP) {
+        origin = DOM_SELECTION_ORIGIN_KEYBOARD;
+    }
+    if (state->selection_origin != DOM_SELECTION_ORIGIN_MODEL_COMMIT) {
+        state_store_tag_selection_origin(state, origin, 0);
+    }
+    View* route_target = target;
+    EditingSurface surface;
+    editing_surface_clear(&surface);
+    if (editing_surface_from_target(target, &surface) && surface.owner) {
+        // selectionchange does not bubble, so route the Lambda notification at
+        // the editing owner whose source model consumes the projected range.
+        route_target = static_cast<View*>(surface.owner);
+    } else if (state->editing.has_active_surface &&
+               state->editing.active_surface.owner) {
+        route_target = static_cast<View*>(state->editing.active_surface.owner);
+    }
+    if (dispatch_lambda_handler(evcon, route_target, "selectionchange")) {
         evcon->need_repaint = true;
     }
     // The JS `selectionchange` event is queued by the dom_range selection
@@ -6558,10 +6897,104 @@ struct JsDispatchScope {
     }
 };
 
+typedef struct TemplateEditActionSnapshot {
+    TemplateEntry* tmpl;
+    TemplateHandlerEntry* handler;
+    Item model_item;
+    const char* template_ref;
+} TemplateEditActionSnapshot;
+
+// Route selection is an immutable pre-beforeinput fact. The first owning edit
+// template with an internal editaction handler wins; a later PASS never opens
+// the UA package as a second action owner.
+static bool snapshot_template_edit_action(View* target,
+                                          TemplateEditActionSnapshot* out) {
+    if (!target || !out || !g_template_registry) return false;
+    memset(out, 0, sizeof(*out));
+    for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* element = node->as_element();
+        if (!element || element->is_synthetic()) continue;
+        Item source;
+        source.element = dom_element_render_source(element);
+        RenderMapLookup lookup = {};
+        if (!render_map_reverse_lookup(source, &lookup)) continue;
+        TemplateEntry* tmpl = template_registry_find_ref(
+            g_template_registry, lookup.template_ref);
+        if (!tmpl || tmpl->is_behavior || !tmpl->is_edit ||
+            !template_entry_may_handle_event(tmpl, "editaction")) {
+            continue;
+        }
+        TemplateHandlerEntry* handler = template_entry_find_handler(
+            tmpl, "editaction");
+        if (!handler) continue;
+        out->tmpl = tmpl;
+        out->handler = handler;
+        out->model_item = lookup.source_item;
+        out->template_ref = lookup.template_ref;
+        return true;
+    }
+    return false;
+}
+
+struct EditingTargetRangesScope {
+    EventContext* evcon;
+    bool saved_active;
+    const EditingTargetRange* saved_ranges;
+    uint32_t saved_count;
+
+    EditingTargetRangesScope(EventContext* context,
+                             const EditingTargetRange* ranges,
+                             uint32_t count) {
+        evcon = context;
+        saved_active = context->editing_target_ranges_active;
+        saved_ranges = context->editing_target_ranges;
+        saved_count = context->editing_target_range_count;
+        context->editing_target_ranges_active = true;
+        context->editing_target_ranges = ranges;
+        context->editing_target_range_count = count;
+    }
+
+    void clear() {
+        if (!evcon) return;
+        evcon->editing_target_ranges_active = saved_active;
+        evcon->editing_target_ranges = saved_ranges;
+        evcon->editing_target_range_count = saved_count;
+        evcon = nullptr;
+    }
+
+    ~EditingTargetRangesScope() { clear(); }
+};
+
+static bool contenteditable_action_snapshot_still_valid(
+        DocState* state,
+        const EditingSurface* surface,
+        const EditingTargetRange* ranges,
+        uint32_t range_count) {
+    if (!state || !surface || !surface->owner ||
+        !dom_is_connected((void*)surface->owner)) {
+        return false;
+    }
+    EditingSurface current_surface;
+    if (!canonical_contenteditable_surface_from_state(state, &current_surface) ||
+        current_surface.owner != surface->owner) {
+        return false;
+    }
+    for (uint32_t i = 0; i < range_count; i++) {
+        if (!editing_geometry_surface_contains_target_range(
+                &current_surface, &ranges[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool dispatch_contenteditable_plain_event(EventContext* evcon,
                                                  View* target,
                                                  const InputIntent* intent,
-                                                 const EditingSurface* surface) {
+                                                 const EditingSurface* surface,
+                                                 const EditingTargetRange* prepared_ranges,
+                                                 uint32_t prepared_range_count) {
     if (!evcon || !target || !intent || !surface ||
         !editing_surface_is_rich(surface)) {
         return false;
@@ -6576,10 +7009,128 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
     if (event_document_has_js_runtime(evcon) && !dispatch_scope.active) return false;
     editing_interaction_set_active_surface(state, surface);
 
+    DomDocument* document = surface->owner->doc;
+    TemplateEditActionSnapshot action_snapshot = {};
+    bool has_model_action = snapshot_template_edit_action(target, &action_snapshot);
+    if (intent->drag_move && !has_model_action) {
+        // DOM-owned moves retain the browser event pair. Model-owned moves are
+        // combined by their backend from one source/target snapshot below.
+        InputIntent delete_intent;
+        delete_intent.type = INPUT_INTENT_DELETE_BY_DRAG;
+        if (!dispatch_contenteditable_plain_event(
+                evcon, target, &delete_intent, surface, nullptr, 0)) {
+            return true;
+        }
+    }
+    RootFrame action_roots(2);
+    Rooted<Item> action_model_root(action_roots,
+        has_model_action ? action_snapshot.model_item : ItemNull);
+    Rooted<Item> action_result_root(action_roots, ItemNull);
+
+    // Compute the action target before notification and expose that exact
+    // snapshot to both public beforeinput and the selected model action.
+    EditingTargetRange target_ranges[4] = {};
+    uint32_t target_range_count = 0;
+    if (prepared_ranges) {
+        if (prepared_range_count > 4) return true;
+        target_range_count = prepared_range_count;
+        for (uint32_t i = 0; i < target_range_count; i++) {
+            target_ranges[i] = prepared_ranges[i];
+        }
+    } else {
+        target_range_count = editing_compute_target_ranges(
+            state, surface, intent, target_ranges, 4);
+    }
+    if (target_range_count > 4) return true;
+    for (uint32_t i = 0; i < target_range_count; i++) {
+        if (!editing_geometry_surface_contains_target_range(
+                surface, &target_ranges[i])) {
+            return true;
+        }
+    }
+    EditingTargetRangesScope target_range_scope(
+        evcon, target_ranges, target_range_count);
+    uint64_t snapshot_epoch = dom_mutation_epoch(document);
+
+    DomSelection* selection = state->dom_selection;
+    DomBoundary start = {};
+    DomBoundary end = {};
+    bool have_range = target_range_count > 0;
+    if (have_range) {
+        start = target_ranges[0].start;
+        end = target_ranges[0].end;
+    } else if (selection && selection->range_count == 1 &&
+               selection->ranges[0]) {
+        start = selection->ranges[0]->start;
+        end = selection->ranges[0]->end;
+        have_range = true;
+    }
+
     bool beforeinput_prevented = false;
     if (input_intent_is_dispatchable(intent->type)) {
         beforeinput_prevented = radiant_dispatch_input_event(
             evcon, target, "beforeinput", intent);
+    }
+
+    if (beforeinput_prevented) return true;
+    // An unrelated listener write (for example an event log beside the host)
+    // may advance the document epoch without invalidating the edit capability.
+    // Revalidate the retained host, canonical surface and every target
+    // boundary. A Selection-only change does not retarget the immutable
+    // action ranges; relevant DOM replacement still fails closed without
+    // choosing a new backend (D7.2.5, D7.5.3).
+    if (!document) return true;
+    if (dom_mutation_epoch(document) != snapshot_epoch &&
+        !contenteditable_action_snapshot_still_valid(
+            state, surface, target_ranges, target_range_count)) {
+        log_error("contenteditable action snapshot: relevant mutation during beforeinput");
+        return true;
+    }
+
+    if (has_model_action) {
+        InputIntent model_intent;
+        if (!input_intent_clone(intent, &model_intent)) return true;
+        // The source-model backend owns deletion, while clipboard transport
+        // remains native. Complete the copy half only after the public cut
+        // event and before invoking the snapshotted model action.
+        if (intent->type == INPUT_INTENT_DELETE_BY_CUT &&
+            !copy_current_selection_to_clipboard(state, "model cut")) {
+            return true;
+        }
+        model_intent.edit_invocation_id = 0;
+        model_intent.edit_plaintext_only =
+            surface->mode == EDIT_MODE_PLAINTEXT_ONLY;
+        Item raw_result = ItemNull;
+        action_snapshot.model_item = action_model_root.get();
+        (void)invoke_template_handler(
+            evcon, target, "editaction", &model_intent,
+            action_snapshot.tmpl, action_snapshot.handler,
+            action_snapshot.model_item, action_snapshot.template_ref,
+            nullptr, &raw_result);
+        action_result_root.set(raw_result);
+        bool claimed = radiant_edit_result_bool(action_result_root.get(), "claimed");
+        bool changed = radiant_edit_result_bool(action_result_root.get(), "changed");
+        model_edit_surface_accept_result(
+            state, surface->owner, action_result_root.get());
+        // The target-range nodes belong to the pre-regeneration DOM. Do not
+        // expose them while constructing the post-action input event.
+        target_range_scope.clear();
+        if (claimed || changed) {
+            EditingSurface live_surface = {};
+            View* input_target = target;
+            if (canonical_contenteditable_surface_from_state(state, &live_surface) &&
+                live_surface.owner) {
+                input_target = static_cast<View*>(live_surface.owner);
+            }
+            bool composition_cancel =
+                intent->type == INPUT_INTENT_DELETE_COMPOSITION_TEXT;
+            if (input_intent_is_dispatchable(intent->type) && !composition_cancel) {
+                radiant_dispatch_input_event(evcon, input_target, "input", intent);
+            }
+            evcon->need_repaint = true;
+        }
+        // A selected model action owns the route even when it declined.
+        return true;
     }
 
     // author code may replace the original host or move the selection. The
@@ -6592,32 +7143,11 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
     DomElement* canonical_host = canonical_surface.owner;
     editing_interaction_set_active_surface(state, &canonical_surface);
     if (beforeinput_prevented) return true;
-    EditingTargetRange target_ranges[4] = {};
-    uint32_t target_range_count = editing_compute_target_ranges(
-        state, &canonical_surface, intent, target_ranges, 4);
-    if (target_range_count > 4) return true;
     for (uint32_t i = 0; i < target_range_count; i++) {
         if (!editing_geometry_surface_contains_target_range(
                 &canonical_surface, &target_ranges[i])) {
             return true;
         }
-    }
-
-    DomSelection* selection = state->dom_selection;
-    DomBoundary start = {};
-    DomBoundary end = {};
-    bool have_range = target_range_count > 0;
-    if (have_range) {
-        start = target_ranges[0].start;
-        end = target_ranges[0].end;
-    } else if (selection && selection->range_count == 1 &&
-               selection->ranges[0]) {
-        // some intents intentionally have no StaticRange target (formatting,
-        // replacement, history). Their live Selection is still the package's
-        // current mechanism input.
-        start = selection->ranges[0]->start;
-        end = selection->ranges[0]->end;
-        have_range = true;
     }
 
     DomEditInvocation invocation = {};
@@ -6675,6 +7205,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
     }
 
     if (invocation.active) dom_edit_invocation_end(&invocation);
+    target_range_scope.clear();
     if (claimed || applied) {
         bool composition_cancel =
             intent->type == INPUT_INTENT_DELETE_COMPOSITION_TEXT;
@@ -6698,7 +7229,7 @@ static bool dispatch_contenteditable_event(EventContext* evcon, View* target,
         return false;
     }
     return dispatch_contenteditable_plain_event(evcon, target, intent,
-                                                &surface);
+                                                &surface, nullptr, 0);
 }
 
 static bool dispatch_contenteditable_composition_event(
@@ -7418,6 +7949,8 @@ static bool radiant_dispatch_wheel_event(EventContext* evcon, View* target,
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) {
     memset(evcon, 0, sizeof(EventContext));
     evcon->dom_event = ItemNull;
+    evcon->model_edit_selection = ItemNull;
+    evcon->model_edit_revision = 0;
     evcon->dom_event_root_lifetime = true;
     evcon->ui_context = uicon;
     evcon->event = *event;
@@ -7441,6 +7974,14 @@ void event_context_cleanup(EventContext* evcon) {
     evcon->dom_event = ItemNull;
     evcon->dom_event_root_gc = nullptr;
     evcon->dom_event_root_lifetime = false;
+    if (evcon->model_edit_selection_root_gc) {
+        gc_unregister_root((gc_heap_t*)evcon->model_edit_selection_root_gc,
+                           &evcon->model_edit_selection.item);
+    }
+    evcon->model_edit_selection = ItemNull;
+    evcon->model_edit_selection_root_gc = nullptr;
+    evcon->model_edit_selection_pending = false;
+    evcon->model_edit_revision = 0;
 }
 
 bool radiant_editing_animation_active(DocState* state) {
@@ -9816,6 +10357,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         new_drop_target = static_cast<View*>(text_drop_elem);
                     }
                 }
+                if (!new_drop_target && dd->has_source_dom_range && evcon.target) {
+                    EditingSurface rich_drop_surface;
+                    if (editing_surface_from_target(evcon.target,
+                                                    &rich_drop_surface) &&
+                        editing_surface_is_rich(&rich_drop_surface) &&
+                        rich_drop_surface.owner) {
+                        new_drop_target = static_cast<View*>(rich_drop_surface.owner);
+                    }
+                }
 
                 bool has_drop_range = false;
                 DomBoundary drop_start = {};
@@ -10445,6 +10995,23 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     text_point_inside_existing_selection(state, evcon.target, char_offset);
 
                 if (mouse_down_in_selection) {
+                    DomSelection* drag_selection = state->dom_selection;
+                    if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+                        btn_event->clicks == 1 &&
+                        !(btn_event->mods & RDT_MOD_SHIFT) &&
+                        drag_selection && drag_selection->range_count == 1 &&
+                        drag_selection->ranges[0] &&
+                        !dom_range_collapsed(drag_selection->ranges[0])) {
+                        DragTransitionArgs rich_drag = {};
+                        rich_drag.source = evcon.target;
+                        rich_drag.x = (float)btn_event->x;
+                        rich_drag.y = (float)btn_event->y;
+                        rich_drag.has_source_dom_range = true;
+                        rich_drag.source_dom_start = drag_selection->ranges[0]->start;
+                        rich_drag.source_dom_end = drag_selection->ranges[0]->end;
+                        drag_transition(state, DRAG_TRANSITION_BEGIN_DROP,
+                                        &rich_drag);
+                    }
                     selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
                     selection_press_in_range_begin(state, evcon.target, char_offset);
                     log_debug("[TEXT SEL PRESS] preserving existing selection on mouse down");
@@ -10770,7 +11337,87 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         // remove" gap the rich path below still has.
                         DomElement* text_drop_elem = nullptr;
                         uint32_t text_drop_offset = 0;
-                        if (dd->has_source_range && dd->source_view &&
+                        if (dd->has_source_dom_range && dd->source_view &&
+                            dd->has_drop_range) {
+                            EditingSurface source_surface;
+                            EditingSurface target_surface;
+                            editing_surface_clear(&source_surface);
+                            editing_surface_clear(&target_surface);
+                            DomBoundary source_start = dd->source_dom_start;
+                            DomBoundary source_end = dd->source_dom_end;
+                            SourcePosC source_start_pos = {};
+                            SourcePosC source_end_pos = {};
+                            SourcePosC drop_start_pos = {};
+                            SourcePosC drop_end_pos = {};
+                            DomDocument* drag_document =
+                                event_context_target_document(&evcon);
+                            bool rebound_source = drag_document &&
+                                drag_document->root &&
+                                source_pos_from_dom_boundary(
+                                    &dd->source_dom_start, &source_start_pos) &&
+                                source_pos_from_dom_boundary(
+                                    &dd->source_dom_end, &source_end_pos) &&
+                                dom_boundary_from_source_pos(
+                                    drag_document->root, &source_start_pos,
+                                    &source_start) &&
+                                dom_boundary_from_source_pos(
+                                    drag_document->root, &source_end_pos,
+                                    &source_end);
+                            DomBoundary drop_start = dd->drop_start;
+                            DomBoundary drop_end = dd->drop_end;
+                            bool rebound_drop = drag_document &&
+                                drag_document->root &&
+                                source_pos_from_dom_boundary(
+                                    &dd->drop_start, &drop_start_pos) &&
+                                source_pos_from_dom_boundary(
+                                    &dd->drop_end, &drop_end_pos) &&
+                                dom_boundary_from_source_pos(
+                                    drag_document->root, &drop_start_pos,
+                                    &drop_start) &&
+                                dom_boundary_from_source_pos(
+                                    drag_document->root, &drop_end_pos,
+                                    &drop_end);
+                            source_pos_free(&source_start_pos);
+                            source_pos_free(&source_end_pos);
+                            source_pos_free(&drop_start_pos);
+                            source_pos_free(&drop_end_pos);
+                            EditingTargetRange source_range = {
+                                source_start, source_end};
+                            bool same_rich_surface =
+                                rebound_source && rebound_drop &&
+                                editing_surface_from_target(
+                                    static_cast<View*>(source_range.start.node),
+                                                            &source_surface) &&
+                                editing_surface_from_target(dd->drop_target,
+                                                            &target_surface) &&
+                                editing_surface_is_rich(&source_surface) &&
+                                editing_surface_is_rich(&target_surface) &&
+                                source_surface.owner == target_surface.owner &&
+                                editing_geometry_surface_contains_target_range(
+                                    &source_surface, &source_range);
+                            if (same_rich_surface) {
+                                Arena* drag_arena = mem_arena_create(
+                                    NULL, MEM_ROLE_TEMP, "rich.drag.arena");
+                                char* drag_text = state_store_extract_selection_text(
+                                    state, drag_arena);
+                                InputIntent drop_intent;
+                                drop_intent.type = INPUT_INTENT_INSERT_FROM_DROP;
+                                drop_intent.data = drag_text ? drag_text : "";
+                                drop_intent.data_mime = "text/plain";
+                                drop_intent.drag_move =
+                                    !(event_mod_ctrl(btn_event->mods) ||
+                                      event_mod_super(btn_event->mods));
+                                EditingTargetRange drop_range = {
+                                    drop_start, drop_end};
+                                dispatch_contenteditable_plain_event(
+                                    &evcon, dd->drop_target, &drop_intent,
+                                    &target_surface, &drop_range, 1);
+                                arena_destroy(drag_arena);
+                                selection_press_in_range_clear(state);
+                                evcon.need_repaint = true;
+                            }
+                        }
+                        else if (dd->has_source_range && dd->source_view &&
                             radiant_text_drop_target_at(&evcon, state, dd->drop_target,
                                                         (float)btn_event->x,
                                                         (float)btn_event->y,

@@ -1,10 +1,10 @@
 # Radiant — Editing, Selection & DOM Ranges
 
-> **Last verified against tree:** 2026-08-28 *(F14.3/F14.4 canonical-target dispatch update)*
+> **Last verified against tree:** 2026-09-08 *(unified UA/model action snapshot and revisioned selection completion)*
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's WHATWG-aligned editing model as it sits over the shared DOM/view tree ([RAD_01](RAD_01_View_and_DOM_Model.md)): the spec-conformant `DomRange`/`DomSelection` primitives, live-range mutation envelopes, the `inputType` intent taxonomy, and the ordinary notification/default-action path for `contenteditable`. It also covers caret/selection geometry and hit-testing, and the pluggable clipboard store. The native form-control editing path is a sibling subject — see [RAD_19](RAD_19_Form_Controls.md).
 >
-> **Primary sources:** `radiant/event.hpp` / `dom_range.cpp` (`DomBoundary`/`DomRange`/`DomSelection`, mutation envelopes, `Selection.modify`, extract/clone/surround, stringification), `radiant/editing.cpp` (surface classification), `radiant/event.cpp` (ordinary contenteditable notification/default/input dispatch and canonical target re-resolution), `radiant/editing_dispatch.cpp` (form notification bridge and diagnostics), `radiant/editing_host.cpp` (canonical host recognition), and `radiant/editing_target_range.cpp` (immutable `InputEvent` target ranges).
+> **Primary sources:** `radiant/event.hpp` / `dom_range.cpp` (`DomBoundary`/`DomRange`/`DomSelection`, mutation envelopes, `Selection.modify`, extract/clone/surround, stringification), `radiant/editing.cpp` (surface classification), `radiant/event.cpp` (the snapshotted contenteditable action gate, source projection, and model completion), `radiant/editing_dom_waist.cpp` (checked DOM edit capabilities), `radiant/state_store.cpp` (selection revision/origin), `radiant/editing_host.cpp` (canonical host recognition), and `radiant/editing_target_range.cpp` (immutable `InputEvent` target ranges).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name. The historical design docs `vibe/radiant/Radiant_Design_Editing*.md` and `Radiant_Design_Selection.md` are rationale only and are explicitly marked phased-out.
 
 ---
@@ -13,7 +13,16 @@
 
 The editing subsystem is a **WHATWG-aligned editing model** layered over the unified DOM/view tree, where a `DomText` is its own `ViewText` and a `DomElement` is its own `ViewElement` ([RAD_01](RAD_01_View_and_DOM_Model.md)). It resolves text controls and standard `contenteditable` hosts through one `EditingSurface` abstraction, maps raw key/text/composition events to `inputType` intents, and routes every contenteditable edit through one ordinary default-action dispatch site.
 
-The path has a strict notification/default/notification contract. It dispatches cancelable `beforeinput`, lets author JavaScript or an ordinary Lambda handler prevent the package default, then re-resolves the current canonical contenteditable surface from the StateStore's DOM `Selection` (with focused-surface fallback for a range-less composition start). The package applies the unprevented default and sends non-cancelable `input` after a claim or change. `editing_live_host_guard`, its retained `DomNodeRef`, and its view-ID validity check are retired: author mutation can replace the original host, and a replacement is eligible only if canonical selection/focus now resolves it. Form controls retain their separate value-store action between the same kind of notifications, as documented by [RAD_19](RAD_19_Form_Controls.md). This ordering follows **S12.1.3** and **S12.2.2**; package dispatch remains within **D7.2.1–D7.2.3**.
+The path has a strict notification/action/notification contract. Before
+cancelable `beforeinput`, it resolves the contenteditable surface, immutable
+target ranges, and exactly one action owner: a source-model `editaction`
+handler or the UA DOM package. After uncanceled notification it revalidates
+any mutation-sensitive host/range capability, invokes only that snapshotted
+owner, and sends non-cancelable `input` after a claim or change. A model
+handler never falls through to UA DOM mutation. Form controls retain their
+separate value-store action between the same kind of notifications, as
+documented by [RAD_19](RAD_19_Form_Controls.md). This ordering and ownership
+follow **D7.2.5**, **D7.5.3**, **S12.1.3**, and **S12.2.2**.
 
 ---
 
@@ -35,7 +44,7 @@ The atom is `struct DomBoundary { DomNode* node; uint32_t offset; }` (`event.hpp
 
 ### 2.4 `EditingSelection` — the façade over both worlds
 
-`struct EditingSelection` (`event.hpp`) is the union facade owned by the StateStore (`DocState`). Its `kind` is `EDIT_SEL_DOM_RANGE` (rich, carrying a `DomRange* range`) or `EDIT_SEL_TEXT_CONTROL` (form, carrying `DomElement* control` plus UTF-16 `start_u16`/`end_u16`). This is the single seam through which the two browser-required selection domains are unified, and `mutation_seq` orders selectionchange delivery and presentation refreshes.
+`struct EditingSelection` (`event.hpp`) is the union facade owned by the StateStore (`DocState`). Its `kind` is `EDIT_SEL_DOM_RANGE` (rich, carrying a `DomRange* range`) or `EDIT_SEL_TEXT_CONTROL` (form, carrying `DomElement* control` plus UTF-16 `start_u16`/`end_u16`). This is the single seam through which the two browser-required selection domains are unified. The 64-bit selection revision orders `selectionchange` delivery and presentation refreshes; `DocState::selection_origin` records `api`, `pointer`, `keyboard`, `dom-mutation`, or `model-commit`, and a model commit also carries its source-model revision. Those fields let a model adapter reject stale selection events and absorb its own projection echo without clearing stored marks (D7.5.3).
 
 ---
 
@@ -62,28 +71,34 @@ The carrier `struct InputIntent` (`event.hpp`, aliased `EditingIntent`) bundles 
 <img alt="Contenteditable beforeinput resolves the canonical target before the package default" src="diagram/rad18_dispatch_seam.svg" width="720">
 
 `dispatch_contenteditable_plain_event` in `event.cpp` is the single ordinary
-contenteditable path. It dispatches cancelable `beforeinput` to the original
-event target, then refreshes the canonical selection shadow and resolves the
-current `EditingSurface`. The selection focus boundary is preferred; the
-focused editing surface is used only when a composition start has no DOM range.
-No original-host identity, `DomNodeRef`, view ID, route snapshot, or live-host
-validity check survives the author notification.
+contenteditable gate. Its fixed order is:
 
-The order is fixed: initial editing-surface resolution → cancelable
-`beforeinput` → canonical selection/focus re-resolution → package default (only
-when not prevented) → non-cancelable `input` after a claim or DOM change. Live
-`DomRange` mutation envelopes preserve the selection's current boundaries while
-author code edits the tree. If the original host is detached and no replacement
-is canonical, the default declines. If author code moves selection/focus to a
-replacement editable host, the package applies there and the `input` event uses
-that same owner. This is the post-F14.4 target rule and is consistent with
-**S12.1.3** (author mutation in `pn` handlers) and **S12.2.2** (current DOM
-mutation semantics).
+1. resolve the initial editing surface and snapshot the first owning internal
+   `editaction` handler, if any;
+2. compute the immutable target ranges and expose those same ranges to the
+   public `beforeinput` event and source projection;
+3. dispatch cancelable `beforeinput` as notification only;
+4. after an epoch change, revalidate the retained host, canonical surface, and
+   every target boundary; and
+5. invoke either the snapshotted model handler or a newly opened checked
+   `DomEditInvocation`, then emit `input` only after a claim or change.
 
-Lambda `edit` templates use the same ordinary handler path; their return verdict
-is the author-side decision, without a prepared transaction or route/result side
-channel. The entire path remains inside one retained JS dispatch batch, so
-MutationObserver delivery stays after the post-action `input` notification.
+Unrelated author mutation, such as updating an event log beside the host, may
+advance the epoch without invalidating the edit and is allowed. Detachment,
+replacement, cross-surface retargeting, or invalidated target ranges fail
+closed: the gate invokes no action and does not select another owner. A
+Selection-only revision does not reroute the owner or rewrite the immutable
+target ranges. A selected model handler owns the route even when it declines,
+so `PASS` never falls through to UA DOM mutation (D7.2.5, D7.5.3).
+
+The model result is a structured `EditResult`. Its source selection and model
+revision remain precisely rooted while S12.1.3 reactive regeneration rebuilds
+the projection, then the source-position bridge resolves the new DOM boundary
+and commits the native selection once. Toolbar/out-of-band commands use the
+same completion mechanism through `dom.finish_model_edit` and a stable logical
+surface handle. The former procedural `set_selection` callback no longer
+exists. The entire action envelope remains inside one retained JS dispatch
+batch, so MutationObserver delivery stays after post-action `input`.
 
 ---
 
@@ -136,7 +151,9 @@ The canonical selection is `state->dom_selection` / `state->sel`. Snapshot/acces
 | `radiant/event.hpp` / `dom_range.cpp` | `DomBoundary`/`DomRange`/`DomSelection`, UTF-16↔UTF-8 offsets, Range/Selection methods, live-range mutation envelopes, navigation, and stringification. |
 | `radiant/event.hpp` / `dom_range_resolver.cpp` | Layout-cache resolution, pixel↔boundary hit-testing, selection rectangles, and glyph-precise X resolvers. |
 | `radiant/event.hpp` / `editing.cpp` | `EditingSurface`/`EditingMode` resolution and canonical-host helpers. |
-| `radiant/event.hpp` / `radiant/event.cpp` | Editing-surface contracts and the contenteditable notification/default/input path, including canonical target re-resolution. |
+| `radiant/event.hpp` / `radiant/event.cpp` | Contenteditable action-owner/target snapshot, source projection, model surface binding/completion, and notification/action/input gate. |
+| `radiant/editing_dom_waist.cpp` | Checked post-notification `DomEditInvocation` capability and DOM-selection commit. |
+| `radiant/state_store.cpp` | Canonical selection revision and origin/model-revision tagging. |
 | `radiant/editing_dispatch.cpp` | Form-control notification bridge and editing diagnostics. |
 | `radiant/event.hpp` / `editing_intent.cpp` | Input-intent taxonomy and key/text/composition mapping. |
 | `radiant/event.hpp` / `editing_host.cpp` | Centralized `contenteditable` recognition, `="false"` islands, and the `contentEditable` IDL. |
@@ -153,3 +170,4 @@ The canonical selection is `state->dom_selection` / `state->sel`. Snapshot/acces
 - [RAD_17 — Interaction State](RAD_17_Interaction_State.md) — `DocState`/StateStore, canonical selection accessors, and the presentation-only geometry cache.
 - [RAD_19 — Form Controls](RAD_19_Form_Controls.md) — the native (non-rich) text-control editing path: value/selection IDL, undo/redo, IME, constraint validation, caret/selection rendering.
 - [RAD_21 — JS Scripting Integration](RAD_21_JS_Scripting_Integration.md) — the JS/Lambda event bridge and template action context.
+- [Lambda DOM Editable](../../../vibe/Lambda_Design_DOM_Editable.md) — the shared editing protocol, two backend boundary, and revisioned source/native selection handoff.

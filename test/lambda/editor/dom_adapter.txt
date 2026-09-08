@@ -1,0 +1,39 @@
+{
+  insert: {
+    claimed: true,
+    changed: true,
+    text: "A!",
+    revision: 1,
+    history: 1
+  },
+  selection: {
+    echo_changed: false,
+    echo_revision: 7,
+    echo_marks_preserved: true,
+    stale_changed: false,
+    pointer_changed: true,
+    pointer_offset: 0,
+    pointer_marks_cleared: true
+  },
+  drag: {
+    claimed: true,
+    text: "adbc",
+    transactions: 1,
+    revision: 1
+  },
+  soft_line_delete: {
+    claimed: true,
+    text: "ab",
+    target: "soft-line-forward"
+  },
+  unsupported: {
+    claimed: false,
+    failure: "unsupported",
+    unchanged: true
+  },
+  extension: {
+    registry_valid: true,
+    dom: null,
+    model: "insert_code_block"
+  }
+}

@@ -1,9 +1,9 @@
 # Radiant Editable Support — Common Gate and Full UA `contenteditable`
 
 **Date:** 2026-07-29 · **Revised:** 2026-09-08
-**Status:** Phase 1 and Phase 9 implemented and verified for the applicable
-UA conformance scope; the separate unified form/history expansion and
-model-editor protocol unification remain proposals.
+**Status:** Phase 1, Phase 9, and the model-editor protocol unification are
+implemented and verified for the applicable UA/model scope; the separate
+unified form/history expansion remains a proposal.
 **Scope:** `contenteditable`, Lambda/Radiant editable templates, the common
 editing transaction gate, registered action handlers, full UA editing
 behavior, `execCommand`/`queryCommand*`, `designMode`, and conformance against
@@ -45,13 +45,16 @@ remains a proposal until its D7.2.5v2 ratification steps are completed; §20.7
 below is the current Phase-9 baseline in the meantime.
 
 **Model-editor unification design:**
-[Lambda_Design_DOM_Editable.md](../Lambda_Design_DOM_Editable.md) proposes the
-shared `lambda/dom` descriptor/request/action/result core, the separate UA-DOM
+[Lambda_Design_DOM_Editable.md](../Lambda_Design_DOM_Editable.md) specifies the
+implemented shared `lambda/dom` descriptor/request/action/result core, the separate UA-DOM
 and source-model backends, and the explicit source-selection/native-waist
 handoff. It is subordinate to this document's route snapshot and registered
 action contract: public `beforeinput` remains notification-only, the selected
 Radiant-template action runs afterwards, and the common gate alone emits the
-post-action `input` (D7.2.5, D7.5.3).
+post-action `input` (D7.2.5, D7.5.3). The ambient runtime
+`set_selection` callback is retired; model selection completes through a
+revisioned `EditResult` or `dom.finish_model_edit` on the declared
+`radiant-dom` waist.
 
 **Historical lineage:** §17.2 consolidates the removed CE1–CE3 design records:
 the editable-host foundation, the later native-legacy-editor pivot, and the
@@ -646,9 +649,11 @@ target-range snapshot, composition state, and clipboard payload. It may invoke
 ordinary event listeners, which are page code and may independently mutate
 the document, but the notification routine itself performs no editing and
 does not treat listener existence as an action claim. The gate detects a
-synchronous listener mutation through the mutation epoch, records it, and
-must not run the registered action handler on stale ranges; the policy for
-that exceptional case is an open question (§16).
+synchronous listener mutation through the mutation epoch. It then validates
+the retained host, canonical surface, and immutable target ranges: unrelated
+observational mutation may proceed, while replacement, detachment,
+cross-surface retargeting, or invalid ranges fail closed without running an
+action or selecting a new owner (D7.2.5, D7.5.3).
 
 Both notification functions target the retained editing host and use the
 standard DOM propagation path. The post-notification carries the same
@@ -1575,17 +1580,20 @@ the normalized intent only in the later action stage. Audit/log/record
 observers see the gate directly.
 
 ### Q2. What happens if a `beforeinput` listener mutates synchronously without
-canceling?
+canceling? — resolved
 
 Browsers permit arbitrary listener code even though the event is conceptually
 a notification. Continuing with the prepared ranges could then apply a second
 edit to stale content.
 
-**Recommendation:** record the mutation epoch around notification. For the
-first implementation, require a mutating listener to also call
-`preventDefault()`; if it does not, stop before handler dispatch, report a
-contract violation, and emit no synthetic `input`. A later browser-parity mode
-may re-resolve the live selection and continue if editor traces require it.
+**Resolution:** record the mutation epoch around notification. When it changes,
+revalidate the snapshotted host, canonical surface, and every immutable target
+boundary. Mutation outside the edit capability—such as an event-log update—is
+allowed. Mutation that detaches/replaces the owner or invalidates/crosses its
+target ranges stops before action dispatch and emits no `input`; routing is
+never repeated. A Selection-only change is observable through its revision but
+does not retarget the snapshotted action. This preserves normal UA observation
+while preventing stale capability use (D7.2.5, D7.5.3).
 
 ### Q3. What is the JavaScript action-registration API?
 

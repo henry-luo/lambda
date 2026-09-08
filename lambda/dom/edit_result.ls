@@ -16,12 +16,33 @@ pub fn make(supported, enabled, claimed, changed, selection_changed,
         failure: failure,
         plan_id: plan_id,
         history_group: history_group,
+        selection_after: null,
+        selection_space: "none",
+        model_revision: null,
         // API notifications use package-selected facts after the command
         // commits. Native only transports this record to InputEvent.
         api_input: false,
         api_input_type: "",
         api_input_data: null
     }
+}
+
+// Model actions return source coordinates explicitly. The native gate applies
+// them only after the matching reactive render revision is published.
+pub fn with_source_selection(edit_result, selection_after, model_revision) =>
+    { *: edit_result, selection_after: selection_after, selection_space: "source",
+      model_revision: model_revision }
+
+pub fn model_applied(changed, selection_changed, history_recorded,
+                     history_group, selection_after, model_revision) {
+    // Keep this leaf-shaped for interpreter handlers: nested adapter calls can
+    // already sit near the fixed scratch-frame depth during reactive editing.
+    { supported: true, enabled: true, claimed: true, changed: changed,
+      selection_changed: selection_changed, history_recorded: history_recorded,
+      query_bool: false, query_value: "", failure: null, plan_id: 0,
+      history_group: history_group, selection_after: selection_after,
+      selection_space: "source", model_revision: model_revision,
+      api_input: false, api_input_type: "", api_input_data: null }
 }
 
 pub fn decline(supported, enabled, failure, plan_id) {

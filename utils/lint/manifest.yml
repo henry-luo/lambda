@@ -383,6 +383,13 @@ rules:
     tags: [lambda, gc, roots, mandatory]
     note: "Ratchets migrated native runtime code against automatic-local root addresses, transient register/unregister guards, and process-lifetime boolean gates for heap-local root registries."
 
+  dom-editable-architecture:
+    backend: python
+    file: utils/lint/rules/structural/check_dom_editable_architecture.py
+    category: architecture
+    tags: [dom, editing, registry, waist, mandatory]
+    note: "D7.2.5/D7.5.3 ratchet: the standard editing descriptor registry has one lambda/dom owner and the retired ambient set_selection ABI cannot return."
+
   no-new-per-file-header:
     backend: python
     file: utils/lint/rules/structural/no_new_per_file_header.py

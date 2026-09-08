@@ -87,7 +87,13 @@ Everything below exists and is exercised by the todo2 app, the `rte_prototype.ls
 
 - **Grammar & registry**: `view`/`edit` declarations with element/map/type/union patterns, `state k: v` declarations, `on event(evt)` handler blocks (`grammar.js` `view_stam`; `lambda/runtime/template_registry.cpp`).
 - **Central template state**: `TemplateStateKey{model_item, template_ref, state_name} → Item` (`lambda/runtime/template_state.h`), **unified into Radiant's DocState** (`state_store.cpp` binds `template_state_map`/`render_map` at store creation). This is the working answer to DOM_Pkg open question Q1 — package state is document-anchored.
-- **Dispatch**: `dispatch_lambda_handler` (`radiant/event.cpp`) routes ~18 event types (click, dblclick, mousedown/up/move, keydown, input, change, blur, paste, cut, selectstart, selectionchange, drag family, beforeinput) to template handlers, with `emit()`/`set_selection()` callbacks, dirty-tracked re-transform, no-op elision, and incremental DOM rebuild.
+- **Dispatch**: `dispatch_lambda_handler` (`radiant/event.cpp`) routes the
+  template event set through dirty-tracked re-transform, no-op elision, and
+  incremental DOM rebuild. `emit()` remains the procedural callback; rich
+  model selection now returns in a revisioned `EditResult` or completes via
+  `dom.finish_model_edit` on the declared `radiant-dom` waist. The former
+  ambient `set_selection()` runtime callback is retired (D7.5.3, D5.3.3; see
+  [Lambda DOM Editable](Lambda_Design_DOM_Editable.md)).
 - **Route arbitration**: the editing subsystem already arbitrates per-surface between JS and Lambda handlers (`EDITING_ROUTE_DOM_SCRIPT` vs `EDITING_ROUTE_RADIANT_TEMPLATE`) through a priority-ordered, route-masked, generation-checked registry (`editing_action_registry_*`, `editing_template_handler.cpp`) — the proven pattern this proposal generalizes.
 - **Runtime embedding**: the full Lambda runtime + MIR JIT is linked into Radiant; `DomDocument` retains `lambda_runtime`; Radiant already loads four `lambda/*` packages from C++ by generating `import pkg: lambda.<name>.<entry>` source and calling `run_script_mir` (`cmd_layout.cpp` math/latex/pdf, `graph_bridge.cpp` graph).
 

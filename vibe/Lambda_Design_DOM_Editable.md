@@ -1,7 +1,7 @@
 # Lambda DOM Editable — One Editing Protocol, Two Mutation Backends
 
 **Date:** 2026-09-08
-**Status:** Proposal — not yet ratified or implemented
+**Status:** Implemented and verified for the unified UA/model editing protocol
 **Scope:** unification of the model-driven Lambda rich-text editor represented
 by `test/ui/rte_prototype.ls` with the package-owned UA `contenteditable`
 path under `lambda/dom`; shared command and input policy; Selection/caret
@@ -30,22 +30,23 @@ layout, hit testing, text shaping, or caret geometry into Lambda.
 > Radiant only through the explicit `radiant-dom` module waist. S12.1.3 keeps
 > reactive-template mutation in `on` handlers, while S12.2.2 defines element
 > mutation. D5.3.3 requires continuously rooted native handoffs. D1.10 and
-> D7.3.5 require executable conformance gates. This proposal refines those
+> D7.3.5 require executable conformance gates. This implementation refines those
 > rulings and introduces no formal-spec conflict.
 
 > **Specification linkage map.** D7.2.5 → §§1, 4–6, 8; D7.5.3 and D5.3.3 →
-> §7; S12.1.3 and S12.2.2 → §§6, 8; D1.10 and D7.3.5 → §11. The proposal does
+> §7; S12.1.3 and S12.2.2 → §§6, 8; D1.10 and D7.3.5 → §11. The design does
 > not mint a new ledger series; the existing CE1–CE3 lineage remains at its
 > parent design home.
 
-> **Verified against the tree on 2026-09-08.** The current-state survey covers
-> `test/ui/rte_prototype.ls`, `lambda/editor/mod_{editor,input_intent,
-> transaction,commands,dom_bridge}.ls`, `lambda/dom/{commands,edit_context,
-> edit_plan,edit_result,dom_edit,editing,caret}.ls`,
-> `radiant/{event.cpp,event.hpp,editing_dom_waist.cpp,
-> source_pos_bridge.cpp}`, and the `set_selection` runtime hook.
+> **Implemented and verified against the tree on 2026-09-08.** The shared
+> protocol is in `lambda/dom/{edit_registry,edit_request,edit_action,
+> edit_result,edit_text_policy}.ls`; the model backend is in
+> `lambda/editor/{mod_dom_adapter,mod_edit_registry,mod_input_intent}.ls`; and
+> the native gate/waist is in `radiant/{event.cpp,event.hpp,
+> editing_dom_waist.cpp,state_store.cpp}` plus the declared `radiant-dom`
+> operations. The pre-cutover survey below is retained as migration rationale.
 
-> **Parent-contract constraint.** This proposal does not alter the parent
+> **Parent-contract constraint.** This design does not alter the parent
 > design's one gate, standard-`contenteditable` routing, pre-notification route
 > and handler snapshot, pure `beforeinput`, exactly-one registered action,
 > gate-owned post-action `input`, or UA-package fallback ownership. If a detail
@@ -132,7 +133,7 @@ The concise answer to the selection question is therefore:
 
 ### 1.1 Parent-design alignment matrix
 
-| `Radiant_Design_Editable.md` contract | This proposal's refinement |
+| `Radiant_Design_Editable.md` contract | This implementation's refinement |
 |---|---|
 | §6/§9 one mandatory gate | native `EditingIntent` and transaction identity remain the gate record; `EditRequest` is its package action value |
 | §7 standard host and existing-context route | no marker is added; `edit_mount` binds a controller only after template/render-map ownership selected the Radiant-template route |
@@ -143,10 +144,14 @@ The concise answer to the selection question is therefore:
 | §11 source-model reconciliation | editor Steps/history remain private; returned source selection is projected only after the matching regeneration |
 | §20 D7.2.5 UA ownership | the existing DOM `EditContext`/`EditPlan`, normalization, history, and conformance behavior remain the UA backend |
 
-This matrix is a constraint on the proposal, not a competing summary of the
+This matrix is a constraint on the implementation, not a competing summary of the
 parent design.
 
-## 2. Current state and the duplication to remove
+## 2. Pre-cutover state and the duplication removed
+
+This section records the state that motivated the implementation. References
+to “currently” and to the prototype loop describe the pre-cutover tree; the
+implemented disposition is recorded in §§7, 10, and 11.
 
 ### 2.1 Two working paths
 
@@ -711,15 +716,17 @@ the target subtree; it does not introduce a second host classifier.
 
 The token is read-only. Public `beforeinput` handlers may inspect the event or
 cancel it, but they are notifications and do not run the model adapter. After
-notification, the gate validates document, retained host, generations,
-mutation epoch, source root, target-range liveness, and selected handler. A
-changed selection revision is recorded but does not re-run routing; whether an
-operation consumes the immutable target ranges or the current live selection
-is part of its descriptor and WPT/Chromium contract.
-Mutation by an author listener makes the action snapshot stale: the gate logs
-an error/contract result, invokes no action handler, emits no `input`, and does
-not select a replacement handler. This is the fail-closed resolution of the
-stale-range case identified by the parent design §8.2/§16 Q2.
+notification, the gate compares the document mutation epoch. If it advanced,
+the retained host, canonical surface, and every target boundary are
+revalidated. An unrelated listener write, such as updating an event log beside
+the host, therefore preserves exact UA behavior. Host replacement, detachment,
+cross-surface retargeting, or an invalid target boundary makes the snapshot
+stale: the gate invokes no action handler, emits no `input`, and does not select
+a replacement handler. A Selection-only change is revisioned and observable,
+but it neither reroutes the snapshotted owner nor rewrites the immutable target
+ranges. This is the fail-closed resolution of the stale-range case identified
+by the parent design §8.2/§16 Q2 while retaining ordinary observational
+`beforeinput` listeners (D7.2.5, D7.5.3).
 
 #### Phase B — invoke the snapshotted action
 
@@ -745,7 +752,7 @@ mutation.
 
 ### 7.2 Registered-action return and explicit out-of-band completion
 
-Replace the ambient `set_selection(selection)` side channel with a declared
+The ambient `set_selection(selection)` side channel is replaced by a declared
 `radiant-dom` operation, exposed to Lambda through the existing `dom` module:
 
 ```text
@@ -782,7 +789,7 @@ transaction; no borrowed handle or package plan crosses an `await`.
 
 The old `SYSPROC_SET_SELECTION`, `pn_set_selection`,
 `lambda_radiant_set_selection`, `dispatch_set_selection`, and thread-local
-`pending_selection` channel retire after parity. That removal is required by
+`pending_selection` channel have been removed. That removal is required by
 D7.5.3: runtime code must not reach Radiant through a bespoke callback when a
 versioned `radiant-dom` operation is the defined boundary.
 
@@ -793,24 +800,28 @@ Toolbar commands need a capability even though clicking a toolbar is not a
 stable logical surface handle:
 
 ```text
-EditSurfaceHandle = document + template instance + source root + host key
+EditSurfaceHandle = document + logical host key + latest model revision
 ```
 
-The handle is opaque and generation-checked. It is not a raw `DomElement*`.
-After reactive regeneration, native code re-resolves the current host from the
-template/render-map identity. Mounting binds the model controller/action thunk
-for this template instance; the document-level Radiant template action handler
-is still the built-in registry entry selected by the parent design. Route
+The handle is opaque and revision-checked. It is not a raw `DomElement*`.
+After reactive regeneration, native code re-resolves the current host by its
+document-local logical host key. Mounting stores the capability only in the
+owning editor value; the document-level Radiant template action handler is
+still the built-in registry entry selected by the parent design. Route
 selection still uses standard `contenteditable`, runtime/template ownership,
 and reverse render-map lookup. The binding adds no routing attribute or second
 editable-host classifier. An action-owner failure is fail-closed and never
 falls through to UA mutation of the derived DOM.
 
-Unmount invalidates the handle. A command against a stale,
-foreign-document, or non-active-surface handle returns failure without moving
-selection. A toolbar may act while it temporarily owns focus when the handle
-still names the document's active model surface and its last selection
-revision; ordinary commands cannot target an arbitrary background editor.
+Host removal or document teardown invalidates use of the handle. A command
+against a foreign-document handle, a missing/non-editable host, or a result
+older than the bound model revision returns failure without moving selection.
+Reactive replacement may recreate the same logical host key and retain the
+capability, which is necessary for a source-owned editor whose DOM is derived.
+The current editor facade has no independent `edit_unmount` operation; if one
+is introduced, it must explicitly invalidate this binding. A toolbar may act
+while it temporarily owns focus because capability possession remains in the
+owning editor state rather than in the focused toolbar node.
 
 The editor state stores the opaque handle and last native selection revision;
 it does not store a DOM wrapper or Range.
@@ -951,13 +962,14 @@ Sharing stops at the first operation that must name a DOM node or a model
 path. This boundary prevents the “unified” layer from becoming a union of both
 engines.
 
-## 10. Proposed migration path
+## 10. Implemented migration record
 
 This section is an implementation appendix, not a second source of behavior
-requirements. Every phase keeps the existing UA conformance gates green and
-adds model coverage before deleting its predecessor.
+requirements. Phases 0–6 landed together on 2026-09-08; every phase kept the
+existing UA conformance gates green and added model coverage before deleting
+its predecessor.
 
-### Phase 0 — Characterize without changing behavior
+### Phase 0 — Characterize without changing behavior — complete
 
 - Add focused tests for current prototype typing, backward/forward/word
   deletion, replacement, selection direction, composition, paste, history,
@@ -972,7 +984,7 @@ adds model coverage before deleting its predecessor.
 **Exit:** both paths have stable behavior evidence and every standard intent
 has an explicit inventory disposition.
 
-### Phase 1 — Extract the pure common core
+### Phase 1 — Extract the pure common core — complete
 
 - Create `edit_registry.ls`, `edit_request.ls`, `edit_action.ls`, and
   `edit_text_policy.ls` under `lambda/dom`.
@@ -984,7 +996,7 @@ has an explicit inventory disposition.
 **Exit:** UA output is unchanged; registry uniqueness/coverage tests pass;
 duplicate word/newline policy is removed.
 
-### Phase 2 — Add the model adapter
+### Phase 2 — Add the model adapter — complete
 
 - Add `lambda/editor/mod_dom_adapter.ls`.
 - Replace the raw `input_type` conditional in `mod_input_intent.ls` with
@@ -999,7 +1011,7 @@ duplicate word/newline policy is removed.
 the second canonical intent or command switch; the public notification is
 pure and the registered model action runs once afterwards.
 
-### Phase 3 — Add read-only native snapshots
+### Phase 3 — Add read-only native snapshots — complete
 
 - Introduce `EditSnapshot` beside, not inside, `DomEditInvocation`.
 - Preserve the parent gate's pre-notification route and handler snapshot.
@@ -1013,7 +1025,7 @@ pure and the registered model action runs once afterwards.
 **Exit:** model commands consume projected target ranges; stale snapshot and
 cross-document tests fail closed; UA WPT/Chromium results are unchanged.
 
-### Phase 4 — Cut over selection completion
+### Phase 4 — Cut over selection completion — complete
 
 - Add stable model surface binding to `edit_mount`.
 - Add `dom.finish_model_edit` to the declared `radiant-dom` interface.
@@ -1027,7 +1039,7 @@ cross-document tests fail closed; UA WPT/Chromium results are unchanged.
 **Exit:** no Lambda editor uses an ambient native callback; a source selection
 is applied exactly once after the matching regenerated model revision.
 
-### Phase 5 — Retire interaction workarounds
+### Phase 5 — Retire interaction workarounds — complete
 
 - Remove prototype click repair and selection echo.
 - Route pointer drag/drop through native drag sessions and standard requests.
@@ -1037,7 +1049,7 @@ is applied exactly once after the matching regenerated model revision.
 **Exit:** pointer selection, node selection, drag copy/move, and toolbar focus
 all pass without fixture-local edit logic.
 
-### Phase 6 — Enforce the boundary
+### Phase 6 — Enforce the boundary — complete
 
 - Audit native code for command/`inputType` policy and the editor for duplicate
   standard descriptor switches.
@@ -1047,6 +1059,23 @@ all pass without fixture-local edit logic.
   is ratified and shipped.
 
 **Exit:** the ownership rules are mechanically enforced as required by D1.10.
+
+### 10.1 Implementation disposition
+
+- `lambda/dom/edit_registry.ls` is the only standard descriptor owner;
+  `commands.ls` remains a compatibility facade. The model extension registry
+  merges through the common collision validator.
+- Both platform and toolbar paths lower through common `EditRequest`,
+  `EditAction`, and `EditResult` values before backend dispatch.
+- `rte_prototype.ls` now uses `editaction` for model mutation and
+  revision-aware `selectionchange` adoption. Native pointer selection, drag
+  transport, hit testing, caret movement, geometry, and painting are shared.
+- Platform model results return through the gate; toolbar results use
+  `dom.finish_model_edit`. Both root source selection across reactive
+  regeneration and tag the resulting native revision `model-commit`.
+- `utils/lint/rules/structural/check_dom_editable_architecture.py` enforces the
+  one-registry owner and prevents the retired ambient selection ABI from
+  returning (D1.10, D7.5.3).
 
 ## 11. Verification and acceptance
 
@@ -1094,7 +1123,8 @@ both backends advertise that capability.
 ### 11.4 Native-waist tests
 
 - snapshot is immutable and read-only;
-- mutation or host replacement during `beforeinput` invalidates stale use;
+- relevant DOM mutation or host replacement during `beforeinput` invalidates
+  stale use, while unrelated observational mutation does not;
 - cancellation invokes no action and no `input`;
 - an uncanceled model edit runs only in the snapshotted action stage, and the
   gate emits at most one post-action `input`;
@@ -1112,7 +1142,7 @@ both backends advertise that capability.
 
 ### 11.5 Acceptance statement
 
-The unification is complete when:
+The implemented unification satisfies the following acceptance conditions:
 
 1. the UA and editor paths share one standard registry, request, action, text
    policy, and result implementation under `lambda/dom`;
@@ -1126,8 +1156,33 @@ The unification is complete when:
 6. UA edits retain their exact DOM/observer/history behavior;
 7. selection/caret navigation is native and common, with source projection at
    explicit boundaries; and
-8. all shared, backend, differential, native-waist, WPT/Chromium, editor, and
-   UI gates pass with no unexpected failures, crashes, hangs, or timeouts.
+8. all applicable shared, backend, native-waist, WPT/Chromium, editor, and UI
+   gates pass with no editing-protocol regression, crash, hang, or timeout.
+
+### 11.6 Implementation verification record
+
+The 2026-09-08 cutover was verified with these executable gates (D1.10,
+D7.3.5):
+
+- exact Lambda goldens for `test/lambda/dom_edit_protocol.ls` and
+  `test/lambda/editor/dom_adapter.ls`, including descriptor collisions,
+  request/result normalization, projected deletion, selection revision/echo,
+  unsupported actions, extensions, and combined drag move;
+- all 28 `rte_*` UI fixtures and the focused DOM/model route, template gate,
+  action-owner, mutation-guard, and UA editable fixtures;
+- the complete WPT Input Events executable at its recorded baseline: 20
+  passing files and 12 known-failure skips, with no unexpected failure;
+- `make test-lambda-baseline`: 5,077/5,077 assertions, including 107
+  forced-GC stress assertions; and
+- the `dom-editable-architecture` and `no-int-cast-radiant` lint rules.
+
+The aggregate Radiant baseline was also run. Its editing/layout coverage was
+green (including 7,410 required layout assertions), while the aggregate
+reported pre-existing or independently reproducible failures in page-layout
+snapshot, CSSOM table computed style, DOM UI link/build orchestration, and
+render-visual comparison. The focused WPT Input Events executable passed when
+rerun alone, so those aggregate failures are not counted as evidence for or
+against this editing cutover.
 
 ## 12. Alternatives considered
 
@@ -1173,7 +1228,7 @@ force the model to approximate it.
 
 ---
 
-This proposal preserves the essential distinction established by the two
+This implementation preserves the essential distinction established by the two
 editors: **the DOM backend is a browser UA; the model backend is a structured
 editor**. The unification is the protocol and the native presentation seam,
 not the authoritative document representation.

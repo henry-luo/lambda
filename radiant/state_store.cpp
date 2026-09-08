@@ -59,6 +59,21 @@ static void view_state_set_hovered_internal(DocState* state, View* view, bool ho
 static void view_state_set_active_internal(DocState* state, View* view, bool active,
                                            bool assert_after_mutation);
 
+// The list lives inside DocState; keeping its destructor here lets every
+// state owner tear down without depending on the event dispatcher.
+static void state_store_destroy_model_edit_surface_bindings(DocState* state) {
+    if (!state) return;
+    ModelEditSurfaceBinding* binding = state->editing.model_edit_surfaces;
+    while (binding) {
+        ModelEditSurfaceBinding* next = binding->next;
+        mem_free(binding->host_key);
+        mem_free(binding);
+        binding = next;
+    }
+    state->editing.model_edit_surfaces = nullptr;
+    state->editing.next_model_edit_surface_id = 0;
+}
+
 typedef struct DumpNodeState {
     void* node;
     uint64_t flags;
@@ -1246,7 +1261,18 @@ extern "C" bool state_store_editing_selection_shadow_matches(DocState* state) {
 extern "C" void state_store_note_selection_mutation(DocState* state) {
     if (!state) return;
     state->selection_mutation_seq++;
+    state->selection_origin = DOM_SELECTION_ORIGIN_API;
+    state->selection_model_revision = 0;
     state->selection_layout_dirty = true;
+}
+
+extern "C" void state_store_tag_selection_origin(DocState* state,
+                                                   DomSelectionOrigin origin,
+                                                   uint64_t model_revision) {
+    if (!state) return;
+    state->selection_origin = origin;
+    state->selection_model_revision =
+        origin == DOM_SELECTION_ORIGIN_MODEL_COMMIT ? model_revision : 0;
 }
 
 static DomSelection* state_store_require_selection(DocState* state,
@@ -1847,6 +1873,7 @@ void DocState::destroy() {
     // document-owned snapshots before this state's DOM/storage dependencies
     // begin teardown (D5.3.3).
     dom_edit_discard_retained_deltas(this);
+    state_store_destroy_model_edit_surface_bindings(this);
 
     if (editing.dom_edit_session_rooted) {
         heap_unregister_gc_root(&editing.dom_edit_session_root);
@@ -3875,6 +3902,20 @@ void doc_state_set_drag_source_range(DocState* state, uint32_t start, uint32_t e
     state->drag_drop->press_offset = press_offset;
     state->version++;
     state_assert_after_mutation(state, "doc_state_set_drag_source_range");
+}
+
+void doc_state_set_drag_source_dom_range(DocState* state,
+                                         const DomBoundary* start,
+                                         const DomBoundary* end) {
+    if (!state || !state->drag_drop || !start || !end ||
+        !start->node || !end->node) {
+        return;
+    }
+    state->drag_drop->has_source_dom_range = true;
+    state->drag_drop->source_dom_start = *start;
+    state->drag_drop->source_dom_end = *end;
+    state->version++;
+    state_assert_after_mutation(state, "doc_state_set_drag_source_dom_range");
 }
 
 void doc_state_update_drag_drop_motion(DocState* state, float x, float y) {
