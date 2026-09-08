@@ -186,6 +186,10 @@ struct JubeNodeResource {
     const char* kind;
     JubeNodeResourceCloseCallback close_callback;
     void* close_user;
+    // Handles are the libuv-backed resources Node reports; other native
+    // resources share the table's ownership and generation checking but are
+    // not part of that report (JSCU24).
+    bool is_handle;
 };
 
 struct JubeNodeResourceSlot {
@@ -5878,8 +5882,8 @@ static JubeNodeResourceSlot* jube_node_resource_slot(NodeRuntimeSession* session
     return slot && slot->generation == generation && slot->resource ? slot : NULL;
 }
 
-uint32_t jube_node_resource_add_with_close(void* session_handle, Item value, const char* kind,
-        JubeNodeResourceCloseCallback close_callback, void* close_user) {
+static uint32_t jube_node_resource_add_impl(void* session_handle, Item value, const char* kind,
+        JubeNodeResourceCloseCallback close_callback, void* close_user, bool is_handle) {
     NodeRuntimeSession* session = (NodeRuntimeSession*)session_handle;
     if (!session || session != jube_active_node_runtime_session || !session->live ||
             session->detaching || !value.item || !kind) return 0;
@@ -5926,11 +5930,38 @@ uint32_t jube_node_resource_add_with_close(void* session_handle, Item value, con
     resource->kind = kind;
     resource->close_callback = close_callback;
     resource->close_user = close_user;
+    resource->is_handle = is_handle;
     // Resource slots own the JS edge until close removes it; net callbacks can
     // otherwise outlive a compacting collection between libuv turns.
     heap_register_gc_root(&resource->value.item);
     slot->resource = resource;
     return resource->id;
+}
+
+uint32_t jube_node_resource_add_with_close(void* session_handle, Item value, const char* kind,
+        JubeNodeResourceCloseCallback close_callback, void* close_user) {
+    return jube_node_resource_add_impl(session_handle, value, kind, close_callback,
+                                       close_user, true);
+}
+
+uint32_t jube_node_resource_add_native(void* session_handle, Item value, const char* kind,
+        JubeNodeResourceCloseCallback close_callback, void* close_user) {
+    return jube_node_resource_add_impl(session_handle, value, kind, close_callback,
+                                       close_user, false);
+}
+
+void jube_node_resource_close_kind(void* session_handle, const char* kind_prefix) {
+    NodeRuntimeSession* session = (NodeRuntimeSession*)session_handle;
+    if (session != jube_active_node_runtime_session || !session ||
+            !session->resource_slots || !kind_prefix) return;
+    size_t prefix_len = strlen(kind_prefix);
+    for (int i = 0; i < session->resource_slots->length; i++) {
+        JubeNodeResourceSlot* slot = (JubeNodeResourceSlot*)session->resource_slots->data[i];
+        JubeNodeResource* resource = slot ? slot->resource : NULL;
+        if (!resource || !resource->kind) continue;
+        if (strncmp(resource->kind, kind_prefix, prefix_len) != 0) continue;
+        jube_node_resource_remove_for_session(session_handle, resource->id);
+    }
 }
 
 uint32_t jube_node_resource_add(Item value, const char* kind) {
@@ -6024,7 +6055,7 @@ Item jube_node_resource_active_handles(void) {
     for (int i = 0; i < session->resource_slots->length; i++) {
         JubeNodeResourceSlot* slot = (JubeNodeResourceSlot*)session->resource_slots->data[i];
         JubeNodeResource* resource = slot ? slot->resource : NULL;
-        if (resource) js_array_push(handles, resource->value);
+        if (resource && resource->is_handle) js_array_push(handles, resource->value);
     }
     return handles;
 }
@@ -6036,7 +6067,7 @@ Item jube_node_resource_active_resources_info(void) {
     for (int i = 0; i < session->resource_slots->length; i++) {
         JubeNodeResourceSlot* slot = (JubeNodeResourceSlot*)session->resource_slots->data[i];
         JubeNodeResource* resource = slot ? slot->resource : NULL;
-        if (!resource) continue;
+        if (!resource || !resource->is_handle) continue;
         js_array_push(resources, js_make_string_len(resource->kind, (int)strlen(resource->kind)));
     }
     return resources;

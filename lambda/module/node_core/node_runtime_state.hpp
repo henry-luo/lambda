@@ -8,7 +8,6 @@
 #endif
 
 #define JS_PERMISSION_MAX_GRANTS 128
-#define JS_CRYPTO_MAX_LIVE_CONTEXTS 4096
 #define JS_CJS_STACK_MAX 128
 #define JS_DIAGNOSTICS_CHANNEL_MAX 512
 #define JS_DIAGNOSTICS_DEFERRED_ERROR_MAX 64
@@ -67,14 +66,8 @@ struct JsPermissionPolicy {
 
 // Native crypto handles are Node module resources, not JavaScript realm
 // metadata. The fixed live-context registries are paid only by Node sessions.
+// JSCU24: live native contexts are owned by the session's generation-checked
+// resource table and named by rid, so no fixed handle tables live here.
 struct JsCryptoNativeState {
     bool pseudo_random_warning_emitted;
-    void* hmac_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
-    int hmac_context_count;
-    void* hash_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
-    int hash_context_count;
-    void* sign_verify_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
-    int sign_verify_context_count;
-    void* cipher_contexts[JS_CRYPTO_MAX_LIVE_CONTEXTS];
-    int cipher_context_count;
 };

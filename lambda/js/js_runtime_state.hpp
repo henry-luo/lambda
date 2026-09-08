@@ -268,6 +268,8 @@ struct JsStreamState : JsNamespaceState {
     Item transform_prototype = {}; Item passthrough_prototype = {}; Item internal_state_namespace = {};
     Item internal_end_of_stream_namespace = {}; Item iterator_namespace = {}; Item web_namespace = {};
     Item promises_namespace = {};
+    // was a function-local `static Item`, which a precise collector never scans
+    Item internal_add_abort_signal_namespace = {};
     bool keys_initialized = false;
     int64_t default_byte_hwm = 16 * 1024;
     int64_t default_object_hwm = 16;

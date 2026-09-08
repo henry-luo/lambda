@@ -64,6 +64,15 @@ Item jube_node_resource_active_resources_info(void);
 uint32_t jube_node_resource_add_with_close(void* session, Item value, const char* kind,
                                            JubeNodeResourceCloseCallback close_callback,
                                            void* close_user);
+// Same generation-checked table, for a native resource that is NOT a libuv
+// handle (a crypto context, say). It is owned and closed identically but is
+// invisible to process._getActiveHandles / getActiveResourcesInfo, which
+// report only handles (JSCU24).
+uint32_t jube_node_resource_add_native(void* session, Item value, const char* kind,
+                                       JubeNodeResourceCloseCallback close_callback,
+                                       void* close_user);
+// Closes every live resource whose kind begins with `kind_prefix`.
+void jube_node_resource_close_kind(void* session, const char* kind_prefix);
 void jube_node_resource_remove_for_session(void* session, uint32_t resource_id);
 void* jube_node_resource_user_data_for_session(void* session, uint32_t resource_id);
 void* jube_node_runtime_current_session(void);

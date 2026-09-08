@@ -1306,8 +1306,8 @@ extern "C" Item js_proxy_revocable(Item target, Item handler) {
     fn->func_ptr = NULL;
     fn->param_count = 0;
     fn->formal_length = 0;
-    fn->native_call = js_proxy_revoke_call_body;
-    fn->native_policy = JS_NATIVE_CALL_BODY;
+    js_fn_native_ensure(fn)->call = js_proxy_revoke_call_body;
+    js_fn_native_ensure(fn)->policy = JS_NATIVE_CALL_BODY;
     fn->name = heap_create_name("", 0);
     fn->prototype = ItemNull;
     // store proxy data pointer in env[0]
@@ -3537,7 +3537,8 @@ extern "C" Item js_new_class_function(void) {
     // The native factory installs a default construct-through-call capability;
     // leaving it set would let later metadata finalization restore the class
     // guard as the [[Construct]] entry and reject `new` class expressions.
-    fn->native_construct = NULL;
+    // clearing a capability the value never had must not mint a record
+    if (fn->native) fn->native->construct = NULL;
     fn->flags |= JS_FUNC_FLAG_CLASS_CONSTRUCTOR;
     fn->construct = js_construct_entry_class_function;
     return result;
@@ -9805,17 +9806,17 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         return js_interp_call_function(fn, args, arg_count, scalar_result_home);
     }
 
-    if (fn->native_call && fn->native_policy == JS_NATIVE_CALL_BODY) {
-        return fn->native_call((Item){.function = (Function*)fn},
+    if (js_fn_native(fn)->call && js_fn_native(fn)->policy == JS_NATIVE_CALL_BODY) {
+        return js_fn_native(fn)->call((Item){.function = (Function*)fn},
             js_current_this, args, arg_count, scalar_result_home);
     }
 
-    if (fn->native_call && (fn->native_policy == JS_NATIVE_CALL_SPAN ||
-            fn->native_policy == JS_NATIVE_CALL_THIS_SPAN)) {
+    if (js_fn_native(fn)->call && (js_fn_native(fn)->policy == JS_NATIVE_CALL_SPAN ||
+            js_fn_native(fn)->policy == JS_NATIVE_CALL_THIS_SPAN)) {
         // Span callbacks declare ownership of the original actual list. They
         // intentionally bypass fixed/rest adaptation, but still enter through
         // the stored typed body selected by their factory.
-        return fn->native_call((Item){.function = (Function*)fn},
+        return js_fn_native(fn)->call((Item){.function = (Function*)fn},
             js_current_this, args, arg_count, scalar_result_home);
     }
 
@@ -9863,10 +9864,10 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
     js_pending_call_argc = adapter.actual_count;
     Item* effective_args = adapter.invoke_items;
 
-    if (fn->native_call) {
+    if (js_fn_native(fn)->call) {
         // The factory selected this exact adapter from the callback's declared
         // type. Repeated calls never cast an opaque address by runtime arity.
-        return fn->native_call((Item){.function = (Function*)fn},
+        return js_fn_native(fn)->call((Item){.function = (Function*)fn},
             js_current_this, effective_args, effective_count,
             scalar_result_home);
     }
@@ -13812,7 +13813,7 @@ extern "C" int js_initial_call_stack_limit(void) {
 
 static bool js_call_use_common_lane(JsFunction* fn) {
     if (!fn || fn->home_class.item == 0 ||
-        !(fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) || fn->native_call ||
+        !(fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) || js_fn_native(fn)->call ||
         (fn->flags & (JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_GENERATOR |
             JS_FUNC_FLAG_ASYNC_GEN | JS_FUNC_FLAG_DERIVED_CTOR |
             JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) || js_fn_with(fn)->depth > 0 ||
@@ -13922,10 +13923,10 @@ Item js_construct_entry_native(Item func_item, Item* args, int arg_count,
     JS_ROOTS(roots, callee_root, func_item, target_root, new_target.item ? new_target : func_item);
     JsFunction* fn = get_type_id(callee_root.get()) == LMD_TYPE_FUNC
         ? (JsFunction*)callee_root.get().function : NULL;
-    if (!fn || !fn->native_construct) {
+    if (!fn || !js_fn_native(fn)->construct) {
         return js_throw_type_error("is not a constructor");
     }
-    return fn->native_construct(callee_root.get(), args, arg_count,
+    return js_fn_native(fn)->construct(callee_root.get(), args, arg_count,
         target_root.get(), result_home);
 }
 
@@ -14145,7 +14146,7 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         uses_local_result_home = true;
     }
 
-    if (!fn || (!fn->func_ptr && !fn->native_call &&
+    if (!fn || (!fn->func_ptr && !js_fn_native(fn)->call &&
             fn->body_kind != JS_FUNCTION_BODY_AST)) {
         log_error("js_call_function: null function pointer");
         return ItemNull;
@@ -14183,7 +14184,7 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         // exact receiver. Applying OrdinaryCallBindThis here turned null and
         // undefined into globalThis before built-in RequireObjectCoercible
         // checks could run (D6.2.2v2).
-        if (!fn->native_call) {
+        if (!js_fn_native(fn)->call) {
             this_val = js_compute_callback_this(fn, this_val);
         }
         this_root.set(this_val);

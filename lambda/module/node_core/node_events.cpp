@@ -9,6 +9,7 @@
  */
 #include "node_events.hpp"
 #include "../../jube/jube_registry.h"
+#include "node_core_common.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 
@@ -612,9 +613,20 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
                         node_events_string_copy(inspected, inspected_text, sizeof(inspected_text));
                         len = snprintf(buf, sizeof(buf), "Unhandled error. (%s)", inspected_text);
                     }
+                    // both arguments allocate and evaluation order is
+                    // unspecified, so build and root them one at a time (D5.4.2)
+                    JubeScopedRoots err_roots(node_events_host, 3);
+                    uint64_t* name_root = err_roots.slot(make_string_item("Error"));
+                    if (!name_root) return ItemNull;
+                    uint64_t* message_root = err_roots.slot(make_string_item(buf, len));
+                    if (!message_root) return ItemNull;
                     Item wrapped = node_events_host->script->new_error_with_name(
-                        make_string_item("Error"), make_string_item(buf, len));
-                    js_set_key_default(wrapped, make_string_item("code"), make_string_item("ERR_UNHANDLED_ERROR"));
+                        jube_root_item(name_root), jube_root_item(message_root));
+                    uint64_t* wrapped_root = err_roots.slot(wrapped);
+                    if (!wrapped_root) return ItemNull;
+                    jube_node_object_set(node_events_host, jube_root_item(wrapped_root),
+                                         "code", make_string_item("ERR_UNHANDLED_ERROR"));
+                    wrapped = jube_root_item(wrapped_root);
                     if (err_arg.item != 0 && get_type_id(err_arg) != LMD_TYPE_UNDEFINED) {
                         js_set_key_default(wrapped, make_string_item("context"), err_arg);
                     }

@@ -77,6 +77,31 @@ static JsCryptoNativeState* crypto_native_state_current(void) {
     return session ? jube_node_crypto_native_state(session) : NULL;
 }
 
+// JSCU24 / D7.4.1v2: a live native context is owned by the Node session's
+// generation-checked resource table and named by an integer rid. The JS object
+// stores that rid, never the pointer, so a stale handle fails closed instead of
+// dereferencing freed memory. These are native resources, not libuv handles,
+// so they stay out of process._getActiveHandles.
+static uint32_t crypto_resource_open(Item owner, const char* kind,
+        JubeNodeResourceCloseCallback close, void* ctx) {
+    void* session = jube_node_runtime_current_session();
+    if (!session) return 0;
+    return jube_node_resource_add_native(session, owner, kind, close, ctx);
+}
+
+static void* crypto_resource_get(Item rid_item) {
+    void* session = jube_node_runtime_current_session();
+    if (!session || get_type_id(rid_item) != LMD_TYPE_INT) return NULL;
+    uint32_t rid = (uint32_t)it2i(rid_item);
+    if (!rid) return NULL;
+    return jube_node_resource_user_data_for_session(session, rid);
+}
+
+static void crypto_resource_close(uint32_t rid) {
+    void* session = jube_node_runtime_current_session();
+    if (session && rid) jube_node_resource_remove_for_session(session, rid);
+}
+
 #define crypto_native_state (*crypto_native_state_current())
 #define crypto_pseudo_random_warning_emitted (crypto_native_state.pseudo_random_warning_emitted)
 JS_FORWARD_STATIC_RETURN(bool, crypto_ensure_roots, (void), crypto_native_state_ensure, () && js_root_range_ensure_registered(&js_runtime_state.crypto.roots))
@@ -1290,6 +1315,7 @@ static Item crypto_stream_input_bytes(Item value, Item encoding_item,
 // ============================================================================
 
 struct HmacCtx {
+    uint32_t rid;   // owning entry in the session resource table
     char alg[16];
     uint8_t* key;
     int key_len;
@@ -1298,23 +1324,6 @@ struct HmacCtx {
     int data_cap;
 };
 
-#define crypto_live_hmac_contexts ((HmacCtx**)crypto_native_state.hmac_contexts)
-#define crypto_live_hmac_context_count (crypto_native_state.hmac_context_count)
-
-static void crypto_track_context(void** contexts, int* count, void* ctx) {
-    if (!contexts || !count || !ctx) return;
-    for (int i = 0; i < *count; i++) if (contexts[i] == ctx) return;
-    if (*count < JS_CRYPTO_MAX_LIVE_CONTEXTS) contexts[(*count)++] = ctx;
-}
-
-static void crypto_untrack_context(void** contexts, int* count, void* ctx) {
-    if (!contexts || !count || !ctx) return;
-    for (int i = 0; i < *count; i++) if (contexts[i] == ctx) {
-            contexts[i] = contexts[*count - 1];
-            contexts[--*count] = NULL;
-            return;
-    }
-}
 
 static void hmac_ctx_release(HmacCtx* ctx) {
     if (!ctx) return;
@@ -1323,11 +1332,14 @@ static void hmac_ctx_release(HmacCtx* ctx) {
     mem_free(ctx);
 }
 
+static void hmac_ctx_close(void* user) { hmac_ctx_release((HmacCtx*)user); }
+
 static void hmac_ctx_free(HmacCtx* ctx) {
     if (!ctx) return;
-    crypto_untrack_context(crypto_native_state.hmac_contexts,
-        &crypto_native_state.hmac_context_count, ctx);
-    hmac_ctx_release(ctx);
+    // A registered context is released by its close callback; one that never
+    // reached the table (an error path before publication) is released here.
+    if (ctx->rid) crypto_resource_close(ctx->rid);
+    else hmac_ctx_release(ctx);
 }
 
 static void crypto_append_bytes(uint8_t** data, int* data_len, int* data_cap,
@@ -1370,7 +1382,7 @@ extern "C" Item js_hmac_update(Item data_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_get_key_cstr(self, "__hmac_ctx__");
     if (ctx_item.item == 0) return self;
-    HmacCtx* ctx = (HmacCtx*)(uintptr_t)it2i(ctx_item);
+    HmacCtx* ctx = (HmacCtx*)crypto_resource_get(ctx_item);
     if (!ctx) return self;
 
     Item status = crypto_append_stream_input(data_item, make_js_undefined_crypto(),
@@ -1383,7 +1395,7 @@ extern "C" Item js_hmac_digest(Item encoding_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_get_key_cstr(self, "__hmac_ctx__");
     if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) return crypto_empty_digest_output(encoding_item);
-    HmacCtx* ctx = (HmacCtx*)(uintptr_t)it2i(ctx_item);
+    HmacCtx* ctx = (HmacCtx*)crypto_resource_get(ctx_item);
     if (!ctx) return crypto_empty_digest_output(encoding_item);
 
     char enc[32];
@@ -1443,20 +1455,23 @@ extern "C" Item js_crypto_createHmac(Item alg_item, Item key_item) {
     }
 
     HmacCtx* ctx = (HmacCtx*)mem_calloc(1, sizeof(HmacCtx), MEM_CAT_JS_RUNTIME);
-    crypto_track_context(crypto_native_state.hmac_contexts,
-        &crypto_native_state.hmac_context_count, ctx);
     memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
     ctx->key = key;
     ctx->key_len = key_len;
 
     Item obj = js_new_object();
-    crypto_link_instance_to_constructor(obj, "Hmac");
-    js_set_key_cstr(obj, "__hmac_ctx__", (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
-    crypto_set_native(obj, make_string_item_crypto("update"), js_hmac_update);
-    crypto_set_native(obj, make_string_item_crypto("digest"), js_hmac_digest);
-    crypto_set_native(obj, make_string_item_crypto("end"), js_hmac_end);
-    crypto_set_native(obj, make_string_item_crypto("read"), js_hmac_read);
-    return obj;
+    // every store below allocates (key strings, native function values) and the
+    // fresh object is not reachable from anywhere else yet, so it must stay
+    // exact-rooted for the whole construction, not just the rid registration.
+    JS_ROOTS(obj_roots, obj_root, obj);
+    crypto_link_instance_to_constructor(obj_root.get(), "Hmac");
+    ctx->rid = crypto_resource_open(obj_root.get(), "crypto.hmac", hmac_ctx_close, ctx);
+    js_set_key_cstr(obj_root.get(), "__hmac_ctx__", (Item){.item = i2it((int64_t)ctx->rid)});
+    crypto_set_native(obj_root.get(), make_string_item_crypto("update"), js_hmac_update);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("digest"), js_hmac_digest);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("end"), js_hmac_end);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("read"), js_hmac_read);
+    return obj_root.get();
 }
 
 // ============================================================================
@@ -1464,6 +1479,7 @@ extern "C" Item js_crypto_createHmac(Item alg_item, Item key_item) {
 // ============================================================================
 
 struct HashCtx {
+    uint32_t rid;   // owning entry in the session resource table
     char alg[16];
     uint8_t* data;
     int data_len;
@@ -1472,8 +1488,6 @@ struct HashCtx {
     bool finalized;
 };
 
-#define crypto_live_hash_contexts ((HashCtx**)crypto_native_state.hash_contexts)
-#define crypto_live_hash_context_count (crypto_native_state.hash_context_count)
 
 static void hash_ctx_release(HashCtx* ctx) {
     if (!ctx) return;
@@ -1481,11 +1495,14 @@ static void hash_ctx_release(HashCtx* ctx) {
     mem_free(ctx);
 }
 
+static void hash_ctx_close(void* user) { hash_ctx_release((HashCtx*)user); }
+
 static void hash_ctx_free(HashCtx* ctx) {
     if (!ctx) return;
-    crypto_untrack_context(crypto_native_state.hash_contexts,
-        &crypto_native_state.hash_context_count, ctx);
-    hash_ctx_release(ctx);
+    // A registered context is released by its close callback; one that never
+    // reached the table (an error path before publication) is released here.
+    if (ctx->rid) crypto_resource_close(ctx->rid);
+    else hash_ctx_release(ctx);
 }
 
 JS_CRYPTO_THROW_CODE(crypto_throw_hash_finalized,
@@ -1498,7 +1515,7 @@ extern "C" Item js_hash_update(Item data_item, Item encoding_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_get_key_cstr(self, "__hash_ctx__");
     if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) return crypto_throw_hash_finalized();
-    HashCtx* ctx = (HashCtx*)(uintptr_t)it2i(ctx_item);
+    HashCtx* ctx = (HashCtx*)crypto_resource_get(ctx_item);
     if (!ctx || ctx->finalized) return crypto_throw_hash_finalized();
 
     Item status = crypto_append_stream_input(data_item, encoding_item,
@@ -1525,7 +1542,7 @@ extern "C" Item js_hash_digest(Item encoding_item) {
         }
         return crypto_throw_hash_finalized();
     }
-    HashCtx* ctx = (HashCtx*)(uintptr_t)it2i(ctx_item);
+    HashCtx* ctx = (HashCtx*)crypto_resource_get(ctx_item);
     if (!ctx || ctx->finalized) return crypto_throw_hash_finalized();
 
     char enc[32];
@@ -1590,7 +1607,7 @@ extern "C" Item js_hash_copy(Item options_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_get_key_cstr(self, "__hash_ctx__");
     if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) return crypto_throw_hash_finalized();
-    HashCtx* ctx = (HashCtx*)(uintptr_t)it2i(ctx_item);
+    HashCtx* ctx = (HashCtx*)crypto_resource_get(ctx_item);
     if (!ctx || ctx->finalized) return crypto_throw_hash_finalized();
 
     int output_len = ctx->output_len;
@@ -1600,8 +1617,6 @@ extern "C" Item js_hash_copy(Item options_item) {
             &output_len, &has_output_len));
 
     HashCtx* copy = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
-    crypto_track_context(crypto_native_state.hash_contexts,
-        &crypto_native_state.hash_context_count, copy);
     memcpy(copy->alg, ctx->alg, strlen(ctx->alg) + 1);
     copy->output_len = has_output_len ? output_len : ctx->output_len;
     if (ctx->data_len > 0) {
@@ -1635,18 +1650,23 @@ extern "C" Item js_hash_setEncoding(Item encoding_item) {
 
 static Item js_hash_make_object(HashCtx* ctx) {
     Item obj = js_new_object();
-    crypto_link_instance_to_constructor(obj, "Hash");
-    js_set_key_cstr(obj, "__hash_ctx__", (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
-    crypto_set_native(obj, make_string_item_crypto("update"), js_hash_update);
-    crypto_set_native(obj, make_string_item_crypto("write"), js_hash_update);
-    crypto_set_native(obj, make_string_item_crypto("digest"), js_hash_digest);
-    crypto_set_native(obj, make_string_item_crypto("end"), js_hash_end);
-    crypto_set_native(obj, make_string_item_crypto("read"), js_hash_read);
-    crypto_set_native(obj, make_string_item_crypto("copy"), js_hash_copy);
-    crypto_set_native(obj, make_string_item_crypto("on"), js_hash_on);
-    crypto_set_native(obj, make_string_item_crypto("once"), js_hash_on);
-    crypto_set_native(obj, make_string_item_crypto("setEncoding"), js_hash_setEncoding);
-    return obj;
+    // every store below allocates (key strings, native function values) and the
+    // fresh object is not reachable from anywhere else yet, so it must stay
+    // exact-rooted for the whole construction, not just the rid registration.
+    JS_ROOTS(obj_roots, obj_root, obj);
+    crypto_link_instance_to_constructor(obj_root.get(), "Hash");
+    ctx->rid = crypto_resource_open(obj_root.get(), "crypto.hash", hash_ctx_close, ctx);
+    js_set_key_cstr(obj_root.get(), "__hash_ctx__", (Item){.item = i2it((int64_t)ctx->rid)});
+    crypto_set_native(obj_root.get(), make_string_item_crypto("update"), js_hash_update);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("write"), js_hash_update);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("digest"), js_hash_digest);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("end"), js_hash_end);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("read"), js_hash_read);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("copy"), js_hash_copy);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("on"), js_hash_on);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("once"), js_hash_on);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("setEncoding"), js_hash_setEncoding);
+    return obj_root.get();
 }
 
 static Item crypto_hash_output_length_from_options(const char* alg, Item options_item,
@@ -1707,8 +1727,6 @@ extern "C" Item js_crypto_createHash(Item alg_item, Item options_item) {
     }
 
     HashCtx* ctx = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
-    crypto_track_context(crypto_native_state.hash_contexts,
-        &crypto_native_state.hash_context_count, ctx);
     memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
     ctx->output_len = output_len;
 
@@ -1720,6 +1738,7 @@ extern "C" Item js_crypto_createHash(Item alg_item, Item options_item) {
 // ============================================================================
 
 struct SignVerifyCtx {
+    uint32_t rid;   // owning entry in the session resource table
     char alg[16];
     bool verify_mode;
     bool finalized;
@@ -1728,8 +1747,6 @@ struct SignVerifyCtx {
     int data_cap;
 };
 
-#define crypto_live_sign_verify_contexts ((SignVerifyCtx**)crypto_native_state.sign_verify_contexts)
-#define crypto_live_sign_verify_context_count (crypto_native_state.sign_verify_context_count)
 
 static void sign_verify_ctx_release(SignVerifyCtx* ctx) {
     if (!ctx) return;
@@ -1737,11 +1754,14 @@ static void sign_verify_ctx_release(SignVerifyCtx* ctx) {
     mem_free(ctx);
 }
 
+static void sign_verify_ctx_close(void* user) { sign_verify_ctx_release((SignVerifyCtx*)user); }
+
 static void sign_verify_ctx_free(SignVerifyCtx* ctx) {
     if (!ctx) return;
-    crypto_untrack_context(crypto_native_state.sign_verify_contexts,
-        &crypto_native_state.sign_verify_context_count, ctx);
-    sign_verify_ctx_release(ctx);
+    // A registered context is released by its close callback; one that never
+    // reached the table (an error path before publication) is released here.
+    if (ctx->rid) crypto_resource_close(ctx->rid);
+    else sign_verify_ctx_release(ctx);
 }
 
 JS_CRYPTO_THROW_CODE(crypto_throw_sign_verify_finalized,
@@ -1750,7 +1770,7 @@ JS_CRYPTO_THROW_CODE(crypto_throw_sign_verify_finalized,
 static SignVerifyCtx* sign_verify_ctx_from_this(Item self) {
     Item ctx_item = js_get_key_cstr(self, "__sign_verify_ctx__");
     if (ctx_item.item == 0 || ctx_item.item == ITEM_NULL) return NULL;
-    return (SignVerifyCtx*)(uintptr_t)it2i(ctx_item);
+    return (SignVerifyCtx*)crypto_resource_get(ctx_item);
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, crypto_bytes_look_like_pem, (const uint8_t* bytes, int len), (bytes && len >= 10 && memcmp(bytes, "-----BEGIN", 10) == 0))
 
@@ -2412,20 +2432,23 @@ static Item js_crypto_create_sign_verify(Item alg_item, bool verify_mode) {
     }
 
     SignVerifyCtx* ctx = (SignVerifyCtx*)mem_calloc(1, sizeof(SignVerifyCtx), MEM_CAT_JS_RUNTIME);
-    crypto_track_context(crypto_native_state.sign_verify_contexts,
-        &crypto_native_state.sign_verify_context_count, ctx);
     memcpy(ctx->alg, alg_buf, strlen(alg_buf) + 1);
     ctx->verify_mode = verify_mode;
 
     Item obj = js_new_object();
-    crypto_link_instance_to_constructor(obj, verify_mode ? "Verify" : "Sign");
-    js_set_key_cstr(obj, "__sign_verify_ctx__", (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
-    crypto_set_native(obj, make_string_item_crypto("update"), js_sign_verify_update);
-    crypto_set_native(obj, make_string_item_crypto("write"), js_sign_verify_update);
-    crypto_set_native(obj, make_string_item_crypto("end"), js_sign_verify_end);
-    crypto_set_native(obj, make_string_item_crypto("sign"), js_sign_verify_sign);
-    crypto_set_native(obj, make_string_item_crypto("verify"), js_sign_verify_verify);
-    return obj;
+    // every store below allocates (key strings, native function values) and the
+    // fresh object is not reachable from anywhere else yet, so it must stay
+    // exact-rooted for the whole construction, not just the rid registration.
+    JS_ROOTS(obj_roots, obj_root, obj);
+    crypto_link_instance_to_constructor(obj_root.get(), verify_mode ? "Verify" : "Sign");
+    ctx->rid = crypto_resource_open(obj_root.get(), "crypto.sign", sign_verify_ctx_close, ctx);
+    js_set_key_cstr(obj_root.get(), "__sign_verify_ctx__", (Item){.item = i2it((int64_t)ctx->rid)});
+    crypto_set_native(obj_root.get(), make_string_item_crypto("update"), js_sign_verify_update);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("write"), js_sign_verify_update);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("end"), js_sign_verify_end);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("sign"), js_sign_verify_sign);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("verify"), js_sign_verify_verify);
+    return obj_root.get();
 }
 
 #define JS_CRYPTO_SIGN_VERIFY_WRAPPER(name, verify_mode) \
@@ -3844,6 +3867,7 @@ static bool crypto_cipher_key_length_valid(const char* alg, int key_len) {
 }
 
 struct CipherCtx {
+    uint32_t rid;   // owning entry in the session resource table
     char alg[32];
     char output_encoding[32];
     mbedtls_cipher_context_t cipher;
@@ -3868,31 +3892,6 @@ struct CipherCtx {
     bool auto_padding;
 };
 
-#define crypto_live_cipher_contexts ((CipherCtx**)crypto_native_state.cipher_contexts)
-#define crypto_live_cipher_context_count (crypto_native_state.cipher_context_count)
-
-static void crypto_track_cipher_context(CipherCtx* ctx) {
-    if (!ctx) return;
-    for (int i = 0; i < crypto_live_cipher_context_count; i++) {
-        if (crypto_live_cipher_contexts[i] == ctx) return;
-    }
-    if (crypto_live_cipher_context_count < JS_CRYPTO_MAX_LIVE_CONTEXTS) {
-        crypto_live_cipher_contexts[crypto_live_cipher_context_count++] = ctx;
-    }
-}
-
-static void crypto_untrack_cipher_context(CipherCtx* ctx) {
-    if (!ctx) return;
-    for (int i = 0; i < crypto_live_cipher_context_count; i++) {
-        if (crypto_live_cipher_contexts[i] == ctx) {
-            crypto_live_cipher_contexts[i] =
-                crypto_live_cipher_contexts[crypto_live_cipher_context_count - 1];
-            crypto_live_cipher_contexts[crypto_live_cipher_context_count - 1] = NULL;
-            crypto_live_cipher_context_count--;
-            return;
-        }
-    }
-}
 
 static void cipher_ctx_append_data(CipherCtx* ctx, const uint8_t* buf, int len) {
     if (!ctx || len <= 0) return;
@@ -3925,10 +3924,12 @@ static void cipher_ctx_release(CipherCtx* ctx) {
     mem_free(ctx);
 }
 
+static void cipher_ctx_close(void* user) { cipher_ctx_release((CipherCtx*)user); }
+
 static void cipher_ctx_free(CipherCtx* ctx) {
     if (!ctx) return;
-    crypto_untrack_cipher_context(ctx);
-    cipher_ctx_release(ctx);
+    if (ctx->rid) crypto_resource_close(ctx->rid);
+    else cipher_ctx_release(ctx);
 }
 
 static bool crypto_is_known_output_encoding(const char* enc) {
@@ -6279,7 +6280,7 @@ extern "C" Item js_cipher_update(Item data_item, Item input_encoding_item, Item 
     Item self = js_get_current_this();
     Item ctx_item = js_get_key_cstr(self, "__cipher_ctx__");
     if (ctx_item.item == 0) return ItemNull;
-    CipherCtx* ctx = (CipherCtx*)(uintptr_t)it2i(ctx_item);
+    CipherCtx* ctx = (CipherCtx*)crypto_resource_get(ctx_item);
     if (!ctx || ctx->finalized) return ItemNull;
 
     char in_enc[32];
@@ -6338,7 +6339,7 @@ extern "C" Item js_cipher_final(Item output_encoding_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_get_key_cstr(self, "__cipher_ctx__");
     if (ctx_item.item == 0) return ItemNull;
-    CipherCtx* ctx = (CipherCtx*)(uintptr_t)it2i(ctx_item);
+    CipherCtx* ctx = (CipherCtx*)crypto_resource_get(ctx_item);
     if (!ctx || ctx->finalized) return ItemNull;
     char out_enc[32];
     bool has_out_enc = false;
@@ -6520,7 +6521,7 @@ extern "C" Item js_cipher_setAutoPadding(Item auto_padding_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_get_key_cstr(self, "__cipher_ctx__");
     if (ctx_item.item == 0) return self;
-    CipherCtx* ctx = (CipherCtx*)(uintptr_t)it2i(ctx_item);
+    CipherCtx* ctx = (CipherCtx*)crypto_resource_get(ctx_item);
     if (!ctx || ctx->finalized) return self;
 
     bool enabled = crypto_item_is_undefined(auto_padding_item) ||
@@ -6552,7 +6553,7 @@ extern "C" Item js_cipher_setAuthTag(Item tag_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_get_key_cstr(self, "__cipher_ctx__");
     if (ctx_item.item == 0) return self;
-    CipherCtx* ctx = (CipherCtx*)(uintptr_t)it2i(ctx_item);
+    CipherCtx* ctx = (CipherCtx*)crypto_resource_get(ctx_item);
     if (!ctx) return self;
 
     const uint8_t* buf; int len;
@@ -6567,7 +6568,7 @@ extern "C" Item js_cipher_setAAD(Item aad_item) {
     Item self = js_get_current_this();
     Item ctx_item = js_get_key_cstr(self, "__cipher_ctx__");
     if (ctx_item.item == 0) return self;
-    CipherCtx* ctx = (CipherCtx*)(uintptr_t)it2i(ctx_item);
+    CipherCtx* ctx = (CipherCtx*)crypto_resource_get(ctx_item);
     if (!ctx) return self;
 
     if (ctx->aad) { mem_free(ctx->aad); ctx->aad = NULL; ctx->aad_len = 0; }
@@ -6598,7 +6599,6 @@ static Item create_cipher_object(const char* alg, bool encrypting,
     }
 
     CipherCtx* ctx = (CipherCtx*)mem_calloc(1, sizeof(CipherCtx), MEM_CAT_JS_RUNTIME);
-    crypto_track_cipher_context(ctx);
     int alen = (int)strlen(alg);
     if (alen > 31) alen = 31;
     memcpy(ctx->alg, alg, (size_t)alen);
@@ -6651,18 +6651,23 @@ static Item create_cipher_object(const char* alg, bool encrypting,
     }
 
     Item obj = js_new_object();
-    crypto_link_instance_to_constructor(obj, encrypting ? "Cipheriv" : "Decipheriv");
-    js_set_key_cstr(obj, "__cipher_ctx__", (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
-    crypto_set_native(obj, make_string_item_crypto("update"), js_cipher_update);
-    crypto_set_native(obj, make_string_item_crypto("final"), js_cipher_final);
-    crypto_set_native(obj, make_string_item_crypto("end"), js_cipher_end);
-    crypto_set_native(obj, make_string_item_crypto("setAutoPadding"), js_cipher_setAutoPadding);
-    crypto_set_native(obj, make_string_item_crypto("read"), js_cipher_read);
-    js_set_key_cstr(obj, "readableLength", (Item){.item = i2it(0)});
-    crypto_set_native(obj, make_string_item_crypto("getAuthTag"), js_cipher_getAuthTag);
-    crypto_set_native(obj, make_string_item_crypto("setAuthTag"), js_cipher_setAuthTag);
-    crypto_set_native(obj, make_string_item_crypto("setAAD"), js_cipher_setAAD);
-    return obj;
+    // every store below allocates (key strings, native function values) and the
+    // fresh object is not reachable from anywhere else yet, so it must stay
+    // exact-rooted for the whole construction, not just the rid registration.
+    JS_ROOTS(obj_roots, obj_root, obj);
+    crypto_link_instance_to_constructor(obj_root.get(), encrypting ? "Cipheriv" : "Decipheriv");
+    ctx->rid = crypto_resource_open(obj_root.get(), "crypto.cipher", cipher_ctx_close, ctx);
+    js_set_key_cstr(obj_root.get(), "__cipher_ctx__", (Item){.item = i2it((int64_t)ctx->rid)});
+    crypto_set_native(obj_root.get(), make_string_item_crypto("update"), js_cipher_update);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("final"), js_cipher_final);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("end"), js_cipher_end);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("setAutoPadding"), js_cipher_setAutoPadding);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("read"), js_cipher_read);
+    js_set_key_cstr(obj_root.get(), "readableLength", (Item){.item = i2it(0)});
+    crypto_set_native(obj_root.get(), make_string_item_crypto("getAuthTag"), js_cipher_getAuthTag);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("setAuthTag"), js_cipher_setAuthTag);
+    crypto_set_native(obj_root.get(), make_string_item_crypto("setAAD"), js_cipher_setAAD);
+    return obj_root.get();
 }
 
 static Item js_crypto_create_cipheriv_common(Item alg_item, Item key_item, Item iv_item, bool encrypting) {
@@ -7744,50 +7749,16 @@ extern "C" Item js_get_crypto_namespace(void) {
 }
 
 static void crypto_reset_live_contexts(void) {
-    while (crypto_live_cipher_context_count > 0) {
-        cipher_ctx_free(crypto_live_cipher_contexts[crypto_live_cipher_context_count - 1]);
-    }
-    while (crypto_live_sign_verify_context_count > 0) {
-        sign_verify_ctx_free(
-            crypto_live_sign_verify_contexts[crypto_live_sign_verify_context_count - 1]);
-    }
-    while (crypto_live_hash_context_count > 0) {
-        hash_ctx_free(crypto_live_hash_contexts[crypto_live_hash_context_count - 1]);
-    }
-    while (crypto_live_hmac_context_count > 0) {
-        hmac_ctx_free(crypto_live_hmac_contexts[crypto_live_hmac_context_count - 1]);
-    }
+    // Every live context is an entry in the session table; closing the kind
+    // runs each one's release callback.
+    jube_node_resource_close_kind(jube_node_runtime_current_session(), "crypto.");
 }
 
 static void crypto_destroy_live_contexts(JsCryptoNativeState* state) {
-    if (!state) return;
-    // Context teardown names the inactive capsule explicitly. Release records
-    // from that capsule without rebinding the thread-local JS state.
-    while (state->cipher_context_count > 0) {
-        int index = --state->cipher_context_count;
-        CipherCtx* ctx = (CipherCtx*)state->cipher_contexts[index];
-        state->cipher_contexts[index] = NULL;
-        cipher_ctx_release(ctx);
-    }
-    while (state->sign_verify_context_count > 0) {
-        int index = --state->sign_verify_context_count;
-        SignVerifyCtx* ctx =
-            (SignVerifyCtx*)state->sign_verify_contexts[index];
-        state->sign_verify_contexts[index] = NULL;
-        sign_verify_ctx_release(ctx);
-    }
-    while (state->hash_context_count > 0) {
-        int index = --state->hash_context_count;
-        HashCtx* ctx = (HashCtx*)state->hash_contexts[index];
-        state->hash_contexts[index] = NULL;
-        hash_ctx_release(ctx);
-    }
-    while (state->hmac_context_count > 0) {
-        int index = --state->hmac_context_count;
-        HmacCtx* ctx = (HmacCtx*)state->hmac_contexts[index];
-        state->hmac_contexts[index] = NULL;
-        hmac_ctx_release(ctx);
-    }
+    // Session teardown closes the resource table itself
+    // (jube_node_resource_cleanup), which releases every remaining crypto
+    // context through its own callback; nothing is tracked here any more.
+    (void)state;
 }
 
 extern "C" void js_crypto_reset(void) {
@@ -7808,14 +7779,6 @@ extern "C" void js_crypto_node_runtime_detach(void* session) {
     memset(state, 0, sizeof(*state));
 }
 
-#undef crypto_live_cipher_context_count
-#undef crypto_live_cipher_contexts
-#undef crypto_live_sign_verify_context_count
-#undef crypto_live_sign_verify_contexts
-#undef crypto_live_hash_context_count
-#undef crypto_live_hash_contexts
-#undef crypto_live_hmac_context_count
-#undef crypto_live_hmac_contexts
 #undef crypto_pseudo_random_warning_emitted
 #undef crypto_native_state
 

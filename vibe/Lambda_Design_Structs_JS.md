@@ -897,6 +897,40 @@ universal; it must not be removed earlier." It is universal as of
 > through `super`, and `with`-scope capture all correct under
 > `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`.
 >
+> **JSCU20 AST payload LANDED 2026-09-08.** The AST group is now one optional
+> `JsAstBody*`: `function`, `script`, `env`, `lexical_this`,
+> `lexical_new_target` and the three derived flags move behind a pointer that
+> only an AST-bodied closure allocates. `body_kind` stays inline because it is
+> the discriminator every call site tests. Reads go through the same null-safe
+> accessor shape as the other payloads (`js_fn_ast` returns a shared zeroed
+> record), and because that accessor returns `const`, a clean build is itself
+> the proof that every write path uses `js_fn_ast_ensure` — the compiler
+> rejects a store through the shared absent record. 69 sites were rewritten
+> across `js_interp.cpp` and `js_runtime_function.cpp`; the `state->` and
+> `gen->` fields of the same name belong to the generator and async state
+> records, not to `JsFunction`, and were correctly left alone.
+>
+> The payload's two Items are precise GC edges, so `js_function_trace` follows
+> the pointer and `js_function_gc_destroy` releases it. A pool-backed
+> `JsFunction` is never traced and its root registration is one-shot, so
+> `js_function_root_ast_payload` registers the payload's own Item slots at
+> attach time — the same contract `js_function_set_eval_origin` already uses.
+>
+> `sizeof(JsFunction)` **264 → 232 B** (the group's 5 pointers/Items and 3
+> flags cost 40 B inline; one pointer replaces them). Gates: test262 baseline
+> 0 regressions (40261/40261), JS gtest 370/370, JS script gtest 107/107
+> (which is the suite that exercises `JS_EXECUTION_BACKEND=ast`), rooting core
+> 107/107, MIR GC stress 107/107, GC heap 76/76, callable catalog clean, node
+> slice identical to pristine. Closures, arrow `this`, `super`, generators,
+> `arguments`, direct `eval` and a 300-iteration closure churn all produce
+> identical results on the MIR and AST tiers, with and without
+> `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`.
+>
+> ⚠ A stale test binary made this look like a segfault regression at first:
+> `make build` does not rebuild `test/*.exe`, so a suite run before
+> `make build-test` links against the previous struct layout. Rebuild the tests
+> after any layout change before believing a crash.
+>
 > **What remains of item 4.** `runtime_context` is *not* removable after all:
 > it is the `Context*` actually handed to generated code on the
 > `MIR_CONTEXT_ABI` path, and its guard needs the captured owner to catch a
@@ -910,6 +944,49 @@ universal; it must not be removed earlier." It is universal as of
 > shared across closures of one source rather than copied per value. That is
 > a substantial change of its own and is deliberately left as the next unit
 > rather than rushed onto the end of this one.
+
+> **JSCU19 stage A LANDED 2026-09-08 — native code facts split off the value.**
+> `JsNativeCode` (`call`, `construct`, `target`, `arity`, `policy`) is the
+> native half of the `JsCallableCode` record. 51 sites across six files moved
+> to it, using the same null-safe accessor shape as the other payloads, so a
+> read on a script closure still sees a zeroed record and only writes allocate.
+> `sizeof(JsFunction)` **232 → 216 B**.
+>
+> **Two corrections to §4.3's premises, both found by measurement.**
+>
+> *The sharing premise does not apply to the native half.* JSCU19 justifies the
+> record by sharing it across every value of one code identity. But
+> `js_func_cache` already dedupes the **values**: its key is
+> `(target_bits, arity, kind, policy, capabilities)` — which is precisely the
+> native group — so two wrappers of one C target are the *same* `JsFunction`,
+> and sharing a record between them is a no-op. What this split actually buys
+> is that a script closure carries one null word instead of 32 B of zeros. The
+> native half of JSCU19 therefore pays as an **optional payload**, not as a
+> sharing mechanism. Sharing remains the right justification for the *script*
+> half, where N closures are genuinely created per evaluation of one source.
+>
+> *The ≤ 160 B ratchet is not reachable as specified.* Two of JSCU19/JSCU20's
+> sub-points are already superseded: `runtime_context` cannot be removed (it is
+> the `Context*` handed to generated code on `MIR_CONTEXT_ABI`, JSCUO6), and
+> `layout_magic` must stay a 32-bit field at offset 4 (one of only two hard
+> pins). With those kept, and `invoke`/`construct`/`func_ptr` retained on the
+> value as JSCU21 requires, the floor for the field moves §4.3 lists is about
+> **196 B**, not 160.
+>
+> **The route that does reach it is JSCU20's own wording.** JSCU20 specifies
+> *one* `JsFunctionPayload*`; the implementation landed **six** separate
+> pointers (`bound`, `klass`, `with`, `ast`, `native`, `eval_origin` = 48 B).
+> Collapsing them into a single payload pointer recovers 40 B and brings the
+> record under the ratchet. The trade is one indirection on every payload read
+> and one allocation covering all six, which suits a value that has either none
+> of them or several. **JSCUO8 (open):** confirm that collapse is wanted before
+> spending it, since it re-touches every accessor landed in JSCU20.
+>
+> Gates: test262 40261/40261 with 0 regressions, JS gtest 370/370, JS script
+> gtest (the `JS_EXECUTION_BACKEND=ast` suite) clean, rooting core 107/107, MIR
+> GC stress clean, callable catalog clean, both Jube node gates clean, node
+> slice identical to pristine, and all 26 built-in modules still byte-identical
+> under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`.
 
 ### 4.3 Rulings (original)
 
@@ -1088,6 +1165,43 @@ item. Hash, HMAC, sign/verify and cipher remain distinct resource kinds.
 Gate: `make test-jube-node-net-crypto-dynamic` and the crypto slice of
 `make node-baseline`, plus a case creating 5,000 live hashes.
 
+**LANDED 2026-09-08 (JSCU24).** `JubeNodeResource` gained `bool is_handle` so
+the rid table can carry entries that are *not* user-visible handles;
+`jube_node_resource_add_native` opens such an entry and
+`jube_node_resource_close_kind` drains one kind at teardown. Both
+`_getActiveHandles` and `_getActiveResources` skip `!is_handle`, so crypto
+contexts are invisible to the Node handle views — which is the observable
+Node behaviour and was the reason a plain `add_with_close` would not do.
+Each context struct carries a `uint32_t rid`; `X_ctx_close` is the close hook;
+`X_ctx_free` closes through the rid when it has one and otherwise releases
+directly, so a context freed before registration still cleans up. All
+create/decode/free sites go through `crypto_resource_open/get/close`; the four
+fixed tables, their tracking helpers, their drain loops and
+`JS_CRYPTO_MAX_LIVE_CONTEXTS` are deleted. `JsCryptoNativeState` is
+131,112 B → 1 B, and the 16,384-context cap is gone.
+
+**A latent GC bug fell out of this and is fixed.** The four factories
+(`js_hash_make_object` and the HMAC, sign/verify and cipher equivalents)
+built a fresh object with `js_new_object()` and then installed its methods
+through a run of allocating stores while holding only a bare C local. The
+object is not reachable from anywhere else at that point, so under
+`LAMBDA_GC_FORCE_EVERY=1` it was collected mid-construction and the finished
+object came back missing methods ("is not a function") or with a reused
+context ("Digest already called"). This predates JSCU24 — pristine `HEAD`
+fails the same probe, with the second symptom — and it violates D5.4.2:
+a value under construction is live and needs an exact root. Each factory now
+opens `JS_ROOTS(obj_roots, obj_root, obj)` immediately after `js_new_object()`
+and performs every subsequent store through `obj_root.get()`, returning the
+rooted handle. Hash, HMAC and cipher round-trips plus a 200-iteration churn
+now produce byte-identical results with and without forced GC.
+
+Verified: `make test-jube-node-net-crypto-dynamic` clean, `test262-baseline`
+40261/40261 with 0 regressions, `test-gc-rooting-core` 107/107,
+`test-js-callable-catalog` clean, JS gtest 370/370, and the crypto Node slice
+at 65 pass / 67 pre-existing failures — identical to pristine, 0 regressed.
+All four affected `modules/node-*.dylib` were rebuilt on both sides of the
+A/B (`node-zlib` includes neither changed header and is unaffected).
+
 ---
 
 ## 6. Dependencies, ordering and gates
@@ -1129,6 +1243,17 @@ changes an `S#`/`D#` ruling.
 ---
 
 ## 7. Open issues
+**JSCUO8 — Collapse the six payload pointers into one `JsFunctionPayload*`?**
+JSCU20 specifies a single payload pointer; the implementation landed six
+(`bound`, `klass`, `with`, `ast`, `native`, `eval_origin`), costing 48 B on
+every value. One pointer to a container recovers 40 B and is the only route
+left to the ≤ 160 B ratchet, since `runtime_context` and `layout_magic` are
+both pinned (JSCUO6) and `invoke`/`construct`/`func_ptr` stay on the value
+(JSCU21). The cost is one extra indirection per payload read and a single
+allocation covering all six, which suits a value that has either none of them
+or several. It re-touches every accessor landed in JSCU20, so it wants an
+explicit decision rather than being folded into the next slice.
+
 
 - **JSCUO1 — ratified 2026-09-07 as JSCU25** (item 1).
 - **JSCUO2 — ratified 2026-09-07 as JSCU26** (item 1); D5.1.1→v2 in

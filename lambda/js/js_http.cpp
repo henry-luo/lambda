@@ -5608,19 +5608,22 @@ extern "C" Item js_http_get(Item options_item, Item callback) {
 // =============================================================================
 
 static Item build_status_codes(void) {
-    Item codes = js_new_object();
     static const int code_list[] = {
         100,101,200,201,202,204,206,301,302,303,304,307,308,
         400,401,403,404,405,406,408,409,410,411,413,414,415,416,417,422,429,
         500,501,502,503,504
     };
+    // the map is reachable from nothing across 35 allocating stores, and each
+    // store's key and value both allocate — root all three (D5.4.2)
+    JS_ROOTS(roots, codes_root, js_new_object());
     for (int i = 0; i < (int)(sizeof(code_list)/sizeof(code_list[0])); i++) {
         String* key = js_property_index_name(code_list[i]);
         if (!key) return ItemError;
-        js_set_key_default(codes, (Item){.item = s2it(key)},
-                        make_string_item(http_status_text(code_list[i])));
+        JS_ROOTS(entry_roots, key_root, (Item){.item = s2it(key)});
+        JS_ROOTS(text_roots, text_root, make_string_item(http_status_text(code_list[i])));
+        js_set_key_default(codes_root.get(), key_root.get(), text_root.get());
     }
-    return codes;
+    return codes_root.get();
 }
 
 // =============================================================================
@@ -5922,28 +5925,31 @@ extern "C" Item js_get_http_namespace(void) {
     // STATUS_CODES
     js_set_key_cstr(http_namespace, "STATUS_CODES", build_status_codes());
 
-    // METHODS
-    Item methods = js_array_new(0);
+    // METHODS — the array is reachable from nothing until the final store, and
+    // each push allocates both the element string and the grown backing store
     static const char* method_list[] = {
         "GET","HEAD","POST","PUT","DELETE","CONNECT","OPTIONS","TRACE","PATCH"
     };
+    JS_ROOTS(methods_roots, methods_root, js_array_new(0));
     for (int i = 0; i < 9; i++) {
-        js_array_push(methods, make_string_item(method_list[i]));
+        JS_ROOTS(entry_roots, entry_root, make_string_item(method_list[i]));
+        js_array_push(methods_root.get(), entry_root.get());
     }
-    js_set_key_cstr(http_namespace, "METHODS", methods);
+    js_set_key_cstr(http_namespace, "METHODS", methods_root.get());
 
     // Agent constructor
     js_install_native_constructor(http_namespace, "Agent", js_http_Agent, 1);
 
-    // globalAgent — stub Agent instance
-    Item agent = js_new_object();
-    js_set_key_cstr(agent, "maxSockets", (Item){.item = i2it(256)});
-    js_set_key_cstr(agent, "keepAlive", (Item){.item = b2it(false)});
-    js_set_key_cstr(agent, "requests", js_new_object());
-    js_set_key_cstr(agent, "sockets", js_new_object());
-    js_set_key_cstr(agent, "freeSockets", js_new_object());
-    js_http_agent_install_methods(agent);
-    js_set_key_cstr(http_namespace, "globalAgent", agent);
+    // globalAgent — stub Agent instance; unreachable until the final store, so
+    // it must stay rooted across its own five stores and the method install
+    JS_ROOTS(agent_roots, agent_root, js_new_object());
+    js_set_key_cstr(agent_root.get(), "maxSockets", (Item){.item = i2it(256)});
+    js_set_key_cstr(agent_root.get(), "keepAlive", (Item){.item = b2it(false)});
+    js_set_key_cstr(agent_root.get(), "requests", js_new_object());
+    js_set_key_cstr(agent_root.get(), "sockets", js_new_object());
+    js_set_key_cstr(agent_root.get(), "freeSockets", js_new_object());
+    js_http_agent_install_methods(agent_root.get());
+    js_set_key_cstr(http_namespace, "globalAgent", agent_root.get());
 
     // Stub constructors for IncomingMessage, ServerResponse, ClientRequest, OutgoingMessage
     Item incoming_fn = js_new_distinct_native_constructor(js_http_stub_ctor);
