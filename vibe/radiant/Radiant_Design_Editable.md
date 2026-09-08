@@ -1,9 +1,9 @@
 # Radiant Editable Support — Common Gate and Full UA `contenteditable`
 
-**Date:** 2026-07-29 · **Revised:** 2026-09-07
+**Date:** 2026-07-29 · **Revised:** 2026-09-08
 **Status:** Phase 1 and Phase 9 implemented and verified for the applicable
-UA conformance scope; the separate unified form/history expansion remains a
-proposal.
+UA conformance scope; the separate unified form/history expansion and
+model-editor protocol unification remain proposals.
 **Scope:** `contenteditable`, Lambda/Radiant editable templates, the common
 editing transaction gate, registered action handlers, full UA editing
 behavior, `execCommand`/`queryCommand*`, `designMode`, and conformance against
@@ -43,6 +43,15 @@ surface timelines, the `EditStep` contract, atomic native-waist application,
 grouping/coalescing, retention, pruning, and unified form-control history. It
 remains a proposal until its D7.2.5v2 ratification steps are completed; §20.7
 below is the current Phase-9 baseline in the meantime.
+
+**Model-editor unification design:**
+[Lambda_Design_DOM_Editable.md](../Lambda_Design_DOM_Editable.md) proposes the
+shared `lambda/dom` descriptor/request/action/result core, the separate UA-DOM
+and source-model backends, and the explicit source-selection/native-waist
+handoff. It is subordinate to this document's route snapshot and registered
+action contract: public `beforeinput` remains notification-only, the selected
+Radiant-template action runs afterwards, and the common gate alone emits the
+post-action `input` (D7.2.5, D7.5.3).
 
 **Historical lineage:** §17.2 consolidates the removed CE1–CE3 design records:
 the editable-host foundation, the later native-legacy-editor pivot, and the
