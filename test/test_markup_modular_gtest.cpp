@@ -250,6 +250,19 @@ TEST_F(BlockParserTest, GfmTables) {
                 json_contains(json->chars, "\"$\": \"td\""));
 }
 
+// Pipes in Markdown image URLs are URL data, not GFM table delimiters.
+TEST_F(BlockParserTest, ImageUrlPipesAreNotTables) {
+    const char* content =
+        "![Platform](https://img.example/badge/Platform-macOS%20|%20Linux%20|%20Windows-green)\n";
+
+    String* json = parse_to_json(content, "test.md");
+    ASSERT_NE(json, nullptr);
+
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"img\""));
+    EXPECT_FALSE(json_contains(json->chars, "\"$\": \"table\""));
+    EXPECT_TRUE(json_contains(json->chars, "Platform-macOS%20|%20Linux%20|%20Windows-green"));
+}
+
 // Test horizontal rules
 TEST_F(BlockParserTest, HorizontalRules) {
     const char* content =

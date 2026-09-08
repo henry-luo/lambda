@@ -18,12 +18,12 @@ let PROJECT_ROOT = "."
 // --------------------------------------------------------------------------
 
 fn directory_entries(path) => input(path, 'dir') ^ { [] }
-fn child_path(parent_path, child_name) =>
-  if (parent_path == ".") { "./" ++ child_name }
-  else { parent_path ++ "/" ++ child_name }
+fn child_path(parent_path, child_name) => join([parent_path, child_name], "/")
 
 fn path_is_open(open_paths, path) => contains(open_paths, path)
 fn remove_path(paths, path) => [for (candidate in paths where candidate != path) candidate]
+fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
+fn event_hits_tree_row(evt, hit_class) => contains(evt["target_parent_class"], hit_class ++ " ")
 
 fn bounded_text_offset(value, offset) {
   if (offset < 0) { 0 }
@@ -61,16 +61,27 @@ fn erase_forwards(value, evt) {
   else { value }
 }
 
+fn entry_is_visible(entry) {
+  let entry_name = lower(entry["name"])
+  // Hide implementation artefacts without preventing normal source browsing.
+  not starts_with(entry_name, ".") and
+    (not entry["is_dir"] or
+      (not starts_with(entry_name, "build") and not starts_with(entry_name, "release")))
+}
+
 fn entry_matches_filter(entry, filter_text) {
   // Directories remain visible so a search result can be reached by expanding
   // its ancestry; the filter itself applies to file names.
-  entry["is_dir"] or filter_text == "" or contains(lower(entry["name"]), lower(filter_text))
+  entry_is_visible(entry) and
+    (entry["is_dir"] or filter_text == "" or contains(lower(entry["name"]), lower(filter_text)))
 }
 
 fn document_format(extension) {
   let ext = lower(extension)
   if (contains(["md", "markdown", "mdown", "mkdn"], ext)) { "markdown" }
   else if (contains(["wiki", "mediawiki"], ext)) { "wiki" }
+  else if (contains(["rst", "rest"], ext)) { "rst" }
+  else if (contains(["htm", "html"], ext)) { "html" }
   else { null }
 }
 
@@ -108,57 +119,72 @@ fn selected_preview(file) {
 // --------------------------------------------------------------------------
 // Mark document preview templates
 //
-// Markdown and wiki readers produce the same HTML-shaped Mark vocabulary.
+// Markdown, wiki, RST, and HTML readers produce the same HTML-shaped Mark
+// vocabulary. LaTeX returns its normal HTML elements after rendering.
 // Applying it deliberately keeps parser output separate from this prototype's
-// UI chrome, and lets the LaTeX renderer return its normal HTML elements too.
+// UI chrome.
 // --------------------------------------------------------------------------
 
 view any { ~ }
 
-view <doc> { <div class:"document-body", *[for (child in ~) apply(child)]> }
-view <body> { <div class:"document-body", *[for (child in ~) apply(child)]> }
-view <h1> { <h1 *[for (child in ~) apply(child)]> }
-view <h2> { <h2 *[for (child in ~) apply(child)]> }
-view <h3> { <h3 *[for (child in ~) apply(child)]> }
-view <h4> { <h4 *[for (child in ~) apply(child)]> }
-view <h5> { <h5 *[for (child in ~) apply(child)]> }
-view <h6> { <h6 *[for (child in ~) apply(child)]> }
-view <p> { <p *[for (child in ~) apply(child)]> }
-view <span> { <span *[for (child in ~) apply(child)]> }
-view <strong> { <strong *[for (child in ~) apply(child)]> }
-view <em> { <em *[for (child in ~) apply(child)]> }
-view <del> { <del *[for (child in ~) apply(child)]> }
-view <u> { <u *[for (child in ~) apply(child)]> }
+fn rendered_children(item) => [for (child in content(item)) apply(child)]
+
+view <doc> { <div class:"document-body", *[rendered_children(~)]> }
+// HTML previews expose document content while keeping imported page chrome and
+// executable/style nodes from altering the editor itself.
+view <html> { <div class:"document-body", *[rendered_children(~)]> }
+view <head> { "" }
+view <title> { "" }
+view <script> { "" }
+view <style> { "" }
+view <body> { <div class:"document-body", *[rendered_children(~)]> }
+view <h1> { <h1 *[rendered_children(~)]> }
+view <h2> { <h2 *[rendered_children(~)]> }
+view <h3> { <h3 *[rendered_children(~)]> }
+view <h4> { <h4 *[rendered_children(~)]> }
+view <h5> { <h5 *[rendered_children(~)]> }
+view <h6> { <h6 *[rendered_children(~)]> }
+view <p> { <p *[rendered_children(~)]> }
+view <span> { <span *[rendered_children(~)]> }
+view <strong> { <strong *[rendered_children(~)]> }
+view <em> { <em *[rendered_children(~)]> }
+view <del> { <del *[rendered_children(~)]> }
+view <u> { <u *[rendered_children(~)]> }
 view <code> {
-  if (~.type == 'block') { <pre <code *[for (child in ~) apply(child)]>> }
-  else { <code *[for (child in ~) apply(child)]> }
+  if (~.type == "block") { <pre <code *[rendered_children(~)]>> }
+  else { <code *[rendered_children(~)]> }
 }
-view <pre> { <pre *[for (child in ~) apply(child)]> }
-view <ul> { <ul *[for (child in ~) apply(child)]> }
-view <ol> { <ol *[for (child in ~) apply(child)]> }
-view <li> { <li *[for (child in ~) apply(child)]> }
-view <blockquote> { <blockquote *[for (child in ~) apply(child)]> }
-view <a> { <a href:~.href, *[for (child in ~) apply(child)]> }
+view <pre> { <pre *[rendered_children(~)]> }
+view <ul> { <ul *[rendered_children(~)]> }
+view <ol> { <ol *[rendered_children(~)]> }
+view <li> { <li *[rendered_children(~)]> }
+view <blockquote> { <blockquote *[rendered_children(~)]> }
+view <a> { <a href:~.href, *[rendered_children(~)]> }
 view <img> { <img src:~.src, alt:~.alt> }
 view <br> { <br> }
 view <hr> { <hr> }
-view <table> { <table *[for (child in ~) apply(child)]> }
-view <thead> { <thead *[for (child in ~) apply(child)]> }
-view <tbody> { <tbody *[for (child in ~) apply(child)]> }
-view <tfoot> { <tfoot *[for (child in ~) apply(child)]> }
-view <tr> { <tr *[for (child in ~) apply(child)]> }
-view <th> { <th *[for (child in ~) apply(child)]> }
-view <td> { <td *[for (child in ~) apply(child)]> }
+view <table> { <table *[rendered_children(~)]> }
+view <thead> { <thead *[rendered_children(~)]> }
+view <tbody> { <tbody *[rendered_children(~)]> }
+view <tfoot> { <tfoot *[rendered_children(~)]> }
+view <tr> { <tr *[rendered_children(~)]> }
+view <th> { <th *[rendered_children(~)]> }
+view <td> { <td *[rendered_children(~)]> }
 
 // --------------------------------------------------------------------------
 // Lazy file-tree rows
 // --------------------------------------------------------------------------
 
 view <tree_entry> {
-  let entry_path = ~.file_path
+  let entry_path = child_path(~.parent_path, ~.name)
   let is_open = path_is_open(~.open_paths, entry_path)
   let indent = (~.depth * 16) ++ "px"
-  let row_class = if (~.selected_path == entry_path) "tree-row selected" else "tree-row"
+  let hit_class = tree_hit_class(entry_path)
+  let row_class = if (~.selected_path == entry_path) {
+    hit_class ++ " tree-row selected"
+  } else {
+    hit_class ++ " tree-row"
+  }
   let children = if (~.is_dir and is_open) { directory_entries(entry_path) } else { [] };
 
   <div class:"tree-entry"
@@ -175,9 +201,11 @@ view <tree_entry> {
     >
     if (~.is_dir and is_open) {
       <div class:"tree-children"
-      , *[for (child in children where entry_matches_filter(child, ~.filter_text))
+      , for (child in children where entry_matches_filter(child, ~.filter_text))
           apply(<tree_entry
-            file_path:child_path(entry_path, child.name),
+            // Recompute per child: retaining entry_path here appends a prior
+            // sibling during reactive list reconciliation.
+            parent_path:child_path(~.parent_path, ~.name),
             name:child.name,
             extension:child.extension,
             is_dir:child.is_dir,
@@ -185,17 +213,21 @@ view <tree_entry> {
             open_paths:~.open_paths,
             selected_path:~.selected_path,
             filter_text:~.filter_text
-          >)]
+          >)
       >
     }
   >
 }
 on click(evt) {
   let target_class = evt["target_class"]
-  if (~.is_dir and (target_class == "tree-toggle" or target_class == "tree-label" or target_class == "folder-icon")) {
-    emit("tree_toggle", ~)
+  let entry_path = child_path(~.parent_path, ~.name)
+  let hit_class = tree_hit_class(entry_path)
+  let hits_this_row = event_hits_tree_row(evt, hit_class)
+  if (~.is_dir and hits_this_row and
+      (target_class == "tree-toggle" or target_class == "tree-label" or target_class == "folder-icon")) {
+    emit("tree_toggle", {file_path:entry_path})
   } else if (not ~.is_dir) {
-    emit("file_select", ~)
+    emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension})
   }
 }
 
@@ -206,20 +238,31 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "Markdown, wiki, and LaTeX files open as rendered documents; all other files open as source.">
+        <p class:"empty-preview-note", "Markdown, wiki, RST, HTML, and LaTeX files open as rendered documents; all other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
-    let preview = selected_preview(~.file);
     <main class:"document-panel"
     , <div class:"document-header"
       , <div class:"document-title"
         , <div class:"document-path", ~.file["file_path"]>
           <h1 class:"document-name", ~.file["name"]>
         >
-        <span class:"preview-kind rendered", "Rendered">
+        <span class:"preview-kind rendered", if (~.preview_mode == "view") "View" else "Source">
       >
-      <section id:"rendered-preview", class:"rendered-preview", apply(preview)>
+      if (~.preview_mode == "view") {
+        let preview = selected_preview(~.file);
+        <section id:"rendered-preview", class:"rendered-preview", apply(preview)>
+      } else {
+        let source = selected_source(~.file);
+        <section class:"source-tab-panel"
+        , <pre id:"source-preview", class:"source-preview", source>
+        >
+      }
+      <nav class:"document-tabs"
+      , <button class:(if (~.preview_mode == "view") "document-tab tab-view active" else "document-tab tab-view"), "View">
+        <button class:(if (~.preview_mode == "source") "document-tab tab-source active" else "document-tab tab-source"), "Source">
+      >
     >
   } else {
     let source = selected_source(~.file);
@@ -231,16 +274,23 @@ view <document_pane> {
         >
         <span class:"preview-kind source", "Source">
       >
-      <pre id:"source-preview", class:"source-preview", source>
+      <section class:"source-tab-panel"
+      , <pre id:"source-preview", class:"source-preview", source>
+      >
     >
   }
+}
+on click(evt) {
+  let target_class = evt["target_class"]
+  if (contains(target_class, "tab-view")) { emit("preview_tab", "view") }
+  else if (contains(target_class, "tab-source")) { emit("preview_tab", "source") }
 }
 
 // --------------------------------------------------------------------------
 // Project browser application
 // --------------------------------------------------------------------------
 
-edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null {
+edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view" {
   let root_entries = directory_entries(PROJECT_ROOT);
 
   <div class:"doc-editor"
@@ -262,9 +312,9 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
         >
         if (root_open) {
           <div class:"tree-children"
-          , *[for (entry in root_entries where entry_matches_filter(entry, filter_text))
+          , for (entry in root_entries where entry_matches_filter(entry, filter_text))
               apply(<tree_entry
-                file_path:child_path(PROJECT_ROOT, entry.name),
+                parent_path:PROJECT_ROOT,
                 name:entry.name,
                 extension:entry.extension,
                 is_dir:entry.is_dir,
@@ -272,13 +322,13 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
                 open_paths:open_paths,
                 selected_path:(if (selected_file == null) "" else selected_file["file_path"]),
                 filter_text:filter_text
-              >)]
+              >)
           >
         }
       >
     <div class:"file-panel-footer", if (filter_text == "") "Project root: ." else "Filtering file names">
   >
-  apply(<document_pane file:selected_file>)
+  apply(<document_pane file:selected_file, preview_mode:preview_mode>)
   >
 }
 on click(evt) {
@@ -311,6 +361,10 @@ on tree_toggle(entry) {
 }
 on file_select(entry) {
   selected_file = {file_path: entry["file_path"], name: entry["name"], extension: entry["extension"]}
+  preview_mode = "view"
+}
+on preview_tab(tab) {
+  preview_mode = tab
 }
 
 // --------------------------------------------------------------------------
@@ -323,12 +377,12 @@ on file_select(entry) {
     <title "Lambda Document Editor — Prototype">
     <style "
       * { box-sizing: border-box; }
-      body { margin: 0; min-height: 100vh; background: #eef1f5; color: #20242c;
+      body { margin: 0; height: 100vh; overflow: hidden; background: #eef1f5; color: #20242c;
              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-      .doc-editor { display: flex; min-height: 100vh; }
+      .doc-editor { display: flex; height: 100vh; overflow: hidden; }
 
       .file-panel { width: 300px; min-width: 240px; max-width: 40vw; display: flex;
-                    flex-direction: column; background: #1f2430; color: #d7dce5;
+                    min-height: 0; flex-direction: column; background: #1f2430; color: #d7dce5;
                     border-right: 1px solid #343c4d; }
       .file-panel-header { padding: 18px 14px 12px; border-bottom: 1px solid #343c4d; }
       .project-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 14px;
@@ -338,7 +392,7 @@ on file_select(entry) {
                      background: #292f3d; color: #f5f7fb; padding: 0 10px; outline: none; }
       .tree-filter:focus { border-color: #79a6ff; box-shadow: 0 0 0 2px rgba(121,166,255,.2); }
       .tree-filter::placeholder { color: #9aa5b7; }
-      .project-tree { flex: 1; overflow: auto; padding: 8px 6px 16px; }
+      .project-tree { min-height: 0; flex: 1; overflow: auto; padding: 8px 6px 16px; }
       .tree-entry, .tree-children { min-width: max-content; }
       .tree-row { min-height: 28px; display: flex; align-items: center; padding-right: 8px;
                   border-radius: 5px; cursor: pointer; color: #c6cedb; user-select: none; }
@@ -356,7 +410,7 @@ on file_select(entry) {
       .file-panel-footer { padding: 10px 14px; border-top: 1px solid #343c4d; color: #99a5b7;
                            font-size: 11px; }
 
-      .document-panel { min-width: 0; flex: 1; display: flex; flex-direction: column; background: #fff; }
+      .document-panel { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; background: #fff; }
       .document-header { min-height: 77px; display: flex; align-items: center; justify-content: space-between;
                          gap: 18px; padding: 15px 28px; border-bottom: 1px solid #e2e6ec; background: #fbfcfe; }
       .document-path { margin-bottom: 3px; color: #7b8798; font-size: 12px; font-family: 'SF Mono', Menlo, monospace; }
@@ -370,9 +424,16 @@ on file_select(entry) {
       .empty-preview h1 { margin: 14px 0 7px; color: #2b3545; font-size: 24px; }
       .empty-preview p { margin: 5px 0; line-height: 1.5; }
       .empty-preview-note { margin-top: 18px !important; color: #8491a1; font-size: 13px; }
-      .source-preview { flex: 1; margin: 0; padding: 26px 30px; overflow: auto; background: #fcfcfd;
+      .source-tab-panel { min-height: 0; flex: 1; overflow: auto; background: #fcfcfd; }
+      .source-preview { min-height: 100%; margin: 0; padding: 26px 30px;
                         color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre-wrap; }
-      .rendered-preview { flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
+      .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
+      .document-tabs { flex: 0 0 auto; display: flex; gap: 2px; justify-content: flex-end;
+                       padding: 7px 18px; border-top: 1px solid #e2e6ec; background: #fbfcfe; }
+      .document-tab { padding: 5px 11px; border: 0; border-radius: 5px; background: transparent;
+                      color: #68778a; cursor: pointer; font-size: 12px; font-weight: 650; }
+      .document-tab:hover { background: #e8edf5; color: #31425a; }
+      .document-tab.active { background: #dce9fd; color: #1c5da6; }
       .document-body, .latex-output { max-width: 900px; margin: 0 auto; color: #232a35; font-size: 16px; line-height: 1.65; }
       .document-body h1, .document-body h2, .document-body h3, .document-body h4,
       .latex-output h1, .latex-output h2, .latex-output h3, .latex-output h4 { color: #192130; line-height: 1.25; }
@@ -386,7 +447,7 @@ on file_select(entry) {
       .document-body code, .latex-output code { padding: 2px 5px; border-radius: 4px; background: #eef1f5;
                      font: .9em 'SF Mono', Menlo, monospace; }
       .document-body pre, .latex-output pre { overflow: auto; padding: 13px 15px; border-radius: 6px;
-                     background: #202734; color: #e3ebf5; white-space: pre-wrap; }
+                     background: #f1f3f6; color: #243042; white-space: pre-wrap; }
       .document-body pre code, .latex-output pre code { padding: 0; background: transparent; color: inherit; }
       .document-body a, .latex-output a { color: #1769c2; }
       .document-body table, .latex-output table { width: 100%; border-collapse: collapse; margin: 1em 0; }
