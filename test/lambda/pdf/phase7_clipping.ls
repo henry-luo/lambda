@@ -11,8 +11,8 @@
 // Expected: paths contains a <clipPath id="clip0"> followed by the
 // big rect inside a <g clip-path="url(#clip0)"> wrapper.
 
-import interp:  lambda.package.pdf.interp
-import resolve: lambda.package.pdf.resolve
+import interp:  lambda.pdf.interp
+import resolve: lambda.pdf.resolve
 
 pn main() {
     let doc = input("test/input/test.pdf", 'pdf') ^ { null }

@@ -468,6 +468,20 @@ static void js_interp_async_clear_loops(
     *continuations = NULL;
 }
 
+// JSCU10: an async frame is precisely traced through its GC carrier, so its
+// suspended for-await-of loop continuations (iterator + env) must be marked.
+// The old context-wide table pinned only the record's Item fields, never these.
+void js_interp_async_trace_continuations(JsAsyncContextStateRecord* state,
+        gc_heap_t* gc) {
+    if (!state || !gc) return;
+    for (JsInterpGeneratorLoopContinuation* loop = state->ast_loop_continuations;
+            loop; loop = loop->next) {
+        gc_mark_item(gc, loop->iterator.item);
+        gc_mark_item(gc, loop->for_in_object.item);
+        if (loop->env) gc_mark_object_ptr(gc, loop->env);
+    }
+}
+
 void js_interp_async_clear_continuations(JsAsyncContextStateRecord* state) {
     if (!state) return;
     js_interp_async_clear_loops(&state->ast_loop_continuations);
@@ -1105,7 +1119,7 @@ static NameEntry* js_interp_find_binding(JsInterpFrame* frame, String* name);
 static bool js_interp_is_undefined(Item value);
 
 static int js_interp_captured_with_depth(const JsInterpFrame* frame) {
-    return frame && frame->active_function ? frame->active_function->with_env_depth : 0;
+    return frame && frame->active_function ? js_fn_with(frame->active_function)->depth : 0;
 }
 
 static bool js_interp_binding_precedes_captured_with(const JsInterpFrame* frame,
@@ -5712,7 +5726,7 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     if (!js_activate_runtime_name_pool()) return ItemError;
     RuntimeExecutionScope execution_scope;
     if (execution_scope.is_outermost() &&
-            !js_runtime_state.event_loop.callback_running &&
+            !js_runtime_state.event_loop->callback_running &&
             js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
@@ -6003,7 +6017,7 @@ Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
     if (!js_activate_runtime_name_pool()) return ItemError;
     RuntimeExecutionScope execution_scope;
     if (execution_scope.is_outermost() &&
-            !js_runtime_state.event_loop.callback_running &&
+            !js_runtime_state.event_loop->callback_running &&
             js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }

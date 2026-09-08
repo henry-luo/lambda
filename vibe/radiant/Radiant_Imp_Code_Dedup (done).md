@@ -147,7 +147,7 @@ Order is deliberately **leaf-first**: render (self-contained consumer, worst shr
 - The biggest content merge (~4k decl LOC; `state_store.hpp` alone is 1,409). Use strong section bands: `event / editing / ranges / text / state store / state machine / logging`. Keep the state-store band cleanly separable — most of that C+ code is expected to migrate to Lambda script later, and its band should lift out without touching the rest.
 - `event_sim.hpp` stays a separate header (test feature); its includes are untouched.
 - Heaviest external rewrite: `lambda/js` includes many of these; `test/test_state_store_stubs.cpp` and editor gtests too.
-- Domain suite: radiant baseline + `make editor-4c-js` + `make editor-4c-view` + state-store/dom-range/source-pos gtests.
+- Domain suite: radiant baseline + `make editor-4c` + state-store/dom-range/source-pos gtests.
 - **Exit deliverable: a structuring rewrite pass over the merged `event.hpp`** (user-requested) — once all pieces are in, reorder/regroup the bands for readability as a separate, declaration-only commit. This is the one phase where "move text verbatim" is followed by a deliberate reorganization.
 
 ### ✅ H4 — `view.hpp` absorbs style (complete; 8 headers + declarations from layout.hpp)

@@ -871,6 +871,7 @@ enum MapKind {
     MAP_KIND_ARRAY_SPARSE = 14, // array companion map plus numeric sparse hash table
     MAP_KIND_ERROR       = 15, // resting-state LambdaError presented as a JS object
     MAP_KIND_REGEXP      = 16, // RegExp carrier with typed trailing native payload
+    MAP_KIND_ASYNC_FRAME = 17, // JSCU10: suspended async activation (internal, no property face)
 };
 
 #define CONTAINER_FLAG_IMMORTAL (1u << 5)
@@ -1226,7 +1227,6 @@ static inline int64_t* array_num_shape_dims(ArrayNumShape* s) { return s->data; 
 static inline int64_t* array_num_shape_strides(ArrayNumShape* s) { return s->data + s->ndim; }
 
 Range* range();
-long range_get(Range *range, int64_t index);
 
 List* list();  // constructs an empty list
 Item list_fill(List *list, int cnt, ...);  // fill the list with the items
@@ -1244,7 +1244,6 @@ void array_copy_owned_items(Array* destination, int64_t destination_index,
                             const Item* source, int64_t count);
 bool js_array_has_props(const Array* arr);
 Map* js_array_props(const Array* arr);
-int64_t container_tail_reserved(const Array* arr);
 int64_t container_dense_capacity(const Array* arr);
 void js_elements_set_props(Array* arr, Map* props);
 void list_relocate_owned_tail(List* list, Item* old_items, int64_t old_capacity,
@@ -2156,20 +2155,13 @@ Map* map_fill(Map* map, ...);
 // Same fill from a caller-rooted Item span; the T0 walker has no varargs.
 Map* map_fill_items(Map* map, const Item* values, int value_count);
 
-// A shaped field is stored in the lane set_field_value chose for it, which is
+// A shaped field is stored in the lane the store path chose for it, which is
 // NOT always ShapeEntry::type->type_id: a non-simple `type` contract (`T?`, a
 // union, a constrained or occurrence type) carries type_id LMD_TYPE_TYPE yet
-// lands in the 9-byte TypedItem `any` lane or a container-pointer lane. C
-// consumers that decode packed field storage — the GC's shape walk above all —
-// must classify through this so they read the lane that was written: the packed
-// layout is an ABI (D3.4.1) and its lane comes from one shared descriptor
-// resolver (D3.4.6 / D2.6.1).
-#ifdef __cplusplus
-extern "C"
-#endif
-TypeId lambda_shape_field_storage_type_id(const void* field_type);
-// The collector decodes a shaped field from the entry's stored descriptor
-// (SCU9): kind, nullability and the decoding TypeId, never from Type::type_id.
+// lands in the TypedItem `any` lane or a container-pointer lane. The packed
+// layout is an ABI (D3.4.1), so a C consumer that decodes it -- the GC's shape
+// walk above all -- reads the descriptor the entry stores (SCU9/D3.4.6): its
+// kind, nullability and decoding TypeId, never Type::type_id.
 #ifdef __cplusplus
 extern "C"
 #endif
@@ -2852,7 +2844,6 @@ extern "C" {
     Item fn_apply1(Item target);
     Item fn_apply2(Item target, Item options);
 
-    Item fn_typeset_latex(Item input_file, Item output_file, Item options);
 
     // datetime constructors
     DateTime fn_datetime0();                       // datetime() - current datetime

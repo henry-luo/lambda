@@ -1,9 +1,9 @@
 // test_math_atom_style.ls — Test math style/font command rendering
 // Coverage: atoms/style.ls — render (mathbf, mathrm, displaystyle, etc.)
 
-import style: lambda.package.math.atoms.style
-import box: lambda.package.math.box
-import mctx: lambda.package.math.context
+import style: lambda.doc.math.atoms.style
+import box: lambda.doc.math.box
+import mctx: lambda.doc.math.context
 
 "===== MATH ATOM STYLE TESTS ====="
 

@@ -816,7 +816,7 @@ As designed, every one surfaces as a parse error rather than a silent
 reinterpretation. A front-end cross-check over the same corpus found the
 two parsers agreeing everywhere; the only apparent divergences were the C
 parser resolving *imports* into un-migrated library sources — e.g.
-`lambda/package/graph/transform/paint.ls:154` still spells the retired
+`lambda/graph/transform/paint.ls:154` still spells the retired
 element divider (`else <g;`), which §7.11 replaced with the boundary comma.
 The package library is therefore part of the migration surface, not just
 `test/`.
@@ -2811,7 +2811,7 @@ import, not new syntax — recorded as SO37.
 
 ### 7.26 Computed keys: `{[expr]: val}` and `<tag [expr]: val>` (decided 2026-09-05)
 
-**The gap.** A map-literal key is a name — an identifier, a quoted symbol, or (since §7.24) a keyword — and an element attribute name is the same `_key` plus the dotted form. There is no literal spelling that builds a shaped map, or an element with an attribute, whose key is known only at run time. The DOM behaviour templates under `lambda/package/dom` hit this directly: a control that must emit `<input type: "range", …>` with an attribute whose *name* comes from the event or the schema has nowhere to put it.
+**The gap.** A map-literal key is a name — an identifier, a quoted symbol, or (since §7.24) a keyword — and an element attribute name is the same `_key` plus the dotted form. There is no literal spelling that builds a shaped map, or an element with an attribute, whose key is known only at run time. The DOM behaviour templates under `lambda/dom` hit this directly: a control that must emit `<input type: "range", …>` with an attribute whose *name* comes from the event or the schema has nowhere to put it.
 
 **Why `map([k1, v1, …])` is not the answer.** It was the candidate, and it was turned down on three counts:
 
@@ -2986,8 +2986,8 @@ continues the previous expression; read it inline (`let y = at + 1`).
 - **Declaration members are data names, not bindings**: in
   `type T { a: int, fn f() {} }` only `T` is a binding; fields *and* methods
   may use any word in K.1 (see §7.24's clarification).
-- **`lambda` is reserved by S17.2.2 but not yet enforced** — it still tests
-  as allowed. Adding it is item 2 of LR02-16; it protects the
-  `lambda.sys.*` shadow escape from being captured. `sys` is deliberately
+- **`lambda` is reserved by S17.2.2** — the direct lexer bar rejects it as a
+  binding name while member/data-name positions remain available. This protects
+  the `lambda.sys.*` shadow escape from being captured. `sys` is deliberately
   *not* reserved: system functions live under `lambda.sys.*`, not a bare
-  `sys` root.
+  `sys` root. Regression: `test/lambda/negative/semantic/lambda_namespace_root.ls`.

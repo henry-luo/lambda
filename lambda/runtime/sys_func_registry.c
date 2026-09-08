@@ -1158,16 +1158,7 @@ const int sys_func_def_count = SYS_FUNC_DEF_COUNT;
 
 // io.http module
 
-// Trampolines for calling _b boxed wrappers from MIR Direct (RetItem ABI fix)
-extern Item fn_call_boxed_0(void* fp);
-extern Item fn_call_boxed_1(void* fp, Item a);
-extern Item fn_call_boxed_2(void* fp, Item a, Item b);
-extern Item fn_call_boxed_3(void* fp, Item a, Item b, Item c);
-extern Item fn_call_boxed_4(void* fp, Item a, Item b, Item c, Item d);
-extern Item fn_call_boxed_5(void* fp, Item a, Item b, Item c, Item d, Item e);
-extern Item fn_call_boxed_6(void* fp, Item a, Item b, Item c, Item d, Item e, Item f);
-extern Item fn_call_boxed_7(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g);
-extern Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h);
+// Trampolines for calling _b boxed wrappers from MIR Direct
 extern Item fn_call_boxed_0_into(void* fp, uint64_t* result_home);
 extern Item fn_call_boxed_1_into(void* fp, Item a, uint64_t* result_home);
 extern Item fn_call_boxed_2_into(void* fp, Item a, Item b, uint64_t* result_home);
@@ -3201,15 +3192,6 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // Trampolines for calling _b boxed wrappers from MIR Direct
     // ========================================================================
-    {"fn_call_boxed_0", FPTR(fn_call_boxed_0)},
-    {"fn_call_boxed_1", FPTR(fn_call_boxed_1)},
-    {"fn_call_boxed_2", FPTR(fn_call_boxed_2)},
-    {"fn_call_boxed_3", FPTR(fn_call_boxed_3)},
-    {"fn_call_boxed_4", FPTR(fn_call_boxed_4)},
-    {"fn_call_boxed_5", FPTR(fn_call_boxed_5)},
-    {"fn_call_boxed_6", FPTR(fn_call_boxed_6)},
-    {"fn_call_boxed_7", FPTR(fn_call_boxed_7)},
-    {"fn_call_boxed_8", FPTR(fn_call_boxed_8)},
     {"fn_call_boxed_0_into", FPTR(fn_call_boxed_0_into)},
     {"fn_call_boxed_1_into", FPTR(fn_call_boxed_1_into)},
     {"fn_call_boxed_2_into", FPTR(fn_call_boxed_2_into)},

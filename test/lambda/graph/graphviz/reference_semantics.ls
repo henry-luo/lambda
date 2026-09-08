@@ -1,6 +1,6 @@
-import graph_transform: lambda.package.graph.transform
-import model: lambda.package.graph.model
-import normalize: lambda.package.graph.normalize
+import graph_transform: lambda.graph.transform
+import model: lambda.graph.model
+import normalize: lambda.graph.normalize
 import adapter: .reference.graphviz_json_adapter
 
 fn children(value, wanted) => [

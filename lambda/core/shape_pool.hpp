@@ -19,11 +19,12 @@ typedef struct ShapeSignature {
 } ShapeSignature;
 
 // Cached shape entry - stored in shape pool
+// An interned shape. The arena owns every entry for the pool's lifetime, so
+// this record carries no tail pointer and no reference count -- both were
+// written at interning and never read again.
 typedef struct CachedShape {
     ShapeSignature signature;   // Fast routing signature; shape confirms identity
     struct ShapeEntry* shape;   // The actual shape chain
-    struct ShapeEntry* last;    // Last entry in chain (for fast append)
-    uint32_t ref_count;         // Reference count for lifecycle
     bool is_element;            // true if TypeElmt, false if TypeMap
     const char* element_name;   // element identity, NULL for map shapes
 } CachedShape;
@@ -118,11 +119,6 @@ struct ShapeEntry* shape_pool_get_element_shape(
  * Check if two shapes are identical (same fields in same order)
  */
 bool shape_pool_shapes_equal(struct ShapeEntry* shape1, struct ShapeEntry* shape2);
-
-/**
- * Get statistics about pool usage
- */
-void shape_pool_print_stats(ShapePool* pool);
 
 /**
  * Get number of unique shapes in pool (excluding parent)

@@ -1,4 +1,4 @@
-import layout: lambda.package.graph.layout
+import layout: lambda.graph.layout
 
 fn by_id(items, id) {
   let matches = [for (item in items where item.id == id) item];

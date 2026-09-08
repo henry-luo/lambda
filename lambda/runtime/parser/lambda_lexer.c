@@ -233,6 +233,11 @@ static LambdaTokenKind lexer_keyword_kind(const char* source, size_t start, size
 // the keyword table keeps one owner.
 bool lambda_lexer_word_bars_binding(const char* text, size_t length) {
     if (!text || length == 0) return false;
+    if (length == 6 && memcmp(text, "lambda", 6) == 0) {
+        // S16.10.1v2/S17.2.2: the namespace root is reserved even though it
+        // is not a capture-real lexer keyword.
+        return true;
+    }
     switch (lexer_keyword_kind(text, 0, length)) {
     case LAMBDA_TOK_IDENTIFIER:
     // clause words — meaningful only inside a for-header, never statement-leading

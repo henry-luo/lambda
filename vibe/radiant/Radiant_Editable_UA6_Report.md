@@ -10,7 +10,7 @@ D7.2.5 and the verification boundary used for its completion.
 
 ## Implemented boundary
 
-`lambda/package/dom` owns descriptors, context validation, planning, command
+`lambda/dom` owns descriptors, context validation, planning, command
 and query dispatch, normalization, history, and default editing behavior.
 Native Radiant provides only platform input, checked generic DOM mutation,
 Selection/Range, clipboard transport, observation, and precise-rooted package

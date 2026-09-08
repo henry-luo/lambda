@@ -1,9 +1,9 @@
 # Radiant Editable Support — Common Gate and Full UA `contenteditable`
 
-**Date:** 2026-07-29 · **Revised:** 2026-09-07
+**Date:** 2026-07-29 · **Revised:** 2026-09-08
 **Status:** Phase 1 and Phase 9 implemented and verified for the applicable
-UA conformance scope; the separate unified form/history expansion remains a
-proposal.
+UA conformance scope; the separate unified form/history expansion and
+model-editor protocol unification remain proposals.
 **Scope:** `contenteditable`, Lambda/Radiant editable templates, the common
 editing transaction gate, registered action handlers, full UA editing
 behavior, `execCommand`/`queryCommand*`, `designMode`, and conformance against
@@ -28,7 +28,7 @@ delegates that path to browser-native structural editing; Radiant exposes the
 clipboard event but does not recreate that retired default action.
 
 **Phase-9 implementation (2026-09-07):**
-`lambda/package/dom` now owns the shared descriptor/context/plan/result path,
+`lambda/dom` now owns the shared descriptor/context/plan/result path,
 default actions, structural normalization, retained history, `designMode`,
 the legacy command/query surface, and the conformance runners. Native code
 retains generic checked DOM/Selection/Range/clipboard mechanisms only; no C++
@@ -43,6 +43,15 @@ surface timelines, the `EditStep` contract, atomic native-waist application,
 grouping/coalescing, retention, pruning, and unified form-control history. It
 remains a proposal until its D7.2.5v2 ratification steps are completed; §20.7
 below is the current Phase-9 baseline in the meantime.
+
+**Model-editor unification design:**
+[Lambda_Design_DOM_Editable.md](../Lambda_Design_DOM_Editable.md) proposes the
+shared `lambda/dom` descriptor/request/action/result core, the separate UA-DOM
+and source-model backends, and the explicit source-selection/native-waist
+handoff. It is subordinate to this document's route snapshot and registered
+action contract: public `beforeinput` remains notification-only, the selected
+Radiant-template action runs afterwards, and the common gate alone emits the
+post-action `input` (D7.2.5, D7.5.3).
 
 **Historical lineage:** §17.2 consolidates the removed CE1–CE3 design records:
 the editable-host foundation, the later native-legacy-editor pivot, and the
@@ -1719,7 +1728,7 @@ their removal phase, and must not become a supported API.
 
 | Current piece | Disposition |
 |---|---|
-| `rich_transaction_default_mutate_unscoped()` text replacement/insertion algorithm | decompose into generic checked DOM operations in the native waist and package-owned policy in `lambda/package/dom/dom_edit.ls`; extend the policy only in the package and do not copy it |
+| `rich_transaction_default_mutate_unscoped()` text replacement/insertion algorithm | decompose into generic checked DOM operations in the native waist and package-owned policy in `lambda/dom/dom_edit.ls`; extend the policy only in the package and do not copy it |
 | `rich_transaction_default_mutate_scoped()` runtime-context guard | retain where DOM mutation notification requires the document's initialized JS/eval context, but keep it inside the generic native mutation waist rather than a command/default-action handler |
 | rich transaction phase, target-range snapshots, selection sequence, re-entrant script-dispatch guard, and state-machine invariants | retain the invariants; migrate names from `rich_transaction_*`/`SM_FAMILY_RICH_EDIT` to route-neutral editable-transaction terminology when the new result schema lands |
 | `editing_rich_find_text_descendant()` | retain the caret-placement traversal, rename it to a route-neutral helper such as `editing_find_text_descendant()`, and keep one implementation |
@@ -1791,8 +1800,8 @@ The cleanup is complete only when:
 | `radiant/editing_dispatch.cpp` | handler snapshot, arbitration, structured result |
 | `radiant/editing_intent.cpp` | intent normalization only |
 | `radiant/event.cpp` | platform event ordering and built-in registrations |
-| `lambda/package/dom/dom_edit.ls` | package-owned uncanceled default action |
-| `lambda/package/dom/commands.ls` | package-owned legacy command registry and shared command execution |
+| `lambda/dom/dom_edit.ls` | package-owned uncanceled default action |
+| `lambda/dom/commands.ls` | package-owned legacy command registry and shared command execution |
 | `radiant/editing_dom_waist.cpp` | checked generic DOM/Selection/Range primitives; no command policy |
 | `radiant/editing_template_handler.cpp` (new or extracted) | Lambda template consumer adapter |
 | `radiant/editing_target_range.cpp` | target-range/action parity |
@@ -1911,7 +1920,7 @@ named command.
 The current `radiant/editing_dom_waist.cpp` is therefore a transition
 inventory. Its generic range replacement, split, wrap/unwrap, selection, and
 observation mechanisms may remain. Any branch that chooses behavior from a
-command or `inputType` moves into `lambda/package/dom/`; command-shaped native
+command or `inputType` moves into `lambda/dom/`; command-shaped native
 exports are narrowed or replaced as soon as their package caller can compose
 the equivalent generic operations. The policy must not be copied while it is
 moved.
@@ -2030,7 +2039,7 @@ the DOM-tree UA package.
 
 ### 20.6 `execCommand`, query APIs, and `designMode`
 
-`lambda/package/dom/commands.ls` becomes a descriptor registry rather than a
+`lambda/dom/commands.ls` becomes a descriptor registry rather than a
 growing conditional. Command names and aliases are canonicalized
 case-insensitively once. A descriptor supplies:
 
@@ -2147,8 +2156,8 @@ back to native editing policy. Package dispatch is synchronous for Phase 9;
 no plan or borrowed DOM handle survives an `await`.
 
 “Lambda DOM behavior package” is an ownership label, not a new import spelling.
-Its sources currently live under `lambda/package/dom`, while `import dom`
-already names the built-in mechanism module. When the old `lambda.package.*`
+Its sources currently live under `lambda/dom`, while `import dom`
+already names the built-in mechanism module. When the old `lambda.*`
 paths are migrated, the behavior package must receive a distinct,
 non-colliding package path; it must not shadow or dual-resolve the built-in
 module (D7.2.4).
@@ -2254,7 +2263,7 @@ The conformance program has three complementary layers:
 
 | Gate | Source | Purpose |
 |---|---|---|
-| Focused package tests | `lambda/package/dom` plus purpose-built JS/UI fixtures | planner, descriptors, queries, normalization, history, error atomicity, and native-waist contracts |
+| Focused package tests | `lambda/dom` plus purpose-built JS/UI fixtures | planner, descriptors, queries, normalization, history, error atomicity, and native-waist contracts |
 | WPT | pinned `ref/wpt/contenteditable/`, applicable `ref/wpt/editing/`, `input-events/`, and Selection tests | standards-facing host, event, command, Selection/Range, and observable DOM behavior |
 | Chromium compatibility | pinned Chromium `editing/` corpus through a Lambda-side runner/manifest | legacy command DOM/Selection results and browser behavior where WPT is silent |
 

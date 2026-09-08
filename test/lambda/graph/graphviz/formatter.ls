@@ -1,5 +1,5 @@
-import model: lambda.package.graph.model
-import normalize: lambda.package.graph.normalize
+import model: lambda.graph.model
+import normalize: lambda.graph.normalize
 
 fn children(value, wanted) => [
   for (child in model.element_children(value) where model.tag(child) == wanted) child

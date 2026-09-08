@@ -3,10 +3,10 @@
 // Renders test.pdf's first page and asserts the decoded text strings
 // and their SVG y-coordinates (computed via page_h - Tm[5]).
 
-import pdf:     lambda.package.pdf.pdf
-import resolve: lambda.package.pdf.resolve
-import interp:  lambda.package.pdf.interp
-import coords:  lambda.package.pdf.coords
+import pdf:     lambda.pdf.pdf
+import resolve: lambda.pdf.resolve
+import interp:  lambda.pdf.interp
+import coords:  lambda.pdf.coords
 
 pn main() {
     let doc = input("test/input/test.pdf", 'pdf') ^ { null }

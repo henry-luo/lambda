@@ -224,7 +224,6 @@ struct JsRuntimeState;
 /** Resolve a control's form owner, honouring an explicit `form=` association. */
 DomElement* dom_find_form_owner(void* control);
 
-void dom_events_destroy_context(JsRuntimeState* state);
 #endif
 
 #ifdef __cplusplus

@@ -16,12 +16,12 @@
 // dispatches commands via emit/on, and exposes #status / #markdown-output
 // for end-to-end smoke. Per-tag `view <h1>` / `view <p>` / `view <strong>`
 // templates and the full `edit_open` -> `edit_exec` wiring through
-// `lambda.package.editor.mod_editor` land in S2.2.
+// `lambda.editor.mod_editor` land in S2.2.
 
-import lambda.package.editor.mod_doc
-import lambda.package.editor.mod_editor
-import lambda.package.editor.mod_md_schema
-import lambda.package.editor.mod_source_pos
+import lambda.editor.mod_doc
+import lambda.editor.mod_editor
+import lambda.editor.mod_md_schema
+import lambda.editor.mod_source_pos
 
 let SOURCE_PATH = './test/input/simple.md'
 let initial_doc = input(SOURCE_PATH, 'markdown') ^ { null }

@@ -23,6 +23,7 @@
 
 extern __thread EvalContext* context;
 extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc);
+extern "C" void js_async_frame_map_gc_trace(Map* map, gc_heap_t* gc);
 extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc);
 extern "C" void js_iterator_map_gc_trace(Map* map, gc_heap_t* gc);
 
@@ -148,8 +149,16 @@ static void lambda_region_destroy_caches(Heap* heap) {
     }
 }
 
+extern "C" void js_function_gc_destroy(void* data);
+
 void heap_gc_destroy_external_payload(void* obj, uint16_t type_tag) {
     if (!obj) return;
+    if (type_tag == LMD_TYPE_FUNC) {
+        // A function value may own optional native payloads (JSCU20); the JS
+        // side knows which layout it is and what it owns.
+        js_function_gc_destroy(obj);
+        return;
+    }
     if (type_tag == LMD_TYPE_DECIMAL) {
         // Decimal wrappers can die during a collection; release the libmpdec
         // payload before the sweep unlinks the wrapper from all_objects.
@@ -222,6 +231,7 @@ static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
     Map* map = (Map*)data;
     if (!map || !gc) return;
     js_generator_map_gc_trace(map, gc);
+    js_async_frame_map_gc_trace(map, gc);
     js_collection_map_gc_trace(map, gc);
     js_iterator_map_gc_trace(map, gc);
     if (map->type_id != LMD_TYPE_MAP) return;
@@ -261,6 +271,8 @@ static void gc_finalize_typed_array(JsTypedArray* ta, gc_native_seen_t* seen_nat
 
 extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_native);
 extern "C" void js_collection_map_heap_destroy(Map* map, gc_native_seen_t* seen_native);
+extern "C" void js_generator_map_heap_destroy(Map* map);
+extern "C" void js_async_frame_map_heap_destroy(Map* map);
 
 static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
     if (!map) return;
@@ -301,6 +313,10 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
         break;
     }
     js_regex_map_heap_destroy(map, seen_native);
+    // JSCU9/JSCU10: a collected generator or async-frame carrier frees its
+    // interpreter continuations.
+    js_generator_map_heap_destroy(map);
+    js_async_frame_map_heap_destroy(map);
 }
 
 static void js_native_map_gc_destroy(void* data) {
@@ -420,16 +436,28 @@ static void heap_finish_init(void) {
     context->heap->gc->js_native_trace = js_native_map_gc_trace;
     context->heap->gc->js_native_destroy = js_native_map_gc_destroy;
     context->heap->gc->js_function_trace = js_function_gc_trace;
+    context->heap->gc->js_function_destroy = js_function_gc_destroy;
     context->heap->gc->js_function_compact = js_function_gc_compact;
     context->heap->gc->external_destroy = heap_gc_destroy_external_payload;
     err_set_heap_allocator(heap_calloc);
     if (!ascii_char_table_initialized) init_ascii_char_table();
 }
 
+// Monotonic across every heap this process creates, so a replaced heap can
+// never be mistaken for its predecessor even when the allocator reuses the
+// same address.
+static uint64_t heap_generation_next = 0;
+
+extern "C" uint64_t heap_generation_for(Context* runtime) {
+    EvalContext* owner = (EvalContext*)runtime;
+    return owner && owner->heap && owner->heap->gc ? owner->heap->generation : 0;
+}
+
 void heap_init() {
     log_debug("heap init: %p", context);
     context->heap = (Heap*)mem_calloc(1, sizeof(Heap), MEM_CAT_EVAL);
     if (!context->heap) return;
+    context->heap->generation = ++heap_generation_next;
     context->heap->pool = mem_pool_create(NULL, MEM_ROLE_RUNTIME_HEAP,
                                           "eval.runtime.pool");
     context->heap->gc = mem_gc_heap_create(NULL, MEM_ROLE_RUNTIME_HEAP, "eval.heap");

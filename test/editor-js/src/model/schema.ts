@@ -1,4 +1,4 @@
-// Port of the schema layer of lambda/package/editor/mod_md_schema.ls
+// Port of the schema layer of lambda/editor/mod_md_schema.ls
 //
 // A Schema is a map  {tagName -> SchemaEntry}  describing per-tag content
 // rules. Validation walks the doc tree and asks: do the children of each

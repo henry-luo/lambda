@@ -284,18 +284,12 @@ ShapeEntry* shape_pool_get_map_shape(ShapePool* pool, const char** field_names,
     ShapeEntry* shape = create_shape_chain(pool->arena, field_names, field_types, field_count);
     if (!shape) return NULL;
     
-    // Find last entry
-    ShapeEntry* last = shape;
-    while (last->next) last = last->next;
-    
     // Create cached shape
     CachedShape* new_cached = (CachedShape*)pool_calloc(pool->pool, sizeof(CachedShape));
     if (!new_cached) return NULL;
     
     new_cached->signature = signature;
     new_cached->shape = shape;
-    new_cached->last = last;
-    new_cached->ref_count = 0;
     new_cached->is_element = false;
     new_cached->element_name = NULL;
     
@@ -364,11 +358,6 @@ ShapeEntry* shape_pool_get_element_shape(
         if (!shape) return NULL;
     }
     
-    // Find last entry
-    ShapeEntry* last = shape;
-    if (last) {
-        while (last->next) last = last->next;
-    }
     
     // Create cached shape
     CachedShape* new_cached = (CachedShape*)pool_calloc(pool->pool, sizeof(CachedShape));
@@ -376,8 +365,6 @@ ShapeEntry* shape_pool_get_element_shape(
     
     new_cached->signature = signature;
     new_cached->shape = shape;
-    new_cached->last = last;
-    new_cached->ref_count = 0;
     new_cached->is_element = true;
     new_cached->element_name = element_name;
     
@@ -433,25 +420,6 @@ bool shape_pool_shapes_equal(ShapeEntry* shape1, ShapeEntry* shape2) {
     return e1 == NULL && e2 == NULL;
 }
 
-void shape_pool_print_stats(ShapePool* pool) {
-#ifndef NDEBUG
-    if (!pool) return;
-    
-    size_t count = hashmap_count(pool->shapes);
-    log_debug("ShapePool Statistics:");
-    log_debug("  Pool: %p", pool);
-    log_debug("  Unique shapes: %zu", count);
-    log_debug("  Ref count: %u", pool->ref_count);
-    log_debug("  Parent: %p", pool->parent);
-    
-    if (pool->parent) {
-        log_debug("Parent pool:");
-        shape_pool_print_stats(pool->parent);
-    }
-#else
-    (void)pool;
-#endif
-}
 
 size_t shape_pool_count(ShapePool* pool) {
     return pool ? hashmap_count(pool->shapes) : 0;

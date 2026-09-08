@@ -1,0 +1,76 @@
+{
+  "name": "Contenteditable default UA action matrix",
+  "html": "test/ui/editor-ua.html",
+  "viewport": {"width": 960, "height": 900},
+  "events": [
+    {"type": "log", "message": "=== contenteditable_default_ua ==="},
+    {"type": "assert_text", "target": {"selector": "#ready"}, "equals": "ready:13"},
+
+    {"type": "set_editing_selection", "target": {"selector": "#typing-surface"}, "start": 5, "end": 5},
+    {"type": "type_physical", "target": {"selector": "#typing-surface"}, "text": " world"},
+    {"type": "assert_text", "target": {"selector": "#typing-surface"}, "equals": "hello world"},
+    {"type": "assert_attribute", "target": {"selector": "#typing-surface"}, "attribute": "data-ua-events", "contains": "beforeinput:insertText"},
+
+    {"type": "set_editing_selection", "target": {"selector": "#replace-surface"}, "start": 1, "end": 4},
+    {"type": "type_physical", "target": {"selector": "#replace-surface"}, "text": "X"},
+    {"type": "assert_text", "target": {"selector": "#replace-surface"}, "equals": "aXef"},
+    {"type": "assert_editing_selection", "target": {"selector": "#replace-surface"}, "start": 2, "end": 2},
+
+    {"type": "set_editing_selection", "target": {"selector": "#backspace-surface"}, "start": 2, "end": 2},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "assert_text", "target": {"selector": "#backspace-surface"}, "equals": "ac"},
+    {"type": "set_editing_selection", "target": {"selector": "#forward-surface"}, "start": 1, "end": 1},
+    {"type": "key_press", "key": "Delete"},
+    {"type": "assert_text", "target": {"selector": "#forward-surface"}, "equals": "ac"},
+
+    {"type": "set_editing_selection", "target": {"selector": "#paragraph-surface"}, "start": 2, "end": 2},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": "#paragraph-surface > p"}, "equals": 2},
+    {"type": "assert_attribute", "target": {"selector": "#paragraph-surface"}, "attribute": "data-ua-html", "equals": "<p>he</p><p>llo</p>"},
+
+    {"type": "set_editing_selection", "target": {"selector": "#line-surface"}, "start": 2, "end": 2},
+    {"type": "key_press", "key": "Enter", "mods_str": "shift"},
+    {"type": "assert_count", "target": {"selector": "#line-surface br"}, "equals": 1},
+    {"type": "assert_attribute", "target": {"selector": "#line-surface"}, "attribute": "data-ua-html", "equals": "<p>he<br>llo</p>"},
+
+    {"type": "set_editing_selection", "target": {"selector": "#format-surface"}, "start": 0, "end": 9},
+    {"type": "key_combo", "key": "b", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": "#format-surface b"}, "equals": 1},
+    {"type": "assert_attribute", "target": {"selector": "#format-surface"}, "attribute": "data-ua-html", "equals": "<b>format me</b>"},
+
+    {"type": "set_editing_selection", "target": {"selector": "#history-surface"}, "start": 4, "end": 4},
+    {"type": "type_physical", "target": {"selector": "#history-surface"}, "text": "X"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": "#history-surface"}, "equals": "seed"},
+    {"type": "key_combo", "key": "z", "mods_str": "super+shift"},
+    {"type": "assert_text", "target": {"selector": "#history-surface"}, "equals": "seedX"},
+
+    {"type": "set_editing_selection", "target": {"selector": "#clipboard-surface"}, "start": 0, "end": 0},
+    {"type": "paste_text", "target": {"selector": "#clipboard-surface"}, "text": "paste"},
+    {"type": "assert_text", "target": {"selector": "#clipboard-surface"}, "equals": "pastetail"},
+    {"type": "assert_attribute", "target": {"selector": "#clipboard-surface"}, "attribute": "data-ua-events", "contains": "beforeinput:insertFromPaste|input:insertFromPaste"},
+
+    {"type": "set_editing_selection", "target": {"selector": "#composition-surface"}, "start": 0, "end": 4},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "pre", "caret": 3},
+    {"type": "ime_compose", "phase": "commit", "commit": "done"},
+    {"type": "assert_text", "target": {"selector": "#composition-surface"}, "equals": "done"},
+    {"type": "assert_attribute", "target": {"selector": "#composition-surface"}, "attribute": "data-ua-events", "contains": "compositionstart|compositionupdate:pre|beforeinput:insertCompositionText:pre|input:insertCompositionText:pre|compositionend:done|beforeinput:insertFromComposition:done"},
+
+    {"type": "set_editing_selection", "target": {"selector": "#plain-surface"}, "start": 0, "end": 5},
+    {"type": "key_combo", "key": "b", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": "#plain-surface"}, "equals": "plain"},
+    {"type": "assert_attribute", "target": {"selector": "#plain-surface"}, "attribute": "data-ua-html", "equals": "plain"},
+
+    {"type": "set_editing_selection", "target": {"selector": "#false-island"}, "start": 2, "end": 2},
+    {"type": "type_physical", "target": {"selector": "#false-island"}, "text": "X"},
+    {"type": "assert_text", "target": {"selector": "#false-surface"}, "equals": "aLOCKb"},
+    {"type": "assert_attribute", "target": {"selector": "#false-surface"}, "attribute": "data-ua-events", "contains": "beforeinput:insertText:X"},
+
+    {"type": "set_editing_selection", "target": {"selector": "#list-surface"}, "start": 3, "end": 3},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_count", "target": {"selector": "#list-surface li"}, "equals": 3},
+    {"type": "assert_text", "target": {"selector": "#list-surface"}, "equals": "onetwo"},
+    {"type": "assert_attribute", "target": {"selector": "#event-log"}, "attribute": "class", "contains": "report"}
+  ]
+}

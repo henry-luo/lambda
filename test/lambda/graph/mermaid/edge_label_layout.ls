@@ -1,4 +1,4 @@
-import layout: lambda.package.graph.layout
+import layout: lambda.graph.layout
 
 let result = layout.from_velmts(
   {attrs: {'data-direction': "TB", 'data-rank-sep': "70"}},

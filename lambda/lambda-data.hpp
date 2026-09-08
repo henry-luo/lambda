@@ -102,6 +102,8 @@ typedef struct LambdaModuleState {
 // headers intentionally keep the public lambda.h ABI declarations minimal.
 extern "C" Item push_k(DateTime dtval);
 
+#include "runtime/context_capsule.h"
+
 typedef struct EvalContext : Context {
     Heap* heap;
     Pool* ast_pool;
@@ -141,6 +143,11 @@ typedef struct EvalContext : Context {
     // Keep new shell bookkeeping at the tail: generated and native callers
     // depend on the established module-state offsets (D8.1.3v10).
     uint32_t execution_depth;
+    // JSCU15: one directory for context-owned subsystem state. Reading a
+    // capsule is an indexed load; the ops pointer is published with the slot
+    // at construction so the lifecycle walks need no central table.
+    void* capsules[CONTEXT_CAPSULE_COUNT];
+    const struct ContextCapsuleOps* capsule_ops[CONTEXT_CAPSULE_COUNT];
 } EvalContext;
 
 // Unicode-enhanced comparison functions are declared in utf_string.h

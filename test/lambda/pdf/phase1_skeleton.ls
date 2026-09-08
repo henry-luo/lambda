@@ -6,7 +6,7 @@
 // Run as a procedural script (./lambda.exe run …) because the pdf API
 // is `pn` (it drives the content-stream interpreter via var/while).
 
-import pdf: lambda.package.pdf.pdf
+import pdf: lambda.pdf.pdf
 
 pn main() {
     let doc = input("test/input/test.pdf", 'pdf') ^ { null }

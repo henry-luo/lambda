@@ -190,13 +190,8 @@ static inline void em_normalize_import_call(MirImportEntry* entry,
         ret_class == JIT_VALUE_BOXED_ITEM &&
         !(entry->audit.flags & JIT_IMPORT_RESULT_SCALAR_STABLE)
         ? SCALAR_RETURN_DYNAMIC : SCALAR_RETURN_NONE;
-    entry->call.normal_result.may_use_scalar_return_home =
-        entry->call.normal_result.scalar_class != SCALAR_RETURN_NONE;
     entry->call.abi_arg_count = (uint16_t)nargs;
     entry->call.source_arg_count = (uint16_t)nargs;
-    entry->call.scalar_return_home_arg_index = -1;
-    entry->call.scalar_home_lane_mask =
-        entry->call.normal_result.may_use_scalar_return_home ? 1u : 0u;
     // C helpers never speak the pair protocol (RV12/SF6): they establish no
     // watermark frame, so `push_l` inside a helper homes its payload in the
     // CALLING JIT frame's extent and the helper returns an ordinary resolved
@@ -4173,19 +4168,15 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
         normal_value_class};
     metadata.normal_result.transport = JIT_RETURN_MIR_RESULT;
     metadata.normal_result.scalar_class = normal.scalar_class;
-    metadata.normal_result.may_use_scalar_return_home = false;
     if (variant && variant->result.error_lane == FN_ERROR_LANE_CONTEXT_ITEM) {
         metadata.error_result.value = {JIT_ABI_ITEM, JIT_VALUE_BOXED_ITEM};
         metadata.error_result.transport = JIT_RETURN_CONTEXT_ERROR;
         metadata.error_result.scalar_class =
             variant->result.error.scalar_class;
-        metadata.error_result.may_use_scalar_return_home = false;
     }
     metadata.abi_args = abi_args;
     metadata.abi_arg_count = (uint16_t)nargs;
     metadata.source_arg_count = (uint16_t)source_nargs;
-    metadata.scalar_return_home_arg_index = -1;
-    metadata.scalar_home_lane_mask = 0;
     // RV10: read the callee's shape, never derive one here. An unknown callee
     // is assumed to speak the universal pair shape (§6).
     metadata.abi = variant ? &variant->result : NULL;

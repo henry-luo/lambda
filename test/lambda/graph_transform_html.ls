@@ -1,4 +1,4 @@
-import transform: lambda.package.graph.transform
+import transform: lambda.graph.transform
 
 let rich = <strong "Rich">
 let result = transform.to_html({

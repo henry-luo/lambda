@@ -4,7 +4,7 @@
 
 ## 1. Summary
 
-This proposal extends `lambda.package.graph` with native Structurizr DSL and C4
+This proposal extends `lambda.graph` with native Structurizr DSL and C4
 diagram support. Structurizr is a workspace language: one architecture model
 defines many views, and each view projects a different diagram from the same
 elements and relationships. The implementation must therefore preserve the
@@ -94,7 +94,7 @@ overlap avoidance. These map directly to the graph package:
 A Structurizr dynamic view can be rendered as either a collaboration diagram or
 a sequence diagram. The collaboration form belongs in the graph package and
 uses ordered relationship instances. A sequence rendering remains a specialized
-ordered-axis layout and should be delegated to `lambda.package.chart.sequence`
+ordered-axis layout and should be delegated to `lambda.chart.sequence`
 when that package exists. The canonical dynamic-view IR must preserve enough
 order and parallel-sequence information for both projections.
 
@@ -373,7 +373,7 @@ the executable and gzip rows are release guardrails for future Graph2 changes.
 The Lambda package adds:
 
 ```text
-lambda/package/graph/structurizr/
+lambda/graph/structurizr/
   structurizr.ls        public facade
   normalize.ls          source Mark to canonical workspace
   model.ls              identifiers, hierarchy, elements, relationships
@@ -521,7 +521,7 @@ Canonical entries preserve:
 The graph projection initially renders a collaboration diagram. Edge labels
 include stable sequence ordinals, and parallel occurrences remain separate
 edges. A future sequence projection consumes the same canonical entries through
-`lambda.package.chart.sequence`.
+`lambda.chart.sequence`.
 
 ### 8.4 Deployment views
 
@@ -717,7 +717,7 @@ SVG, Java, or the Structurizr CLI. The initial corpus pins Structurizr CLI
 v2025.11.09 and covers the basic model plus Stage 4C static/filtered views and
 Stage 4D dynamic/deployment views. Reference provenance records source and
 artifact SHA-256 values, and a maintenance script regenerates all three cases.
-The existing `lambda.package.graph.conformance` runner is extended rather than
+The existing `lambda.graph.conformance` runner is extended rather than
 cloned.
 
 ### 12.4 Test command
@@ -939,7 +939,7 @@ The initial Structurizr/C4 release is complete when:
 - custom component discovery;
 - executable scripts, plugins, or JVM extension classes;
 - full Structurizr expression language beyond the reviewed allowlist;
-- dynamic sequence rendering through `lambda.package.chart.sequence`;
+- dynamic sequence rendering through `lambda.chart.sequence`;
 - workspace editing and source-preserving formatter;
 - pixel parity with Structurizr's browser renderer.
 

@@ -1,4 +1,4 @@
-import scene: lambda.package.graph.scene
+import scene: lambda.graph.scene
 
 let actual = <'graph-scene' direction: "LR", width: 200, height: 100,
   <cluster id: "c", x: 0, y: 0, width: 200, height: 100,

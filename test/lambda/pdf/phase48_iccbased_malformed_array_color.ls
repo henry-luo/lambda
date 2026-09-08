@@ -1,6 +1,6 @@
 // Phase 48 - malformed ICCBased arrays keep native black fallback.
 
-import interp: lambda.package.pdf.interp
+import interp: lambda.pdf.interp
 
 fn name(s) { { kind: "name", value: s } }
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }

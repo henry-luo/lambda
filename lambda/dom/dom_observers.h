@@ -37,7 +37,6 @@ void dom_notify_mutation_detail(DomJsMutationKind kind,
 
 #ifdef __cplusplus
 struct JsRuntimeState;
-void dom_observers_destroy_context(JsRuntimeState* state);
 #endif
 
 #ifdef __cplusplus

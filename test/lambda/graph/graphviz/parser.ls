@@ -1,5 +1,5 @@
-import model: lambda.package.graph.model
-import schema: lambda.package.graph.schema
+import model: lambda.graph.model
+import schema: lambda.graph.schema
 
 fn children(value, wanted) => [
   for (child in model.element_children(value) where model.tag(child) == wanted) child

@@ -54,19 +54,19 @@ extern "C" void js_domain_restore_stack(Item previous);
 
 #define RAF_CAPACITY JS_EVENT_RAF_CAPACITY
 #define TASK_FLUSH_WORK_BUDGET 8192
-#define next_tick_deque (js_runtime_state.event_loop.next_tick_deque)
-#define microtask_deque (js_runtime_state.event_loop.microtask_deque)
-#define microtask_running (js_runtime_state.event_loop.microtask_running)
-#define raf_callback_ring (js_runtime_state.event_loop.raf_callback)
-#define raf_id_ring (js_runtime_state.event_loop.raf_id)
-#define raf_head (js_runtime_state.event_loop.raf_head)
-#define raf_tail (js_runtime_state.event_loop.raf_tail)
-#define raf_count (js_runtime_state.event_loop.raf_count)
-#define next_raf_id (js_runtime_state.event_loop.next_raf_id)
-#define auto_close_mode (js_runtime_state.event_loop.auto_close_mode)
-#define auto_close_after_load (js_runtime_state.event_loop.auto_close_after_load)
-#define auto_close_settle_ms (js_runtime_state.event_loop.auto_close_settle_ms)
-#define event_loop_shutting_down (js_runtime_state.event_loop.shutting_down)
+#define next_tick_deque (js_runtime_state.event_loop->next_tick_deque)
+#define microtask_deque (js_runtime_state.event_loop->microtask_deque)
+#define microtask_running (js_runtime_state.event_loop->microtask_running)
+#define raf_callback_ring (js_runtime_state.event_loop->raf_callback)
+#define raf_id_ring (js_runtime_state.event_loop->raf_id)
+#define raf_head (js_runtime_state.event_loop->raf_head)
+#define raf_tail (js_runtime_state.event_loop->raf_tail)
+#define raf_count (js_runtime_state.event_loop->raf_count)
+#define next_raf_id (js_runtime_state.event_loop->next_raf_id)
+#define auto_close_mode (js_runtime_state.event_loop->auto_close_mode)
+#define auto_close_after_load (js_runtime_state.event_loop->auto_close_after_load)
+#define auto_close_settle_ms (js_runtime_state.event_loop->auto_close_settle_ms)
+#define event_loop_shutting_down (js_runtime_state.event_loop->shutting_down)
 
 extern "C" void js_event_loop_set_auto_close_mode(bool enabled) {
     // Layout config is applied before a document Runtime exists.  There is no
@@ -129,11 +129,11 @@ JS_FORWARD_EXPRESSION(bool, js_microtask_is_running, (void), (js_active_runtime_
 struct JsEventLoopCallbackScope {
     bool previous;
 
-    JsEventLoopCallbackScope() : previous(js_runtime_state.event_loop.callback_running) {
-        js_runtime_state.event_loop.callback_running = true;
+    JsEventLoopCallbackScope() : previous(js_runtime_state.event_loop->callback_running) {
+        js_runtime_state.event_loop->callback_running = true;
     }
     ~JsEventLoopCallbackScope() {
-        js_runtime_state.event_loop.callback_running = previous;
+        js_runtime_state.event_loop->callback_running = previous;
     }
     JsEventLoopCallbackScope(const JsEventLoopCallbackScope&) = delete;
     JsEventLoopCallbackScope& operator=(const JsEventLoopCallbackScope&) = delete;
@@ -372,19 +372,19 @@ typedef struct JsTimerHandle {
 
 #define MAX_TIMER_HANDLES JS_EVENT_TIMER_CAPACITY
 #define MAX_MOCK_SCHEDULER_WAITS JS_EVENT_MOCK_WAIT_CAPACITY
-#define timer_handles ((JsTimerHandle**)js_runtime_state.timers.handles)
-#define timer_handle_count (js_runtime_state.timers.handle_count)
-#define next_timer_id (js_runtime_state.timers.next_id)
-#define timer_progress_generation (js_runtime_state.timers.progress_generation)
-#define timer_force_shutdown (js_runtime_state.timers.force_shutdown)
-#define timer_nan_warning_emitted (js_runtime_state.timers.nan_warning_emitted)
-#define timer_negative_warning_emitted (js_runtime_state.timers.negative_warning_emitted)
-#define virtual_clock_enabled (js_runtime_state.timers.virtual_clock_enabled)
-#define virtual_clock_ms (js_runtime_state.timers.virtual_clock_ms)
-#define mock_scheduler_enabled (js_runtime_state.timers.mock_scheduler_enabled)
-#define mock_scheduler_now_ms (js_runtime_state.timers.mock_scheduler_now_ms)
-#define mock_scheduler_waits (js_runtime_state.timers.mock_waits)
-#define mock_scheduler_roots_epoch (js_runtime_state.timers.mock_roots_epoch)
+#define timer_handles ((JsTimerHandle**)js_runtime_state.timers->handles)
+#define timer_handle_count (js_runtime_state.timers->handle_count)
+#define next_timer_id (js_runtime_state.timers->next_id)
+#define timer_progress_generation (js_runtime_state.timers->progress_generation)
+#define timer_force_shutdown (js_runtime_state.timers->force_shutdown)
+#define timer_nan_warning_emitted (js_runtime_state.timers->nan_warning_emitted)
+#define timer_negative_warning_emitted (js_runtime_state.timers->negative_warning_emitted)
+#define virtual_clock_enabled (js_runtime_state.timers->virtual_clock_enabled)
+#define virtual_clock_ms (js_runtime_state.timers->virtual_clock_ms)
+#define mock_scheduler_enabled (js_runtime_state.timers->mock_scheduler_enabled)
+#define mock_scheduler_now_ms (js_runtime_state.timers->mock_scheduler_now_ms)
+#define mock_scheduler_waits (js_runtime_state.timers->mock_waits)
+#define mock_scheduler_roots_epoch (js_runtime_state.timers->mock_roots_epoch)
 extern "C" uint64_t js_get_heap_epoch(void);
 
 static void close_all_timer_handles(void);

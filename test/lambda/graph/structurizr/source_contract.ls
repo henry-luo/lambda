@@ -1,5 +1,5 @@
-import model: lambda.package.graph.model
-import structurizr: lambda.package.graph.structurizr.structurizr
+import model: lambda.graph.model
+import structurizr: lambda.graph.structurizr.structurizr
 
 let source = (input("test/lambda/graph/structurizr/source_contract.dsl",
   {type: "graph", flavor: "structurizr"})) ^ { null }

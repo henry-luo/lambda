@@ -1,12 +1,12 @@
 // input_intent_basic.ls — Phase R4 intent dispatcher
-import lambda.package.editor.mod_doc
-import lambda.package.editor.mod_step
-import lambda.package.editor.mod_source_pos
-import lambda.package.editor.mod_transaction
-import lambda.package.editor.mod_input_intent
-import lambda.package.editor.mod_decorations
-import lambda.package.editor.mod_history
-import lambda.package.editor.mod_md_schema
+import lambda.editor.mod_doc
+import lambda.editor.mod_step
+import lambda.editor.mod_source_pos
+import lambda.editor.mod_transaction
+import lambda.editor.mod_input_intent
+import lambda.editor.mod_decorations
+import lambda.editor.mod_history
+import lambda.editor.mod_md_schema
 
 let d0 = node('doc', [
   node('paragraph', [text("Hello")])

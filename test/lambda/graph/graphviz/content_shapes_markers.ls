@@ -1,9 +1,9 @@
-import layout: lambda.package.graph.layout
-import model: lambda.package.graph.model
-import normalize: lambda.package.graph.normalize
-import paint: lambda.package.graph.transform.paint
-import scene: lambda.package.graph.scene
-import transform: lambda.package.graph.transform
+import layout: lambda.graph.layout
+import model: lambda.graph.model
+import normalize: lambda.graph.normalize
+import paint: lambda.graph.transform.paint
+import scene: lambda.graph.scene
+import transform: lambda.graph.transform
 
 fn direct_children(value, wanted) => [
   for (child in model.element_children(value) where model.tag(child) == wanted) child

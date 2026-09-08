@@ -258,9 +258,9 @@ static void jube_node_session_module_states_destroy(NodeRuntimeSession* session)
 
 static void jube_node_session_state_init(NodeRuntimeSession* session) {
     if (!session) return;
-    session->cjs.module_stack.roots.slots = session->cjs.module_stack_slots;
-    session->cjs.module_stack.roots.slot_count = JS_CJS_STACK_MAX;
-    session->cjs.module_stack.roots.name = "CommonJS module stack";
+    // owner NULL: the session is used only on its attaching thread, so the
+    // vector resolves the current context at each use (JSCU14).
+    js_item_stack_init(&session->cjs.module_stack, NULL, "CommonJS module stack");
     session->diagnostics_channels.roots.slots =
         &session->diagnostics_channels.namespace_object;
     session->diagnostics_channels.roots.slot_count =
@@ -271,6 +271,8 @@ static void jube_node_session_state_init(NodeRuntimeSession* session) {
 
 static void jube_node_session_state_clear(NodeRuntimeSession* session) {
     if (!session) return;
+    // release the rooted blocks before the record is zeroed
+    js_item_stack_destroy(&session->cjs.module_stack);
     memset(&session->cjs, 0, sizeof(session->cjs));
     memset(&session->commonjs_compile_cache, 0, sizeof(session->commonjs_compile_cache));
     memset(&session->diagnostics_channels, 0, sizeof(session->diagnostics_channels));

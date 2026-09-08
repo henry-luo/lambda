@@ -317,6 +317,8 @@ typedef struct gc_heap {
     gc_js_native_trace_fn js_native_trace; // traces native payload edges on JS Map wrappers
     gc_js_native_destroy_fn js_native_destroy; // frees native payloads on dead JS Map wrappers
     gc_js_function_trace_fn js_function_trace; // recognizes and traces GC-owned JsFunction objects
+    // Releases a dying function value's optional native payloads (JSCU20).
+    void (*js_function_destroy)(void* data);
     gc_js_function_compact_fn js_function_compact; // updates JsFunction data-zone edges
     gc_external_destroy_fn external_destroy; // frees generic external payloads at sweep/teardown
 

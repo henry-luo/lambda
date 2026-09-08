@@ -1,7 +1,7 @@
 # Lambda Impl: LambdaJS Struct and Type Clean-Up
 
 - **Date:** 2026-08-18
-- **Status:** PROPOSAL — census and source audit complete; no runtime implementation started
+- **Status:** PROPOSAL — census and source audit complete; no runtime implementation started. The four first-tier items (P3, P1, P2, P6) plus two banked P5 fixes are designed in [`Lambda_Design_Structs_JS.md`](Lambda_Design_Structs_JS.md) (2026-09-07), which extends this ledger with JSCU9–JSCU24 and JSCUO1–JSCUO7 and re-measures the §2 table.
 - **Scope:** LambdaJS runtime, web/Node compatibility state, JS callable representation, and JS compiler records under `lambda/js/`. Shared Lambda data/runtime structures are referenced where LambdaJS should reuse them rather than introduce a second mechanism.
 - **Principle:** one concept or mechanism has one authoritative owning struct. A mechanism may have private node/entry records, but it has one public owner and one lifecycle. Distinct language semantics must not be merged merely because their current layouts look alike.
 - **Formal authority:** D3.4.7 (immutable JS class metadata), D4.3.3 (precise VMap trace/finalize), D5.1.1/D5.1.3 (side stacks versus non-LIFO heap ownership), D5.4.1–D5.4.4 (canonical context, lazy capsules, reset-as-construction, immutable registries and lock-free hot paths), D6.2.1/D6.2.2v2 (function identity and distinct Call/Construct capabilities), D6.3.1 (one scheduler and ordered jobs), D7.3.5 (Test262/WPT/Node gates), D7.4.1v2 (native carriers and rids), D7.4.5 (future virtual array/element carriers), and D8.2.1/D8.2.2/D8.2.4/D8.2.5 (unified indexed compilation and typed fact tables).

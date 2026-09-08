@@ -1,10 +1,10 @@
 // Stage-4 drawing commands (mod_drawing_commands). Every command lowers to the
 // existing set_attr / replace steps (no new step kinds).
-import lambda.package.editor.mod_doc
-import lambda.package.editor.mod_step
-import lambda.package.editor.mod_transaction
-import lambda.package.editor.mod_geom
-import lambda.package.editor.mod_drawing_commands
+import lambda.editor.mod_doc
+import lambda.editor.mod_step
+import lambda.editor.mod_transaction
+import lambda.editor.mod_geom
+import lambda.editor.mod_drawing_commands
 
 fn apply_all(steps, doc, i, n) { if (i >= n) { doc } else { apply_all(steps, step_apply(steps[i], doc), i + 1, n) } }
 

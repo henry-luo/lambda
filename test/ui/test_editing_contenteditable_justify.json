@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable justify composes a package-owned style step",
-  "html": "test/html/editable-dom-justify.html",
+  "html": "test/ui/ce/editable-dom-justify.html",
   "viewport": {"width": 640, "height": 140},
   "events": [
     {"type": "log", "message": "=== contenteditable_justify ==="},

@@ -2,7 +2,7 @@
 // Adapt MathLive markup snapshots into a Lambda math-package comparison run.
 //
 // This runner uses the copied MathLive snapshot corpus as expected output, but
-// renders formulas through lambda/package/math via a generated Lambda script.
+// renders formulas through lambda/doc/math via a generated Lambda script.
 // When invoked by test/test_run.js, it accepts the runner's --report argument
 // and emits the summary/results shape consumed by the shared Node adapter lane.
 
@@ -279,8 +279,8 @@ function buildLambdaScript(cases) {
   const formulaList = cases.map((testCase) =>
     `    {formula: ${lambdaString(testCase.formula)}, display: ${testCase.display ? 'true' : 'false'}}`
   ).join(',\n');
-  return `import math_pkg: lambda.package.math.math
-import html_ser: lambda.package.latex.to_html
+  return `import math_pkg: lambda.doc.math.math
+import html_ser: lambda.latex.to_html
 
 let cases = [
 ${formulaList}

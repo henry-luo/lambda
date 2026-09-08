@@ -77,9 +77,8 @@ void jm_compile_recovery_state_destroy_context(JsRuntimeState* runtime_state);
 #define g_active_js_transpiler (jm_compile_recovery_state_ensure()->active_js_transpiler)
 #define g_active_mir_transpiler (jm_compile_recovery_state_ensure()->active_mir_transpiler)
 #define g_active_js_owned_source (jm_compile_recovery_state_ensure()->active_js_owned_source)
-#define module_mir_contexts ((MIR_context_t*)js_runtime_state.deferred_mir.contexts)
-#define module_mir_source_buffers (js_runtime_state.deferred_mir.source_buffers)
-#define module_mir_context_count (js_runtime_state.deferred_mir.count)
+#define js_module_code_store (&js_runtime_state.code_store)
+#define module_mir_context_count (js_runtime_state.code_store.count)
 void* jm_build_js_debug_info(JsMirTranspiler* mt, const char* filename);
 
 typedef enum JsMirReferenceKind {

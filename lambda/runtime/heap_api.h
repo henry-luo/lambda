@@ -37,6 +37,8 @@ void heap_unregister_gc_weak(uint64_t* slot);
 bool heap_register_gc_root_for(Context* runtime, uint64_t* slot);
 void heap_unregister_gc_root_for(Context* runtime, uint64_t* slot);
 bool heap_register_gc_root_range_for(Context* runtime, uint64_t* base, int count);
+// The owning heap's incarnation id (0 when the context has no live heap).
+uint64_t heap_generation_for(Context* runtime);
 void heap_unregister_gc_root_range_for(Context* runtime, uint64_t* base);
 bool heap_try_register_gc_root(uint64_t* slot);
 void heap_no_gc_scope_begin(void);

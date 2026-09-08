@@ -1,6 +1,6 @@
 // Phase 60 - parsed BI/EI inline image filters are preserved and gated.
 
-import interp: lambda.package.pdf.interp
+import interp: lambda.pdf.interp
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

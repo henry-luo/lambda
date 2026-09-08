@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
-const DEFAULT_ROOT = path.join(PROJECT_ROOT, 'lambda/package/math');
+const DEFAULT_ROOT = path.join(PROJECT_ROOT, 'lambda/doc/math');
 
 const FIELDS = [
   'render_height',
@@ -47,7 +47,7 @@ function printHelp() {
   console.log(`Usage: node test/lambda/mathlive/box_field_census.mjs [options]
 
 Options:
-  --root DIR    Source root to scan, default lambda/package/math
+  --root DIR    Source root to scan, default lambda/doc/math
   --json        Emit JSON instead of a text report
 `);
 }

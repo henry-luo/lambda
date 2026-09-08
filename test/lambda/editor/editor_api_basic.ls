@@ -1,8 +1,8 @@
-import lambda.package.editor.mod_doc
-import lambda.package.editor.mod_editor
-import lambda.package.editor.mod_source_pos
-import lambda.package.editor.mod_step
-import lambda.package.editor.mod_transaction
+import lambda.editor.mod_doc
+import lambda.editor.mod_editor
+import lambda.editor.mod_source_pos
+import lambda.editor.mod_step
+import lambda.editor.mod_transaction
 
 let d0 = node('doc', [node('paragraph', [text("Hello")])])
 let caret = text_selection(pos([0, 0], 5), pos([0, 0], 5))

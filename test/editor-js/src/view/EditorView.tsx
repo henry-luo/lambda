@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, type KeyboardEvent } from 'react'
 import { dispatchIntent } from '../input/intent.js'
 import { renderDoc } from './render.js'
+import { historyShortcutForKey } from './history-shortcut.js'
 import { useEditorState } from './use-editor-state.js'
 import { intentFromInputEvent } from './intent-from-input-event.js'
 import { setDomSelectionFromSource } from './dom-bridge.js'
@@ -72,12 +73,11 @@ export function EditorView(props: EditorViewProps) {
     // Cmd/Ctrl+Z and Shift-variant for undo/redo. We handle these here rather
     // than via beforeinput because not all platforms emit historyUndo intents
     // via beforeinput.
-    const isMeta = e.metaKey || e.ctrlKey
-    if (!isMeta) return
-    if (e.key === 'z' && !e.shiftKey) {
+    const historyShortcut = historyShortcutForKey(e)
+    if (historyShortcut === 'undo') {
       e.preventDefault()
       dispatch({ type: 'undo' })
-    } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
+    } else if (historyShortcut === 'redo') {
       e.preventDefault()
       dispatch({ type: 'redo' })
     }

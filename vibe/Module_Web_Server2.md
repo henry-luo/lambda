@@ -548,7 +548,7 @@ app.openapi({ title: "User API", version: "1.0.0" })
 app.listen(3000)
 ```
 
-### 2.10 Lambda OpenAPI Package (`lambda/package/openapi/`)
+### 2.10 Lambda OpenAPI Package (`lambda/openapi/`)
 
 The OpenAPI / Swagger support is implemented as a **Lambda script package** rather than C++ code. This allows the OpenAPI logic to be written in Lambda itself, leveraging the language's built-in YAML/JSON parsing, type system, and validation capabilities.
 
@@ -568,7 +568,7 @@ The OpenAPI / Swagger support is implemented as a **Lambda script package** rath
 ```
   ┌──────────────────────┐     ┌─────────────────────────────┐
   │  C++ HTTP Server     │     │  Lambda OpenAPI Package      │
-  │  (lambda/serve/)     │     │  (lambda/package/openapi/)   │
+  │  (lambda/serve/)     │     │  (lambda/openapi/)   │
   │                      │     │                              │
   │  1. On startup:      │────>│  server.init(spec_path)      │
   │     call init()      │<────│  returns {spec, docs_html,   │

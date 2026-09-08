@@ -1,10 +1,10 @@
 // cmd_delete_multi_node — the canonical multi-node-selection operation.
 // Deletes every node in a MultiNodeSelection (descending order), exposed both
 // as a command and through the editor API.
-import lambda.package.editor.mod_doc
-import lambda.package.editor.mod_source_pos
-import lambda.package.editor.mod_commands
-import lambda.package.editor.mod_editor
+import lambda.editor.mod_doc
+import lambda.editor.mod_source_pos
+import lambda.editor.mod_commands
+import lambda.editor.mod_editor
 
 let d = node('doc', [
   node('paragraph', [text("A")]),

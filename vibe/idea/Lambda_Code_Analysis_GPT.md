@@ -156,7 +156,7 @@ source files
 Stage 1 should expose a command shaped like this:
 
 ```bash
-./lambda.exe code scan lambda radiant --rules lambda/package/code/rules/lambda_repo.ls
+./lambda.exe code scan lambda radiant --rules lambda/code/rules/lambda_repo.ls
 ./lambda.exe code ast radiant/layout_grid.cpp -o temp/layout_grid.code.json
 ```
 
@@ -198,7 +198,7 @@ lambda/code/
     code_cpp.cpp
     code_js.cpp
     code_python.cpp
-lambda/package/code/
+lambda/code/
   query.ls
   rules/
     lambda_repo.ls

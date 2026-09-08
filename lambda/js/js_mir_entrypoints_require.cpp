@@ -990,7 +990,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // v14: initialize event loop before execution. Dynamic import runs inside
     // an active script, so preserve the caller's pending PromiseJobs.
     if (!g_jm_preamble_compile_only && execution_scope.is_outermost() &&
-            !js_runtime_state.event_loop.callback_running &&
+            !js_runtime_state.event_loop->callback_running &&
             js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
@@ -1094,7 +1094,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         // the context now would leave dangling func_ptr pointers → SIGBUS.
         jm_defer_mir_cleanup(ctx);
         if (module_mir_context_count > 0) {
-            module_mir_source_buffers[module_mir_context_count - 1] = owned_source;
+            js_code_store_attach_source(js_module_code_store, owned_source);
             jm_clear_active_js_transpile(NULL, NULL, owned_source);
             owned_source = NULL;
         }
@@ -1263,7 +1263,7 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
     if (runtime->dom_ui_context) dom_set_ui_context(runtime->dom_ui_context);
     if (runtime->dom_doc) dom_set_document(runtime->dom_doc);
     if (execution_scope.is_outermost() &&
-            !js_runtime_state.event_loop.callback_running &&
+            !js_runtime_state.event_loop->callback_running &&
             js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
@@ -1427,7 +1427,7 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     // not resolve through the prior batch document's discarded global object.
     (void)js_get_global_this();
     if (execution_scope.is_outermost() &&
-            !js_runtime_state.event_loop.callback_running) {
+            !js_runtime_state.event_loop->callback_running) {
         js_event_loop_init();
     }
     if (runtime->dom_doc) dom_set_document(runtime->dom_doc);
@@ -1725,8 +1725,8 @@ static JsCjsState* js_cjs_state_current(bool attach) {
 }
 
 #define js_cjs_module_stack_state (js_cjs_state_current(true)->module_stack)
-#define js_cjs_module_stack (js_cjs_module_stack_state.roots.slots)
-#define js_cjs_module_stack_count (js_cjs_module_stack_state.depth)
+#define js_cjs_module_stack_at(i) js_item_stack_at(&js_cjs_module_stack_state, (i))
+#define js_cjs_module_stack_count js_item_stack_depth(&js_cjs_module_stack_state)
 
 extern "C" void js_cjs_metadata_reset(void) {
     JsCjsState* state = js_cjs_state_current(false);
@@ -1735,7 +1735,7 @@ extern "C" void js_cjs_metadata_reset(void) {
 
 static Item js_cjs_current_module(void) {
     if (js_cjs_module_stack_count <= 0) return ItemNull;
-    return js_cjs_module_stack[js_cjs_module_stack_count - 1];
+    return js_cjs_module_stack_at(js_cjs_module_stack_count - 1);
 }
 
 static Item js_cjs_find_module(Item filename) {
@@ -1743,9 +1743,8 @@ static Item js_cjs_find_module(Item filename) {
     String* spec = it2s(filename);
     ModuleDescriptor* desc = module_get_for_runtime(
         context ? context->runtime : NULL, spec ? spec->chars : NULL);
-    if (desc && desc->source_lang && strcmp(desc->source_lang, "js-cjs") == 0) {
-        return desc->namespace_obj;
-    }
+    if (!desc) return ItemNull;
+    if (get_type_id(desc->cjs_module) == LMD_TYPE_MAP) return desc->cjs_module;
     return ItemNull;
 }
 
@@ -1753,12 +1752,26 @@ static void js_cjs_store_module(Item filename, Item module) {
     if (get_type_id(filename) != LMD_TYPE_STRING) return;
     String* spec = it2s(filename);
     if (!spec) return;
-    ModuleDescriptor* existing = module_get_for_runtime(
-        context ? context->runtime : NULL, spec->chars);
+    Runtime* runtime = context ? context->runtime : NULL;
+    ModuleDescriptor* existing = module_get_for_runtime(runtime, spec->chars);
     if (existing && existing->source_lang &&
-            strcmp(existing->source_lang, "js-cjs") != 0) return;
-    module_register_for_runtime(context ? context->runtime : NULL,
-        spec->chars, "js-cjs", module, NULL);
+            strcmp(existing->source_lang, "js") != 0 &&
+            strcmp(existing->source_lang, "js-cjs") != 0) {
+        // another language owns this path; CommonJS metadata never rebrands it.
+        return;
+    }
+    if (!existing) {
+        // metadata-only child (never loaded through the JS loader): the CJS
+        // module object is also the descriptor's namespace.
+        module_register_for_runtime(runtime, spec->chars, "js-cjs", module, NULL);
+        existing = module_get_for_runtime(runtime, spec->chars);
+        if (!existing) return;
+    }
+    // The loader marks a file as "js" before its body runs and re-registers
+    // the ESM namespace after it, so the CJS `module` object cannot ride in
+    // namespace_obj under a language tag: it was dropped on both writes.
+    // It is a second fact of the same descriptor.
+    module_descriptor_set_cjs_module(existing, module);
 }
 
 static Item js_cjs_exports(Item module) {
@@ -1782,6 +1795,9 @@ static Item js_cjs_children(Item module) {
 }
 
 static void js_cjs_update_cached_default(Item filename, Item module) {
+    // No CJS module object means the namespace already carries the loader's
+    // `default`; replacing it with a fresh {} is how exports went missing.
+    if (get_type_id(module) != LMD_TYPE_MAP) return;
     Item ns = js_module_get(filename);
     if (get_type_id(ns) != LMD_TYPE_MAP) return;
     js_set_key_default(ns, js_cjs_key("default", (int)strlen("default")), js_cjs_exports(module));
@@ -1802,9 +1818,6 @@ static Item js_cjs_cached_value(Item specifier) {
 
 extern "C" Item js_cjs_enter(Item module, Item filename) {
     if (!js_cjs_state_current(true)) return (Item){.item = ITEM_JS_UNDEFINED};
-    if (!js_root_range_ensure_registered(&js_cjs_module_stack_state.roots)) {
-        return (Item){.item = ITEM_JS_UNDEFINED};
-    }
     if (get_type_id(module) != LMD_TYPE_MAP) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
@@ -1837,13 +1850,13 @@ extern "C" Item js_cjs_complete(Item module) {
 extern "C" Item js_cjs_leave(Item module) {
     if (js_cjs_module_stack_count > 0) {
         if (module.item == ItemNull.item ||
-            js_cjs_module_stack[js_cjs_module_stack_count - 1].item == module.item) {
+            js_cjs_module_stack_at(js_cjs_module_stack_count - 1).item == module.item) {
             js_item_stack_pop(&js_cjs_module_stack_state);
         } else {
             for (int i = js_cjs_module_stack_count - 1; i >= 0; i--) {
-                if (js_cjs_module_stack[i].item != module.item) continue;
+                if (js_cjs_module_stack_at(i).item != module.item) continue;
                 for (int j = i + 1; j < js_cjs_module_stack_count; j++) {
-                    js_cjs_module_stack[j - 1] = js_cjs_module_stack[j];
+                    js_cjs_module_stack_at(j - 1) = js_cjs_module_stack_at(j);
                 }
                 js_item_stack_shrink(&js_cjs_module_stack_state,
                                      js_cjs_module_stack_count - 1);

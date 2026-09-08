@@ -1,12 +1,12 @@
 // Markdown list autoformat: typing a space after a bare marker turns the block
 // into a list. "-"/"*"/"+" -> bullet, "N." -> ordered. (cmd_autoformat_list,
 // also wired into the insertText intent.)
-import lambda.package.editor.mod_doc
-import lambda.package.editor.mod_step
-import lambda.package.editor.mod_source_pos
-import lambda.package.editor.mod_md_schema
-import lambda.package.editor.mod_commands
-import lambda.package.editor.mod_input_intent
+import lambda.editor.mod_doc
+import lambda.editor.mod_step
+import lambda.editor.mod_source_pos
+import lambda.editor.mod_md_schema
+import lambda.editor.mod_commands
+import lambda.editor.mod_input_intent
 
 fn st(d, sel, sch) => {doc: d, selection: sel, schema: sch, stored_marks: null}
 fn caret_at(path, off) => text_selection(pos(path, off), pos(path, off))

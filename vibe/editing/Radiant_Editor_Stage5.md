@@ -54,7 +54,7 @@ The **"zero new step kinds"** rule (§5.1) and an **invert-roundtrip invariant**
 
 ### Lambda port status — the actual Stage-5 deliverable
 
-The port to `lambda/package/editor/` proceeds **text-first**, each step verified against the JS oracle via a bridge (`test/editor-js/tools/export-lambda-oracle.ts` → `test/lambda/editor/oracle_poc.ls`):
+The port to `lambda/editor/` proceeds **text-first**, each step verified against the JS oracle via a bridge (`test/editor-js/tools/export-lambda-oracle.ts` → `test/lambda/editor/oracle_poc.ls`):
 
 | Layer | Lambda port status |
 |---|---|
@@ -791,16 +791,16 @@ When undoing a deletion of a shape that had connectors anchored to it, the conne
 
 | Module | Responsibility | LOC budget |
 |---|---|---|
-| `lambda/package/editor/mod_geom.ls` | Vec2, Rect, Matrix3x3, transforms, point-in-polygon, segment-distance, bbox math | 600 |
-| `lambda/package/editor/mod_drawing_schema.ls` | Schema entries for `drawing`, `layer`, `shape`, `connector`, `group`, `text-frame`, `label`; the `'drawing-object` role | 300 |
-| `lambda/package/editor/mod_doc_schema.ls` | Combined schema = `md_schema ++ drawing_schema`; default for new editors | 60 |
-| `lambda/package/editor/mod_tools.ls` | Tool interface, tool registry, all built-in tools (select, pan, rect, ellipse, line, polyline, path, freehand, connector, text, eraser) | 1400 |
-| `lambda/package/editor/mod_router.ls` | Connector routing (straight, orthogonal, curved, segment); port resolution; reverse `shape→connectors` index | 800 |
-| `lambda/package/editor/mod_snap.ls` | Grid snap, object snap, guides as decorations | 350 |
-| `lambda/package/editor/mod_drawing_commands.ls` | All `cmd_*` from §5.3 | 1200 |
-| `lambda/package/editor/mod_selection_handles.ls` | Resize/rotate/waypoint handle rendering + hit-test | 400 |
-| `lambda/package/editor/mod_drawing_templates.ls` | `view`/`edit` templates per shape kind, connector, text-frame; selection overlay | 900 |
-| `lambda/package/editor/mod_clipboard_drawing.ls` | Copy/paste flavour handling for drawings; SVG coercion | 500 |
+| `lambda/editor/mod_geom.ls` | Vec2, Rect, Matrix3x3, transforms, point-in-polygon, segment-distance, bbox math | 600 |
+| `lambda/editor/mod_drawing_schema.ls` | Schema entries for `drawing`, `layer`, `shape`, `connector`, `group`, `text-frame`, `label`; the `'drawing-object` role | 300 |
+| `lambda/editor/mod_doc_schema.ls` | Combined schema = `md_schema ++ drawing_schema`; default for new editors | 60 |
+| `lambda/editor/mod_tools.ls` | Tool interface, tool registry, all built-in tools (select, pan, rect, ellipse, line, polyline, path, freehand, connector, text, eraser) | 1400 |
+| `lambda/editor/mod_router.ls` | Connector routing (straight, orthogonal, curved, segment); port resolution; reverse `shape→connectors` index | 800 |
+| `lambda/editor/mod_snap.ls` | Grid snap, object snap, guides as decorations | 350 |
+| `lambda/editor/mod_drawing_commands.ls` | All `cmd_*` from §5.3 | 1200 |
+| `lambda/editor/mod_selection_handles.ls` | Resize/rotate/waypoint handle rendering + hit-test | 400 |
+| `lambda/editor/mod_drawing_templates.ls` | `view`/`edit` templates per shape kind, connector, text-frame; selection overlay | 900 |
+| `lambda/editor/mod_clipboard_drawing.ls` | Copy/paste flavour handling for drawings; SVG coercion | 500 |
 
 ### 13.2 Modules extended
 

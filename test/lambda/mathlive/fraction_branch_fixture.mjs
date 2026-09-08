@@ -220,8 +220,8 @@ function renderLambda(formula, displayMode) {
   const scriptPath = path.join(TEMP_DIR, 'frac_fixture_run.ls');
   const lit = JSON.stringify(formula);
   const fn = displayMode ? 'render_display' : 'render_inline';
-  const script = `import math_pkg: lambda.package.math.math
-import html_ser: lambda.package.latex.to_html
+  const script = `import math_pkg: lambda.doc.math.math
+import html_ser: lambda.latex.to_html
 
 let formula = ${lit}
 let parsed = parse(formula, {type: "math", flavor: "latex"}) ^ { ^ }

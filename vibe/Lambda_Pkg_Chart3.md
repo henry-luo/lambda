@@ -1473,19 +1473,19 @@ All existing tests (bar, line, scatter, arc, area, donut, text, rule, tick, laye
 
 | File | Change | Details |
 |------|--------|---------|
-| `lambda/package/chart/stack.ls` | **New** | Stacking engine (67 lines). Computes cumulative `_y0`/`_y1` offsets per group. Uses `{*:row, *:extra}` spread to add stack fields while preserving original data. |
-| `lambda/package/chart/chart.ls` | **Modified** | Added `import stack: .stack`. Rewrote `render_single()` to detect stacking via `detect_stack_mode()`, apply `stack.apply_stack()`, build stacked y-scale via `build_stacked_y_scale()`, extract `x_offset` channel, and pass `is_stacked`/`x_offset_field`/`x_offset_cats` in mark context. |
-| `lambda/package/chart/mark.ls` | **Modified** | `bar()`: extracts `is_stacked`, `x_offset_field`, `x_offset_cats` from ctx; computes `n_groups` for grouped bars; subdivides band width with 2px sub-gap; uses `_y0`/`_y1` for stacked bar y-positioning. `area_mark()`: extracts `is_stacked`; stacked areas use `_y1` for top points, `_y0` for bottom baseline. Added `find_cat_index()` helper. |
-| `lambda/package/chart/parse.ls` | **Modified** | `parse_encoding()` now extracts `x_offset`, `x2`, `y2`, `detail`, `tooltip` channels via `find_child()`. |
-| `lambda/package/chart/vega.ls` | **Modified** | `convert_encoding()` maps Vega-Lite `xOffset`/`x_offset`, `x2`, `y2`, `detail`, `tooltip` channels. `convert_channel()` converts `stack: false` → `"none"` for explicit stack disable. |
+| `lambda/chart/stack.ls` | **New** | Stacking engine (67 lines). Computes cumulative `_y0`/`_y1` offsets per group. Uses `{*:row, *:extra}` spread to add stack fields while preserving original data. |
+| `lambda/chart/chart.ls` | **Modified** | Added `import stack: .stack`. Rewrote `render_single()` to detect stacking via `detect_stack_mode()`, apply `stack.apply_stack()`, build stacked y-scale via `build_stacked_y_scale()`, extract `x_offset` channel, and pass `is_stacked`/`x_offset_field`/`x_offset_cats` in mark context. |
+| `lambda/chart/mark.ls` | **Modified** | `bar()`: extracts `is_stacked`, `x_offset_field`, `x_offset_cats` from ctx; computes `n_groups` for grouped bars; subdivides band width with 2px sub-gap; uses `_y0`/`_y1` for stacked bar y-positioning. `area_mark()`: extracts `is_stacked`; stacked areas use `_y1` for top points, `_y0` for bottom baseline. Added `find_cat_index()` helper. |
+| `lambda/chart/parse.ls` | **Modified** | `parse_encoding()` now extracts `x_offset`, `x2`, `y2`, `detail`, `tooltip` channels via `find_child()`. |
+| `lambda/chart/vega.ls` | **Modified** | `convert_encoding()` maps Vega-Lite `xOffset`/`x_offset`, `x2`, `y2`, `detail`, `tooltip` channels. `convert_channel()` converts `stack: false` → `"none"` for explicit stack disable. |
 
 ### Phase B Files Changed
 
 | File | Change | Details |
 |------|--------|---------|
-| `lambda/package/chart/chart.ls` | **Modified** | Added `y2_ch` extraction and `y2_field` in mark context. Added `apply_histogram_transform()` for auto bin+count detection. Added `build_position_scale_y2()` for dual-value y-domain. Extended `build_position_scale()` to use band scales for `rect` and `boxplot` marks. Updated `render_mark()` dispatch with boxplot, errorbar, errorband, rect. |
-| `lambda/package/chart/mark.ls` | **Modified** | Added `boxplot_mark()` (~55 lines), `errorbar_mark()` (~25 lines), `errorband_mark()` (~25 lines), `rect_mark()` (~25 lines) — all new mark rendering functions after `tick_mark`, before `find_cat_index`. Fixed `rect_mark` y-positioning for inverted band scales. |
-| `lambda/package/chart/transform.ls` | **Modified** | Made `add_field()` public (`pub fn`) for use by histogram transform in chart.ls. |
+| `lambda/chart/chart.ls` | **Modified** | Added `y2_ch` extraction and `y2_field` in mark context. Added `apply_histogram_transform()` for auto bin+count detection. Added `build_position_scale_y2()` for dual-value y-domain. Extended `build_position_scale()` to use band scales for `rect` and `boxplot` marks. Updated `render_mark()` dispatch with boxplot, errorbar, errorband, rect. |
+| `lambda/chart/mark.ls` | **Modified** | Added `boxplot_mark()` (~55 lines), `errorbar_mark()` (~25 lines), `errorband_mark()` (~25 lines), `rect_mark()` (~25 lines) — all new mark rendering functions after `tick_mark`, before `find_cat_index`. Fixed `rect_mark` y-positioning for inverted band scales. |
+| `lambda/chart/transform.ls` | **Modified** | Made `add_field()` public (`pub fn`) for use by histogram transform in chart.ls. |
 
 ### Phase A Tests Added
 

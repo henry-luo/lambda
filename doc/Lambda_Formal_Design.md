@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.50.0 (2026-09-07)
+**Spec version:** 1.51.0 (2026-09-07)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -105,7 +105,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   arithmetic, compare, deref, or typed store; a plain-`T` carrier never
   holds a null sentinel; `box(NULL_LANE(T)) == ItemNull` exactly. [D2.5]
 - **DI6 — GC sees only pointers.** Numeric/bool sentinels and scalar homes
-  are never roots; the number stack is never scanned. [D2.5.1, D5.1.1, D5.2.2]
+  are never roots; the number stack is never scanned. [D2.5.1, D5.1.1v2, D5.2.2]
 - **DI7 — No scalar cells in the GC heap.** No `INT64`/`UINT64`/`FLOAT`
   payload is ever a standalone GC allocation; an Item with those tags can
   never point into the GC zone. [D2.7.1]
@@ -837,13 +837,19 @@ that carries them.
 
 ### D5.1 The stack model
 
-- **D5.1.1** Three stack-like mechanisms with distinct owners: the native C
-  stack (invisible to GC); **watermarked side stacks** — the root stack,
+- **D5.1.1v2*** Three stack-like mechanisms with distinct owners: the native
+  C stack (invisible to GC); **watermarked side stacks** — the root stack,
   precisely scanned `[base, top)`, and the **number stack, never
-  scanned** — two strictly separate mappings; and heap async frames
-  (Item region root-registered, tail never scanned). *LIFO lifetimes live
-  on the side stacks; non-LIFO lifetimes own their scalars in tail regions
-  of their own allocation.* [SF2, SF12, Stack_Frame §5.1]
+  scanned** — two strictly separate mappings; and heap async frames — **a
+  tail-bearing heap container whose Item region the collector traces
+  through its owner (the task, or the suspended generator/async object)
+  and whose tail is never scanned**. *LIFO lifetimes live on the side
+  stacks; non-LIFO lifetimes own their scalars in tail regions of their own
+  allocation.* (Revised 2026-09-07: v1 said the Item region is
+  "root-registered", which described only the native `LambdaAsyncFrame`;
+  v2 names the one carrier both languages suspend into — the
+  `GC_TYPE_JS_ENV` form — with the owner, not a root range, as the edge.)
+  [SF2, SF12, SF20, Stack_Frame §5.1, JSCU25, JSCU26]
 - **D5.1.2** Static per-function frame sizing, no `MIR_ALLOCA`, two saved
   watermarks per frame, virtual reservation + demand paging (decommit
   after GC), explicit frame-entry limit checks; no hotness detection —
@@ -1123,7 +1129,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 - **D7.2.3** Imported packages are cached in-process (L1, D8.5.1) and
   distribute as **source** (D1.7); compiled artifacts are derived local
   caches only.
-- **D7.2.4*** **`lambda.*` is the one root for everything Lambda ships**, and
+- **D7.2.4** **`lambda.*` is the one root for everything Lambda ships**, and
   the root name is reserved (S16.10.1v2). Three tiers live under it:
   **`lambda.sys.*`** — the runtime's own system functions, prelude-imported
   unqualified (S17.2.1); **`lambda.<module>`** — built-in modules, with the
@@ -1141,7 +1147,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   recognition,
   events, Selection/Range, clipboard/composition transport, observation,
   geometry, and checked generic DOM mutation primitives. The behavior package
-  (currently sourced under `lambda/package/dom`) owns uncanceled
+  (currently sourced under `lambda/dom`) owns uncanceled
   `contenteditable` default actions, structural normalization, editing
   history, `designMode`, and the complete
   `execCommand`/`queryCommand*` compatibility surface. User input and legacy
@@ -1832,13 +1838,16 @@ slice; no formal semantic ruling or document semver changes.
 | D4.4.4 | Decided 2026-09-06 (CW34, `vibe/Lambda_Design_Runtime_COW.md` §11.11): read-modify-write handle borrows — tier-shared static shape in `build_ast`, runtime spine test `cow_bind_rmw_handle`; havlak's array copies 205k → 41k per run. Fixtures `test/lambda/proc/cow_rmw_borrow.ls`, `test/mir/lambda/cw34_rmw_borrow`. |
 | D4.6 | Name identity is a PROPOSAL (rev 5): W1/W2 integer schemes can start now; W4 stage 3 blocked on the MIR-cache reconciliation (NI §8). |
 | D4.7 | Const pool / MarkPack is a DRAFT (rev 4): baked-pointer census verified against emitters 2026-07-31; phases CP-P0..P4 not started. |
+| D5.1.1v2 | Revised 2026-09-07 (v2), not implemented: `LambdaAsyncFrame` still `mem_calloc`s its slots and root-registers the Item half (re-registering on growth, `concurrency.cpp:1120`); LambdaJS generators and async functions already suspend into the `GC_TYPE_JS_ENV` carrier but own it from context-wide index tables (`generators[4096]`, `async_contexts[256]`) rather than from the object. JSCU9–JSCU11 move JS ownership to the carrier; JSCU26 moves the Lambda frame onto the same carrier with strong task retention; JSCU25 makes a JS async activation a weakly registered `LambdaTask` resumed by its microtask job. Design and gates: `vibe/Lambda_Design_Structs_JS.md` item 1. |
 | D5.2.2v3 | Generated-function caller homes are deleted. The retained `MirScalarHomeBinding` coloring is payload ownership for C/helper and hosted-language boundaries, not an alternate function-return ABI. Per-source mutable-binding storage and loop back-edge reclaim remain unimplemented (DO24); they are independent of companion-lane transport. |
 | D5.2.3 | Lambda helper-adopt emission is retired as of 2026-08-17: its emitter sets the v3 no-rehome rule and fresh Lambda MIR has zero `lambda_item_adopt_scalar_home` calls. LambdaJS keeps the conservative helper rehome path because helpers may return module-state scalar Items; the attempted global skip changed `regression_side_stack_frame_gc` and was reverted. Shared machinery also remains for foreign hosted compilers and explicit C/host ownership boundaries. Loop back-edge reclaim and the associated peak-side-stack proof remain open under `DO24`; revisit JS only with a per-helper ownership proof. |
 | D5.2.1v3 | LambdaJS P2.5 and P5a landed 2026-08-17: Lambda and LambdaJS compile only the companion-lane ABI; `LAMBDA_RETURN_V3`, `FN_COMPANION_HOME`, generated `_scalar_home` parameters, and direct-call donation are deleted. Record of the retired v2 design: every function carried a hidden trailing home address and copied a wide payload into it. Retained side-number-stack slots belong only to destination ownership, C helpers, or hosted-language APIs under D5.2.2v3. |
 | D6.1.3 | `may_await` analysis exists; the `may_defect` split does not — `may_return_error` is overloaded and the missing-analysis polarity is currently "trusted clean" (wrong direction; one half of the measured O1 divergence). |
+| D6.3.1 | JS async activations as `LambdaTask`s (JSCU25, ratified 2026-09-07) are not implemented: readiness stays with the microtask queue (the reaction job resumes the task; the FIFO run queue never resumes a JS frame), the Promise is the handle, the mailbox is lazy, and the scheduler holds JS activation tasks weakly so an unreachable pending activation is collected. `lambda_task_create` today allocates a mailbox and registers four roots per task (`concurrency.cpp:737–774`). |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
-| D7.2.5 | Implemented 2026-09-07. The shipped `lambda/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
+| D7.2.4 | **Implemented 2026-09-08.** The direct AST resolver exposes `lambda.sys.*` through the existing sys-function registry, aliases `lambda.math`/`lambda.io` to the built-in module rows, reserves the `lambda` root, and maps the shipped package tree to `lambda/{chart,dom,editor,graph,latex,openapi,pdf}` with typesetting under `lambda/doc/math`. Live imports, bridges, tests, and release preparation use the canonical paths; regressions are `test/lambda/lambda_namespace.ls` and the reserved-root negative fixture. |
+| D7.2.5 | Implemented 2026-09-07. The shipped `lambda/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
 | D7.4.1v2 | Native-module POC 1 remains unstarted; the engine-owned Promise VMap is designed by JR7/Tune7 but not yet implemented. |
 | D7.4.3 | Hosted-language layering: `lang-python` is the landed DSO reference chain, but Python is currently statically linked and its ten follow-up ADRs (Lang_Hosting §17) are unwritten. |
 | D7.4.4 | Implemented in DOM4 (2026-08-14): `host_ops`, `legacy_ops`, `JubeHostObjectOps`, and the vmap `string_key_item` re-materialization shim were removed; record-owned hooks are the only host-object protocol and the ABI is version 4. |
@@ -2073,7 +2082,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D4.5 | Memory_Model §5–§7 | `Lambda_Design_Memory_Model.md` |
 | D4.6 | NI1–NI16, W1–W6 | `Lambda_Design_Name_Identity.md` |
 | D4.7 | CP1–CP26 | `Lambda_Design_Const_Pool.md` |
-| D5.1–D5.3 | SF1–SF20, OS1–OS11; Stack_API phases + invariants; CR1–CR8, RH1–RH8; Merges A/B/C | `Lambda_Design_Stack_Frame.md`, `Lambda_Design_Stack_API.md`, `Lambda_Design_Stack_Rooting.md` |
+| D5.1–D5.3 | SF1–SF20 (+ SF20 addendum 2026-09-07), OS1–OS11; Stack_API phases + invariants; CR1–CR8, RH1–RH8; Merges A/B/C; JSCU9–JSCU14, JSCU25–JSCU26 | `Lambda_Design_Stack_Frame.md`, `Lambda_Design_Stack_API.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Structs_JS.md` |
 | D5.2, D2.7.2, D8.4.2 | RV1–RV16 (+ RV3a, RV10a, RV14a), RVO1–RVO11 | `Lambda_Design_Compiling_Return_Value.md` |
 | D5.4 | RG0–RG14, MT2 contract | `Lambda_Design_Runtime_Globals.md` |
 | D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3; REH-D6–REH-D12 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md`, `Lambda_Design_Runtime_Error_Handling.md` |

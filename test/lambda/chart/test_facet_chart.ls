@@ -1,5 +1,5 @@
 // Test: facet chart composition - grid of sub-charts partitioned by a field
-import chart: lambda.package.chart.chart
+import chart: lambda.chart.chart
 
 let data = [
     <row cat: "A", x: 1, y: 10>,

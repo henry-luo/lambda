@@ -8,12 +8,12 @@
 //
 // form_of, radio_group and details_group were native `radiant.*` bodies. None
 // of them is mechanism -- each is policy over ordinary DOM reads -- so each now
-// lives in lambda/package/dom/tree.ls, written in Lambda over the published
+// lives in lambda/dom/tree.ls, written in Lambda over the published
 // core. This fixture holds the Lambda definitions and the native bodies to the
 // same answers on every element of two real documents, which is what makes the
 // move a refactor rather than a rewrite.
 import dom
-import tree: lambda.package.dom.tree
+import tree: lambda.dom.tree
 
 fn chain_len(c) { if (c == null) 0 else 1 + chain_len(dom.next_sibling(c)) }
 fn nth_from(c, i) { if (i <= 0) c else nth_from(dom.next_sibling(c), i - 1) }

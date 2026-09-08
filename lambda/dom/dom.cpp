@@ -2065,26 +2065,24 @@ struct JsDomCollectionRuntimeState {
     int refresh_depth = 0;
 };
 
+static void dom_collection_capsule_destroy(void* capsule);
+static const ContextCapsuleOps dom_collection_capsule_ops = {
+    "js-dom-collections", CONTEXT_CAPSULE_LIFETIME_REALM,
+    sizeof(JsDomCollectionRuntimeState), NULL, NULL, dom_collection_capsule_destroy
+};
 JS_FORWARD_STATIC_EXPRESSION(JsDomCollectionRuntimeState*,
     dom_collection_runtime_state_get, (),
-    (js_active_runtime_state ? (JsDomCollectionRuntimeState*)js_runtime_state.dom_collection_state : nullptr))
+    ((JsDomCollectionRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_COLLECTION)))
 
-template <typename State>
-static State* dom_runtime_state_ensure(void*& slot, const char* label) {
+// One ensure per capsule; the directory owns allocation and lifecycle.
+static JsDomCollectionRuntimeState* dom_collection_state_ensure_ptr() {
     if (!js_active_runtime_state) return nullptr;
-    State* state = (State*)slot;
-    if (state) return state;
-    state = (State*)mem_calloc(1, sizeof(State), MEM_CAT_DOM);
-    if (!state) {
-        log_error("%s: failed to allocate context state", label);
-        return nullptr;
-    }
-    slot = state;
-    return state;
+    return (JsDomCollectionRuntimeState*)context_capsule_ensure(
+        context, CONTEXT_CAPSULE_DOM_COLLECTION, &dom_collection_capsule_ops);
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, dom_collection_runtime_state_ensure, (), (dom_runtime_state_ensure<JsDomCollectionRuntimeState>(js_runtime_state.dom_collection_state, "js-dom-collections") != nullptr))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_collection_runtime_state_ensure, (), (dom_collection_state_ensure_ptr() != nullptr))
 
-#define dom_collection_rt_state ((JsDomCollectionRuntimeState*)js_runtime_state.dom_collection_state)
+#define dom_collection_rt_state ((JsDomCollectionRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_COLLECTION))
 #define s_select_options_owners (dom_collection_rt_state->select_options_owners)
 #define s_select_options_owner_count (dom_collection_rt_state->select_options_owner_count)
 #define s_live_child_collections (dom_collection_rt_state->live_child_collections)
@@ -2200,8 +2198,7 @@ static void dom_register_owner_collection(Item collection, DomElement* owner,
 #define JS_DOM_REGISTER_OWNER_COLLECTION(name, entries, count, capacity) \
 static void name(Item collection, DomElement* owner, int kind) { \
     JsDomCollectionRuntimeState* state = dom_collection_runtime_state_get(); \
-    if (!state) state = dom_runtime_state_ensure<JsDomCollectionRuntimeState>( \
-        js_runtime_state.dom_collection_state, "js-dom-collections"); \
+    if (!state) state = dom_collection_state_ensure_ptr(); \
     if (!state) return; \
     dom_register_owner_collection(collection, owner, kind, state->entries, \
         &state->count, capacity); \
@@ -2862,13 +2859,23 @@ struct JsDomForeignDocumentRuntimeState {
     int pending_image_load_count = 0;
     bool iframe_load_drain_scheduled = false;
 };
+static void dom_foreign_document_capsule_destroy(void* capsule);
+static const ContextCapsuleOps dom_foreign_document_capsule_ops = {
+    "js-dom-foreign-document", CONTEXT_CAPSULE_LIFETIME_REALM,
+    sizeof(JsDomForeignDocumentRuntimeState), NULL, NULL,
+    dom_foreign_document_capsule_destroy
+};
+
+
 
 JS_FORWARD_STATIC_EXPRESSION(JsDomForeignDocumentRuntimeState*,
     dom_foreign_document_state_get, (),
-    (js_active_runtime_state ? (JsDomForeignDocumentRuntimeState*)js_runtime_state.dom_foreign_document_state : nullptr))
-JS_FORWARD_STATIC_EXPRESSION(bool, dom_foreign_document_state_ensure, (), (dom_runtime_state_ensure<JsDomForeignDocumentRuntimeState>(js_runtime_state.dom_foreign_document_state, "js-dom-foreign-document") != nullptr))
+    (js_active_runtime_state ? (JsDomForeignDocumentRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_FOREIGN_DOCUMENT) : nullptr))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_foreign_document_state_ensure, (),
+    (js_active_runtime_state && context_capsule_ensure(context,
+        CONTEXT_CAPSULE_DOM_FOREIGN_DOCUMENT, &dom_foreign_document_capsule_ops) != nullptr))
 
-#define dom_foreign_document_rt_state ((JsDomForeignDocumentRuntimeState*)js_runtime_state.dom_foreign_document_state)
+#define dom_foreign_document_rt_state ((JsDomForeignDocumentRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_FOREIGN_DOCUMENT))
 #define s_foreign_doc_cache (dom_foreign_document_rt_state->foreign_doc_cache)
 #define s_foreign_doc_cache_count (dom_foreign_document_rt_state->foreign_doc_cache_count)
 #define s_doc_with_window (dom_foreign_document_rt_state->doc_with_window)
@@ -16539,20 +16546,17 @@ JS_FORWARD_VOID( dom_collections_release_context, (void), reset_live_dom_collect
 #undef s_live_lookup_collection_count
 #undef s_dom_collection_refresh_depth
 
-static void dom_destroy_context_state(void** slot, bool has_entries,
+static void dom_destroy_context_state(void* capsule, bool has_entries,
                                          const char* label) {
-    if (!slot || !*slot) return;
+    if (!capsule) return;
     // All weak homes and native pins are removed before heap destruction.
     if (has_entries) log_error("%s: context destroyed before roots were released", label);
-    mem_free(*slot);
-    *slot = nullptr;
+    mem_free(capsule);
 }
 
-extern "C" void dom_collections_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->dom_collection_state) return;
-    JsDomCollectionRuntimeState* state =
-        (JsDomCollectionRuntimeState*)runtime_state->dom_collection_state;
-    dom_destroy_context_state(&runtime_state->dom_collection_state,
+static void dom_collection_capsule_destroy(void* capsule) {
+    JsDomCollectionRuntimeState* state = (JsDomCollectionRuntimeState*)capsule;
+    dom_destroy_context_state(capsule,
         state->select_options_owner_count || state->live_child_collection_count ||
         state->live_form_collection_count || state->live_lookup_collection_count,
         "js-dom-collections");
@@ -16580,11 +16584,10 @@ extern "C" void dom_foreign_documents_release_context(void) {
 #undef s_pending_image_load_count
 #undef s_iframe_load_drain_scheduled
 
-extern "C" void dom_foreign_documents_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->dom_foreign_document_state) return;
+static void dom_foreign_document_capsule_destroy(void* capsule) {
     JsDomForeignDocumentRuntimeState* state =
-        (JsDomForeignDocumentRuntimeState*)runtime_state->dom_foreign_document_state;
-    dom_destroy_context_state(&runtime_state->dom_foreign_document_state,
+        (JsDomForeignDocumentRuntimeState*)capsule;
+    dom_destroy_context_state(capsule,
         state->foreign_doc_cache_count || state->doc_with_window_count ||
         state->iframe_cache_count || state->pending_iframe_load_count ||
         state->pending_image_load_count,

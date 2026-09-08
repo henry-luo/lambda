@@ -4,7 +4,7 @@
 // Procedural form because the pdf API is `pn` (drives the content-stream
 // interpreter via var/while).
 
-import pdf: lambda.package.pdf.pdf
+import pdf: lambda.pdf.pdf
 
 pn main() {
     let doc = input("test/input/advanced_test.pdf", 'pdf') ^ { null }

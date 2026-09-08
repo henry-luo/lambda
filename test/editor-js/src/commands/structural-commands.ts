@@ -1,6 +1,6 @@
 // Structural editing commands: lists, tables, and images.
 //
-// Ports the corresponding functions from lambda/package/editor/mod_commands.ls.
+// Ports the corresponding functions from lambda/editor/mod_commands.ls.
 // Each command returns Transaction | null (null = does not apply). They build
 // on the same step vocabulary (replace) as the text commands — no new step
 // kinds.

@@ -188,12 +188,12 @@ not contractual; symbols and responsibilities are.
 
 | Source | Landed behavior | Phase-9 gap |
 |---|---|---|
-| `lambda/package/dom/dom.ls` | package entry and behavior registration | import-path migration remains governed by D7.2.4; no second DOM namespace may be created |
-| `lambda/package/dom/form.ls` | body-scoped `domedit` and `execcommand` behavior hooks | document editing API transport is Boolean/verdict-shaped and has no query/design-mode result channel |
-| `lambda/package/dom/dom_edit.ls` | text/replacement insertion, simple deletion, composition splice/caret, plain paste/drop, cut/drag deletion, paragraph/line-break delegation, formatting delegation | context comes through native pending-range side channels; cross-tree rules, whitespace, typing style, normalization, and history are incomplete |
-| `lambda/package/dom/commands.ls` | case-insensitive subset for bold/italic/underline/strike, HTML/text insertion, backward/forward deletion, paragraph, and line break | conditional registry, single-text formatting assumptions, no query API, no typing state, no block/list/object/history/clipboard command families |
-| `lambda/package/dom/tree.ls` | package-side general DOM traversals and small edit-range composition | lacks the traversal and classification vocabulary required by full structural planning |
-| `lambda/package/dom/keymap.ls` | key-to-intent policy shared by current editable surfaces | must map into descriptors without becoming a second command table |
+| `lambda/dom/dom.ls` | package entry and behavior registration | import-path migration remains governed by D7.2.4; no second DOM namespace may be created |
+| `lambda/dom/form.ls` | body-scoped `domedit` and `execcommand` behavior hooks | document editing API transport is Boolean/verdict-shaped and has no query/design-mode result channel |
+| `lambda/dom/dom_edit.ls` | text/replacement insertion, simple deletion, composition splice/caret, plain paste/drop, cut/drag deletion, paragraph/line-break delegation, formatting delegation | context comes through native pending-range side channels; cross-tree rules, whitespace, typing style, normalization, and history are incomplete |
+| `lambda/dom/commands.ls` | case-insensitive subset for bold/italic/underline/strike, HTML/text insertion, backward/forward deletion, paragraph, and line break | conditional registry, single-text formatting assumptions, no query API, no typing state, no block/list/object/history/clipboard command families |
+| `lambda/dom/tree.ls` | package-side general DOM traversals and small edit-range composition | lacks the traversal and classification vocabulary required by full structural planning |
+| `lambda/dom/keymap.ls` | key-to-intent policy shared by current editable surfaces | must map into descriptors without becoming a second command table |
 
 The existing package direction is retained. Phase 9 refactors and extends it;
 it does not create a separate rich-edit package beside it.
@@ -298,7 +298,7 @@ implementation creates the following modules, adjusting names only if the
 package naming migration lands first:
 
 ```text
-lambda/package/dom/
+lambda/dom/
   dom.ls                    package entry; imports/registers behavior
   form.ls                   existing element/body behavior declarations
   dom_edit.ls               default-input entry; no structural algorithms
@@ -379,7 +379,7 @@ typing value is captured in an immutable closure expecting later mutation
 
 ### 4.3 Package naming hold point
 
-This plan uses the physical path `lambda/package/dom` because that is the
+This plan uses the physical path `lambda/dom` because that is the
 current tree. It does not establish `lambda.dom` as the package import name:
 `import dom` already identifies the built-in DOM mechanism module. When the
 D7.2.4 package-path migration reaches this package, select and migrate to one
@@ -974,7 +974,7 @@ a native shortcut around an unmet earlier exit gate.
 
 - generate a checked source inventory for command names, `inputType` branches,
   block/list tag tables, history state, normalization helpers, and TLS edit
-  channels outside `lambda/package/dom`;
+  channels outside `lambda/dom`;
 - distinguish allowed IDL method names and generic enum operations from
   forbidden native policy;
 - add a lint/audit script that fails when a new native command-policy site is
@@ -1336,11 +1336,11 @@ a native shortcut around an unmet earlier exit gate.
 
 | File/area | Planned responsibility/change |
 |---|---|
-| `lambda/package/dom/dom_edit.ls` | thin default-input entry into context/descriptor/planner |
-| `lambda/package/dom/commands.ls` | immutable full descriptor/alias registry and exec/query dispatch |
-| `lambda/package/dom/form.ls` | register body/document internal edit API behavior; no algorithms |
-| `lambda/package/dom/tree.ls` | general DOM traversal only; promote shared helpers rather than copy |
-| new `lambda/package/dom/edit_*.ls` modules | package policy families in §4 |
+| `lambda/dom/dom_edit.ls` | thin default-input entry into context/descriptor/planner |
+| `lambda/dom/commands.ls` | immutable full descriptor/alias registry and exec/query dispatch |
+| `lambda/dom/form.ls` | register body/document internal edit API behavior; no algorithms |
+| `lambda/dom/tree.ls` | general DOM traversal only; promote shared helpers rather than copy |
+| new `lambda/dom/edit_*.ls` modules | package policy families in §4 |
 | package-state mechanism | one generic precisely rooted document package value; no native editing fields |
 | `radiant/editing_controller.cpp` | common gate invocation/result integration, cancellation, event order |
 | `radiant/editing_dom_waist.cpp` | generic transaction primitives only; delete TLS/pending channels and policy |
@@ -1381,7 +1381,7 @@ match is reviewed against D7.2.5.
 Before each new helper:
 
 ```text
-rg "existing concept or candidate symbol" lambda/dom radiant lambda/package/dom
+rg "existing concept or candidate symbol" lambda/dom radiant lambda/dom
 ```
 
 If the required native mechanism exists as a `static`, promote it to the

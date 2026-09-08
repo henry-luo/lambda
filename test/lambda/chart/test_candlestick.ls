@@ -1,8 +1,8 @@
 // Test: candlestick chart (OHLC stock chart) using layered composition
 // Rule mark: high-low whisker (y to y2)
 // Bar mark: open-close body (y to y2) colored by direction
-import vega: lambda.package.chart.vega
-import chart: lambda.package.chart.chart
+import vega: lambda.chart.vega
+import chart: lambda.chart.chart
 
 let raw_data = [
     {date: "Mon", open: 100.0, high: 115.0, low: 95.0,  close: 110.0, direction: "up"},

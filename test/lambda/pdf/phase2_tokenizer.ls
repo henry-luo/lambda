@@ -3,7 +3,7 @@
 // Verifies parse_content_stream produces the expected operator sequence
 // from test.pdf's flate-decoded content stream.
 
-import resolve: lambda.package.pdf.resolve
+import resolve: lambda.pdf.resolve
 pn main() {
     let doc = input("test/input/test.pdf", 'pdf') ^ { null }
     let page = resolve.page_at(doc, 0)

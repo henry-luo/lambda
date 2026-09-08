@@ -1,9 +1,9 @@
 // test_math_atom_enclose.ls — Test math enclosure commands
 // Coverage: atoms/enclose.ls — render_box, render_phantom, render_rule
 
-import enc: lambda.package.math.atoms.enclose
-import box: lambda.package.math.box
-import mctx: lambda.package.math.context
+import enc: lambda.doc.math.atoms.enclose
+import box: lambda.doc.math.box
+import mctx: lambda.doc.math.context
 
 "===== MATH ATOM ENCLOSE TESTS ====="
 

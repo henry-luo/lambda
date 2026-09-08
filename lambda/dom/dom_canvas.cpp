@@ -39,18 +39,22 @@ struct JsCanvasRuntimeState {
 
 static JsCanvasRuntimeState* canvas_runtime_state(void) {
     return js_active_runtime_state ?
-        (JsCanvasRuntimeState*)js_runtime_state.canvas_state : NULL;
+        (JsCanvasRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_CANVAS) : NULL;
 }
+
+extern __thread EvalContext* context;
+static void js_canvas_capsule_destroy(void* capsule);
+static const ContextCapsuleOps js_canvas_capsule_ops = {
+    "js-canvas", CONTEXT_CAPSULE_LIFETIME_REALM, sizeof(JsCanvasRuntimeState),
+    NULL, NULL, js_canvas_capsule_destroy
+};
 
 static JsCanvasRuntimeState* canvas_runtime_state_ensure(void) {
     if (!js_active_runtime_state) return NULL;
-    if (!js_runtime_state.canvas_state) {
-        // Canvas setup is cold; measurement reads this context-owned table
-        // directly and never contends with another JS realm.
-        js_runtime_state.canvas_state = mem_calloc(1, sizeof(JsCanvasRuntimeState),
-            MEM_CAT_JS_RUNTIME);
-    }
-    return (JsCanvasRuntimeState*)js_runtime_state.canvas_state;
+    // Canvas setup is cold; measurement reads this context-owned table
+    // directly and never contends with another JS realm.
+    return (JsCanvasRuntimeState*)context_capsule_ensure(
+        context, CONTEXT_CAPSULE_DOM_CANVAS, &js_canvas_capsule_ops);
 }
 
 static FontContext* canvas_get_font_context() {
@@ -316,13 +320,11 @@ extern "C" void js_canvas_cleanup(void) {
     }
 }
 
-extern "C" void js_canvas_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->canvas_state) return;
-    JsCanvasRuntimeState* state = (JsCanvasRuntimeState*)runtime_state->canvas_state;
+static void js_canvas_capsule_destroy(void* capsule) {
+    JsCanvasRuntimeState* state = (JsCanvasRuntimeState*)capsule;
     for (int i = 0; i < state->font_handle_count; i++) {
         if (state->font_handles[i]) font_handle_release(state->font_handles[i]);
     }
     if (state->font_context) font_context_destroy(state->font_context);
     mem_free(state);
-    runtime_state->canvas_state = NULL;
 }

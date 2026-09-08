@@ -1,6 +1,6 @@
 // Phase 54 - short raw Image XObjects render available pixels and black gaps.
 
-import interp: lambda.package.pdf.interp
+import interp: lambda.pdf.interp
 
 fn ref(n) { { type: "indirect_ref", object_num: n } }
 fn name(s) { { kind: "name", value: s } }

@@ -1,5 +1,5 @@
 // Test: hconcat chart composition - two charts side by side
-import chart: lambda.package.chart.chart
+import chart: lambda.chart.chart
 
 let data_a = [
     <row cat: "X", val: 10>,

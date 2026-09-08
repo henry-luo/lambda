@@ -40,8 +40,8 @@ extern "C" void js_function_root_item_if_needed(void* function, Item* slot) {
 static int js_function_metadata_length(JsFunction* fn) {
     int length = fn->formal_length >= 0 ? fn->formal_length : fn->param_count;
     if (length < 0) length = -length - 1;
-    if (fn->bound_args) {
-        length -= fn->bound_argc;
+    if (js_fn_bound(fn)->args) {
+        length -= js_fn_bound(fn)->argc;
         if (length < 0) length = 0;
     }
     return length;
@@ -141,10 +141,8 @@ static void js_function_register_pool_pointer_roots(JsFunction* fn) {
     bool registered = heap_try_register_gc_root((uint64_t*)&fn->name);
     registered = heap_try_register_gc_root((uint64_t*)&fn->source_text) &&
         registered;
-    registered = heap_try_register_gc_root((uint64_t*)&fn->vm_stack_filename) &&
-        registered;
-    registered = heap_try_register_gc_root((uint64_t*)&fn->vm_stack_source) &&
-        registered;
+
+
     if (registered) {
         fn->pool_pointer_roots_registered =
             JS_FUNC_POOL_POINTER_ROOTS_REGISTERED;
@@ -208,29 +206,89 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     }
     gc_mark_item(gc, fn->prototype.item);
     gc_mark_item(gc, fn->bound_this_store[0].item);
-    if (fn->bound_args) {
-        gc_mark_object_ptr(gc, fn->bound_args);
-        for (int i = 0; i < fn->bound_argc; i++) gc_mark_item(gc, fn->bound_args[i].item);
+    if (fn->bound) {
+        if (fn->bound->args) {
+            gc_mark_object_ptr(gc, fn->bound->args);
+            for (int i = 0; i < fn->bound->argc; i++) {
+                gc_mark_item(gc, fn->bound->args[i].item);
+            }
+        }
+        gc_mark_item(gc, fn->bound->target.item);
     }
-    gc_mark_item(gc, fn->bound_target.item);
     gc_mark_object_ptr(gc, fn->name);
     gc_mark_item(gc, fn->properties_map.item);
     gc_mark_item(gc, fn->home_global.item);
     gc_mark_item(gc, fn->home_class.item);
     gc_mark_object_ptr(gc, fn->source_text);
-    if (fn->with_env) {
-        gc_mark_object_ptr(gc, fn->with_env);
-        for (int i = 0; i < fn->with_env_depth; i++) gc_mark_item(gc, fn->with_env[i].item);
+    if (fn->with && fn->with->env) {
+        gc_mark_object_ptr(gc, fn->with->env);
+        for (int i = 0; i < fn->with->depth; i++) gc_mark_item(gc, fn->with->env[i].item);
     }
-    gc_mark_object_ptr(gc, fn->vm_stack_filename);
-    gc_mark_object_ptr(gc, fn->vm_stack_source);
-    gc_mark_item(gc, fn->class_constructor.item);
-    gc_mark_item(gc, fn->class_instance_prototype.item);
-    gc_mark_item(gc, fn->class_superclass.item);
+    if (fn->eval_origin) {
+        gc_mark_object_ptr(gc, fn->eval_origin->filename);
+        gc_mark_object_ptr(gc, fn->eval_origin->source);
+    }
+    if (fn->klass) {
+        gc_mark_item(gc, fn->klass->constructor.item);
+        gc_mark_item(gc, fn->klass->instance_prototype.item);
+        gc_mark_item(gc, fn->klass->superclass.item);
+    }
     gc_mark_item(gc, fn->ast_lexical_this.item);
     gc_mark_item(gc, fn->ast_lexical_new_target.item);
     if (fn->interp_env) gc_mark_object_ptr(gc, fn->interp_env);
     return 1;
+}
+
+// JSCU20: an eval origin is a per-value native payload, so it is allocated
+// and released with the value rather than living in every closure.
+#define JS_FN_PAYLOAD_ENSURE(fn, field, type)                                  \
+    if (!(fn)) return NULL;                                                    \
+    if (!(fn)->field) {                                                        \
+        (fn)->field = (type*)mem_calloc(1, sizeof(type), MEM_CAT_JS_RUNTIME);  \
+    }                                                                          \
+    return (fn)->field;
+
+JsBoundData* js_fn_bound_ensure(JsFunction* fn) {
+    JS_FN_PAYLOAD_ENSURE(fn, bound, JsBoundData)
+}
+JsClassData* js_fn_class_ensure(JsFunction* fn) {
+    JS_FN_PAYLOAD_ENSURE(fn, klass, JsClassData)
+}
+JsWithData* js_fn_with_ensure(JsFunction* fn) {
+    JS_FN_PAYLOAD_ENSURE(fn, with, JsWithData)
+}
+
+extern "C" void js_function_set_eval_origin(JsFunction* fn, String* filename,
+        String* source, int64_t line_offset, int64_t column_offset) {
+    if (!fn) return;
+    if (!fn->eval_origin) {
+        fn->eval_origin = (JsEvalOrigin*)mem_calloc(1, sizeof(JsEvalOrigin),
+            MEM_CAT_JS_RUNTIME);
+        if (!fn->eval_origin) return;
+    }
+    fn->eval_origin->filename = filename;
+    fn->eval_origin->source = source;
+    fn->eval_origin->line_offset = line_offset;
+    fn->eval_origin->column_offset = column_offset;
+    // A GC-backed value reaches these Strings through its tracer. A pool-backed
+    // one is not traced at all, and its one-shot root registration may already
+    // have run before this payload existed, so root the payload's own slots
+    // here rather than re-entering that path.
+    if (context && context->heap && context->heap->gc &&
+            !gc_is_managed(context->heap->gc, fn)) {
+        heap_try_register_gc_root((uint64_t*)&fn->eval_origin->filename);
+        heap_try_register_gc_root((uint64_t*)&fn->eval_origin->source);
+    }
+}
+
+// Called by the collector for every dying function value.
+extern "C" void js_function_gc_destroy(void* data) {
+    JsFunction* fn = (JsFunction*)data;
+    if (!fn || fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) return;
+    if (fn->eval_origin) { mem_free(fn->eval_origin); fn->eval_origin = NULL; }
+    if (fn->bound) { mem_free(fn->bound); fn->bound = NULL; }
+    if (fn->klass) { mem_free(fn->klass); fn->klass = NULL; }
+    if (fn->with) { mem_free(fn->with); fn->with = NULL; }
 }
 
 extern "C" int js_function_gc_compact(void* data, gc_heap_t* gc) {
@@ -331,8 +389,8 @@ static void js_function_capture_with_env(JsFunction* fn) {
     Item* stack = js_with_capture_stack(&depth);
     if (stack && depth > 0) {
         js_env_rehome_scalars(stack);
-        fn->with_env = stack;
-        fn->with_env_depth = depth;
+        JsWithData* with = js_fn_with_ensure(fn);
+        if (with) { with->env = stack; with->depth = depth; }
     }
 }
 

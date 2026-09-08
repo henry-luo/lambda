@@ -34,6 +34,11 @@ typedef struct Heap {
     LambdaRegionBlock* region_free_blocks;
     LambdaMapContractCacheEntry map_contract_cache[LAMBDA_MAP_CONTRACT_CACHE_CAPACITY];
     uint32_t map_contract_cache_next;
+    // Identity of this heap incarnation, assigned once at heap_init from a
+    // process-wide counter and never reused. Root registrations die with the
+    // heap; a RootVector compares this to know its blocks must re-register
+    // (D5.4.2, JSCU12). The heap owns its epoch; no subsystem keeps a copy.
+    uint64_t generation;
 } Heap;
 
 void heap_init();
@@ -127,7 +132,7 @@ void mir_guest_finish_context(Runtime* runtime, bool reusing_context);
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
 #include "runtime-state.h"
 
-// Lambda home: directory containing runtime assets (package/, input/).
+// Lambda home: directory containing runtime assets (package trees, input/).
 // Dev default: "./lambda"  Release: "./lmd"  Override: LAMBDA_HOME env var.
 extern const char* g_lambda_home;
 void lambda_home_init(void);    // call once at startup (reads LAMBDA_HOME env var)

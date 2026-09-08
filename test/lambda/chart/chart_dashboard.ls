@@ -12,8 +12,8 @@
 //   mark / encoding / transform — single-view chart (Vega-Lite)
 //   layer   — layered chart (e.g. candlestick)
 
-import vega:  lambda.package.chart.vega
-import chart: lambda.package.chart.chart
+import vega:  lambda.chart.vega
+import chart: lambda.chart.chart
 
 // ── Input file ─────────────────────────────────────────────────────────────
 let dashboard_file = "test/lambda/chart/dashboard_data.json"

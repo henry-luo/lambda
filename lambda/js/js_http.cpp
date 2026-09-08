@@ -24,6 +24,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/base64.h"
 #include "../../lib/url.h"
+#include "../../lib/strview.h"
 
 #include <cstring>
 #include <cstdio>
@@ -293,34 +294,130 @@ static bool http_item_to_integral_int64(Item value, int64_t* out) {
 // Inline HTTP/1.1 Parser
 // =============================================================================
 
-typedef struct ParsedRequest {
+// Node's default --max-http-header-size: the request line plus every header
+// line. Exceeding it is a protocol failure (431), not a silent truncation.
+#define HTTP_MAX_HEADER_SECTION 16384
+
+// One header or trailer field as offsets into the connection buffer that the
+// head was parsed from. Original spelling, order and duplicates survive
+// because the field is the source bytes themselves; the lowercase key that
+// Node exposes is derived at materialization.
+typedef struct HttpFieldSpan {
+    int32_t name_off;
+    int32_t name_len;
+    int32_t value_off;
+    int32_t value_len;
+} HttpFieldSpan;
+
+typedef struct HttpFieldList {
+    HttpFieldSpan* items;
+    int count;
+    int capacity;
+} HttpFieldList;
+
+// Parsed request head. Every span indexes `base`, so a head is valid only
+// while the connection buffer it was parsed from is neither shifted nor
+// reallocated: the server materializes the IncomingMessage and every header
+// fact before it runs script or compacts the buffer.
+typedef struct HttpRequestHead {
+    const char* base;
     char method[16];
-    char url[4096];
     char http_version[16];
-    // headers stored as key-value pairs
-    char raw_header_names[64][128];
-    char raw_header_values[64][4096];
-    char header_names[64][128];
-    char header_values[64][4096];
-    int  header_count;
-    char raw_trailer_names[32][128];
-    char raw_trailer_values[32][4096];
-    char trailer_names[32][128];
-    char trailer_values[32][4096];
-    int  trailer_count;
+    int  url_off;
+    int  url_len;
+    HttpFieldList headers;
+    HttpFieldList trailers;
     const char* body;
     int  body_len;
     int  content_length;
     bool body_complete;
     int  error_status;
-} ParsedRequest;
+} HttpRequestHead;
 
-static const char* http_request_header(ParsedRequest* req, const char* name) {
-    if (!req || !name) return NULL;
-    for (int i = 0; i < req->header_count; i++) {
-        if (strcmp(req->header_names[i], name) == 0) return req->header_values[i];
+static bool http_field_list_push(HttpFieldList* list, HttpFieldSpan span) {
+    if (!list) return false;
+    if (list->count >= list->capacity) {
+        int capacity = list->capacity ? list->capacity * 2 : 16;
+        HttpFieldSpan* items = (HttpFieldSpan*)mem_realloc(list->items,
+            (size_t)capacity * sizeof(HttpFieldSpan), MEM_CAT_JS_RUNTIME);
+        if (!items) return false;
+        list->items = items;
+        list->capacity = capacity;
     }
-    return NULL;
+    list->items[list->count++] = span;
+    return true;
+}
+
+static void http_field_list_release(HttpFieldList* list) {
+    if (!list) return;
+    if (list->items) mem_free(list->items);
+    list->items = NULL;
+    list->count = 0;
+    list->capacity = 0;
+}
+
+static void http_request_head_init(HttpRequestHead* req, const char* base) {
+    memset(req, 0, sizeof(*req));
+    req->base = base;
+}
+
+// The lists keep their capacity across the pipelined requests of one read
+// callback; only the counts and scalar facts start over.
+static void http_request_head_reset(HttpRequestHead* req, const char* base) {
+    req->base = base;
+    req->method[0] = '\0';
+    req->http_version[0] = '\0';
+    req->url_off = 0;
+    req->url_len = 0;
+    req->headers.count = 0;
+    req->trailers.count = 0;
+    req->body = NULL;
+    req->body_len = 0;
+    req->content_length = 0;
+    req->body_complete = false;
+    req->error_status = 0;
+}
+
+static void http_request_head_release(HttpRequestHead* req) {
+    if (!req) return;
+    http_field_list_release(&req->headers);
+    http_field_list_release(&req->trailers);
+}
+
+static HttpFieldSpan http_field_span(const HttpRequestHead* req, const char* name,
+                                    int name_len, const char* value, int value_len) {
+    HttpFieldSpan span;
+    span.name_off = (int32_t)(name - req->base);
+    span.name_len = name_len;
+    span.value_off = (int32_t)(value - req->base);
+    span.value_len = value_len;
+    return span;
+}
+
+static bool http_field_name_equals(const HttpRequestHead* req, const HttpFieldSpan* span,
+                                   const char* lower_name) {
+    int len = (int)strlen(lower_name);
+    if (span->name_len != len) return false;
+    const char* p = req->base + span->name_off;
+    for (int i = 0; i < len; i++) {
+        char c = p[i];
+        if (c >= 'A' && c <= 'Z') c = c + 32;
+        if (c != lower_name[i]) return false;
+    }
+    return true;
+}
+
+// Lookup by lowercase name. Returns the first matching field's value view;
+// `str` is NULL when absent. The view is not NUL-terminated.
+static StrView http_request_header(const HttpRequestHead* req, const char* lower_name) {
+    if (!req || !lower_name) return strview_init(NULL, 0);
+    for (int i = 0; i < req->headers.count; i++) {
+        const HttpFieldSpan* span = &req->headers.items[i];
+        if (http_field_name_equals(req, span, lower_name)) {
+            return strview_init(req->base + span->value_off, (size_t)span->value_len);
+        }
+    }
+    return strview_init(NULL, 0);
 }
 
 static bool http_token_equals_ci(const char* value, int len, const char* token) {
@@ -337,19 +434,28 @@ static bool http_token_equals_ci(const char* value, int len, const char* token) 
     return true;
 }
 
-static bool http_header_has_token(const char* value, const char* token) {
-    if (!value || !token) return false;
+static bool http_header_has_token_n(const char* value, int value_len, const char* token) {
+    if (!value || value_len <= 0 || !token) return false;
     const char* p = value;
-    while (*p) {
-        while (*p == ' ' || *p == '\t' || *p == ',') p++;
+    const char* limit = value + value_len;
+    while (p < limit) {
+        while (p < limit && (*p == ' ' || *p == '\t' || *p == ',')) p++;
         const char* start = p;
-        while (*p && *p != ',') p++;
+        while (p < limit && *p != ',') p++;
         const char* end = p;
         while (end > start && (end[-1] == ' ' || end[-1] == '\t')) end--;
         if (http_token_equals_ci(start, (int)(end - start), token)) return true;
-        if (*p == ',') p++;
+        if (p < limit && *p == ',') p++;
     }
     return false;
+}
+
+static bool http_header_has_token(const char* value, const char* token) {
+    return value && http_header_has_token_n(value, (int)strlen(value), token);
+}
+
+static bool http_header_view_has_token(StrView value, const char* token) {
+    return value.str && http_header_has_token_n(value.str, (int)value.length, token);
 }
 
 static int http_chunk_hex_value(char c) {
@@ -359,9 +465,9 @@ static int http_chunk_hex_value(char c) {
     return -1;
 }
 
-static void http_request_store_trailer(ParsedRequest* req, const char* line_start,
+static void http_request_store_trailer(HttpRequestHead* req, const char* line_start,
                                        const char* line_end) {
-    if (!req || req->trailer_count >= 32 || !line_start || !line_end || line_end <= line_start) return;
+    if (!req || !req->base || !line_start || !line_end || line_end <= line_start) return;
     const char* colon = (const char*)memchr(line_start, ':', (size_t)(line_end - line_start));
     if (!colon) return;
 
@@ -370,26 +476,11 @@ static void http_request_store_trailer(ParsedRequest* req, const char* line_star
     while (vstart < line_end && (*vstart == ' ' || *vstart == '\t')) vstart++;
     int vlen = (int)(line_end - vstart);
     if (nlen <= 0) return;
-    if (nlen >= 128) nlen = 127;
-    if (vlen >= 4096) vlen = 4095;
-
-    int index = req->trailer_count;
-    memcpy(req->raw_trailer_names[index], line_start, (size_t)nlen);
-    req->raw_trailer_names[index][nlen] = '\0';
-    memcpy(req->raw_trailer_values[index], vstart, (size_t)vlen);
-    req->raw_trailer_values[index][vlen] = '\0';
-    memcpy(req->trailer_names[index], line_start, (size_t)nlen);
-    req->trailer_names[index][nlen] = '\0';
-    for (int i = 0; i < nlen; i++) {
-        char c = req->trailer_names[index][i];
-        if (c >= 'A' && c <= 'Z') req->trailer_names[index][i] = c + 32;
-    }
-    memcpy(req->trailer_values[index], vstart, (size_t)vlen);
-    req->trailer_values[index][vlen] = '\0';
-    req->trailer_count++;
+    http_field_list_push(&req->trailers,
+        http_field_span(req, line_start, nlen, vstart, vlen));
 }
 
-static int http_decode_chunked_request_body(char* data, int len, ParsedRequest* req,
+static int http_decode_chunked_request_body(char* data, int len, HttpRequestHead* req,
                                             int* consumed, bool* complete, bool emit) {
     int pos = 0;
     int out_len = 0;
@@ -468,19 +559,8 @@ static int http_decode_chunked_request_body(char* data, int len, ParsedRequest* 
 
 // parse an HTTP request from raw bytes. Returns 0 on success, -1 on incomplete/error.
 // Sets *consumed to the number of bytes consumed (headers + body).
-static int parse_http_request(char* data, int data_len, ParsedRequest* req, int* consumed) {
-    // ParsedRequest owns large fixed header/trailer arrays; clearing the whole
-    // struct for every pipelined request turns tiny GET parsing into bulk zeroing.
-    req->method[0] = '\0';
-    req->url[0] = '\0';
-    req->http_version[0] = '\0';
-    req->header_count = 0;
-    req->trailer_count = 0;
-    req->body = NULL;
-    req->body_len = 0;
-    req->content_length = 0;
-    req->body_complete = false;
-    req->error_status = 0;
+static int parse_http_request(char* data, int data_len, HttpRequestHead* req, int* consumed) {
+    http_request_head_reset(req, data);
     *consumed = 0;
 
     // find end of headers
@@ -491,7 +571,23 @@ static int parse_http_request(char* data, int data_len, ParsedRequest* req, int*
             break;
         }
     }
-    if (!hdr_end) return -1; // incomplete
+    if (!hdr_end) {
+        // A client that never terminates its header section must not make the
+        // connection buffer grow without bound; fail it the way Node does.
+        if (data_len > HTTP_MAX_HEADER_SECTION) {
+            req->body_complete = true;
+            req->error_status = 431;
+            *consumed = data_len;
+            return 0;
+        }
+        return -1; // incomplete
+    }
+    if (hdr_end - data > HTTP_MAX_HEADER_SECTION) {
+        req->body_complete = true;
+        req->error_status = 431;
+        *consumed = (int)(hdr_end - data);
+        return 0;
+    }
 
     // parse request line
     const char* p = data;
@@ -510,10 +606,8 @@ static int parse_http_request(char* data, int data_len, ParsedRequest* req, int*
     p = sp1 + 1;
     const char* sp2 = (const char*)memchr(p, ' ', line_end - p);
     if (!sp2) return -1;
-    int ulen = (int)(sp2 - p);
-    if (ulen >= 4096) ulen = 4095;
-    memcpy(req->url, p, ulen);
-    req->url[ulen] = '\0';
+    req->url_off = (int)(p - data);
+    req->url_len = (int)(sp2 - p);
 
     // HTTP version
     p = sp2 + 1;
@@ -536,23 +630,12 @@ static int parse_http_request(char* data, int data_len, ParsedRequest* req, int*
         while (vstart < line_end && *vstart == ' ') vstart++;
         int vvlen = (int)(line_end - vstart);
 
-        if (req->header_count < 64) {
-            if (nlen >= 128) nlen = 127;
-            if (vvlen >= 4096) vvlen = 4095;
-            memcpy(req->raw_header_names[req->header_count], p, nlen);
-            req->raw_header_names[req->header_count][nlen] = '\0';
-            memcpy(req->raw_header_values[req->header_count], vstart, vvlen);
-            req->raw_header_values[req->header_count][vvlen] = '\0';
-            memcpy(req->header_names[req->header_count], p, nlen);
-            req->header_names[req->header_count][nlen] = '\0';
-            // lowercase the header name
-            for (int i = 0; i < nlen; i++) {
-                char c = req->header_names[req->header_count][i];
-                if (c >= 'A' && c <= 'Z') req->header_names[req->header_count][i] = c + 32;
-            }
-            memcpy(req->header_values[req->header_count], vstart, vvlen);
-            req->header_values[req->header_count][vvlen] = '\0';
-            req->header_count++;
+        if (nlen > 0 && !http_field_list_push(&req->headers,
+                http_field_span(req, p, nlen, vstart, vvlen))) {
+            req->body_complete = true;
+            req->error_status = 500;
+            *consumed = (int)(hdr_end - data);
+            return 0;
         }
 
         p = line_end + 2;
@@ -564,14 +647,23 @@ static int parse_http_request(char* data, int data_len, ParsedRequest* req, int*
     int content_length = 0;
     bool chunked_body = false;
     bool has_content_length = false;
-    for (int i = 0; i < req->header_count; i++) {
-        if (strcmp(req->header_names[i], "transfer-encoding") == 0 &&
-            http_header_has_token(req->header_values[i], "chunked")) {
+    for (int i = 0; i < req->headers.count; i++) {
+        const HttpFieldSpan* span = &req->headers.items[i];
+        const char* value = data + span->value_off;
+        if (http_field_name_equals(req, span, "transfer-encoding") &&
+            http_header_has_token_n(value, span->value_len, "chunked")) {
             chunked_body = true;
         }
-        if (strcmp(req->header_names[i], "content-length") == 0) {
+        if (http_field_name_equals(req, span, "content-length")) {
             has_content_length = true;
-            content_length = atoi(req->header_values[i]);
+            content_length = 0;
+            for (int k = 0; k < span->value_len; k++) {
+                char c = value[k];
+                if (c == ' ' || c == '\t') continue;
+                if (c < '0' || c > '9') break;
+                if (content_length > 0x0fffffff) break;
+                content_length = content_length * 10 + (c - '0');
+            }
         }
     }
 
@@ -591,7 +683,7 @@ static int parse_http_request(char* data, int data_len, ParsedRequest* req, int*
             return 0;
         }
         if (chunked_complete) {
-            req->trailer_count = 0;
+            req->trailers.count = 0;
             int emit_consumed = 0;
             bool emit_complete = false;
             int emit_len = http_decode_chunked_request_body(data + hdr_size, available, req,
@@ -2181,14 +2273,29 @@ static Item make_response_object(JsHttpConn* conn) {
 // =============================================================================
 
 // create an IncomingMessage from a parsed HTTP request
-static void http_request_headers_append(Item headers, const char* name, const char* value) {
-    Item key = make_string_item(name);
-    Item incoming = make_string_item(value);
+// Appends one field to Node's lowercase-keyed header object. `name` is the
+// source spelling; the lowercase key is derived here so no caller keeps a
+// second normalized copy of every field.
+static void http_request_headers_append(Item headers, const char* name, int name_len,
+                                        const char* value, int value_len) {
+    char small[128];
+    char* lower = name_len < (int)sizeof(small) ? small
+        : (char*)mem_alloc((size_t)name_len + 1, MEM_CAT_JS_RUNTIME);
+    if (!lower) return;
+    for (int i = 0; i < name_len; i++) {
+        char c = name[i];
+        lower[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    }
+    lower[name_len] = '\0';
+    Item key = make_string_item(lower, name_len);
+    bool is_cookie = name_len == 6 && memcmp(lower, "cookie", 6) == 0;
+    if (lower != small) mem_free(lower);
+    Item incoming = make_string_item(value, value_len);
     Item existing = js_get_key_default(headers, key);
     if (get_type_id(existing) == LMD_TYPE_STRING) {
         String* es = it2s(existing);
         String* is = it2s(incoming);
-        const char* sep = strcmp(name, "cookie") == 0 ? "; " : ", ";
+        const char* sep = is_cookie ? "; " : ", ";
         int sep_len = (int)strlen(sep);
         int total = (int)es->len + sep_len + (int)is->len;
         char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
@@ -2204,18 +2311,18 @@ static void http_request_headers_append(Item headers, const char* name, const ch
 }
 
 static Item http_conn_socket_object(JsHttpConn* conn);
-static bool http_request_is_chunked(ParsedRequest* req);
+static bool http_request_is_chunked(HttpRequestHead* req);
 static Item js_http_server_req_destroy(Item maybe_self, Item err_item);
 static Item js_http_server_req_setTimeout(Item maybe_self, Item msecs_item, Item callback_item);
 
-static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
+static Item make_request_object(JsHttpConn* conn, HttpRequestHead* req) {
     Item msg = js_readable_new_with_class(ItemNull, JS_CLASS_INCOMING_MESSAGE);
     if (get_type_id(http_incoming_message_prototype) == LMD_TYPE_MAP) {
         js_set_prototype(msg, http_incoming_message_prototype);
     }
 
     js_set_key_cstr(msg, "method", make_string_item(req->method));
-    js_set_key_cstr(msg, "url", make_string_item(req->url));
+    js_set_key_cstr(msg, "url", make_string_item(req->base + req->url_off, req->url_len));
     int http_major = 1;
     int http_minor = 1;
     const char* version_string = req->http_version;
@@ -2246,19 +2353,25 @@ static Item make_request_object(JsHttpConn* conn, ParsedRequest* req) {
     // headers as lowercase-key object
     Item headers = http_new_header_object();
     Item raw_headers = js_array_new(0);
-    for (int i = 0; i < req->header_count; i++) {
-        js_array_push(raw_headers, make_string_item(req->raw_header_names[i]));
-        js_array_push(raw_headers, make_string_item(req->raw_header_values[i]));
-        http_request_headers_append(headers, req->header_names[i], req->header_values[i]);
+    for (int i = 0; i < req->headers.count; i++) {
+        const HttpFieldSpan* span = &req->headers.items[i];
+        const char* name = req->base + span->name_off;
+        const char* value = req->base + span->value_off;
+        js_array_push(raw_headers, make_string_item(name, span->name_len));
+        js_array_push(raw_headers, make_string_item(value, span->value_len));
+        http_request_headers_append(headers, name, span->name_len, value, span->value_len);
     }
     js_set_key_cstr(msg, "headers", headers);
     js_set_key_cstr(msg, "rawHeaders", raw_headers);
     Item trailers = http_new_header_object();
     Item raw_trailers = js_array_new(0);
-    for (int i = 0; i < req->trailer_count; i++) {
-        js_array_push(raw_trailers, make_string_item(req->raw_trailer_names[i]));
-        js_array_push(raw_trailers, make_string_item(req->raw_trailer_values[i]));
-        http_request_headers_append(trailers, req->trailer_names[i], req->trailer_values[i]);
+    for (int i = 0; i < req->trailers.count; i++) {
+        const HttpFieldSpan* span = &req->trailers.items[i];
+        const char* name = req->base + span->name_off;
+        const char* value = req->base + span->value_off;
+        js_array_push(raw_trailers, make_string_item(name, span->name_len));
+        js_array_push(raw_trailers, make_string_item(value, span->value_len));
+        http_request_headers_append(trailers, name, span->name_len, value, span->value_len);
     }
     js_set_key_cstr(msg, "trailers", trailers);
     js_set_key_cstr(msg, "rawTrailers", raw_trailers);
@@ -2806,10 +2919,11 @@ static void http_conn_feed_request_body(JsHttpConn* conn) {
         if (!complete || decoded_len < 0 || consumed <= 0 || consumed > conn->recv_len) {
             return;
         }
-        ParsedRequest trailer_req;
-        memset(&trailer_req, 0, sizeof(trailer_req));
+        HttpRequestHead trailer_req;
+        http_request_head_init(&trailer_req, conn->recv_buf);
         decoded_len = http_decode_chunked_request_body(conn->recv_buf, conn->recv_len,
                                                        &trailer_req, &consumed, &complete, true);
+        http_request_head_release(&trailer_req);
         if (decoded_len > 0) {
             js_readable_push(conn->current_request, make_string_item(conn->recv_buf, decoded_len));
         }
@@ -2877,39 +2991,36 @@ static void http_server_send_default_error(JsHttpConn* conn, int status) {
     http_conn_write_bytes(conn, make_string_item(response, len), true);
 }
 
-static bool http_request_wants_keep_alive(ParsedRequest* req, bool has_buffered_request) {
+static bool http_request_wants_keep_alive(HttpRequestHead* req, bool has_buffered_request) {
     (void)has_buffered_request;
-    const char* connection = http_request_header(req, "connection");
-    if (connection && http_header_has_token(connection, "close")) return false;
+    StrView connection = http_request_header(req, "connection");
+    if (http_header_view_has_token(connection, "close")) return false;
     if (strcmp(req->http_version, "HTTP/1.0") == 0) {
-        return connection && http_header_has_token(connection, "keep-alive");
+        return http_header_view_has_token(connection, "keep-alive");
     }
     // HTTP/1.1 persistence is the default; tying it to bytes already buffered
     // drops pipelined requests that arrive in a later libuv read after /1 ends.
     return true;
 }
 
-static bool http_request_has_expect_continue(ParsedRequest* req) {
-    const char* expect = http_request_header(req, "expect");
-    return expect && http_header_has_token(expect, "100-continue");
+static bool http_request_has_expect_continue(HttpRequestHead* req) {
+    return http_header_view_has_token(http_request_header(req, "expect"), "100-continue");
 }
 
-static bool http_request_has_expect_header(ParsedRequest* req) {
-    const char* expect = http_request_header(req, "expect");
-    return expect && expect[0] != '\0';
+static bool http_request_has_expect_header(HttpRequestHead* req) {
+    StrView expect = http_request_header(req, "expect");
+    return expect.str && expect.length > 0;
 }
 
-static bool http_request_is_chunked(ParsedRequest* req) {
-    const char* transfer_encoding = http_request_header(req, "transfer-encoding");
-    return transfer_encoding && http_header_has_token(transfer_encoding, "chunked");
+static bool http_request_is_chunked(HttpRequestHead* req) {
+    return http_header_view_has_token(http_request_header(req, "transfer-encoding"), "chunked");
 }
 
-static bool http_request_accepts_chunked_response(ParsedRequest* req) {
-    const char* te = http_request_header(req, "te");
-    return te && http_header_has_token(te, "chunked");
+static bool http_request_accepts_chunked_response(HttpRequestHead* req) {
+    return http_header_view_has_token(http_request_header(req, "te"), "chunked");
 }
 
-static Item http_response_for_request(JsHttpConn* conn, ParsedRequest* req, bool force_close,
+static Item http_response_for_request(JsHttpConn* conn, HttpRequestHead* req, bool force_close,
                                       bool over_max, bool has_buffered_request) {
     Item res_obj = make_response_object(conn);
     if (conn) {
@@ -2938,7 +3049,7 @@ static void http_server_send_service_unavailable(JsHttpConn* conn) {
     http_response_flush(res_obj);
 }
 
-static void http_server_send_expectation_failed(JsHttpConn* conn, ParsedRequest* req,
+static void http_server_send_expectation_failed(JsHttpConn* conn, HttpRequestHead* req,
                                                 bool has_buffered_request) {
     if (!conn || conn->destroyed) return;
     Item res_obj = http_response_for_request(conn, req, false, false, has_buffered_request);
@@ -2968,7 +3079,7 @@ static void http_dispatch_listeners(JsHttpConn* conn, Item listeners, Item skip,
     }
 }
 
-static void http_server_dispatch_request(JsHttpConn* conn, ParsedRequest* req,
+static void http_server_dispatch_request(JsHttpConn* conn, HttpRequestHead* req,
         Item on_req, Item on_expect, bool has_handler, bool has_request_event,
         bool has_expect_handler, bool expect_continue, bool response_at_eof,
         bool has_buffered_request) {
@@ -3004,7 +3115,7 @@ static void http_server_dispatch_request(JsHttpConn* conn, ParsedRequest* req,
 }
 
 static void http_server_process_parsed_request(JsHttpConn* conn,
-        ParsedRequest* req, bool expect_continue, bool expect_unknown,
+        HttpRequestHead* req, bool expect_continue, bool expect_unknown,
         bool response_at_eof, bool has_buffered_request) {
     conn->request_count++;
     JsHttpServer* srv = conn->server;
@@ -3068,6 +3179,10 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
         memcpy(conn->recv_buf + conn->recv_len, buf->base, (size_t)nread);
         conn->recv_len += (int)nread;
 
+        // One head serves every pipelined request in this read; its spans
+        // are consumed before the buffer is compacted for the next one.
+        HttpRequestHead req;
+        http_request_head_init(&req, conn->recv_buf);
         while (conn->recv_len > 0 && !conn->destroyed) {
             if (conn->current_request.item != 0 &&
                 (conn->request_body_remaining > 0 || conn->request_body_chunked)) {
@@ -3111,7 +3226,6 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 continue;
             }
 
-            ParsedRequest req;
             int consumed = 0;
             if (parse_http_request(conn->recv_buf, conn->recv_len, &req, &consumed) != 0) {
                 break;
@@ -3135,6 +3249,7 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
             if (remaining > 0) memmove(conn->recv_buf, conn->recv_buf + consumed, (size_t)remaining);
             conn->recv_len = remaining;
         }
+        http_request_head_release(&req);
     }
 
     if (buf->base) mem_free(buf->base);
@@ -3142,7 +3257,8 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
     if (nread < 0 && conn && !conn->destroyed) {
         conn->read_ended = true;
         if (conn->recv_len > 0 && conn->current_request.item == 0) {
-            ParsedRequest req;
+            HttpRequestHead req;
+            http_request_head_init(&req, conn->recv_buf);
             int consumed = 0;
             if (parse_http_request(conn->recv_buf, conn->recv_len, &req, &consumed) == 0 &&
                 consumed > 0 && consumed <= conn->recv_len) {
@@ -3159,6 +3275,7 @@ static void http_server_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                 conn->recv_len = remaining;
                 }
             }
+            http_request_head_release(&req);
         }
         http_conn_destroy_unfinished_request(conn);
         js_microtask_flush();

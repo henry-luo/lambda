@@ -1,7 +1,7 @@
 // test_latex_macros.ls — Test macro definition parsing and substitution
 // Coverage: macros.ls — get_defs, find_macro, substitute_body
 
-import macros: lambda.package.latex.macros
+import macros: lambda.latex.macros
 
 "===== LATEX MACROS TESTS ====="
 

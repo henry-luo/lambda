@@ -1,4 +1,4 @@
-// Core text commands. Subset of lambda/package/editor/mod_commands.ls
+// Core text commands. Subset of lambda/editor/mod_commands.ls
 // sufficient for the Slate `transforms/` Tier-A baseline:
 //
 //   cmdInsertText, cmdInsertParagraph (split block), cmdInsertLineBreak,

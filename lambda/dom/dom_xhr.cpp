@@ -70,23 +70,23 @@ struct JsXhrRuntimeState {
     char* base_url = nullptr;
 };
 
+extern __thread EvalContext* context;
+static void js_xhr_capsule_destroy(void* capsule);
+static const ContextCapsuleOps js_xhr_capsule_ops = {
+    "xhr", CONTEXT_CAPSULE_LIFETIME_REALM, sizeof(JsXhrRuntimeState),
+    NULL, NULL, js_xhr_capsule_destroy
+};
+
 JS_FORWARD_STATIC_EXPRESSION(JsXhrRuntimeState*, js_xhr_runtime_state_get, (),
-    (js_active_runtime_state ? (JsXhrRuntimeState*)js_runtime_state.xhr_state : nullptr))
+    ((JsXhrRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_XHR)))
 
 static bool js_xhr_runtime_state_ensure() {
     if (!js_active_runtime_state) return false;
-    if (js_xhr_runtime_state_get()) return true;
-    JsXhrRuntimeState* state = (JsXhrRuntimeState*)mem_calloc(1,
-        sizeof(JsXhrRuntimeState), MEM_CAT_JS_RUNTIME);
-    if (!state) {
-        log_error("xhr: failed to allocate context state");
-        return false;
-    }
-    js_runtime_state.xhr_state = state;
-    return true;
+    return context_capsule_ensure(context, CONTEXT_CAPSULE_DOM_XHR,
+                                  &js_xhr_capsule_ops) != nullptr;
 }
 
-#define js_xhr_state ((JsXhrRuntimeState*)js_runtime_state.xhr_state)
+#define js_xhr_state ((JsXhrRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_XHR))
 #define _xhr_pool (js_xhr_state->pool)
 #define _xhr_count (js_xhr_state->count)
 #define _xhr_base_url (js_xhr_state->base_url)
@@ -804,14 +804,12 @@ extern "C" void js_xhr_reset(void) {
 #undef _xhr_count
 #undef _xhr_base_url
 
-extern "C" void js_xhr_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->xhr_state) return;
-    JsXhrRuntimeState* state = (JsXhrRuntimeState*)runtime_state->xhr_state;
+static void js_xhr_capsule_destroy(void* capsule) {
+    JsXhrRuntimeState* state = (JsXhrRuntimeState*)capsule;
     // js_runtime_state_release_heap_resources() resets request-owned buffers
     // before heap teardown; only the empty capsule may remain at this point.
     if (state->count || state->base_url) {
         log_error("xhr: context destroyed before request state was reset");
     }
     mem_free(state);
-    runtime_state->xhr_state = nullptr;
 }

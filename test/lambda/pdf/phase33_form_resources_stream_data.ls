@@ -1,6 +1,6 @@
 // Phase 33 — Form XObjects use their own Resources and stream_data bytes.
 
-import interp: lambda.package.pdf.interp
+import interp: lambda.pdf.interp
 
 fn ref(n) { { type: "indirect_ref", object_num: n } }
 fn name(s) { { kind: "name", value: s } }

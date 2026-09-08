@@ -1,5 +1,5 @@
 // F5 word-boundary scanners from the dom package's editing applier.
-import editing: lambda.package.dom.editing
+import editing: lambda.dom.editing
 
 let back = {
     mid_word: editing.word_start("hello world", 11),

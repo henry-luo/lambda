@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable structural history restores backward selection direction",
-  "html": "test/html/editable-dom-structural-history-direction.html",
+  "html": "test/ui/ce/editable-dom-structural-history-direction.html",
   "viewport": {"width": 640, "height": 140},
   "events": [
     {"type": "log", "message": "=== contenteditable_structural_history_direction ==="},

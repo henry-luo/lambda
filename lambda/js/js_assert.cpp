@@ -66,15 +66,15 @@ JS_FORWARD_STATIC_VOID( js_assert_set_native, (Item object, const char* name, Ta
 
 extern "C" uint64_t js_get_heap_epoch(void);
 
-#define assert_namespace (js_runtime_state.assert.namespace_object)
-#define internal_errors_namespace (js_runtime_state.assert.internal_errors_namespace)
-#define internal_assert_myers_diff_namespace (js_runtime_state.assert.internal_myers_diff_namespace)
-#define assert_options_key (js_runtime_state.assert.options_key)
-#define assert_diff_key (js_runtime_state.assert.diff_key)
-#define assert_instances (js_runtime_state.assert.instances)
-#define assert_instance_count (js_runtime_state.assert.instance_count)
-#define assert_key_epoch (js_runtime_state.assert.key_epoch)
-#define assert_instances_roots_epoch (js_runtime_state.assert.instances_roots_epoch)
+#define assert_namespace (js_runtime_state.assert->namespace_object)
+#define internal_errors_namespace (js_runtime_state.assert->internal_errors_namespace)
+#define internal_assert_myers_diff_namespace (js_runtime_state.assert->internal_myers_diff_namespace)
+#define assert_options_key (js_runtime_state.assert->options_key)
+#define assert_diff_key (js_runtime_state.assert->diff_key)
+#define assert_instances (js_runtime_state.assert->instances)
+#define assert_instance_count (js_runtime_state.assert->instance_count)
+#define assert_key_epoch (js_runtime_state.assert->key_epoch)
+#define assert_instances_roots_epoch (js_runtime_state.assert->instances_roots_epoch)
 
 static void js_assert_register_instance(Item instance) {
     uint64_t epoch = js_get_heap_epoch();
@@ -5112,21 +5112,21 @@ extern "C" void js_assert_reset(void) {
 // node:test module — basic test runner with mock support
 // =============================================================================
 
-#define node_test_namespace (js_runtime_state.assert.node_test_namespace)
-#define g_node_before_each_store (js_runtime_state.assert.before_each_store)
-#define g_node_after_each_store (js_runtime_state.assert.after_each_store)
-#define g_node_test_event_queue (js_runtime_state.assert.event_queue)
-#define g_node_test_total_count (js_runtime_state.assert.node_test_total_count)
-#define g_node_test_pass_count (js_runtime_state.assert.node_test_pass_count)
-#define g_node_test_fail_count (js_runtime_state.assert.node_test_fail_count)
-#define g_node_test_next_id (js_runtime_state.assert.node_test_next_id)
-#define g_node_test_roots_epoch (js_runtime_state.assert.node_test_roots_epoch)
+#define node_test_namespace (js_runtime_state.assert->node_test_namespace)
+#define g_node_before_each_store (js_runtime_state.assert->before_each_store)
+#define g_node_after_each_store (js_runtime_state.assert->after_each_store)
+#define g_node_test_event_queue (js_runtime_state.assert->event_queue)
+#define g_node_test_total_count (js_runtime_state.assert->node_test_total_count)
+#define g_node_test_pass_count (js_runtime_state.assert->node_test_pass_count)
+#define g_node_test_fail_count (js_runtime_state.assert->node_test_fail_count)
+#define g_node_test_next_id (js_runtime_state.assert->node_test_next_id)
+#define g_node_test_roots_epoch (js_runtime_state.assert->node_test_roots_epoch)
 
 #define MAX_NODE_TEST_HOOKS 64
-#define g_node_before_each_hooks (js_runtime_state.assert.before_each_hooks)
-#define g_node_after_each_hooks (js_runtime_state.assert.after_each_hooks)
-#define g_node_before_each_count (js_runtime_state.assert.before_each_count)
-#define g_node_after_each_count (js_runtime_state.assert.after_each_count)
+#define g_node_before_each_hooks (js_runtime_state.assert->before_each_hooks)
+#define g_node_after_each_hooks (js_runtime_state.assert->after_each_hooks)
+#define g_node_before_each_count (js_runtime_state.assert->before_each_count)
+#define g_node_after_each_count (js_runtime_state.assert->after_each_count)
 
 // forward decls used throughout
 static Item js_mock_fn_impl(Item original_fn);
@@ -5145,8 +5145,8 @@ static Item js_mock_timers_tick_impl(Item delay);
 // not share a registry or need a hot-path lock.
 // ---------------------------------------------------------------------------
 #define MAX_MOCK_SLOTS 64
-#define g_mock_slots (js_runtime_state.assert.mock_slots)
-#define g_mock_slot_count (js_runtime_state.assert.mock_slot_count)
+#define g_mock_slots (js_runtime_state.assert->mock_slots)
+#define g_mock_slot_count (js_runtime_state.assert->mock_slot_count)
 
 static int mock_alloc_slot(void) {
     // first try to reuse

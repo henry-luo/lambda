@@ -1,5 +1,5 @@
-import model: lambda.package.graph.model
-import normalize: lambda.package.graph.normalize
+import model: lambda.graph.model
+import normalize: lambda.graph.normalize
 
 fn property_values(value) => [
   for (group in model.element_children(value), property in model.element_children(group)

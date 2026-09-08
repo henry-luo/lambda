@@ -1,6 +1,6 @@
 # `@lambda/editor-js` — JS reference implementation of the Lambda/Radiant rich editor
 
-This sub-project is the **reference implementation** of the Stage-4 rich-document-with-inline-drawings editor described in [`vibe/Radiant_Editor_Stage4_Drawings.md`](../../vibe/Radiant_Editor_Stage4_Drawings.md). It is a parallel deliverable to `lambda/package/editor/`: same architecture, same module boundaries, same fixture-driven test corpus — written in TypeScript on top of React 19 + Vite + Vitest.
+This sub-project is the **reference implementation** of the Stage-4 rich-document-with-inline-drawings editor described in [`vibe/Radiant_Editor_Stage4_Drawings.md`](../../vibe/Radiant_Editor_Stage4_Drawings.md). It is a parallel deliverable to `lambda/editor/`: same architecture, same module boundaries, same fixture-driven test corpus — written in TypeScript on top of React 19 + Vite + Vitest.
 
 ## Why it exists
 
@@ -77,7 +77,7 @@ npm run typecheck     # tsc --noEmit
 
 ## Relationship to the Lambda port
 
-The Lambda implementation (`lambda/package/editor/`) is **deferred until this JS reference is green against the full corpus**. The two implementations will share fixtures via `test/lambda/editing/` re-using `test/editor-js/test/**/*.html` + `*.json`. Any divergence between JS and Lambda outputs is a Lambda bug; any divergence between JS and Slate/PM is documented in the relevant `NOTES.md`.
+The Lambda implementation (`lambda/editor/`) is **deferred until this JS reference is green against the full corpus**. The two implementations will share fixtures via `test/lambda/editing/` re-using `test/editor-js/test/**/*.html` + `*.json`. Any divergence between JS and Lambda outputs is a Lambda bug; any divergence between JS and Slate/PM is documented in the relevant `NOTES.md`.
 
 ## Status
 

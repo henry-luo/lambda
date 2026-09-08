@@ -8,6 +8,7 @@
 import { dispatchIntent } from '../input/intent.js'
 import { intentFromInputEvent } from './intent-from-input-event.js'
 import { renderDoc } from './render-vnode.js'
+import { historyShortcutForKey } from './history-shortcut.js'
 import { reconcileDoc } from './reconcile.js'
 import { setDomSelectionFromSource } from './dom-bridge.js'
 import {
@@ -83,12 +84,11 @@ export class EditorViewDom {
   // Undo/redo via Cmd/Ctrl+Z (+Shift) / Ctrl+Y — handled here rather than via
   // beforeinput because not all platforms emit historyUndo input events.
   private handleKeyDown = (ev: KeyboardEvent): void => {
-    const isMeta = ev.metaKey || ev.ctrlKey
-    if (!isMeta) return
-    if (ev.key === 'z' && !ev.shiftKey) {
+    const historyShortcut = historyShortcutForKey(ev)
+    if (historyShortcut === 'undo') {
       ev.preventDefault()
       this.dispatch({ type: 'undo' })
-    } else if ((ev.key === 'z' && ev.shiftKey) || ev.key === 'y') {
+    } else if (historyShortcut === 'redo') {
       ev.preventDefault()
       this.dispatch({ type: 'redo' })
     }

@@ -45,9 +45,14 @@ fi
 rm -rf ./release/lmd/input/latex/fonts
 cp -r ./lambda/input/latex/fonts ./release/lmd/input/latex/fonts
 
-# Step 2d: Copy Lambda packages
-rm -rf ./release/lmd/package
-cp -r ./lambda/package ./release/lmd/package
+# Step 2d: Copy Lambda packages using the logical `lambda.*` tree.
+for package_dir in chart dom editor graph latex openapi pdf; do
+    rm -rf "./release/lmd/$package_dir"
+    cp -r "./lambda/$package_dir" "./release/lmd/$package_dir"
+done
+rm -rf ./release/lmd/doc
+mkdir -p ./release/lmd/doc
+cp -r ./lambda/doc/math ./release/lmd/doc/math
 
 # Step 2c: Copy live-demo.html and referenced files
 # Copy live-demo.html

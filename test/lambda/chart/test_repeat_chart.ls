@@ -1,5 +1,5 @@
 // Test: repeat chart composition - scatter plot matrix
-import chart: lambda.package.chart.chart
+import chart: lambda.chart.chart
 
 let data = [
     <row a: 1, b: 2, c: 3>,

@@ -1,4 +1,4 @@
-// Port of lambda/package/editor/mod_transaction.ls
+// Port of lambda/editor/mod_transaction.ls
 //
 // A Transaction bundles steps + before/after doc snapshots + selection mapping.
 // Pure value: every modifier returns a new transaction.

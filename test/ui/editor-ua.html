@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Radiant UA contenteditable test</title>
+  <style>
+    :root {
+      --border: #d8dee8;
+      --surface: #fff;
+      --page: #eef2f7;
+      --bar: #f8fafc;
+      --text: #172033;
+      --muted: #64748b;
+      --accent: #2563eb;
+      --blocked: #fff7ed;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(960px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 24px 0 40px;
+    }
+    header {
+      margin-bottom: 16px;
+      padding: 18px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    h1, h2, p { margin: 0; }
+    h1 { font-size: 22px; }
+    h2 { font-size: 15px; margin-bottom: 6px; }
+    header p { color: var(--muted); margin-top: 6px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .panel {
+      margin-top: 12px;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .hint { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+    .ua-surface {
+      min-height: 34px;
+      padding: 8px 10px;
+      border: 1px solid #aeb9c9;
+      border-radius: 6px;
+      background: #fff;
+      outline: none;
+    }
+    .ua-surface:focus { border-color: var(--accent); box-shadow: 0 0 0 2px #dbeafe; }
+    .ua-surface[contenteditable="false"] { background: var(--blocked); }
+    .ua-surface p { margin: 0 0 8px; }
+    .ua-surface p:last-child { margin-bottom: 0; }
+    .ua-surface ul, .ua-surface ol { margin: 0; padding-left: 24px; }
+    .ua-surface li + li { margin-top: 4px; }
+    .report {
+      display: block;
+      margin-top: 8px;
+      padding: 7px 9px;
+      background: var(--bar);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: #334155;
+      font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    #event-log {
+      min-height: 32px;
+      white-space: pre-wrap;
+    }
+    #ready { color: #166534; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Radiant user-agent <code>contenteditable</code></h1>
+      <p>
+        These surfaces intentionally have observational listeners only. They do not cancel
+        <code>beforeinput</code>, call <code>execCommand</code>, or rewrite their contents.
+        Every edit below must therefore come from Radiant's package-owned UA default action.
+      </p>
+      <output id="ready" class="report">ready:0</output>
+      <output id="event-log" class="report">events:none</output>
+    </header>
+
+    <section class="panel">
+      <h2>Printable insertion and range replacement</h2>
+      <p class="hint">Typing uses the physical keydown → text-input route; the selection is supplied by the event driver.</p>
+      <div id="typing-surface" class="ua-surface" contenteditable="true" tabindex="0">hello</div>
+      <output id="typing-report" class="report"></output>
+      <div id="replace-surface" class="ua-surface" contenteditable="true" tabindex="0">abcdef</div>
+      <output id="replace-report" class="report"></output>
+    </section>
+
+    <section class="panel">
+      <h2>Deletion and structural default actions</h2>
+      <div id="backspace-surface" class="ua-surface" contenteditable="true" tabindex="0">abc</div>
+      <output id="backspace-report" class="report"></output>
+      <div id="forward-surface" class="ua-surface" contenteditable="true" tabindex="0">abc</div>
+      <output id="forward-report" class="report"></output>
+      <div id="paragraph-surface" class="ua-surface" contenteditable="true" tabindex="0"><p>hello</p></div>
+      <output id="paragraph-report" class="report"></output>
+      <div id="line-surface" class="ua-surface" contenteditable="true" tabindex="0"><p>hello</p></div>
+      <output id="line-report" class="report"></output>
+    </section>
+
+    <section class="panel">
+      <h2>Keyboard formatting, history, and clipboard</h2>
+      <div id="format-surface" class="ua-surface" contenteditable="true" tabindex="0">format me</div>
+      <output id="format-report" class="report"></output>
+      <div id="history-surface" class="ua-surface" contenteditable="true" tabindex="0">seed</div>
+      <output id="history-report" class="report"></output>
+      <div id="clipboard-surface" class="ua-surface" contenteditable="true" tabindex="0">tail</div>
+      <output id="clipboard-report" class="report"></output>
+    </section>
+
+    <section class="panel">
+      <h2>Composition and editing boundaries</h2>
+      <div id="composition-surface" class="ua-surface" contenteditable="true" tabindex="0">seed</div>
+      <output id="composition-report" class="report"></output>
+      <div id="plain-surface" class="ua-surface" contenteditable="plaintext-only" tabindex="0">plain</div>
+      <output id="plain-report" class="report"></output>
+      <div id="false-surface" class="ua-surface" contenteditable="true" tabindex="0">a<span id="false-island" contenteditable="false">LOCK</span>b</div>
+      <output id="false-report" class="report"></output>
+      <div id="list-surface" class="ua-surface" contenteditable="true" tabindex="0"><ul><li>one</li><li>two</li></ul></div>
+      <output id="list-report" class="report"></output>
+    </section>
+  </main>
+
+  <script>
+    (function() {
+      var surfaces = [
+        'typing', 'replace', 'backspace', 'forward', 'paragraph', 'line',
+        'format', 'history', 'clipboard', 'composition', 'plain', 'false', 'list'
+      ];
+      var eventLog = [];
+      var perSurfaceLog = {};
+
+      function surfaceFor(name) {
+        return document.getElementById(name + '-surface');
+      }
+
+      function reportFor(name) {
+        return document.getElementById(name + '-report');
+      }
+
+      function updateSurface(name) {
+        var surface = surfaceFor(name);
+        var report = reportFor(name);
+        if (!surface || !report) return;
+        var entries = perSurfaceLog[name] || [];
+        var html = surface.innerHTML;
+        surface.setAttribute('data-ua-text', surface.textContent);
+        surface.setAttribute('data-ua-html', html);
+        surface.setAttribute('data-ua-events', entries.join('|'));
+        report.textContent = 'text=' + surface.textContent + '|html=' + html +
+          '|events=' + (entries.length ? entries.join('|') : 'none');
+      }
+
+      function record(name, phase, event) {
+        var inputType = event && event.inputType ? ':' + event.inputType : '';
+        var data = event && event.data ? ':' + event.data : '';
+        var item = phase + inputType + data;
+        if (!perSurfaceLog[name]) perSurfaceLog[name] = [];
+        perSurfaceLog[name].push(item);
+        eventLog.push(name + ':' + item);
+        document.getElementById('event-log').textContent = 'events:' + eventLog.join('|');
+        updateSurface(name);
+      }
+
+      function install(name) {
+        var surface = surfaceFor(name);
+        if (!surface) return;
+        perSurfaceLog[name] = [];
+        surface.addEventListener('beforeinput', function(event) {
+          record(name, 'beforeinput', event);
+        });
+        surface.addEventListener('input', function(event) {
+          record(name, 'input', event);
+        });
+        surface.addEventListener('keydown', function(event) {
+          record(name, 'keydown:' + event.key, event);
+        });
+        surface.addEventListener('compositionstart', function(event) {
+          record(name, 'compositionstart', event);
+        });
+        surface.addEventListener('compositionupdate', function(event) {
+          record(name, 'compositionupdate', event);
+        });
+        surface.addEventListener('compositionend', function(event) {
+          record(name, 'compositionend', event);
+        });
+        updateSurface(name);
+      }
+
+      document.addEventListener('selectionchange', function() {
+        var selection = document.getSelection();
+        if (!selection || !selection.anchorNode) return;
+        for (var i = 0; i < surfaces.length; i++) {
+          var name = surfaces[i];
+          var surface = surfaceFor(name);
+          if (surface && surface.contains(selection.anchorNode)) {
+            eventLog.push(name + ':selectionchange');
+            document.getElementById('event-log').textContent = 'events:' + eventLog.join('|');
+            updateSurface(name);
+            return;
+          }
+        }
+      });
+
+      for (var i = 0; i < surfaces.length; i++) install(surfaces[i]);
+      document.getElementById('ready').textContent = 'ready:' + surfaces.length;
+    }());
+  </script>
+</body>
+</html>

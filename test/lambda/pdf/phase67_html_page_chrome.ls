@@ -1,6 +1,6 @@
 // Phase 67 - generated PDF HTML has page chrome and no page labels by default.
 
-import pdf: lambda.package.pdf.pdf
+import pdf: lambda.pdf.pdf
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

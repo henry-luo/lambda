@@ -1,4 +1,4 @@
-import normalize: lambda.package.graph.normalize
+import normalize: lambda.graph.normalize
 
 let valid = <graph direction: "LR", directed: true,
   <subgraph id: "group",

@@ -33,7 +33,7 @@ The Bootstrap gap doc is stale and its probe never runs; before touching the eng
 2. **New WPT runners** (expected to start substantially red — that is the point; the baseline pins current truth):
    - `test_wpt_cssom_view_gtest` over `ref/wpt/css/cssom-view/` — acceptance suite for Phases 1.
    - `test_wpt_dom_nodes_gtest` over `ref/wpt/dom/nodes/` (includes the `MutationObserver-*.html` files) — acceptance for Phase 2 fragments + Phase 4 MO.
-3. **Create `test/ui/dom/`** with one smoke fixture (load a small page, `click` toggles a class via inline JS, `assert_text`) plus a `make dom-ui` target mirroring the `editor-4c-view` loop in the `Makefile`. Wire nothing into aggregate CI yet.
+3. **Create `test/ui/dom/`** with one smoke fixture (load a small page, `click` toggles a class via inline JS, `assert_text`) plus a `make dom-ui` target mirroring the `editor-4c` loop in the `Makefile`. Wire nothing into aggregate CI yet.
 4. Record all numbers (bootstrap probe results, both new WPT baselines, `dom_jquery_lib` + `lib_popper` current failure signatures) in an implementation-log section appended to this doc.
 
 **Exit gate:** both runners registered with pinned baselines; `dom_bootstrap` executing; log section records the starting numbers.
@@ -183,7 +183,7 @@ Consolidation phase: real Bootstrap/jQuery pages driven purely by synthesized in
 | `jquery_ajax_insert.json`, `jquery_delegate.json`, `jquery_fx.json` | from Phases 2–3 | `assert_text`, `assert_style` |
 | `window_resize_reflow.json`, `scroll_events.json`, `transition_class.json` | from Phases 1, 3 | `assert_rect`, `assert_class` |
 
-**CI wiring:** `make dom-ui` runs the directory (same loop shape as `editor-4c-view`); add it to the radiant extended suite, and — once stable for a while — promote to `test-radiant-baseline`.
+**CI wiring:** `make dom-ui` runs the directory (same loop shape as `editor-4c`); add it to the radiant extended suite, and — once stable for a while — promote to `test-radiant-baseline`.
 
 **Exit gate:** all fixtures green headless; `make dom-ui` in CI.
 

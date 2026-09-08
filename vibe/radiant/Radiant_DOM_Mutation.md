@@ -613,7 +613,7 @@ Regression gates:
 
 - focused StateStore unit test executable for the rebind/prune helpers;
 - `make test-ui-automation` for the broader UI automation set;
-- `make editor-4c-view` to keep the editor drag-reorder and editing workflows
+- `make editor-4c` to keep the editor drag-reorder and editing workflows
   green.
 
 ## 10. Open Design Risks

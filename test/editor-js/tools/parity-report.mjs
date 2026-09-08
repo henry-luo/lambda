@@ -182,7 +182,7 @@ if (unmapped.length) {
 }
 L.push('')
 L.push('---')
-L.push('*Regenerate: `make editor-4c-parity` (or `node test/editor-js/tools/parity-report.mjs --refresh-oracle`).*')
+L.push('*Regenerate: `make editor-4c` (or `node test/editor-js/tools/parity-report.mjs --refresh-oracle`).*')
 
 fs.writeFileSync(reportOut, L.join('\n') + '\n')
 
