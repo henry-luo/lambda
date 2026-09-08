@@ -676,14 +676,14 @@ static Item js_named_native_function_source_item(const String* name) {
     return result;
 }
 JS_FORWARD_STATIC_ITEM(js_function_prototype_call_target, (), make_js_undefined, ())
-JS_FORWARD_STATIC_EXPRESSION(bool, js_function_has_vm_stack_source, (JsFunction* fn), (fn && fn->vm_stack_filename && fn->vm_stack_source))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_function_has_vm_stack_source, (JsFunction* fn), (fn && fn->eval_origin && fn->eval_origin->filename && fn->eval_origin->source))
 
 static bool js_function_push_vm_stack_source(JsFunction* fn) {
     if (!js_function_has_vm_stack_source(fn)) return false;
-    return js_eval_source_push_compact((Item){.item = s2it(fn->vm_stack_filename)},
-                                       (Item){.item = s2it(fn->vm_stack_source)},
-                                       fn->vm_stack_line_offset,
-                                       fn->vm_stack_column_offset) != 0;
+    return js_eval_source_push_compact((Item){.item = s2it(fn->eval_origin->filename)},
+                                       (Item){.item = s2it(fn->eval_origin->source)},
+                                       fn->eval_origin->line_offset,
+                                       fn->eval_origin->column_offset) != 0;
 }
 
 #define js_global_var_module_binding_keys (js_runtime_state.global_var_module_bindings->keys)
@@ -966,7 +966,7 @@ extern "C" Item js_bound_function_target(Item func_item) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) return ItemNull;
     JsFunction* fn = (JsFunction*)func_item.function;
     if (!fn || !(fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)) return ItemNull;
-    return fn->bound_target.item ? fn->bound_target : ItemNull;
+    return js_fn_bound(fn)->target.item ? js_fn_bound(fn)->target : ItemNull;
 }
 
 static Item js_bound_function_effective_new_target(Item callee, Item new_target) {
@@ -2228,7 +2228,7 @@ static int js_resolve_ta_type_from_ctor(Item ctor);
 static int js_resolve_ta_type_from_class(Item class_item) {
     if (get_type_id(class_item) != LMD_TYPE_FUNC) return -1;
     JsFunction* fn = (JsFunction*)class_item.function;
-    Item instance_proto = fn ? fn->class_instance_prototype : ItemNull;
+    Item instance_proto = js_fn_class(fn)->instance_prototype;
     if (instance_proto.item == ItemNull.item) {
         instance_proto = js_get_name_key(class_item, "prototype", 9);
     }
@@ -3379,11 +3379,11 @@ static Item js_construct_entry_class_function(Item callee, Item* args, int argc,
         if (!class_roots.valid()) return ItemNull;
 
         JsFunction* class_fn = (JsFunction*)callee_root.get().function;
-        bool ctor_own = class_fn && class_fn->class_constructor.item != ItemNull.item;
+        bool ctor_own = class_fn && js_fn_class(class_fn)->constructor.item != ItemNull.item;
         if (class_fn) {
-            ctor_root.set(class_fn->class_constructor);
-            proto_root.set(class_fn->class_instance_prototype);
-            super_root.set(class_fn->class_superclass);
+            ctor_root.set(js_fn_class(class_fn)->constructor);
+            proto_root.set(js_fn_class(class_fn)->instance_prototype);
+            super_root.set(js_fn_class(class_fn)->superclass);
         }
         if (proto_root.get().item == ItemNull.item) {
             result_root.set(js_get_name_key(callee_root.get(), "prototype", 9));
@@ -3548,8 +3548,10 @@ extern "C" void js_set_class_constructor(Item class_function, Item constructor_b
     JsFunction* fn = (JsFunction*)class_function.function;
     if (!fn) return;
     fn->flags |= JS_FUNC_FLAG_CLASS_CONSTRUCTOR;
-    fn->class_constructor = constructor_body;
-    js_function_root_item_if_needed(fn, &fn->class_constructor);
+    JsClassData* klass = js_fn_class_ensure(fn);
+    if (!klass) return;
+    klass->constructor = constructor_body;
+    js_function_root_item_if_needed(fn, &klass->constructor);
 }
 
 #define JS_SET_CLASS_ITEM(name, field) \
@@ -3557,11 +3559,13 @@ extern "C" void name(Item class_function, Item value) { \
     if (get_type_id(class_function) != LMD_TYPE_FUNC) return; \
     JsFunction* fn = (JsFunction*)class_function.function; \
     if (!fn) return; \
-    fn->field = value; \
-    js_function_root_item_if_needed(fn, &fn->field); \
+    JsClassData* klass = js_fn_class_ensure(fn); \
+    if (!klass) return; \
+    klass->field = value; \
+    js_function_root_item_if_needed(fn, &klass->field); \
 }
-JS_SET_CLASS_ITEM(js_set_class_instance_prototype, class_instance_prototype)
-JS_SET_CLASS_ITEM(js_set_class_superclass, class_superclass)
+JS_SET_CLASS_ITEM(js_set_class_instance_prototype, instance_prototype)
+JS_SET_CLASS_ITEM(js_set_class_superclass, superclass)
 #undef JS_SET_CLASS_ITEM
 
 extern "C" Item js_get_class_superclass(Item class_function) {
@@ -3570,7 +3574,7 @@ extern "C" Item js_get_class_superclass(Item class_function) {
     }
     JsFunction* fn = (JsFunction*)class_function.function;
     return (fn->flags & JS_FUNC_FLAG_CLASS_CONSTRUCTOR) != 0
-        ? fn->class_superclass : ItemNull;
+        ? js_fn_class(fn)->superclass : ItemNull;
 }
 
 extern "C" Item js_construct_value_defer_own_fields(Item callee,
@@ -4433,7 +4437,7 @@ static Item js_private_brand_owner(Item object, String* private_key, bool* out_f
         Item proto = ItemNull;
         if (get_type_id(candidate) == LMD_TYPE_FUNC) {
             JsFunction* candidate_fn = (JsFunction*)candidate.function;
-            proto = candidate_fn ? candidate_fn->class_instance_prototype : ItemNull;
+            proto = js_fn_class(candidate_fn)->instance_prototype;
         } else {
             proto = js_get_key_cstr(candidate, "prototype");
         }
@@ -4459,7 +4463,7 @@ static Item js_private_method_lookup_from_brand(Item receiver, Item key, String*
     Item proto = ItemNull;
     if (get_type_id(brand) == LMD_TYPE_FUNC) {
         JsFunction* brand_fn = (JsFunction*)brand.function;
-        proto = brand_fn ? brand_fn->class_instance_prototype : ItemNull;
+        proto = js_fn_class(brand_fn)->instance_prototype;
     } else {
         proto = js_get_key_cstr(brand, "prototype");
     }
@@ -11188,12 +11192,12 @@ Item js_intrinsic_function_to_string_body(Item callee, Item this_value,
         }
 #define JS_VALID_SOURCE_PTR(source) ((source) && \
     ((uintptr_t)(source) & 3) == 0 && (uintptr_t)(source) >= 0x1000)
-        if (!(fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS || fn->bound_args) &&
+        if (!(fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS || js_fn_bound(fn)->args) &&
             JS_VALID_SOURCE_PTR(fn->source_text) && fn->source_text->len > 0) {
             return (Item){.item = s2it(fn->source_text)};
         }
 #undef JS_VALID_SOURCE_PTR
-        if (!(fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS || fn->bound_args)) {
+        if (!(fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS || js_fn_bound(fn)->args)) {
             return js_named_native_function_source_item(fn->name);
         }
     }
@@ -13586,9 +13590,9 @@ extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallb
                 // definition-time heritage cache (D6.2.2v2).
                 return live_super;
             }
-            if (current_class && current_class->class_superclass.item != 0 &&
-                    current_class->class_superclass.item != ItemNull.item) {
-                return current_class->class_superclass;
+            if (current_class && js_fn_class(current_class)->superclass.item != 0 &&
+                    js_fn_class(current_class)->superclass.item != ItemNull.item) {
+                return js_fn_class(current_class)->superclass;
             }
             return live_super;
         }
@@ -13709,8 +13713,8 @@ static Item js_super_call_class_impl(Item callee, Item this_val, Item* args,
     if (callee_type == LMD_TYPE_FUNC) {
         if (js_is_class_constructor(callee)) {
             JsFunction* class_fn = (JsFunction*)callee.function;
-            Item superclass = class_fn ? class_fn->class_superclass : ItemNull;
-            Item constructor = class_fn ? class_fn->class_constructor : ItemNull;
+            Item superclass = js_fn_class(class_fn)->superclass;
+            Item constructor = js_fn_class(class_fn)->constructor;
             bool derived = superclass.item != ItemNull.item &&
                 get_type_id(superclass) != LMD_TYPE_NULL &&
                 get_type_id(superclass) != LMD_TYPE_UNDEFINED;
@@ -13811,9 +13815,9 @@ static bool js_call_use_common_lane(JsFunction* fn) {
         !(fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) || fn->native_call ||
         (fn->flags & (JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_GENERATOR |
             JS_FUNC_FLAG_ASYNC_GEN | JS_FUNC_FLAG_DERIVED_CTOR |
-            JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) || fn->with_env_depth > 0 ||
+            JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) || js_fn_with(fn)->depth > 0 ||
         (fn->flags & JS_FUNC_FLAG_USES_WITH) || fn->eval_initializer_context ||
-        fn->vm_stack_filename || fn->vm_stack_source) {
+        fn->eval_origin) {
         // The former call-lane classifier also disabled this shortcut for
         // derived constructors; preserve that invariant so super() still
         // enters the TDZ/new.target setup owned by the generic dispatcher.
@@ -13823,7 +13827,7 @@ static bool js_call_use_common_lane(JsFunction* fn) {
     // cheaper than this shortcut; only the home-class install still wins.
     // Recheck caller-dynamic facts at the edge: classifier metadata never
     // authorizes skipping caller with-scope isolation.
-    return js_with_depth_active() == 0 && fn->with_env_depth == 0 &&
+    return js_with_depth_active() == 0 && js_fn_with(fn)->depth == 0 &&
         !(fn->flags & JS_FUNC_FLAG_USES_WITH) && !fn->eval_initializer_context &&
         !js_function_has_vm_stack_source(fn);
 }
@@ -13962,13 +13966,13 @@ Item js_construct_entry_bound(Item func_item, Item* args, int arg_count,
     if (target_root.get().item == wrapper_root.get().item) {
         return js_throw_type_error("bound target is not a constructor");
     }
-    int total_argc = fn->bound_argc + arg_count;
+    int total_argc = js_fn_bound(fn)->argc + arg_count;
     RootSpan merged_roots(total_argc > 0 ? (size_t)total_argc : 0);
     Item* merged = total_argc > 0 ? merged_roots.items() : NULL;
     if (total_argc > 0 && !merged) return ItemError;
-    for (int i = 0; i < fn->bound_argc; i++) merged[i] = fn->bound_args[i];
+    for (int i = 0; i < js_fn_bound(fn)->argc; i++) merged[i] = js_fn_bound(fn)->args[i];
     for (int i = 0; i < arg_count; i++) {
-        merged[fn->bound_argc + i] = args ? args[i] : ItemNull;
+        merged[js_fn_bound(fn)->argc + i] = args ? args[i] : ItemNull;
     }
     // Bound [[Construct]] ignores [[BoundThis]], prepends the owned arguments,
     // and delegates through the target capability instead of redispatching by
@@ -13987,7 +13991,7 @@ Item js_call_entry_bound(Item func_item, Item this_val, Item* args,
     JsFunction* fn = get_type_id(func_item) == LMD_TYPE_FUNC
         ? (JsFunction*)func_item.function : NULL;
     if (!fn) return js_throw_type_error("is not a function");
-    int bound_argc = fn->bound_argc;
+    int bound_argc = js_fn_bound(fn)->argc;
     int total_argc = bound_argc + arg_count;
     RootFrame roots(3);
     Rooted<Item> wrapper_root(roots, func_item);
@@ -14001,7 +14005,7 @@ Item js_call_entry_bound(Item func_item, Item this_val, Item* args,
         return js_throw_type_error("bound target is not callable");
     }
     for (int i = 0; i < bound_argc; i++) {
-        merged[i] = fn->bound_args ? fn->bound_args[i] : ItemNull;
+        merged[i] = js_fn_bound(fn)->args ? js_fn_bound(fn)->args[i] : ItemNull;
     }
     for (int i = 0; i < arg_count; i++) {
         merged[bound_argc + i] = args ? args[i] : ItemNull;
@@ -14210,10 +14214,10 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     // Ordinary calls usually have no caller or callee with-scope. A compiled
     // with body is the exception: an early return bypasses its generated pop,
     // so its empty entry stack still needs restoration after the call.
-    bool switched_with_stack = !common_lane && (saved_with_depth > 0 || fn->with_env_depth > 0 ||
+    bool switched_with_stack = !common_lane && (saved_with_depth > 0 || js_fn_with(fn)->depth > 0 ||
         (fn->flags & JS_FUNC_FLAG_USES_WITH) != 0);
     if (switched_with_stack) {
-        js_with_set_stack(fn->with_env, fn->with_env_depth);
+        js_with_set_stack(js_fn_with(fn)->env, js_fn_with(fn)->depth);
     }
     // For generator functions: set up callee proto so js_generator_create uses fn.prototype
     // If fn.prototype is not an object, js_generator_create falls back to depth-2.
@@ -14551,7 +14555,7 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this,
     bound->param_count = -1;
     bound->formal_length = 0;
     bound->flags = JS_FUNC_FLAG_HAS_BOUND_THIS;
-    bound->bound_target = func_root.get();
+    js_fn_bound_ensure(bound)->target = func_root.get();
     bound->construct = js_is_constructor_internal(func_root.get())
         ? js_construct_entry_bound : NULL;
     Item bound_home_global = get_type_id(func_root.get()) == LMD_TYPE_FUNC
@@ -14565,10 +14569,10 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this,
         Item* owned_args = js_alloc_env(rooted_argc);
         if (!owned_args) return ItemError;
         bound = (JsFunction*)bound_root.get().function;
-        bound->bound_args = owned_args;
-        bound->bound_argc = rooted_argc;
+        js_fn_bound_ensure(bound)->args = owned_args;
+        js_fn_bound_ensure(bound)->argc = rooted_argc;
         for (int i = 0; i < rooted_argc; i++) {
-            owned_item_slot_store(bound->bound_args, rooted_argc, i,
+            owned_item_slot_store(js_fn_bound_ensure(bound)->args, rooted_argc, i,
                 (Item){.item = arg_roots[i] ? *arg_roots[i] : 0});
         }
     }
@@ -33073,11 +33077,11 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
     if (get_type_id(result) == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)result.function;
         fn->source_text = display_source;
-        fn->vm_stack_filename = get_type_id(eval_options.filename) == LMD_TYPE_STRING ?
-            it2s(eval_options.filename) : heap_create_name("<anonymous>", 11);
-        fn->vm_stack_source = heap_create_name(code_str->chars, code_str->len);
-        fn->vm_stack_line_offset = eval_options.line_offset;
-        fn->vm_stack_column_offset = eval_options.column_offset;
+        js_function_set_eval_origin(fn,
+            get_type_id(eval_options.filename) == LMD_TYPE_STRING
+                ? it2s(eval_options.filename) : heap_create_name("<anonymous>", 11),
+            heap_create_name(code_str->chars, code_str->len),
+            eval_options.line_offset, eval_options.column_offset);
         js_set_key_cstr(result, "cachedData", cached_data);
         js_set_key_cstr(result, "cachedDataProduced", (Item){.item = b2it(cached_data_produced)});
         js_set_key_cstr(result, "cachedDataRejected", (Item){.item = b2it(cached_data_rejected)});

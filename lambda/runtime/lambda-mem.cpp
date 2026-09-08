@@ -149,8 +149,16 @@ static void lambda_region_destroy_caches(Heap* heap) {
     }
 }
 
+extern "C" void js_function_gc_destroy(void* data);
+
 void heap_gc_destroy_external_payload(void* obj, uint16_t type_tag) {
     if (!obj) return;
+    if (type_tag == LMD_TYPE_FUNC) {
+        // A function value may own optional native payloads (JSCU20); the JS
+        // side knows which layout it is and what it owns.
+        js_function_gc_destroy(obj);
+        return;
+    }
     if (type_tag == LMD_TYPE_DECIMAL) {
         // Decimal wrappers can die during a collection; release the libmpdec
         // payload before the sweep unlinks the wrapper from all_objects.
@@ -428,6 +436,7 @@ static void heap_finish_init(void) {
     context->heap->gc->js_native_trace = js_native_map_gc_trace;
     context->heap->gc->js_native_destroy = js_native_map_gc_destroy;
     context->heap->gc->js_function_trace = js_function_gc_trace;
+    context->heap->gc->js_function_destroy = js_function_gc_destroy;
     context->heap->gc->js_function_compact = js_function_gc_compact;
     context->heap->gc->external_destroy = heap_gc_destroy_external_payload;
     err_set_heap_allocator(heap_calloc);

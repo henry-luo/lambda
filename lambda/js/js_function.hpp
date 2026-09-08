@@ -54,6 +54,34 @@ enum JsNativeCallPolicy : uint8_t {
     JS_NATIVE_CALL_BODY = 6,
 };
 
+// JSCU20 optional payloads. Each is present only on the values that need it,
+// so an ordinary closure carries three null words rather than eight fields.
+// Reads go through the null-safe accessors below; writes allocate.
+struct JsBoundData {
+    Item target;
+    Item* args;
+    int argc;
+};
+
+struct JsClassData {
+    Item constructor;
+    Item instance_prototype;
+    Item superclass;
+};
+
+struct JsWithData {
+    Item* env;
+    int depth;
+};
+
+// Source origin of a dynamically compiled function.
+struct JsEvalOrigin {
+    String* filename;
+    String* source;
+    int64_t line_offset;
+    int64_t column_offset;
+};
+
 struct JsFunction {
     TypeId type_id;
     uint32_t layout_magic;
@@ -63,9 +91,7 @@ struct JsFunction {
     int env_size;
     Item prototype;
     Item bound_this_store[2];
-    Item* bound_args;
-    int bound_argc;
-    Item bound_target;
+    JsBoundData* bound;
     String* name;
     int catalog_id;
     Item properties_map;
@@ -88,18 +114,15 @@ struct JsFunction {
     Item home_class;
     String* source_text;
     bool eval_initializer_context;
-    Item* with_env;
-    int with_env_depth;
-    String* vm_stack_filename;
-    String* vm_stack_source;
-    int64_t vm_stack_line_offset;
-    int64_t vm_stack_column_offset;
+    JsWithData* with;
+    // JSCU20: only a dynamically compiled function (eval / new Function / vm)
+    // has an origin, so ordinary closures carry one null word instead of four
+    // fields. Owned by this value and released by its destroy hook.
+    JsEvalOrigin* eval_origin;
     // Source classes are functions with an explicit construct capability.
     // Keeping their constructor body and instance prototype here removes the
     // former callable-Map protocol and leaves ordinary properties observable.
-    Item class_constructor;
-    Item class_instance_prototype;
-    Item class_superclass;
+    JsClassData* klass;
     Context* runtime_context;
     // AST bodies retain source-level semantics while using the ordinary JS
     // call kernel. The lexical environment is a precise GC edge.
@@ -116,7 +139,59 @@ struct JsFunction {
     uint8_t body_kind;
 };
 
+// A missing payload reads as all-zero, so call sites keep the shape they had
+// when these were inline fields and an unguarded read stays safe.
+inline const JsBoundData js_fn_bound_absent{};
+inline const JsClassData js_fn_class_absent{};
+inline const JsWithData js_fn_with_absent{};
+
+static inline const JsBoundData* js_fn_bound(const JsFunction* fn) {
+    return fn && fn->bound ? fn->bound : &js_fn_bound_absent;
+}
+static inline const JsClassData* js_fn_class(const JsFunction* fn) {
+    return fn && fn->klass ? fn->klass : &js_fn_class_absent;
+}
+static inline const JsWithData* js_fn_with(const JsFunction* fn) {
+    return fn && fn->with ? fn->with : &js_fn_with_absent;
+}
+
+JsBoundData* js_fn_bound_ensure(JsFunction* fn);
+JsClassData* js_fn_class_ensure(JsFunction* fn);
+JsWithData* js_fn_with_ensure(JsFunction* fn);
+
 #define JS_FUNCTION_LAYOUT_MAGIC 0x4A53464Eu
+
+// JSCUO6 -- inventory of what actually depends on this layout, so a field can
+// be moved with the readers known rather than guessed at.
+//
+// (1) Cross-layout discrimination is the ONLY hard constraint. Three records
+//     share the LMD_TYPE_FUNC tag and the `Item::function` (`Function*`) slot:
+//     Lambda's `Function`, this `JsFunction`, and `JsAccessorPair`. Every
+//     consumer that receives one of them as an Item reads `type_id` at 0 and
+//     then `layout_magic` at 4 to decide which record it holds
+//     (js_function_gc_trace / js_function_gc_compact in
+//     js_runtime_function.cpp, js_function_get_target/get_arity there, and
+//     the call kernel at js_runtime.cpp). Those two offsets must not move,
+//     and must stay identical across JsFunction and JsAccessorPair.
+// (2) No generated code reads a JsFunction field. JS MIR lowers every call to
+//     a named C helper (js_call_function_into and friends) and dispatches
+//     through `fn->invoke` in C, so unlike Lambda's `Function` -- whose
+//     `flags` word transpile-mir.cpp loads at a baked `offsetof` -- this
+//     record has no emitted-offset reader to preserve.
+// (3) The collector reaches this record only through the js_function_trace
+//     hook, which uses field names; the raw LAMBDA_GC_OFF_FUNCTION_* path in
+//     gc_heap.c runs only after that hook declines, i.e. for `Function`.
+//
+// The two historical pins below (func_ptr at 8, bound_this_store at 48) were
+// added with the scalar-GC-invariant work and back no reader found by this
+// inventory. They are kept as tripwires, not as an ABI contract: moving those
+// fields is safe once this block is updated in the same change.
+static_assert(offsetof(JsFunction, type_id) == 0,
+              "JsFunction type tag must sit where every Item consumer reads it");
+static_assert(offsetof(JsFunction, layout_magic) == 4,
+              "JsFunction layout discriminator is read before any field access");
+static_assert(offsetof(JsAccessorPair, layout_magic) == offsetof(JsFunction, layout_magic),
+              "accessor pairs share the FUNC tag and must discriminate at the same offset");
 static_assert(offsetof(JsFunction, func_ptr) == 8,
               "JsFunction prefix must preserve the compiled-function ABI");
 static_assert(offsetof(JsFunction, bound_this_store) == 48,

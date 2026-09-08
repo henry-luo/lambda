@@ -850,6 +850,69 @@ universal; it must not be removed earlier." It is universal as of
 
 ### 4.3 Rulings
 
+> **JSCUO6 CLOSED and JSCU20 (first payload) LANDED 2026-09-08.**
+>
+> The inventory the design demanded before item 4 moves a field is now an
+> enforced assert block in `js_function.hpp`, and it corrects the design's
+> risk assumption. Three records share the `LMD_TYPE_FUNC` tag and the
+> `Item::function` slot -- Lambda's `Function`, `JsFunction` and
+> `JsAccessorPair` -- and every consumer discriminates by reading `type_id`
+> at 0 then `layout_magic` at 4. **Those two offsets are the only hard
+> constraint on `JsFunction`.** No generated code reads a `JsFunction` field:
+> JS MIR lowers every call to a named C helper and dispatches through
+> `fn->invoke` in C, unlike Lambda's `Function`, whose `flags` word
+> `transpile-mir.cpp` loads at a baked `offsetof`. The collector reaches
+> `JsFunction` only through the `js_function_trace` hook, so the raw
+> `LAMBDA_GC_OFF_FUNCTION_*` path applies to `Function` alone. The two
+> historical pins (`func_ptr` at 8, `bound_this_store` at 48) back no reader
+> this inventory could find and are kept as tripwires, not as an ABI
+> contract. **Item 4's `JsFunction` half is therefore much less
+> ABI-constrained than §4.2 assumed.**
+>
+> The first optional payload follows: `JsEvalOrigin` (filename, source, line
+> and column offsets) is allocated only for a dynamically compiled function,
+> so an ordinary closure carries one null word instead of four fields.
+> `sizeof(JsFunction)` **328 → 304 B**. Two supporting facts made this more
+> than a field move: function values had **no finalizer** (`external_destroy`
+> had no `LMD_TYPE_FUNC` arm), so any native payload would have leaked -- a
+> `js_function_destroy` GC hook now exists beside `js_function_trace` and
+> `js_function_compact`, which is the lifecycle every later payload needs;
+> and pool-backed root registration is one-shot, so an origin attached after
+> finalization would never have been rooted -- the setter roots the payload's
+> own slots instead of re-entering that path.
+>
+> Three more payloads follow the same shape: `JsBoundData` (target, owned
+> argument vector, count), `JsClassData` (constructor, instance prototype,
+> superclass) and `JsWithData` (captured `with` env and depth). Each is
+> absent on an ordinary closure. Reads go through null-safe accessors
+> (`js_fn_bound`/`js_fn_class`/`js_fn_with`) that return a shared zeroed
+> record when the payload is missing, so an unguarded read that was safe as
+> an inline field stays safe; only writes allocate. `sizeof(JsFunction)`
+> **328 → 264 B**.
+>
+> Gates: test262 baseline **0 regressions** (40261/40261); rooting gate exit
+> 0; JS gtest **370/370**; the callable-catalog gate clean; `new Function`,
+> error stacks, `vm.runInThisContext`, a 150-iteration dynamic-function
+> churn, two-level `bind` chains with correct `.length`, class inheritance
+> through `super`, and `with`-scope capture all correct under
+> `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`.
+>
+> **What remains of item 4.** `runtime_context` is *not* removable after all:
+> it is the `Context*` actually handed to generated code on the
+> `MIR_CONTEXT_ABI` path, and its guard needs the captured owner to catch a
+> wrong-thread invocation -- the same finding as JSCU9's generator guard, and
+> kept for the same reason. The AST group (`ast_function`, `ast_script`,
+> `interp_env`, the two lexical Items and three flags, 42 JsFunction sites
+> concentrated in the interpreter) is a further ~48 B. Reaching the ≤ 160 B
+> ratchet then needs **JSCU19 itself**: the shared `FunctionCode` /
+> `JsCallableCode` record for the immutable code facts, which is item 4's
+> centrepiece, touches the call kernel, and wants the code identity to be
+> shared across closures of one source rather than copied per value. That is
+> a substantial change of its own and is deliberately left as the next unit
+> rather than rushed onto the end of this one.
+
+### 4.3 Rulings (original)
+
 **JSCU19 — One `FunctionCode` header, extended by `JsCallableCode`.**
 Non-GC, immutable after publication, owned by the module artifact (Lambda
 `Script`; JS `JsCompiledArtifact` from JSCU16) so it outlives every value

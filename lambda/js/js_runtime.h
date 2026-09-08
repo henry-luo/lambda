@@ -1307,6 +1307,9 @@ void js_private_field_init_end(void);
 }
 
 Item make_string_item(const char* str, int len);
+struct JsFunction; struct String;
+extern "C" void js_function_set_eval_origin(struct JsFunction* fn, String* filename,
+        String* source, int64_t line_offset, int64_t column_offset);
 Item make_string_item(const char* str);
 // Interned property keys. These go through the name pool, so they keep name
 // identity and need no RootFrame — unlike make_string_item / js_get_key_cstr,
