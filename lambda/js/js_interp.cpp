@@ -1119,7 +1119,7 @@ static NameEntry* js_interp_find_binding(JsInterpFrame* frame, String* name);
 static bool js_interp_is_undefined(Item value);
 
 static int js_interp_captured_with_depth(const JsInterpFrame* frame) {
-    return frame && frame->active_function ? frame->active_function->with_env_depth : 0;
+    return frame && frame->active_function ? js_fn_with(frame->active_function)->depth : 0;
 }
 
 static bool js_interp_binding_precedes_captured_with(const JsInterpFrame* frame,

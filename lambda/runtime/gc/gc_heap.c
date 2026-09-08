@@ -505,6 +505,7 @@ gc_heap_t* gc_heap_create(void) {
     gc->js_native_trace = NULL;
     gc->js_native_destroy = NULL;
     gc->js_function_trace = NULL;
+    gc->js_function_destroy = NULL;
     gc->external_destroy = NULL;
     // Initialize bump-pointer allocator
     gc->bump_blocks = NULL;

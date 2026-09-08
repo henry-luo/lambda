@@ -5574,7 +5574,7 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
             // instance testing delegates to the stored target's instanceof
             // algorithm instead of interpreting the absent payload as data.
             RootFrame roots(1);
-            Rooted<Item> target_root(roots, right_fn->bound_target);
+            Rooted<Item> target_root(roots, js_fn_bound(right_fn)->target);
             if (target_root.get().item == ItemNull.item ||
                     target_root.get().item == right.item) {
                 return js_throw_type_error("Bound target is not callable");
@@ -16675,8 +16675,6 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     fn->prototype = ItemNull;
     // NOTE: bound_this left as 0 (from pool_calloc). Do NOT set to ItemNull
     // because ItemNull.item is non-zero and bound check uses truthy test.
-    fn->bound_args = NULL;
-    fn->bound_argc = 0;
     fn->name = heap_create_name(name, strlen(name));
     // Constructor-cache publication is the point where call and construct
     // capabilities become immutable executable metadata under D6.2.2v2.
