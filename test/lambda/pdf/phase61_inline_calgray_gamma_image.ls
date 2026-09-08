@@ -1,6 +1,6 @@
 // Phase 61 - inline CalGray image pixels apply Gamma like content colors.
 
-import image: lambda.package.pdf.image
+import image: lambda.pdf.image
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

@@ -1,7 +1,7 @@
 // Phase 28 — WinAnsi font encoding fallback for text without ToUnicode.
 
-import font:   lambda.package.pdf.font
-import interp: lambda.package.pdf.interp
+import font:   lambda.pdf.font
+import interp: lambda.pdf.interp
 
 fn name(s) { { kind: "name", value: s } }
 fn str(s) { { kind: "string", value: s } }

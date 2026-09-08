@@ -3,7 +3,7 @@
 // This file was `editing_dom_handler.cpp`, a native editing implementation that
 // decided what each `beforeinput` intent should do to a contenteditable. None of
 // that survives: inserts, replacements, both delete intents and every
-// composition intent belong to `lambda/package/dom/dom_edit.ls`.
+// composition intent belong to `lambda/dom/dom_edit.ls`.
 //
 // What is here is the geometry and mutation mechanism the package drives —
 // resolving boundaries to a text node, splicing that node, creating one at an
@@ -1258,7 +1258,7 @@ bool dom_edit_insert_at_boundary_u16(DomEditInvocation* invocation,
 // a range in an element is the first *structural* one, and it is what full UA
 // editing needs: `bold` wraps, `unbold` unwraps, and the same pair underlies
 // every inline command. Which tag a command wraps in, and whether it toggles on
-// or off, stays in `lambda/package/dom/commands.ls` — what is here is the tree
+// or off, stays in `lambda/dom/commands.ls` — what is here is the tree
 // surgery, mechanism the way the splice is.
 // ---------------------------------------------------------------------------
 

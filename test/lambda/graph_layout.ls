@@ -1,4 +1,4 @@
-import graph: lambda.package.graph.graph
+import graph: lambda.graph.graph
 
 let result = graph.layout({
   nodes: [

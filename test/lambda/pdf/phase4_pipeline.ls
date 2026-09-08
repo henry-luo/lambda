@@ -10,7 +10,7 @@
 // so we don't depend on pdf_parse_content_stream operand shapes here;
 // that path is already covered by phase2/phase3 tests.
 
-import interp: lambda.package.pdf.interp
+import interp: lambda.pdf.interp
 
 fn ref(n) {
     { type: "indirect_ref", object_num: n }

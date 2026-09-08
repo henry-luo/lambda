@@ -86,7 +86,7 @@ On **COMPLETE**, the just-finished `pending_input` is appended to `repl_history`
 
 ## 7. Module resolution, parallel precompile, and the registries
 
-**Path resolution.** `resolve_module_path` (`runner.cpp:751`) maps an import token to a canonical absolute path: built-ins `math`/`io` and bare-URI (`'...'`) imports return NULL (skipped); a relative `.foo.bar` becomes `<import_dir>/foo/bar.ls`; an absolute `lambda.package.x` has its first segment replaced with `g_lambda_home`, dots turned to slashes, `.ls` appended; the result is canonicalized via `file_realpath`. `g_lambda_home` defaults to `./lambda` (dev) or `./lmd` (release) and is overridable by the `LAMBDA_HOME` env var, resolved once by `lambda_home_init` (`runner.cpp:57`).
+**Path resolution.** `resolve_module_path` (`runner.cpp:751`) maps an import token to a canonical absolute path: built-ins `math`/`io` and bare-URI (`'...'`) imports return NULL (skipped); a relative `.foo.bar` becomes `<import_dir>/foo/bar.ls`; an absolute `lambda.x` has its first segment replaced with `g_lambda_home`, dots turned to slashes, `.ls` appended; the result is canonicalized via `file_realpath`. `g_lambda_home` defaults to `./lambda` (dev) or `./lmd` (release) and is overridable by the `LAMBDA_HOME` env var, resolved once by `lambda_home_init` (`runner.cpp:57`).
 
 **Dedup & circular detection.** `load_script` keys `runtime->scripts` by canonical path; a hit whose `is_loading` flag is still set is a circular import and is rejected (`runner.cpp:1134`–`1142`). The same structure serves as the compile cache.
 

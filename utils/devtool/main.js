@@ -732,7 +732,7 @@ class LayoutDevTool {
     const scriptPath = path.join(outputDir, `${outputBase}_measure_width.ls`);
     const escapedPdf = this.escapeLambdaString(pdfFile);
     const script =
-      'import coords: lambda.package.pdf.coords\n' +
+      'import coords: lambda.pdf.coords\n' +
       `let doc = input("${escapedPdf}", 'pdf') ^ { null }\n` +
       'fn max_width(pages, i, n, cur) {\n' +
       '    if (i >= n) { cur }\n' +

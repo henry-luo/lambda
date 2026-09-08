@@ -1,7 +1,7 @@
 // F3: constraint-validation predicates from the dom package, exercised
 // headlessly. The engine-coupled half (reading a live control, writing
 // :valid/:invalid) is covered by the UI-automation tests instead.
-import validate: lambda.package.dom.validate
+import validate: lambda.dom.validate
 
 {
   email: [

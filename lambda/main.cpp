@@ -1180,7 +1180,7 @@ static char* build_pdf_to_html_bridge_script(const char* pdf_file, const char* o
 
     const char* opts = opts_expr ? opts_expr : "null";
     int needed = snprintf(nullptr, 0,
-        "import pdf: lambda.package.pdf.pdf\n"
+        "import pdf: lambda.pdf.pdf\n"
         "let doc = input(\"%s\", 'pdf') ^ { null }\n"
         "pdf.pdf_to_html(doc, %s)\n",
         escaped_pdf, opts);
@@ -1196,7 +1196,7 @@ static char* build_pdf_to_html_bridge_script(const char* pdf_file, const char* o
         return nullptr;
     }
     snprintf(script_buf, (size_t)needed + 1,
-        "import pdf: lambda.package.pdf.pdf\n"
+        "import pdf: lambda.pdf.pdf\n"
         "let doc = input(\"%s\", 'pdf') ^ { null }\n"
         "pdf.pdf_to_html(doc, %s)\n",
         escaped_pdf, opts);
@@ -1218,10 +1218,10 @@ static char* build_latex_to_html_bridge_script(const char* latex_file,
     const char* font = font_option ? font_option : "default";
     bool has_options = full_document || font_option;
     const char* format = has_options ?
-        "import latex: .lambda.package.latex.latex\n"
+        "import latex: .lambda.latex.latex\n"
         "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
         "latex.render_to_html(ast, {standalone: %s, font_option: \"%s\"})\n" :
-        "import latex: .lambda.package.latex.latex\n"
+        "import latex: .lambda.latex.latex\n"
         "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
         "latex.render_to_html(ast, null)\n";
     int needed = has_options

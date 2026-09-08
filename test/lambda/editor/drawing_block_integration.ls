@@ -3,11 +3,11 @@
 // is an atomic, editable embed (flow-mode descends into it; its shapes are the
 // selectable units) and that a node-selection on the drawing deletes it as a
 // whole block.
-import lambda.package.editor.mod_doc
-import lambda.package.editor.mod_source_pos
-import lambda.package.editor.mod_dom_bridge
-import lambda.package.editor.mod_doc_schema
-import lambda.package.editor.mod_editor
+import lambda.editor.mod_doc
+import lambda.editor.mod_source_pos
+import lambda.editor.mod_dom_bridge
+import lambda.editor.mod_doc_schema
+import lambda.editor.mod_editor
 
 // 1. registry wiring: editor_schemas.doc is the drawing-capable schema
 "registry_has_doc:"; editor_schemas.doc.drawing != null

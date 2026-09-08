@@ -1,6 +1,6 @@
 // Phase 70 - PDF line width 0 emits an explicit SVG hairline.
 
-import interp: lambda.package.pdf.interp
+import interp: lambda.pdf.interp
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

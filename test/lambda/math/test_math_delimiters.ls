@@ -1,8 +1,8 @@
 // test_math_delimiters.ls — Test delimiter rendering
 // Coverage: atoms/delimiters.ls — render_stretchy, render_at_scale
 
-import delim: lambda.package.math.atoms.delimiters
-import box: lambda.package.math.box
+import delim: lambda.doc.math.atoms.delimiters
+import box: lambda.doc.math.box
 
 "===== MATH DELIMITER TESTS ====="
 

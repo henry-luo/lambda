@@ -13,7 +13,7 @@
 
 Radiant delivers events to handlers through **three coexisting flows**:
 
-1. **Lambda behavior templates** — UA default actions in `lambda/package/dom/` (`form.ls`, `caret.ls`, …), matched by element selector.
+1. **Lambda behavior templates** — UA default actions in `lambda/dom/` (`form.ls`, `caret.ls`, …), matched by element selector.
 2. **JS DOM event handlers** — `addEventListener` listeners and `on<type>` IDL handlers, dispatched by the JS realm's own 3-phase dispatcher.
 3. **Lambda author template handlers** — a `.ls` page's `view`/`edit` templates that *generate* the DOM through the render map and handle events on the elements they produced.
 
@@ -36,7 +36,7 @@ Facts the unification builds on, all landed:
 
 ### 2.2 Flow 1 — behavior templates (UA default actions)
 
-**Registration.** `lambda/package/dom/dom.ls` (entry; imports `form.ls`, which imports `validate`/`editing`/`aria`/`ime`/`menu`/`caret`/`keymap`/`dom_edit`/`commands`/`submit`/`details`). Radiant loads it once per document, lazily, on the **first discrete event** (`radiant_dom_package_ensure`, `event.cpp:2612`): it runs `import dom: lambda.package.dom.dom` via `run_script_mir` into the document's one runtime, with `template_registry_set_behavior_mode(true)` raised for the span of the load — so "is this UA behavior" is decided by **provenance, not syntax** (`TemplateEntry.is_behavior`, `template_registry.h:60`). Behavior templates are never selected by `apply()`; they attach at dispatch time to elements they did not produce. `RADIANT_DOM_PKG=0` disables the package wholesale. A script-less page gets an evaluator created on demand, and only when the target is something the package governs — a form control, a rich editing surface, or `details > summary` (EO4/EO6 + the package-governs predicate, `event.cpp:2672`).
+**Registration.** `lambda/dom/dom.ls` (entry; imports `form.ls`, which imports `validate`/`editing`/`aria`/`ime`/`menu`/`caret`/`keymap`/`dom_edit`/`commands`/`submit`/`details`). Radiant loads it once per document, lazily, on the **first discrete event** (`radiant_dom_package_ensure`, `event.cpp:2612`): it runs `import dom: lambda.dom.dom` via `run_script_mir` into the document's one runtime, with `template_registry_set_behavior_mode(true)` raised for the span of the load — so "is this UA behavior" is decided by **provenance, not syntax** (`TemplateEntry.is_behavior`, `template_registry.h:60`). Behavior templates are never selected by `apply()`; they attach at dispatch time to elements they did not produce. `RADIANT_DOM_PKG=0` disables the package wholesale. A script-less page gets an evaluator created on demand, and only when the target is something the package governs — a form control, a rich editing surface, or `details > summary` (EO4/EO6 + the package-governs predicate, `event.cpp:2672`).
 
 **Dispatch.** After the author tier and only if `!defaultPrevented`: `dispatch_behavior_handler` (`event.cpp:2872`) → `behavior_match_walk` (`:2831`) walks target→root over real DOM parents, skipping synthetic elements, and selector-matches each element's Mark source against the behavior registry for a template that declares this event name (`template_registry_match_behavior` — most-specific template per element; specificity model `TMPL_SPEC_*`). Properties:
 

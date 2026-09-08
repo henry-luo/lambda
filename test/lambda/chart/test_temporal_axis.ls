@@ -1,5 +1,5 @@
 // Test: temporal x-axis with datetime data
-import chart: lambda.package.chart.chart
+import chart: lambda.chart.chart
 
 let spec =
 <chart width: 400, height: 300, title: "Temperature Over Time",

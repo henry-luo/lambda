@@ -16,7 +16,7 @@
 The web-platform host code — ~28.3k lines across 20 files — lives in `lambda/js/` under `js_*` names, yet after F17–F20 it is no longer JS-specific in any honest sense:
 
 - The **event record** is one native record both realms read (ES24); the **author cascade** in `js_dom_events.cpp` dispatches JS listeners *and* Lambda author templates in one walk (ES23/F18).
-- The **behavior package** (`lambda/package/dom/*.ls`) is the UA tier over the same mechanism (ES22), reaching it through `radiant.*` waist primitives.
+- The **behavior package** (`lambda/dom/*.ls`) is the UA tier over the same mechanism (ES22), reaching it through `radiant.*` waist primitives.
 - The **wrapper vocabulary** is shared: `~` in a behavior handler and `el` in page JS are the same branded `dom_node` VMap (D7.4.1–D7.4.4).
 
 But the *code architecture* still says otherwise. The same `js_dom.cpp` bodies are reached through three different doors:
@@ -184,7 +184,7 @@ All moved symbols rename `js_dom_*` → `dom_*`; the un-prefixed browser accesso
 
 ### ES36 (ratified 2026-09-01) — the Lambda `import dom` module
 
-A new Jube **static module `"dom"`** (`lambda/dom/dom_module.cpp`, registered beside `radiant` in `jube_register_builtin_modules()`) exposes the DOM API to Lambda scripts. Bare `import dom` resolves through the Jube registry; no collision with the behavior package, which is only ever imported by full path (`lambda.package.dom.dom`).
+A new Jube **static module `"dom"`** (`lambda/dom/dom_module.cpp`, registered beside `radiant` in `jube_register_builtin_modules()`) exposes the DOM API to Lambda scripts. Bare `import dom` resolves through the Jube registry; no collision with the behavior package, which is only ever imported by full path (`lambda.dom.dom`).
 
 **Surface** (~28 functions, snake_case, ≤4 args per the DOM_Pkg §4.3 waist budget; signatures in Lambda type syntax per the native-module convention):
 

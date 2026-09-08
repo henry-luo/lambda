@@ -1,7 +1,7 @@
 // Structurizr JSON and Lambda C4 Workspace Mark to one semantic comparison value.
 
-import model: lambda.package.graph.model
-import structurizr: lambda.package.graph.structurizr.structurizr
+import model: lambda.graph.model
+import structurizr: lambda.graph.structurizr.structurizr
 
 fn children(value, wanted = null) => [
   for (child in model.element_children(value)

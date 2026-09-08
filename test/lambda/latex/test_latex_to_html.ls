@@ -1,7 +1,7 @@
 // test_latex_to_html.ls — Test HTML serialization
 // Coverage: to_html.ls — to_html (serialize element tree to HTML string)
 
-import to_html: lambda.package.latex.to_html
+import to_html: lambda.latex.to_html
 
 "===== LATEX TO_HTML TESTS ====="
 

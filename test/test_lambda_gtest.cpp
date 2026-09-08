@@ -303,6 +303,10 @@ TEST(LambdaNegativeTests, test_bare_vector_comparison_error) {
     test_lambda_script_expects_error("test/lambda/negative/semantic/bare_vector_comparison.ls");
 }
 
+TEST(LambdaNegativeTests, test_lambda_namespace_root_reserved) {
+    test_lambda_script_expects_error("test/lambda/negative/semantic/lambda_namespace_root.ls");
+}
+
 TEST(LambdaNegativeTests, test_condition_lint_masks) {
     const char* script_path = "test/lambda/negative/semantic/condition_lint_masks.ls";
     const char* args[] = {LAMBDA_EXE, script_path, NULL};

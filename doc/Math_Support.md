@@ -20,7 +20,7 @@ let ast = input("\\frac{a+b}{c}", 'math')
 | `'math-latex'`  | Explicit LaTeX math                      |
 | `'math-ascii'`  | ASCII Math flavor (see §7)               |
 
-The result is a Lambda element tree rooted at a `math` element, which can be rendered to HTML via the `lambda.package.math` package.
+The result is a Lambda element tree rooted at a `math` element, which can be rendered to HTML via the `lambda.doc.math` package.
 
 ### 1.2 Math in Markdown
 
@@ -54,12 +54,12 @@ let doc = input('./paper.tex', 'latex')
 
 ## 2. Rendering Math to HTML
 
-Math is rendered to HTML using the `lambda.package.math` package. The package converts the parsed AST into a MathLive-compatible `<span>` element tree, which can be serialised with `format(result, 'html')`.
+Math is rendered to HTML using the `lambda.doc.math` package. The package converts the parsed AST into a MathLive-compatible `<span>` element tree, which can be serialised with `format(result, 'html')`.
 
 ### 2.1 Lambda API
 
 ```lambda
-import math: lambda.package.math.math
+import math: lambda.doc.math.math
 
 // Parse and render in one step
 let ast     = input("\\sum_{k=1}^{n} k^2", 'math')

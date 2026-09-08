@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Generate lambda/package/math/metrics_data.ls from MathLive's font-metrics-data.ts.
+// Generate lambda/doc/math/metrics_data.ls from MathLive's font-metrics-data.ts.
 // Per-character metrics [depth, height, italic, skew, width] for:
 //   - Main-Regular (cmr)    — upright Roman / non-italic text
 //   - Math-Italic (cmmi)    — italic math letters
@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 const SRC = path.join(PROJECT_ROOT, 'ref/mathlive/src/core/font-metrics-data.ts');
-const OUT = path.join(PROJECT_ROOT, 'lambda/package/math/metrics_data.ls');
+const OUT = path.join(PROJECT_ROOT, 'lambda/doc/math/metrics_data.ls');
 
 const text = fs.readFileSync(SRC, 'utf8');
 

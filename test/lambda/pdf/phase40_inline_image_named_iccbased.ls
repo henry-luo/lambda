@@ -1,6 +1,6 @@
 // Phase 40 — inline images resolve named page ColorSpace resources.
 
-import interp: lambda.package.pdf.interp
+import interp: lambda.pdf.interp
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

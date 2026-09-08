@@ -1,6 +1,6 @@
 // Test: histogram from Vega-Lite JSON with bin + count
-import vega: lambda.package.chart.vega
-import chart: lambda.package.chart.chart
+import vega: lambda.chart.vega
+import chart: lambda.chart.chart
 
 let vl = {
     width: 400,

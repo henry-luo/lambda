@@ -82,8 +82,8 @@ export function mathlive_expected_error(formula) {
 function build_lambda_math_script(formula, display) {
   const formula_literal = JSON.stringify(formula);
   const render_function = display ? 'render_display' : 'render_inline';
-  return `import math_pkg: lambda.package.math.math
-import html_ser: lambda.package.latex.to_html
+  return `import math_pkg: lambda.doc.math.math
+import html_ser: lambda.latex.to_html
 
 let formula = ${formula_literal}
 let parsed = parse(formula, {type: "math", flavor: "latex"}) ^ { ^ }

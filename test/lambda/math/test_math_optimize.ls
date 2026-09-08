@@ -1,7 +1,7 @@
 // test_math_optimize.ls — Test math box coalescing optimization
 // Coverage: optimize.ls — coalesce (merge adjacent styled spans)
 
-import opt: lambda.package.math.optimize
+import opt: lambda.doc.math.optimize
 
 "===== MATH OPTIMIZE TESTS ====="
 

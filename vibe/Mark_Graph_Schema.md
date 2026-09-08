@@ -196,7 +196,7 @@ Canonical consumers use these children as the authority. Legacy `label` and
 but do not override `<label>` or `<content>`. Normalization is recursive and
 idempotent, and preserves unrelated attributes.
 
-`lambda.package.graph.schema` enforces the structural Graph IR boundary before
+`lambda.graph.schema` enforces the structural Graph IR boundary before
 normalization rebuilds the tree. It validates known attribute types and enum
 values, required node/subgraph identities and edge endpoints, permitted child
 placement, and the cardinality of canonical `<label>/<content>` pairs. Unknown

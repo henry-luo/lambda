@@ -1,4 +1,4 @@
-import graph: lambda.package.graph.layout
+import graph: lambda.graph.layout
 
 fn placement(result, id) => [for (item in result.placements where item.id == id) item][0]
 

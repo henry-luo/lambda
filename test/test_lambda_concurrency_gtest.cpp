@@ -728,8 +728,8 @@ typedef struct SharedModuleStressCase {
 // mark.type reaches a string-annotated chart helper; Lambda single-quoted
 // literals are symbols and must not be used for this fixture's mark names.
 static const char* kSharedModuleStressChartBar =
-    "import vega: lambda.package.chart.vega\n"
-    "import chart: lambda.package.chart.chart\n"
+    "import vega: lambda.chart.vega\n"
+    "import chart: lambda.chart.chart\n"
     "let spec = vega.convert({width: 120, height: 80, data: {values: "
     "[{category: 'A', amount: 2}, {category: 'B', amount: 5}]}, mark: "
     "{type: \"bar\"}, encoding: {x: {field: 'category', type: 'nominal'}, "
@@ -737,8 +737,8 @@ static const char* kSharedModuleStressChartBar =
     "len(format(chart.render_spec(spec), 'xml'))\n";
 
 static const char* kSharedModuleStressChartLine =
-    "import vega: lambda.package.chart.vega\n"
-    "import chart: lambda.package.chart.chart\n"
+    "import vega: lambda.chart.vega\n"
+    "import chart: lambda.chart.chart\n"
     "let spec = vega.convert({width: 120, height: 80, data: {values: "
     "[{x: 0, y: 3}, {x: 1, y: 7}, {x: 2, y: 4}]}, mark: {type: \"line\"}, "
     "encoding: {x: {field: 'x', type: 'quantitative'}, y: {field: 'y', "
@@ -746,12 +746,12 @@ static const char* kSharedModuleStressChartLine =
     "len(format(chart.render_spec(spec), 'xml'))\n";
 
 static const char* kSharedModuleStressPdfPageCount =
-    "import pdf: lambda.package.pdf.pdf\n"
+    "import pdf: lambda.pdf.pdf\n"
     "let doc = input('test/input/test.pdf', 'pdf') ^ { null }\n"
     "pdf.pdf_page_count(doc)\n";
 
 static const char* kSharedModuleStressPdfContent =
-    "import resolve: lambda.package.pdf.resolve\n"
+    "import resolve: lambda.pdf.resolve\n"
     "let doc = input('test/input/test.pdf', 'pdf') ^ { null }\n"
     "let page = resolve.page_at(doc, 0)\n"
     "len(resolve.page_content_bytes(doc, page))\n";
@@ -1074,9 +1074,9 @@ protected:
         // load_script from a worker would test per-thread compilation instead
         // of shared immutable module execution.
         Script* chart_package = load_script_mir_direct(&shared_module_stress_runtime,
-        "lambda/package/chart/chart.ls", NULL, true);
+        "lambda/chart/chart.ls", NULL, true);
         Script* pdf_package = load_script_mir_direct(&shared_module_stress_runtime,
-        "lambda/package/pdf/pdf.ls", NULL, true);
+        "lambda/pdf/pdf.ls", NULL, true);
         ASSERT_NE(chart_package, nullptr);
         ASSERT_NE(pdf_package, nullptr);
         for (int i = 0; i < shared_module_stress_case_count; i++) {

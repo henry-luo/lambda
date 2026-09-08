@@ -1,6 +1,6 @@
-import model: lambda.package.graph.model
-import layout: lambda.package.graph.layout
-import transform: lambda.package.graph.transform
+import model: lambda.graph.model
+import layout: lambda.graph.layout
+import transform: lambda.graph.transform
 
 let source = input(
   "test/lambda/graph/mermaid/class_diagram.mmd", {type: "graph", flavor: "mermaid"}) ^ { null }

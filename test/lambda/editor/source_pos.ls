@@ -1,5 +1,5 @@
 // SourcePath / SourcePos resolution and comparison (Phase R2)
-import lambda.package.editor.mod_source_pos
+import lambda.editor.mod_source_pos
 
 // ---------------------------------------------------------------------------
 // pos() and selection constructors return well-formed records

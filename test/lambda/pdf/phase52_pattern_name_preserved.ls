@@ -1,6 +1,6 @@
 // Phase 52 - named shading Pattern scn still uses Lambda's pattern support.
 
-import interp: lambda.package.pdf.interp
+import interp: lambda.pdf.interp
 
 fn name(s) { { kind: "name", value: s } }
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }

@@ -1,9 +1,9 @@
 // test_math_atom_color.ls — Test math color command rendering
 // Coverage: atoms/color.ls — render (textcolor, color, colorbox)
 
-import col: lambda.package.math.atoms.color
-import box: lambda.package.math.box
-import mctx: lambda.package.math.context
+import col: lambda.doc.math.atoms.color
+import box: lambda.doc.math.box
+import mctx: lambda.doc.math.context
 
 "===== MATH ATOM COLOR TESTS ====="
 

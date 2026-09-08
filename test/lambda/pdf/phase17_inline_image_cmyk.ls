@@ -1,6 +1,6 @@
 // Phase 17 — inline 8-bit DeviceCMYK images convert to RGB pixels.
 
-import image: lambda.package.pdf.image
+import image: lambda.pdf.image
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

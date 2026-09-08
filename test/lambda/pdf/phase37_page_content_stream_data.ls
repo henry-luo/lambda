@@ -1,6 +1,6 @@
 // Phase 37 — page /Contents accepts stream_data bytes like other PDF streams.
 
-import pdf: lambda.package.pdf.pdf
+import pdf: lambda.pdf.pdf
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

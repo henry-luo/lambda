@@ -1,4 +1,4 @@
-import graph: lambda.package.graph.graph
+import graph: lambda.graph.graph
 
 graph.layout_custom(null, [
   {id: "a", index: 0, width: 80, height: 40},

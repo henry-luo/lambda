@@ -1,6 +1,6 @@
 {
   "title": "Lambda Chart Dashboard",
-  "subtitle": "A showcase of chart types supported by lambda.package.chart",
+  "subtitle": "A showcase of chart types supported by lambda.chart",
   "columns": 3,
   "charts": [
     {

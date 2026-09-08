@@ -2517,6 +2517,47 @@ static const char* resolve_imported_module(Transpiler* tp, StrView* name) {
     return registered_jube_module_name(name);
 }
 
+// S17.2.1/D7.2.4: split a fully qualified built-in member without creating a
+// parallel namespace object. The AST still carries the ordinary member chain;
+// calls and constants resolve its complete spelling against the existing
+// registry/module rows.
+static bool resolve_builtin_module_member(StrView path, const char** module,
+        StrView* member) {
+    static const char* prefixes[] = {
+        "lambda.sys.", "lambda.math.", "lambda.io.", "math.", "io."
+    };
+    static const char* modules[] = {"sys", "math", "io", "math", "io"};
+    if (!path.str || !module || !member) return false;
+    while (path.length && (path.str[path.length - 1] == ' ' ||
+            path.str[path.length - 1] == '\t' ||
+            path.str[path.length - 1] == '\r' ||
+            path.str[path.length - 1] == '\n')) {
+        path.length--;
+    }
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+        size_t prefix_len = strlen(prefixes[i]);
+        if (path.length <= prefix_len ||
+                memcmp(path.str, prefixes[i], prefix_len) != 0) continue;
+        StrView suffix = {path.str + prefix_len, path.length - prefix_len};
+        // A second dot is a package/member chain, not a built-in export.
+        if (memchr(suffix.str, '.', suffix.length)) return false;
+        *module = modules[i];
+        *member = suffix;
+        return true;
+    }
+    return false;
+}
+
+static const char* resolve_builtin_import_module(StrView* module) {
+    if (strview_equal(module, "math") || strview_equal(module, "lambda.math")) {
+        return "math";
+    }
+    if (strview_equal(module, "io") || strview_equal(module, "lambda.io")) {
+        return "io";
+    }
+    return NULL;
+}
+
 static SysFuncInfo* lookup_module_prefixed_sys_func(const char* module, StrView* func_name, int arg_count) {
     if (!module || !func_name) return NULL;
     char prefixed[128];
@@ -2553,6 +2594,15 @@ static SysFuncInfo* lookup_complex_math_builtin(StrView* func_name, int arg_coun
         return get_sys_func_info(&qualified_view, arg_count);
     }
     return NULL;
+}
+
+static SysFuncInfo* lookup_builtin_module_member(const char* module,
+        StrView* member, int arg_count) {
+    if (!module || !member) return NULL;
+    if (strcmp(module, "sys") == 0) {
+        return get_sys_func_info(member, arg_count);
+    }
+    return lookup_module_prefixed_sys_func(module, member, arg_count);
 }
 
 static bool start_option_name_is(AstNamedNode* option, const char* name) {
@@ -8682,11 +8732,59 @@ static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
     return set_type_any(tp, ANY_MEMBER_SHAPE);
 }
 
+static AstNode* direct_math_constant(Transpiler* tp, SourceSpan span,
+        StrView name) {
+    double value = 0.0;
+    bool is_float = false;
+    if (name.length == 7 && memcmp(name.str, "max_int", 7) == 0) {
+        // keep the named math constant on the same literal lane as the shared
+        // literal lane; otherwise overflow checks reject INT53_MAX (D2.2.2).
+        TypeInt64* constant = (TypeInt64*)alloc_type(tp->pool,
+            LMD_TYPE_INT, sizeof(TypeInt64));
+        constant->int64_val = INT53_MAX;
+        constant->is_const = 1;
+        constant->is_literal = 1;
+        arraylist_append(tp->const_list, &constant->int64_val);
+        constant->const_index = tp->const_list->length - 1;
+        AstPrimaryNode* result = (AstPrimaryNode*)alloc_ast_node_from_span(
+            tp, AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
+        result->type = (Type*)constant;
+        return (AstNode*)result;
+    }
+    if (name.length == 2 && memcmp(name.str, "pi", 2) == 0) {
+        value = 3.14159265358979323846;
+        is_float = true;
+    } else if (name.length == 1 && name.str[0] == 'e') {
+        value = 2.71828182845904523536;
+        is_float = true;
+    }
+    if (!is_float) return NULL;
+    TypeFloat* constant = (TypeFloat*)alloc_type(tp->pool,
+        LMD_TYPE_FLOAT, sizeof(TypeFloat));
+    constant->double_val = value;
+    constant->is_const = 1;
+    constant->is_literal = 1;
+    arraylist_append(tp->const_list, &constant->double_val);
+    constant->const_index = tp->const_list->length - 1;
+    AstPrimaryNode* result = (AstPrimaryNode*)alloc_ast_node_from_span(
+        tp, AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
+    result->type = (Type*)constant;
+    return (AstNode*)result;
+}
+
 AstNode* build_field_node_from_parts(Transpiler* tp, SourceSpan span,
         AstNodeType node_type, AstNode* object, AstNode* field) {
     if (node_type == AST_NODE_MEMBER_EXPR) {
         AstNode* object_value = ast_unwrap_primary(object);
         AstNode* field_value = ast_unwrap_primary(field);
+        const char* qualified_module = NULL;
+        StrView qualified_member = {0};
+        StrView qualified_path = source_span_text(tp, span);
+        if (resolve_builtin_module_member(qualified_path, &qualified_module,
+                &qualified_member) && strcmp(qualified_module, "math") == 0) {
+            AstNode* constant = direct_math_constant(tp, span, qualified_member);
+            if (constant) return constant;
+        }
         if (object_value && field_value &&
                 field_value->node_type == AST_NODE_IDENT) {
             AstIdentNode* field_ident = (AstIdentNode*)field_value;
@@ -8723,47 +8821,11 @@ AstNode* build_field_node_from_parts(Transpiler* tp, SourceSpan span,
             }
             const char* module = resolve_imported_module(tp, &module_name);
             if (module && strcmp(module, "math") == 0) {
-                double value = 0.0;
-                bool is_float = false;
-                if (field_ident->name->len == 7 &&
-                        memcmp(field_ident->name->chars, "max_int", 7) == 0) {
-                    // keep the named math constant on the same literal lane
-                    // as the shared literal lane; otherwise overflow checks reject the
-                    // canonical compact-int boundary (D2.2.2).
-                    TypeInt64* constant = (TypeInt64*)alloc_type(tp->pool,
-                        LMD_TYPE_INT, sizeof(TypeInt64));
-                    constant->int64_val = INT53_MAX;
-                    constant->is_const = 1;
-                    constant->is_literal = 1;
-                    arraylist_append(tp->const_list, &constant->int64_val);
-                    constant->const_index = tp->const_list->length - 1;
-                    AstPrimaryNode* result = (AstPrimaryNode*)alloc_ast_node_from_span(
-                        tp, AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
-                    result->type = (Type*)constant;
-                    return (AstNode*)result;
-                }
-                if (field_ident->name->len == 2 &&
-                        memcmp(field_ident->name->chars, "pi", 2) == 0) {
-                    value = 3.14159265358979323846;
-                    is_float = true;
-                } else if (field_ident->name->len == 1 &&
-                        field_ident->name->chars[0] == 'e') {
-                    value = 2.71828182845904523536;
-                    is_float = true;
-                }
-                if (is_float) {
-                    TypeFloat* constant = (TypeFloat*)alloc_type(tp->pool,
-                        LMD_TYPE_FLOAT, sizeof(TypeFloat));
-                    constant->double_val = value;
-                    constant->is_const = 1;
-                    constant->is_literal = 1;
-                    arraylist_append(tp->const_list, &constant->double_val);
-                    constant->const_index = tp->const_list->length - 1;
-                    AstPrimaryNode* result = (AstPrimaryNode*)alloc_ast_node_from_span(
-                        tp, AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
-                    result->type = (Type*)constant;
-                    return (AstNode*)result;
-                }
+                StrView constant_name = strview_init(field_ident->name->chars,
+                    field_ident->name->len);
+                AstNode* constant = direct_math_constant(tp, span,
+                    constant_name);
+                if (constant) return constant;
             }
         }
     }
@@ -8988,6 +9050,20 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
         AstFieldNode* member = (AstFieldNode*)effective;
         AstNode* object = ast_unwrap_primary(member->object);
         AstNode* field = ast_unwrap_primary(member->field);
+        StrView qualified_path = source_span_text(tp, effective->source_span);
+        const char* qualified_module = NULL;
+        StrView qualified_member = {0};
+        if (resolve_builtin_module_member(qualified_path, &qualified_module,
+                &qualified_member)) {
+            info = lookup_builtin_module_member(qualified_module,
+                &qualified_member, lookup_arg_count);
+            if (info) {
+                // lambda.sys.* is the reserved escape from a shadow; math/io
+                // use the same module rows as their bare aliases (S17.2.1).
+                call->function = direct_sys_function(tp,
+                    effective->source_span, info);
+            }
+        }
         if (object && object->node_type == AST_NODE_IDENT &&
                 field && field->node_type == AST_NODE_IDENT) {
             StrView module_name = strview_init(
@@ -8997,7 +9073,7 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
                 ((AstIdentNode*)field)->name->chars,
                 ((AstIdentNode*)field)->name->len);
             const char* module = resolve_imported_module(tp, &module_name);
-            if (module) {
+            if (!info && module) {
                 char qualified[128];
                 snprintf(qualified, sizeof(qualified), "%s_%.*s", module,
                     (int)field_name.length, field_name.str);
@@ -10224,12 +10300,13 @@ static AstNode* build_module_import_from_parts(Transpiler* tp,
     node->alias = alias_view.length
         ? name_pool_create_strview(tp->name_pool, alias_view) : NULL;
     if (!module.length) return (AstNode*)node;
-    if (strview_equal(&module, "math")) {
+    const char* builtin_module = resolve_builtin_import_module(&module);
+    if (builtin_module && strcmp(builtin_module, "math") == 0) {
         if (node->alias) tp->builtin_alias_math = node->alias;
         else tp->builtin_import_math = true;
         return alloc_ast_node_from_span(tp, AST_NODE_NULL, span, sizeof(AstNode));
     }
-    if (strview_equal(&module, "io")) {
+    if (builtin_module && strcmp(builtin_module, "io") == 0) {
         if (node->alias) tp->builtin_alias_io = node->alias;
         else tp->builtin_import_io = true;
         return alloc_ast_node_from_span(tp, AST_NODE_NULL, span, sizeof(AstNode));
@@ -11163,8 +11240,13 @@ static LambdaParseValue direct_ast_reduce(void* context,
         AstNode* object = child0;
         if (reduction->form == LAMBDA_REDUCTION_FORM_MEMBER) {
             StrView source = source_span_text(tp, reduction->span);
-            AstNode* path = try_parse_path_expr_text_span(tp, source.str,
-                source.str + source.length, reduction->span);
+            const char* builtin_module = NULL;
+            StrView builtin_member = {0};
+            bool builtin_member_path = resolve_builtin_module_member(source,
+                &builtin_module, &builtin_member);
+            AstNode* path = builtin_member_path ? NULL
+                : try_parse_path_expr_text_span(tp, source.str,
+                    source.str + source.length, reduction->span);
             if (path) return direct_ast_value(path);
             if (reduction->detail_token.kind == LAMBDA_TOK_SLASH) {
                 // A slash after an existing value is the navigation root

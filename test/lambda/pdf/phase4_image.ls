@@ -12,7 +12,7 @@
 //   page.dict.Resources.XObject = { Im0: indirect_ref(42), Fm0: indirect_ref(99) }
 //   indirect_object(42).content = { dictionary: { Subtype: "Image", Width: 100, Height: 50 }, data: "" }
 
-import image: lambda.package.pdf.image
+import image: lambda.pdf.image
 
 fn ref(n) {
     { type: "indirect_ref", object_num: n }

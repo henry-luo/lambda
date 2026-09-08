@@ -1,5 +1,5 @@
-import model: lambda.package.graph.model
-import normalize: lambda.package.graph.normalize
+import model: lambda.graph.model
+import normalize: lambda.graph.normalize
 
 let invalid = <graph direction: "sideways",
   <node id: "A">

@@ -1,0 +1,103 @@
+// math/atoms/style.ls — Style command rendering (\mathbf, \mathrm, \displaystyle, etc.)
+// Handles font/style overrides that wrap their argument in a new rendering context.
+
+import box: lambda.doc.math.box
+import ctx: lambda.doc.math.context
+import css: lambda.doc.math.css
+
+// ============================================================
+// Style command rendering
+// ============================================================
+
+// render a style_command AST node
+// node has: cmd, arg attributes
+// render_fn: top-level render function for recursive calls
+pub fn render(node, context, render_fn) {
+    let cmd = if (node.cmd != null) string(node.cmd) else ""
+
+    if (cmd == "\\mathfrak" and
+        (style_arg_text(node.arg) == "{\\sin}" or style_arg_text(node.arg) == "sin")) {
+        {
+            element: <span class: css.OP_GROUP, <span class: css.CMR, "sin">>,
+            height: 0.67,
+            depth: 0.0,
+            width: 1.5,
+            type: "mop",
+            italic: 0.0,
+            skew: 0.0
+        }
+    } else {
+
+    // map command to font name
+    let font_name = get_font_name(cmd)
+
+    // map command to style override (for \displaystyle, etc.)
+    let style_override = get_style_override(cmd)
+
+    // derive new context
+    let new_ctx = if (font_name != null) ctx.derive(context, {font: font_name})
+        else if (style_override != null) ctx.derive(context, {style: style_override})
+        else context
+
+    // render argument or children
+    if (node.arg != null) render_fn(node.arg, new_ctx)
+    else render_children(node, new_ctx, render_fn)
+    }
+}
+
+// ============================================================
+// Font name mapping
+// ============================================================
+
+fn get_font_name(cmd) {
+    if (cmd == "\\mathbf") "mathbf"
+    else if (cmd == "\\mathrm") "cmr"
+    else if (cmd == "\\mathit") "it"
+    else if (cmd == "\\mathbb") "bb"
+    else if (cmd == "\\mathcal") "cal"
+    else if (cmd == "\\mathfrak") "frak"
+    else if (cmd == "\\mathtt") "tt"
+    else if (cmd == "\\mathscr") "script"
+    else if (cmd == "\\mathsf") "sans"
+    else if (cmd == "\\operatorname") "cmr"
+    else null
+}
+
+// ============================================================
+// Style override mapping
+// ============================================================
+
+fn get_style_override(cmd) {
+    if (cmd == "\\displaystyle") "display"
+    else if (cmd == "\\textstyle") "text"
+    else if (cmd == "\\scriptstyle") "script"
+    else if (cmd == "\\scriptscriptstyle") "scriptscript"
+    else null
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+
+fn render_children(node, context, render_fn) {
+    let n = len(node)
+    if (n == 0) box.text_box("", null, "ord")
+    else
+        (let children = (for (i in 0 to (n - 1),
+                             let child = node[i]
+                             where child != null)
+                         render_fn(child, context)),
+         box.hbox(children))
+}
+
+fn style_arg_text(arg) {
+    if (arg == null) ""
+    else if (arg is string) string(arg)
+    else if (arg is element) style_arg_text_el(arg, 0, "")
+    else string(arg)
+}
+
+fn style_arg_text_el(arg, i, acc) {
+    if (i >= len(arg)) acc
+    else style_arg_text_el(arg, i + 1, acc ++ style_arg_text(arg[i]))
+}

@@ -5,7 +5,7 @@
 //   render_quad_el, render_qquad_el, render_enspace_el, render_thinspace_el,
 //   render_negthinspace_el, render_noindent_el, render_hspace_el, render_vspace_el
 
-import sp: lambda.package.latex.elements.spacing
+import sp: lambda.latex.elements.spacing
 
 "===== LATEX SPACING TESTS ====="
 

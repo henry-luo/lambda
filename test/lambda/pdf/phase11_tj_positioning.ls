@@ -4,8 +4,8 @@
 // adjustment creates a visible word/column gap. Lambda should not collapse
 // such arrays into one text node at the original x position.
 
-import text: lambda.package.pdf.text
-import util: lambda.package.pdf.util
+import text: lambda.pdf.text
+import util: lambda.pdf.util
 
 fn name(s) { { kind: "name", value: s } }
 fn str(s)  { { kind: "string", value: s } }

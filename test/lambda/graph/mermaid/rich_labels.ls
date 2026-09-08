@@ -1,5 +1,5 @@
-import model: lambda.package.graph.model
-import transform: lambda.package.graph.transform
+import model: lambda.graph.model
+import transform: lambda.graph.transform
 
 let graph = input("test/lambda/graph/mermaid/rich_labels.mmd",
   {type: "graph", flavor: "mermaid"}) ^ { null }

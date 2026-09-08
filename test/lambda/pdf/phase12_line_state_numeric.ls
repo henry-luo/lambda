@@ -4,7 +4,7 @@
 // producers may emit 2.0 J / 1.0 j. The C++ parser casts those numeric
 // operands to int; Lambda should honor them rather than ignoring floats.
 
-import path: lambda.package.pdf.path
+import path: lambda.pdf.path
 
 fn arr(items) { { kind: "array", value: items } }
 

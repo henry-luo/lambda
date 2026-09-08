@@ -2328,7 +2328,7 @@ static char* build_pdf_view_bridge_script(const char* pdf_file, const char* opts
 
     const char* opts = opts_expr ? opts_expr : "null";
     int needed = snprintf(nullptr, 0,
-        "import pdf: lambda.package.pdf.pdf\n"
+        "import pdf: lambda.pdf.pdf\n"
         "let doc = input(\"%s\", 'pdf') ^ { null }\n"
         "pdf.pdf_to_html(doc, %s)\n",
         escaped_pdf, opts);
@@ -2346,7 +2346,7 @@ static char* build_pdf_view_bridge_script(const char* pdf_file, const char* opts
     }
 
     snprintf(script_buf, (size_t)needed + 1,
-        "import pdf: lambda.package.pdf.pdf\n"
+        "import pdf: lambda.pdf.pdf\n"
         "let doc = input(\"%s\", 'pdf') ^ { null }\n"
         "pdf.pdf_to_html(doc, %s)\n",
         escaped_pdf, opts);
@@ -3093,7 +3093,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
             // Build a Lambda script that renders all math at once
             // Use parse() instead of input() to parse raw strings (not files)
             StrBuf* script = strbuf_new_cap(4096);
-            strbuf_append_str(script, "import math: lambda.package.math.math\n[\n");
+            strbuf_append_str(script, "import math: lambda.doc.math.math\n[\n");
 
             for (int i = 0; i < math_list->length; i++) {
                 MathInfo* mi = (MathInfo*)math_list->data[i];
@@ -3278,7 +3278,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     char script_buf[4096];
     snprintf(script_buf, sizeof(script_buf),
-        "import latex: lambda.package.latex.latex\n"
+        "import latex: lambda.latex.latex\n"
         "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
         "latex.render(ast, {standalone: true})\n",
         safe_path);

@@ -471,7 +471,7 @@ The compiler reports `Unexpected syntax near '..' [path_parent]`. Relative
 module names support `.same_directory` and nested descendants, while `..` is
 reserved for path/parent expressions; there is no documented parent-relative
 module spelling and the diagnostic does not suggest one. The helper had to move
-under the absolute `lambda.package.graph` namespace to remain shared. Lambda
+under the absolute `lambda.graph` namespace to remain shared. Lambda
 should either support parent-relative imports or explicitly diagnose this as an
 unsupported module path and point to the available import forms.
 ## Runtime map attribute spread creates a nested element child — still OPEN (re-verified 2026-08-25)

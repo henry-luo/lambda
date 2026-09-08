@@ -1,0 +1,8 @@
+"sys escape:"
+6
+"math module:"
+3.141592653589793
+"builtin alias:"
+3.141592653589793
+"doc package:"
+10

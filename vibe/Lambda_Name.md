@@ -196,4 +196,4 @@ A helper function `node_name_text(TSNode)` was added to extract name text from i
 A `// todo: handle string and symbol escape` comment marks this for future work.
 
 ### Migration
-422 replacements across 25 `.ls` files converted `"key":` → `key:` or `'key':`. Three keys in `lambda/package/latex/symbols.ls` were reverted to `"string"` syntax because they contain single-quote characters that cannot be represented as symbols without escape processing.
+422 replacements across 25 `.ls` files converted `"key":` → `key:` or `'key':`. Three keys in `lambda/latex/symbols.ls` were reverted to `"string"` syntax because they contain single-quote characters that cannot be represented as symbols without escape processing.

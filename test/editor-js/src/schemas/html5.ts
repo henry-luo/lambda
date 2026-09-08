@@ -1,6 +1,6 @@
 // HTML5 subset schema — matches our fixture format (HTML tags directly).
 // Mirrors the html5_subset_schema constant in
-// lambda/package/editor/mod_md_schema.ls.
+// lambda/editor/mod_md_schema.ls.
 
 import type { Schema, SchemaEntry } from '../model/schema.js'
 

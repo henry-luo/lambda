@@ -1,5 +1,5 @@
 // Selection helpers used by commands. Mirror the inline helpers in
-// lambda/package/editor/mod_commands.ls (sel_lo, sel_hi, sel_collapsed,
+// lambda/editor/mod_commands.ls (sel_lo, sel_hi, sel_collapsed,
 // sel_single_leaf, etc.).
 
 import { pathEqual, pos, posMax, posMin } from '../model/source-pos.js'

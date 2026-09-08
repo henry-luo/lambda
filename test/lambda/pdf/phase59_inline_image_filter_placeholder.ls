@@ -1,6 +1,6 @@
 // Phase 59 - filtered inline images use a placeholder instead of raw pixels.
 
-import image: lambda.package.pdf.image
+import image: lambda.pdf.image
 
 fn name(s) { { kind: "name", value: s } }
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }

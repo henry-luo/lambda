@@ -3,8 +3,8 @@
 // Usage:
 //   ./lambda.exe render test/lambda/chart/chart_dashboard_demo.ls -o doc/demo3.png
 
-import vega:  lambda.package.chart.vega
-import chart: lambda.package.chart.chart
+import vega:  lambda.chart.vega
+import chart: lambda.chart.chart
 
 let dashboard_file = "test/lambda/chart/dashboard_demo.json"
 let dashboard = input(dashboard_file)^

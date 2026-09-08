@@ -131,7 +131,7 @@ Three seams connect the drawing surface to the rich-text editor. Each is stated 
 
 ## 4. Rich-Text List Editing
 
-These are rich-text refinements delivered in Stage 4. The behaviour is authored and verified in the JS reference (`test/editor-js/`, which builds the live `test/html/editor.html`) and mirrored to the Lambda port (`lambda/package/editor/mod_commands.ls`), with the JS↔Lambda oracle keeping them in step.
+These are rich-text refinements delivered in Stage 4. The behaviour is authored and verified in the JS reference (`test/editor-js/`, which builds the live `test/html/editor.html`) and mirrored to the Lambda port (`lambda/editor/mod_commands.ls`), with the JS↔Lambda oracle keeping them in step.
 
 ### 4.1 Indentation: the flat *indent-level* model (decision)
 

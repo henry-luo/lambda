@@ -1,7 +1,7 @@
 // test_latex_css.ls — Test LaTeX CSS stylesheet
 // Coverage: css.ls — get_stylesheet, STYLESHEET constant
 
-import css: lambda.package.latex.css
+import css: lambda.latex.css
 
 "===== LATEX CSS TESTS ====="
 

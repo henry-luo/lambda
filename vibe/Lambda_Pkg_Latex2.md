@@ -55,7 +55,7 @@ All 7 milestones are complete. Current baseline: **448/448** tests.
 - Fixed `to_html.ls` segfault during transpilation — root cause was `collect_captures_from_node` in `build_ast.cpp` casting `AstLoopNode*` to `AstNamedNode*`, reading `index_name` field as `AstNode*` pointer for `for (k, v at el)` two-variable iteration. Fix: use correct `AstLoopNode*` cast.
 - Fixed 6 syntax errors in `analyze.ls` — stray `}`, missing parentheses on `if` conditions, mixed if-expression/if-statement syntax in `walk_setcounter`/`walk_definecolor`/`parse_rgb_float`.
 
-**Math integration verified:** Full LaTeX → HTML pipeline now works end-to-end including math rendering. Inline math (e.g. `$x^2 + y^2 = z^2$`) is dispatched through `math_bridge.ls` to the math package (`lambda/package/math/math.ls`), producing KaTeX-compatible HTML with proper superscripts, spacing, and font classes. Tested via `latex.render_file_to_html("test.tex")`.
+**Math integration verified:** Full LaTeX → HTML pipeline now works end-to-end including math rendering. Inline math (e.g. `$x^2 + y^2 = z^2$`) is dispatched through `math_bridge.ls` to the math package (`lambda/doc/math/math.ls`), producing KaTeX-compatible HTML with proper superscripts, spacing, and font classes. Tested via `latex.render_file_to_html("test.tex")`.
 
 ---
 
@@ -866,7 +866,7 @@ The LaTeX rendering pipeline uses two distinct font families that coexist in `la
 - `KaTeX_AMS` — AMS mathematical symbols (`∀`, `∃`, `ℝ`, `ℤ`, etc.)
 - `KaTeX_Caligraphic`, `KaTeX_Fraktur`, `KaTeX_Script`, `KaTeX_SansSerif`, `KaTeX_Typewriter` — math alphabets (`𝒜`, `𝔄`, etc.)
 
-The math package (`lambda/package/math/`) emits HTML elements with CSS classes like `.ML__delim-size2` (→ `font-family:KaTeX_Size2`) and `.ML__mathit` (→ `font-family:KaTeX_Math`). These classes are defined in the embedded stylesheet returned by `math/css.ls:get_stylesheet()`. The KaTeX fonts must be registered with FreeType before layout and rendering, which is handled by `process_document_font_faces()` reading `@font-face` declarations from `lambda/input/latex/css/katex.css`.
+The math package (`lambda/doc/math/`) emits HTML elements with CSS classes like `.ML__delim-size2` (→ `font-family:KaTeX_Size2`) and `.ML__mathit` (→ `font-family:KaTeX_Math`). These classes are defined in the embedded stylesheet returned by `math/css.ls:get_stylesheet()`. The KaTeX fonts must be registered with FreeType before layout and rendering, which is handled by `process_document_font_faces()` reading `@font-face` declarations from `lambda/input/latex/css/katex.css`.
 
 **Visual consistency:** Both families derive from Knuth's Computer Modern, so they blend seamlessly in a rendered document — body text (CMU) and math (KaTeX) share the same visual heritage despite coming from different font files.
 
@@ -881,7 +881,7 @@ The math package (`lambda/package/math/`) emits HTML elements with CSS classes l
 
 ### B.4 Stretchy Delimiter Selection
 
-`lambda/package/math/atoms/delimiters.ls:render_stretchy(delim, content_height, atom_type)` selects the appropriate KaTeX Size font level:
+`lambda/doc/math/atoms/delimiters.ls:render_stretchy(delim, content_height, atom_type)` selects the appropriate KaTeX Size font level:
 
 ```
 content_height ≤ 1.2em  →  KaTeX_Main (regular glyph, class ML__small-delim)
@@ -892,7 +892,7 @@ content_height ≤ 4.0em  →  KaTeX_Size4 (class ML__delim-size4)
 content_height  > 4.0em  →  KaTeX_Size4 + CSS scaleY() transform (SVG-based fallback)
 ```
 
-`lambda/package/math/atoms/array.ls:wrap_delimiters()` computes `content_height = table_box.height + table_box.depth` and passes it to `render_stretchy`, ensuring matrix `( )` and cases `{` brackets scale with the table they enclose.
+`lambda/doc/math/atoms/array.ls:wrap_delimiters()` computes `content_height = table_box.height + table_box.depth` and passes it to `render_stretchy`, ensuring matrix `( )` and cases `{` brackets scale with the table they enclose.
 
 ### B.5 License
 

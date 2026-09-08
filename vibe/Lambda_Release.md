@@ -56,7 +56,8 @@ need to be shipped:
 
 | Source (dev build) | Release image | Contents |
 |--------------------|---------------|----------|
-| `lambda/package/` | `lmd/package/` | Lambda Script packages (chart, latex, math) |
+| `lambda/{chart,dom,editor,graph,latex,openapi,pdf}` | `lmd/{chart,dom,editor,graph,latex,openapi,pdf}/` | Lambda Script packages |
+| `lambda/doc/math/` | `lmd/doc/math/` | Document math typesetting package |
 | `lambda/input/*.ls` | `lmd/input/*.ls` | Built-in input format scripts |
 | `lambda/input/*.css` | `lmd/input/*.css` | Built-in input CSS |
 | `lambda/input/latex/css/` | `lmd/input/latex/css/` | KaTeX + article CSS |
@@ -80,8 +81,13 @@ cp ./lambda/input/latex/css/*.css ./release/lmd/input/latex/css/
 rm -rf ./release/lmd/input/latex/fonts
 cp -r  ./lambda/input/latex/fonts ./release/lmd/input/latex/fonts
 
-rm -rf ./release/lmd/package
-cp -r  ./lambda/package ./release/lmd/package
+for package_dir in chart dom editor graph latex openapi pdf; do
+    rm -rf "./release/lmd/$package_dir"
+    cp -r "./lambda/$package_dir" "./release/lmd/$package_dir"
+done
+rm -rf ./release/lmd/doc
+mkdir -p ./release/lmd/doc
+cp -r ./lambda/doc/math ./release/lmd/doc/math
 ```
 
 ---
@@ -95,12 +101,12 @@ named `"lambda"`:
 
 | File | Hardcoded string |
 |------|-----------------|
-| `lambda/build_ast.cpp` (absolute import) | `./lambda/package/…` (implicit: dots → slashes from `./`) |
+| `lambda/build_ast.cpp` (absolute import) | `./lambda/…` (implicit: dots → slashes from `./`) |
 | `lambda/validator/ast_validate.cpp` | `"lambda/input/html5_schema.ls"`, `"lambda/input/eml_schema.ls"`, etc. |
 | `radiant/cmd_layout.cpp` | `"lambda/input/markdown.css"`, `"lambda/input/wiki.css"`, `"lambda/input/latex/css/article.css"`, `"lambda/input/latex/css/katex.css"` |
 
-Lambda Script source files use the canonical notation `import lambda.package.chart.chart`,
-which the absolute-import resolver maps to `./lambda/package/chart/chart.ls`. In the release
+Lambda Script source files use the canonical notation `import lambda.chart.chart`,
+which the absolute-import resolver maps to `./lambda/chart/chart.ls`. In the release
 image the directory is `./lmd/`, breaking all such imports.
 
 ### 4.2 Solution — `g_lambda_home` global
@@ -108,7 +114,7 @@ image the directory is `./lmd/`, breaking all such imports.
 Add a single global in `lambda/runner.cpp` (or a new `lambda/lambda-env.cpp`):
 
 ```c
-// lambda_home is the directory containing Lambda's runtime assets (package/, input/).
+// lambda_home is the directory containing Lambda's runtime assets (package trees, input/).
 // Dev default: "./lambda"   Release default: "./lmd"
 // Can be overridden via the LAMBDA_HOME environment variable.
 const char* g_lambda_home = "./lambda";
@@ -251,23 +257,23 @@ needs_free  = true;   // free schema_file at end of function
 **Current behaviour** for absolute imports (no leading dot):
 
 ```
-import lambda.package.chart.chart
+import lambda.chart.chart
   → strbuf_append_format(buf, "./%.*s", module_length, module_str)
   → replace '.' with '/'
   → append ".ls"
-  → result: ./lambda/package/chart/chart.ls
+  → result: ./lambda/chart/chart.ls
 ```
 
 The first path component `lambda` maps directly to the `./lambda` directory. When the release
 uses `./lmd`, this breaks.
 
-**Proposed fix:** After constructing the initial path `./lambda/package/chart/chart.ls`, replace
+**Proposed fix:** After constructing the initial path `./lambda/chart/chart.ls`, replace
 the `lambda` component with the last path component of `g_lambda_home`:
 
 ```cpp
 // In the absolute-import block, after building the initial buf:
 // Replace the first path segment (after "./") with the basename of g_lambda_home.
-// e.g. if g_lambda_home = "./lmd", buf = "./lambda/package/..." → "./lmd/package/..."
+// e.g. if g_lambda_home = "./lmd", buf = "./lambda/..." → "./lmd/..."
 const char* home = g_lambda_home;
 // skip leading "./"
 if (home[0] == '.' && home[1] == '/') home += 2;
@@ -286,7 +292,7 @@ if (segment_end) {
 }
 ```
 
-This preserves backward compatibility: scripts written with `import lambda.package.*` continue
+This preserves backward compatibility: scripts written with `import lambda.*` continue
 to work in both dev and release without any source changes.
 
 ---
@@ -332,7 +338,7 @@ After the changes:
   `"./lmd"` relative path won't work. A future step can auto-detect the install prefix from the
   executable path (`argv[0]`).
 - **`import lambda.*` namespace vs. `import lmd.*`** — the proposal keeps `lambda` as the
-  canonical module namespace in Lambda scripts (always write `import lambda.package.*`) and
+  canonical module namespace in Lambda scripts (always write `import lambda.*`) and
   maps it to `g_lambda_home` at resolution time. An alternative is to make the first segment
   a configurable alias, but that adds complexity for no real benefit.
 - **Windows** — `lambda.exe` naming is kept as-is on Windows. The `lambda_home_path()` helper

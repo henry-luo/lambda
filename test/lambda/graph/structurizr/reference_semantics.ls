@@ -1,6 +1,6 @@
-import model: lambda.package.graph.model
-import structurizr: lambda.package.graph.structurizr.structurizr
-import conformance: lambda.package.graph.conformance
+import model: lambda.graph.model
+import structurizr: lambda.graph.structurizr.structurizr
+import conformance: lambda.graph.conformance
 import adapter: .reference.structurizr_json_adapter
 
 let cases = conformance.manifest_cases("test/lambda/graph/structurizr/manifest.mark")

@@ -127,7 +127,7 @@ void mir_guest_finish_context(Runtime* runtime, bool reusing_context);
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
 #include "runtime-state.h"
 
-// Lambda home: directory containing runtime assets (package/, input/).
+// Lambda home: directory containing runtime assets (package trees, input/).
 // Dev default: "./lambda"  Release: "./lmd"  Override: LAMBDA_HOME env var.
 extern const char* g_lambda_home;
 void lambda_home_init(void);    // call once at startup (reads LAMBDA_HOME env var)

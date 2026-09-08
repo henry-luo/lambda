@@ -1,4 +1,4 @@
-import transform: lambda.package.graph.transform
+import transform: lambda.graph.transform
 
 let installed = transform.install()
 let graph = transform.to_html({

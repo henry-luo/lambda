@@ -2,8 +2,8 @@
 // Note: Lambda's printer collapses adjacent strings into one line, so this
 // suite reports violation messages via boolean comparisons / lengths instead
 // of printing the raw strings.
-import lambda.package.editor.mod_md_schema
-import lambda.package.editor.mod_edit_schema
+import lambda.editor.mod_md_schema
+import lambda.editor.mod_edit_schema
 
 let sch = md_schema
 
