@@ -652,7 +652,7 @@ misses is named below the table.
 | generator / async / reset-registry capacities | none | **none** | met |
 | closure capture arrays copied by snapshots | 0 fixed | **0** | met |
 | `sizeof(JsMirTranspiler)` | ≤ 2,048 | **664** | met (§9.2 split) |
-| `sizeof(JsRuntimeState)` | ≤ 1,024 | **21,384** | **misses by 20,360** |
+| `sizeof(JsRuntimeState)` | ≤ 1,024 | **9,120** | misses by 8,096 |
 
 **`JsMirTranspiler` — ratchet MET 2026-09-08 at 664 B.** §9.3 took it from
 30,840 to 2,720 B; §9.2's first split takes it to **664 B**, well under 2,048.
@@ -679,14 +679,35 @@ body. The remaining four records §9.2 names — control flow, generator lowerin
 eval lowering — are still inline; they are small, and splitting them further
 buys structure rather than either bytes or a ratchet.
 
-**`JsRuntimeState` (21,384 B).** 38 records are still embedded by value,
-13,808 B of the total. The largest, `JsDomPlatformState` (5,680 B), left in this
-change: local/session storage and media-query state are DOM-only, so it is now a
-lazy **context capsule** rather than a pointer that is always allocated. The
-same test applies to the rest: a record that every realm uses is not honestly
-served by a pointer, and only the ones a plain JS realm never touches should
-become capsules. `JsEvalState` (4,304 B) is the next largest and *is* used by
-every realm, so it needs a different answer than either.
+**`JsRuntimeState` — 27,064 → 9,120 B this session; ratchet ≤ 1,024 still
+misses.** Two things came out:
+
+- **`JsDomPlatformState` (5,680 B) became a lazy context capsule.** Local and
+  session storage and media-query state are DOM-only, so a plain JS realm never
+  materialises them. Read paths use `context_capsule`, not
+  `context_capsule_ensure` — a batch reset of a realm that never touched storage
+  must not allocate the capsule just to clear it.
+- **The native wrapper cache (12,288 B) grows instead of being two fixed 512-entry
+  tables.** This was 57 % of the record. It also stopped being a cache in
+  ordinary use: a bare realm already reaches ~5,000 reachable functions, so the
+  512 slots saturated and every later wrapper simply missed. Function identity
+  is unaffected either way — verified against Node before and after — because a
+  compiled function's Item is stored once at its binding rather than rebuilt per
+  reference, so this was a size and hit-rate problem, not a correctness one. The
+  cached wrappers are pool-backed and carry no registered GC root, so the arrays
+  may move.
+
+**What reaching ≤ 1,024 now requires.** The remainder is almost entirely the ~38
+records still embedded by value. The largest is `JsEvalState` (4,304 B), of
+which `JsEvalBridgeState` is 2,920 B — four `bool[512]` flag arrays parallel to
+`RootVector`s plus three `int` frame-mark arrays, exactly the "parallel fixed
+arrays encode records by position" shape §2 flagged. Those caps are *diagnosed*
+(`js-eval-env: binding stack overflow`), unlike the silent ones fixed elsewhere,
+so converting them is a size change rather than a correctness fix. Beyond that,
+closing the ratchet is §4's capsule-directory conversion applied to the whole
+set, and the honest test stays the one above: a record every realm uses is not
+served by a pointer, only the ones a plain JS realm never touches become
+capsules.
 
 The original table follows.
 
