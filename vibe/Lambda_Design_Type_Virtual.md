@@ -382,8 +382,9 @@ be written by the loop.
 
 A retained DOM carrier may observe newer native state in a later Lambda run.
 Within any one run it is stable. `version()` supports JavaScript iterators and
-inline caches across host mutations; it is not observable identity and does
-not participate in equality.
+shape/version guards across host mutations (there are no inline caches in
+either lane — D8.4.1v2/LC1v2); it is not observable identity and does not
+participate in equality.
 
 ### D4l.9 — Identity is independent of the carrier address
 

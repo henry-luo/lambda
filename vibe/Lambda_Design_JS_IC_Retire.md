@@ -6,8 +6,20 @@ Lambda-lane dispatch is governed by D8.4.1v2. The implementation removed the
 per-callsite state and duplicated MIR array/typed-array lanes, then landed the
 original Tier B design: stateless named fast heads use the existing TypeMap
 open-addressed table with NameId identity and fall back to the shared runtime
-property kernels. Tier A compile-predicted slot specialization remains a future
-option. Companion history: `vibe/jube/JS_Tune_History.md`.
+property kernels.
+
+**Update 2026-09-09.** The owner extended the no-inline-cache ruling to
+LambdaJS: LC1's "LJS keeps its ICs" carve-out is closed
+([`Lambda_Design_Compiling.md`](Lambda_Design_Compiling.md) LC1v2,
+**D8.4.1v2**). Tier A (§5, IR10–IR15) is therefore **no longer an optional
+follow-up — it is the only sanctioned way to make LambdaJS property access
+faster**, together with the integer-index lane. Result38 measures the
+consequence of shipping Tier B alone: LambdaJS is 4.35× QuickJS and 29× untyped
+Lambda, with `js_to_property_key` at 80% of `primes` and the descriptor-object
+property-add path at 25–40% of the object-heavy rows. The execution plan built
+on IR10–IR15 is [`jube/JS_Tune10_Fast_Paths.md`](jube/JS_Tune10_Fast_Paths.md)
+(T10-1 index lane, T10-2 Tier A shapes, T10-3 add kernel). Companion history:
+`vibe/jube/JS_Tune_History.md`.
 
 ### Implementation result
 

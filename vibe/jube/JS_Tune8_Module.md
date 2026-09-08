@@ -184,6 +184,11 @@ Production migration starts only when:
 4. T0 establishes failure/cycle/reset behavior before changing it; and
 5. the worktree handoff is recorded so unrelated user changes are preserved.
 
+*(2026-09-09: JR8 is retired — D8.4.1v2/LC1v2 ban feedback vectors. Where this
+document gates module reuse on "JR8 evidence", the gate is now the
+de-pointering/pointer audit alone; see `JS_Runtime_Redesign.md` JR8 and
+`JS_Tune10_Fast_Paths.md`.)*
+
 JR8 feedback vectors are **not** required to replace the runtime module
 instance caches. They are required before a general JS compiled module can be
 declared safely reusable across fresh realms, because mutable IC/guard cells

@@ -167,14 +167,47 @@ struct JsAstFunctionFactWalk {
     bool with_active;
     bool tail_active;
     bool direct_body_active;
+    JsAstNode* parent;
 };
+
+// T10-0/D-D: a key position is a name, not a reference. `node.arguments`,
+// `{arguments: v}`, `class { arguments() {} }` and `obj.eval` must not be read
+// as observations of `arguments`/`this`/`new.target` or as an `eval` mention;
+// treating them as such materialized an arguments object on every call of the
+// enclosing function (51 us/call on prettier_ast, which never uses `arguments`).
+static bool js_ast_fact_walk_skips_child(JsAstNode* parent, JsAstNode* child) {
+    if (!parent || !child) return false;
+    switch (parent->node_type) {
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* member = (JsMemberNode*)parent;
+        return !member->computed && (JsAstNode*)member->property == child;
+    }
+    case JS_AST_NODE_PROPERTY: {
+        JsPropertyNode* prop = (JsPropertyNode*)parent;
+        // A shorthand `{arguments}` key doubles as the value reference.
+        return !prop->computed && !prop->shorthand &&
+            (JsAstNode*)prop->key == child;
+    }
+    case JS_AST_NODE_METHOD_DEFINITION: {
+        JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)parent;
+        return !method->computed && (JsAstNode*)method->key == child;
+    }
+    case JS_AST_NODE_FIELD_DEFINITION: {
+        JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)parent;
+        return !field->computed && (JsAstNode*)field->key == child;
+    }
+    default:
+        return false;
+    }
+}
 
 static void js_ast_collect_function_facts_node(JsAstNode* node,
         JsAstFunctionFactWalk walk);
 
 static void js_ast_collect_function_facts_child(JsAstNode* child, void* opaque) {
-    js_ast_collect_function_facts_node(child,
-        *(JsAstFunctionFactWalk*)opaque);
+    JsAstFunctionFactWalk* walk = (JsAstFunctionFactWalk*)opaque;
+    if (js_ast_fact_walk_skips_child(walk->parent, child)) return;
+    js_ast_collect_function_facts_node(child, *walk);
 }
 
 static void js_ast_collect_function_facts_node(JsAstNode* node,
@@ -232,6 +265,7 @@ static void js_ast_collect_function_facts_node(JsAstNode* node,
             js_ast_identifier_named(node, "eval", 4))) {
         walk.facts->tail_reuse_safe = false;
     }
+    walk.parent = node;
     js_ast_visit_children(node, js_ast_collect_function_facts_child, &walk);
 }
 
@@ -241,10 +275,10 @@ JsAstFunctionFacts js_ast_collect_function_facts(JsAstNode* params,
     facts.tail_reuse_safe = true;
     for (JsAstNode* param = params; param;
             param = (JsAstNode*)param->next) {
-        js_ast_collect_function_facts_node(param, {&facts, true, true, false, true, false});
+        js_ast_collect_function_facts_node(param, {&facts, true, true, false, true, false, NULL});
     }
     js_ast_collect_function_facts_node(body,
-        {&facts, true, true, true, true, true});
+        {&facts, true, true, true, true, true, NULL});
     facts.tail_reuse_safe = facts.tail_reuse_safe &&
         !(facts.observations & JS_AST_OBSERVES_ARGUMENTS);
     return facts;

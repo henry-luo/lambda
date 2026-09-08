@@ -6458,6 +6458,99 @@ static bool js_reflect_receiver_accepts_data(Item receiver_descriptor,
     return !has_writable || it2b(js_to_boolean(writable));
 }
 
+// T10-3/D-B: OrdinarySet that creates a new own data property on an ordinary
+// extensible object. The general algorithm below proves the same facts by
+// materializing a descriptor object per prototype link and then re-parsing one
+// in Reflect.defineProperty; that cost lands on every constructor store and
+// every object-literal-shaped add (~7us per `new P(x,y)` in Result38, against
+// 200ns in QuickJS). This kernel proves them from shape storage alone and then
+// performs the single slot write. Anything it cannot prove cheaply returns
+// false, leaving the unchanged algorithm as the semantics.
+// Input-owned shape entries carry NAME_ID_NONE, so absence is only proved once
+// the byte-confirmed seam has also missed (same two probes as
+// js_named_fast_lookup).
+static ShapeEntry* js_ordinary_shape_entry_for(TypeMap* tm, NameId name_id,
+        uint32_t name_hash, const char* name, int name_len) {
+    if (!tm || !typemap_ptr_is_plausible(tm) || !tm->shape) return NULL;
+    ShapeEntry* entry = typemap_hash_lookup_by_name_id(tm, name_id, name_hash);
+    return entry ? entry : typemap_hash_lookup_idless(tm, name, name_len);
+}
+
+static bool js_ordinary_add_prototype_chain_is_clear(Item target, NameId name_id,
+        uint32_t name_hash, const char* name, int name_len) {
+    Item cur = js_get_prototype_of(target);
+    for (int depth = 0; depth < 64; depth++) {
+        TypeId t = get_type_id(cur);
+        if (t == LMD_TYPE_NULL || t == LMD_TYPE_UNDEFINED) return true;
+        // Only ordinary shape-backed maps can be cleared this cheaply: an
+        // exotic or branded prototype may synthesize a governing descriptor
+        // (String indices, RegExp flags, Proxy traps) that shape storage does
+        // not hold.
+        if (t != LMD_TYPE_MAP || !cur.map) return false;
+        uint8_t kind = cur.map->map_kind;
+        if (kind != MAP_KIND_PLAIN && kind != MAP_KIND_DESC) return false;
+        if (!js_object_uses_ordinary_shape(cur)) return false;
+        TypeMap* tm = (TypeMap*)cur.map->type;
+        if (!tm || !typemap_ptr_is_plausible(tm)) return false;
+        if (js_ordinary_shape_entry_for(tm, name_id, name_hash, name, name_len)) {
+            // An inherited entry governs this Set (accessor, non-writable, or
+            // a plain shadowed data property); let the full algorithm decide.
+            return false;
+        }
+        cur = js_get_prototype_of(cur);
+    }
+    return false;
+}
+
+// preventExtensions/seal/freeze are recorded as ordinary own marker properties,
+// so extensibility is a shape question. The name spellings and the truthiness
+// test mirror js_object_is_extensible's Map branch exactly; only the interning
+// and prototype-aware map_get are dropped, neither of which can change the
+// answer for an own marker slot.
+static bool js_ordinary_map_is_extensible(Map* m) {
+    bool found = false;
+    // The 17 here is the length every writer and reader in this file uses.
+    Item marker = js_map_shape_lookup_ext(m, "__non_extensible__", 17, &found);
+    if (found && js_is_truthy(marker)) return false;
+    marker = js_map_shape_lookup_ext(m, "__sealed__", 10, &found);
+    if (found && js_is_truthy(marker)) return false;
+    marker = js_map_shape_lookup_ext(m, "__frozen__", 10, &found);
+    return !(found && js_is_truthy(marker));
+}
+
+static bool js_ordinary_add_own_data_property(Item target, Item key, Item value) {
+    if (get_type_id(target) != LMD_TYPE_MAP || !target.map) return false;
+    // MAP_KIND_PLAIN means no ShapeEntry on this object carries descriptor
+    // attributes, so a hit in shape storage is always a plain data slot. It
+    // also excludes proxies, typed arrays, dataset views and every other exotic.
+    if (target.map->map_kind != MAP_KIND_PLAIN) return false;
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    NameRef key_ref = it2s(key);
+    if (!key_ref || property_key_kind(key_ref) != NAME_KEY_STRING) return false;
+    NameId name_id = property_key_id(key_ref);
+    if (name_id == NAME_ID_NONE) return false;
+    // `__proto__` is an accessor on Object.prototype, not an own data slot.
+    if (key_ref->len == 9 && memcmp(key_ref->chars, "__proto__", 9) == 0) {
+        return false;
+    }
+    if (!js_object_uses_ordinary_shape(target)) return false;
+    uint32_t name_hash = property_key_hash(key_ref);
+    const char* name = key_ref->chars;
+    int name_len = (int)key_ref->len;
+    if (js_ordinary_shape_entry_for((TypeMap*)target.map->type, name_id,
+            name_hash, name, name_len)) {
+        // Not an add: an existing own slot has its own writability and
+        // stored-type rules, which the named fast path already tried.
+        return false;
+    }
+    if (!js_ordinary_map_is_extensible(target.map)) return false;
+    if (!js_ordinary_add_prototype_chain_is_clear(target, name_id, name_hash,
+            name, name_len)) {
+        return false;
+    }
+    return !item_is_error(js_define_own_key_storage(target, key, value));
+}
+
 extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
                                              Item receiver) {
     JS_ROOTS(roots,
@@ -6652,6 +6745,12 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     bool target_is_typed_array = get_type_id(target) == LMD_TYPE_MAP &&
         js_object_has_class(target, JS_CLASS_TYPED_ARRAY);
     if (receiver.item == target.item && !target_is_typed_array) {
+        // T10-3: the ordinary "create a new own data property" case, decided
+        // from shape storage before any descriptor object is built.
+        if (js_ordinary_add_own_data_property(target_root.get(), key_root.get(),
+                value_root.get())) {
+            return (Item){.item = b2it(true)};
+        }
         bool can_fast_set = true;
         // Shape-flag shortcut. js_object_get_own_property_descriptor allocates a
         // whole descriptor Map (js_new_object plus four interned-key writes)

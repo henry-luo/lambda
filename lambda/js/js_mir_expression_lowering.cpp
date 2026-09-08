@@ -1005,6 +1005,26 @@ static void jm_emit_named_evaluation_for_identifier(JsMirTranspiler* mt, JsAstNo
     }
 }
 
+// T10-1/D-A: the numeric key lane is admitted by the key's physical carrier,
+// never by a static type guess. A native F64/INT register cannot hold a string,
+// so ToPropertyKey on it runs no user code and its result is the index the
+// element kernels already take. An inferred numeric type over a boxed carrier
+// is not a proof — a rebound `var` still holds anything — and stays generic.
+// Returns true and sets *out_num (MIR_T_D) on admission; otherwise sets
+// *out_item to the boxed key the generic path consumes.
+static bool jm_emit_computed_key_number_lane(JsMirTranspiler* mt,
+        JsAstNode* key_expr, MIR_reg_t* out_num, MIR_reg_t* out_item) {
+    MirValue value = jm_transpile_expression_value(mt, key_expr);
+    bool native_number = value.rep == VALUE_REP_F64 ||
+        (value.rep == VALUE_REP_I64 && value.semantic_type == LMD_TYPE_INT);
+    if (native_number) {
+        *out_num = em_require_rep(&mt->func_em->em, value, VALUE_REP_F64).reg;
+        return true;
+    }
+    *out_item = em_require_rep(&mt->func_em->em, value, VALUE_REP_ITEM).reg;
+    return false;
+}
+
 JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
     JsMirReference ref;
     ref.kind = JS_MIR_REF_INVALID;
@@ -1015,6 +1035,8 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
     ref.is_private = false;
     ref.computed_key = false;
     ref.property_key_canonicalized = false;
+    ref.key_is_number = false;
+    ref.key_num_reg = 0;
     ref.named_key_index = UINT32_MAX;
     ref.named_key_id = NAME_ID_NONE;
     ref.jube_slot = -1;
@@ -1102,9 +1124,26 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
         if (mt->in_generator && mem->computed && jm_has_yield(mt, mem->property)) {
             obj_spill = jm_gen_spill_save(mt, ref.base_reg);
         }
+        // T10-1/D-A: a computed key carried in a native numeric register
+        // reaches js_get_number_reference / js_set_number_assignment, which
+        // index directly. The boxed form is still published because
+        // delete/`in`/super and the compound-update paths address the
+        // reference through key_reg.
+        if (ref.computed_key) {
+            MIR_reg_t key_num = 0, key_item = 0;
+            if (jm_emit_computed_key_number_lane(mt, mem->property,
+                    &key_num, &key_item)) {
+                ref.key_num_reg = key_num;
+                ref.key_is_number = true;
+                ref.key_reg = jm_box_native(mt, key_num, LMD_TYPE_FLOAT);
+            } else {
+                ref.key_reg = key_item;
+            }
+        } else {
             ref.key_reg = jm_emit_member_key(mt, mem);
-            if (ref.computed_key) jm_emit_error_lane_propagate_check(mt);
-            jm_create_gc_root_slot(mt, ref.key_reg);
+        }
+        if (ref.computed_key) jm_emit_error_lane_propagate_check(mt);
+        jm_create_gc_root_slot(mt, ref.key_reg);
         if (obj_spill >= 0) {
             jm_gen_spill_load(mt, ref.base_reg, obj_spill);
         }
@@ -1192,6 +1231,11 @@ static void jm_emit_canonicalize_computed_key_for_get_put(JsMirTranspiler* mt, J
     // computed update/compound references must preserve base-nullish errors while reusing one ToPropertyKey result.
     jm_callr_1(mt, "js_require_object_coercible", MIR_T_I64, ref->base_reg);
     jm_emit_error_lane_propagate_check(mt);
+    if (ref->key_is_number) {
+        // T10-1: ToPropertyKey on a Number runs no user code, so `a[i] += v`
+        // keeps the native index lane for both the read and the write.
+        return;
+    }
     ref->key_reg = jm_callr_1(mt, "js_to_property_key", MIR_T_I64, ref->key_reg);
     jm_emit_error_lane_propagate_check(mt);
     ref->property_key_canonicalized = true;
@@ -1225,6 +1269,11 @@ MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref) {
         if (!ref->is_private && ref->named_key_index != UINT32_MAX) {
             MIR_reg_t name_id = jm_emit_reference_name_id(mt, ref);
             return jm_callr_2(mt, "js_get_name_id", MIR_T_I64, ref->base_reg, name_id);
+        }
+        if (ref->key_is_number) {
+            return jm_call_2(mt, "js_get_number_reference", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                MIR_T_D, MIR_new_reg_op(mt->ctx, ref->key_num_reg));
         }
         MIR_reg_t key = jm_emit_reference_key(mt, ref);
         MIR_reg_t lane = jm_callr_1(mt, "js_property_lane_for_canonical_key", MIR_T_I64, key);
@@ -1279,6 +1328,14 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
                 result = jm_call_4(mt, "js_set_name_id", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_id),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0));
+            } else if (ref->key_is_number) {
+                // js_set_number_assignment owns the strict-policy completion,
+                // so no separate js_assignment_set_result is needed here.
+                result = jm_call_4(mt, "js_set_number_assignment", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                    MIR_T_D, MIR_new_reg_op(mt->ctx, ref->key_num_reg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0));
             } else {
@@ -6073,7 +6130,26 @@ static MirValue jm_emit_member_value(JsMirTranspiler* mt,
         }
     }
 
-    MIR_reg_t key = jm_transpile_member_key(mt, mem);
+    // T10-1/D-A: same numeric-key lane as jm_emit_reference. js_get_reference
+    // would re-derive the index from a boxed key and only covers dense
+    // LMD_TYPE_ARRAY; the numeric entry reaches array-num, typed-array and
+    // string elements without the generic property walk.
+    MIR_reg_t key = 0;
+    if (mem->computed) {
+        MIR_reg_t key_num = 0;
+        if (jm_emit_computed_key_number_lane(mt, mem->property, &key_num, &key)) {
+            if (mem_obj_spill >= 0) jm_gen_spill_load(mt, obj, mem_obj_spill);
+            MIR_reg_t num_val = jm_call_2(mt, "js_get_number_reference",
+                MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                MIR_T_D, MIR_new_reg_op(mt->ctx, key_num));
+            jm_emit_error_lane_propagate_check(mt);
+            return jm_expression_value(mt, (JsAstNode*)mem, num_val,
+                jm_get_effective_type(mt, (JsAstNode*)mem), VALUE_REP_ITEM);
+        }
+    } else {
+        key = jm_transpile_member_key(mt, mem);
+    }
 
     if (mem_obj_spill >= 0) {
         jm_gen_spill_load(mt, obj, mem_obj_spill);

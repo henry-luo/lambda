@@ -319,7 +319,7 @@ family — `js_map_get_fast(char*)`, `well_known_name_id` per access, numeric ke
 round-tripping through `snprintf`/`sscanf` — is still the top LJS item and still owns the
 tail (havlak 448x, cd 267x, hashmap 210x, sha1 197x). The integer/NameId fast path for
 dynamic numeric keys remains the highest-leverage LJS change and should be its own round
-(LJS may use ICs — D8.4.1 restricts Lambda script only).
+(2026-09-09: LJS may NOT use ICs either — D8.4.1v2/LC1v2 now cover both lanes).
 
 ## 6. Gates and acceptance (house rules, unchanged)
 

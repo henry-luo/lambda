@@ -13,6 +13,17 @@ confirmed with zero retry and a sub-10-second runner guard.
 
 **Scope:** explain the Result28 → Result29 LambdaJS regression, assess Tune1–Tune8, and define the Tune9 recovery gates
 
+> **Superseded in part (2026-09-09).** The diagnosis in §5 and the architecture
+> in §9 stand and are confirmed by Result38. The IC-based half of the §10 plan
+> does not: the named-property IC machinery was deleted on 2026-08-15
+> (`Lambda_Design_JS_IC_Retire.md`), and the owner extended the
+> no-inline-cache ruling to LambdaJS on 2026-09-09 (**D8.4.1v2**, LC1v2), which
+> also retires the JR8 feedback-vector plan referenced in §6. Read "inline the
+> monomorphic IC hit" and "JR8 feedback" as **compile-predicted shape
+> specialization with an inline guard and the shared kernel on a miss**
+> (IC_Retire Tier A / IR10–IR15). Successor plan with Result38 measurements:
+> [`JS_Tune10_Fast_Paths.md`](JS_Tune10_Fast_Paths.md).
+
 ## 1. Executive conclusion
 
 Result29 is a real and major LambdaJS performance regression:

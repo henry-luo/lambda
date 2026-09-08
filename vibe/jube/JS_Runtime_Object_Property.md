@@ -803,7 +803,14 @@ using TypeMap identity. A hit is legal only when the guarded TypeMap proves:
 All other cases miss without observable work into the Tune5 core. The core
 and `JsPropertyOps` signatures contain no IC/feedback parameter.
 
-### 12.3 JR8 handoff
+### 12.3 JR8 handoff — **VOID (JR8 retired 2026-09-09)**
+
+> **D8.4.1v2**/LC1v2 ban feedback vectors and per-site caches in LambdaJS; the
+> ICs this seam was to hand over were deleted on 2026-08-15
+> (`../Lambda_Design_JS_IC_Retire.md`). The consumer of these seams is now
+> compile-predicted shape specialization (IC_Retire Tier A, IR10–IR15;
+> `JS_Tune10_Fast_Paths.md`), which needs the same stable kernel seams and no
+> mutable state. Text below kept for the seam definitions.
 
 JR8 replaces outer IC structs with per-function feedback slots. It consumes
 the same TypeMap/metadata facts and cannot change the semantic or ops-table

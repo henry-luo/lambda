@@ -134,6 +134,13 @@ Final: **452 entries** with test262 fast paths on, test262 39,255/39,255 stable 
 
 ### 2.9 Property access: shapes and inline caches — Tune10 / Tune11 / Tune12
 
+> **Outcome (2026-09-09).** The shape work in this section survived; the inline
+> caches did not. `JsLoadIC`/`JsStoreIC` were deleted on 2026-08-15
+> (`../Lambda_Design_JS_IC_Retire.md`), and per-site caches are now banned in
+> LambdaJS as well as in the Lambda lane (**D8.4.1v2**, LC1v2). This matches
+> the section's own finding that the measured wins came from canonical shapes
+> rather than from the cells. Successor: `JS_Tune10_Fast_Paths.md`.
+
 This is the longest arc, and its honest summary is that **the ICs themselves were neutral; the shape work and the prototype cache were the wins.**
 
 **Tune10 — build the instrument first.** `js_exec_profile` (`JS_EXEC_PROFILE=time`) with per-event call/self-time counters, MIR call-site counts per helper, shape-guard hit/miss counters, and per-site tables for load ICs and property-set sites. It immediately reframed the problem: `richards` spent ~3.5 s self time in `property_get` while `call_function` self time was small (its huge inclusive time is just the callee body).

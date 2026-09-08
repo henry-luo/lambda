@@ -740,7 +740,12 @@ here. Promise representation remains the existing one until JR7. JR7 can then
 replace storage without changing how `Promise`, `.then`, or reaction callbacks
 are invoked.
 
-### 10.6 Feedback vectors
+### 10.6 Feedback vectors — **RETIRED (JR8 withdrawn 2026-09-09)**
+
+> Banned by **D8.4.1v2**/LC1v2. A stable-callee speed-up, if it is ever
+> justified by measurement, must be a compile-time prediction guarded inline
+> with the observable `Get -> Call` (D6.2.2v2) on a miss — never a cached
+> callee slot. See `JS_Tune10_Fast_Paths.md` T10-5.
 
 JR8 call slots cache exact function identity and, after a stable hit, may cache
 its call entry/native target. Because the baseline path already performs

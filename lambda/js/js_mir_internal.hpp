@@ -97,6 +97,11 @@ typedef struct JsMirReference {
     bool is_private;
     bool computed_key;
     bool property_key_canonicalized;
+    // T10-1/D-A: a computed key carried in a native numeric register stays in
+    // a double lane. ToPropertyKey would format it as text, intern the text in
+    // the NamePool, and have the kernel parse it back into an index.
+    bool key_is_number;
+    MIR_reg_t key_num_reg;      // MIR_T_D, valid only when key_is_number
     uint32_t named_key_index;
     NameId named_key_id;
     int jube_slot;

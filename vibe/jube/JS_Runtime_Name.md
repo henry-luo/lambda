@@ -917,9 +917,16 @@ transition compares only NameId; an id-less transition requires an ordinary
 STRING key and confirms hash/length/bytes. Pointer equality is not a transition
 identity shortcut, and a non-zero mismatch never falls back to spelling.
 
-### 7.5 Inline caches
+### 7.5 Inline caches — **RETIRED 2026-08-15**
 
-Named IC metadata stores `NameId key_id`, never name bytes, `key_item`, or a
+> `JsLoadIC`/`JsStoreIC` no longer exist (`../Lambda_Design_JS_IC_Retire.md`
+> IR6), and **D8.4.1v2**/LC1v2 now ban per-site caches in LambdaJS. The
+> NameId-only rule below survives its carrier: the stateless named heads
+> `js_get_name_id`/`js_set_name_id` and any future compile-predicted site
+> descriptor carry `NameId`, never name bytes or pointer-valued key identity.
+> Historical text follows.
+
+Named IC metadata stored `NameId key_id`, never name bytes, `key_item`, or a
 NameRecord pointer. `JsLoadIC` and `JsStoreIC` drop `name`, `name_len`, and
 pointer-valued key identity; their receiver/shape/slot entry arrays remain.
 Static named and computed-key ICs both cache the post-`ToPropertyKey` NameId.

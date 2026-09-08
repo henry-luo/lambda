@@ -637,7 +637,9 @@ This can be static first:
 - only lower when prototype mutation is not observed;
 - only for string-literal method names.
 
-Dynamic inline caches can be a later round if static coverage is too narrow.
+*(2026-09-09: no longer available — D8.4.1v2/LC1v2 ban inline caches in both
+lanes. If static coverage is too narrow, the answer is better compile-time
+prediction, not a cache; see `JS_Tune10_Fast_Paths.md`.)*
 
 ### Correctness gates
 

@@ -29,6 +29,11 @@ This pass has six implementation candidates:
 0. Split ordinary maps into descriptor-free `MAP_KIND_PLAIN` and
    descriptor-bearing `MAP_KIND_DESC`.
 1. Remove the duplicate shape lookup in `js_own_shape_slot_status()`.
+> **Superseded (2026-09-09).** The caches this round added were removed on
+> 2026-08-15 (`../Lambda_Design_JS_IC_Retire.md`) and are now banned in both
+> lanes (**D8.4.1v2**, LC1v2). Kept as the implementation and measurement
+> record; do not use it as a template for new work.
+
 2. Add a callsite inline cache for compiled non-computed member reads, with both
    monomorphic and small polymorphic states.
 3. Add a callsite inline cache for compiled non-computed member writes to

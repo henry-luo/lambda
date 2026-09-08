@@ -17,8 +17,9 @@
 > **Spec anchors**: **D7.4.4** (single host-object protocol — this doc's charter ruling,
 > minted from D4k/D4j), D3.4.7 / D7.4.1–D7.4.3 (host-family metadata, single VMap/Jube bridge),
 > D6.2.2v2 (observable Get-then-`[[Call]]` for method calls), D5.4.3/D5.4.4 (no realm state
-> baked into shared MIR), D8 (compilation). LC1 applies to Lambda script only; LJS keeps its
-> caches — but DOM4 is *static resolution*, not an inline cache.
+> baked into shared MIR), D8 (compilation). LC1v2 / D8.4.1v2 ban inline caches in **both**
+> lanes (LambdaJS included, since 2026-09-09) — DOM4 is *static resolution*, which is exactly
+> the sanctioned mechanism.
 
 ## 0. The DOM1→DOM4 arc
 

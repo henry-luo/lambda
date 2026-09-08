@@ -324,7 +324,7 @@ gap (Tune19 non-goal restated).
 
 - No change to the `a[i] : T?` public contract (D2.5.3) — TIG1 makes the
   element type precise *inside* the `?`, it does not remove totality.
-- No inline caches in Lambda script (LC1); shape/class inference for JS
+- No inline caches in either lane (LC1v2/D8.4.1v2); shape/class inference for JS
   stays within D3.4.7's immutable JsClassMeta rules.
 - No new user-facing type syntax; this is inference precision, not surface.
 - No Hindley-Milner unification/generalization — propagation stays

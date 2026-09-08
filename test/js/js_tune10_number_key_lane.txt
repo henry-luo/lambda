@@ -1,0 +1,26 @@
+1 z
+2
+h
+m
+n
+i
+undefined undefined
+undefined
+9
+2 9
+1,26,3
+true true false 3 undefined
+got2
+set3
+e undefined
+1.5 undefined
+7
+big big
+undefined 0
+6 [null,null,null,null,null,1]
+["z",2,3,4] x z 4
+{"1":"a","1.5":"b","-1":"c","NaN":"d","Infinity":"e"} 1|1.5|-1|NaN|Infinity
+1e+21 1e-7 0.1 0 1.2345678901234568e+29
+9007199254740991 9007199254740992 1000000000000000 -42
+TypeError: true
+TypeError set: true

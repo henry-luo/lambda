@@ -1,6 +1,15 @@
 # Lambda Runtime Globals — Audit & Migration to EvalContext
 
 **Date:** 2026-07-29
+> **Note (2026-09-09).** This record predates the LambdaJS inline-cache
+> retirement. Every mention below of "member ICs", "IC probes", or "IC slabs"
+> describes the per-site `JsLoadIC`/`JsStoreIC` machinery that was **deleted on
+> 2026-08-15** (`Lambda_Design_JS_IC_Retire.md` IR6); per-site caches are now
+> banned in both lanes (**D8.4.1v2**, LC1v2). The context-ownership rules those
+> passages state still apply verbatim to what replaced them — the per-context
+> module name/slot tables and the stateless `NameId` property heads — so the
+> audit conclusions are unchanged; only the mechanism name is stale.
+
 **Status:** Implemented and audited for context ownership, the MIR Direct
 helper ABI, and stable eval-thread identity. The 2026-07-29 cleanup removed the
 remaining scoped `EvalContext` rebinding APIs and call sites. Production native

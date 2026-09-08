@@ -6687,10 +6687,21 @@ static Item js_set_array_core(Item object, Item key, Item value,
     return js_elements_set_mode(object, key, value, strict);
 }
 
+// T10-2/D-C: the owner marker is installed non-enumerable, which promotes the
+// view's map to MAP_KIND_DESC. That byte therefore rules a dataset out before
+// the 24-byte shape lookup, which otherwise ran (and hashed) on every named
+// property access in the runtime.
+static inline bool js_map_may_be_dataset_view(Map* m) {
+    return m && m->data && m->map_kind == MAP_KIND_DESC;
+}
+
 // ES45: the second dataset assignment path, routed the same way as the one in
 // js_globals.cpp -- unwrap the proxy here, write through the catalog's row.
 extern "C" Item js_dataset_owner(Item dataset) {
-    if (get_type_id(dataset) != LMD_TYPE_MAP || !dataset.map) return ItemNull;
+    if (get_type_id(dataset) != LMD_TYPE_MAP ||
+            !js_map_may_be_dataset_view(dataset.map)) {
+        return ItemNull;
+    }
     bool found = false;
     Item owner = js_map_shape_lookup_ext(dataset.map,
         "__lambda_dataset_element", 24, &found);
@@ -8108,13 +8119,15 @@ static inline Map* js_named_fast_receiver_map(Item object, const char* name,
     if (type == LMD_TYPE_MAP) {
         Map* map = object.map;
         if (!map || !map->data) return NULL;
-        bool dataset_owner = false;
         // dataset views use an ordinary Map shell, but their hidden owner
         // marker routes writes to DOM attributes; raw slots would bypass that
         // hook and make MutationObserver state diverge from the property.
-        js_map_shape_lookup_ext(map, "__lambda_dataset_element", 24,
-            &dataset_owner);
-        if (dataset_owner) return NULL;
+        if (js_map_may_be_dataset_view(map)) {
+            bool dataset_owner = false;
+            js_map_shape_lookup_ext(map, "__lambda_dataset_element", 24,
+                &dataset_owner);
+            if (dataset_owner) return NULL;
+        }
         if (out_receiver_kind) *out_receiver_kind = JS_NAMED_FAST_RECEIVER_MAP;
         return map;
     }

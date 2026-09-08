@@ -196,7 +196,7 @@ Sources to unify: `transpile-mir.cpp:434–490` (`new_reg/emit_insn/emit_label/e
 
 **P4.2 — Lambda first**, node family by family (statements → expressions → calls/closures → for-expr clause driving with `lower_clause` for group/order/join). Lambda-range nodes route through `lower_ext_node` to the existing code, which shrinks in place.
 
-**P4.3 — JS module-by-module**, starting on the node-baseline corpus. **Non-negotiable carry-overs into the JS profile:** inline caches (`JsLoadIC/JsStoreIC`), native specialization (dual boxed+native emission — generalized in the driver since it's the same mechanism as Lambda's unboxed path), ctor shape caches, TDZ checks, completion/finally semantics. Perf gate per batch: LambdaJS perf suite + AWFY-JS.
+**P4.3 — JS module-by-module**, starting on the node-baseline corpus. **Non-negotiable carry-overs into the JS profile:** *(inline caches (`JsLoadIC/JsStoreIC`) — **struck 2026-09-09**: deleted 2026-08-15 and banned by D8.4.1v2/LC1v2, so nothing to carry over)*, native specialization (dual boxed+native emission — generalized in the driver since it's the same mechanism as Lambda's unboxed path), ctor shape caches, TDZ checks, completion/finally semantics. Perf gate per batch: LambdaJS perf suite + AWFY-JS.
 
 **P4.4 — Shared engines:** one destructuring lowering engine (serves declarators/params/for-targets/catch/match arms); shared iterator emission (`jm_emit_get_iterator` generalized, profile-dispatched); completion/abrupt-cleanup logic.
 

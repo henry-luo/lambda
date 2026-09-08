@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.52.0 (2026-09-08)
+**Spec version:** 1.53.0 (2026-09-09)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1520,7 +1520,14 @@ loosely across the corpus — context disambiguates, and we live with it.
   it comes, is a guard chain, never a patchable cache. LambdaJS named and
   indexed property accesses use the shared runtime reference/property kernels;
   TypeMap shape metadata remains ordinary lookup data, not mutable per-site
-  cache state. Generated code stays immutable. [LC1]
+  cache state. Generated code stays immutable. This bans mutable per-site
+  cache cells, feedback vectors, and callee/method caches in **both** lanes:
+  the sanctioned speed-up is **compile-predicted specialization with an
+  inline guard and the shared kernel on a miss** — for LambdaJS, per-site
+  literal and constructor shapes, integer-index lanes, and static `NameId`s
+  (D3.4.4v2, D4.6.1v2), the same physical routes the Lambda lane uses. A JS
+  fast path is admissible only when a miss is observationally identical to
+  the kernel result. [LC1v2]
 - **D8.4.2v2*** Core direct calls pass individual ABI operands (`Context*`,
   args); returns are shaped per the companion-lane convention (D5.2.1v3)
   — the trailing scalar-home operand is retired. `Item* + argc` is the JS
@@ -1868,6 +1875,7 @@ slice; no formal semantic ruling or document semver changes.
 | D8.2.1–D8.2.3 | The physical Lambda/JS foundation is substantially shared (`AstNodeType`, many layouts/aliases, `FnAnalysis`, and `MirEmitter`), but structural convergence is incomplete. P1a (2026-08-28) moved Lambda iterator `for` to `AST_NODE_FOR_EXPR`/`AstForNode`; P1b moved Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode`; P1c folded assignment/declaration-wrapper storage; P1d (2026-08-28) promotes condition loops to one `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` and retires the old while/do/C-style tags, while iterator clauses use `AST_NODE_FOR_CLAUSE`. P1e (2026-08-29) retires the duplicated JavaScript core-child rows and leaves only extension layouts in `js_ast_children.cpp`; Python remains the later guest acceptance test. |
 | D8.2.4–D8.2.6 | P1–P4 establish the shared indexed compiler substrate described above. P5 (2026-08-30) completes the planned structural semantic-family consolidation: `MirValue` demand/profile lowering now owns shared sequence, condition, module-slot, destination, call/result, return/completion, function-publication, and module-finalization boundaries in Lambda and JS, while profile callbacks retain language semantics and boxed fallback. P6 moves shared context/owner binding, result publication, execution/current-file/module-state scopes, and active-module handles into `runtime-state`; the semantic walkers and their frames remain distinct under **D8.1.3v10**. The 2026-09-05 FunctionId follow-up retires `FnAnalysis::js_mir_backend`: JS MIR artifacts are reached only through the `func_entries_by_id` table keyed by the shared `FunctionId`; post-order storage remains a backend detail. The same closeout publishes the physical Lambda parse→build→bind graph and the full `MirValue` producer boundaries. Current verification is 4,098 Lambda/Input and 40,261 Test262 baseline cases, with Lambda 0.512534 and JS 0.690065 release compiler-time ratios. This is an implementation status for **D2.4.1–D2.4.3**, **D5.2.1v3**, **D5.3.4**, and **D8.2.6**, not a new ruling. Focused gates: `vibe/Lambda_Design_JS_Unified.md` P5–P6. |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
+| D8.4.1v2 | ICs are retired in both lanes: the Lambda lane never had them; the LambdaJS per-site `JsLoadIC`/`JsStoreIC` machinery was deleted 2026-08-15 (IC_Retire IR1–IR8) and the LambdaJS carve-out in LC1 was closed 2026-09-09 (LC1v2). The replacement — compile-predicted literal/constructor shapes with an inline guard, an integer-index lane, and the shared kernel on a miss — is specified in `vibe/jube/JS_Tune10_Fast_Paths.md` (T10-1/T10-2) and is **not implemented**; Result38 measures LambdaJS at 4.35× QuickJS with the unspecialized kernel path. |
 | D8.4.2v3 | Lambda and LambdaJS direct calls pass `Context*` and source operands only; internal shape-2 results use two MIR results and C-reachable entries use the context companion slot. The trailing scalar-home operand is deleted from generated call ABI. |
 | D8.4.3v2 | Landed 2026-08-17 for Lambda, LambdaJS, Jube, and hosted execution boundaries: ordinary failures use explicit returned completions through each frame, while `LambdaRecoveryFrame` is restricted by the recovery-boundary gate to native-fault/test containment sites. The catalog and adapter audits retain the explicit Item/companion-lane contracts; see `vibe/Lambda_Design_Runtime_Error_Handling.md` §10–§12. |
 | D8.5.1 | MIR cache L1 landed; L2 lazy codegen approved but `mir.c` still eager. |
@@ -2102,7 +2110,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md` |
 | D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12; JSI1–JSI13 | `Lambda_Design_Unified_AST.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
-| D8.4 | LC1 + call-ABI notes; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_Runtime_Error_Handling.md` |
+| D8.4 | LC1v2 + call-ABI notes; IR1–IR8; T10-0–T10-5; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_JS_IC_Retire.md`, `jube/JS_Tune10_Fast_Paths.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md` |
 | D8.6 | MT1–MT8; U33–U36 | `Lambda_Design_MIR_Emission_Test.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md` |
 

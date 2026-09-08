@@ -397,17 +397,20 @@ mixed suites (cf. mypyc, Static Hermes typed paths).
 
 ### What NOT to do
 
-- **No inline caches in Lambda script — DECIDED 2026-08-01, recorded as
-  [`Lambda_Design_Compiling.md`](Lambda_Design_Compiling.md) LC1.** Stated in
-  lane/site terms: specialized lowerings (declared, or inferred behind a
-  DF-guard) have no dynamic sites by construction; open sites in Lambda —
-  untyped functions, partially typed functions' open sites, and boxed
-  fallback bodies alike — get plain runtime dispatch now and multi-version /
-  guard hoisting later (dual-func §10, DF16), never ICs; LJS keeps its ICs
-  (no type system to specialize against). Accepted cost: shape dispatch is
-  pushed onto the type system, which makes the TS-3 fix (T-A/T-C above)
-  load-bearing. Full rationale (guard-amortization, closed dispatch space,
-  immutable-code/module-cache, union completeness, Julia precedent) in LC1.
+- **No inline caches in Lambda script or LambdaJS — DECIDED 2026-08-01,
+  extended to LambdaJS 2026-09-09, recorded as
+  [`Lambda_Design_Compiling.md`](Lambda_Design_Compiling.md) LC1v2 and
+  **D8.4.1v2**.** Stated in lane/site terms: specialized lowerings (declared,
+  or inferred behind a DF-guard) have no dynamic sites by construction; open
+  sites in Lambda — untyped functions, partially typed functions' open sites,
+  and boxed fallback bodies alike — get plain runtime dispatch now and
+  multi-version / guard hoisting later (dual-func §10, DF16), never ICs.
+  LambdaJS is now under the same rule: compile-predicted shape specialization
+  with an inline guard and the shared kernel on a miss, never per-site cache
+  cells. Accepted cost: shape dispatch is pushed onto the type system, which
+  makes the TS-3 fix (T-A/T-C above) load-bearing. Full rationale
+  (guard-amortization, closed dispatch space, immutable-code/module-cache,
+  union completeness, Julia precedent) in LC1v2.
 - Don't add more declared types to benchmark sources to compensate — until
   T-A/T-C land, annotations are net-negative (TS-3), and the `*2.ls` corpus
   already demonstrates it.
