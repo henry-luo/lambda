@@ -829,6 +829,141 @@ static CssValue* css_parse_font_family_values(const CssToken* tokens, int value_
     return list_value;
 }
 
+static bool css_font_shorthand_is_slash(const CssValue* value) {
+    return value && value->type == CSS_VALUE_TYPE_CUSTOM &&
+        value->data.custom_property.name &&
+        strcmp(value->data.custom_property.name, "/") == 0;
+}
+
+static bool css_font_shorthand_is_valid_line_height(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_LENGTH ||
+        value->type == CSS_VALUE_TYPE_PERCENTAGE ||
+        value->type == CSS_VALUE_TYPE_NUMBER ||
+        value->type == CSS_VALUE_TYPE_FUNCTION ||
+        value->type == CSS_VALUE_TYPE_VAR ||
+        value->type == CSS_VALUE_TYPE_ENV ||
+        value->type == CSS_VALUE_TYPE_CALC) {
+        return true;
+    }
+    return value->type == CSS_VALUE_TYPE_KEYWORD &&
+        (value->data.keyword == CSS_VALUE_NORMAL ||
+         value->data.keyword == CSS_VALUE_INHERIT);
+}
+
+static bool css_font_shorthand_is_family_value(const CssValue* value) {
+    if (!value || css_font_shorthand_is_slash(value)) return false;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return !info || info->group != CSS_VALUE_GROUP_GLOBAL;
+    }
+    return value->type == CSS_VALUE_TYPE_CUSTOM ||
+        value->type == CSS_VALUE_TYPE_STRING ||
+        value->type == CSS_VALUE_TYPE_FUNCTION ||
+        value->type == CSS_VALUE_TYPE_VAR ||
+        value->type == CSS_VALUE_TYPE_ENV;
+}
+
+static bool css_font_shorthand_has_family(const CssValue* group, size_t start) {
+    if (!group || group->type != CSS_VALUE_TYPE_LIST ||
+        start >= (size_t)group->data.list.count) {
+        return false;
+    }
+    for (size_t i = start; i < (size_t)group->data.list.count; i++) {
+        if (!css_font_shorthand_is_family_value(group->data.list.values[i])) return false;
+    }
+    return true;
+}
+
+bool css_parse_font_shorthand(const CssValue* value, CssFontShorthandParts* parts) {
+    if (!parts) return false;
+    *parts = {nullptr, nullptr, nullptr, nullptr, nullptr, 0, false};
+    if (!value || value->type != CSS_VALUE_TYPE_LIST || value->data.list.count < 2) {
+        return false;
+    }
+    const CssValue* group = value;
+    if (value->data.list.values[0] &&
+        value->data.list.values[0]->type == CSS_VALUE_TYPE_LIST) {
+        group = value->data.list.values[0];
+    }
+    size_t count = (size_t)group->data.list.count;
+    if (count < 2) return false;
+    parts->group = group;
+    parts->family_start = count;
+
+    for (size_t i = 0; i < count; i++) {
+        const CssValue* item = group->data.list.values[i];
+        if (item && item->type == CSS_VALUE_TYPE_KEYWORD) {
+            const CssEnumInfo* info = css_enum_info(item->data.keyword);
+            if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return false;
+        }
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        const CssValue* item = group->data.list.values[i];
+        if (!item) continue;
+        if ((item->type == CSS_VALUE_TYPE_LENGTH ||
+             item->type == CSS_VALUE_TYPE_PERCENTAGE) && !parts->size) {
+            parts->size = item;
+            size_t next = i + 1;
+            if (next < count && css_font_shorthand_is_slash(group->data.list.values[next])) {
+                if (next + 1 >= count ||
+                    !css_font_shorthand_is_valid_line_height(group->data.list.values[next + 1])) {
+                    return false;
+                }
+                parts->line_height = group->data.list.values[next + 1];
+                next += 2;
+            }
+            parts->family_start = next;
+            break;
+        }
+        if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+            const CssEnumInfo* info = css_enum_info(item->data.keyword);
+            if (!info) continue;
+            if (info->group == CSS_VALUE_GROUP_FONT_WEIGHT) {
+                parts->weight = item;
+            } else if (info->group == CSS_VALUE_GROUP_FONT_STYLE) {
+                parts->style = item;
+            } else if (item->data.keyword == CSS_VALUE_SMALL_CAPS) {
+                parts->small_caps = true;
+            } else if (info->group == CSS_VALUE_GROUP_FONT_SIZE && !parts->size) {
+                parts->size = item;
+                size_t next = i + 1;
+                if (next < count && css_font_shorthand_is_slash(group->data.list.values[next])) {
+                    if (next + 1 >= count ||
+                        !css_font_shorthand_is_valid_line_height(group->data.list.values[next + 1])) {
+                        return false;
+                    }
+                    parts->line_height = group->data.list.values[next + 1];
+                    next += 2;
+                }
+                parts->family_start = next;
+                break;
+            }
+        } else if (item->type == CSS_VALUE_TYPE_NUMBER && !parts->weight) {
+            int weight = (int)item->data.number.value; // INT_CAST_OK: CSS numeric weight.
+            if (weight >= 1 && weight <= 1000) parts->weight = item;
+        }
+    }
+
+    // `font` needs a family after its size; sharing this check keeps invalid
+    // declarations out of both the cascade and intrinsic font measurement.
+    if (!parts->size || !css_font_shorthand_has_family(group, parts->family_start)) {
+        return false;
+    }
+    if (value != group) {
+        for (size_t i = 1; i < (size_t)value->data.list.count; i++) {
+            const CssValue* family = value->data.list.values[i];
+            if (family && family->type == CSS_VALUE_TYPE_LIST) {
+                if (!css_font_shorthand_has_family(family, 0)) return false;
+            } else if (!css_font_shorthand_is_family_value(family)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 // Helper: Parse a CSS function with its arguments from tokens
 // Returns a CssValue of type CSS_VALUE_TYPE_FUNCTION
 // *pos should point to the CSS_TOKEN_FUNCTION token; on return, *pos points past the closing paren
@@ -2525,6 +2660,14 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                 return NULL;
             }
         }
+
+        if (decl->property_code == CSS_PROPERTY_FONT_SIZE &&
+            !css_property_validate_value(decl->property_code, decl->value)) {
+            // Validate here as well as DOM application so an invalid value
+            // cannot displace the inherited font size in the cascade.
+            log_debug("[CSS Parse] Rejecting invalid font-size");
+            return NULL;
+        }
     }
 
     // Validate: for standard properties, {}-blocks are only valid if the entire
@@ -2558,6 +2701,22 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                           property_name);
                 return NULL;
             }
+        }
+    }
+
+    if (decl->value && decl->property_code == CSS_PROPERTY_FONT) {
+        bool allow_special_value = decl->value->type == CSS_VALUE_TYPE_VAR ||
+            decl->value->type == CSS_VALUE_TYPE_ENV;
+        if (decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            const CssEnumInfo* info = css_enum_info(decl->value->data.keyword);
+            allow_special_value = info &&
+                (info->group == CSS_VALUE_GROUP_GLOBAL ||
+                 info->group == CSS_VALUE_GROUP_SYSTEM_FONT);
+        }
+        CssFontShorthandParts parts;
+        if (!allow_special_value && !css_parse_font_shorthand(decl->value, &parts)) {
+            log_debug("[CSS Parse] Rejecting invalid font shorthand");
+            return NULL;
         }
     }
 
