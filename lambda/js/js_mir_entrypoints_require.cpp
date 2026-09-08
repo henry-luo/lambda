@@ -100,6 +100,9 @@ JsMirMainFunc js_mir_link_main(MIR_context_t ctx, bool use_interp,
 }
 
 static void js_mir_finish_script_turn(Runtime* runtime, Item result) {
+    // D5.4.1: callbacks remain part of the active evaluator turn; marking this
+    // boundary prevents synchronous layout from handing TLS to another realm.
+    RuntimeExecutionScope execution_scope(context);
     js_event_loop_drain_script_turn(
         runtime && runtime->dom_doc != NULL,
         js_dynamic_import_suppress_module_drain <= 0);

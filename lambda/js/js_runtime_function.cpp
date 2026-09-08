@@ -13,8 +13,15 @@ extern __thread EvalContext* context;
 // Function object wrappers
 // =============================================================================
 
-#define JS_FUNCTION_SIZE_CLASS 7
-static_assert(sizeof(JsFunction) <= 384,
+// JSCUO9: the class index selects a slot from gc_object_zone.c's table
+// (16, 32, 48, 64, 96, 128, 256, 384), so this constant, not sizeof, is what
+// the allocator honours. It was 7 — the 384 B slot — which the record needed
+// at 328 B when item 4 began but not afterwards: every shrink down to 216 B
+// kept handing out 384 B slots. Class 5 is the 128 B slot, and the record now
+// measures exactly 128, so a function value occupies a third of what it did.
+// Keep this constant and the assert below moving together.
+#define JS_FUNCTION_SIZE_CLASS 5
+static_assert(sizeof(JsFunction) <= 128,
               "JsFunction must fit its GC object-zone size class");
 
 extern "C" JsFunction* js_alloc_gc_function_object(void) {
@@ -176,12 +183,17 @@ void js_function_finalize_capabilities(JsFunction* fn) {
     js_function_ensure_metadata_properties(fn);
 }
 
+static JsFunctionPayload* js_fn_payload_ensure(JsFunction* fn);
+
+
 extern "C" void js_set_function_home_class(Item fn_item, Item home_class) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     if (!fn) return;
-    fn->home_class = home_class;
-    js_function_root_item_if_needed(fn, &fn->home_class);
+    JsFunctionPayload* payload = js_fn_payload_ensure(fn);
+    if (!payload) return;
+    payload->home_class = home_class;
+    js_function_root_item_if_needed(fn, &payload->home_class);
     js_function_finalize_capabilities(fn);
 }
 
@@ -205,50 +217,82 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
         for (int i = 0; i < fn->env_size; i++) gc_mark_item(gc, fn->env[i].item);
     }
     gc_mark_item(gc, fn->prototype.item);
-    gc_mark_item(gc, fn->bound_this_store[0].item);
-    if (fn->bound) {
-        if (fn->bound->args) {
-            gc_mark_object_ptr(gc, fn->bound->args);
-            for (int i = 0; i < fn->bound->argc; i++) {
-                gc_mark_item(gc, fn->bound->args[i].item);
-            }
-        }
-        gc_mark_item(gc, fn->bound->target.item);
-    }
     gc_mark_object_ptr(gc, fn->name);
     gc_mark_item(gc, fn->properties_map.item);
     gc_mark_item(gc, fn->home_global.item);
-    gc_mark_item(gc, fn->home_class.item);
     gc_mark_object_ptr(gc, fn->source_text);
-    if (fn->with && fn->with->env) {
-        gc_mark_object_ptr(gc, fn->with->env);
-        for (int i = 0; i < fn->with->depth; i++) gc_mark_item(gc, fn->with->env[i].item);
+    // JSCUO8: one container holds every optional record, so the whole payload
+    // side of the trace is reached through a single null check.
+    const JsFunctionPayload* p = fn->payload;
+    if (!p) return 1;
+    gc_mark_item(gc, p->home_class.item);
+    if (p->bound) {
+        gc_mark_item(gc, p->bound->this_store[0].item);
+        if (p->bound->args) {
+            gc_mark_object_ptr(gc, p->bound->args);
+            for (int i = 0; i < p->bound->argc; i++) {
+                gc_mark_item(gc, p->bound->args[i].item);
+            }
+        }
+        gc_mark_item(gc, p->bound->target.item);
     }
-    if (fn->eval_origin) {
-        gc_mark_object_ptr(gc, fn->eval_origin->filename);
-        gc_mark_object_ptr(gc, fn->eval_origin->source);
+    if (p->with && p->with->env) {
+        gc_mark_object_ptr(gc, p->with->env);
+        for (int i = 0; i < p->with->depth; i++) gc_mark_item(gc, p->with->env[i].item);
     }
-    if (fn->klass) {
-        gc_mark_item(gc, fn->klass->constructor.item);
-        gc_mark_item(gc, fn->klass->instance_prototype.item);
-        gc_mark_item(gc, fn->klass->superclass.item);
+    if (p->eval_origin) {
+        gc_mark_object_ptr(gc, p->eval_origin->filename);
+        gc_mark_object_ptr(gc, p->eval_origin->source);
     }
-    if (fn->ast) {
-        gc_mark_item(gc, fn->ast->lexical_this.item);
-        gc_mark_item(gc, fn->ast->lexical_new_target.item);
-        if (fn->ast->env) gc_mark_object_ptr(gc, fn->ast->env);
+    if (p->klass) {
+        gc_mark_item(gc, p->klass->constructor.item);
+        gc_mark_item(gc, p->klass->instance_prototype.item);
+        gc_mark_item(gc, p->klass->superclass.item);
+    }
+    if (p->ast) {
+        gc_mark_item(gc, p->ast->lexical_this.item);
+        gc_mark_item(gc, p->ast->lexical_new_target.item);
+        if (p->ast->env) gc_mark_object_ptr(gc, p->ast->env);
     }
     return 1;
 }
 
+// A payload must be owned the same way its function is. A GC-backed value
+// reaches js_function_gc_destroy and frees the payload there; a POOL-backed one
+// is never finalized, so a malloc'd payload would outlive every reference and
+// leak — it has to come from the same pool and die with it. Getting this wrong
+// is invisible in behaviour and shows up only as a memtrack leak at shutdown.
+static bool js_function_is_pool_backed(const JsFunction* fn) {
+    return fn && context && context->heap && context->heap->gc &&
+        !gc_is_managed(context->heap->gc, (void*)fn);
+}
+
+static void* js_fn_payload_calloc(const JsFunction* fn, size_t size) {
+    if (js_function_is_pool_backed(fn)) {
+        return js_input && js_input->pool ? pool_calloc(js_input->pool, size) : NULL;
+    }
+    return mem_calloc(1, size, MEM_CAT_JS_RUNTIME);
+}
+
 // JSCU20: an eval origin is a per-value native payload, so it is allocated
 // and released with the value rather than living in every closure.
+// JSCUO8: the container is minted on first use, then the requested record.
+static JsFunctionPayload* js_fn_payload_ensure(JsFunction* fn) {
+    if (!fn) return NULL;
+    if (!fn->payload) {
+        fn->payload = (JsFunctionPayload*)js_fn_payload_calloc(fn,
+            sizeof(JsFunctionPayload));
+    }
+    return fn->payload;
+}
+
 #define JS_FN_PAYLOAD_ENSURE(fn, field, type)                                  \
-    if (!(fn)) return NULL;                                                    \
-    if (!(fn)->field) {                                                        \
-        (fn)->field = (type*)mem_calloc(1, sizeof(type), MEM_CAT_JS_RUNTIME);  \
+    JsFunctionPayload* slot = js_fn_payload_ensure(fn);                        \
+    if (!slot) return NULL;                                                    \
+    if (!slot->field) {                                                        \
+        slot->field = (type*)js_fn_payload_calloc(fn, sizeof(type));           \
     }                                                                          \
-    return (fn)->field;
+    return slot->field;
 
 JsNativeCode* js_fn_native_ensure(JsFunction* fn) {
     JS_FN_PAYLOAD_ENSURE(fn, native, JsNativeCode)
@@ -265,53 +309,55 @@ JsClassData* js_fn_class_ensure(JsFunction* fn) {
 JsWithData* js_fn_with_ensure(JsFunction* fn) {
     JS_FN_PAYLOAD_ENSURE(fn, with, JsWithData)
 }
+JsEvalOrigin* js_fn_eval_origin_ensure(JsFunction* fn) {
+    JS_FN_PAYLOAD_ENSURE(fn, eval_origin, JsEvalOrigin)
+}
 
 // A GC-backed value reaches the payload's Items through its tracer. A
 // pool-backed one is not traced at all, and its one-shot root registration may
 // already have run before this payload existed, so root the payload's own slots
 // here rather than re-entering that path (same contract as the eval origin).
+static bool js_function_payload_needs_own_roots(const JsFunction* fn) {
+    return js_function_is_pool_backed(fn);
+}
+
 static void js_function_root_ast_payload(JsFunction* fn) {
-    if (!fn || !fn->ast) return;
-    if (context && context->heap && context->heap->gc &&
-            !gc_is_managed(context->heap->gc, fn)) {
-        heap_try_register_gc_root((uint64_t*)&fn->ast->lexical_this);
-        heap_try_register_gc_root((uint64_t*)&fn->ast->lexical_new_target);
-    }
+    if (!fn || !fn->payload || !fn->payload->ast) return;
+    if (!js_function_payload_needs_own_roots(fn)) return;
+    heap_try_register_gc_root((uint64_t*)&fn->payload->ast->lexical_this);
+    heap_try_register_gc_root((uint64_t*)&fn->payload->ast->lexical_new_target);
 }
 
 extern "C" void js_function_set_eval_origin(JsFunction* fn, String* filename,
         String* source, int64_t line_offset, int64_t column_offset) {
     if (!fn) return;
-    if (!fn->eval_origin) {
-        fn->eval_origin = (JsEvalOrigin*)mem_calloc(1, sizeof(JsEvalOrigin),
-            MEM_CAT_JS_RUNTIME);
-        if (!fn->eval_origin) return;
-    }
-    fn->eval_origin->filename = filename;
-    fn->eval_origin->source = source;
-    fn->eval_origin->line_offset = line_offset;
-    fn->eval_origin->column_offset = column_offset;
-    // A GC-backed value reaches these Strings through its tracer. A pool-backed
-    // one is not traced at all, and its one-shot root registration may already
-    // have run before this payload existed, so root the payload's own slots
-    // here rather than re-entering that path.
-    if (context && context->heap && context->heap->gc &&
-            !gc_is_managed(context->heap->gc, fn)) {
-        heap_try_register_gc_root((uint64_t*)&fn->eval_origin->filename);
-        heap_try_register_gc_root((uint64_t*)&fn->eval_origin->source);
-    }
+    JsEvalOrigin* origin = js_fn_eval_origin_ensure(fn);
+    if (!origin) return;
+    origin->filename = filename;
+    origin->source = source;
+    origin->line_offset = line_offset;
+    origin->column_offset = column_offset;
+    if (!js_function_payload_needs_own_roots(fn)) return;
+    heap_try_register_gc_root((uint64_t*)&origin->filename);
+    heap_try_register_gc_root((uint64_t*)&origin->source);
 }
 
 // Called by the collector for every dying function value.
 extern "C" void js_function_gc_destroy(void* data) {
     JsFunction* fn = (JsFunction*)data;
     if (!fn || fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) return;
-    if (fn->eval_origin) { mem_free(fn->eval_origin); fn->eval_origin = NULL; }
-    if (fn->bound) { mem_free(fn->bound); fn->bound = NULL; }
-    if (fn->klass) { mem_free(fn->klass); fn->klass = NULL; }
-    if (fn->with) { mem_free(fn->with); fn->with = NULL; }
-    if (fn->ast) { mem_free(fn->ast); fn->ast = NULL; }
-    if (fn->native) { mem_free(fn->native); fn->native = NULL; }
+    // only a GC-backed value reaches this hook, and those own malloc'd
+    // payloads; a pool-backed value's payload dies with its pool instead
+    JsFunctionPayload* p = fn->payload;
+    if (!p) return;
+    if (p->eval_origin) mem_free(p->eval_origin);
+    if (p->bound) mem_free(p->bound);
+    if (p->klass) mem_free(p->klass);
+    if (p->with) mem_free(p->with);
+    if (p->ast) mem_free(p->ast);
+    if (p->native) mem_free(p->native);
+    mem_free(p);
+    fn->payload = NULL;
 }
 
 extern "C" int js_function_gc_compact(void* data, gc_heap_t* gc) {

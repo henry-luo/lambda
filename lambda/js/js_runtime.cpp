@@ -676,14 +676,15 @@ static Item js_named_native_function_source_item(const String* name) {
     return result;
 }
 JS_FORWARD_STATIC_ITEM(js_function_prototype_call_target, (), make_js_undefined, ())
-JS_FORWARD_STATIC_EXPRESSION(bool, js_function_has_vm_stack_source, (JsFunction* fn), (fn && fn->eval_origin && fn->eval_origin->filename && fn->eval_origin->source))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_function_has_vm_stack_source, (JsFunction* fn), (js_fn_eval_origin(fn)->filename && js_fn_eval_origin(fn)->source))
 
 static bool js_function_push_vm_stack_source(JsFunction* fn) {
     if (!js_function_has_vm_stack_source(fn)) return false;
-    return js_eval_source_push_compact((Item){.item = s2it(fn->eval_origin->filename)},
-                                       (Item){.item = s2it(fn->eval_origin->source)},
-                                       fn->eval_origin->line_offset,
-                                       fn->eval_origin->column_offset) != 0;
+    const JsEvalOrigin* origin = js_fn_eval_origin(fn);
+    return js_eval_source_push_compact((Item){.item = s2it(origin->filename)},
+                                       (Item){.item = s2it(origin->source)},
+                                       origin->line_offset,
+                                       origin->column_offset) != 0;
 }
 
 #define js_global_var_module_binding_keys (js_runtime_state.global_var_module_bindings->keys)
@@ -3538,7 +3539,7 @@ extern "C" Item js_new_class_function(void) {
     // leaving it set would let later metadata finalization restore the class
     // guard as the [[Construct]] entry and reject `new` class expressions.
     // clearing a capability the value never had must not mint a record
-    if (fn->native) fn->native->construct = NULL;
+    if (fn->payload && fn->payload->native) fn->payload->native->construct = NULL;
     fn->flags |= JS_FUNC_FLAG_CLASS_CONSTRUCTOR;
     fn->construct = js_construct_entry_class_function;
     return result;
@@ -11188,14 +11189,16 @@ Item js_intrinsic_function_to_string_body(Item callee, Item this_value,
     if (get_type_id(this_value) == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)this_value.function;
         if (fn && (fn->flags & JS_FUNC_FLAG_CLASS_CONSTRUCTOR)) {
-            return fn->source_text ? (Item){.item = s2it(fn->source_text)}
+            String* text = js_fn_source_text(fn);
+            return text ? (Item){.item = s2it(text)}
                 : js_native_function_source_item();
         }
 #define JS_VALID_SOURCE_PTR(source) ((source) && \
     ((uintptr_t)(source) & 3) == 0 && (uintptr_t)(source) >= 0x1000)
+        String* source = js_fn_source_text(fn);
         if (!(fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS || js_fn_bound(fn)->args) &&
-            JS_VALID_SOURCE_PTR(fn->source_text) && fn->source_text->len > 0) {
-            return (Item){.item = s2it(fn->source_text)};
+            JS_VALID_SOURCE_PTR(source) && source->len > 0) {
+            return (Item){.item = s2it(source)};
         }
 #undef JS_VALID_SOURCE_PTR
         if (!(fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS || js_fn_bound(fn)->args)) {
@@ -13812,13 +13815,13 @@ extern "C" int js_initial_call_stack_limit(void) {
 }
 
 static bool js_call_use_common_lane(JsFunction* fn) {
-    if (!fn || fn->home_class.item == 0 ||
+    if (!fn || js_fn_home_class(fn).item == 0 ||
         !(fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) || js_fn_native(fn)->call ||
         (fn->flags & (JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_GENERATOR |
             JS_FUNC_FLAG_ASYNC_GEN | JS_FUNC_FLAG_DERIVED_CTOR |
             JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) || js_fn_with(fn)->depth > 0 ||
         (fn->flags & JS_FUNC_FLAG_USES_WITH) || fn->eval_initializer_context ||
-        fn->eval_origin) {
+        js_fn_eval_origin(fn)->source) {
         // The former call-lane classifier also disabled this shortcut for
         // derived constructors; preserve that invariant so super() still
         // enters the TDZ/new.target setup owned by the generic dispatcher.
@@ -14231,7 +14234,7 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         js_super_this_binding_push(this_val);
         js_current_this = (Item){.item = ITEM_JS_TDZ};
     }
-    Item method_home_class = fn->home_class;
+    Item method_home_class = js_fn_home_class(fn);
     if (method_home_class.item != ItemNull.item && method_home_class.item != 0 &&
         get_type_id(method_home_class) != LMD_TYPE_UNDEFINED) {
         js_current_private_home_class = method_home_class;

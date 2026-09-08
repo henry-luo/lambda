@@ -5189,7 +5189,7 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         ? js_interp_function_lexical_this(function) : js_get_lexical_this_binding());
     Rooted<Item> new_target_root(roots, (function->flags & JS_FUNC_FLAG_ARROW)
         ? js_fn_ast(function)->lexical_new_target : js_get_new_target());
-    Rooted<Item> home_class_root(roots, function->home_class);
+    Rooted<Item> home_class_root(roots, js_fn_home_class(function));
     Rooted<Item> arguments_root(roots, ItemNull);
     Rooted<Item> tail_arguments_root(roots, ItemNull);
     Rooted<Item> tail_scratch_root(roots, ItemNull);
@@ -5428,7 +5428,7 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
     function_env->arguments_object = arguments_object_root.get().item;
     function_env->function_node = (AstNode*)js_fn_ast(function)->function;
     function_env->arguments_are_mapped = mapped ? 1 : 0;
-    Item home_class = function->home_class;
+    Item home_class = js_fn_home_class(function);
     JsInterpFrame init_frame = {};
     init_frame.script = js_fn_ast(function)->script;
     init_frame.env = function_env;
@@ -5499,7 +5499,7 @@ extern "C" Item js_interp_resume_generator(Item generator,
     JsFunction* function = (JsFunction*)function_root.get().function;
     if (!function || !js_fn_ast(function)->function ||
             get_type_id(arguments_root.get()) != LMD_TYPE_ARRAY) return ItemError;
-    home_class_root.set(function->home_class);
+    home_class_root.set(js_fn_home_class(function));
     JsBlockNode* body = js_fn_ast(function)->function->body &&
             js_fn_ast(function)->function->body->node_type == AST_NODE_BLOCK
         ? (JsBlockNode*)js_fn_ast(function)->function->body : NULL;
@@ -5638,7 +5638,7 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
     Rooted<Item> this_root(roots, state->this_val);
     Rooted<Item> input_root(roots, input);
     Rooted<Item> home_class_root(roots,
-        ((JsFunction*)function_root.get().function)->home_class);
+        js_fn_home_class((JsFunction*)function_root.get().function));
     Rooted<Item> await_values_root(roots, state->ast_await_values);
     JsFunction* function = (JsFunction*)function_root.get().function;
     if (!function || !js_fn_ast(function)->function ||

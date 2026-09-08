@@ -11,6 +11,7 @@
 #include "../lib/font/font.h"
 #include "../lib/tagged.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lambda/runtime/runtime-state.h"
 
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -4889,12 +4890,13 @@ void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
 
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
     DomDocument* doc = NULL;
-    // owned by this UI tree so unrelated documents on the same thread cannot
     if (lycon->ui_context->iframe_depth >= MAX_IFRAME_DEPTH) {
         log_warn("iframe: maximum nesting depth (%d) exceeded, skipping", MAX_IFRAME_DEPTH);
         return;
     }
-    if (!(block->embed && block->embedp()->doc)) {
+    EvalContext* active_context = (EvalContext*)eval_context_tls_runtime();
+    bool evaluation_active = active_context && active_context->execution_depth != 0;
+    if (!(block->embed && block->embedp()->doc) && !evaluation_active) {
         const char* srcdoc = block->get_attribute("srcdoc");
         const char* src = block->get_attribute("src");
         if ((srcdoc && *srcdoc) || (src && *src)) {
@@ -4925,8 +4927,11 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                 lycon->ui_context->iframe_depth--;
             }
         }
-    }
-    else {
+    } else if (evaluation_active && !(block->embed && block->embedp()->doc)) {
+        // D5.4.1: lazy iframe navigation waits for post-script layout because
+        // switching isolates here would invalidate the parent's live JS frames.
+        log_debug("iframe: deferring navigation until evaluator quiescence");
+    } else {
         doc = block->embedp()->doc;
     }
     if (doc && doc->view_tree && doc->view_tree->root) {
