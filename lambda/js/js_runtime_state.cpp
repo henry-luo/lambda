@@ -250,10 +250,8 @@ void js_runtime_state_destroy_context(void) {
     jm_compile_recovery_state_destroy_context(runtime_context->js_state);
     js_runtime_prototype_snapshot_destroy_context(runtime_context->js_state);
     js_runtime_regex_cache_destroy_context(runtime_context->js_state);
-    for (int i = 0; i < runtime_context->js_state->generator_count; i++) {
-        js_interp_generator_clear_continuations(
-            &runtime_context->js_state->generators[i]);
-    }
+    // JSCU9: generators are GC-owned carriers; the heap finalizer releases
+    // their continuations when the context heap is destroyed.
     if (runtime_context->js_state->operations.symbol_registry) {
         hashmap_free(runtime_context->js_state->operations.symbol_registry);
     }

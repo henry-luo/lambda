@@ -34,6 +34,10 @@ typedef struct ModuleDescriptor {
     const char* source_lang;    // "lambda", "js", "python", ... (static string, not owned)
     LangProfile* profile;       // resolved language profile for shared AST phases
     Item namespace_obj;         // namespace Item (map of exported symbols)
+    // CommonJS `module` object for a JS file loaded through require(). A
+    // second fact beside the namespace, not a retag of it: the loader owns
+    // namespace_obj and source_lang before and after the body runs.
+    Item cjs_module;
     const ModuleNamespaceOps* namespace_ops; // language-owned export membrane
     void* mir_ctx;              // compiled MIR context (opaque, for function lookup)
     bool initialized;           // true after module code has executed
@@ -90,6 +94,8 @@ void module_register_with_namespace_ops_for_runtime(
 // Look up a module by resolved path. Returns NULL if not found.
 ModuleDescriptor* module_get(const char* path);
 ModuleDescriptor* module_get_for_runtime(Runtime* runtime, const char* path);
+// Stores the CommonJS module object on an existing descriptor and roots it.
+void module_descriptor_set_cjs_module(ModuleDescriptor* desc, Item module);
 
 // Check if a module is already loaded
 bool module_is_loaded(const char* path);

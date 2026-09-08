@@ -21,8 +21,6 @@
 #define JS_WITH_STACK_MAX 16
 #define JS_DEFERRED_MIR_MAX 4096
 #define JS_FUNCTION_CACHE_CAPACITY 512
-#define JS_MAX_GENERATORS 4096
-#define JS_MAX_ASYNC_CONTEXTS 256
 #define JS_READLINE_INPUT_MAP_MAX 256
 #define JS_GLOBAL_VAR_MODULE_BINDING_CAP 512
 #define JS_GLOBAL_LEX_BIND_MAX 1024
@@ -950,10 +948,8 @@ struct JsRuntimeState {
     // Resumable code retains function environments after its creating native
     // frame has returned.  The fixed tables are context-owned so resumes never
     // consult process-global state or contend with another isolate.
-    JsGeneratorStateRecord generators[JS_MAX_GENERATORS] = {};
-    int generator_count = 0;
-    JsAsyncContextStateRecord async_contexts[JS_MAX_ASYNC_CONTEXTS] = {};
-    int async_context_count = 0;
+    // JSCU10: async activations are GC-owned frames, not a fixed table. Only
+    // the single await scratch value keeps an epoch-guarded root.
     Item async_resolved_value = {};
     void* async_roots_registered_gc = NULL;
     uint64_t async_roots_registered_epoch = UINT64_MAX;

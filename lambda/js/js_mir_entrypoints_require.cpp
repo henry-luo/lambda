@@ -1743,9 +1743,8 @@ static Item js_cjs_find_module(Item filename) {
     String* spec = it2s(filename);
     ModuleDescriptor* desc = module_get_for_runtime(
         context ? context->runtime : NULL, spec ? spec->chars : NULL);
-    if (desc && desc->source_lang && strcmp(desc->source_lang, "js-cjs") == 0) {
-        return desc->namespace_obj;
-    }
+    if (!desc) return ItemNull;
+    if (get_type_id(desc->cjs_module) == LMD_TYPE_MAP) return desc->cjs_module;
     return ItemNull;
 }
 
@@ -1753,12 +1752,26 @@ static void js_cjs_store_module(Item filename, Item module) {
     if (get_type_id(filename) != LMD_TYPE_STRING) return;
     String* spec = it2s(filename);
     if (!spec) return;
-    ModuleDescriptor* existing = module_get_for_runtime(
-        context ? context->runtime : NULL, spec->chars);
+    Runtime* runtime = context ? context->runtime : NULL;
+    ModuleDescriptor* existing = module_get_for_runtime(runtime, spec->chars);
     if (existing && existing->source_lang &&
-            strcmp(existing->source_lang, "js-cjs") != 0) return;
-    module_register_for_runtime(context ? context->runtime : NULL,
-        spec->chars, "js-cjs", module, NULL);
+            strcmp(existing->source_lang, "js") != 0 &&
+            strcmp(existing->source_lang, "js-cjs") != 0) {
+        // another language owns this path; CommonJS metadata never rebrands it.
+        return;
+    }
+    if (!existing) {
+        // metadata-only child (never loaded through the JS loader): the CJS
+        // module object is also the descriptor's namespace.
+        module_register_for_runtime(runtime, spec->chars, "js-cjs", module, NULL);
+        existing = module_get_for_runtime(runtime, spec->chars);
+        if (!existing) return;
+    }
+    // The loader marks a file as "js" before its body runs and re-registers
+    // the ESM namespace after it, so the CJS `module` object cannot ride in
+    // namespace_obj under a language tag: it was dropped on both writes.
+    // It is a second fact of the same descriptor.
+    module_descriptor_set_cjs_module(existing, module);
 }
 
 static Item js_cjs_exports(Item module) {
@@ -1782,6 +1795,9 @@ static Item js_cjs_children(Item module) {
 }
 
 static void js_cjs_update_cached_default(Item filename, Item module) {
+    // No CJS module object means the namespace already carries the loader's
+    // `default`; replacing it with a fresh {} is how exports went missing.
+    if (get_type_id(module) != LMD_TYPE_MAP) return;
     Item ns = js_module_get(filename);
     if (get_type_id(ns) != LMD_TYPE_MAP) return;
     js_set_key_default(ns, js_cjs_key("default", (int)strlen("default")), js_cjs_exports(module));

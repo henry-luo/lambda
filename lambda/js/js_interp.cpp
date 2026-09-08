@@ -468,6 +468,20 @@ static void js_interp_async_clear_loops(
     *continuations = NULL;
 }
 
+// JSCU10: an async frame is precisely traced through its GC carrier, so its
+// suspended for-await-of loop continuations (iterator + env) must be marked.
+// The old context-wide table pinned only the record's Item fields, never these.
+void js_interp_async_trace_continuations(JsAsyncContextStateRecord* state,
+        gc_heap_t* gc) {
+    if (!state || !gc) return;
+    for (JsInterpGeneratorLoopContinuation* loop = state->ast_loop_continuations;
+            loop; loop = loop->next) {
+        gc_mark_item(gc, loop->iterator.item);
+        gc_mark_item(gc, loop->for_in_object.item);
+        if (loop->env) gc_mark_object_ptr(gc, loop->env);
+    }
+}
+
 void js_interp_async_clear_continuations(JsAsyncContextStateRecord* state) {
     if (!state) return;
     js_interp_async_clear_loops(&state->ast_loop_continuations);

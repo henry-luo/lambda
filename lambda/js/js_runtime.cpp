@@ -38,6 +38,7 @@ void js_interp_generator_trace_continuations(JsGeneratorStateRecord* state,
 void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
 struct JsAsyncContextStateRecord;
 void js_interp_async_clear_continuations(JsAsyncContextStateRecord* state);
+void js_interp_async_trace_continuations(JsAsyncContextStateRecord* state, gc_heap_t* gc);
 
 // Shared formatting buffer for the throw-with-format helpers. JS error
 // messages are bounded by construction; truncation is preferable to a heap
@@ -93,9 +94,13 @@ typedef struct JsProxyMapCarrier {
     JsProxyData payload;
 } JsProxyMapCarrier;
 
+// JSCU9 (D5.1.1v2/D5.1.3): the generator's suspended state is carried by the
+// generator object itself, not a context-wide index table. The object owns its
+// re-homed environment and traces its own edges; there is no pool, cap, or
+// slot-recycling identity hazard.
 typedef struct JsGeneratorMapCarrier {
     Map base;
-    int64_t generator_index;
+    JsGeneratorStateRecord state;
 } JsGeneratorMapCarrier;
 
 struct JsRegexData;
@@ -27770,30 +27775,32 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
 // (Item* env, Item input, int64_t state) and returns a 2-element array
 // [value, next_state] where next_state == -1 means done.
 using JsGenerator = JsGeneratorStateRecord;
-#define js_generators (js_runtime_state.generators)
-#define js_generator_count (js_runtime_state.generator_count)
 
 extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
     if (!map || !gc) return;
     Item generator_item = (Item){.map = map};
     if (!js_object_has_class(generator_item, JS_CLASS_GENERATOR)) return;
-    int64_t idx = ((JsGeneratorMapCarrier*)map)->generator_index;
-    if (idx < 0 || idx >= js_generator_count) return;
-    if (js_generators[idx].env) gc_mark_object_ptr(gc, js_generators[idx].env);
-    gc_mark_item(gc, js_generators[idx].private_home_class.item);
-    gc_mark_item(gc, js_generators[idx].delegate.item);
-    gc_mark_item(gc, js_generators[idx].ast_function.item);
-    gc_mark_item(gc, js_generators[idx].ast_arguments.item);
-    gc_mark_item(gc, js_generators[idx].ast_this.item);
-    gc_mark_item(gc, js_generators[idx].ast_yield_values.item);
-    gc_mark_item(gc, js_generators[idx].ast_pending_resume_input.item);
-    if (js_generators[idx].ast_function_env) {
-        gc_mark_object_ptr(gc, js_generators[idx].ast_function_env);
-    }
-    if (js_generators[idx].ast_body_env) {
-        gc_mark_object_ptr(gc, js_generators[idx].ast_body_env);
-    }
-    js_interp_generator_trace_continuations(&js_generators[idx], gc);
+    JsGeneratorStateRecord* gen = &((JsGeneratorMapCarrier*)map)->state;
+    if (gen->env) gc_mark_object_ptr(gc, gen->env);
+    gc_mark_item(gc, gen->private_home_class.item);
+    gc_mark_item(gc, gen->delegate.item);
+    gc_mark_item(gc, gen->ast_function.item);
+    gc_mark_item(gc, gen->ast_arguments.item);
+    gc_mark_item(gc, gen->ast_this.item);
+    gc_mark_item(gc, gen->ast_yield_values.item);
+    gc_mark_item(gc, gen->ast_pending_resume_input.item);
+    if (gen->ast_function_env) gc_mark_object_ptr(gc, gen->ast_function_env);
+    if (gen->ast_body_env) gc_mark_object_ptr(gc, gen->ast_body_env);
+    js_interp_generator_trace_continuations(gen, gc);
+}
+
+// JSCU9: free a collected generator's native continuation lists. The GC calls
+// this for every dying Map (lambda-mem.cpp), so a generator that is never run
+// to completion still releases its interpreter continuations.
+extern "C" void js_generator_map_heap_destroy(Map* map) {
+    if (!map) return;
+    if (!js_object_has_class((Item){.map = map}, JS_CLASS_GENERATOR)) return;
+    js_interp_generator_clear_continuations(&((JsGeneratorMapCarrier*)map)->state);
 }
 
 // Helper: create {value, done} iterator result object
@@ -27941,26 +27948,20 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
         result_root, ItemNull,
         private_home_root, js_current_private_home_class);
 
-    // Allocate a new generator slot; the carrier stores this identity outside
-    // the observable property shape, so completed objects cannot alias a key.
-    int idx = -1;
-    if (js_generator_count >= JS_MAX_GENERATORS) {
-        // Last resort: recycle oldest completed slot
-        for (int i = 0; i < js_generator_count; i++) {
-            if (js_generators[i].done) {
-                idx = i;
-                break;
-            }
-        }
-        if (idx < 0) {
-            log_error("generator: exceeded max generators (%d)", JS_MAX_GENERATORS);
-            return ItemNull;
-        }
-    } else {
-        idx = js_generator_count++;
-    }
-    JsGenerator* gen = &js_generators[idx];
-    js_interp_generator_clear_continuations(gen);
+    // The generator object owns its state inline (JSCU9): allocate the carrier
+    // and initialize the embedded record. A zeroed GC allocation means the
+    // continuation lists start empty, so no pre-clear is needed.
+    TypeMap* generator_type = js_object_type_for_class(JS_CLASS_GENERATOR);
+    JsGeneratorMapCarrier* carrier = (JsGeneratorMapCarrier*)heap_calloc(
+        sizeof(JsGeneratorMapCarrier), LMD_TYPE_MAP);
+    if (!generator_type || !carrier) return ItemError;
+    carrier->base.type_id = LMD_TYPE_MAP;
+    carrier->base.map_kind = MAP_KIND_PLAIN;
+    carrier->base.type = generator_type;
+    carrier->base.data = NULL;
+    carrier->base.data_cap = 0;
+    obj_root.set((Item){.map = &carrier->base});
+    JsGenerator* gen = &carrier->state;
     gen->type_id = LMD_TYPE_MAP;
     gen->runtime_context = runtime;
     gen->state_fn = func_ptr;
@@ -27996,17 +27997,6 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     gen->ast_pending_resume_input = ItemNull;
     gen->ast_initialized = false;
 
-    TypeMap* generator_type = js_object_type_for_class(JS_CLASS_GENERATOR);
-    JsGeneratorMapCarrier* carrier = (JsGeneratorMapCarrier*)heap_calloc(
-        sizeof(JsGeneratorMapCarrier), LMD_TYPE_MAP);
-    if (!generator_type || !carrier) return ItemError;
-    carrier->base.type_id = LMD_TYPE_MAP;
-    carrier->base.map_kind = MAP_KIND_PLAIN;
-    carrier->base.type = generator_type;
-    carrier->base.data = NULL;
-    carrier->base.data_cap = 0;
-    carrier->generator_index = idx;
-    obj_root.set((Item){.map = &carrier->base});
     // Set prototype: use the generator function's current .prototype if it's an
     // object (OrdinaryCreateFromConstructor).  Default parameter evaluation can
     // mutate g.prototype before the generator object is created, so read the
@@ -28081,9 +28071,7 @@ extern "C" Item js_generator_create_ast(Item function, Item arguments,
 
 static JsGenerator* js_get_generator(Item gen_obj) {
     if (!js_object_has_class(gen_obj, JS_CLASS_GENERATOR)) return NULL;
-    int64_t idx = ((JsGeneratorMapCarrier*)gen_obj.map)->generator_index;
-    if (idx < 0 || idx >= js_generator_count) return NULL;
-    return &js_generators[idx];
+    return &((JsGeneratorMapCarrier*)gen_obj.map)->state;
 }
 
 extern "C" JsGeneratorStateRecord* js_generator_get_ast_state(Item generator) {
@@ -31271,14 +31259,49 @@ extern "C" Item js_await_sync_incremental(Item value) {
 // Phase 6: Async/Await Full State Machine Runtime
 // ============================================================
 
-// Async context: tracks a running async function's state machine
+// Async context: a running async function's suspended state machine.
 using JsAsyncContext = JsAsyncContextStateRecord;
-#define js_async_contexts (js_runtime_state.async_contexts)
-#define js_async_context_count (js_runtime_state.async_context_count)
-
 #define js_async_resolved_value (js_runtime_state.async_resolved_value)
 
-static void js_async_register_roots_once() {
+// JSCU10 (D5.1.1v2/D5.1.3): a suspended async activation is a GC-owned frame,
+// not a slot in a context-wide table. The carrier owns its re-homed env and
+// result promise and traces its own edges; the resume/reject reactions retain
+// the frame Item, so it lives exactly as long as the awaited promise or the
+// running body needs it. No cap, no pool, no 2,049 permanent roots.
+typedef struct JsAsyncFrameCarrier {
+    Map base;
+    JsAsyncContextStateRecord state;
+} JsAsyncFrameCarrier;
+
+static JsAsyncContext* js_async_frame_from_item(Item frame_item) {
+    if (get_type_id(frame_item) != LMD_TYPE_MAP || !frame_item.map ||
+            frame_item.map->map_kind != MAP_KIND_ASYNC_FRAME) return NULL;
+    return &((JsAsyncFrameCarrier*)frame_item.map)->state;
+}
+
+extern "C" void js_async_frame_map_gc_trace(Map* map, gc_heap_t* gc) {
+    if (!map || !gc || map->map_kind != MAP_KIND_ASYNC_FRAME) return;
+    JsAsyncContext* ctx = &((JsAsyncFrameCarrier*)map)->state;
+    if (ctx->env) gc_mark_object_ptr(gc, ctx->env);
+    gc_mark_item(gc, ctx->this_val.item);
+    gc_mark_item(gc, ctx->promise.item);
+    gc_mark_item(gc, ctx->ast_function.item);
+    gc_mark_item(gc, ctx->ast_arguments.item);
+    gc_mark_item(gc, ctx->ast_await_values.item);
+    if (ctx->ast_function_env) gc_mark_object_ptr(gc, ctx->ast_function_env);
+    if (ctx->ast_body_env) gc_mark_object_ptr(gc, ctx->ast_body_env);
+    js_interp_async_trace_continuations(ctx, gc);
+}
+
+extern "C" void js_async_frame_map_heap_destroy(Map* map) {
+    if (!map || map->map_kind != MAP_KIND_ASYNC_FRAME) return;
+    js_interp_async_clear_continuations(&((JsAsyncFrameCarrier*)map)->state);
+}
+
+// One scratch Item (await's resolved-value handoff) survives across the suspend
+// check; register it once per heap epoch. This is all that remains of the old
+// 2,049-root async table.
+static void js_async_ensure_scratch_root() {
     gc_heap_t* active_gc = context && context->heap ? context->heap->gc : NULL;
     uint64_t active_epoch = js_get_heap_epoch();
     if (!active_gc ||
@@ -31286,21 +31309,6 @@ static void js_async_register_roots_once() {
              js_runtime_state.async_roots_registered_epoch == active_epoch)) return;
     js_runtime_state.async_roots_registered_gc = active_gc;
     js_runtime_state.async_roots_registered_epoch = active_epoch;
-
-    for (int i = 0; i < JS_MAX_ASYNC_CONTEXTS; i++) {
-        // A suspended state machine owns its raw GC env pointer after the
-        // generated wrapper returns, so the fixed context table must root it.
-        heap_register_gc_root((uint64_t*)&js_async_contexts[i].env);
-        heap_register_gc_root(&js_async_contexts[i].this_val.item);
-        heap_register_gc_root(&js_async_contexts[i].ast_function.item);
-        heap_register_gc_root(&js_async_contexts[i].ast_arguments.item);
-        heap_register_gc_root(&js_async_contexts[i].ast_await_values.item);
-        heap_register_gc_root((uint64_t*)&js_async_contexts[i].ast_function_env);
-        heap_register_gc_root((uint64_t*)&js_async_contexts[i].ast_body_env);
-        // The promise carrier is a GC VMap now; retaining only the native
-        // context record would let a suspended async function lose its owner.
-        heap_register_gc_root(&js_async_contexts[i].promise.item);
-    }
     heap_register_gc_root(&js_async_resolved_value.item);
 }
 
@@ -31350,12 +31358,15 @@ extern "C" Item js_async_must_suspend(Item value) {
 JS_FORWARD_EXPRESSION(Item, js_async_get_resolved, (void), js_async_resolved_value)
 
 // Forward declarations for async callbacks
-static Item js_async_resume_handler(Item ctx_idx_item, Item resolved_value);
-static Item js_async_reject_handler(Item ctx_idx_item, Item reason);
+static Item js_async_resume_handler(Item frame_item, Item resolved_value);
+static Item js_async_reject_handler(Item frame_item, Item reason);
 
-// Core async state machine driver: calls the state machine and handles results
-static void js_async_drive(int ctx_idx, Item input, int64_t state) {
-    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
+// Core async state machine driver: calls the state machine and handles results.
+// The frame Item is rooted here so the GC-owned activation survives the body's
+// synchronous execution before a suspend re-homes it to the awaited promise.
+static void js_async_drive(Item frame_item, Item input, int64_t state) {
+    JsAsyncContext* ctx = js_async_frame_from_item(frame_item);
+    if (!ctx) return;
     if (!js_mir_owner_is_current(ctx->runtime_context, "js-async-drive")) {
         return;
     }
@@ -31363,11 +31374,14 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     if (ctx->module_state_id != UINT32_MAX &&
             !module_state.activate(ctx->module_state_id)) return;
     JS_ROOTS(roots,
+        frame_root, frame_item,
         input_root, input,
         result_root, ItemNull,
         value_root, ItemNull,
         resume_root, ItemNull,
         reject_root, ItemNull);
+    // ctx points inside the carrier frame_root keeps alive; re-read after any
+    // allocation is unnecessary because the carrier itself never moves.
     Item prev_this = js_current_this;
     js_current_this = ctx->this_val;
     if (get_type_id(ctx->ast_function) == LMD_TYPE_FUNC) {
@@ -31405,16 +31419,15 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
         // Suspended on pending promise — register resume/reject callbacks
         ctx->state = next_state;
 
-        // Create bound resume callback: js_async_resume_handler(ctx_idx, resolved_val)
+        // Bind resume/reject to the frame Item itself (JSCU10): the awaited
+        // promise's reaction list then retains the activation until it settles.
         Item resume_fn = js_new_native_function(js_async_resume_handler);
-        Item idx_item = (Item){.item = i2it(ctx_idx)};
-        resume_root.set(js_bind_function(resume_fn, ItemNull, &idx_item, 1));
+        resume_root.set(js_bind_function(resume_fn, ItemNull, &frame_item, 1));
 
-        // Create bound reject callback: js_async_reject_handler(ctx_idx, reason)
         Item reject_fn = js_new_native_function(js_async_reject_handler);
         // The first callback has no owner while the second callback allocates;
         // keep both exact-rooted until the awaited promise records them.
-        reject_root.set(js_bind_function(reject_fn, ItemNull, &idx_item, 1));
+        reject_root.set(js_bind_function(reject_fn, ItemNull, &frame_item, 1));
 
         // Register on the pending promise
         js_promise_then(value_root.get(), resume_root.get(), reject_root.get());
@@ -31422,24 +31435,22 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
 }
 
 // Callback when an awaited promise resolves — resumes the async state machine
-static Item js_async_resume_handler(Item ctx_idx_item, Item resolved_value) {
-    int ctx_idx = (int)it2i(ctx_idx_item);
-    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
-    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
-    js_async_drive(ctx_idx, resolved_value, ctx->state);
+static Item js_async_resume_handler(Item frame_item, Item resolved_value) {
+    JsAsyncContext* ctx = js_async_frame_from_item(frame_item);
+    if (!ctx) return ItemNull;
+    js_async_drive(frame_item, resolved_value, ctx->state);
     return ItemNull;
 }
 
 // Callback when an awaited promise rejects — re-enter through the ERROR lane.
-static Item js_async_reject_handler(Item ctx_idx_item, Item reason) {
-    int ctx_idx = (int)it2i(ctx_idx_item);
-    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
-    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
+static Item js_async_reject_handler(Item frame_item, Item reason) {
+    JsAsyncContext* ctx = js_async_frame_from_item(frame_item);
+    if (!ctx) return ItemNull;
     // The resume state is shared by fulfillment and rejection, so encode the
     // rejected reason before re-entry; otherwise await's catch target sees a
     // normal string/value and continues past the rejection.
     Item thrown = js_throw_value(reason);
-    js_async_drive(ctx_idx, thrown, ctx->state);
+    js_async_drive(frame_item, thrown, ctx->state);
     return ItemNull;
 }
 
@@ -31452,13 +31463,21 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
         return ItemError;
     }
     if (!js_mir_owner_is_current(runtime, "js-async-create")) return ItemError;
-    js_async_register_roots_once();
-    if (js_async_context_count >= JS_MAX_ASYNC_CONTEXTS) {
-        log_error("js: async context limit reached (%d)", JS_MAX_ASYNC_CONTEXTS);
-        return (Item){.item = i2it(-1)};
-    }
-    int idx = js_async_context_count++;
-    JsAsyncContext* ctx = &js_async_contexts[idx];
+    js_async_ensure_scratch_root();
+    // Allocate the GC-owned frame carrier; a zeroed allocation leaves the
+    // continuation lists empty. The frame Item is rooted while the promise
+    // allocation below may collect (JSCU10).
+    JsAsyncFrameCarrier* carrier = (JsAsyncFrameCarrier*)heap_calloc(
+        sizeof(JsAsyncFrameCarrier), LMD_TYPE_MAP);
+    if (!carrier) return ItemError;
+    carrier->base.type_id = LMD_TYPE_MAP;
+    carrier->base.map_kind = MAP_KIND_ASYNC_FRAME;
+    carrier->base.type = NULL;
+    carrier->base.data = NULL;
+    carrier->base.data_cap = 0;
+    Item frame_item = (Item){.map = &carrier->base};
+    JS_ROOTS(create_roots, frame_root, frame_item);
+    JsAsyncContext* ctx = &carrier->state;
     ctx->runtime_context = runtime;
     ctx->state_fn = fn_ptr;
     js_env_rehome_scalars(env);
@@ -31483,10 +31502,8 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
     // Create a pending promise for this async function's result
     JsPromise* p = js_alloc_promise();
     ctx->promise = js_promise_to_item(p);
-    // async functions allocate their result promise before the body runs.
-    js_promise_to_item(p);
 
-    return (Item){.item = i2it(idx)};
+    return frame_root.get();
 }
 
 extern "C" Item js_async_context_create_mir(void* fn_ptr, Item* env,
@@ -31511,19 +31528,17 @@ extern "C" Item js_async_context_create_ast(Item function, Item arguments,
 }
 
 // Start execution of an async state machine (initial call at state 0)
-extern "C" Item js_async_start(Item ctx_idx_item) {
-    int ctx_idx = (int)it2i(ctx_idx_item);
-    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
-    js_async_drive(ctx_idx, make_js_undefined(), 0);
+extern "C" Item js_async_start(Item frame_item) {
+    if (!js_async_frame_from_item(frame_item)) return ItemNull;
+    js_async_drive(frame_item, make_js_undefined(), 0);
     return ItemNull;
 }
 
-// Get the result promise for an async context
-extern "C" Item js_async_get_promise(Item ctx_idx_item) {
-    int ctx_idx = (int)it2i(ctx_idx_item);
-    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
-    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
-    return ctx->promise;
+// Get the result promise for an async activation. No allocation before the
+// read, so the frame the generated wrapper still holds is not collected here.
+extern "C" Item js_async_get_promise(Item frame_item) {
+    JsAsyncContext* ctx = js_async_frame_from_item(frame_item);
+    return ctx ? ctx->promise : ItemNull;
 }
 
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected) {
@@ -37430,24 +37445,15 @@ extern "C" bool js_is_set_instance(Item obj) {
 // Called by js_batch_reset() to prevent dangling pointers after pool destruction.
 // =============================================================================
 void js_deep_batch_reset() {
-    // generators, queue owners, and async contexts contain Items from the old
-    // heap; GC-owned Promise carriers are reclaimed with that heap.
-    for (int i = 0; i < js_generator_count; i++) {
-        js_interp_generator_clear_continuations(&js_generators[i]);
-    }
-    for (int i = 0; i < js_async_context_count; i++) {
-        js_interp_async_clear_continuations(&js_async_contexts[i]);
-    }
-    memset(js_generators, 0, sizeof(js_generators));
-    js_generator_count = 0;
+    // Generators and async activations (JSCU9/JSCU10) are GC-owned carriers
+    // reclaimed with the old heap; the heap finalizer frees their
+    // continuations, so no table walk is needed.
     js_runtime_state.promises.pending_count = 0;
     js_runtime_state.promises.live_count = 0;
     js_runtime_state.promises.peak_live_count = 0;
     js_domain_current = (Item){0};
     js_domain_namespace = (Item){0};
     js_item_stack_clear(&js_domain_stack_state);
-    memset(js_async_contexts, 0, sizeof(js_async_contexts));
-    js_async_context_count = 0;
     memset(js_als_instances, 0, sizeof(js_als_instances));
     js_als_instance_count = 0;
     js_async_hooks_enabled_count = 0;
