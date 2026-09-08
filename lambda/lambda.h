@@ -112,15 +112,16 @@ enum EnumTypeId {
     LMD_TYPE_RANGE,
     LMD_TYPE_ARRAY_NUM,   // unified numeric array (elem_type selects int/int64/float)
     LMD_TYPE_ARRAY,  // array of Items
+    LMD_TYPE_VARRAY,  // virtual indexed sequence; public semantic type is array
     LMD_TYPE_MAP,
     LMD_TYPE_VMAP,  // virtual map with vtable dispatch (hashmap, treemap, etc.)
     // D2.6.6v2 phase 2 (OB14): `LMD_TYPE_OBJECT` is GONE. Nominal-ness is a
     // property of the type descriptor (TypeMap::nominal, cached by
     // Type::is_nominal), never a container kind — a nominal value is an ordinary
     // MAP or ELEMENT, and `object` survives only as a TYPE (`TYPE_OBJECT`),
-    // matched by pointer identity. ELEMENT is now the last container tag, so the
-    // contiguous container band ends here.
+    // matched by pointer identity.
     LMD_TYPE_ELEMENT,
+    LMD_TYPE_VELMT,   // virtual element; public semantic type is element
     LMD_TYPE_TYPE,
     LMD_TYPE_FUNC,
 
@@ -147,9 +148,11 @@ static inline bool lambda_type_id_has_pointer_lane(TypeId type_id) {
     case LMD_TYPE_RANGE:
     case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_ARRAY:
+    case LMD_TYPE_VARRAY:
     case LMD_TYPE_MAP:
     case LMD_TYPE_VMAP:
     case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_VELMT:
     case LMD_TYPE_TYPE:
     case LMD_TYPE_FUNC:
         return true;
@@ -202,6 +205,20 @@ LAMBDA_STATIC_ASSERT(LMD_TYPE_COUNT <= 0x20,
                      "Lambda TypeIds must stay out of double discriminator space");
 LAMBDA_STATIC_ASSERT(LMD_CONTAINER_HEAP_START <= 0x20,
                      "TypeId space must stay inside the 000 octant; 0x80-0x9F is inline-int space");
+// D7.4.5v2: the enum order is an enforced classification ABI. Array-like
+// carriers form one closed range, Velmt immediately follows Element, and no
+// valid TypeId follows Error.
+LAMBDA_STATIC_ASSERT(LMD_TYPE_ARRAY_NUM == LMD_TYPE_RANGE + 1 &&
+                     LMD_TYPE_ARRAY == LMD_TYPE_ARRAY_NUM + 1 &&
+                     LMD_TYPE_VARRAY == LMD_TYPE_ARRAY + 1,
+                     "array-family TypeIds must be the contiguous RANGE..VARRAY band");
+LAMBDA_STATIC_ASSERT(LMD_TYPE_VELMT == LMD_TYPE_ELEMENT + 1,
+                     "Velmt must immediately follow Element");
+LAMBDA_STATIC_ASSERT(LMD_TYPE_COUNT == LMD_TYPE_ERROR + 1,
+                     "Error must be the last valid TypeId");
+LAMBDA_STATIC_ASSERT(LMD_TYPE_RANGE == 16 && LMD_TYPE_VARRAY == 19 &&
+                     LMD_TYPE_VELMT == 23 && LMD_TYPE_ERROR == 27,
+                     "D7.4.5v2 TypeId ABI changed without an ABI revision");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_RAW_POINTER), "raw pointer tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_NULL), "null tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_UNDEFINED), "undefined tag must be non-double");
@@ -221,9 +238,11 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_PATH), "path tag must be no
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_RANGE), "range tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ARRAY_NUM), "array-num tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ARRAY), "array tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_VARRAY), "varray tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_MAP), "map tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_VMAP), "vmap tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ELEMENT), "element tag must be non-double");
+LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_VELMT), "velmt tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_TYPE), "type tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_FUNC), "function tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_ANY), "any tag must be non-double");
@@ -365,6 +384,15 @@ typedef enum {
     BOOL_ERROR = 2
 } BoolEnum;
 typedef uint8_t Bool;
+
+// Virtual structural callbacks must distinguish a missing entry from a
+// present null and keep readonly host state separate from an execution error.
+typedef enum VirtualOpStatus {
+    VIRTUAL_OP_OK = 0,
+    VIRTUAL_OP_MISSING,
+    VIRTUAL_OP_READONLY,
+    VIRTUAL_OP_ERROR,
+} VirtualOpStatus;
 
 #define  LMD_TYPE_CONTAINER LMD_TYPE_RANGE
 
@@ -726,6 +754,26 @@ typedef struct LambdaGcVMapLayout {
     LambdaGcVMapVtableLayout* vtable;
 } LambdaGcVMapLayout;
 
+// VArray and Velmt share this prefix. VMap has the same object-field offsets,
+// while retaining its established map-specific vtable ABI.
+typedef struct LambdaGcVirtualVtableLayout {
+    uint32_t abi_version;
+    TypeId carrier_type;
+    uint8_t reserved[3];
+    void (*destroy)(void* data);
+    void (*trace)(void* data, struct gc_heap* gc);
+    uint64_t (*version)(void* data);
+} LambdaGcVirtualVtableLayout;
+
+typedef struct LambdaGcVirtualContainerLayout {
+    LambdaGcContainerLayout container;
+    void* data;
+    void* vtable;
+    const void* host_type;
+    void* host_data;
+    uint64_t expando;
+} LambdaGcVirtualContainerLayout;
+
 typedef struct LambdaGcFunctionLayout {
     TypeId type_id;
     uint8_t arity;
@@ -761,6 +809,13 @@ enum LambdaGcLayoutOffset {
     LAMBDA_GC_OFF_VMAP_DATA = offsetof(LambdaGcVMapLayout, data),
     LAMBDA_GC_OFF_VMAP_VTABLE = offsetof(LambdaGcVMapLayout, vtable),
     LAMBDA_GC_OFF_VMAP_VTABLE_TRACE = offsetof(LambdaGcVMapVtableLayout, trace),
+    LAMBDA_GC_OFF_VIRTUAL_DATA = offsetof(LambdaGcVirtualContainerLayout, data),
+    LAMBDA_GC_OFF_VIRTUAL_VTABLE = offsetof(LambdaGcVirtualContainerLayout, vtable),
+    LAMBDA_GC_OFF_VIRTUAL_HOST_TYPE = offsetof(LambdaGcVirtualContainerLayout, host_type),
+    LAMBDA_GC_OFF_VIRTUAL_HOST_DATA = offsetof(LambdaGcVirtualContainerLayout, host_data),
+    LAMBDA_GC_OFF_VIRTUAL_EXPANDO = offsetof(LambdaGcVirtualContainerLayout, expando),
+    LAMBDA_GC_OFF_VIRTUAL_VTABLE_DESTROY = offsetof(LambdaGcVirtualVtableLayout, destroy),
+    LAMBDA_GC_OFF_VIRTUAL_VTABLE_TRACE = offsetof(LambdaGcVirtualVtableLayout, trace),
     LAMBDA_GC_OFF_FUNCTION_CLOSURE_FIELD_COUNT = offsetof(LambdaGcFunctionLayout, closure_field_count),
     LAMBDA_GC_OFF_FUNCTION_CLOSURE_ENV = offsetof(LambdaGcFunctionLayout, closure_env),
 };
@@ -776,6 +831,9 @@ typedef ArrayNum ArrayFloat;  // compat alias: float arrays (elem_type == ELEM_F
 typedef struct Map Map;
 typedef struct SparseArrayMap SparseArrayMap;
 typedef struct VMap VMap;
+typedef struct VArray VArray;
+typedef struct Velmt Velmt;
+typedef struct VirtualContainer VirtualContainer;
 typedef struct Element Element;
 // S2.1.3 / D2.6.6: an object IS a nominally-typed element, so it shares
 // Element's layout rather than defining a fourth container shape. The two
@@ -1642,25 +1700,40 @@ static inline bool is_text_type_id(TypeId type_id) {
     return type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL;
 }
 
-static inline bool is_array_family_type_id(TypeId type_id) {
+static inline TypeId item_semantic_type_id(TypeId type_id) {
+    if (type_id == LMD_TYPE_VMAP) return LMD_TYPE_MAP;
+    if (type_id == LMD_TYPE_VARRAY) return LMD_TYPE_ARRAY;
+    if (type_id == LMD_TYPE_VELMT) return LMD_TYPE_ELEMENT;
+    return type_id;
+}
+
+static inline bool is_materialized_array_type_id(TypeId type_id) {
     return type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_NUM;
+}
+
+static inline bool is_array_family_type_id(TypeId type_id) {
+    return type_id >= LMD_TYPE_RANGE && type_id <= LMD_TYPE_VARRAY;
 }
 
 static inline bool is_map_family_type_id(TypeId type_id) {
     return type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP ||
-           type_id == LMD_TYPE_ELEMENT;
+           type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_VELMT;
 }
 
 // The kind that carries BOTH an attribute face and a content face. Since
-// D2.6.6v2 phase 2 that is exactly ELEMENT — a nominal value with content IS an
-// element, so this is no longer a two-member family. Kept as a named predicate
-// because the content-face sites read better through it.
+// D2.6.6v2 gives the materialized face to ELEMENT; D7.4.5v2 adds VELMT as its
+// representation-transparent virtual counterpart.
 static inline bool is_element_family_type_id(TypeId type_id) {
-    return type_id == LMD_TYPE_ELEMENT;
+    return type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_VELMT;
+}
+
+static inline bool is_virtual_container_type_id(TypeId type_id) {
+    return type_id == LMD_TYPE_VMAP || type_id == LMD_TYPE_VARRAY ||
+           type_id == LMD_TYPE_VELMT;
 }
 
 static inline bool is_container_type_id(TypeId type_id) {
-    return type_id >= LMD_TYPE_CONTAINER && type_id < LMD_TYPE_ANY;
+    return type_id >= LMD_TYPE_CONTAINER && type_id <= LMD_TYPE_VELMT;
 }
 
 static inline bool is_native_param_type_id(TypeId type_id) {
@@ -2487,6 +2560,7 @@ extern "C" {
     Item op_or(Bool a, Bool b);
 
     Bool fn_eq(Item a, Item b);
+    Bool fn_eq_strict(Item a, Item b);
     Bool fn_ne(Item a, Item b);
     Bool fn_str_eq_ptr(String* a, String* b);
     Bool fn_sym_eq_ptr(Symbol* a, Symbol* b);
@@ -2944,7 +3018,8 @@ extern "C" {
     // VMap system functions
     Item vmap_new();
     Item vmap_from_array(Item array_item);
-    void vmap_set(Item vmap_item, Item key, Item value);
+    bool virtual_host_member_set(Item owner, Item key, Item value, Item* out);
+    Item vmap_set(Item vmap_item, Item key, Item value);
     Item vmap_set_cow(Item owner, Item key, Item value);
     Item vmap_clone_for_cow(Item source);
 

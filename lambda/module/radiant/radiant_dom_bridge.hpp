@@ -10,6 +10,15 @@
 
 struct DomDocument;
 
+// Shared structural backend for every DOM Node-family Jube brand.
+RADIANT_C_API const VelmtVtable radiant_dom_node_velmt_vtable;
+// Node.childNodes and Element.children share one filtered native VArray backend.
+RADIANT_C_API const VArrayVtable dom_child_collection_varray_vtable;
+// Creation-time DOM collection results retain a traced materialized member list.
+RADIANT_C_API const VArrayVtable dom_static_varray_vtable;
+// CSSOM list views share one owner-backed live VArray backend.
+RADIANT_C_API const VArrayVtable dom_cssom_collection_varray_vtable;
+
 typedef enum RadiantDocumentOperation {
     RADIANT_DOCUMENT_ASSIGN = 0,
     RADIANT_DOCUMENT_REPLACE,
@@ -171,6 +180,10 @@ RADIANT_C_API const void* radiant_dom_input_element_host_type(void);
 RADIANT_C_API const void* radiant_dom_select_element_host_type(void);
 RADIANT_C_API const void* radiant_dom_textarea_element_host_type(void);
 RADIANT_C_API const void* radiant_dom_option_element_host_type(void);
+RADIANT_C_API const void* radiant_dom_radio_node_list_host_type(void);
+RADIANT_C_API const void* radiant_dom_rect_list_host_type(void);
+RADIANT_C_API const void* radiant_dom_style_sheet_list_host_type(void);
+RADIANT_C_API const void* radiant_dom_css_rule_list_host_type(void);
 
 RADIANT_C_API Item fn_radiant_load(Item path_item);
 RADIANT_C_API Item fn_radiant_root(Item doc_item);

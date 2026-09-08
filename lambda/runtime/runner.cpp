@@ -1854,6 +1854,11 @@ void runtime_reset_heap(Runtime* runtime) {
             // Reset them before heap destruction so a later batch script cannot
             // dereference stale Promise/module state from the preceding script.
             js_batch_reset();
+        } else {
+            // Lambda DOM imports also allocate Radiant Velmt/VArray wrappers
+            // from this heap. Retire their weak cache slots before replacing
+            // the heap even when no JavaScript source ran (D7.4.5v2).
+            dom_batch_reset();
         }
 
         if (runtime_scheduler(runtime)) {

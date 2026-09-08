@@ -1,5 +1,5 @@
 // Test: VMap (Hash Map) - Functional Tests
-// Construction, member access, for-loop, len, non-string keys
+// Construction, member access, for-loop, len, canonical name/integer keys
 
 // Test 1: Empty map
 len(map())
@@ -48,23 +48,23 @@ len(m6);
 // Test 13: Integer key for-loop
 [for (k, v in m6) v]
 
-// Test 14: Float keys
-let m7 = map([3.14, "pi", 2.718, "e"])
-len(m7)
+// Test 14: Integral numeric forms are one integer key
+let m7 = map([3, "int", 3.0, "float", 3.00m, "decimal", 3n, "integer"]);
+[len(m7), m7[3], m7[3.0], m7[3.00m], m7[3n]]
 
-// Test 15: Boolean keys
-let m8 = map([true, "yes", false, "no"])
-len(m8);
+// Test 15: String and symbol forms are one name key
+let m8 = map(["flag", "string", 'flag', "symbol"]);
+[len(m8), m8.flag, m8['flag']];
 
-// Test 16: Bool key for-loop
+// Test 16: Name key for-loop
 [for (k, v in m8) v]
 
 // Test 17: Large map
 let big = map(["k1", 1, "k2", 2, "k3", 3, "k4", 4, "k5", 5])
 len(big)
 
-// Test 18: Mixed key types in construction
-let m9 = map(["name", "test", 42, "answer", true, "flag"])
+// Test 18: Mixed canonical key kinds in construction
+let m9 = map(["name", "test", 42, "answer"])
 len(m9);
 
 // Final result - collect key tests

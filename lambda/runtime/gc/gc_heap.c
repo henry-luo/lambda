@@ -356,9 +356,11 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define LMD_TYPE_RANGE_       LMD_TYPE_RANGE
 #define LMD_TYPE_ARRAY_NUM_   LMD_TYPE_ARRAY_NUM
 #define LMD_TYPE_ARRAY_       LMD_TYPE_ARRAY
+#define LMD_TYPE_VARRAY_      LMD_TYPE_VARRAY
 #define LMD_TYPE_MAP_         LMD_TYPE_MAP
 #define LMD_TYPE_VMAP_        LMD_TYPE_VMAP
 #define LMD_TYPE_ELEMENT_     LMD_TYPE_ELEMENT
+#define LMD_TYPE_VELMT_       LMD_TYPE_VELMT
 #define LMD_TYPE_TYPE_        LMD_TYPE_TYPE
 #define LMD_TYPE_FUNC_        LMD_TYPE_FUNC
 #define GC_TYPE_JS_ENV_       GC_TYPE_JS_ENV
@@ -1366,8 +1368,8 @@ static void* item_to_ptr(gc_heap_t* gc, uint64_t item) {
     // sentinels or invalid Items, not recoverable pointer encodings.
     if (tag >= LMD_TYPE_RANGE_) return NULL;
 
-    // anything else (ERROR=25 with null pointer, ANY=24, etc.)
-    // extract pointer — if lower 56 bits are 0, returns NULL
+    // remaining pointer-backed scalar tags live below RANGE; if the lower 56
+    // bits are zero, extracting their payload naturally returns NULL.
     void* ptr = (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
     return ptr;
 }
@@ -1904,6 +1906,20 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         } else if (gc->vmap_trace) {
             if (data) gc->vmap_trace(data, gc);
         }
+        gc_mark_item(gc, *(uint64_t*)(p + LAMBDA_GC_OFF_VIRTUAL_EXPANDO));
+        break;
+    }
+
+    case LMD_TYPE_VARRAY_:
+    case LMD_TYPE_VELMT_: {
+        // New virtual carriers share a lifecycle-first vtable prefix, so GC
+        // traces backend Item edges without knowing either structural face.
+        uint8_t* p = (uint8_t*)obj;
+        void* data = *(void**)(p + LAMBDA_GC_OFF_VIRTUAL_DATA);
+        LambdaGcVirtualVtableLayout* vtable = *(LambdaGcVirtualVtableLayout**)(
+            p + LAMBDA_GC_OFF_VIRTUAL_VTABLE);
+        if (vtable && vtable->trace) vtable->trace(data, gc);
+        gc_mark_item(gc, *(uint64_t*)(p + LAMBDA_GC_OFF_VIRTUAL_EXPANDO));
         break;
     }
 
@@ -2313,13 +2329,13 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
         gc->external_destroy(obj, tag);
     }
 
-    if (tag == LMD_TYPE_VMAP_) {
-        // VMap host payload cleanup is independent of optional lazy backing data.
+    if (tag == LMD_TYPE_VMAP_ || tag == LMD_TYPE_VARRAY_ || tag == LMD_TYPE_VELMT_) {
+        // Virtual host payload cleanup is independent of optional backend data.
         uint8_t* p = (uint8_t*)obj;
-        void* data = *(void**)(p + LAMBDA_GC_OFF_VMAP_DATA);
+        void* data = *(void**)(p + LAMBDA_GC_OFF_VIRTUAL_DATA);
         if (gc->vmap_destroy) {
             gc->vmap_destroy(obj, data);
-            *(void**)(p + LAMBDA_GC_OFF_VMAP_DATA) = NULL;  // prevent double-free at context teardown
+            *(void**)(p + LAMBDA_GC_OFF_VIRTUAL_DATA) = NULL;  // prevent double-free at context teardown
         }
     }
     else if (tag == LMD_TYPE_ERROR_) {

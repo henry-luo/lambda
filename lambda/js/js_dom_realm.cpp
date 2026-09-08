@@ -23,6 +23,7 @@
 #include "../lambda.hpp"
 #include "../dom/dom.h"
 #include "../dom/dom_realm_hooks.h"
+#include "../dom/realm/dom_realm.h"
 #include "js_runtime.h"
 #include "js_props.h"
 #include "../dom/dom_ops.h"
@@ -98,6 +99,21 @@ static Item _iface_proto(Item global, const char* name) {
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
 }
 
+static Item dom_collection_iterator(void) {
+    return js_get_iterator(dom_realm_receiver());
+}
+
+static void _install_collection_iterator(Item global, const char* name) {
+    RootFrame roots(3);
+    Rooted<Item> proto_root(roots, _iface_proto(global, name));
+    if (get_type_id(proto_root.get()) != LMD_TYPE_MAP) return;
+    Rooted<Item> key_root(roots, js_well_known_symbol_key(1));
+    Rooted<Item> method_root(roots,
+        dom_realm_new_function(dom_collection_iterator));
+    js_set_key_default(proto_root.get(), key_root.get(), method_root.get());
+    js_mark_non_enumerable(proto_root.get(), key_root.get());
+}
+
 static void _install_nodelist_for_each(Item global) {
     Item node_list_proto = _iface_proto(global, "NodeList");
     Item array_ctor = js_get_key_cstr(global, "Array");
@@ -105,8 +121,8 @@ static void _install_nodelist_for_each(Item global) {
     Item array_for_each = js_get_key_cstr(array_proto, "forEach");
     if (get_type_id(node_list_proto) == LMD_TYPE_MAP &&
         js_is_callable(array_for_each)) {
-        // Query APIs return Arrays, but libraries feature-detect the WebIDL
-        // NodeList prototype before choosing their iteration path.
+        // NodeList shares Array's callback contract while retaining its own
+        // WebIDL identity and VArray carrier (D7.4.5v2).
         js_set_key_cstr(node_list_proto, "forEach", array_for_each);
     }
 }
@@ -419,14 +435,19 @@ extern "C" void dom_install_collection_globals(void) {
     }
     static const char* collection_ifaces[] = {
         "Range", "Selection", "HTMLCollection", "HTMLFormControlsCollection",
-        "HTMLOptionsCollection", "NodeList",
+        "HTMLOptionsCollection", "NodeList", "NamedNodeMap", "DOMTokenList",
+        "DOMRectList", "StyleSheetList", "CSSRuleList",
     };
     for (size_t i = 0; i < sizeof(collection_ifaces) / sizeof(collection_ifaces[0]); i++) {
         _install_iface(global, collection_ifaces[i]);
+        // Range and Selection share this constructor-installation table but
+        // are object-like interfaces, not WebIDL collection carriers.
+        if (i >= 2) _install_collection_iterator(global, collection_ifaces[i]);
     }
     _install_iface(global, "CSSNestedDeclarations");
     _install_nodelist_for_each(global);
     _install_iface(global, "RadioNodeList");
+    _install_collection_iterator(global, "RadioNodeList");
     _install_xpath_evaluator(global);
     log_debug("dom_install_collection_globals: installed collection interfaces");
 }

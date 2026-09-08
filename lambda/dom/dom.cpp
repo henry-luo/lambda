@@ -29,6 +29,7 @@
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../jube/jube_registry.h"
+#include "../runtime/gc/gc_heap.h"
 #include "../io/mark_builder.hpp"
 #include "../io/mark_editor.hpp"
 #include "../core/mark_reader.hpp"
@@ -86,31 +87,6 @@ static inline Item js_string_key(const char* s) {
     return js_name_item(s);
 }
 
-extern "C" void dom_attribute_collection_expose_named(Item collection,
-                                                        Item name, Item attr) {
-    if (get_type_id(collection) != LMD_TYPE_ARRAY ||
-            get_type_id(name) != LMD_TYPE_STRING) return;
-    String* name_string = it2s(name);
-    if (!name_string || name_string->len == 0 ||
-            (name_string->len == 6 && strncmp(name_string->chars, "length", 6) == 0)) {
-        return;
-    }
-    // NamedNodeMap's supported property names are observable alongside its
-    // indexed face; the array companion map is the current DOM carrier.
-    js_set_key_default(collection, name, attr);
-}
-
-static void dom_refresh_live_child_collections_for_mutation(DomNode* target,
-                                                               DomNode* parent);
-static void dom_refresh_live_form_collections_for_mutation(DomNode* target,
-                                                              DomNode* parent,
-                                                              DomDocument* doc);
-static void dom_refresh_select_option_collections_for_mutation(DomNode* target,
-                                                                  DomNode* parent,
-                                                                  DomDocument* doc);
-static void dom_refresh_live_lookup_collections_for_mutation(DomNode* target,
-                                                                DomNode* parent,
-                                                                DomDocument* doc);
 // Pre-order walk over `node` and its following siblings, descending into each
 // element's children. `visit` returns false to skip that element's subtree.
 // Four call sites used to spell this out with a recursive std::function
@@ -128,10 +104,10 @@ static void dom_walk_elements(DomNode* node, DomElementVisit visit, void* ctx) {
     }
 }
 
-static void _collect_document_forms_rec(DomNode* node, Item forms);
 static void _collect_form_controls_rec(DomNode* node, Item arr);
-static void _collect_lookup_rec(DomElement* root, const char* query, Item collection,
-                                int kind);
+static bool _is_listed_form_control(DomElement* elem);
+static bool _get_selectedness(DomElement* opt);
+static void _select_normalize_native(DomElement* select);
 
 static const char* dom_to_attr_cstr(Item value) {
     Item str_value = js_to_string(value);
@@ -181,7 +157,6 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 void dom_register_named_elements(DomElement* root);
 static bool dom_node_is_connected(DomNode* node);
 static DomElement* _nearest_select_for_node(DomNode* node);
-static void _select_refresh_cached_selected_options_for_node(DomNode* node);
 static void _select_ask_for_reset(DomElement* sel);
 static bool _get_selectedness(DomElement* opt);
 static Item dom_svg_get_transform_list(DomElement* elem);
@@ -645,10 +620,6 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     if (!has_pending_structural_record) {
         dom_record_mutation_detail(kind, target, parent, doc->js.mutation_sequence);
     }
-    dom_refresh_live_child_collections_for_mutation(target, parent);
-    dom_refresh_live_form_collections_for_mutation(target, parent, doc);
-    dom_refresh_select_option_collections_for_mutation(target, parent, doc);
-    dom_refresh_live_lookup_collections_for_mutation(target, parent, doc);
     dom_observers_mutation_notify(kind, target, parent, attribute_name, old_value);
 
     DocState* st = doc->state;
@@ -1069,7 +1040,6 @@ static Item dom_replace_text_data(DomText* text_node, uint32_t offset,
 static void expando_reset(); // forward declaration
 static void reset_dom_wrapper_cache(); // forward declaration
 static void reset_foreign_document_cache(); // forward declaration
-static void reset_live_dom_collections(); // forward declaration
 static void reset_pending_iframe_loads();
 static void _schedule_image_load(DomElement* image);
 // Phase 6E: text-control helpers are shared with Radiant event/render paths
@@ -1103,7 +1073,6 @@ extern "C" void dom_batch_reset() {
     if (!js_active_runtime_state) return;
     DocState* state = dom_current_state();
     dom_selection_reset();
-    reset_live_dom_collections();
     reset_pending_iframe_loads();
     expando_reset();
     reset_dom_wrapper_cache();
@@ -1125,7 +1094,6 @@ extern "C" void dom_batch_reset() {
 extern "C" void dom_shutdown() {
     // See dom_batch_reset: a detached host has no valid DOM cache owner.
     if (!js_active_runtime_state) return;
-    reset_live_dom_collections();
     reset_pending_iframe_loads();
     expando_reset();
     reset_dom_wrapper_cache();
@@ -1155,13 +1123,11 @@ extern "C" bool dom_evaluate_media_query(const char* query) {
 // DOM Expando Properties
 // Allows arbitrary JS values to be stored on DOM elements, e.g.
 //   element._myData = { ... }; let x = element._myData;
-// DOM expandos live in the owning wrapper's traced VMap backing store.
+// DOM expandos live in the owning wrapper's traced virtual-container slot.
 // ============================================================================
 
 extern "C" Item radiant_dom_lookup_cached_node(void* dom_node);
 extern "C" Item radiant_dom_wrap_node(void* dom_node);
-
-#define DOM_EXPANDO_BACKING_KEY "__jube_expando__"
 
 typedef struct AttachedExpandoRoot {
     DomNode* node;
@@ -1268,7 +1234,7 @@ static void attached_expando_root_remove(DomNode* node) {
 static Item expando_wrapper(DomNode* node, bool create) {
     if (!node) return ItemNull;
     Item wrapper = radiant_dom_lookup_cached_node(node);
-    if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) return wrapper;
+    if (virtual_container_from_item(wrapper)) return wrapper;
     if (!create) {
         if (!node->is_element() || !node->as_element()->doc ||
                 node->as_element()->doc->js.doc_node != (void*)node) {
@@ -1280,34 +1246,35 @@ static Item expando_wrapper(DomNode* node, bool create) {
 
 static Item expando_get_map(DomNode* node) {
     Item wrapper = expando_wrapper(node, false);
-    Item key = js_string_key(DOM_EXPANDO_BACKING_KEY);
-    if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
-        Item map = vmap_backing_get(wrapper.vmap, key);
+    VirtualContainer* container = virtual_container_from_item(wrapper);
+    if (container) {
+        Item map = container->expando;
         if (get_type_id(map) == LMD_TYPE_MAP) return map;
     }
     AttachedExpandoRoot* attached = attached_expando_find(node);
     if (!attached || get_type_id(attached->map) != LMD_TYPE_MAP) return ItemNull;
-    if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
-        vmap_backing_set(wrapper.vmap, key, attached->map);
-    }
+    if (container) container->expando = attached->map;
     return attached->map;
 }
 
 static Item expando_get_or_create_map(DomNode* node) {
-    Item wrapper = expando_wrapper(node, true);
-    if (get_type_id(wrapper) != LMD_TYPE_VMAP || !wrapper.vmap) return ItemNull;
-    Item key = js_string_key(DOM_EXPANDO_BACKING_KEY);
-    Item existing = vmap_backing_get(wrapper.vmap, key);
+    RootFrame roots(2);
+    Rooted<Item> wrapper_root(roots, expando_wrapper(node, true));
+    VirtualContainer* container = virtual_container_from_item(wrapper_root.get());
+    if (!container) return ItemNull;
+    Item existing = container->expando;
     if (get_type_id(existing) == LMD_TYPE_MAP) {
         attached_expando_root_add(node, existing);
         return existing;
     }
-    Item m = js_new_object();
-    // The wrapper's VMap backing store owns detached state. Connected nodes
+    Rooted<Item> map_root(roots, js_new_object());
+    container = virtual_container_from_item(wrapper_root.get());
+    if (!container || get_type_id(map_root.get()) != LMD_TYPE_MAP) return ItemNull;
+    // The wrapper's traced expando slot owns detached state. Connected nodes
     // additionally root the map until their native-tree detach transition.
-    if (!vmap_backing_set(wrapper.vmap, key, m)) return ItemNull;
-    attached_expando_root_add(node, m);
-    return m;
+    container->expando = map_root.get();
+    attached_expando_root_add(node, map_root.get());
+    return map_root.get();
 }
 
 extern "C" void dom_expando_attachment_changed(
@@ -1316,11 +1283,8 @@ extern "C" void dom_expando_attachment_changed(
     if (!root) return;
     if (attached) {
         Item wrapper = expando_wrapper(root, false);
-        if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
-            Item map = vmap_backing_get(wrapper.vmap,
-                js_string_key(DOM_EXPANDO_BACKING_KEY));
-            attached_expando_root_add(root, map, true);
-        }
+        VirtualContainer* container = virtual_container_from_item(wrapper);
+        if (container) attached_expando_root_add(root, container->expando, true);
     } else {
         attached_expando_root_remove(root);
     }
@@ -2000,6 +1964,14 @@ JS_FORWARD_ITEM(dom_wrap_element, (void* dom_elem), radiant_dom_wrap_node, (dom_
 
 extern "C" void* radiant_dom_unwrap_node(Item item);
 extern "C" bool radiant_dom_is_node(Item item);
+extern "C" const void* radiant_dom_node_list_host_type(void);
+extern "C" const void* radiant_dom_html_collection_host_type(void);
+extern "C" const void* radiant_dom_html_options_collection_host_type(void);
+extern "C" const void* radiant_dom_html_form_controls_collection_host_type(void);
+extern "C" const void* radiant_dom_named_node_map_host_type(void);
+extern "C" const void* radiant_dom_token_list_host_type(void);
+extern "C" const void* radiant_dom_radio_node_list_host_type(void);
+extern "C" const void* radiant_dom_rect_list_host_type(void);
 
 // Jube POC: unwrap/type policy is exposed through the radiant module so DOM
 // nodes no longer depend on the retired DOM map wrapper shell.
@@ -2007,10 +1979,11 @@ JS_FORWARD_RETURN(void*, dom_unwrap_element, (Item item), radiant_dom_unwrap_nod
 
 extern "C" void* dom_unwrap_element_impl(Item item) {
     TypeId tid = get_type_id(item);
-    if (tid == LMD_TYPE_VMAP) {
-        // Only Radiant-branded VMaps unwrap as DOM nodes; style/CSSOM VMaps
+    if (tid == LMD_TYPE_VELMT || tid == LMD_TYPE_VMAP) {
+        // Only Radiant-branded virtual containers unwrap as DOM nodes;
+        // style/CSSOM VMaps
         // must stop here or Radiant and DOM unwrap helpers recurse forever.
-        if (radiant_dom_is_node(item)) return item.vmap->host_data;
+        if (radiant_dom_is_node(item)) return virtual_host_data(item);
         DomDocument* doc = js_document_proxy_doc_from_item(item);
         return doc ? dom_get_or_create_doc_node(doc) : nullptr;
     }
@@ -2021,425 +1994,405 @@ extern "C" void* dom_unwrap_element_impl(Item item) {
 // need every caller to know the concrete carrier representation.
 JS_FORWARD_RETURN(bool, dom_is_node, (Item item), radiant_dom_is_node, (item))
 
-struct SelectOptionsOwnerEntry {
-    Array* array;
-    DomElement* owner;
-    DomNodeRef owner_ref;
-    int kind;
-};
+typedef enum DomCollectionVArrayKind {
+    DOM_VARRAY_CHILD_NODES,
+    DOM_VARRAY_ELEMENT_CHILDREN,
+    DOM_VARRAY_DOCUMENT_FORMS,
+    DOM_VARRAY_FORM_ELEMENTS,
+    DOM_VARRAY_LOOKUP_TAG,
+    DOM_VARRAY_LOOKUP_CLASS,
+    DOM_VARRAY_LOOKUP_NAME,
+    DOM_VARRAY_SELECT_OPTIONS,
+    DOM_VARRAY_SELECT_SELECTED_OPTIONS,
+    DOM_VARRAY_ATTRIBUTES,
+    DOM_VARRAY_CLASS_LIST,
+} DomCollectionVArrayKind;
 
-struct LiveChildCollectionEntry {
-    Array* array;
-    DomElement* owner;
-    DomNodeRef owner_ref;
-    int kind;
-};
-
-struct LiveFormCollectionEntry {
-    Array* array;
-    DomDocument* doc;
-    DomElement* owner;
-    DomNodeRef owner_ref;
-    int kind;
-};
-
-struct LiveLookupCollectionEntry {
-    Array* array;
-    DomDocument* doc;
-    DomElement* root;
-    DomNodeRef root_ref;
-    String* query;
-    int kind;
+typedef struct DomCollectionVArray {
+    Item owner;
+    Item query;
+    DomCollectionVArrayKind kind;
     bool include_root;
-};
+} DomCollectionVArray;
 
-static const int SELECT_COLLECTION_OPTIONS = 1;
-static const int SELECT_COLLECTION_SELECTED_OPTIONS = 2;
-static const int LIVE_CHILD_COLLECTION_CHILDREN = 1;
-static const int LIVE_CHILD_COLLECTION_CHILD_NODES = 2;
-static const int LIVE_FORM_COLLECTION_DOCUMENT_FORMS = 1;
-static const int LIVE_FORM_COLLECTION_FORM_ELEMENTS = 2;
-static const int LIVE_LOOKUP_COLLECTION_TAG = 1;
-static const int LIVE_LOOKUP_COLLECTION_CLASS = 2;
-static const int LIVE_LOOKUP_COLLECTION_NAME = 3;
-// Live collection tables retain weak JS-array homes and native-node pins. They
-// are lazy per-document-realm state, so property reads keep direct local table
-// access and never contend with another context.
-// JSCUO5: the four tables grow on demand. They were 4,096 entries each —
-// 753,696 B in every realm that merely touched a live collection.
-struct JsDomCollectionRuntimeState {
-    SelectOptionsOwnerEntry* select_options_owners = nullptr;
-    int select_options_owner_count = 0;
-    int select_options_owner_capacity = 0;
-    LiveChildCollectionEntry* live_child_collections = nullptr;
-    int live_child_collection_count = 0;
-    int live_child_collection_capacity = 0;
-    LiveFormCollectionEntry* live_form_collections = nullptr;
-    int live_form_collection_count = 0;
-    int live_form_collection_capacity = 0;
-    LiveLookupCollectionEntry* live_lookup_collections = nullptr;
-    int live_lookup_collection_count = 0;
-    int live_lookup_collection_capacity = 0;
-    int refresh_depth = 0;
-};
-
-static void dom_collection_capsule_destroy(void* capsule);
-static const ContextCapsuleOps dom_collection_capsule_ops = {
-    "js-dom-collections", CONTEXT_CAPSULE_LIFETIME_REALM,
-    sizeof(JsDomCollectionRuntimeState), NULL, NULL, dom_collection_capsule_destroy
-};
-JS_FORWARD_STATIC_EXPRESSION(JsDomCollectionRuntimeState*,
-    dom_collection_runtime_state_get, (),
-    ((JsDomCollectionRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_COLLECTION)))
-
-// One ensure per capsule; the directory owns allocation and lifecycle.
-static JsDomCollectionRuntimeState* dom_collection_state_ensure_ptr() {
-    if (!js_active_runtime_state) return nullptr;
-    return (JsDomCollectionRuntimeState*)context_capsule_ensure(
-        context, CONTEXT_CAPSULE_DOM_COLLECTION, &dom_collection_capsule_ops);
-}
-JS_FORWARD_STATIC_EXPRESSION(bool, dom_collection_runtime_state_ensure, (), (dom_collection_state_ensure_ptr() != nullptr))
-
-#define dom_collection_rt_state ((JsDomCollectionRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_COLLECTION))
-#define s_select_options_owners (dom_collection_rt_state->select_options_owners)
-#define s_select_options_owner_count (dom_collection_rt_state->select_options_owner_count)
-#define s_select_options_owner_capacity (dom_collection_rt_state->select_options_owner_capacity)
-#define s_live_child_collection_capacity (dom_collection_rt_state->live_child_collection_capacity)
-#define s_live_form_collection_capacity (dom_collection_rt_state->live_form_collection_capacity)
-#define s_live_lookup_collection_capacity (dom_collection_rt_state->live_lookup_collection_capacity)
-#define s_live_child_collections (dom_collection_rt_state->live_child_collections)
-#define s_live_child_collection_count (dom_collection_rt_state->live_child_collection_count)
-#define s_live_form_collections (dom_collection_rt_state->live_form_collections)
-#define s_live_form_collection_count (dom_collection_rt_state->live_form_collection_count)
-#define s_live_lookup_collections (dom_collection_rt_state->live_lookup_collections)
-#define s_live_lookup_collection_count (dom_collection_rt_state->live_lookup_collection_count)
-#define s_dom_collection_refresh_depth (dom_collection_rt_state->refresh_depth)
-
-extern "C" void heap_register_gc_weak(uint64_t* slot,
-    void (*on_clear)(uint64_t*, void*), void* weak_context);
-
-struct DomCollectionRefreshGuard {
-    bool active = false;
-    DomCollectionRefreshGuard() {
-        active = dom_collection_runtime_state_get() != nullptr;
-        if (active) s_dom_collection_refresh_depth++;
-    }
-    ~DomCollectionRefreshGuard() {
-        if (active) s_dom_collection_refresh_depth--;
-    }
-};
-
-static bool live_collection_pin(DomDocument* doc, DomElement* owner,
-                                DomNodeRef* out_ref) {
-    if (!doc || !owner || !out_ref) return false;
-    *out_ref = dom_node_ref((DomNode*)owner);
-    if (!dom_node_ref_validate(doc, *out_ref)) return false;
-    return dom_node_pin(doc, *out_ref, DOM_NODE_PIN_LIVE_COLLECTION);
+static DomElement* dom_collection_varray_owner(void* data) {
+    DomCollectionVArray* collection = (DomCollectionVArray*)data;
+    if (!collection) return nullptr;
+    DomNode* node = (DomNode*)dom_unwrap_element(collection->owner);
+    return node && node->is_element() ? node->as_element() : nullptr;
 }
 
-static void live_collection_unpin(DomDocument* doc, DomNodeRef* ref) {
-    if (!doc || !ref || !ref->address) return;
-    dom_node_unpin(doc, *ref, DOM_NODE_PIN_LIVE_COLLECTION);
-    *ref = {nullptr, 0};
-}
-
-static void reset_live_dom_collections() {
-    if (!dom_collection_runtime_state_get()) return;
-    // Live collections keep native owner pointers outside the GC graph; release
-    // their explicit lifecycle pins before the next document epoch can recycle.
-    for (int i = 0; i < s_select_options_owner_count; i++) {
-        heap_unregister_gc_weak((uint64_t*)&s_select_options_owners[i].array);
-        DomElement* owner = s_select_options_owners[i].owner;
-        live_collection_unpin(owner ? owner->doc : nullptr,
-                              &s_select_options_owners[i].owner_ref);
-    }
-    for (int i = 0; i < s_live_child_collection_count; i++) {
-        heap_unregister_gc_weak((uint64_t*)&s_live_child_collections[i].array);
-        DomElement* owner = s_live_child_collections[i].owner;
-        live_collection_unpin(owner ? owner->doc : nullptr,
-                              &s_live_child_collections[i].owner_ref);
-    }
-    for (int i = 0; i < s_live_form_collection_count; i++) {
-        heap_unregister_gc_weak((uint64_t*)&s_live_form_collections[i].array);
-        live_collection_unpin(s_live_form_collections[i].doc,
-                              &s_live_form_collections[i].owner_ref);
-    }
-    for (int i = 0; i < s_live_lookup_collection_count; i++) {
-        heap_unregister_gc_weak((uint64_t*)&s_live_lookup_collections[i].array);
-        live_collection_unpin(s_live_lookup_collections[i].doc,
-                              &s_live_lookup_collections[i].root_ref);
-    }
-    // JSCUO5: these are pointers now, so `sizeof` on them is 8 — zero the live
-    // prefix by count instead. The storage itself is kept for reuse and is
-    // released by the capsule teardown.
-    #define JS_DOM_CLEAR_COLLECTION_TABLE(table, count_field) \
-        if (table) memset(table, 0, (size_t)(count_field) * sizeof(*(table))); \
-        count_field = 0;
-    JS_DOM_CLEAR_COLLECTION_TABLE(s_select_options_owners, s_select_options_owner_count)
-    JS_DOM_CLEAR_COLLECTION_TABLE(s_live_child_collections, s_live_child_collection_count)
-    JS_DOM_CLEAR_COLLECTION_TABLE(s_live_form_collections, s_live_form_collection_count)
-    JS_DOM_CLEAR_COLLECTION_TABLE(s_live_lookup_collections, s_live_lookup_collection_count)
-    #undef JS_DOM_CLEAR_COLLECTION_TABLE
-}
-
-// JSCUO5: grow a live-collection table. Each entry's `array` is a weak GC slot
-// registered BY ADDRESS, so moving the block must unregister at the old
-// addresses and re-register at the new ones — a plain realloc would leave the
-// collector holding pointers into freed memory. Nothing else in an entry is
-// known to the collector.
-template <typename Entry>
-static bool dom_collection_table_grow(Entry** entries, int count, int* capacity) {
-    if (!entries || !capacity) return false;
-    int next = *capacity ? *capacity * 2 : 16;
-    for (int i = 0; i < count; i++) {
-        if ((*entries)[i].array) heap_unregister_gc_weak((uint64_t*)&(*entries)[i].array);
-    }
-    Entry* grown = (Entry*)mem_realloc(*entries, (size_t)next * sizeof(Entry),
-                                       MEM_CAT_JS_RUNTIME);
-    if (!grown) {
-        // realloc left the original block intact; restore its registrations
-        for (int i = 0; i < count; i++) {
-            if ((*entries)[i].array) {
-                heap_register_gc_weak((uint64_t*)&(*entries)[i].array, nullptr, nullptr);
-            }
+static bool dom_collection_varray_matches(DomElement* elem,
+                                           DomCollectionVArray* collection) {
+    if (!elem || !collection) return false;
+    const char* query = is_text_type_id(get_type_id(collection->query))
+        ? collection->query.get_chars() : "";
+    switch (collection->kind) {
+    case DOM_VARRAY_DOCUMENT_FORMS:
+        return elem->tag_name && strcasecmp(elem->tag_name, "form") == 0;
+    case DOM_VARRAY_FORM_ELEMENTS:
+        return _is_listed_form_control(elem);
+    case DOM_VARRAY_LOOKUP_TAG:
+        return elem->tag_name && query &&
+            ((query[0] == '*' && query[1] == '\0') ||
+             strcasecmp(elem->tag_name, query) == 0);
+    case DOM_VARRAY_LOOKUP_CLASS:
+        for (int index = 0; query && index < elem->class_count; index++) {
+            if (elem->class_names[index] &&
+                    strcmp(elem->class_names[index], query) == 0) return true;
         }
         return false;
+    case DOM_VARRAY_LOOKUP_NAME: {
+        const char* name = elem->get_attribute("name");
+        return name && query && strcmp(name, query) == 0;
     }
-    memset(grown + *capacity, 0, (size_t)(next - *capacity) * sizeof(Entry));
-    *entries = grown;
-    *capacity = next;
-    for (int i = 0; i < count; i++) {
-        if (grown[i].array) {
-            heap_register_gc_weak((uint64_t*)&grown[i].array, nullptr, nullptr);
-        }
+    default:
+        return false;
     }
-    return true;
 }
 
-template <typename Entry>
-static void dom_register_owner_collection(Item collection, DomElement* owner,
-        int kind, Entry** entries_ref, int* count, int* capacity) {
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
-    Entry* entries = *entries_ref;
-    for (int i = 0; i < *count; i++) {
-        if (entries[i].array == collection.array) {
-            if (entries[i].owner != owner) {
-                DomElement* old_owner = entries[i].owner;
-                live_collection_unpin(old_owner ? old_owner->doc : nullptr,
-                                      &entries[i].owner_ref);
-                if (!live_collection_pin(owner->doc, owner,
-                        &entries[i].owner_ref)) return;
+static DomElement* dom_collection_varray_find_rec(DomNode* node,
+        DomCollectionVArray* collection, int64_t target, int64_t* seen) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (dom_collection_varray_matches(elem, collection)) {
+                if (*seen == target) return elem;
+                (*seen)++;
             }
-            entries[i].owner = owner;
-            entries[i].kind = kind;
-            return;
+            DomElement* found = dom_collection_varray_find_rec(
+                elem->first_child, collection, target, seen);
+            if (found) return found;
         }
-    }
-    int entry_index = *count;
-    for (int i = 0; i < *count; i++) {
-        if (!entries[i].array) {
-            DomElement* old_owner = entries[i].owner;
-            live_collection_unpin(old_owner ? old_owner->doc : nullptr,
-                                  &entries[i].owner_ref);
-            entry_index = i;
-            break;
-        }
-    }
-    if (entry_index >= *capacity &&
-            !dom_collection_table_grow(entries_ref, *count, capacity)) return;
-    entries = *entries_ref;   // growth may have moved the block
-    Entry* entry = &entries[entry_index];
-    if (!live_collection_pin(owner->doc, owner, &entry->owner_ref)) return;
-    entry->array = collection.array;
-    entry->owner = owner;
-    entry->kind = kind;
-    // Weak-clear the raw array address before its allocator slot can be reused.
-    heap_register_gc_weak((uint64_t*)&entry->array, nullptr, nullptr);
-    if (entry_index == *count) (*count)++;
-}
-#define JS_DOM_REGISTER_OWNER_COLLECTION(name, entries, count, capacity) \
-static void name(Item collection, DomElement* owner, int kind) { \
-    JsDomCollectionRuntimeState* state = dom_collection_runtime_state_get(); \
-    if (!state) state = dom_collection_state_ensure_ptr(); \
-    if (!state) return; \
-    dom_register_owner_collection(collection, owner, kind, &state->entries, \
-        &state->count, &state->capacity); \
-}
-JS_DOM_REGISTER_OWNER_COLLECTION(_register_select_options_owner,
-    select_options_owners, select_options_owner_count,
-    select_options_owner_capacity)
-
-template <typename Entry>
-static DomElement* dom_collection_owner(Entry* entries, int count,
-                                           Item collection, int* out_kind) {
-    if (!dom_collection_runtime_state_get()) return nullptr;
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
-    for (int i = 0; i < count; i++) {
-        if (entries[i].array == collection.array) {
-            if (out_kind) *out_kind = entries[i].kind;
-            return entries[i].owner;
-        }
+        node = node->next_sibling;
     }
     return nullptr;
 }
 
-static DomElement* _select_options_owner(Item collection, int* out_kind) {
-    return dom_collection_owner(s_select_options_owners,
-        s_select_options_owner_count, collection, out_kind);
-}
-JS_DOM_REGISTER_OWNER_COLLECTION(_register_live_child_collection,
-    live_child_collections, live_child_collection_count,
-    live_child_collection_capacity)
-#undef JS_DOM_REGISTER_OWNER_COLLECTION
-
-static DomElement* _live_child_collection_owner(Item collection, int* out_kind) {
-    return dom_collection_owner(s_live_child_collections,
-        s_live_child_collection_count, collection, out_kind);
-}
-
-template <typename Entry>
-struct JsDomLiveCollectionTraits;
-
-template <>
-struct JsDomLiveCollectionTraits<LiveFormCollectionEntry> {
-    static DomDocument* doc(LiveFormCollectionEntry* entry) { return entry->doc; }
-    static DomElement* subject(LiveFormCollectionEntry* entry) { return entry->owner; }
-    static DomNodeRef* pin_ref(LiveFormCollectionEntry* entry) {
-        return &entry->owner_ref;
-    }
-    static void assign(LiveFormCollectionEntry* entry, DomDocument* doc,
-            DomElement* subject, int kind) {
-        entry->doc = doc;
-        entry->owner = subject;
-        entry->kind = kind;
-    }
-};
-
-template <>
-struct JsDomLiveCollectionTraits<LiveLookupCollectionEntry> {
-    static DomDocument* doc(LiveLookupCollectionEntry* entry) { return entry->doc; }
-    static DomElement* subject(LiveLookupCollectionEntry* entry) { return entry->root; }
-    static DomNodeRef* pin_ref(LiveLookupCollectionEntry* entry) {
-        return &entry->root_ref;
-    }
-    static void assign(LiveLookupCollectionEntry* entry, DomDocument* doc,
-            DomElement* subject, int kind) {
-        entry->doc = doc;
-        entry->root = subject;
-        entry->kind = kind;
-    }
-};
-
-template <typename Entry>
-static void dom_register_live_collection(Item collection, DomDocument* doc,
-        DomElement* subject, int kind, Entry** entries_ref, int* count, int* capacity) {
-    if (!dom_collection_runtime_state_ensure()) return;
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return;
-    Entry* entries = *entries_ref;
-    if (!doc && subject) doc = subject->doc;
-    if (!doc && !subject) return;
-    DomElement* pin_owner = subject ? subject : doc->root;
-    for (int i = 0; i < *count; i++) {
-        Entry* entry = &entries[i];
-        if (entry->array != collection.array) continue;
-        DomElement* old_pin_owner = JsDomLiveCollectionTraits<Entry>::subject(entry);
-        if (!old_pin_owner) {
-            DomDocument* old_doc = JsDomLiveCollectionTraits<Entry>::doc(entry);
-            old_pin_owner = old_doc ? old_doc->root : nullptr;
+static DomElement* dom_collection_varray_find_option_rec(DomNode* node,
+        bool allow_optgroup, bool selected_only, int64_t target, int64_t* seen) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            const char* tag = elem->tag_name;
+            if (tag && strcasecmp(tag, "option") == 0) {
+                if (!selected_only || _get_selectedness(elem)) {
+                    if (*seen == target) return elem;
+                    (*seen)++;
+                }
+            } else if (tag && (strcasecmp(tag, "select") == 0 ||
+                               strcasecmp(tag, "hr") == 0)) {
+                // nested selects and horizontal rules own no options here
+            } else if (tag && strcasecmp(tag, "optgroup") == 0) {
+                if (allow_optgroup) {
+                    DomElement* found = dom_collection_varray_find_option_rec(
+                        elem->first_child, false, selected_only, target, seen);
+                    if (found) return found;
+                }
+            } else {
+                DomElement* found = dom_collection_varray_find_option_rec(
+                    elem->first_child, allow_optgroup, selected_only, target, seen);
+                if (found) return found;
+            }
         }
-        if (old_pin_owner != pin_owner || JsDomLiveCollectionTraits<Entry>::doc(entry) != doc) {
-            live_collection_unpin(JsDomLiveCollectionTraits<Entry>::doc(entry),
-                JsDomLiveCollectionTraits<Entry>::pin_ref(entry));
-            if (!live_collection_pin(doc, pin_owner,
-                    JsDomLiveCollectionTraits<Entry>::pin_ref(entry))) return;
-        }
-        JsDomLiveCollectionTraits<Entry>::assign(entry, doc, subject, kind);
-        return;
-    }
-    int entry_index = *count;
-    for (int i = 0; i < *count; i++) {
-        Entry* entry = &entries[i];
-        if (!entry->array) {
-            live_collection_unpin(JsDomLiveCollectionTraits<Entry>::doc(entry),
-                JsDomLiveCollectionTraits<Entry>::pin_ref(entry));
-            entry_index = i;
-            break;
-        }
-    }
-    if (entry_index >= *capacity &&
-            !dom_collection_table_grow(entries_ref, *count, capacity)) return;
-    entries = *entries_ref;   // growth may have moved the block
-    Entry* entry = &entries[entry_index];
-    if (!live_collection_pin(doc, pin_owner,
-            JsDomLiveCollectionTraits<Entry>::pin_ref(entry))) return;
-    entry->array = collection.array;
-    JsDomLiveCollectionTraits<Entry>::assign(entry, doc, subject, kind);
-    // the cache is a weak observer; the array must not keep its own slot alive.
-    heap_register_gc_weak((uint64_t*)&entry->array, nullptr, nullptr);
-    if (entry_index == *count) (*count)++;
-}
-
-static void _register_live_form_collection(Item collection, DomDocument* doc,
-                                           DomElement* owner, int kind) {
-    // The generic helper receives state-owned table pointers by value; initialize
-    // the realm state before those arguments are evaluated (D5.2).
-    if (!dom_collection_runtime_state_ensure()) return;
-    dom_register_live_collection(collection, doc, owner, kind,
-        &s_live_form_collections, &s_live_form_collection_count,
-        &s_live_form_collection_capacity);
-}
-
-template <typename Entry>
-static Entry* dom_collection_entry(Entry* entries, int count, Item collection) {
-    if (!dom_collection_runtime_state_get()) return nullptr;
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
-    for (int i = 0; i < count; i++) {
-        if (entries[i].array == collection.array) {
-            return &entries[i];
-        }
+        node = node->next_sibling;
     }
     return nullptr;
 }
 
-static LiveFormCollectionEntry* _live_form_collection_entry(Item collection) {
-    return dom_collection_entry(s_live_form_collections,
-        s_live_form_collection_count, collection);
+static const char* dom_collection_attribute_name_at(DomElement* owner,
+                                                     int64_t target) {
+    if (!owner || target < 0) return nullptr;
+    int attr_count = 0;
+    int64_t seen = 0;
+    const char** attr_names = owner->attribute_names(&attr_count);
+    for (int index = 0; attr_names && index < attr_count; index++) {
+        const char* name = attr_names[index];
+        if (!name || dom_is_internal_attr(name)) continue;
+        if (seen++ == target) return name;
+    }
+    return nullptr;
 }
 
-static LiveLookupCollectionEntry* _live_lookup_collection_entry(Item collection);
-
-static void _register_live_lookup_collection(Item collection, DomDocument* doc,
-                                             DomElement* root, int kind,
-                                             bool include_root, const char* query) {
-    if (!query) return;
-    if (!doc && root) doc = root->doc;
-    if (!doc && !root) return;
-    // The generic helper receives state-owned table pointers by value; initialize
-    // the realm state before those arguments are evaluated (D5.2).
-    if (!dom_collection_runtime_state_ensure()) return;
-    String* query_name = heap_create_name(query);
-    dom_register_live_collection(collection, doc, root, kind,
-        &s_live_lookup_collections, &s_live_lookup_collection_count,
-        &s_live_lookup_collection_capacity);
-    LiveLookupCollectionEntry* entry = _live_lookup_collection_entry(collection);
-    if (!entry) return;
-    entry->query = query_name;
-    entry->include_root = include_root;
+static int64_t dom_collection_attribute_count(DomElement* owner) {
+    if (!owner) return 0;
+    int attr_count = 0;
+    int64_t visible = 0;
+    const char** attr_names = owner->attribute_names(&attr_count);
+    for (int index = 0; attr_names && index < attr_count; index++) {
+        if (attr_names[index] && !dom_is_internal_attr(attr_names[index])) visible++;
+    }
+    return visible;
 }
 
-static LiveLookupCollectionEntry* _live_lookup_collection_entry(Item collection) {
-    return dom_collection_entry(s_live_lookup_collections,
-        s_live_lookup_collection_count, collection);
+static Item dom_collection_attribute_item(DomElement* owner, const char* name) {
+    if (!owner || !name || dom_is_internal_attr(name)) return ItemNull;
+    const char* value = owner->get_attribute(name);
+    RootFrame roots(3);
+    Rooted<Item> result(roots, js_new_object());
+    Rooted<Item> name_item(roots, js_name_item(name));
+    Rooted<Item> value_item(roots, js_name_item(value ? value : ""));
+    // Attr identity is not implemented yet; this record preserves the current
+    // entry surface while NamedNodeMap membership itself stays virtual.
+    dom_realm_set_cstr(result.get(), "nodeName", name_item.get());
+    dom_realm_set_cstr(result.get(), "nodeValue", value_item.get());
+    dom_realm_set_cstr(result.get(), "name", name_item.get());
+    dom_realm_set_cstr(result.get(), "value", value_item.get());
+    return result.get();
 }
 
-extern "C" bool dom_collection_has_live_property_state(Item collection) {
-    if (get_type_id(collection) != LMD_TYPE_ARRAY) return false;
-    if (!dom_collection_runtime_state_get()) return false;
-    int collection_kind = 0;
-    if (_live_child_collection_owner(collection, &collection_kind)) return true;
-    if (_live_form_collection_entry(collection)) return true;
-    if (_live_lookup_collection_entry(collection)) return true;
-    return _select_options_owner(collection, &collection_kind) != nullptr;
+static DomNode* dom_collection_varray_walk(void* data, int64_t target,
+                                           int64_t* out_count) {
+    DomCollectionVArray* collection = (DomCollectionVArray*)data;
+    DomElement* owner = dom_collection_varray_owner(data);
+    if (!collection || !owner) return nullptr;
+    int64_t seen = 0;
+    if (collection->kind == DOM_VARRAY_CHILD_NODES ||
+            collection->kind == DOM_VARRAY_ELEMENT_CHILDREN) {
+        for (DomNode* child = dom_first_script_visible_child(owner); child;
+             child = dom_next_script_visible_sibling(child)) {
+            if (collection->kind == DOM_VARRAY_ELEMENT_CHILDREN &&
+                    !child->is_element()) continue;
+            if (seen == target) return child;
+            seen++;
+        }
+        if (out_count) *out_count = seen;
+        return nullptr;
+    }
+    if (collection->kind == DOM_VARRAY_SELECT_OPTIONS ||
+            collection->kind == DOM_VARRAY_SELECT_SELECTED_OPTIONS) {
+        if (collection->kind == DOM_VARRAY_SELECT_SELECTED_OPTIONS) {
+            _select_normalize_native(owner);
+        }
+        DomNode* found = (DomNode*)dom_collection_varray_find_option_rec(
+            owner->first_child, true,
+            collection->kind == DOM_VARRAY_SELECT_SELECTED_OPTIONS,
+            target, &seen);
+        if (out_count) *out_count = seen;
+        return found;
+    }
+    DomNode* first = collection->include_root
+        ? (DomNode*)owner : owner->first_child;
+    DomNode* found = (DomNode*)dom_collection_varray_find_rec(
+        first, collection, target, &seen);
+    if (out_count) *out_count = seen;
+    return found;
+}
+
+static int64_t dom_collection_varray_count(void* data) {
+    DomCollectionVArray* collection = (DomCollectionVArray*)data;
+    if (collection && collection->kind == DOM_VARRAY_ATTRIBUTES) {
+        return dom_collection_attribute_count(dom_collection_varray_owner(data));
+    }
+    if (collection && collection->kind == DOM_VARRAY_CLASS_LIST) {
+        DomElement* owner = dom_collection_varray_owner(data);
+        return owner ? owner->class_count : 0;
+    }
+    int64_t count = 0;
+    (void)dom_collection_varray_walk(data, -1, &count);
+    return count;
+}
+
+static VirtualOpStatus dom_collection_varray_get(void* data, int64_t index,
+                                                  Item* out) {
+    if (!out) return VIRTUAL_OP_ERROR;
+    DomCollectionVArray* collection = (DomCollectionVArray*)data;
+    if (collection && collection->kind == DOM_VARRAY_ATTRIBUTES) {
+        DomElement* owner = dom_collection_varray_owner(data);
+        const char* name = dom_collection_attribute_name_at(owner, index);
+        if (!name) return VIRTUAL_OP_MISSING;
+        *out = dom_collection_attribute_item(owner, name);
+        return get_type_id(*out) == LMD_TYPE_MAP
+            ? VIRTUAL_OP_OK : VIRTUAL_OP_ERROR;
+    }
+    if (collection && collection->kind == DOM_VARRAY_CLASS_LIST) {
+        DomElement* owner = dom_collection_varray_owner(data);
+        if (!owner || index < 0 || index >= owner->class_count) {
+            return VIRTUAL_OP_MISSING;
+        }
+        *out = js_name_item(owner->class_names[index]);
+        return VIRTUAL_OP_OK;
+    }
+    DomNode* node = index < 0 ? nullptr
+        : dom_collection_varray_walk(data, index, nullptr);
+    if (!node) return VIRTUAL_OP_MISSING;
+    *out = dom_wrap_element((void*)node);
+    return get_type_id(*out) == LMD_TYPE_VELMT
+        ? VIRTUAL_OP_OK : VIRTUAL_OP_ERROR;
+}
+
+static VirtualOpStatus dom_collection_varray_readonly_set(
+        void* data, int64_t index, Item value, Item* out) {
+    (void)data; (void)index; (void)value; (void)out;
+    return VIRTUAL_OP_READONLY;
+}
+
+static VirtualOpStatus dom_collection_varray_readonly_splice(
+        void* data, int64_t start, int64_t remove_count,
+        const Item* values, int64_t value_count, Item* out) {
+    (void)data; (void)start; (void)remove_count;
+    (void)values; (void)value_count; (void)out;
+    return VIRTUAL_OP_READONLY;
+}
+
+static void dom_collection_varray_destroy(void* data) {
+    mem_free(data);
+}
+
+static void dom_collection_varray_trace(void* data, gc_heap* gc) {
+    DomCollectionVArray* collection = (DomCollectionVArray*)data;
+    if (!collection || !gc) return;
+    gc_mark_item(gc, collection->owner.item);
+    gc_mark_item(gc, collection->query.item);
+}
+
+extern "C" const VArrayVtable dom_child_collection_varray_vtable = {
+    {LAMBDA_VIRTUAL_ABI_VERSION, LMD_TYPE_VARRAY, {0, 0, 0},
+     dom_collection_varray_destroy, dom_collection_varray_trace, nullptr},
+    {dom_collection_varray_count,
+     dom_collection_varray_get,
+     dom_collection_varray_readonly_set,
+     dom_collection_varray_readonly_splice}
+};
+
+typedef struct DomStaticVArray {
+    Item items;
+} DomStaticVArray;
+
+static int64_t dom_static_items_count(Item items) {
+    TypeId type = get_type_id(items);
+    if (type == LMD_TYPE_ARRAY) return items.array ? items.array->length : 0;
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        return items.array_num ? items.array_num->length : 0;
+    }
+    return 0;
+}
+
+static int64_t dom_static_varray_count(void* data) {
+    DomStaticVArray* collection = (DomStaticVArray*)data;
+    return collection ? dom_static_items_count(collection->items) : 0;
+}
+
+static VirtualOpStatus dom_static_varray_get(
+        void* data, int64_t index, Item* out) {
+    DomStaticVArray* collection = (DomStaticVArray*)data;
+    if (!collection || !out || index < 0 ||
+            index >= dom_static_items_count(collection->items)) {
+        return VIRTUAL_OP_MISSING;
+    }
+    *out = item_at(collection->items, index);
+    return VIRTUAL_OP_OK;
+}
+
+static void dom_static_varray_trace(void* data, gc_heap* gc) {
+    DomStaticVArray* collection = (DomStaticVArray*)data;
+    if (collection && gc) gc_mark_item(gc, collection->items.item);
+}
+
+extern "C" const VArrayVtable dom_static_varray_vtable = {
+    {LAMBDA_VIRTUAL_ABI_VERSION, LMD_TYPE_VARRAY, {0, 0, 0},
+     dom_collection_varray_destroy, dom_static_varray_trace, nullptr},
+    {dom_static_varray_count,
+     dom_static_varray_get,
+     dom_collection_varray_readonly_set,
+     dom_collection_varray_readonly_splice}
+};
+
+extern "C" Item dom_static_collection_from_array(
+        Item items, const void* host_type) {
+    if (!is_materialized_array_type_id(get_type_id(items))) return ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> items_root(roots, items);
+    DomStaticVArray* collection = (DomStaticVArray*)mem_calloc(
+        1, sizeof(DomStaticVArray), MEM_CAT_JS_RUNTIME);
+    if (!collection) return ItemNull;
+    collection->items = items_root.get();
+    Item result = varray_new(&dom_static_varray_vtable, collection,
+        host_type, collection);
+    if (get_type_id(result) != LMD_TYPE_VARRAY) {
+        dom_collection_varray_destroy(collection);
+        return ItemNull;
+    }
+    return result;
+}
+
+extern "C" Item dom_static_node_list_from_array(Item items) {
+    return dom_static_collection_from_array(
+        items, radiant_dom_node_list_host_type());
+}
+
+extern "C" Item dom_static_radio_node_list_from_array(Item items) {
+    return dom_static_collection_from_array(
+        items, radiant_dom_radio_node_list_host_type());
+}
+
+extern "C" Item dom_static_rect_list_from_array(Item items) {
+    return dom_static_collection_from_array(
+        items, radiant_dom_rect_list_host_type());
+}
+
+extern "C" int dom_child_collection_named_get(Item receiver, Item key, Item* out) {
+    if (!out || get_type_id(receiver) != LMD_TYPE_VARRAY) return 0;
+    const char* name = fn_to_cstr(key);
+    if (!name || !name[0]) return 0;
+    DomCollectionVArray* collection = (DomCollectionVArray*)receiver.varray->data;
+    if (collection && collection->kind == DOM_VARRAY_ATTRIBUTES) {
+        DomElement* owner = dom_collection_varray_owner(collection);
+        int64_t count = dom_collection_attribute_count(owner);
+        for (int64_t index = 0; index < count; index++) {
+            const char* candidate = dom_collection_attribute_name_at(owner, index);
+            if (candidate && strcmp(candidate, name) == 0) {
+                *out = dom_collection_attribute_item(owner, candidate);
+                return 1;
+            }
+        }
+        return 0;
+    }
+    int64_t count = varray_count(receiver.varray);
+    for (int64_t index = 0; index < count; index++) {
+        Item candidate = varray_get(receiver.varray, index);
+        DomNode* node = (DomNode*)dom_unwrap_element(candidate);
+        if (!node || !node->is_element()) continue;
+        DomElement* elem = node->as_element();
+        const char* id = elem->get_attribute("id");
+        const char* attr_name = elem->get_attribute("name");
+        if ((id && strcmp(id, name) == 0) ||
+                (attr_name && strcmp(attr_name, name) == 0)) {
+            *out = candidate;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+extern "C" int dom_child_collection_named_has(Item receiver, Item key, Item* out) {
+    if (!out) return 0;
+    Item ignored = ItemNull;
+    *out = (Item){.item = b2it(
+        dom_child_collection_named_get(receiver, key, &ignored) ? 1 : 0)};
+    return 1;
+}
+
+static Item dom_collection_varray_new(Item owner,
+        DomCollectionVArrayKind kind, Item query, bool include_root,
+        const void* host_type) {
+    RootFrame roots(2);
+    Rooted<Item> owner_root(roots, owner);
+    Rooted<Item> query_root(roots, query);
+    DomCollectionVArray* collection = (DomCollectionVArray*)mem_calloc(
+        1, sizeof(DomCollectionVArray), MEM_CAT_JS_RUNTIME);
+    if (!collection) return ItemNull;
+    collection->owner = owner_root.get();
+    collection->query = query_root.get();
+    collection->kind = kind;
+    collection->include_root = include_root;
+    Item result = varray_new(&dom_child_collection_varray_vtable, collection,
+                             host_type, collection);
+    if (get_type_id(result) != LMD_TYPE_VARRAY) {
+        dom_collection_varray_destroy(collection);
+        return ItemNull;
+    }
+    return result;
 }
 
 static Item dom_text_replace_data_method(DomText* text_node, Item offset_arg,
@@ -2455,308 +2408,88 @@ static Item dom_text_split_method(DomText* text_node, Item offset_arg);
 static Item js_text_data_body(Item callee, Item this_value, Item* args,
                               int argc, uint64_t* result_home);
 static void dom_expando_flag_set(DomElement* elem, const char* name, Item value);
-static void _select_refresh_options_collection(Item collection, DomElement* sel);
-static void _select_refresh_selected_options_collection(Item collection, DomElement* sel);
-
-static Item _collection_named_item(Item name_arg) {
-    const char* name = fn_to_cstr(name_arg);
-    if (!name || !*name) return ItemNull;
-    Item self = dom_realm_receiver();
-    if (get_type_id(self) != LMD_TYPE_ARRAY || !self.array) return ItemNull;
-    for (int64_t i = 0; i < self.array->length; i++) {
-        Item item = js_elements_get_int(self, i);
-        DomElement* elem = (DomElement*)dom_unwrap_element(item);
-        if (!elem) continue;
-        const char* id = elem->get_attribute("id");
-        if (id && strcmp(id, name) == 0) return item;
-        const char* nm = elem->get_attribute("name");
-        if (nm && strcmp(nm, name) == 0) return item;
-    }
-    return ItemNull;
-}
-
-static Item _options_collection_add(Item element_arg, Item before_arg) {
-    Item self = dom_realm_receiver();
-    int kind = 0;
-    DomElement* owner = _select_options_owner(self, &kind);
-    if (!owner || kind != SELECT_COLLECTION_OPTIONS || !_is_tag(owner, "select")) return ItemNull;
-
-    Item args[2] = { element_arg, before_arg };
-    // The owner is already known to be a <select>, which is the only thing the
-    // module's executor checks before handing this operation back to the core.
-    return dom_element_operation_impl(dom_wrap_element(owner), JUBE_DOM_ADD, args, 2);
-}
-
-static void _decorate_dom_collection(Item collection, const char* ctor_name) {
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !ctor_name) return;
-    Item named_key = js_name_item("namedItem");
-    Item existing = dom_realm_get(collection, named_key);
-    if (!dom_realm_is_callable(existing)) {
-        dom_realm_set_native(collection, named_key, _collection_named_item);
-    }
-    Item ctor = dom_realm_constructor(ctor_name);
-    if (ctor.item != ItemNull.item) {
-        dom_realm_set_cstr(collection, "constructor", ctor);
-    }
-}
-
-static void _decorate_options_collection(Item collection) {
-    _decorate_dom_collection(collection, "HTMLOptionsCollection");
-    if (get_type_id(collection) != LMD_TYPE_ARRAY) return;
-
-    Item add_key = js_name_item("add");
-    Item existing = dom_realm_get(collection, add_key);
-    if (dom_realm_is_callable(existing)) return;
-
-    // select.options is a live collection object, so install add() on the collection and delegate to the owning select.
-    Item add_fn = dom_realm_new_function(_options_collection_add);
-    js_set_function_name(add_fn, add_key);
-    dom_realm_set(collection, add_key, add_fn);
-}
-
-static bool _array_companion_set_int_slot(Item collection, const char* name,
-                                          int name_len, int64_t value) {
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array ||
-        !js_array_has_props(collection.array) || !name || name_len <= 0) {
-        return false;
-    }
-    Map* props = js_array_props(collection.array);
-    if (!props || !map_kind_is_array_props(props->map_kind) || !props->data) return false;
-    Item props_item = (Item){.map = props};
-    ShapeEntry* entry = nullptr;
-    JsShapeSlotStatus status = js_own_shape_slot_status(props_item, name, name_len, nullptr, &entry);
-    if (status != JS_SHAPE_SLOT_DATA || !entry || entry->byte_offset < 0 ||
-        entry->byte_offset + (int64_t)sizeof(int64_t) > (int64_t)props->data_cap) {
-        return false;
-    }
-    // The array companion uses shaped int64 lanes; an IEEE payload would be
-    // decoded as an int poison sentinel by a later property read.
-    *(int64_t*)((char*)props->data + entry->byte_offset) = value;
-    return true;
-}
-
-static void _refresh_live_child_collection(Item collection, DomElement* owner, int kind) {
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !owner) return;
-    // live collection refresh owns the dense backing array; routing through
-    // JS length assignment can leave companion-map collection properties stale.
-    collection.array->length = 0;
-    DomNode* child = dom_first_script_visible_child(owner);
-    while (child) {
-        if (kind == LIVE_CHILD_COLLECTION_CHILD_NODES || child->is_element()) {
-            if (child->is_element()) {
-                js_array_push(collection, dom_wrap_element(child->as_element()));
-            } else {
-                js_array_push(collection, dom_wrap_element((DomElement*)(void*)child));
-            }
-        }
-        child = dom_next_script_visible_sibling(child);
-    }
-    if (js_array_has_props(collection.array)) {
-        // decorated collections have a companion map; keep its length in sync
-        // because array property reads consult it before the dense length, and
-        // normal JS writes can be rejected once the slot is descriptor-backed.
-        // A companion map can exist solely for namedItem()/constructor and
-        // therefore have no length slot; only update an actual descriptor slot.
-        _array_companion_set_int_slot(collection, "length", 6,
-                                      collection.array->length);
-    }
-}
-
-static void _refresh_live_form_collection(Item collection, LiveFormCollectionEntry* entry) {
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !entry) return;
-    // live form collections own their dense array; setting length through JS
-    // leaves old numeric slots and companion-map length visible to optimized reads.
-    collection.array->length = 0;
-    if (entry->kind == LIVE_FORM_COLLECTION_DOCUMENT_FORMS) {
-        DomDocument* doc = entry->doc;
-        if (doc && doc->root) {
-            _collect_document_forms_rec((DomNode*)doc->root, collection);
-        }
-    } else if (entry->kind == LIVE_FORM_COLLECTION_FORM_ELEMENTS) {
-        DomElement* form = entry->owner;
-        if (form) {
-            _collect_form_controls_rec(form->first_child, collection);
-        }
-    }
-    if (js_array_has_props(collection.array)) {
-        _array_companion_set_int_slot(collection, "length", 6,
-                                      collection.array->length);
-    }
-}
-
-static void _refresh_live_lookup_collection(Item collection, LiveLookupCollectionEntry* entry) {
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !entry) return;
-    // lookup collections are live; refresh through JS array pushes because
-    // decorated arrays use `extra` for companion properties, not Lambda extras.
-    collection.array->length = 0;
-    DomElement* root = entry->root ? entry->root : (entry->doc ? entry->doc->root : nullptr);
-    const char* query = entry->query ? entry->query->chars : "";
-    if (!root) return;
-    if (entry->include_root) {
-        _collect_lookup_rec(root, query, collection, entry->kind);
-    } else {
-        DomNode* child = root->first_child;
-        while (child) {
-            if (child->is_element()) {
-                _collect_lookup_rec(child->as_element(), query, collection, entry->kind);
-            }
-            child = child->next_sibling;
-        }
-    }
-    if (js_array_has_props(collection.array)) {
-        _array_companion_set_int_slot(collection, "length", 6,
-                                      collection.array->length);
-    }
-}
-
-static Item _new_live_lookup_collection(DomDocument* doc, DomElement* root,
-                                        int kind, bool include_root,
-                                        Item query_item, const char* ctor_name) {
-    // Collection registration allocates realm state and wraps matching nodes;
-    // keep both the query and newly allocated array rooted across those GC
-    // boundaries (S6.4, D5.2). Without this, the weak cache can retain a
-    // reclaimed array while the refresh walk is still populating it.
-    JS_ROOTS(roots,
-        query_root, query_item,
-        collection_root, js_array_new(0));
-    const char* query = dom_to_dom_string_cstr(query_root.get());
-    if (!query) return ItemNull;
-    Item collection = collection_root.get();
-    _register_live_lookup_collection(collection, doc, root, kind, include_root, query);
-    LiveLookupCollectionEntry* entry = _live_lookup_collection_entry(collection);
-    _refresh_live_lookup_collection(collection, entry);
-    if (ctor_name) _decorate_dom_collection(collection, ctor_name);
-    return collection_root.get();
-}
-
 extern "C" Item dom_live_child_collection_bridge(void* elem_ptr, bool elements_only) {
     DomElement* elem = (DomElement*)elem_ptr;
-    JS_ROOTS(roots, collection_root, js_array_new(0));
-    Item collection = collection_root.get();
-    if (!elem) return collection;
-    int kind = elements_only ? LIVE_CHILD_COLLECTION_CHILDREN : LIVE_CHILD_COLLECTION_CHILD_NODES;
-    _register_live_child_collection(collection, elem, kind);
-    _refresh_live_child_collection(collection, elem, kind);
-    // DOM child collections are live; registering the owner lets the array
-    // refresh before script reads instead of freezing a stale mutation snapshot.
-    if (elements_only) _decorate_dom_collection(collection, "HTMLCollection");
-    return collection_root.get();
+    if (!elem) return ItemNull;
+    Item owner = dom_wrap_element((void*)elem);
+    if (get_type_id(owner) != LMD_TYPE_VELMT) return ItemNull;
+    const void* host_type = elements_only
+        ? radiant_dom_html_collection_host_type()
+        : radiant_dom_node_list_host_type();
+    return dom_collection_varray_new(owner,
+        elements_only ? DOM_VARRAY_ELEMENT_CHILDREN : DOM_VARRAY_CHILD_NODES,
+        ItemNull, false, host_type);
+}
+
+extern "C" Item dom_attribute_collection_bridge(void* elem_ptr) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    if (!elem) return ItemNull;
+    Item owner = dom_wrap_element(elem);
+    return dom_collection_varray_new(owner, DOM_VARRAY_ATTRIBUTES,
+        ItemNull, false, radiant_dom_named_node_map_host_type());
+}
+
+static Item dom_token_list_collection_bridge(DomElement* elem) {
+    if (!elem) return ItemNull;
+    Item owner = dom_wrap_element(elem);
+    return dom_collection_varray_new(owner, DOM_VARRAY_CLASS_LIST,
+        ItemNull, false, radiant_dom_token_list_host_type());
 }
 
 extern "C" Item dom_live_document_forms_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
-    JS_ROOTS(roots, collection_root, js_array_new(0));
-    Item collection = collection_root.get();
-    if (!doc) return collection;
-    _register_live_form_collection(collection, doc, nullptr, LIVE_FORM_COLLECTION_DOCUMENT_FORMS);
-    LiveFormCollectionEntry* entry = _live_form_collection_entry(collection);
-    _refresh_live_form_collection(collection, entry);
-    _decorate_dom_collection(collection, "HTMLCollection");
-    return collection_root.get();
+    Item owner = doc && doc->root ? dom_wrap_element(doc->root) : ItemNull;
+    return dom_collection_varray_new(owner, DOM_VARRAY_DOCUMENT_FORMS,
+        ItemNull, true, radiant_dom_html_collection_host_type());
 }
 
 extern "C" Item dom_live_form_elements_bridge(void* elem_ptr) {
     DomElement* form = (DomElement*)elem_ptr;
-    JS_ROOTS(roots, collection_root, js_array_new(0));
-    Item collection = collection_root.get();
-    if (!form) return collection;
-    _register_live_form_collection(collection, form->doc, form, LIVE_FORM_COLLECTION_FORM_ELEMENTS);
-    LiveFormCollectionEntry* entry = _live_form_collection_entry(collection);
-    _refresh_live_form_collection(collection, entry);
-    _decorate_dom_collection(collection, "HTMLFormControlsCollection");
-    return collection_root.get();
+    Item owner = form ? dom_wrap_element(form) : ItemNull;
+    return dom_collection_varray_new(owner, DOM_VARRAY_FORM_ELEMENTS,
+        ItemNull, false, radiant_dom_html_form_controls_collection_host_type());
 }
 
-#define JS_DOM_DOCUMENT_LOOKUP_BRIDGE(name, kind, ctor_name) \
+static Item dom_live_select_collection_bridge(DomElement* select,
+                                                bool selected_only) {
+    Item owner = select ? dom_wrap_element(select) : ItemNull;
+    return dom_collection_varray_new(owner,
+        selected_only ? DOM_VARRAY_SELECT_SELECTED_OPTIONS
+                      : DOM_VARRAY_SELECT_OPTIONS,
+        ItemNull, false,
+        selected_only ? radiant_dom_html_collection_host_type()
+                      : radiant_dom_html_options_collection_host_type());
+}
+
+#define JS_DOM_DOCUMENT_LOOKUP_BRIDGE(name, kind, host_type_fn) \
 extern "C" Item name(void* doc_ptr, Item query) { \
     DomDocument* doc = (DomDocument*)doc_ptr; \
-    return _new_live_lookup_collection(doc, doc ? doc->root : nullptr, \
-        kind, true, query, ctor_name); \
+    RootFrame roots(2); \
+    Rooted<Item> owner(roots, doc && doc->root ? dom_wrap_element(doc->root) : ItemNull); \
+    Rooted<Item> text(roots, js_to_string(query)); \
+    return dom_collection_varray_new(owner.get(), kind, text.get(), true, host_type_fn()); \
 }
 #define JS_DOM_ELEMENT_LOOKUP_BRIDGE(name, kind) \
 extern "C" Item name(void* elem_ptr, Item query) { \
     DomElement* elem = (DomElement*)elem_ptr; \
-    return _new_live_lookup_collection(elem ? elem->doc : nullptr, elem, \
-        kind, false, query, "HTMLCollection"); \
+    RootFrame roots(2); \
+    Rooted<Item> owner(roots, elem ? dom_wrap_element(elem) : ItemNull); \
+    Rooted<Item> text(roots, js_to_string(query)); \
+    return dom_collection_varray_new(owner.get(), kind, text.get(), false, \
+        radiant_dom_html_collection_host_type()); \
 }
 JS_DOM_DOCUMENT_LOOKUP_BRIDGE(dom_live_document_get_elements_by_tag_name_bridge,
-    LIVE_LOOKUP_COLLECTION_TAG, "HTMLCollection")
+    DOM_VARRAY_LOOKUP_TAG, radiant_dom_html_collection_host_type)
 JS_DOM_DOCUMENT_LOOKUP_BRIDGE(dom_live_document_get_elements_by_class_name_bridge,
-    LIVE_LOOKUP_COLLECTION_CLASS, "HTMLCollection")
+    DOM_VARRAY_LOOKUP_CLASS, radiant_dom_html_collection_host_type)
 JS_DOM_DOCUMENT_LOOKUP_BRIDGE(dom_live_document_get_elements_by_name_bridge,
-    LIVE_LOOKUP_COLLECTION_NAME, nullptr)
+    DOM_VARRAY_LOOKUP_NAME, radiant_dom_node_list_host_type)
 JS_DOM_ELEMENT_LOOKUP_BRIDGE(dom_live_element_get_elements_by_tag_name_bridge,
-    LIVE_LOOKUP_COLLECTION_TAG)
+    DOM_VARRAY_LOOKUP_TAG)
 JS_DOM_ELEMENT_LOOKUP_BRIDGE(dom_live_element_get_elements_by_class_name_bridge,
-    LIVE_LOOKUP_COLLECTION_CLASS)
+    DOM_VARRAY_LOOKUP_CLASS)
 #undef JS_DOM_ELEMENT_LOOKUP_BRIDGE
 #undef JS_DOM_DOCUMENT_LOOKUP_BRIDGE
-
-static void dom_refresh_live_child_collections_for_mutation(DomNode* target,
-                                                               DomNode* parent) {
-    if (!dom_collection_runtime_state_get()) return;
-    for (int i = 0; i < s_live_child_collection_count; i++) {
-        if (!s_live_child_collections[i].array) continue;
-        DomElement* owner = s_live_child_collections[i].owner;
-        if (!owner) continue;
-        if ((DomNode*)owner != target && (DomNode*)owner != parent) continue;
-        Item collection = (Item){.array = s_live_child_collections[i].array};
-        _refresh_live_child_collection(collection, owner, s_live_child_collections[i].kind);
-    }
-}
-
-#define JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION(name, entries, count, EntryType, owner_doc_expr, refresh) \
-static void name(DomNode* target, DomNode* parent, DomDocument* doc) { \
-    if (!dom_collection_runtime_state_get()) return; \
-    (void)target; \
-    (void)parent; \
-    for (int i = 0; i < count; i++) { \
-        EntryType* entry = &entries[i]; \
-        if (!entry->array) continue; \
-        DomDocument* owner_doc = owner_doc_expr; \
-        if (doc && owner_doc && owner_doc != doc) continue; \
-        Item collection = (Item){.array = entry->array}; \
-        refresh(collection, entry); \
-    } \
-}
-
-JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION(
-    dom_refresh_live_form_collections_for_mutation,
-    s_live_form_collections, s_live_form_collection_count,
-    LiveFormCollectionEntry,
-    entry->doc ? entry->doc : (entry->owner ? entry->owner->doc : nullptr),
-    _refresh_live_form_collection)
-
-static void dom_refresh_select_option_collections_for_mutation(DomNode* target,
-                                                                  DomNode* parent,
-                                                                  DomDocument* doc) {
-    if (!dom_collection_runtime_state_get()) return;
-    (void)target;
-    (void)parent;
-    for (int i = 0; i < s_select_options_owner_count; i++) {
-        if (!s_select_options_owners[i].array) continue;
-        DomElement* owner = s_select_options_owners[i].owner;
-        if (!owner || !_is_tag(owner, "select")) continue;
-        if (doc && owner->doc && owner->doc != doc) continue;
-        Item collection = (Item){.array = s_select_options_owners[i].array};
-        // optimized length/index reads can bypass the property hook, so
-        // structural select changes refresh held option collections here too.
-        if (s_select_options_owners[i].kind == SELECT_COLLECTION_OPTIONS) {
-            _select_refresh_options_collection(collection, owner);
-        } else if (s_select_options_owners[i].kind == SELECT_COLLECTION_SELECTED_OPTIONS) {
-            _select_refresh_selected_options_collection(collection, owner);
-        }
-    }
-}
-
-JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION(
-    dom_refresh_live_lookup_collections_for_mutation,
-    s_live_lookup_collections, s_live_lookup_collection_count,
-    LiveLookupCollectionEntry,
-    entry->doc ? entry->doc : (entry->root ? entry->root->doc : nullptr),
-    _refresh_live_lookup_collection)
-
-#undef JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION
 
 // ============================================================================
 // Document Proxy Object
@@ -2764,20 +2497,22 @@ JS_DOM_REFRESH_LIVE_DOCUMENT_COLLECTION(
 
 static DomDocument* js_document_proxy_doc_from_item(Item item) {
     TypeId tid = get_type_id(item);
-    if (tid == LMD_TYPE_VMAP && item.vmap) {
+    if (is_virtual_container_type_id(tid)) {
+        const void* host_type = virtual_host_type(item);
+        void* host_data = virtual_host_data(item);
         // ESO102: a Document-typed wrapper carries the #document *node* now.
         // The old proxy carried the document itself, and reading the new
         // host_data through that cast is what crashed -- the JIT recovered from
         // it, so it surfaced as "JS execution failed" with no exception.
-        if (item.vmap->host_type == radiant_dom_document_host_type()) {
-            DomNode* n = (DomNode*)item.vmap->host_data;
+        if (host_type == radiant_dom_document_host_type() ||
+                host_type == radiant_dom_foreign_document_host_type()) {
+            DomNode* n = (DomNode*)host_data;
             DomElement* e = (n && n->is_element()) ? n->as_element() : nullptr;
             DomDocument* doc = e ? e->doc : nullptr;
             return doc ? doc : (_js_main_document ? _js_main_document : _js_current_document);
         }
-        if (item.vmap->host_type == (const void*)&js_foreign_doc_vmap_marker ||
-            item.vmap->host_type == radiant_dom_foreign_document_host_type()) {
-            return (DomDocument*)item.vmap->host_data;
+        if (host_type == (const void*)&js_foreign_doc_vmap_marker) {
+            return (DomDocument*)host_data;
         }
         // ESO102: a wrapper around the document *node* is the same Document as
         // the proxy. Readers accept either shape before either writer changes,
@@ -2797,11 +2532,14 @@ static DomDocument* js_document_proxy_doc_from_item(Item item) {
 // Returns the DomDocument* if `item` is a foreign-doc wrapper, else null.
 extern "C" void* dom_get_foreign_doc(Item item) {
     TypeId tid = get_type_id(item);
-    if (tid == LMD_TYPE_VMAP) {
-        if (item.vmap &&
-            (item.vmap->host_type == (const void*)&js_foreign_doc_vmap_marker ||
-             item.vmap->host_type == radiant_dom_foreign_document_host_type())) {
-            return item.vmap->host_data;
+    if (is_virtual_container_type_id(tid)) {
+        const void* host_type = virtual_host_type(item);
+        void* native = virtual_host_data(item);
+        if (host_type == (const void*)&js_foreign_doc_vmap_marker) return native;
+        if (host_type == radiant_dom_foreign_document_host_type()) {
+            DomNode* node = (DomNode*)native;
+            DomElement* elem = node && node->is_element() ? node->as_element() : nullptr;
+            return elem ? (void*)elem->doc : nullptr;
         }
         return nullptr;
     }
@@ -3121,12 +2859,12 @@ static Item wrap_foreign_doc_owned(DomDocument* doc, bool owns_doc) {
             return (Item){.item = s_foreign_doc_cache[i].item};
         }
     }
-    Item it = vmap_new();
-    if (get_type_id(it) != LMD_TYPE_VMAP || !it.vmap) return ItemNull;
-    // Foreign document wrappers are native VMaps; the cached host_data is the
-    // document selected during active-document swaps.
-    it.vmap->host_type = radiant_dom_foreign_document_host_type();
-    it.vmap->host_data = doc;
+    DomNode* node = (DomNode*)dom_get_or_create_doc_node(doc);
+    Item it = node ? radiant_dom_wrap_node(node) : ItemNull;
+    if (get_type_id(it) != LMD_TYPE_VELMT) return ItemNull;
+    // The foreign brand selects active-document behavior; structural reads
+    // retain the same document-node backend as every other DOM Velmt.
+    virtual_host_set(it, radiant_dom_foreign_document_host_type(), node);
     if (s_foreign_doc_cache_count < FOREIGN_DOC_CACHE_SIZE) {
         s_foreign_doc_cache[s_foreign_doc_cache_count].doc = doc;
         s_foreign_doc_cache[s_foreign_doc_cache_count].item = it.item;
@@ -3969,81 +3707,27 @@ static Item js_classlist_value_item(DomElement* elem) {
     return result;
 }
 
-typedef enum JsClassListOperation {
-    JS_CLASSLIST_ADD = 1,
-    JS_CLASSLIST_REMOVE,
-    JS_CLASSLIST_TOGGLE,
-    JS_CLASSLIST_CONTAINS,
-    JS_CLASSLIST_ITEM,
-    JS_CLASSLIST_REPLACE,
-    JS_CLASSLIST_TO_STRING,
-    JS_CLASSLIST_ITERATOR,
-} JsClassListOperation;
-
-typedef struct JsClassListMethodSpec {
-    const char* name;
-    JsClassListOperation operation;
-    int formal_length;
-} JsClassListMethodSpec;
-
-static Item js_classlist_operation(Item elem_item, JsClassListOperation operation,
+static Item js_classlist_operation(Item elem_item, JubeDomTokenListOperation operation,
                                    Item* args, int argc);
-
-static Item js_classlist_operation_body(Item callee, Item this_value,
-        Item* args, int argc, uint64_t* result_home) {
-    (void)result_home;
-    JsFunction* fn = get_type_id(callee) == LMD_TYPE_FUNC
-        ? (JsFunction*)callee.function : NULL;
-    JsClassListOperation operation = fn
-        ? (JsClassListOperation)js_fn_native(fn)->target.bits : (JsClassListOperation)0;
-    return js_classlist_operation(this_value, operation, args, argc);
-}
 
 static Item dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
     if (!elem) return ItemNull;
-    Item exp_map = expando_get_or_create_map((DomNode*)elem);
-    Item cache_key = js_name_item("__classListWrapper");
-    Item wrapper = exp_map.item != ITEM_NULL ? dom_realm_get(exp_map, cache_key) : ItemNull;
-    JS_ROOTS(roots,
-        elem_root, elem_item,
-        expando_root, exp_map,
-        wrapper_root, wrapper,
-        method_root, ItemNull);
-    if (get_type_id(wrapper_root.get()) != LMD_TYPE_MAP &&
-            get_type_id(wrapper_root.get()) != LMD_TYPE_VMAP) {
-        wrapper_root.set(js_new_object());
-        static const JsClassListMethodSpec methods[] = {
-            {"add", JS_CLASSLIST_ADD, 0},
-            {"remove", JS_CLASSLIST_REMOVE, 0},
-            {"toggle", JS_CLASSLIST_TOGGLE, 1},
-            {"contains", JS_CLASSLIST_CONTAINS, 1},
-            {"item", JS_CLASSLIST_ITEM, 1},
-            {"replace", JS_CLASSLIST_REPLACE, 2},
-            {"toString", JS_CLASSLIST_TO_STRING, 0},
-        };
-        for (int i = 0; i < (int)(sizeof(methods) / sizeof(methods[0])); i++) {
-            method_root.set(js_new_native_payload_function(
-                js_classlist_operation_body, (uint64_t)methods[i].operation,
-                methods[i].formal_length));
-            method_root.set(js_bind_function(method_root.get(), elem_root.get(), NULL, 0));
-            dom_realm_set(wrapper_root.get(),
-                js_name_item(methods[i].name),
-                method_root.get());
-        }
-        method_root.set(js_new_native_payload_function(
-            js_classlist_operation_body, (uint64_t)JS_CLASSLIST_ITERATOR, 0));
-        method_root.set(js_bind_function(method_root.get(), elem_root.get(), NULL, 0));
-        // DOMTokenList is iterable; delegated UI event routers commonly spread
-        // classList while resolving their target before invoking callbacks.
-        dom_realm_set(wrapper_root.get(), js_well_known_symbol_key(1), method_root.get());
+    RootFrame roots(4);
+    Rooted<Item> elem_root(roots, elem_item);
+    Rooted<Item> expando_root(roots, expando_get_or_create_map((DomNode*)elem));
+    // Creating the cache key may collect, so retain the expando before the
+    // allocation; otherwise repeated classList reads can lose their wrapper.
+    Rooted<Item> cache_key_root(roots, js_name_item("__classListWrapper"));
+    Rooted<Item> wrapper_root(roots,
+        expando_root.get().item != ITEM_NULL
+            ? dom_realm_get(expando_root.get(), cache_key_root.get())
+            : ItemNull);
+    if (get_type_id(wrapper_root.get()) != LMD_TYPE_VARRAY) {
+        wrapper_root.set(dom_token_list_collection_bridge(elem));
         if (expando_root.get().item != ITEM_NULL) {
-            // The wrapper and owner must remain rooted while function creation
-            // allocates; otherwise precise GC can publish a stale cache edge.
-            dom_realm_set(expando_root.get(), cache_key, wrapper_root.get());
+            dom_realm_set(expando_root.get(), cache_key_root.get(), wrapper_root.get());
         }
     }
-    dom_realm_set_cstr(wrapper_root.get(), "length", (Item){.item = i2it((int64_t)elem->class_count)});
-    dom_realm_set_cstr(wrapper_root.get(), "value", js_classlist_value_item(elem));
     return wrapper_root.get();
 }
 
@@ -5198,34 +4882,6 @@ static Item dom_throw_syntax_error(const char* message) {
 }
 JS_FORWARD_ITEM(dom_throw_contenteditable_syntax_error, (void), dom_throw_syntax_error, ("Invalid contentEditable value"))
 
-static void _collect_lookup_rec(DomElement* root, const char* query, Item collection,
-                                int kind) {
-    if (!root || !query) return;
-    bool matches = false;
-    if (kind == LIVE_LOOKUP_COLLECTION_TAG) {
-        matches = root->tag_name && ((query[0] == '*' && query[1] == '\0') ||
-            strcasecmp(root->tag_name, query) == 0);
-    } else if (kind == LIVE_LOOKUP_COLLECTION_CLASS) {
-        for (int i = 0; i < root->class_count; i++) {
-            if (root->class_names[i] && strcmp(root->class_names[i], query) == 0) {
-                matches = true;
-                break;
-            }
-        }
-    } else if (kind == LIVE_LOOKUP_COLLECTION_NAME) {
-        const char* attr = root->get_attribute("name");
-        matches = attr && strcmp(attr, query) == 0;
-    }
-    if (matches) js_array_push(collection, dom_wrap_element(root));
-    DomNode* child = root->first_child;
-    while (child) {
-        if (child->is_element()) {
-            _collect_lookup_rec(child->as_element(), query, collection, kind);
-        }
-        child = child->next_sibling;
-    }
-}
-
 // ============================================================================
 // Helper: CSS selector parse + match
 // ============================================================================
@@ -5825,7 +5481,6 @@ static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
     }
 
     dom_register_named_elements(elem);
-    _select_refresh_cached_selected_options_for_node((DomNode*)elem);
     if (notify_mutation) {
         // innerHTML replaces children under the same parent; preserving the
         // remove/insert records avoids broad TREE_REPLACE fallback for local edits.
@@ -6731,26 +6386,13 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
         return (Item){.item = i2it(9)};
     }
 
-    // childNodes — return a NodeList-like Array of the document's children
-    // (synthesized doctype + documentElement). Backed by the document stub
-    // so iteration works.
+    // childNodes uses the same direct native VArray backend as element nodes;
+    // the document stub supplies synthesized doctype + documentElement order.
     if (prop_id == JS_DOM_PROP_CHILD_NODES) {
         DomDocument* doc = doc_arg;
         if (!doc) return ItemNull;
         void* stub_v = dom_get_or_create_doc_node(doc);
-        if (!stub_v) return ItemNull;
-        DomElement* stub = (DomElement*)stub_v;
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        DomNode* child = stub->first_child;
-        while (child) {
-            array_push(arr, dom_wrap_element((void*)child));
-            child = child->next_sibling;
-        }
-        return (Item){.array = arr};
+        return stub_v ? dom_live_child_collection_bridge(stub_v, false) : ItemNull;
     }
 
     // nodeName
@@ -7797,15 +7439,30 @@ static void _select_select_only_option(DomElement* sel, DomElement* selected_opt
                                        (int)n); // INT_CAST_OK: option count
 }
 
-static void _select_normalize_for_selected_options(DomElement* sel, Item options) {
-    if (!sel || get_type_id(options) != LMD_TYPE_ARRAY) return;
+static int64_t _select_option_count_native(DomElement* select) {
+    if (!select) return 0;
+    int64_t count = 0;
+    (void)dom_collection_varray_find_option_rec(
+        select->first_child, true, false, -1, &count);
+    return count;
+}
+
+static DomElement* _select_option_at_native(DomElement* select, int64_t index) {
+    if (!select || index < 0) return nullptr;
+    int64_t seen = 0;
+    return dom_collection_varray_find_option_rec(
+        select->first_child, true, false, index, &seen);
+}
+
+static void _select_normalize_native(DomElement* sel) {
+    if (!sel) return;
     if (sel->has_attribute("multiple")) return;
-    int64_t n = js_array_length(options);
+    int64_t n = _select_option_count_native(sel);
     int selected_count = 0;
     int last_selected = -1;
     int first_non_disabled = -1;
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(options, i));
+        DomElement* opt = _select_option_at_native(sel, i);
         if (!opt) continue;
         if (_get_selectedness(opt)) {
             selected_count++;
@@ -7823,69 +7480,61 @@ static void _select_normalize_for_selected_options(DomElement* sel, Item options
     else if (selected_count == 0 && size <= 1 && !_select_is_dirty(sel)) chosen = first_non_disabled;
     if (chosen < 0) return;
     for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(options, i));
+        DomElement* opt = _select_option_at_native(sel, i);
         if (!opt) continue;
         _set_selectedness(opt, (int)i == chosen); // INT_CAST_OK: option index
     }
 }
 
-static void _select_refresh_selected_options_collection(Item collection, DomElement* sel) {
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !sel) return;
-    dom_realm_set_cstr(collection, "length", (Item){.item = i2it(0)});
-
-    Item arr = js_array_new(0);
-    _collect_options(sel->first_child, arr);
-    _select_normalize_for_selected_options(sel, arr);
-    int64_t n = js_array_length(arr);
+static int _select_effective_selected_index_native(DomElement* sel) {
+    if (!sel) return -1;
+    _select_normalize_native(sel);
+    int64_t n = _select_option_count_native(sel);
     for (int64_t i = 0; i < n; i++) {
-        Item it = js_elements_get_int(arr, i);
-        DomElement* opt = (DomElement*)dom_unwrap_element(it);
-        if (opt && _get_selectedness(opt)) js_array_push(collection, it);
-    }
-}
-
-static int _select_effective_selected_index(DomElement* sel, Item options) {
-    if (!sel || get_type_id(options) != LMD_TYPE_ARRAY) return -1;
-    int64_t n = js_array_length(options);
-    int sel_idx = -1;
-    int first_non_disabled = -1;
-    for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(options, i));
+        DomElement* opt = _select_option_at_native(sel, i);
         if (!opt) continue;
-        if (sel_idx < 0 && _get_selectedness(opt)) sel_idx = (int)i; // INT_CAST_OK: option index
-        if (first_non_disabled < 0 && !opt->has_attribute("disabled")) {
-            first_non_disabled = (int)i; // INT_CAST_OK: option index
-        }
+        if (_get_selectedness(opt)) return (int)i; // INT_CAST_OK: option index
     }
-    int size = 0;
-    const char* sz = sel->get_attribute("size");
-    if (sz) {
-        char* ep = nullptr;
-        long v = strtol(sz, &ep, 10);
-        if (ep != sz && v > 0) size = (int)v; // INT_CAST_OK: select display size attribute
-    }
-    if (sel_idx < 0 && !sel->has_attribute("multiple") && size <= 1 &&
-        !_select_is_dirty(sel)) {
-        sel_idx = first_non_disabled;
-    }
-    return sel_idx;
+    return -1;
 }
 
-static void _select_refresh_options_collection(Item collection, DomElement* sel) {
-    if (get_type_id(collection) != LMD_TYPE_ARRAY || !sel) return;
-    // held select.options objects are live; refresh the dense array directly so
-    // stale option slots do not survive structural mutations through companion props.
-    collection.array->length = 0;
-    _collect_options(sel->first_child, collection);
-    int64_t n = js_array_length(collection);
-    int sel_idx = _select_effective_selected_index(sel, collection);
-    dom_realm_set_cstr(collection, "selectedIndex", (Item){.item = i2it(sel_idx)});
-    if (js_array_has_props(collection.array)) {
-        Map* props = js_array_props(collection.array);
-        Item props_item = (Item){.map = props};
-        dom_realm_set_cstr(props_item, "length", (Item){.item = i2it(n)});
-        _array_companion_set_int_slot(collection, "length", 6, n);
-    }
+static DomCollectionVArray* _select_collection_data(Item collection) {
+    if (get_type_id(collection) != LMD_TYPE_VARRAY) return nullptr;
+    DomCollectionVArray* data = (DomCollectionVArray*)virtual_host_data(collection);
+    if (!data || (data->kind != DOM_VARRAY_SELECT_OPTIONS &&
+                  data->kind != DOM_VARRAY_SELECT_SELECTED_OPTIONS)) return nullptr;
+    return data;
+}
+
+static DomElement* _select_collection_owner(Item collection,
+                                             DomCollectionVArrayKind kind) {
+    DomCollectionVArray* data = _select_collection_data(collection);
+    if (!data || data->kind != kind) return nullptr;
+    return dom_collection_varray_owner(data);
+}
+
+extern "C" Item dom_options_collection_selected_index(Item collection) {
+    DomElement* select = _select_collection_owner(
+        collection, DOM_VARRAY_SELECT_OPTIONS);
+    return (Item){.item = i2it(_select_effective_selected_index_native(select))};
+}
+
+extern "C" Item dom_options_collection_set_selected_index(
+        Item collection, Item value) {
+    DomElement* select = _select_collection_owner(
+        collection, DOM_VARRAY_SELECT_OPTIONS);
+    if (select) _select_set_selected_index(select, _select_index_from_item(value));
+    return value;
+}
+
+extern "C" Item dom_options_collection_add(
+        Item collection, Item element, Item before) {
+    DomElement* select = _select_collection_owner(
+        collection, DOM_VARRAY_SELECT_OPTIONS);
+    if (!select) return ItemNull;
+    Item args[2] = {element, before};
+    return dom_element_operation_impl(
+        dom_wrap_element(select), JUBE_DOM_ADD, args, 2);
 }
 
 static DomElement* _nearest_select_for_node(DomNode* node) {
@@ -7895,120 +7544,6 @@ static DomElement* _nearest_select_for_node(DomNode* node) {
         if (_is_tag(elem, "select")) return elem;
     }
     return nullptr;
-}
-
-static void _select_refresh_cached_selected_options(DomElement* sel) {
-    if (!sel) return;
-    Item exp = expando_get_map((DomNode*)sel);
-    if (exp.item == ITEM_NULL) return;
-    Item out = dom_realm_get_name(exp, "__selectedOptions");
-    if (get_type_id(out) == LMD_TYPE_ARRAY) {
-        _select_refresh_selected_options_collection(out, sel);
-    }
-}
-JS_FORWARD_STATIC_VOID( _select_refresh_cached_selected_options_for_node, (DomNode* node), _select_refresh_cached_selected_options, (_nearest_select_for_node(node)))
-
-extern "C" void js_array_exotic_before_property_get(Item object, Item key) {
-    if (get_type_id(object) != LMD_TYPE_ARRAY) return;
-    if (!dom_collection_runtime_state_get()) return;
-    if (s_dom_collection_refresh_depth > 0) return;
-    int child_kind = 0;
-    DomElement* child_owner = _live_child_collection_owner(object, &child_kind);
-    if (child_owner) {
-        // Live collection rebuilds read their own dense slots; guard against
-        // re-entering refresh through the generic JS array getters.
-        DomCollectionRefreshGuard refresh_guard;
-        _refresh_live_child_collection(object, child_owner, child_kind);
-        return;
-    }
-    LiveFormCollectionEntry* form_entry = _live_form_collection_entry(object);
-    if (form_entry) {
-        DomCollectionRefreshGuard refresh_guard;
-        _refresh_live_form_collection(object, form_entry);
-        if (get_type_id(key) != LMD_TYPE_STRING) return;
-        String* sk = it2s(key);
-        if (!sk || sk->len == 0) return;
-        if ((sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) ||
-            (sk->len == 9 && strncmp(sk->chars, "namedItem", 9) == 0) ||
-            (sk->len == 11 && strncmp(sk->chars, "constructor", 11) == 0)) {
-            return;
-        }
-        bool numeric = true;
-        for (int64_t i = 0; i < sk->len; i++) {
-            if (sk->chars[i] < '0' || sk->chars[i] > '9') {
-                numeric = false;
-                break;
-            }
-        }
-        if (numeric) return;
-
-        Item matched = ItemNull;
-        for (int64_t i = 0; i < object.array->length; i++) {
-            Item candidate = js_elements_get_int(object, i);
-            DomElement* elem = (DomElement*)dom_unwrap_element(candidate);
-            if (!elem) continue;
-            const char* name = elem->get_attribute("name");
-            const char* id = elem->get_attribute("id");
-            if ((name && strlen(name) == (size_t)sk->len &&
-                 strncmp(name, sk->chars, (size_t)sk->len) == 0) ||
-                (id && strlen(id) == (size_t)sk->len &&
-                 strncmp(id, sk->chars, (size_t)sk->len) == 0)) {
-                matched = candidate;
-                break;
-            }
-        }
-
-        Item prop_key = (Item){.item = s2it(heap_strcpy(sk->chars, sk->len))};
-        if (matched.item != ItemNull.item) {
-            dom_realm_set(object, prop_key, matched);
-        } else if (js_array_has_props(object.array)) {
-            Map* props = js_array_props(object.array);
-            bool found = false;
-            Item existing = js_map_shape_lookup_ext(props, sk->chars, (int)sk->len, &found);
-            if (found && dom_unwrap_element(existing)) {
-                // dynamic named properties can become stale after DOM renames;
-                // tombstone only old DOM-backed slots and leave user expandos alone.
-                js_delete_property(object, prop_key);
-            }
-        }
-        return;
-    }
-    LiveLookupCollectionEntry* lookup_entry = _live_lookup_collection_entry(object);
-    if (lookup_entry) {
-        DomCollectionRefreshGuard refresh_guard;
-        _refresh_live_lookup_collection(object, lookup_entry);
-        return;
-    }
-    int kind = 0;
-    DomElement* owner = _select_options_owner(object, &kind);
-    if (!owner) return;
-    if (kind == SELECT_COLLECTION_OPTIONS) {
-        DomCollectionRefreshGuard refresh_guard;
-        _select_refresh_options_collection(object, owner);
-        return;
-    }
-    if (kind != SELECT_COLLECTION_SELECTED_OPTIONS) return;
-    TypeId kt = get_type_id(key);
-    if (kt == LMD_TYPE_INT || kt == LMD_TYPE_INT64 || kt == LMD_TYPE_FLOAT) {
-        DomCollectionRefreshGuard refresh_guard;
-        _select_refresh_selected_options_collection(object, owner);
-        return;
-    }
-    if (kt != LMD_TYPE_STRING) return;
-    String* sk = it2s(key);
-    if (!sk) return;
-    DomCollectionRefreshGuard refresh_guard;
-    _select_refresh_selected_options_collection(object, owner);
-}
-
-extern "C" void js_array_exotic_before_property_set(Item object, Item key, Item value) {
-    if (get_type_id(object) != LMD_TYPE_ARRAY || get_type_id(key) != LMD_TYPE_STRING) return;
-    String* sk = it2s(key);
-    if (!sk || sk->len != 13 || strncmp(sk->chars, "selectedIndex", 13) != 0) return;
-    int kind = 0;
-    DomElement* owner = _select_options_owner(object, &kind);
-    if (!owner || kind != SELECT_COLLECTION_OPTIONS || !_is_tag(owner, "select")) return;
-    _select_set_selected_index(owner, _select_index_from_item(value));
 }
 
 // F8/ES19: an attribute write that feeds constraint validation or the ARIA
@@ -8055,7 +7590,6 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
         DomElement* sel = _nearest_select_for_node((DomNode*)elem);
         if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
     }
-    _select_refresh_cached_selected_options_for_node((DomNode*)elem);
     _after_image_src_set(elem, attr_name, attr_value);
 }
 
@@ -8068,7 +7602,6 @@ extern "C" void dom_after_remove_attribute(void* elem_ptr,
     if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
         _select_ask_for_reset(elem);
     }
-    _select_refresh_cached_selected_options_for_node((DomNode*)elem);
 }
 
 extern "C" void dom_after_toggle_attribute_remove(void* elem_ptr,
@@ -8337,7 +7870,6 @@ static void dom_apply_option_selected(DomElement* elem, bool selected) {
     } else if (sel) {
         _select_ask_for_reset(sel);
     }
-    _select_refresh_cached_selected_options(sel);
 }
 
 extern "C" void dom_set_option_selected_dirty(void* dom_elem, bool selected) {
@@ -9163,7 +8695,6 @@ static void _collect_form_related_rec(DomNode* node, Item arr, bool controls) {
     }
 }
 JS_FORWARD_STATIC_VOID( _collect_form_controls_rec, (DomNode* node, Item arr), _collect_form_related_rec, (node, arr, true))
-JS_FORWARD_STATIC_VOID( _collect_document_forms_rec, (DomNode* node, Item forms), _collect_form_related_rec, (node, forms, false))
 
 // Return the lowercased name/id key used to look up a form control by name.
 // Returns nullptr if the element has neither.
@@ -9211,22 +8742,7 @@ static Item dom_template_content(DomElement* template_elem) {
 }
 
 static Item dom_collect_child_nodes(DomElement* elem, bool elements_only) {
-    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-    arr->type_id = LMD_TYPE_ARRAY;
-    arr->items = nullptr;
-    arr->length = 0;
-    arr->capacity = 0;
-    DomNode* child = dom_first_script_visible_child(elem);
-    while (child) {
-        if (child->is_element()) {
-            array_push(arr, dom_wrap_element(child->as_element()));
-        } else if (!elements_only) {
-            // text and comment nodes share the DOM wrapper path.
-            array_push(arr, dom_wrap_element((DomElement*)(void*)child));
-        }
-        child = dom_next_script_visible_sibling(child);
-    }
-    return (Item){.array = arr};
+    return elem ? dom_live_child_collection_bridge(elem, elements_only) : ItemNull;
 }
 
 // form[name] named getter: collect every listed control whose name or id
@@ -9313,9 +8829,7 @@ static bool dom_get_textlike_property(DomNode* node, Item elem_item,
         return true;
     }
     if (strcmp(prop, "childNodes") == 0) {
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        *result = (Item){.array = arr};
+        *result = dom_live_child_collection_bridge((void*)node, false);
         return true;
     }
     if (strcmp(prop, "firstChild") == 0 || strcmp(prop, "lastChild") == 0) {
@@ -9630,43 +9144,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = b2it(dom_node_is_connected((DomNode*)elem) ? 1 : 0)};
     }
 
-    // attributes → a NamedNodeMap-like array of {name, value} entries with
-    // .length and indexed access. Not a full NamedNodeMap (getNamedItem etc.
-    // are unimplemented), but sufficient for the reconciler's
-    // stale-attribute removal loop `for (i=0; i<elem.attributes.length; i++)
-    // ... elem.attributes[i].name`. Internal (__lambda_*) attributes are
-    // filtered so they don't leak to script.
+    // D7.4.5v2: attributes is a live NamedNodeMap VArray over native attributes.
     if (prop_id == JS_DOM_PROP_ATTRIBUTES) {
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        RootFrame roots(4);
-        Rooted<Item> arr_root(roots, (Item){.array = arr});
-        Rooted<Item> pair_root(roots, ItemNull);
-        Rooted<Item> name_root(roots, ItemNull);
-        Rooted<Item> value_root(roots, ItemNull);
-        int attr_count = 0;
-        const char** attr_names = elem->attribute_names(&attr_count);
-        for (int i = 0; attr_names && i < attr_count; i++) {
-            const char* name = attr_names[i];
-            if (dom_is_internal_attr(name)) continue;
-            const char* value = elem->get_attribute(name);
-            pair_root.set(js_new_object());
-            name_root.set(js_name_item(name));
-            value_root.set(js_name_item(value ? value : ""));
-            // Attr exposes both legacy name/value and Node nodeName/nodeValue;
-            // sanitizers iterate the latter aliases from element.attributes.
-            dom_realm_set_cstr(pair_root.get(), "nodeName", name_root.get());
-            dom_realm_set_cstr(pair_root.get(), "nodeValue", value_root.get());
-            dom_realm_set_cstr(pair_root.get(), "name", name_root.get());
-            dom_realm_set_cstr(pair_root.get(), "value", value_root.get());
-            js_array_push(arr_root.get(), pair_root.get());
-            dom_attribute_collection_expose_named(arr_root.get(),
-                name_root.get(), pair_root.get());
-        }
-        return arr_root.get();
+        return dom_attribute_collection_bridge(elem);
     }
 
     // ownerDocument — returns the document proxy for any element.
@@ -9764,21 +9244,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return dom_collect_child_nodes(elem, false);
     }
 
-    // children (array of child DOM elements only)
+    // children (live element-only VArray)
     if (prop_id == JS_DOM_PROP_CHILDREN) {
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-        DomNode* child = dom_first_script_visible_child(elem);
-        while (child) {
-            if (child->is_element()) {
-                array_push(arr, dom_wrap_element(child->as_element()));
-            }
-            child = dom_next_script_visible_sibling(child);
-        }
-        return (Item){.array = arr};
+        return dom_live_child_collection_bridge(elem, true);
     }
 
     // length (for NodeList / HTMLCollection-like results)
@@ -9934,52 +9402,24 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // ------------------------------------------------------------------
     if (_is_tag(elem, "select")) {
         if (prop_id == JS_DOM_PROP_OPTIONS) {
-            Item arr = js_array_new(0);
-            _decorate_options_collection(arr);
-            _register_select_options_owner(arr, elem, SELECT_COLLECTION_OPTIONS);
-            _select_refresh_options_collection(arr, elem);
-            return arr;
+            return dom_live_select_collection_bridge(elem, false);
         }
         if (prop_id == JS_DOM_PROP_LENGTH) {
-            Item arr = js_array_new(0);
-            _collect_options(elem->first_child, arr);
-            return (Item){.item = i2it(js_array_length(arr))};
+            return (Item){.item = i2it(_select_option_count_native(elem))};
         }
         if (prop_id == JS_DOM_PROP_SELECTED_OPTIONS) {
             Item exp = expando_get_or_create_map((DomNode*)elem);
             Item cache_key = js_name_item("__selectedOptions");
             Item out = (exp.item != ITEM_NULL) ? dom_realm_get(exp, cache_key) : ItemNull;
-            if (get_type_id(out) != LMD_TYPE_ARRAY) {
-                out = js_array_new(0);
-                _decorate_dom_collection(out, "HTMLCollection");
+            if (get_type_id(out) != LMD_TYPE_VARRAY) {
+                out = dom_live_select_collection_bridge(elem, true);
                 if (exp.item != ITEM_NULL) dom_realm_set(exp, cache_key, out);
             }
-            _register_select_options_owner(out, elem, SELECT_COLLECTION_SELECTED_OPTIONS);
-            _select_refresh_selected_options_collection(out, elem);
             return out;
         }
         if (prop_id == JS_DOM_PROP_SELECTED_INDEX) {
-            Item arr = js_array_new(0);
-            _collect_options(elem->first_child, arr);
-            int64_t n = js_array_length(arr);
-            int first_non_disabled = -1;
-            for (int64_t i = 0; i < n; i++) {
-                DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
-                if (!opt) continue;
-                if (_get_selectedness(opt)) return (Item){.item = i2it(i)};
-                if (first_non_disabled < 0 && !opt->has_attribute("disabled"))
-                    first_non_disabled = (int)i; // INT_CAST_OK: option index
-            }
-            // Default-selected behavior: non-multiple, size<=1 select with
-            // no explicit selectedness picks the first non-disabled option.
-            int size = 0;
-            const char* sz = elem->get_attribute("size");
-            if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
-            if (!elem->has_attribute("multiple") && size <= 1
-                && first_non_disabled >= 0 && !_select_is_dirty(elem)) {
-                return (Item){.item = i2it(first_non_disabled)};
-            }
-            return (Item){.item = i2it(-1)};
+            return (Item){.item = i2it(
+                _select_effective_selected_index_native(elem))};
         }
         if (prop_id == JS_DOM_PROP_VALUE) {
             char* value = _select_value(elem);
@@ -10520,8 +9960,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
                 return a->items[0];
             }
             if (mlen > 1) {
-                // multiple matches — return as RadioNodeList-ish array
-                return matches;
+                return dom_static_radio_node_list_from_array(matches);
             }
         }
     }
@@ -13628,10 +13067,10 @@ extern "C" Item dom_get_bounding_client_rect_bridge(void* dom_elem) {
 
 extern "C" Item dom_get_client_rects_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
-    if (!elem) return js_array_new(0);
+    if (!elem) return dom_static_rect_list_from_array(js_array_new(0));
     if (elem->doc) dom_ensure_geometry_snapshot(elem->doc);
     if (layout_noscript_content_suppressed(elem)) {
-        return js_array_new(0);
+        return dom_static_rect_list_from_array(js_array_new(0));
     }
 
     float x = 0.0f;
@@ -13645,11 +13084,11 @@ extern "C" Item dom_get_client_rects_bridge(void* dom_elem) {
     // This built the same eight fields by hand, which is why it kept crashing
     // after dom_make_rect learned a realm-free path: one rect, one builder.
     // (The hand-rolled copy also truncated every coordinate to an integer.)
-    Item rect = dom_make_rect_in(elem->doc, x, y, w, h);
-
-    Item arr = js_array_new(0);
-    js_array_push(arr, rect);
-    return arr;
+    RootFrame roots(2);
+    Rooted<Item> rect_root(roots, dom_make_rect_in(elem->doc, x, y, w, h));
+    Rooted<Item> array_root(roots, js_array_new(0));
+    js_array_push(array_root.get(), rect_root.get());
+    return dom_static_rect_list_from_array(array_root.get());
 }
 
 extern "C" Item dom_scroll_into_view_bridge(void* dom_elem) {
@@ -14269,7 +13708,6 @@ extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         elem->tag() == MARKUP_NAME_SELECT) {
         _select_ask_for_reset(elem);
     }
-    _select_refresh_cached_selected_options_for_node((DomNode*)elem);
     log_debug("dom-edit tree trace: append parent=%s first=%s",
               elem->tag_name ? elem->tag_name : "?",
               elem->first_child && elem->first_child->is_element()
@@ -14784,7 +14222,6 @@ static Item dom_child_node_insert_relative(DomNode* node, Item* args, int argc,
     }
 
     mem_free(insertion_args);
-    _select_refresh_cached_selected_options_for_node(parent_node);
     dom_mutation_notify();
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -14960,7 +14397,6 @@ extern "C" Item dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc
             }
         }
     }
-    _select_refresh_cached_selected_options_for_node((DomNode*)elem);
     dom_mutation_notify();
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -15161,7 +14597,6 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
             DomElement* sel = _nearest_select_for_node((DomNode*)elem);
             if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
         }
-        _select_refresh_cached_selected_options_for_node((DomNode*)elem);
         _after_image_src_set(elem, attr_name, attr_val);
         dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                                elem->parent, attr_name, old_value);
@@ -15267,7 +14702,6 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
             _select_ask_for_reset(elem);
         }
-        _select_refresh_cached_selected_options_for_node((DomNode*)elem);
         dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                                elem->parent, attr_name, old_value);
         return ItemNull;
@@ -15316,12 +14750,6 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
 
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
-
         if (!selector_group) return dom_throw_syntax_error("Invalid selector");
         if (css_selector_group_contains_generic_pseudo(selector_group)) {
             return dom_throw_syntax_error("Invalid selector");
@@ -15330,15 +14758,19 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
         // Keep :scope anchored to this Element for relative selector queries.
         selector_matcher_set_scope_element(matcher, elem);
+        RootFrame roots(1);
+        Rooted<Item> items(roots, js_array_new(0));
         ArrayList* results = arraylist_new(16);
-        if (!results) return (Item){.array = arr};
-        dom_selector_group_collect_all(
-            matcher, selector_group, elem, results, false);
-        for (int i = 0; i < results->length; i++) {
-            array_push(arr, dom_wrap_element((DomElement*)results->data[i]));
+        if (results) {
+            dom_selector_group_collect_all(
+                matcher, selector_group, elem, results, false);
+            for (int i = 0; i < results->length; i++) {
+                js_array_push(items.get(),
+                    dom_wrap_element((DomElement*)results->data[i]));
+            }
+            arraylist_free(results);
         }
-        arraylist_free(results);
-        return (Item){.array = arr};
+        return dom_static_node_list_from_array(items.get());
     }
 
     // matches(selector) → boolean
@@ -15812,7 +15244,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
 // classList API (v12)
 // ============================================================================
 
-static Item js_classlist_operation(Item elem_item, JsClassListOperation operation,
+static Item js_classlist_operation(Item elem_item, JubeDomTokenListOperation operation,
                                    Item* args, int argc) {
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) {
@@ -15821,7 +15253,7 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
     }
 
     // add(className, ...)
-    if (operation == JS_CLASSLIST_ADD) {
+    if (operation == JUBE_DOM_TOKEN_LIST_ADD) {
         for (int i = 0; i < argc; i++) {
             const char* cls = fn_to_cstr(args[i]);
             if (cls) elem->add_class(cls);
@@ -15831,7 +15263,7 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
     }
 
     // remove(className, ...)
-    if (operation == JS_CLASSLIST_REMOVE) {
+    if (operation == JUBE_DOM_TOKEN_LIST_REMOVE) {
         for (int i = 0; i < argc; i++) {
             const char* cls = fn_to_cstr(args[i]);
             if (cls) elem->remove_class(cls);
@@ -15841,7 +15273,7 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
     }
 
     // toggle(className [, force]) → boolean
-    if (operation == JS_CLASSLIST_TOGGLE) {
+    if (operation == JUBE_DOM_TOKEN_LIST_TOGGLE) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         const char* cls = fn_to_cstr(args[0]);
         if (!cls) return (Item){.item = ITEM_FALSE};
@@ -15866,7 +15298,7 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
     }
 
     // contains(className) → boolean
-    if (operation == JS_CLASSLIST_CONTAINS) {
+    if (operation == JUBE_DOM_TOKEN_LIST_CONTAINS) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         const char* cls = fn_to_cstr(args[0]);
         if (!cls) return (Item){.item = ITEM_FALSE};
@@ -15875,7 +15307,7 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
     }
 
     // item(index) → string or null
-    if (operation == JS_CLASSLIST_ITEM) {
+    if (operation == JUBE_DOM_TOKEN_LIST_ITEM) {
         if (argc < 1) return ItemNull;
         int64_t idx = it2i(args[0]);
         if (idx < 0 || idx >= elem->class_count) return ItemNull;
@@ -15883,7 +15315,7 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
     }
 
     // replace(oldClass, newClass) → boolean
-    if (operation == JS_CLASSLIST_REPLACE) {
+    if (operation == JUBE_DOM_TOKEN_LIST_REPLACE) {
         if (argc < 2) return (Item){.item = ITEM_FALSE};
         const char* old_cls = fn_to_cstr(args[0]);
         const char* new_cls = fn_to_cstr(args[1]);
@@ -15896,11 +15328,11 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
     }
 
     // toString() → space-separated class string
-    if (operation == JS_CLASSLIST_TO_STRING) {
+    if (operation == JUBE_DOM_TOKEN_LIST_TO_STRING) {
         return js_classlist_value_item(elem);
     }
 
-    if (operation == JS_CLASSLIST_ITERATOR) {
+    if (operation == JUBE_DOM_TOKEN_LIST_ITERATOR) {
         Item values = js_array_new(0);
         for (int i = 0; i < elem->class_count; i++) {
             js_array_push(values, js_name_item(elem->class_names[i]));
@@ -15910,6 +15342,17 @@ static Item js_classlist_operation(Item elem_item, JsClassListOperation operatio
 
     log_error("js-classlist-operation: invalid operation %d", (int)operation);
     return ItemNull;
+}
+
+extern "C" Item dom_token_list_operation(Item receiver, int operation,
+                                           Item* args, int argc) {
+    if (get_type_id(receiver) != LMD_TYPE_VARRAY || !receiver.varray) {
+        return ItemNull;
+    }
+    DomCollectionVArray* collection = (DomCollectionVArray*)receiver.varray->data;
+    if (!collection || collection->kind != DOM_VARRAY_CLASS_LIST) return ItemNull;
+    return js_classlist_operation(collection->owner,
+        (JubeDomTokenListOperation)operation, args, argc);
 }
 
 extern "C" Item dom_classlist_get_property(Item elem_item, Item prop_name) {
@@ -16607,18 +16050,10 @@ extern "C" Item dom_option_ctor(Item text_arg, Item value_arg, Item def_sel_arg,
     return dom_wrap_element(opt);
 }
 
-JS_FORWARD_VOID( dom_collections_release_context, (void), reset_live_dom_collections, ())
-
-#undef dom_collection_rt_state
-#undef s_select_options_owners
-#undef s_select_options_owner_count
-#undef s_live_child_collections
-#undef s_live_child_collection_count
-#undef s_live_form_collections
-#undef s_live_form_collection_count
-#undef s_live_lookup_collections
-#undef s_live_lookup_collection_count
-#undef s_dom_collection_refresh_depth
+extern "C" void dom_collections_release_context(void) {
+    // Owner-backed VArrays retain their owners through precise GC edges and
+    // need no realm-global issued-collection registry to release.
+}
 
 static void dom_destroy_context_state(void* capsule, bool has_entries,
                                          const char* label) {
@@ -16626,28 +16061,6 @@ static void dom_destroy_context_state(void* capsule, bool has_entries,
     // All weak homes and native pins are removed before heap destruction.
     if (has_entries) log_error("%s: context destroyed before roots were released", label);
     mem_free(capsule);
-}
-
-static void dom_collection_capsule_destroy(void* capsule) {
-    JsDomCollectionRuntimeState* state = (JsDomCollectionRuntimeState*)capsule;
-    // JSCUO5: the four tables are separate allocations now. Their `array` slots
-    // are weak GC registrations, so drop those before the storage goes away.
-    #define JS_DOM_FREE_COLLECTION_TABLE(field, count_field) \
-        for (int i = 0; i < state->count_field; i++) { \
-            if (state->field[i].array) { \
-                heap_unregister_gc_weak((uint64_t*)&state->field[i].array); \
-            } \
-        } \
-        if (state->field) mem_free(state->field);
-    JS_DOM_FREE_COLLECTION_TABLE(select_options_owners, select_options_owner_count)
-    JS_DOM_FREE_COLLECTION_TABLE(live_child_collections, live_child_collection_count)
-    JS_DOM_FREE_COLLECTION_TABLE(live_form_collections, live_form_collection_count)
-    JS_DOM_FREE_COLLECTION_TABLE(live_lookup_collections, live_lookup_collection_count)
-    #undef JS_DOM_FREE_COLLECTION_TABLE
-    dom_destroy_context_state(capsule,
-        state->select_options_owner_count || state->live_child_collection_count ||
-        state->live_form_collection_count || state->live_lookup_collection_count,
-        "js-dom-collections");
 }
 
 extern "C" void dom_foreign_documents_release_context(void) {

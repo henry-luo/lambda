@@ -28,7 +28,7 @@ static int g_custom_layout_registry_count = 0;
 static CustomLayoutUnknownLogEntry g_custom_layout_unknown_logs[CUSTOM_LAYOUT_MAX_UNKNOWN_LOGS];
 static int g_custom_layout_unknown_log_count = 0;
 
-static void velmt_edges_from_box_edges(VelmtEdges* dst, const BoxEdges* src) {
+static void radiant_velmt_edges_from_box_edges(RadiantVelmtEdges* dst, const BoxEdges* src) {
     if (!dst || !src) return;
     dst->left = src->left;
     dst->right = src->right;
@@ -62,14 +62,15 @@ static int custom_layout_count_children(ViewBlock* block) {
     return count;
 }
 
-void custom_layout_fill_velmt_from_view(Velmt* velmt, View* child, int index, bool normalize_origin) {
+void custom_layout_fill_radiant_velmt_from_view(
+        RadiantVelmt* velmt, View* child, int index, bool normalize_origin) {
     if (!velmt) return;
     memset(velmt, 0, sizeof(*velmt));
     if (!child) return;
     velmt->view = child;
     velmt->element = child->is_element() ? child->as_element() : nullptr;
     velmt->index = index;
-    // top-level custom layout children are normalized; nested Velmt snapshots
+    // top-level custom layout children are normalized; nested RadiantVelmt snapshots
     // preserve local child offsets so callbacks can inspect rich content.
     velmt->border_box.x = normalize_origin ? 0.0f : child->x;
     velmt->border_box.y = normalize_origin ? 0.0f : child->y;
@@ -79,18 +80,18 @@ void custom_layout_fill_velmt_from_view(Velmt* velmt, View* child, int index, bo
     ViewBlock* child_block = lam::view_as_block(child);
     if (child_block) {
         BoxMetrics metrics = layout_box_metrics(child_block);
-        velmt_edges_from_box_edges(&velmt->margin, &metrics.margin);
-        velmt_edges_from_box_edges(&velmt->border, &metrics.border);
-        velmt_edges_from_box_edges(&velmt->padding, &metrics.padding);
+        radiant_velmt_edges_from_box_edges(&velmt->margin, &metrics.margin);
+        radiant_velmt_edges_from_box_edges(&velmt->border, &metrics.border);
+        radiant_velmt_edges_from_box_edges(&velmt->padding, &metrics.padding);
     }
 }
 
-static int custom_layout_collect_children(ViewBlock* block, Velmt* children, int capacity) {
+static int custom_layout_collect_children(ViewBlock* block, RadiantVelmt* children, int capacity) {
     if (!block || !children || capacity <= 0) return 0;
     int count = 0;
     for (View* child = (View*)block->first_child; child; child = child->next()) {
         if (!custom_layout_child_is_in_flow(child)) continue;
-        custom_layout_fill_velmt_from_view(&children[count], child, count, true);
+        custom_layout_fill_radiant_velmt_from_view(&children[count], child, count, true);
         count++;
         if (count >= capacity) break;
     }
@@ -104,7 +105,7 @@ static bool custom_layout_placement_valid(const CustomLayoutContext* context,
         placement->child_index < context->child_count;
 }
 
-static void custom_layout_clear_child_z(const Velmt* child) {
+static void custom_layout_clear_child_z(const RadiantVelmt* child) {
     if (!child || !child->view) return;
     ViewElement* element = lam::view_as_element(child->view);
     if (!element || !element->position) return;
@@ -113,7 +114,7 @@ static void custom_layout_clear_child_z(const Velmt* child) {
     element->position->custom_layout_z_index = 0;
 }
 
-static bool custom_layout_apply_child_z(LayoutContext* lycon, const Velmt* child, int z) {
+static bool custom_layout_apply_child_z(LayoutContext* lycon, const RadiantVelmt* child, int z) {
     if (!lycon || !child || !child->view) return false;
     ViewElement* element = lam::view_as_element(child->view);
     if (!element) return false;
@@ -131,7 +132,7 @@ static bool custom_layout_apply_child_z(LayoutContext* lycon, const Velmt* child
     return true;
 }
 
-static bool custom_layout_child_has_percent_size(const Velmt* child, bool horizontal) {
+static bool custom_layout_child_has_percent_size(const RadiantVelmt* child, bool horizontal) {
     if (!child || !child->view) return false;
     ViewBlock* block = lam::view_as_block(child->view);
     if (!block || !block->blk) return false;
@@ -155,7 +156,7 @@ static void custom_layout_warn_auto_axis_percent_children(const CustomLayoutCont
     int first_percent_child_index = -1;
     const char* first_percent_child_loc = nullptr;
     for (int i = 0; i < context->child_count; i++) {
-        const Velmt* child = &context->children[i];
+        const RadiantVelmt* child = &context->children[i];
         if (!custom_layout_child_has_percent_size(child, horizontal)) continue;
         if (first_percent_child_index < 0) {
             first_percent_child_index = i;
@@ -449,7 +450,8 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
     int child_count = custom_layout_count_children(block);
     ScratchMark mark = scratch_mark(&lycon->scratch);
     int scratch_child_capacity = child_count > 0 ? child_count : 1;
-    Velmt* children = (Velmt*)scratch_calloc(&lycon->scratch, sizeof(Velmt) * scratch_child_capacity);
+    RadiantVelmt* children = (RadiantVelmt*)scratch_calloc(
+        &lycon->scratch, sizeof(RadiantVelmt) * scratch_child_capacity);
     CustomLayoutPlacement* placements = (CustomLayoutPlacement*)scratch_calloc(
         &lycon->scratch, sizeof(CustomLayoutPlacement) * scratch_child_capacity);
     bool* placed_children = (bool*)scratch_calloc(
@@ -512,7 +514,7 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
                       block->source_loc(), layout_name, placement->child_index);
             continue;
         }
-        Velmt* child = &context.children[placement->child_index];
+        RadiantVelmt* child = &context.children[placement->child_index];
         child->view->x = placement->x;
         child->view->y = placement->y;
         if (placement->has_z) {
@@ -530,7 +532,7 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
 
     for (int i = 0; i < child_count; i++) {
         if (placed_children[i]) continue;
-        Velmt* child = &context.children[i];
+        RadiantVelmt* child = &context.children[i];
         // a successful custom layout pass owns every in-flow child position;
         // omitted placements must not leak normal-flow coordinates.
         child->view->x = 0.0f;

@@ -3668,8 +3668,9 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         TypeId child_type = get_type_id(child_item);
-        // Guard: skip items with invalid type IDs (corrupted memory)
-        if (child_type == 0 || child_type > LMD_TYPE_ELEMENT) {
+        // D7.4.5v2 makes Error the terminal valid TypeId; representation checks
+        // below still admit only the materialized child forms supported here.
+        if (child_type == 0 || child_type > LMD_TYPE_ERROR) {
             log_error("build_dom_tree: <%s> child %lld has invalid type=%d (raw=0x%llx), skipping",
                       tag_name, (long long)i, child_type, (unsigned long long)child_item.item);
             continue;

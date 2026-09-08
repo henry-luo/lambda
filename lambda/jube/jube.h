@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define JUBE_ABI_VERSION 4
+#define JUBE_ABI_VERSION 6
 #define JUBE_ABI_VERSION_LEGACY 1
 #define JUBE_HOST_API_VERSION 4
 #define JUBE_HOST_LANG_API_VERSION 1
@@ -376,11 +376,27 @@ typedef enum JubeDomElementOperation {
     JUBE_DOM_SPLIT_TEXT,
 } JubeDomElementOperation;
 
+typedef enum JubeCarrierKind {
+    JUBE_CARRIER_VMAP = 0,
+    JUBE_CARRIER_VARRAY,
+    JUBE_CARRIER_VELMT,
+} JubeCarrierKind;
+
+static inline TypeId jube_carrier_type_id(JubeCarrierKind carrier) {
+    switch (carrier) {
+    case JUBE_CARRIER_VARRAY: return LMD_TYPE_VARRAY;
+    case JUBE_CARRIER_VELMT: return LMD_TYPE_VELMT;
+    case JUBE_CARRIER_VMAP:
+    default: return LMD_TYPE_VMAP;
+    }
+}
+
 struct JubeTypeDef {
     const char* name;
     uint32_t flags;
-    const void* vmap_ops;
+    const void* carrier_ops;
     void (*destroy)(void* native);
+    JubeCarrierKind carrier;
 };
 
 struct JubeFuncDef {
@@ -582,9 +598,9 @@ struct JubeHostValueAPI {
     const uint8_t* (*string_bytes)(Item value);
     // Preserves integer-vs-float behavior without exposing tagged values.
     bool (*number_to_int64_exact)(Item value, int64_t* out_value);
-    // Creates and unwraps a branded native object without publishing VMap's
-    // concrete layout. The type must be a module-declared JubeTypeDef, and
-    // its destroy hook owns the payload's lifetime.
+    // Creates and unwraps a branded native object without publishing the
+    // carrier layout. The type must be a module-declared JubeTypeDef; its
+    // destroy hook owns the payload only when JUBE_TYPE_OWNING_NATIVE is set.
     Item (*native_object_new)(const JubeTypeDef* type, void* payload);
     void* (*native_object_data)(Item object, const JubeTypeDef* type);
 };
@@ -693,6 +709,17 @@ typedef Item (*JubeDomFn3)(Item, Item, Item);
 typedef Item (*JubeDomFn4)(Item, Item, Item, Item);
 typedef Item (*JubeDomFn5)(Item, Item, Item, Item, Item);
 
+typedef enum JubeDomTokenListOperation {
+    JUBE_DOM_TOKEN_LIST_ADD = 1,
+    JUBE_DOM_TOKEN_LIST_REMOVE,
+    JUBE_DOM_TOKEN_LIST_TOGGLE,
+    JUBE_DOM_TOKEN_LIST_CONTAINS,
+    JUBE_DOM_TOKEN_LIST_ITEM,
+    JUBE_DOM_TOKEN_LIST_REPLACE,
+    JUBE_DOM_TOKEN_LIST_TO_STRING,
+    JUBE_DOM_TOKEN_LIST_ITERATOR,
+} JubeDomTokenListOperation;
+
 struct JubeHostDomCatalogAPI {
 #define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv) \
     JubeDomFn##argc name;
@@ -723,6 +750,8 @@ struct JubeHostRealmAPI {
     Item (*expando_delete_property)(Item obj, Item key);
     Item (*expando_own_property_names)(Item obj);
     Item (*live_child_collection_bridge)(void* elem, bool elements_only);
+    Item (*attribute_collection_bridge)(void* elem);
+    Item (*token_list_operation)(Item receiver, int operation, Item* args, int argc);
     Item (*live_document_forms_bridge)(void* doc);
     Item (*live_form_elements_bridge)(void* elem);
     Item (*live_document_get_elements_by_tag_name_bridge)(void* doc, Item query);

@@ -1304,7 +1304,7 @@ Item array_num_read_borrowed_item(ArrayNum* array, int64_t offset);
 Item array_num_read_item(ArrayNum* array, int64_t offset);
 double array_num_read_double(ArrayNum* arr, int64_t offset);
 
-// Deep structural equality for Items (Phase 14: no-op elision)
+// Strict structural equality for non-observable no-op elision.
 bool item_deep_equal(Item a, Item b);
 
 #ifdef __cplusplus

@@ -1436,7 +1436,7 @@ explicit decision rather than being folded into the next slice.
   them capsules: object-owned `JsObserver` with dynamic targets, one tagged
   `JsLiveCollectionRegistry` for the four 4,096-entry tables
   (`lambda/dom/dom.cpp:1970`), object-owned `JsXhrRequest`
-  (`dom_xhr.cpp:67`). Parent §6.3, §6.4, §7.2 apply unchanged; D7.4.5's
+  (`dom_xhr.cpp:67`). Parent §6.3, §6.4, §7.2 apply unchanged; D7.4.5v2's
   live `VArray` stays a later stage.
 - **JSCUO6 — Inventory of generated-code readers of `JsFunction` offsets.**
   Two pins are asserted (`func_ptr` at 8, `bound_this_store` at 48) and no

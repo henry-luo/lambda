@@ -574,6 +574,8 @@ static bool mir_direct_pointer_lane_abi_type(TypeId type_id) {
     case LMD_TYPE_ARRAY:
     case LMD_TYPE_MAP:
     case LMD_TYPE_VMAP:
+    case LMD_TYPE_VARRAY:
+    case LMD_TYPE_VELMT:
     case LMD_TYPE_ELEMENT:
     case LMD_TYPE_TYPE:
     case LMD_TYPE_FUNC:
@@ -3412,7 +3414,8 @@ static MIR_reg_t emit_box_impl(MirTranspiler* mt, MIR_reg_t val_reg,
         return emit_box_symbol(mt, val_reg);
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT: case LMD_TYPE_RANGE: case LMD_TYPE_FUNC:
-    case LMD_TYPE_PATH: case LMD_TYPE_VMAP:
+    case LMD_TYPE_PATH: case LMD_TYPE_VMAP: case LMD_TYPE_VARRAY:
+    case LMD_TYPE_VELMT:
         return emit_box_container(mt, val_reg);
     case LMD_TYPE_TYPE:
         // Type* is a direct-pointer Item whose header supplies the TYPE tag;
@@ -3594,6 +3597,7 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT: case LMD_TYPE_RANGE:
     case LMD_TYPE_FUNC: case LMD_TYPE_TYPE: case LMD_TYPE_PATH: case LMD_TYPE_VMAP:
+    case LMD_TYPE_VARRAY: case LMD_TYPE_VELMT:
         return emit_unbox_container(mt, item_reg);
     case LMD_TYPE_COMPLEX:
         // Complex is already the untagged direct-pointer Item representation.
@@ -4804,7 +4808,8 @@ static bool mir_is_container_field_type(TypeId type_id) {
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: 
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
-    case LMD_TYPE_PATH:
+    case LMD_TYPE_PATH: case LMD_TYPE_VMAP: case LMD_TYPE_VARRAY:
+    case LMD_TYPE_VELMT:
         return true;
     default:
         return false;
@@ -4816,6 +4821,7 @@ static bool mir_is_nullable_container_type(TypeId type_id) {
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
     case LMD_TYPE_RANGE: case LMD_TYPE_PATH: case LMD_TYPE_VMAP:
+    case LMD_TYPE_VARRAY: case LMD_TYPE_VELMT:
     case LMD_TYPE_FUNC:
         return true;
     default:
@@ -5241,7 +5247,7 @@ static bool static_store_field_value(void* field_ptr, TypeId field_type, Item va
     case LMD_TYPE_RANGE:
     case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT:
-        if (value_type < LMD_TYPE_RANGE || value_type > LMD_TYPE_ELEMENT) return false;
+        if (!is_container_type_id(value_type)) return false;
         *(Container**)field_ptr = value.container; return true;
     case LMD_TYPE_DECIMAL:
         if (value_type != LMD_TYPE_DECIMAL) return false;
@@ -17853,11 +17859,13 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 // map([k1, v1, ...]) -> vmap_from_array(arr)
                 arg = call_node->argument;
                 MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
-                RETURN_CALL_VALUE(emit_call_1(mt, "vmap_from_array", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1)));
+                MIR_reg_t result = emit_call_1(mt, "vmap_from_array", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
+                if (!mt->in_handler_operand) emit_return_if_item_error(mt, result);
+                RETURN_CALL_VALUE(result);
             }
         }
-        // ==== VMap: m.set(k, v) -> vmap_set(m, k, v) ====
+        // ==== virtual member mutation: m.set(k, v) ====
         if (info->fn == SYSPROC_VMAP_SET) {
             arg = call_node->argument;
             MirVarEntry* cow_root = mir_direct_root_binding(mt, arg);
@@ -17868,11 +17876,23 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_reg_t key = transpile_box_item(mt, key_arg);
                 MIR_reg_t value = transpile_box_item(mt, value_arg);
                 MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
-                MIR_reg_t replacement = emit_call_3(mt, "vmap_set_cow", MIR_T_I64,
+                MIR_reg_t replacement = emit_call_3(mt, "member_set_cow", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
-                emit_return_if_item_error(mt, replacement);
+                MIR_label_t skip_publish = new_label(mt);
+                if (mt->in_handler_operand) {
+                    MIR_reg_t type_id = emit_item_tag(mt, replacement);
+                    MIR_reg_t is_error = new_reg(mt, "vmap_cow_error", MIR_T_I64);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                        MIR_new_reg_op(mt->ctx, is_error), MIR_new_reg_op(mt->ctx, type_id),
+                        MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, skip_publish),
+                        MIR_new_reg_op(mt->ctx, is_error)));
+                } else {
+                    emit_return_if_item_error(mt, replacement);
+                }
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, cow_root->reg),
                     MIR_new_reg_op(mt->ctx, replacement)));
@@ -17881,6 +17901,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 cow_root->cow_marked = false;
                 cow_root->cow_children_may_be_shared = true;
                 update_gc_root_slot(mt, cow_root);
+                emit_label(mt, skip_publish);
                 RETURN_CALL_VALUE(replacement);
             }
             MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
@@ -17891,10 +17912,12 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             arg = arg->next;
             MIR_reg_t boxed_a3 = transpile_box_item(mt, arg);
 
-            RETURN_CALL_VALUE(emit_call_3(mt, "vmap_set", MIR_T_I64,
+            MIR_reg_t result = emit_call_3(mt, "fn_index_set", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3)));
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a3));
+            if (!mt->in_handler_operand) emit_return_if_item_error(mt, result);
+            RETURN_CALL_VALUE(result);
         }
 
         if (info->fn == SYSPROC_PUSH || info->fn == SYSPROC_SPLICE) {

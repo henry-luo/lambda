@@ -71,7 +71,8 @@ bool js_store_typed_value(void* field_ptr, TypeId value_type,
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
         *(Container**)field_ptr = value.container;
         break;
-    case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_FUNC: case LMD_TYPE_VMAP: case LMD_TYPE_VARRAY:
+    case LMD_TYPE_VELMT: case LMD_TYPE_DECIMAL:
     case LMD_TYPE_TYPE: case LMD_TYPE_PATH:
         *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFFULL);
         break;
@@ -1638,8 +1639,8 @@ extern "C" Item js_strict_equal(Item left, Item right) {
     }
 
     default:
-        if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_VMAP) {
-            // Jube host objects can have duplicate VMap carriers for one native
+        if (left_type == LMD_TYPE_MAP || is_virtual_container_type_id(left_type)) {
+            // Jube host objects can have duplicate virtual carriers for one native
             // value; strict equality must follow host identity rather than
             // wrapper allocation once DOM nodes are record-driven.
             void* left_host = jube_host_identity(left);
