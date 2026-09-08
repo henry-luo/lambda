@@ -2863,7 +2863,7 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
             }
         }
         // platform lookup
-        char* p = font_platform_find_fallback(fam);
+        char* p = font_platform_find_fallback(fam, NULL);
         if (p && strstr(p, ".ttc")) { mem_free(p); p = nullptr; }
         if (p) {
             if (out_font_name) {
@@ -2982,7 +2982,7 @@ static const char* resolve_svg_radiant_font_family(const char* font_family,
             font_family_exists(font_ctx, start)) {
             return mem_strdup(start, MEM_CAT_RENDER);
         }
-        char* platform_path = font_platform_find_fallback(start);
+        char* platform_path = font_platform_find_fallback(start, NULL);
         if (platform_path) {
             mem_free(platform_path);
             return mem_strdup(start, MEM_CAT_RENDER);

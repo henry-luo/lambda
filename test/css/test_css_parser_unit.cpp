@@ -357,6 +357,15 @@ TEST_F(CssParserUnitTest, Declaration_LineHeight_Unitless) {
     ASSERT_NE(decl->value, nullptr);
 }
 
+TEST_F(CssParserUnitTest, Declaration_LineHeight_RejectsUnknownDimension) {
+    auto parser = CreateParser();
+    auto decl = parser.ParseDeclaration("line-height: 1x");
+
+    ASSERT_NE(decl, nullptr);
+    ASSERT_NE(decl->value, nullptr);
+    EXPECT_FALSE(css_property_validate_value(decl->property_code, decl->value));
+}
+
 // =============================================================================
 // Category 7: Declaration Parsing - Multiple Values
 // =============================================================================

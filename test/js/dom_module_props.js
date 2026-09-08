@@ -112,6 +112,17 @@ console.log(nsEl.getAttribute("__lambda_ns_uri") === null);
 var madeText = document.createTextNode("Factory");
 console.log(madeText.nodeType);
 console.log(madeText.data);
+var numericText = document.createTextNode(178);
+console.log(numericText.data);
+console.log(document.createTextNode(null).data);
+console.log(document.createTextNode().data);
+var textNodeSymbolThrows = false;
+try {
+    document.createTextNode(Symbol("text"));
+} catch (error) {
+    textNodeSymbolThrows = error instanceof TypeError;
+}
+console.log(textNodeSymbolThrows);
 var madeComment = document.createComment("factory-comment");
 console.log(madeComment.nodeType);
 console.log(madeComment.data);

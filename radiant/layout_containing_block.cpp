@@ -119,6 +119,9 @@ LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, Vie
     }
 
     LayoutContainingBlock cb = layout_containing_block_for_view(block);
+    // CSS Position resolves an abspos percentage inline size against the
+    // containing block's used padding box, including an auto-width block.
+    cb.has_definite_width = true;
     return cb;
 }
 

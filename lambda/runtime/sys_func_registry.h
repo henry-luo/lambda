@@ -158,7 +158,6 @@ typedef struct JitReturnLane {
     JitAbiValue value;
     JitReturnTransport transport;
     ScalarReturnClass scalar_class;
-    bool may_use_scalar_return_home;
 } JitReturnLane;
 typedef struct JitCallEffects {
     JitGcEffect gc;
@@ -173,8 +172,10 @@ typedef struct JitCallMetadata {
     const JitAbiArg* abi_args;
     uint16_t abi_arg_count;
     uint16_t source_arg_count;
-    int16_t scalar_return_home_arg_index;
-    uint8_t scalar_home_lane_mask;
+    // A CALL site never donates a scalar home: the retired v2 fields here
+    // (home arg index, lane mask, per-lane `may_use_scalar_return_home`) were
+    // written and never read. A hosted guest FRAME may still accept one --
+    // that lives on MirFunctionPlan, which is a different record.
     // SCU11 (RV10): the callee's published return contract, referenced, so a
     // call site never recomputes the shape from its own local facts.
     // `return_shape` is its cached projection (NULL abi = universal shape 2).

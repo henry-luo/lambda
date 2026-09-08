@@ -82,6 +82,7 @@ static void module_descriptor_ensure_roots(ModuleDescriptor* desc) {
     uint64_t epoch = js_get_heap_epoch();
     if (desc->roots_epoch == epoch) return;
     heap_register_gc_root(&desc->namespace_obj.item);
+    heap_register_gc_root(&desc->cjs_module.item);
     heap_register_gc_root(&desc->specifier_item.item);
     heap_register_gc_root(&desc->awaited_target.item);
     heap_register_gc_root(&desc->evaluation_error.item);
@@ -258,6 +259,12 @@ void module_register_for_runtime(Runtime* runtime, const char* path, const char*
 
 ModuleDescriptor* module_get(const char* path) {
     return module_get_for_runtime(module_registry_active_runtime(), path);
+}
+
+void module_descriptor_set_cjs_module(ModuleDescriptor* desc, Item module) {
+    if (!desc) return;
+    desc->cjs_module = module;
+    module_descriptor_ensure_roots(desc);
 }
 
 ModuleDescriptor* module_get_for_runtime(Runtime* runtime, const char* path) {

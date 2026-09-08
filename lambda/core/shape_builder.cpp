@@ -63,8 +63,8 @@ static bool shape_builder_find_field(ShapeBuilder* builder, const char* name, si
     return false;
 }
 
-bool shape_builder_add_field_typed(ShapeBuilder* builder, const char* name, Type* contract) {
-    if (!builder || !name || !contract) {
+bool shape_builder_add_field(ShapeBuilder* builder, const char* name, TypeId type) {
+    if (!builder || !name) {
         log_error("shape_builder_add_field: invalid arguments");
         return false;
     }
@@ -73,24 +73,18 @@ bool shape_builder_add_field_typed(ShapeBuilder* builder, const char* name, Type
     size_t field_index = 0;
     if (shape_builder_find_field(builder, name, &field_index)) {
         log_warn("shape_builder_add_field: duplicate field '%s', replacing", name);
-        builder->fields[field_index].type_id = contract->type_id;
-        builder->fields[field_index].contract = contract;
+        builder->fields[field_index].type_id = type;
         return true;
     }
 
     if (!shape_builder_reserve(builder, builder->field_count + 1)) return false;
     ShapeFieldDraft* draft = &builder->fields[builder->field_count++];
     draft->name = name;
-    draft->type_id = contract->type_id;
-    draft->contract = contract;
+    draft->type_id = type;
 
     log_debug("shape_builder_add_field: added '%s' (type=%d), count=%zu",
-        name, contract->type_id, builder->field_count);
+        name, type, builder->field_count);
     return true;
-}
-
-bool shape_builder_add_field(ShapeBuilder* builder, const char* name, TypeId type) {
-    return shape_builder_add_field_typed(builder, name, type_info[type].type);
 }
 
 bool shape_builder_remove_field(ShapeBuilder* builder, const char* name) {
@@ -123,22 +117,6 @@ bool shape_builder_has_field(ShapeBuilder* builder, const char* name) {
     return shape_builder_find_field(builder, name, NULL);
 }
 
-bool shape_builder_get_field_type(ShapeBuilder* builder, const char* name, TypeId* out_type) {
-    if (!builder || !name) {
-        return false;
-    }
-
-    size_t field_index = 0;
-    if (shape_builder_find_field(builder, name, &field_index)) {
-        if (out_type) {
-            *out_type = builder->fields[field_index].type_id;
-        }
-        return true;
-    }
-
-    return false;
-}
-
 // ========== Import/Export ==========
 
 void shape_builder_import_shape(ShapeBuilder* builder, ShapeEntry* shape) {
@@ -159,19 +137,9 @@ void shape_builder_import_shape(ShapeBuilder* builder, ShapeEntry* shape) {
         ShapeFieldDraft* draft = &builder->fields[builder->field_count++];
         draft->name = entry->name->str;
         draft->type_id = entry->type->type_id;
-        draft->contract = entry->type;
     }
 
     log_debug("shape_builder_import_shape: imported %zu fields", builder->field_count);
-}
-
-void shape_builder_clear(ShapeBuilder* builder) {
-    if (!builder) {
-        return;
-    }
-
-    builder->field_count = 0;
-    log_debug("shape_builder_clear: cleared");
 }
 
 // ========== Finalization ==========
@@ -236,8 +204,4 @@ ShapeEntry* shape_builder_finalize(ShapeBuilder* builder) {
 
 size_t shape_builder_field_count(ShapeBuilder* builder) {
     return builder ? builder->field_count : 0;
-}
-
-bool shape_builder_is_empty(ShapeBuilder* builder) {
-    return builder ? (builder->field_count == 0) : true;
 }

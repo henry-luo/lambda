@@ -93,11 +93,6 @@ Map* js_array_props(const Array* arr) {
     return get_type_id(props_item) == LMD_TYPE_MAP ? props_item.map : NULL;
 }
 
-int64_t container_tail_reserved(const Array* arr) {
-    (void)arr;
-    return 0;  // the companion no longer occupies an elements slot
-}
-
 int64_t container_dense_capacity(const Array* arr) {
     return arr && arr->capacity > arr->extra ? arr->capacity - arr->extra : 0;
 }

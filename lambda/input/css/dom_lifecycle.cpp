@@ -466,6 +466,7 @@ void dom_js_mutation_records_reset(DomDocument* doc) {
     doc->js.mutation_kind_mask = 0;
     doc->js.mutation_record_count = 0;
     doc->js.mutation_record_overflow = 0;
+    doc->js.inline_stylesheet_mutation_count = 0;
     // Mutation records hold raw nodes across the reconcile pass; release all
     // pins before the single quiescent-point sweep.
     dom_retire_sweep(doc);

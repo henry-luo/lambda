@@ -148,6 +148,12 @@ Item dom_cssom_get_document_stylesheets(void);
  */
 Item dom_cssom_get_style_element_sheet(Item elem);
 
+/** Reparse a connected inline <style> after a DOM text-tree mutation. */
+bool dom_cssom_sync_inline_style_element(void* elem);
+
+/** Synchronize mutation-tracked inline sheets in current document source order. */
+void dom_cssom_sync_mutated_inline_stylesheets(void* doc);
+
 /** Update a stylesheet's disabled state and request a document recascade. */
 bool dom_cssom_stylesheet_set_disabled(Item sheet, bool disabled);
 

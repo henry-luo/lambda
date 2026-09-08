@@ -6055,6 +6055,8 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
         line_break(lycon);
     } else {
         line_align(lycon);
+        // a block child can close an otherwise phantom inline line in the cell.
+        layout_finalize_static_inline_positions(lycon);
     }
     if (tcell->blk) {
         tcell->block_mut()->first_line_baseline = lycon->block.first_line_ascender;

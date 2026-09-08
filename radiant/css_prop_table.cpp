@@ -6,7 +6,14 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+static RadiantCssomUsedValueSync s_cssom_used_value_sync = nullptr;
+
+void radiant_set_cssom_used_value_sync(RadiantCssomUsedValueSync sync) {
+    s_cssom_used_value_sync = sync;
+}
 
 static bool copy_text(char* out, size_t out_size, const char* text) {
     if (!out || out_size == 0) return false;
@@ -247,6 +254,79 @@ static bool serialize_decl(const CssPropAccessor* accessor, DomElement* element,
                            int pseudo_type, char* out, size_t out_size) {
     return accessor && serialize_decl_recursive(element, accessor->id, pseudo_type, 0,
                                                 out, out_size);
+}
+
+static const CssValue* inherited_decl_value(DomElement* element, CssPropertyCode id,
+                                            int pseudo_type, int depth,
+                                            DomElement** declaring_element) {
+    if (!element || depth > 16) return nullptr;
+    CssDeclaration* declaration = computed_decl(element, id, pseudo_type);
+    const CssValue* value = declaration ? declaration->value : nullptr;
+    if (value && value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        if (keyword == CSS_VALUE_INHERIT ||
+            (keyword == CSS_VALUE_UNSET && css_property_is_inherited(id))) {
+            DomElement* parent = parent_element(element);
+            return parent ? inherited_decl_value(parent, id, 0, depth + 1,
+                                                 declaring_element) : nullptr;
+        }
+        if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_REVERT ||
+            keyword == CSS_VALUE_UNSET) {
+            return nullptr;
+        }
+    }
+    if (value) {
+        if (declaring_element) *declaring_element = element;
+        return value;
+    }
+    if (css_property_is_inherited(id)) {
+        DomElement* parent = parent_element(element);
+        return parent ? inherited_decl_value(parent, id, 0, depth + 1,
+                                             declaring_element) : nullptr;
+    }
+    return nullptr;
+}
+
+static bool cssom_font_size_px(DomElement* element, int pseudo_type,
+                               float* font_size) {
+    if (!element || !font_size) return false;
+    char serialized[64];
+    if (!serialize_decl_recursive(element, CSS_PROPERTY_FONT_SIZE, pseudo_type, 0,
+                                  serialized, sizeof(serialized))) {
+        return false;
+    }
+    char* end = nullptr;
+    float parsed = strtof(serialized, &end);
+    if (end == serialized || strcmp(end, "px") != 0 || parsed < 0.0f ||
+        !isfinite(parsed)) {
+        return false;
+    }
+    *font_size = parsed;
+    return true;
+}
+
+static bool serialize_line_height(const CssPropAccessor* accessor, DomElement* element,
+                                  int pseudo_type, char* out, size_t out_size) {
+    if (!accessor || !element) return false;
+    DomElement* declaring_element = nullptr;
+    const CssValue* value = inherited_decl_value(
+        element, CSS_PROPERTY_LINE_HEIGHT, pseudo_type, 0, &declaring_element);
+    if (value && value->type == CSS_VALUE_TYPE_NUMBER) {
+        float font_size = 0.0f;
+        // CSS Inline: inherited unitless values retain their multiplier and use
+        // the target element's font size, unlike inherited percentages.
+        if (cssom_font_size_px(element, pseudo_type, &font_size)) {
+            return format_number(out, out_size, value->data.number.value * font_size, "px");
+        }
+    } else if (value && value->type == CSS_VALUE_TYPE_PERCENTAGE && declaring_element) {
+        float font_size = 0.0f;
+        // Percentages compute to a length on the declaring element before inheritance.
+        if (cssom_font_size_px(declaring_element, 0, &font_size)) {
+            return format_number(out, out_size,
+                                 value->data.percentage.value * font_size / 100.0f, "px");
+        }
+    }
+    return serialize_decl(accessor, element, pseudo_type, out, out_size);
 }
 
 static bool format_self_alignment(char* out, size_t out_size,
@@ -614,7 +694,8 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_FONT_WEIGHT, serialize_font_weight, 0),
     DIRECT_ROW(CSS_PROPERTY_FONT_STYLE, PROP_GROUP_FONT, FontProp, font_style, CSS_PROP_VALUE_ENUM, 0),
     DIRECT_ROW(CSS_PROPERTY_FONT_VARIANT, PROP_GROUP_FONT, FontProp, font_variant, CSS_PROP_VALUE_ENUM, 0),
-    DECL_ROW(CSS_PROPERTY_LINE_HEIGHT),
+    DERIVED_ROW(CSS_PROPERTY_LINE_HEIGHT, serialize_line_height,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DIRECT_ROW(CSS_PROPERTY_LETTER_SPACING, PROP_GROUP_FONT, FontProp, letter_spacing, CSS_PROP_VALUE_PX, 0),
     DIRECT_ROW(CSS_PROPERTY_WORD_SPACING, PROP_GROUP_FONT, FontProp, word_spacing, CSS_PROP_VALUE_PX, 0),
     DIRECT_ROW(CSS_PROPERTY_TEXT_ALIGN, PROP_GROUP_BLOCK, BlockProp, text_align, CSS_PROP_VALUE_ENUM, 0),
@@ -709,9 +790,13 @@ bool dom_ensure_computed(DomElement* element, bool needs_used_value) {
     dirty = dirty || element->doc->js.mutation_count > 0;
     if (!dirty) return true;
 
-    // DOM3 geometry is a committed-layout snapshot. A computed-style read may
-    // refresh stylesheet declarations, but it must not turn a style mutation
-    // into a synchronous layout pass merely to refresh a used value.
+    if (needs_used_value && s_cssom_used_value_sync &&
+            s_cssom_used_value_sync(element->doc)) {
+        // CSSOM width/height resolve to used values for displayed boxes.
+        return true;
+    }
+
+    // A declaration read still recascades when no usable layout snapshot exists.
     radiant_cascade_styles_for_element(element);
     return false;
 }
@@ -737,8 +822,9 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
         // Before the first UiContext exists, loader scripts can only observe
         // the already-cascaded declaration tree; keep this compatibility seam
         // inside the table instead of reviving a second JS serializer.
-        if (id >= CSS_PROPERTY_BORDER_TOP_WIDTH &&
-            id <= CSS_PROPERTY_BORDER_LEFT_STYLE) {
+        if ((accessor->flags & CSS_PROP_ACCESSOR_CASCADE_RESOLVED) ||
+            (id >= CSS_PROPERTY_BORDER_TOP_WIDTH &&
+             id <= CSS_PROPERTY_BORDER_LEFT_STYLE)) {
             return accessor->serialize && accessor->serialize(
                 accessor, element, pseudo_type, out, out_size);
         }

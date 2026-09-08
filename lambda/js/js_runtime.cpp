@@ -38,6 +38,7 @@ void js_interp_generator_trace_continuations(JsGeneratorStateRecord* state,
 void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
 struct JsAsyncContextStateRecord;
 void js_interp_async_clear_continuations(JsAsyncContextStateRecord* state);
+void js_interp_async_trace_continuations(JsAsyncContextStateRecord* state, gc_heap_t* gc);
 
 // Shared formatting buffer for the throw-with-format helpers. JS error
 // messages are bounded by construction; truncation is preferable to a heap
@@ -93,9 +94,13 @@ typedef struct JsProxyMapCarrier {
     JsProxyData payload;
 } JsProxyMapCarrier;
 
+// JSCU9 (D5.1.1v2/D5.1.3): the generator's suspended state is carried by the
+// generator object itself, not a context-wide index table. The object owns its
+// re-homed environment and traces its own edges; there is no pool, cap, or
+// slot-recycling identity hazard.
 typedef struct JsGeneratorMapCarrier {
     Map base;
-    int64_t generator_index;
+    JsGeneratorStateRecord state;
 } JsGeneratorMapCarrier;
 
 struct JsRegexData;
@@ -19117,23 +19122,43 @@ static Item js_regexp_symbol_match(Item this_val, Item arg0) {
 //   - Reads captures from exec result object (not directly from RE2 engine)
 //   - Supports functional replacer with correct (matched, cap1…, position, S, groups?) args
 static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) {
+    // regexp execution and callback conversion allocate; retain every live JS value
+    // because native stack locals are not GC roots (D5.3).
+    RootFrame roots(8);
+    Rooted<Item> regex_root(roots, this_val);
+    Rooted<Item> str_root(roots, str);
+    Rooted<Item> replacement_root(roots, replacement);
+    Rooted<Item> results_root(roots, ItemNull);
+    Rooted<Item> result_root(roots, ItemNull);
+    Rooted<Item> value_root(roots, ItemNull);
+    Rooted<Item> matched_root(roots, ItemNull);
+    Rooted<Item> named_captures_root(roots, ItemNull);
+    RootSpan captures_roots(64);
+    RootSpan callback_args_roots(70);
+    Item* captures_buf = captures_roots.items();
+    Item* fn_args_buf = callback_args_roots.items();
+    if (!captures_buf || !fn_args_buf) return ItemError;
+    for (int index = 0; index < 64; index++) captures_buf[index] = make_js_undefined();
+    for (int index = 0; index < 70; index++) fn_args_buf[index] = make_js_undefined();
     // Step 2: Type check
-    TypeId ttid = get_type_id(this_val);
+    TypeId ttid = get_type_id(regex_root.get());
     if (ttid != LMD_TYPE_MAP && ttid != LMD_TYPE_ARRAY)
         return js_throw_type_error("RegExp.prototype[@@replace] called on incompatible receiver");
     // Step 3: S = ToString(string)
-    if (get_type_id(str) != LMD_TYPE_STRING) {
-        JS_ASSIGN_OR_RETURN_INTO(str, js_to_string(str));
+    if (get_type_id(str_root.get()) != LMD_TYPE_STRING) {
+        JS_ASSIGN_OR_RETURN_INTO(str, js_to_string(str_root.get()));
+        str_root.set(str);
     }
-    String* S = it2s(str);
+    String* S = it2s(str_root.get());
     int lengthS = S ? (int)S->len : 0;
     // Step 5: functionalReplace = IsCallable(replaceValue)
-    bool functional_replace = js_is_callable(replacement);
+    bool functional_replace = js_is_callable(replacement_root.get());
     // Step 6: If not functional, replaceValue = ToString(replaceValue)
     if (!functional_replace) {
-        JS_ASSIGN_OR_RETURN_INTO(replacement, js_to_string(replacement));
+        JS_ASSIGN_OR_RETURN_INTO(replacement, js_to_string(replacement_root.get()));
+        replacement_root.set(replacement);
     }
-    JsRegexData* fast_rd = js_get_regex_data(this_val);
+    JsRegexData* fast_rd = js_get_regex_data(regex_root.get());
     // Js55 P10b: js_regex_exec returns match.index in UTF-16 code units whenever
     // the input string has non-ASCII bytes (see `code_unit_indices` at
     // js_runtime.cpp:15856). The replace loop below uses `position` as either
@@ -19148,55 +19173,59 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         js_utf16_len(S->chars, (int)S->len, (bool)S->is_ascii) : lengthS;
     if (fast_rd && fast_rd->global && !functional_replace) {
         bool own_global_fast = false;
-        Item own_global_val = js_map_shape_lookup_ext(this_val.map, "global", 6, &own_global_fast);
+        Item own_global_val = js_map_shape_lookup_ext(regex_root.get().map, "global", 6, &own_global_fast);
         bool own_flags_fast = false;
-        Item own_flags_val = js_map_shape_lookup_ext(this_val.map, "flags", 5, &own_flags_fast);
+        Item own_flags_val = js_map_shape_lookup_ext(regex_root.get().map, "flags", 5, &own_flags_fast);
         String* own_flags_str = own_flags_fast ? it2s(own_flags_val) : NULL;
         JS_ASSIGN_OR_RETURN(own_global_bool, own_global_fast ? js_to_boolean(own_global_val) : (Item){.item = ITEM_FALSE});
         if (own_global_fast && it2b(own_global_bool) &&
             own_flags_str && own_flags_str->len == 1 && own_flags_str->chars[0] == 'g') {
             Item li_key_fast = js_name_item("lastIndex", 9);
-            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(this_val, li_key_fast, 0));
-            Item fast = js_try_fast_replace_non_whitespace(this_val, str, replacement, fast_rd, false);
+            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex_root.get(), li_key_fast, 0));
+            Item fast = js_try_fast_replace_non_whitespace(regex_root.get(), str_root.get(),
+                replacement_root.get(), fast_rd, false);
             if (fast.item != ItemNull.item || item_is_error(fast)) return fast;
         }
     }
     // Step 6.a.i (ES2021): if not functionalReplace, read Get(rx,"flags") to propagate getter errors
     // (test: get-flags-err.js, flags-tostring-error.js). We don't use the result for global detection.
     if (!functional_replace) {
-        JS_ASSIGN_OR_RETURN(flags_val, js_string_matchall_get_flags(this_val));
+        JS_ASSIGN_OR_RETURN(flags_val, js_string_matchall_get_flags(regex_root.get()));
         JS_ASSIGN_OR_RETURN(flags_string, js_to_string(flags_val));
     }
     // Step 7 (ES2015): global = ToBoolean(Get(rx, "global")) — read directly so overrides work
     // (test: coerce-global.js — r.global=undefined must be respected)
-    JS_ASSIGN_OR_RETURN(global_val, js_get_name_key(this_val, "global", 6));
+    JS_ASSIGN_OR_RETURN(global_val, js_get_name_key(regex_root.get(), "global", 6));
     JS_ASSIGN_OR_RETURN(global_bool, js_to_boolean(global_val));
     bool global = it2b(global_bool);
     Item li_key = js_name_item("lastIndex", 9);
     bool full_unicode = false;
     if (global) {
-        JS_ASSIGN_OR_RETURN(unicode_val, js_get_name_key(this_val, "unicode", 7));
+        JS_ASSIGN_OR_RETURN(unicode_val, js_get_name_key(regex_root.get(), "unicode", 7));
         full_unicode = it2b(js_to_boolean(unicode_val));
         // Step 8: Set rx.lastIndex = 0 (Throw=true)
-        JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(this_val, li_key, 0));
+        JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex_root.get(), li_key, 0));
     }
     if (!utf16_replace) {
-        Item fast = js_try_fast_replace_non_whitespace(this_val, str, replacement, fast_rd, functional_replace);
+        Item fast = js_try_fast_replace_non_whitespace(regex_root.get(), str_root.get(),
+            replacement_root.get(), fast_rd, functional_replace);
         if (fast.item != ItemNull.item || item_is_error(fast)) return fast;
     }
     // Steps 9-11: collect all RegExpExec results
-    Item results_array = js_array_new(0);
+    results_root.set(js_array_new(0));
     for (int safety = 0; safety < 2000000; safety++) {
-        JS_ASSIGN_OR_RETURN(result, js_regexp_exec_dispatch(this_val, str));
-        if (result.item == ItemNull.item) break;
-        js_array_push(results_array, result);
+        result_root.set(js_regexp_exec_dispatch(regex_root.get(), str_root.get()));
+        if (item_is_error(result_root.get())) return result_root.get();
+        if (result_root.get().item == ItemNull.item) break;
+        Item pushed = js_array_push(results_root.get(), result_root.get());
+        if (item_is_error(pushed)) return pushed;
         if (!global) break;
         // For global: if empty match, advance lastIndex to avoid infinite loop
-        JS_ASSIGN_OR_RETURN(match_str_raw, js_get_name_key(result, "0", 1));
+        JS_ASSIGN_OR_RETURN(match_str_raw, js_get_name_key(result_root.get(), "0", 1));
         JS_ASSIGN_OR_RETURN(match_str_val, js_to_string(match_str_raw));
         String* ms = it2s(match_str_val);
         if (!ms || ms->len == 0) {
-            JS_ASSIGN_OR_RETURN(li, js_get_key_default(this_val, li_key));
+            JS_ASSIGN_OR_RETURN(li, js_get_key_default(regex_root.get(), li_key));
             JS_ASSIGN_OR_RETURN(li_num, js_to_number(li));
             // ToLength(lastIndex): clamp to [0, 2^53-1]
             int64_t idx = 0;
@@ -19214,20 +19243,18 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
             int64_t next_idx = utf16_replace ?
                 js_regex_advance_string_index_units(S, idx, full_unicode) :
                 js_regex_advance_string_index_bytes(S, idx, full_unicode);
-            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(this_val, li_key, next_idx));
+            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex_root.get(), li_key, next_idx));
         }
     }
     // Steps 12-15: build result string
     StrBuf* buf = strbuf_new();
     int next_source_pos = 0;
-    int nresults = results_array.array ? results_array.array->length : 0;
+    int nresults = results_root.get().array ? results_root.get().array->length : 0;
     // fixed-size buffers to avoid alloca-in-loop stack growth
-    Item captures_buf[64];
-    Item fn_args_buf[70]; // max: 1 matched + 64 captures + 1 position + 1 S + 1 groups
     for (int ri = 0; ri < nresults; ri++) {
-        Item result = js_elements_get_int(results_array, ri);
+        result_root.set(js_elements_get_int(results_root.get(), ri));
         // Step 14a: nCaptures = max(ToLength(Get(result,"length")) - 1, 0)
-        Item len_val = js_get_name_key(result, "length", 6);
+        Item len_val = js_get_name_key(result_root.get(), "length", 6);
         if (item_is_error(len_val)) { strbuf_free(buf); return len_val; }
         int result_length = 0;
         {
@@ -19248,15 +19275,15 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         int n_captures = (result_length > 1) ? result_length - 1 : 0;
         if (n_captures > 64) n_captures = 64;
         // Step 14b: matched = ToString(Get(result,"0"))
-        Item matched_raw = js_get_name_key(result, "0", 1);
+        Item matched_raw = js_get_name_key(result_root.get(), "0", 1);
         if (item_is_error(matched_raw)) { strbuf_free(buf); return matched_raw; }
-        Item matched = js_to_string(matched_raw);
-        if (item_is_error(matched)) { strbuf_free(buf); return matched; }
-        String* matched_s = it2s(matched);
+        matched_root.set(js_to_string(matched_raw));
+        if (item_is_error(matched_root.get())) { strbuf_free(buf); return matched_root.get(); }
+        String* matched_s = it2s(matched_root.get());
         const char* matched_chars = matched_s ? matched_s->chars : "";
         int matched_len = matched_s ? (int)matched_s->len : 0;
         // Step 14e: position = max(ToInteger(Get(result,"index")), 0)
-        Item index_val = js_get_name_key(result, "index", 5);
+        Item index_val = js_get_name_key(result_root.get(), "index", 5);
         if (item_is_error(index_val)) { strbuf_free(buf); return index_val; }
         Item index_num = js_to_number(index_val);
         if (item_is_error(index_num)) { strbuf_free(buf); return index_num; }
@@ -19276,7 +19303,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         for (int n = 1; n <= n_captures; n++) {
             char idx_buf[8];
             int idx_blen = snprintf(idx_buf, sizeof(idx_buf), "%d", n);
-            Item capN = js_get_name_key(result, idx_buf, idx_blen);
+            Item capN = js_get_name_key(result_root.get(), idx_buf, idx_blen);
             if (item_is_error(capN)) { strbuf_free(buf); return capN; }
             if (get_type_id(capN) != LMD_TYPE_UNDEFINED && capN.item != ItemNull.item) {
                 Item capN_str = js_to_string(capN);
@@ -19287,42 +19314,44 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
             }
         }
         // Step 14i: namedCaptures = Get(result, "groups")
-        Item named_captures = js_get_name_key(result, "groups", 6);
-        if (item_is_error(named_captures)) { strbuf_free(buf); return named_captures; }
+        named_captures_root.set(js_get_name_key(result_root.get(), "groups", 6));
+        if (item_is_error(named_captures_root.get())) { strbuf_free(buf); return named_captures_root.get(); }
         // Step 14j/k: compute replacement string
         Item replacement_str;
         if (functional_replace) {
             // replacerArgs = [matched, cap1, ..., capN, position, S, groups?]
-            bool has_groups = !js_regexp_is_undefined(named_captures);
+            bool has_groups = !js_regexp_is_undefined(named_captures_root.get());
             int fn_argc = 1 + n_captures + 2 + (has_groups ? 1 : 0);
             int ai = 0;
-            fn_args_buf[ai++] = matched;
+            fn_args_buf[ai++] = matched_root.get();
             for (int n = 0; n < n_captures; n++) fn_args_buf[ai++] = captures_buf[n];
             fn_args_buf[ai++] = (Item){.item = i2it(position)};
-            fn_args_buf[ai++] = str;
-            if (has_groups) fn_args_buf[ai++] = named_captures;
-            Item replValue = js_call_function(replacement, make_js_undefined(), fn_args_buf, fn_argc);
-            if (item_is_error(replValue)) { strbuf_free(buf); return replValue; }
-            replacement_str = js_to_string(replValue);
-            if (item_is_error(replacement_str)) { strbuf_free(buf); return replacement_str; }
+            fn_args_buf[ai++] = str_root.get();
+            if (has_groups) fn_args_buf[ai++] = named_captures_root.get();
+            value_root.set(js_call_function(replacement_root.get(), make_js_undefined(),
+                fn_args_buf, fn_argc));
+            if (item_is_error(value_root.get())) { strbuf_free(buf); return value_root.get(); }
+            value_root.set(js_to_string(value_root.get()));
+            if (item_is_error(value_root.get())) { strbuf_free(buf); return value_root.get(); }
+            replacement_str = value_root.get();
         } else {
-            if (!js_regexp_is_undefined(named_captures)) {
-                TypeId nctid = get_type_id(named_captures);
-                if (named_captures.item == ItemNull.item || nctid == LMD_TYPE_NULL) {
+            if (!js_regexp_is_undefined(named_captures_root.get())) {
+                TypeId nctid = get_type_id(named_captures_root.get());
+                if (named_captures_root.get().item == ItemNull.item || nctid == LMD_TYPE_NULL) {
                     strbuf_free(buf);
                     return js_throw_type_error("RegExp replace groups cannot be null");
                 }
-                named_captures = js_to_object(named_captures);
-                if (item_is_error(named_captures)) { strbuf_free(buf); return named_captures; }
+                named_captures_root.set(js_to_object(named_captures_root.get()));
+                if (item_is_error(named_captures_root.get())) { strbuf_free(buf); return named_captures_root.get(); }
             }
             // GetSubstitution: apply $-patterns in replacement string
-            String* rs = it2s(replacement);
+            String* rs = it2s(replacement_root.get());
             if (rs && rs->len > 0) {
                 StrBuf* rb = strbuf_new();
                 Item replacement_status = js_apply_replacement_from_items(rb, rs->chars, (int)rs->len,
                     S ? S->chars : "", lengthS, position,
                     matched_chars, matched_len,
-                    captures_buf, n_captures, named_captures);
+                    captures_buf, n_captures, named_captures_root.get());
                 if (item_is_error(replacement_status)) {
                     strbuf_free(rb);
                     strbuf_free(buf);
@@ -19335,18 +19364,19 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
                 replacement_str = js_name_item("", 0);
             }
         }
+        value_root.set(replacement_str);
         // Step 14l: if position >= nextSourcePosition, append prefix + replacement
         if (position >= next_source_pos && S) {
             if (position > next_source_pos) {
                 if (utf16_replace) {
-                    Item prefix = js_str_substring_utf16(str, next_source_pos, position);
-                    String* ps = it2s(prefix);
+                    named_captures_root.set(js_str_substring_utf16(str_root.get(), next_source_pos, position));
+                    String* ps = it2s(named_captures_root.get());
                     if (ps) strbuf_append_str_n(buf, ps->chars, ps->len);
                 } else {
                     strbuf_append_str_n(buf, S->chars + next_source_pos, position - next_source_pos);
                 }
             }
-            String* rs = it2s(replacement_str);
+            String* rs = it2s(value_root.get());
             if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
             if (utf16_replace) {
                 int64_t matched_units = matched_s ?
@@ -19360,8 +19390,8 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
     // Step 15: append remaining string
     if (S && next_source_pos < (utf16_replace ? source_units : lengthS)) {
         if (utf16_replace) {
-            Item suffix = js_str_substring_utf16(str, next_source_pos, source_units);
-            String* ss = it2s(suffix);
+            named_captures_root.set(js_str_substring_utf16(str_root.get(), next_source_pos, source_units));
+            String* ss = it2s(named_captures_root.get());
             if (ss) strbuf_append_str_n(buf, ss->chars, ss->len);
         } else {
             strbuf_append_str_n(buf, S->chars + next_source_pos, lengthS - next_source_pos);
@@ -27770,30 +27800,32 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
 // (Item* env, Item input, int64_t state) and returns a 2-element array
 // [value, next_state] where next_state == -1 means done.
 using JsGenerator = JsGeneratorStateRecord;
-#define js_generators (js_runtime_state.generators)
-#define js_generator_count (js_runtime_state.generator_count)
 
 extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
     if (!map || !gc) return;
     Item generator_item = (Item){.map = map};
     if (!js_object_has_class(generator_item, JS_CLASS_GENERATOR)) return;
-    int64_t idx = ((JsGeneratorMapCarrier*)map)->generator_index;
-    if (idx < 0 || idx >= js_generator_count) return;
-    if (js_generators[idx].env) gc_mark_object_ptr(gc, js_generators[idx].env);
-    gc_mark_item(gc, js_generators[idx].private_home_class.item);
-    gc_mark_item(gc, js_generators[idx].delegate.item);
-    gc_mark_item(gc, js_generators[idx].ast_function.item);
-    gc_mark_item(gc, js_generators[idx].ast_arguments.item);
-    gc_mark_item(gc, js_generators[idx].ast_this.item);
-    gc_mark_item(gc, js_generators[idx].ast_yield_values.item);
-    gc_mark_item(gc, js_generators[idx].ast_pending_resume_input.item);
-    if (js_generators[idx].ast_function_env) {
-        gc_mark_object_ptr(gc, js_generators[idx].ast_function_env);
-    }
-    if (js_generators[idx].ast_body_env) {
-        gc_mark_object_ptr(gc, js_generators[idx].ast_body_env);
-    }
-    js_interp_generator_trace_continuations(&js_generators[idx], gc);
+    JsGeneratorStateRecord* gen = &((JsGeneratorMapCarrier*)map)->state;
+    if (gen->env) gc_mark_object_ptr(gc, gen->env);
+    gc_mark_item(gc, gen->private_home_class.item);
+    gc_mark_item(gc, gen->delegate.item);
+    gc_mark_item(gc, gen->ast_function.item);
+    gc_mark_item(gc, gen->ast_arguments.item);
+    gc_mark_item(gc, gen->ast_this.item);
+    gc_mark_item(gc, gen->ast_yield_values.item);
+    gc_mark_item(gc, gen->ast_pending_resume_input.item);
+    if (gen->ast_function_env) gc_mark_object_ptr(gc, gen->ast_function_env);
+    if (gen->ast_body_env) gc_mark_object_ptr(gc, gen->ast_body_env);
+    js_interp_generator_trace_continuations(gen, gc);
+}
+
+// JSCU9: free a collected generator's native continuation lists. The GC calls
+// this for every dying Map (lambda-mem.cpp), so a generator that is never run
+// to completion still releases its interpreter continuations.
+extern "C" void js_generator_map_heap_destroy(Map* map) {
+    if (!map) return;
+    if (!js_object_has_class((Item){.map = map}, JS_CLASS_GENERATOR)) return;
+    js_interp_generator_clear_continuations(&((JsGeneratorMapCarrier*)map)->state);
 }
 
 // Helper: create {value, done} iterator result object
@@ -27941,26 +27973,20 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
         result_root, ItemNull,
         private_home_root, js_current_private_home_class);
 
-    // Allocate a new generator slot; the carrier stores this identity outside
-    // the observable property shape, so completed objects cannot alias a key.
-    int idx = -1;
-    if (js_generator_count >= JS_MAX_GENERATORS) {
-        // Last resort: recycle oldest completed slot
-        for (int i = 0; i < js_generator_count; i++) {
-            if (js_generators[i].done) {
-                idx = i;
-                break;
-            }
-        }
-        if (idx < 0) {
-            log_error("generator: exceeded max generators (%d)", JS_MAX_GENERATORS);
-            return ItemNull;
-        }
-    } else {
-        idx = js_generator_count++;
-    }
-    JsGenerator* gen = &js_generators[idx];
-    js_interp_generator_clear_continuations(gen);
+    // The generator object owns its state inline (JSCU9): allocate the carrier
+    // and initialize the embedded record. A zeroed GC allocation means the
+    // continuation lists start empty, so no pre-clear is needed.
+    TypeMap* generator_type = js_object_type_for_class(JS_CLASS_GENERATOR);
+    JsGeneratorMapCarrier* carrier = (JsGeneratorMapCarrier*)heap_calloc(
+        sizeof(JsGeneratorMapCarrier), LMD_TYPE_MAP);
+    if (!generator_type || !carrier) return ItemError;
+    carrier->base.type_id = LMD_TYPE_MAP;
+    carrier->base.map_kind = MAP_KIND_PLAIN;
+    carrier->base.type = generator_type;
+    carrier->base.data = NULL;
+    carrier->base.data_cap = 0;
+    obj_root.set((Item){.map = &carrier->base});
+    JsGenerator* gen = &carrier->state;
     gen->type_id = LMD_TYPE_MAP;
     gen->runtime_context = runtime;
     gen->state_fn = func_ptr;
@@ -27996,17 +28022,6 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     gen->ast_pending_resume_input = ItemNull;
     gen->ast_initialized = false;
 
-    TypeMap* generator_type = js_object_type_for_class(JS_CLASS_GENERATOR);
-    JsGeneratorMapCarrier* carrier = (JsGeneratorMapCarrier*)heap_calloc(
-        sizeof(JsGeneratorMapCarrier), LMD_TYPE_MAP);
-    if (!generator_type || !carrier) return ItemError;
-    carrier->base.type_id = LMD_TYPE_MAP;
-    carrier->base.map_kind = MAP_KIND_PLAIN;
-    carrier->base.type = generator_type;
-    carrier->base.data = NULL;
-    carrier->base.data_cap = 0;
-    carrier->generator_index = idx;
-    obj_root.set((Item){.map = &carrier->base});
     // Set prototype: use the generator function's current .prototype if it's an
     // object (OrdinaryCreateFromConstructor).  Default parameter evaluation can
     // mutate g.prototype before the generator object is created, so read the
@@ -28081,9 +28096,7 @@ extern "C" Item js_generator_create_ast(Item function, Item arguments,
 
 static JsGenerator* js_get_generator(Item gen_obj) {
     if (!js_object_has_class(gen_obj, JS_CLASS_GENERATOR)) return NULL;
-    int64_t idx = ((JsGeneratorMapCarrier*)gen_obj.map)->generator_index;
-    if (idx < 0 || idx >= js_generator_count) return NULL;
-    return &js_generators[idx];
+    return &((JsGeneratorMapCarrier*)gen_obj.map)->state;
 }
 
 extern "C" JsGeneratorStateRecord* js_generator_get_ast_state(Item generator) {
@@ -31271,14 +31284,49 @@ extern "C" Item js_await_sync_incremental(Item value) {
 // Phase 6: Async/Await Full State Machine Runtime
 // ============================================================
 
-// Async context: tracks a running async function's state machine
+// Async context: a running async function's suspended state machine.
 using JsAsyncContext = JsAsyncContextStateRecord;
-#define js_async_contexts (js_runtime_state.async_contexts)
-#define js_async_context_count (js_runtime_state.async_context_count)
-
 #define js_async_resolved_value (js_runtime_state.async_resolved_value)
 
-static void js_async_register_roots_once() {
+// JSCU10 (D5.1.1v2/D5.1.3): a suspended async activation is a GC-owned frame,
+// not a slot in a context-wide table. The carrier owns its re-homed env and
+// result promise and traces its own edges; the resume/reject reactions retain
+// the frame Item, so it lives exactly as long as the awaited promise or the
+// running body needs it. No cap, no pool, no 2,049 permanent roots.
+typedef struct JsAsyncFrameCarrier {
+    Map base;
+    JsAsyncContextStateRecord state;
+} JsAsyncFrameCarrier;
+
+static JsAsyncContext* js_async_frame_from_item(Item frame_item) {
+    if (get_type_id(frame_item) != LMD_TYPE_MAP || !frame_item.map ||
+            frame_item.map->map_kind != MAP_KIND_ASYNC_FRAME) return NULL;
+    return &((JsAsyncFrameCarrier*)frame_item.map)->state;
+}
+
+extern "C" void js_async_frame_map_gc_trace(Map* map, gc_heap_t* gc) {
+    if (!map || !gc || map->map_kind != MAP_KIND_ASYNC_FRAME) return;
+    JsAsyncContext* ctx = &((JsAsyncFrameCarrier*)map)->state;
+    if (ctx->env) gc_mark_object_ptr(gc, ctx->env);
+    gc_mark_item(gc, ctx->this_val.item);
+    gc_mark_item(gc, ctx->promise.item);
+    gc_mark_item(gc, ctx->ast_function.item);
+    gc_mark_item(gc, ctx->ast_arguments.item);
+    gc_mark_item(gc, ctx->ast_await_values.item);
+    if (ctx->ast_function_env) gc_mark_object_ptr(gc, ctx->ast_function_env);
+    if (ctx->ast_body_env) gc_mark_object_ptr(gc, ctx->ast_body_env);
+    js_interp_async_trace_continuations(ctx, gc);
+}
+
+extern "C" void js_async_frame_map_heap_destroy(Map* map) {
+    if (!map || map->map_kind != MAP_KIND_ASYNC_FRAME) return;
+    js_interp_async_clear_continuations(&((JsAsyncFrameCarrier*)map)->state);
+}
+
+// One scratch Item (await's resolved-value handoff) survives across the suspend
+// check; register it once per heap epoch. This is all that remains of the old
+// 2,049-root async table.
+static void js_async_ensure_scratch_root() {
     gc_heap_t* active_gc = context && context->heap ? context->heap->gc : NULL;
     uint64_t active_epoch = js_get_heap_epoch();
     if (!active_gc ||
@@ -31286,21 +31334,6 @@ static void js_async_register_roots_once() {
              js_runtime_state.async_roots_registered_epoch == active_epoch)) return;
     js_runtime_state.async_roots_registered_gc = active_gc;
     js_runtime_state.async_roots_registered_epoch = active_epoch;
-
-    for (int i = 0; i < JS_MAX_ASYNC_CONTEXTS; i++) {
-        // A suspended state machine owns its raw GC env pointer after the
-        // generated wrapper returns, so the fixed context table must root it.
-        heap_register_gc_root((uint64_t*)&js_async_contexts[i].env);
-        heap_register_gc_root(&js_async_contexts[i].this_val.item);
-        heap_register_gc_root(&js_async_contexts[i].ast_function.item);
-        heap_register_gc_root(&js_async_contexts[i].ast_arguments.item);
-        heap_register_gc_root(&js_async_contexts[i].ast_await_values.item);
-        heap_register_gc_root((uint64_t*)&js_async_contexts[i].ast_function_env);
-        heap_register_gc_root((uint64_t*)&js_async_contexts[i].ast_body_env);
-        // The promise carrier is a GC VMap now; retaining only the native
-        // context record would let a suspended async function lose its owner.
-        heap_register_gc_root(&js_async_contexts[i].promise.item);
-    }
     heap_register_gc_root(&js_async_resolved_value.item);
 }
 
@@ -31350,12 +31383,15 @@ extern "C" Item js_async_must_suspend(Item value) {
 JS_FORWARD_EXPRESSION(Item, js_async_get_resolved, (void), js_async_resolved_value)
 
 // Forward declarations for async callbacks
-static Item js_async_resume_handler(Item ctx_idx_item, Item resolved_value);
-static Item js_async_reject_handler(Item ctx_idx_item, Item reason);
+static Item js_async_resume_handler(Item frame_item, Item resolved_value);
+static Item js_async_reject_handler(Item frame_item, Item reason);
 
-// Core async state machine driver: calls the state machine and handles results
-static void js_async_drive(int ctx_idx, Item input, int64_t state) {
-    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
+// Core async state machine driver: calls the state machine and handles results.
+// The frame Item is rooted here so the GC-owned activation survives the body's
+// synchronous execution before a suspend re-homes it to the awaited promise.
+static void js_async_drive(Item frame_item, Item input, int64_t state) {
+    JsAsyncContext* ctx = js_async_frame_from_item(frame_item);
+    if (!ctx) return;
     if (!js_mir_owner_is_current(ctx->runtime_context, "js-async-drive")) {
         return;
     }
@@ -31363,11 +31399,14 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     if (ctx->module_state_id != UINT32_MAX &&
             !module_state.activate(ctx->module_state_id)) return;
     JS_ROOTS(roots,
+        frame_root, frame_item,
         input_root, input,
         result_root, ItemNull,
         value_root, ItemNull,
         resume_root, ItemNull,
         reject_root, ItemNull);
+    // ctx points inside the carrier frame_root keeps alive; re-read after any
+    // allocation is unnecessary because the carrier itself never moves.
     Item prev_this = js_current_this;
     js_current_this = ctx->this_val;
     if (get_type_id(ctx->ast_function) == LMD_TYPE_FUNC) {
@@ -31405,16 +31444,15 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
         // Suspended on pending promise — register resume/reject callbacks
         ctx->state = next_state;
 
-        // Create bound resume callback: js_async_resume_handler(ctx_idx, resolved_val)
+        // Bind resume/reject to the frame Item itself (JSCU10): the awaited
+        // promise's reaction list then retains the activation until it settles.
         Item resume_fn = js_new_native_function(js_async_resume_handler);
-        Item idx_item = (Item){.item = i2it(ctx_idx)};
-        resume_root.set(js_bind_function(resume_fn, ItemNull, &idx_item, 1));
+        resume_root.set(js_bind_function(resume_fn, ItemNull, &frame_item, 1));
 
-        // Create bound reject callback: js_async_reject_handler(ctx_idx, reason)
         Item reject_fn = js_new_native_function(js_async_reject_handler);
         // The first callback has no owner while the second callback allocates;
         // keep both exact-rooted until the awaited promise records them.
-        reject_root.set(js_bind_function(reject_fn, ItemNull, &idx_item, 1));
+        reject_root.set(js_bind_function(reject_fn, ItemNull, &frame_item, 1));
 
         // Register on the pending promise
         js_promise_then(value_root.get(), resume_root.get(), reject_root.get());
@@ -31422,24 +31460,22 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
 }
 
 // Callback when an awaited promise resolves — resumes the async state machine
-static Item js_async_resume_handler(Item ctx_idx_item, Item resolved_value) {
-    int ctx_idx = (int)it2i(ctx_idx_item);
-    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
-    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
-    js_async_drive(ctx_idx, resolved_value, ctx->state);
+static Item js_async_resume_handler(Item frame_item, Item resolved_value) {
+    JsAsyncContext* ctx = js_async_frame_from_item(frame_item);
+    if (!ctx) return ItemNull;
+    js_async_drive(frame_item, resolved_value, ctx->state);
     return ItemNull;
 }
 
 // Callback when an awaited promise rejects — re-enter through the ERROR lane.
-static Item js_async_reject_handler(Item ctx_idx_item, Item reason) {
-    int ctx_idx = (int)it2i(ctx_idx_item);
-    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
-    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
+static Item js_async_reject_handler(Item frame_item, Item reason) {
+    JsAsyncContext* ctx = js_async_frame_from_item(frame_item);
+    if (!ctx) return ItemNull;
     // The resume state is shared by fulfillment and rejection, so encode the
     // rejected reason before re-entry; otherwise await's catch target sees a
     // normal string/value and continues past the rejection.
     Item thrown = js_throw_value(reason);
-    js_async_drive(ctx_idx, thrown, ctx->state);
+    js_async_drive(frame_item, thrown, ctx->state);
     return ItemNull;
 }
 
@@ -31452,13 +31488,21 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
         return ItemError;
     }
     if (!js_mir_owner_is_current(runtime, "js-async-create")) return ItemError;
-    js_async_register_roots_once();
-    if (js_async_context_count >= JS_MAX_ASYNC_CONTEXTS) {
-        log_error("js: async context limit reached (%d)", JS_MAX_ASYNC_CONTEXTS);
-        return (Item){.item = i2it(-1)};
-    }
-    int idx = js_async_context_count++;
-    JsAsyncContext* ctx = &js_async_contexts[idx];
+    js_async_ensure_scratch_root();
+    // Allocate the GC-owned frame carrier; a zeroed allocation leaves the
+    // continuation lists empty. The frame Item is rooted while the promise
+    // allocation below may collect (JSCU10).
+    JsAsyncFrameCarrier* carrier = (JsAsyncFrameCarrier*)heap_calloc(
+        sizeof(JsAsyncFrameCarrier), LMD_TYPE_MAP);
+    if (!carrier) return ItemError;
+    carrier->base.type_id = LMD_TYPE_MAP;
+    carrier->base.map_kind = MAP_KIND_ASYNC_FRAME;
+    carrier->base.type = NULL;
+    carrier->base.data = NULL;
+    carrier->base.data_cap = 0;
+    Item frame_item = (Item){.map = &carrier->base};
+    JS_ROOTS(create_roots, frame_root, frame_item);
+    JsAsyncContext* ctx = &carrier->state;
     ctx->runtime_context = runtime;
     ctx->state_fn = fn_ptr;
     js_env_rehome_scalars(env);
@@ -31483,10 +31527,8 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
     // Create a pending promise for this async function's result
     JsPromise* p = js_alloc_promise();
     ctx->promise = js_promise_to_item(p);
-    // async functions allocate their result promise before the body runs.
-    js_promise_to_item(p);
 
-    return (Item){.item = i2it(idx)};
+    return frame_root.get();
 }
 
 extern "C" Item js_async_context_create_mir(void* fn_ptr, Item* env,
@@ -31511,19 +31553,17 @@ extern "C" Item js_async_context_create_ast(Item function, Item arguments,
 }
 
 // Start execution of an async state machine (initial call at state 0)
-extern "C" Item js_async_start(Item ctx_idx_item) {
-    int ctx_idx = (int)it2i(ctx_idx_item);
-    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
-    js_async_drive(ctx_idx, make_js_undefined(), 0);
+extern "C" Item js_async_start(Item frame_item) {
+    if (!js_async_frame_from_item(frame_item)) return ItemNull;
+    js_async_drive(frame_item, make_js_undefined(), 0);
     return ItemNull;
 }
 
-// Get the result promise for an async context
-extern "C" Item js_async_get_promise(Item ctx_idx_item) {
-    int ctx_idx = (int)it2i(ctx_idx_item);
-    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
-    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
-    return ctx->promise;
+// Get the result promise for an async activation. No allocation before the
+// read, so the frame the generated wrapper still holds is not collected here.
+extern "C" Item js_async_get_promise(Item frame_item) {
+    JsAsyncContext* ctx = js_async_frame_from_item(frame_item);
+    return ctx ? ctx->promise : ItemNull;
 }
 
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected) {
@@ -37430,24 +37470,15 @@ extern "C" bool js_is_set_instance(Item obj) {
 // Called by js_batch_reset() to prevent dangling pointers after pool destruction.
 // =============================================================================
 void js_deep_batch_reset() {
-    // generators, queue owners, and async contexts contain Items from the old
-    // heap; GC-owned Promise carriers are reclaimed with that heap.
-    for (int i = 0; i < js_generator_count; i++) {
-        js_interp_generator_clear_continuations(&js_generators[i]);
-    }
-    for (int i = 0; i < js_async_context_count; i++) {
-        js_interp_async_clear_continuations(&js_async_contexts[i]);
-    }
-    memset(js_generators, 0, sizeof(js_generators));
-    js_generator_count = 0;
+    // Generators and async activations (JSCU9/JSCU10) are GC-owned carriers
+    // reclaimed with the old heap; the heap finalizer frees their
+    // continuations, so no table walk is needed.
     js_runtime_state.promises.pending_count = 0;
     js_runtime_state.promises.live_count = 0;
     js_runtime_state.promises.peak_live_count = 0;
     js_domain_current = (Item){0};
     js_domain_namespace = (Item){0};
     js_item_stack_clear(&js_domain_stack_state);
-    memset(js_async_contexts, 0, sizeof(js_async_contexts));
-    js_async_context_count = 0;
     memset(js_als_instances, 0, sizeof(js_als_instances));
     js_als_instance_count = 0;
     js_async_hooks_enabled_count = 0;

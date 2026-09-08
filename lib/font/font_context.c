@@ -255,6 +255,10 @@ void font_context_destroy(FontContext* ctx) {
         font_database_destroy_internal(ctx->database);
         ctx->database = NULL;
     }
+    if (ctx->explicit_font_directories) {
+        arraylist_free(ctx->explicit_font_directories);
+        ctx->explicit_font_directories = NULL;
+    }
 
     Arena* glyph_arena = ctx->glyph_arena;
     bool owns_glyph_arena = ctx->owns_glyph_arena;
@@ -556,7 +560,7 @@ char* font_find_path(FontContext* ctx, const char* family) {
     if (!matches || matches->length == 0) {
         if (matches) arraylist_free(matches);
         // try platform-specific fallback
-        char* result = font_platform_find_fallback(family);
+        char* result = font_platform_find_fallback(family, NULL);
         return result;  // may be NULL
     }
 
@@ -627,6 +631,14 @@ void font_context_add_scan_directory(FontContext* ctx, const char* directory) {
     // explicit document/test font directories must be scanned before broad
     // platform directories, otherwise the discovery cap can be reached first.
     arraylist_prepend(ctx->database->scan_directories, dir_copy);
+    if (!ctx->explicit_font_directories) {
+        ctx->explicit_font_directories = arraylist_new(0);
+    }
+    if (ctx->explicit_font_directories) {
+        // Preserve the exact file face for metrics rather than resolving its
+        // family name through the platform catalog.
+        arraylist_append(ctx->explicit_font_directories, dir_copy);
+    }
 }
 
 // ============================================================================

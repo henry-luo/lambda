@@ -23,6 +23,7 @@
 
 extern __thread EvalContext* context;
 extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc);
+extern "C" void js_async_frame_map_gc_trace(Map* map, gc_heap_t* gc);
 extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc);
 extern "C" void js_iterator_map_gc_trace(Map* map, gc_heap_t* gc);
 
@@ -222,6 +223,7 @@ static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
     Map* map = (Map*)data;
     if (!map || !gc) return;
     js_generator_map_gc_trace(map, gc);
+    js_async_frame_map_gc_trace(map, gc);
     js_collection_map_gc_trace(map, gc);
     js_iterator_map_gc_trace(map, gc);
     if (map->type_id != LMD_TYPE_MAP) return;
@@ -261,6 +263,8 @@ static void gc_finalize_typed_array(JsTypedArray* ta, gc_native_seen_t* seen_nat
 
 extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_native);
 extern "C" void js_collection_map_heap_destroy(Map* map, gc_native_seen_t* seen_native);
+extern "C" void js_generator_map_heap_destroy(Map* map);
+extern "C" void js_async_frame_map_heap_destroy(Map* map);
 
 static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
     if (!map) return;
@@ -301,6 +305,10 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
         break;
     }
     js_regex_map_heap_destroy(map, seen_native);
+    // JSCU9/JSCU10: a collected generator or async-frame carrier frees its
+    // interpreter continuations.
+    js_generator_map_heap_destroy(map);
+    js_async_frame_map_heap_destroy(map);
 }
 
 static void js_native_map_gc_destroy(void* data) {

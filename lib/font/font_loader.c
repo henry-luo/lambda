@@ -331,6 +331,26 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
     }
     path = clean_path;
 
+    bool is_explicit_scan_font = false;
+    if (ctx->explicit_font_directories) {
+        for (int i = 0; i < ctx->explicit_font_directories->length; i++) {
+            const char* directory = (const char*)ctx->explicit_font_directories->data[i];
+            if (!directory) continue;
+            size_t directory_len = strlen(directory);
+            while (directory_len > 0 &&
+                   (directory[directory_len - 1] == '/' ||
+                    directory[directory_len - 1] == '\\')) {
+                directory_len--;
+            }
+            if (directory_len > 0 &&
+                strncmp(path, directory, directory_len) == 0 &&
+                (path[directory_len] == '/' || path[directory_len] == '\\')) {
+                is_explicit_scan_font = true;
+                break;
+            }
+        }
+    }
+
     // detect format by reading file magic bytes
     FILE* fp = fopen(path, "rb");
     if (!fp) {
@@ -359,6 +379,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
             FontHandle* handle = create_handle(ctx, (uint8_t*)cached_data, cached_len,
                                                 face_index, size_px, physical_size, weight, slant);
             if (handle) {
+                handle->is_explicit_scan_font = is_explicit_scan_font;
                 handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
                 log_info("font_loader: loaded WOFF '%s' from file cache (family=%s, size=%.0f)",
                          path, handle->family_name ? handle->family_name : "?", physical_size);
@@ -405,6 +426,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         FontHandle* handle = create_handle(ctx, (uint8_t*)sfnt_data, sfnt_len,
                                             face_index, size_px, physical_size, weight, slant);
         if (handle) {
+            handle->is_explicit_scan_font = is_explicit_scan_font;
             handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
             log_info("font_loader: loaded WOFF '%s' (family=%s, size=%.0f)",
                      path, handle->family_name ? handle->family_name : "?", physical_size);
@@ -421,6 +443,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
             FontHandle* handle = create_handle(ctx, (uint8_t*)cached_data, cached_len,
                                                 face_index, size_px, physical_size, weight, slant);
             if (handle) {
+                handle->is_explicit_scan_font = is_explicit_scan_font;
                 handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
                 log_info("font_loader: loaded '%s' from file cache (family=%s, size=%.0f)",
                          path, handle->family_name ? handle->family_name : "?", physical_size);
@@ -474,6 +497,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         FontHandle* handle = create_handle(ctx, ttf_buf, ttf_size,
                                             face_index, size_px, physical_size, weight, slant);
         if (handle) {
+            handle->is_explicit_scan_font = is_explicit_scan_font;
             handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
             log_info("font_loader: loaded '%s' (family=%s, size=%.0f)",
                      path, handle->family_name ? handle->family_name : "?", physical_size);

@@ -305,10 +305,19 @@ static int font_get_handle_platform_metrics(FontHandle* handle,
                                             float* out_descent,
                                             float* out_line_height) {
     if (!handle) return 0;
+    if (handle->size_px == 0.0f) {
+        // CoreText clamps zero-point faces to a default size; CSS metrics scale to zero.
+        if (out_ascent) *out_ascent = 0.0f;
+        if (out_descent) *out_descent = 0.0f;
+        if (out_line_height) *out_line_height = 0.0f;
+        return 1;
+    }
 #ifdef __APPLE__
-    if ((handle->is_document_font || handle->metrics_from_platform_ref) &&
+    if ((handle->is_document_font || handle->is_explicit_scan_font ||
+         handle->metrics_from_platform_ref) &&
         handle->ct_raster_ref) {
-        // aliases and platform fallbacks may resolve to a substitute; measure the retained face.
+        // CSS faces and caller-supplied directories retain their selected file;
+        // resolving the family name again can substitute another installed face.
         return font_platform_get_metrics_from_ref(handle->ct_raster_ref,
             out_ascent, out_descent, out_line_height);
     }

@@ -1968,6 +1968,9 @@ typedef struct Linebox {
     View* start_view;
     ViewBlock* first_static_line_alignment; // abspos inline descendants awaiting line-box extent
     ViewBlock* last_static_line_alignment;
+    ViewBlock* first_static_inline_position; // abspos inline boxes awaiting final text alignment
+    ViewBlock* last_static_inline_position;
+    float static_inline_alignment_offset_x; // final uniform text-align shift for static inline boxes
     bool has_phantom_inline_fragment; // zero-height inline run still needing text-align
     CssEnum vertical_align;
     float vertical_align_offset;    // length/percentage vertical-align offset (px), positive = raise
@@ -3841,6 +3844,7 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
 void line_break(LayoutContext* lycon);
 void layout_finalize_static_line_self_alignment(LayoutContext* lycon,
                                                 float used_line_height);
+void layout_finalize_static_inline_positions(LayoutContext* lycon);
 void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* span);
 void line_consume_trailing_collapsible_space(LayoutContext* lycon,
                                              bool trim_text_bounds,
@@ -4287,6 +4291,26 @@ inline bool layout_span_children_have_no_line_content(ViewSpan* span) {
     return true;
 }
 
+inline bool layout_view_has_only_out_of_flow_descendants(View* view) {
+    if (!view || view->view_type == RDT_VIEW_NONE) return false;
+    if (layout_view_is_out_of_flow(view)) return true;
+    if (view->view_type != RDT_VIEW_INLINE) return false;
+    ViewSpan* span = static_cast<ViewSpan*>(view);
+    if (!span->first_child) return false;
+    for (View* child = span->first_child; child; child = child->next()) {
+        if (!layout_view_has_only_out_of_flow_descendants(child)) return false;
+    }
+    return true;
+}
+
+inline bool layout_span_children_have_only_out_of_flow_descendants(ViewSpan* span) {
+    if (!span || !span->first_child) return false;
+    for (View* child = span->first_child; child; child = child->next()) {
+        if (!layout_view_has_only_out_of_flow_descendants(child)) return false;
+    }
+    return true;
+}
+
 static inline bool layout_block_is_out_of_flow_positioned(const ViewBlock* block) {
     return block && layout_position_is_abs_fixed(block->position);
 }
@@ -4355,6 +4379,7 @@ bool layout_quirky_container_ignores_child_margin_bottom(
 bool layout_element_was_inline(DomElement* element, bool include_replaced = true);
 bool layout_object_uses_default_size(DomElement* element);
 bool layout_element_is_replaced(DomElement* element);
+bool is_form_control(DomElement* element);
 
 struct LayoutBorderSpacingValue {
     float horizontal;

@@ -53,6 +53,12 @@ JsModuleConstEntry* jm_find_module_const_by_binding_in(struct hashmap* consts,
         }
     }
     if (!module_binding->name) return NULL;
+    if (!module_binding->scope || (module_binding->scope->kind != SCOPE_KIND_GLOBAL &&
+            module_binding->scope->kind != SCOPE_KIND_MODULE)) {
+        // a retained script can share a name with a later local binding; only
+        // public bindings may cross the separate compilation boundary by name.
+        return NULL;
+    }
     // Preamble declarations belong to a separately compiled AST, so their
     // NameEntry addresses cannot be shared with the consumer. This is the one
     // explicit compilation-boundary link; all ordinary source lookups remain

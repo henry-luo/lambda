@@ -64,6 +64,8 @@ extern "C" void js_domain_restore_stack(Item previous);
 #define raf_count (js_runtime_state.event_loop.raf_count)
 #define next_raf_id (js_runtime_state.event_loop.next_raf_id)
 #define auto_close_mode (js_runtime_state.event_loop.auto_close_mode)
+#define auto_close_after_load (js_runtime_state.event_loop.auto_close_after_load)
+#define auto_close_settle_ms (js_runtime_state.event_loop.auto_close_settle_ms)
 #define event_loop_shutting_down (js_runtime_state.event_loop.shutting_down)
 
 extern "C" void js_event_loop_set_auto_close_mode(bool enabled) {
@@ -71,6 +73,16 @@ extern "C" void js_event_loop_set_auto_close_mode(bool enabled) {
     // semantic event-loop state to mutate until that Runtime binds a capsule.
     if (!js_active_runtime_state) return;
     auto_close_mode = enabled;
+}
+
+extern "C" void js_event_loop_set_auto_close_after_load(bool enabled) {
+    if (!js_active_runtime_state) return;
+    auto_close_after_load = enabled;
+}
+
+extern "C" void js_event_loop_set_auto_close_settle_ms(double settle_ms) {
+    if (!js_active_runtime_state) return;
+    auto_close_settle_ms = settle_ms > 0.0 ? settle_ms : 0.0;
 }
 
 JS_FORWARD_EXPRESSION(bool, js_event_loop_auto_close_mode, (void),
@@ -951,12 +963,38 @@ static Item js_timer_finish_create(uv_loop_t* loop, JsTimerHandle* th,
     return timer_obj;
 }
 
-static Item js_schedule_timer(Item callback, Item delay, Item args_array,
-                              bool has_args, bool is_interval) {
-    if (!js_is_callable(callback)) {
+static Item js_timer_run_string_handler(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return ItemError;
+    // Timer strings execute as a classic script in the captured document realm.
+    return js_builtin_eval(env[0], 1);
+}
+
+static Item js_timer_normalize_handler(Item handler) {
+    if (js_is_callable(handler)) return handler;
+    if (!dom_get_document()) {
         return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
             "The \"callback\" argument must be of type function.");
     }
+
+    // HTML timers accept TimerHandler strings; retain compiled-source input in
+    // a closure so it is evaluated only when the timer task runs.
+    RootFrame roots(2);
+    Rooted<Item> handler_root(roots, handler);
+    Rooted<Item> source_root(roots, js_to_string(handler_root.get()));
+    if (item_is_error(source_root.get())) return source_root.get();
+
+    Item* env = js_alloc_env(1);
+    if (!env) return ItemError;
+    env[0] = source_root.get();
+    return js_new_native_closure(js_timer_run_string_handler, 0, env, 1);
+}
+
+static Item js_schedule_timer(Item callback, Item delay, Item args_array,
+                              bool has_args, bool is_interval) {
+    RootFrame roots(1);
+    Rooted<Item> callback_root(roots, js_timer_normalize_handler(callback));
+    if (item_is_error(callback_root.get())) return callback_root.get();
     uv_loop_t *loop = js_timer_get_loop(
         is_interval ? "setInterval" : "setTimeout");
     if (!loop) return ItemNull;
@@ -968,7 +1006,7 @@ static Item js_schedule_timer(Item callback, Item delay, Item args_array,
     if (!th) return ItemNull;
 
     th->id = next_timer_id++;
-    th->callback = callback;
+    th->callback = callback_root.get();
     th->is_interval = is_interval;
     th->extra_count = 0;
     th->timer.data = th;
@@ -1392,17 +1430,10 @@ extern "C" void js_event_loop_attach_lambda_scheduler(void) {
 extern "C" void js_event_loop_init(void) {
     js_event_loop_attach_lambda_scheduler();
     if (timer_handle_count > 0) {
-        // Host-driven sessions (Radiant `view`) share ONE event loop across all
-        // of a page's script executions, matching the browser. A later page
-        // script re-entering init must not discard timers a prior script queued
-        // (e.g. an editor's post-mount setTimeout(0)); the host drains them after
-        // committing layout. The loop is already live here (timers exist), so
-        // preserve it. The first init of a session runs fully (timer_count == 0).
-        if (dom_is_host_driven_loop()) {
-            event_loop_shutting_down = false;
-            return;
-        }
-        js_event_loop_shutdown();
+        // Timers belong to the active document realm. Nested script entries in
+        // a static capture must retain them until the document load boundary.
+        event_loop_shutting_down = false;
+        return;
     }
     event_loop_shutting_down = false;
 
@@ -1416,6 +1447,7 @@ extern "C" void js_event_loop_init(void) {
     raf_tail = 0;
     raf_count = 0;
     next_raf_id = 1;
+    // The document host config owns auto-close policy across nested script entries.
     // reset timers — clear stale callback pointers
     for (int i = 0; i < timer_handle_count; i++) {
         timer_handles[i] = NULL;
@@ -1790,6 +1822,18 @@ extern "C" int js_event_loop_drain(void) {
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return 0;
 
+    if (auto_close_mode && !auto_close_after_load) {
+        // Parsing may re-enter the script runner; only service ready work until
+        // the final load boundary decides which pending timers to retain.
+        for (int turn = 0; turn < 4; turn++) {
+            int active = uv_run(loop, UV_RUN_NOWAIT);
+            js_event_loop_render_checkpoint();
+            js_microtask_flush();
+            if (!active) break;
+        }
+        return 0;
+    }
+
     if (js_process_exit_requested()) {
         // process.exit() must bypass ordinary libuv liveness; Node does not wait
         // for servers or sockets once user code requested hard termination.
@@ -1799,6 +1843,9 @@ extern "C" int js_event_loop_drain(void) {
     }
 
     if (auto_close_mode) {
+        if (virtual_clock_enabled && auto_close_settle_ms > 0.0) {
+            js_event_loop_advance_virtual_time(auto_close_settle_ms, 0);
+        }
         for (int turn = 0; turn < 4; turn++) {
             int active = uv_run(loop, UV_RUN_NOWAIT);
             js_event_loop_render_checkpoint();

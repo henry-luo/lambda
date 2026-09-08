@@ -56,7 +56,9 @@ RADIANT_RENDER_JOBS := $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n 
 # DOM fixtures are process-isolated and CPU-heavy; bound concurrency while
 # leaving one core available for the host. Override with DOM_UI_JOBS=<n>.
 DOM_UI_JOBS ?= $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); else echo 1; fi)
-LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1
+# Match the browser-reference extractor's post-load stabilization window while
+# keeping static capture deterministic through Radiant's virtual JS clock.
+LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 # Ranges and reflection remain extended `make test` coverage; their large
 # known-failure inventories are not part of the fast Radiant baseline gate.
 RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_radiant_view_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest
@@ -1643,6 +1645,10 @@ test-gc-rooting-core: build
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe js --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_jit.txt
 	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_jit.txt
+	@echo "Running LambdaJS AST functional RegExp replacement exact-root gate..."
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 JS_EXECUTION_BACKEND=ast \
+		./lambda.exe js --no-log test/js/regexp_replace_callback_ast_gc.js > temp/gc_rooting_js_regexp_replace.txt
+	@diff -u test/js/regexp_replace_callback_ast_gc.txt temp/gc_rooting_js_regexp_replace.txt
 	@echo "Running Lambda-to-JS Promise membrane exact-root forced-GC gate..."
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe js --no-log test/js/concurrency_lambda_promise.js > temp/gc_rooting_lambda_promise.txt

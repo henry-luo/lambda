@@ -427,9 +427,11 @@ static FontHandle* font_resolve_single(FontContext* ctx, const FontStyleDesc* st
 
     // 6. platform-specific fallback
     {
-        char* platform_path = font_platform_find_fallback(style->family);
+        int platform_face_index = 0;
+        char* platform_path = font_platform_find_fallback(style->family,
+                                                           &platform_face_index);
         if (platform_path) {
-            handle = font_load_face_internal(ctx, platform_path, 0,
+            handle = font_load_face_internal(ctx, platform_path, platform_face_index,
                                               style->size_px, physical_size,
                                               style->weight, style->slant);
             mem_free(platform_path);

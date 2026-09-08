@@ -533,6 +533,8 @@ bool css_is_valid_css_function(const char* name);
 // tokenization, strict end-of-input validation, and pool-backed allocations.
 CssRule* css_parse_rule_text(const char* text, size_t length, Pool* pool);
 CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length, Pool* pool);
+// Unknown pseudos are valid in authored CSS but invalid in DOM selector APIs.
+bool css_selector_group_contains_generic_pseudo(const CssSelectorGroup* group);
 CssDeclaration* css_parse_declaration_text(const char* text, size_t length, Pool* pool);
 bool css_declaration_is_supported(const CssDeclaration* declaration);
 CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length,

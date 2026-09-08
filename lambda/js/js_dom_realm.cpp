@@ -242,6 +242,21 @@ extern "C" void dom_install_option_constructor(void) {
     log_debug("dom_install_option_constructor: installed Option");
 }
 
+extern "C" void dom_install_image_constructor(void) {
+    JS_ROOTS(roots,
+        global_root, js_get_global_this(),
+        proto_root, _iface_proto(global_root.get(), "HTMLImageElement"),
+        ctor_root, js_new_native_body_constructor(dom_image_constructor_body,
+            js_native_construct_via_call_body, 0));
+    if (get_type_id(proto_root.get()) != LMD_TYPE_MAP ||
+            get_type_id(ctor_root.get()) != LMD_TYPE_FUNC) return;
+    // Image and HTMLImageElement share a prototype in the platform surface.
+    js_set_function_name(ctor_root.get(), js_name_item("Image"));
+    js_initialize_native_constructor_prototype(ctor_root.get(), proto_root.get());
+    js_set_key_cstr(global_root.get(), "Image", ctor_root.get());
+    log_debug("dom_install_image_constructor: installed Image");
+}
+
 // ---------------------------------------------------------------------------
 // Window-level publications
 // ---------------------------------------------------------------------------

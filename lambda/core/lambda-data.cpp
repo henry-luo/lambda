@@ -1701,11 +1701,6 @@ TypeId type_field_storage_type_id(const Type* type) {
     return (TypeId)lambda_lane_storage_desc_for((Type*)type).value_domain;
 }
 
-// C-linkage view of the same projection for consumers that cannot see Type*.
-extern "C" TypeId lambda_shape_field_storage_type_id(const void* field_type) {
-    return type_field_storage_type_id((const Type*)field_type);
-}
-
 // ---------------------------------------------------------------------------
 // SCU9: the descriptor lives on the ShapeEntry.
 // ---------------------------------------------------------------------------

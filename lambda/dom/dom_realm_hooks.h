@@ -23,6 +23,11 @@ extern "C" Item dom_xpath_evaluator_ctor(void);
 extern "C" Item dom_option_ctor(Item text_arg, Item value_arg,
                                 Item def_sel_arg, Item sel_arg);
 
+/** `Image(width?, height?)` — a detached HTMLImageElement. */
+extern "C" Item dom_image_constructor_body(Item callee, Item this_value,
+                                             Item* args, int argc,
+                                             uint64_t* result_home);
+
 /** `new DOMMatrix()` / `new DOMPoint()` — geometry values the realm exposes. */
 extern "C" Item dom_matrix_constructor(Item init);
 extern "C" Item dom_point_constructor(Item x, Item y, Item z, Item w);
@@ -55,6 +60,7 @@ extern "C" Item dom_window_prompt(Item message_item, Item default_item);
 // for a document with no JS realm.
 extern "C" void dom_install_collection_globals(void);
 extern "C" void dom_install_option_constructor(void);
+extern "C" void dom_install_image_constructor(void);
 extern "C" void dom_install_window_dialog_globals(void);
 extern "C" void dom_install_window_computed_style_global(void);
 
