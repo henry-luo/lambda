@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable undo/redo retains and coalesces package text deltas",
-  "html": "test/html/editable-dom-history.html",
+  "html": "test/ui/ce/editable-dom-history.html",
   "viewport": {"width": 640, "height": 140},
   "events": [
     {"type": "log", "message": "=== contenteditable_history ==="},

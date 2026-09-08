@@ -48,7 +48,7 @@ The current tree has several implementations of the same operation: select a fix
 | `test/test_ui_automation_gtest.cpp` | scans only `test/ui/*.json`; extracts `html`, `skip_headless`, event types, and waits with `strstr`/`strchr`; silently ignores missing pages | CPU-derived jobs clamped by a memory-derived limit | parses the human `Assertions:` line with `sscanf` |
 | `test/ui/dom/run-dom-ui.mjs` | parses `test/ui/dom/*.json` with Node `JSON.parse`; uses a sibling page by default | separate CPU-minus-one worker pool | trusts process exit and prints its own summary |
 | `hit-test-ui` Make target | shell glob plus `sed` extraction of `html` | sequential shell loop | trusts process exit |
-| `editor-4c-view` Make target | three shell globs, `sed`, and a hard-coded default page | sequential shell loop | suppresses output and trusts process exit |
+| `editor-4c` Make target | parity runner plus unified UI fixture runner | sequential parity and view phases | each runner reports failures and stops the target |
 | `editable-editor-e2e` Make target | 32 explicit page/fixture command pairs | sequential Make recipe | stops on command failure |
 | `test/test_radiant_view_gtest.cpp` | hard-coded C++ case table, including five `test/view` event fixtures | its own parallel pre-run | independently checks exit and selected output strings |
 
@@ -446,8 +446,9 @@ dom-ui-run: build-test
 hit-test-ui: build-test
 	$(UI_TEST_RUNNER) --suite hit-test $(ARGS)
 
-editor-4c-view: build-test
-	$(UI_TEST_RUNNER) --suite editor --tag stage4c-view $(ARGS)
+editor-4c: build-test
+	@cd test/editor-js && node tools/parity-report.mjs --refresh-oracle
+	$(UI_TEST_RUNNER) --suite editor --test "editor4b_*,editor4c_*,editor4c_phase_c_*" $(ARGS)
 
 editable-editor-e2e: build-test
 	$(UI_TEST_RUNNER) --suite editor --tag upstream-editor $(ARGS)
@@ -469,7 +470,7 @@ Other existing aliases map to suite plus tags:
 | `editable-ui` | `--suite editor --tag contenteditable` |
 | `editable-editor-e2e` | `--suite editor --tag upstream-editor` |
 | `drawing-editor-e2e` | `--suite editor --tag drawing` |
-| `editor-4c-view` | `--suite editor --tag stage4c-view` |
+| `editor-4c` | parity report + `--suite editor --test "editor4b_*,editor4c_*,editor4c_phase_c_*"` |
 | `dom-ui-run` | `--suite dom` |
 | `hit-test-ui` | `--suite hit-test` |
 

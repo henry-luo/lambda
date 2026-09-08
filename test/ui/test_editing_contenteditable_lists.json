@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable list toggling uses package-selected core tree steps",
-  "html": "test/html/editable-dom-lists.html",
+  "html": "test/ui/ce/editable-dom-lists.html",
   "viewport": {"width": 640, "height": 140},
   "events": [
     {"type": "log", "message": "=== contenteditable_lists ==="},

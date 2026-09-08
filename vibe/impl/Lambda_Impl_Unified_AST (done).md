@@ -43,7 +43,7 @@
 ### 1.2 Ground rules (from the design + K17)
 
 - **Never a big-bang rewrite.** Every phase — and every step inside Phase 2/4 — lands with both pipelines green. Old and new paths coexist behind flags until the new path is proven, then the old path is deleted in the same phase (no permanent dual paths).
-- **Test gates on every merge:** `make test-lambda-baseline` (100%), lambda gtest (`make build-test` suite), editor Phase-A **1931** JS tests (`make editor-4c-js`), UI-automation **5714**, node-baseline (`make node-baseline`, ≥1492/3517 — no regression), plus AWFY + LambdaJS perf benchmarks on codegen-touching phases (release build only, per project rules).
+- **Test gates on every merge:** `make test-lambda-baseline` (100%), lambda gtest (`make build-test` suite), editor Phase-A **1931** JS tests (`make editor-4c`), UI-automation **5714**, node-baseline (`make node-baseline`, ≥1492/3517 — no regression), plus AWFY + LambdaJS perf benchmarks on codegen-touching phases (release build only, per project rules).
 - **Concurrency-track interleaving (U21):** after Phase 0, the concurrency plan's Stage A may proceed in parallel with Phases 1–3 (it codes against the emitter API). Phase 4's resumable-function-transform extraction is a *coordination point* with that track (§7).
 - **C2MIR (`transpile.cpp`) is frozen (U11):** it receives only the mechanical Phase-1 enum update; it is never taught core-node semantics beyond what Lambda already exercises.
 

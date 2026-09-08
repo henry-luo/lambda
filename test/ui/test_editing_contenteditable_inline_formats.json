@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable subscript and superscript share the format planner",
-  "html": "test/html/editable-dom-inline-formats.html",
+  "html": "test/ui/ce/editable-dom-inline-formats.html",
   "viewport": {"width": 640, "height": 160},
   "events": [
     {"type": "log", "message": "=== contenteditable_inline_formats ==="},

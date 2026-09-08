@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable queryCommand APIs read the dom package registry",
-  "html": "test/html/editable-dom-queries.html",
+  "html": "test/ui/ce/editable-dom-queries.html",
   "viewport": {"width": 640, "height": 240},
   "events": [
     {"type": "log", "message": "=== contenteditable_queries ==="},

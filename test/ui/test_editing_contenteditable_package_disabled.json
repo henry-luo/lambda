@@ -1,6 +1,6 @@
 {
   "name": "Disabled DOM behavior package leaves contenteditable mutation unavailable",
-  "html": "test/html/editable-dom-package-disabled.html",
+  "html": "test/ui/ce/editable-dom-package-disabled.html",
   "viewport": {"width": 640, "height": 140},
   "events": [
     {"type": "log", "message": "=== contenteditable_package_disabled ==="},

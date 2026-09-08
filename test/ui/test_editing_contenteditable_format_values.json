@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable format values use generic wrappers and attributes",
-  "html": "test/html/editable-dom-format-values.html",
+  "html": "test/ui/ce/editable-dom-format-values.html",
   "viewport": {"width": 640, "height": 160},
   "events": [
     {"type": "log", "message": "=== contenteditable_format_values ==="},

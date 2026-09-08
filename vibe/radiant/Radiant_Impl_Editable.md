@@ -1748,7 +1748,7 @@ make build-test
 ./test/test_dom_range_gtest.exe
 ./test/test_ui_automation_gtest.exe
 make dom-ui
-make editor-4c-view
+make editor-4c
 make editable-unit
 make editable-ui
 make editable-editor-e2e

@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable indent and outdent use generic list moves",
-  "html": "test/html/editable-dom-indent.html",
+  "html": "test/ui/ce/editable-dom-indent.html",
   "viewport": { "width": 640, "height": 240 },
   "events": [
     { "type": "set_editing_selection", "target": { "selector": "#second" }, "start": 0, "end": 3 },

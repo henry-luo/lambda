@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable document settings persist in the package session",
-  "html": "test/html/editable-dom-settings.html",
+  "html": "test/ui/ce/editable-dom-settings.html",
   "viewport": {"width": 640, "height": 160},
   "events": [
     {"type": "log", "message": "=== contenteditable_settings ==="},
