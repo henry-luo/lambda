@@ -428,11 +428,24 @@ static JsFunction* js_func_cache_lookup(
 
 static void js_func_cache_insert(const JsRuntimeState::JsFunctionCacheKey& key,
         JsFunction* fn) {
-    if (js_runtime_state.function_cache_count < JS_FUNCTION_CACHE_CAPACITY) {
-        int slot = js_runtime_state.function_cache_count++;
-        js_runtime_state.function_cache_keys[slot] = key;
-        js_runtime_state.function_cache_values[slot] = fn;
+    JsRuntimeState& state = js_runtime_state;
+    if (state.function_cache_count >= state.function_cache_capacity) {
+        int capacity = state.function_cache_capacity ? state.function_cache_capacity * 2 : 64;
+        auto* keys = (JsRuntimeState::JsFunctionCacheKey*)mem_realloc(
+            state.function_cache_keys,
+            (size_t)capacity * sizeof(JsRuntimeState::JsFunctionCacheKey),
+            MEM_CAT_JS_RUNTIME);
+        if (!keys) return;   // a miss only costs a duplicate wrapper
+        state.function_cache_keys = keys;
+        auto** values = (JsFunction**)mem_realloc(state.function_cache_values,
+            (size_t)capacity * sizeof(JsFunction*), MEM_CAT_JS_RUNTIME);
+        if (!values) return;
+        state.function_cache_values = values;
+        state.function_cache_capacity = capacity;
     }
+    int slot = state.function_cache_count++;
+    state.function_cache_keys[slot] = key;
+    state.function_cache_values[slot] = fn;
 }
 
 void js_func_cache_reset() {
