@@ -2932,90 +2932,13 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     Runtime* runtime = dom_doc->js.runtime;
     if (!runtime) return;
 
-    EvalContext* owner = runtime->eval_context;
-    if (owner && !eval_context_init(owner)) {
-        log_error("script-runner-cleanup: document owner is not current");
-        return;
-    }
-    if (owner && owner->js_state &&
-            !js_runtime_state_init(owner)) return;
-
-    // The document runtime can have queued callback roots even when the
-    // caller did not reach the normal loader teardown path.
-    if (owner && owner->js_state) {
-        js_event_loop_shutdown();
-        js_batch_reset();
-        // Deferred module contexts can retain functions into this heap.  They
-        // must finish while their document capsule is still active, not from
-        // a later context-free layout cleanup.
-        jm_cleanup_deferred_mir();
-    }
-    // The document runtime owns the reactive edit/template side stores. They
-    // allocate outside the GC heap, so heap destruction alone would retain
-    // their context capsules after every interactive document teardown.
-    edit_bridge_destroy();
-    render_map_destroy();
-    tmpl_state_destroy();
-    lambda_module_state_destroy();
-
-    // A Lambda module loaded into this runtime (the dom package) registers a
-    // descriptor whose namespace is an Item in the heap below, so the registry
-    // has to be dropped while that heap is still alive — the same order
-    // runtime_cleanup uses. Nothing registered here before the package could
-    // load into a JS document's runtime.
-    module_registry_cleanup_for_runtime(runtime);
-
-    // Destroy retained heap and GC metadata.
-    if (runtime_heap(runtime)) {
-        Heap* heap = runtime_heap(runtime);
-        if (heap->gc) {
-            heap_finalize_gc_objects(heap->gc);
-            gc_heap_destroy(heap->gc);
-            // pool is destroyed separately below
-        }
-        mem_free(heap);
-        runtime_set_heap(runtime, nullptr);
-    }
-
-    if (runtime_type_list(runtime)) {
-        // A loaded Lambda package can publish its Script-owned type list here.
-        if (!runtime_type_list_is_script_owned(runtime)) {
-            arraylist_free(runtime_type_list(runtime));
-        }
-        runtime_set_type_list(runtime, nullptr);
-    }
-
-    runtime_set_name_pool(runtime, nullptr);
-    // Lambda modules can be loaded into this runtime (the dom package), and
-    // this teardown is hand-rolled rather than runtime_cleanup, so the pieces
-    // that running Lambda code establishes have to be released here too: the
-    // signal-handler alt stack (64KB, installed on first Lambda execution) and
-    // the Scripts this runtime owns, which nothing else would free.
-    lambda_stack_cleanup();
-    // Running Lambda in this runtime can stand up the task scheduler, which
-    // runtime_cleanup would own but this hand-rolled teardown otherwise leaks.
-    if (runtime_scheduler(runtime)) {
-        lambda_scheduler_destroy(runtime_scheduler(runtime));
-        runtime_set_scheduler(runtime, nullptr);
-    }
-    runtime_free_all_scripts(runtime);
-    // The dom package registers its behavior templates in the EvalContext's
-    // registry (g_template_registry resolves to context->template_registry),
-    // which nothing else owns once this context retires.
-    if (runtime->eval_context) {
-        TemplateRegistry* doc_templates = runtime->eval_context->template_registry;
-        runtime->eval_context->template_registry = nullptr;
-        template_registry_destroy(doc_templates);
-    }
-    if (runtime->eval_context) {
-        EvalContext* retiring_context = runtime->eval_context;
-        js_runtime_state_destroy_context();
-        if (!eval_context_shutdown(retiring_context)) return;
-        mem_free(retiring_context);
-        runtime->eval_context = nullptr;
-    }
-    mem_free(runtime);
+    // The document remains caller-owned; detach it before the centralized
+    // Runtime teardown releases every heap pool, name pool, script, and capsule.
     dom_doc->js.runtime = nullptr;
+    runtime->dom_doc = nullptr;
+    runtime->dom_ui_context = nullptr;
+    runtime_cleanup(runtime);
+    mem_free(runtime);
 
     log_debug("script_runner_cleanup_js_state: cleaned up JS state");
 }

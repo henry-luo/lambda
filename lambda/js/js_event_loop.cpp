@@ -1807,6 +1807,9 @@ extern "C" bool js_event_loop_pump_wait(int max_wait_ms) {
 }
 
 extern "C" int js_event_loop_drain(void) {
+    // D5.4.1: the drain may resume parent timers after a rendering checkpoint,
+    // so it is not a quiescent handoff boundary for nested document realms.
+    RuntimeExecutionScope execution_scope(context);
     // Commit script mutations before its first queued task. This is the
     // one-shot equivalent of the host render opportunity between event tasks.
     js_event_loop_render_checkpoint();
