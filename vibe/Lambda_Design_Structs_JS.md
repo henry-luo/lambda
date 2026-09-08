@@ -1329,7 +1329,68 @@ changes an `S#`/`D#` ruling.
 ---
 
 ## 7. Open issues
-**JSCUO5 — web-object fixed capacities are now the dominant pressure.** The
+**JSCUO5 — web-object fixed capacities. Observers LANDED 2026-09-08.**
+`JsObserverRuntimeState` **1,598,480 → 32 B**, `JsObserverState`
+**24,976 → 152 B**, and both capacities (`JS_OBSERVER_CAP` 64,
+`JS_OBSERVER_TARGET_CAP` 32) are deleted.
+
+The two levels needed different treatments, and the reason is the rooting:
+
+- **Observers are held by pointer, individually allocated.** Each observer's
+  `object` and `callback` are *registered GC roots*, so the array holding them
+  must be address-stable — growing an array of embedded records by `realloc`
+  would leave every registered root dangling. Growing an array of pointers
+  moves nothing the collector knows about. Root registration also moved from
+  "all 64 slots up front" to "this observer's two slots, at creation".
+- **Targets are a plain growable array.** A `JsObserverTarget` holds DOM
+  pointers and pinned refs but no `Item`, so nothing is registered against its
+  address and the array may move freely.
+
+Two hazards the change created and closed. `js_observer_deliver` deduplicated
+owner documents in a stack array sized `JS_OBSERVER_CAP * JS_OBSERVER_TARGET_CAP`
+— 2,048 pointers; with the caps gone that would have been unbounded, so it
+grows on the heap. And `dom_observers_reset` zeroed the table with
+`memset(observers, 0, sizeof(observers))`, which after the change memsets eight
+bytes *through a pointer*: it segfaulted every mutation-observer UI fixture.
+Both release paths now share one `observer_state_release_all`.
+**When a fixed array becomes a pointer, `sizeof` on it silently changes
+meaning — audit every `sizeof` and every stack array sized from the capacity.**
+
+**All three web-object states are done.**
+
+| Structure | Was | Now |
+|---|---:|---:|
+| `JsObserverRuntimeState` | 1,598,480 | **32** |
+| `JsDomCollectionRuntimeState` | 753,696 | **72** |
+| `JsXhrRuntimeState` | 72,720 | **24** |
+
+`JsDomCollectionRuntimeState`'s four 4,096-entry registries grow on demand. They
+look freely movable — nothing in an entry is a *strong* root — but each entry's
+`array` is a **weak** GC slot registered by address, so `dom_collection_table_grow`
+unregisters at the old addresses, moves, and re-registers at the new ones (and
+restores the old registrations if the realloc fails). That kept all ~56 indexed
+read sites unchanged.
+
+`JsXhrRuntimeState`'s 64-record pool and each record's 64-header table both grow.
+Nothing here is registered with the collector, so a plain realloc suffices.
+
+**The same defect appeared in all three, and it is the thing to look for.**
+When a fixed array becomes a pointer, `sizeof` on it silently becomes 8, and any
+stack array sized from the deleted capacity becomes unbounded. Concretely:
+`dom_observers_reset` and `reset_live_dom_collections` both cleared their tables
+with `memset(table, 0, sizeof(table))` and segfaulted every DOM fixture until
+they cleared by count instead; `js_observer_deliver` had a 2,048-pointer stack
+array sized `JS_OBSERVER_CAP * JS_OBSERVER_TARGET_CAP`, and XHR's send path had a
+64-entry `char* header_strs[MAX_HEADERS]` — both now sized to the live count.
+**Grep every `sizeof` and every capacity-sized local before believing the
+change.** The observer crash was caught by the UI fixtures, not by any JS or GC
+gate.
+
+`JsMirTranspiler` (30,840 B, 106 members) is a separate target and has grown
+since the parent proposal. The largest remaining record in the tree is
+`NodeRuntimeSession` at 805,648 B.
+
+**JSCUO5 (original) — web-object fixed capacities are now the dominant pressure.** The
 2026-09-08 census puts the three DOM web-object states at the top of the tree:
 `JsObserverRuntimeState` 1,598,480 B (64 observers × 32 targets),
 `JsDomCollectionRuntimeState` 753,696 B (four 4,096-entry registries, two with

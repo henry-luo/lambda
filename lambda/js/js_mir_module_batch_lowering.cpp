@@ -2899,16 +2899,16 @@ static int js_mir_lower(void* opaque) {
     MIR_type_t main_ret = MIR_T_I64;
     MIR_item_t main_item = MIR_new_func_arr(mt->ctx, "js_main", 1, &main_ret, 1, main_vars);
     MIR_func_t main_func = MIR_get_item_func(mt->ctx, main_item);
-    mt->em.func_item = main_item;
-    mt->em.func = main_func;
+    mt->func_em->em.func_item = main_item;
+    mt->func_em->em.func = main_func;
     mt->current_fc = NULL;
     mt->current_class = NULL;
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
     mt->eval_local_frame_reg = 0;
-    mt->last_closure_has_env = false;
-    mt->last_closure_env_reg = 0;
-    mt->last_closure_capture_count = 0;
+    mt->last_closure.has_env = false;
+    mt->last_closure.env_reg = 0;
+    mt->last_closure.count = 0;
     mt->in_main = true;
     mt->func_error_lane_label = 0;  // reset for js_main
 

@@ -2454,7 +2454,7 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
         // D8.4.3: the ERROR-lane carrier must be the value defined by both
         // short-circuit arms. Keeping the RHS helper register here reads an
         // uninitialized path-local value when the RHS is skipped.
-        mt->last_call_result = em_value_for_rep(result, LMD_TYPE_ANY,
+        mt->func_em->last_call_result = em_value_for_rep(result, LMD_TYPE_ANY,
             VALUE_REP_ITEM);
         return publish(result, VALUE_REP_ITEM);
     }
@@ -4473,27 +4473,27 @@ bool jm_resolve_transitive_capture_env(JsMirVarEntry* var,
 }
 
 void jm_readback_closure_env(JsMirTranspiler* mt) {
-    if (!mt->last_closure_has_env) return;
-    if (mt->last_closure_env_reg == 0) return;
+    if (!mt->last_closure.has_env) return;
+    if (mt->last_closure.env_reg == 0) return;
     int readback_count = jm_last_closure_capture_count_clamped(
-        mt->last_closure_capture_count);
+        mt->last_closure.count);
     MIR_label_t readback_done = jm_new_label(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
         MIR_new_label_op(mt->ctx, readback_done),
-        MIR_new_reg_op(mt->ctx, mt->last_closure_env_reg),
+        MIR_new_reg_op(mt->ctx, mt->last_closure.env_reg),
         MIR_new_int_op(mt->ctx, 0)));
     for (int i = 0; i < readback_count; i++) {
-        if (mt->last_closure_capture_is_nfe[i]) continue;
-        if (!mt->last_closure_capture_is_assigned[i]) continue;
+        if (mt->last_closure.captures[i].is_nfe) continue;
+        if (!mt->last_closure.captures[i].is_assigned) continue;
         JsMirVarEntry* var = jm_find_var_by_binding(mt,
-            mt->last_closure_capture_bindings[i]);
+            mt->last_closure.captures[i].binding);
         if (!var) {
             continue;
         }
         if (var->from_block_func_decl) continue;
-        int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
-        MIR_reg_t read_env = mt->last_closure_env_reg;
-        if (mt->last_closure_capture_is_transitive[i]) {
+        int slot = mt->last_closure.captures[i].slot >= 0 ? mt->last_closure.captures[i].slot : i;
+        MIR_reg_t read_env = mt->last_closure.env_reg;
+        if (mt->last_closure.captures[i].is_transitive) {
             jm_resolve_transitive_capture_env(var, &read_env, &slot);
         }
         // Js56 P2: BOOL vars are stored BOXED (var-decl falls into the
@@ -4532,7 +4532,7 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
             }
         }
     }
-    // Js56 P2: do NOT reset last_closure_has_env after readback. The closure's
+    // Js56 P2: do NOT reset last_closure.has_env after readback. The closure's
     // env is kept alive by the closure object itself and remains the canonical
     // storage for the captured vars; readback on every subsequent call to the
     // same closure propagates env mutations back to the outer's var->reg.
@@ -4952,7 +4952,7 @@ static MIR_reg_t jm_emit_intrinsic_direct_eval(JsMirTranspiler* mt,
             jm_call_void_0(mt, "js_eval_global_lexical_pop_frame");
         }
     }
-    mt->last_call_result = em_value_for_rep(result, LMD_TYPE_ANY,
+    mt->func_em->last_call_result = em_value_for_rep(result, LMD_TYPE_ANY,
         VALUE_REP_ITEM);
     jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
     jm_emit_error_lane_propagate_check(mt);
@@ -4983,7 +4983,7 @@ static MIR_reg_t jm_emit_eval_identifier_call(JsMirTranspiler* mt,
         MIR_new_label_op(mt->ctx, indirect),
         MIR_new_reg_op(mt->ctx, callee), MIR_new_reg_op(mt->ctx, intrinsic)));
     JsErrorLaneTrack branch_lane = jm_error_lane_state(mt);
-    MirValue branch_carrier = mt->last_call_result;
+    MirValue branch_carrier = mt->func_em->last_call_result;
 
     MIR_reg_t index_zero = jm_box_int_const(mt, 0);
     MIR_reg_t first_argument = jm_callr_2(mt, "js_elements_get", MIR_T_I64, args_array, index_zero);
@@ -4994,7 +4994,7 @@ static MIR_reg_t jm_emit_eval_identifier_call(JsMirTranspiler* mt,
     jm_emit_jmp(mt, done);
 
     jm_emit_label_with_state(mt, indirect, branch_lane);
-    mt->last_call_result = branch_carrier;
+    mt->func_em->last_call_result = branch_carrier;
     MIR_reg_t this_value = jm_emit_plain_call_this_arg(mt, call);
     bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
     MIR_reg_t indirect_result = jm_apply_function_into(mt,
@@ -5773,7 +5773,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                             for (int i = 0; i < JM_PARAM_COUNT(fc); i++) {
                                 char pname[32];
                                 jm_get_backend_param_name(i, pname, sizeof(pname));
-                                MIR_reg_t preg = MIR_reg(mt->ctx, pname, mt->em.func);
+                                MIR_reg_t preg = MIR_reg(mt->ctx, pname, mt->func_em->em.func);
                                 MIR_type_t mtype = (jm_param_type(fc, i) == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
                                 MIR_insn_code_t mov = (mtype == MIR_T_D) ? MIR_DMOV : MIR_MOV;
                                 jm_emit(mt, MIR_new_insn(mt->ctx, mov,
@@ -6373,8 +6373,8 @@ static void jm_free_branch_state(JsMirBranchState* state);
 
 static void jm_save_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
     memset(state, 0, sizeof(*state));
-    state->current_func_item = mt->em.func_item;
-    state->current_func = mt->em.func;
+    state->current_func_item = mt->func_em->em.func_item;
+    state->current_func = mt->func_em->em.func;
     state->current_fc = mt->current_fc;
     state->current_class = mt->current_class;
     state->scope_env_reg = mt->scope_env_reg;
@@ -6431,8 +6431,8 @@ static void jm_free_branch_state(JsMirBranchState* state) {
 static void jm_restore_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
     if (!state) return;
 
-    mt->em.func_item = state->current_func_item;
-    mt->em.func = state->current_func;
+    mt->func_em->em.func_item = state->current_func_item;
+    mt->func_em->em.func = state->current_func;
     mt->current_fc = state->current_fc;
     mt->current_class = state->current_class;
     mt->scope_env_reg = state->scope_env_reg;
@@ -6457,7 +6457,7 @@ static MirValue jm_emit_conditional_value(JsMirTranspiler* mt,
 
     jm_emit_branch(mt, MIR_BF, l_false, truthy);
     JsErrorLaneTrack branch_exc = jm_error_lane_state(mt);
-    MirValue branch_carrier = mt->last_call_result;
+    MirValue branch_carrier = mt->func_em->last_call_result;
 
     JsMirBranchState branch_state;
     jm_save_branch_state(mt, &branch_state);
@@ -6472,7 +6472,7 @@ static MirValue jm_emit_conditional_value(JsMirTranspiler* mt,
     jm_emit_label_with_state(mt, l_false, branch_exc);
     // The consequent's last helper is path-local; the alternate begins from
     // the condition carrier that dominates both arms (D8.4.3).
-    mt->last_call_result = branch_carrier;
+    mt->func_em->last_call_result = branch_carrier;
     jm_save_branch_state(mt, &branch_state);
     jm_push_scope(mt);
     MIR_reg_t alt = jm_transpile_box_item(mt, cond->alternate);
@@ -6484,7 +6484,7 @@ static MirValue jm_emit_conditional_value(JsMirTranspiler* mt,
     jm_emit_label_with_state(mt, l_end, jm_error_lane_merge(cons_exit, alt_exit));
     // Both arms define the boxed ternary value, making it the only valid
     // carrier for an ERROR-lane test emitted after the join (D8.4.3).
-    mt->last_call_result = em_value_for_rep(result, LMD_TYPE_ANY,
+    mt->func_em->last_call_result = em_value_for_rep(result, LMD_TYPE_ANY,
         VALUE_REP_ITEM);
     return jm_expression_value(mt, (JsAstNode*)cond, result,
         jm_get_effective_type(mt, (JsAstNode*)cond), VALUE_REP_ITEM);
@@ -6547,7 +6547,7 @@ static MirValue jm_emit_template_literal_value(JsMirTranspiler* mt,
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, pool_reg),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, pool),
-            mt->em.frame.runtime, 0, 1)));
+            mt->func_em->em.frame.runtime, 0, 1)));
 
     // Create StringBuf: stringbuf_new(pool)
     // StringBuf is a pointer-valued helper; using an integer return type here
@@ -6805,11 +6805,10 @@ static void jm_promote_capture_to_scope_env(JsMirTranspiler* mt, JsMirVarEntry* 
     jm_emit_store_i64(mt, slot * (int)sizeof(uint64_t), mt->scope_env_reg, val);
 }
 
+// §9.3: every capture is tracked now. The old 512 ceiling silently dropped
+// read-back for any closure past it, which was a source-language limit.
 static int jm_last_closure_track_count(JsFuncCollected* fc) {
     if (!fc || JM_CAPTURE_COUNT(fc) <= 0) return 0;
-    if (JM_CAPTURE_COUNT(fc) > JS_MIR_LAST_CLOSURE_CAPTURE_MAX) {
-        return JS_MIR_LAST_CLOSURE_CAPTURE_MAX;
-    }
     return JM_CAPTURE_COUNT(fc);
 }
 
@@ -6841,16 +6840,20 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
         jm_collect_indexed_func_assignments(mt, fc->node->body, assigned);
         jm_collect_descendant_func_assignments(mt, fc, assigned);
     }
-    mt->last_closure_env_reg = env;
-    mt->last_closure_capture_count = count;
+    mt->last_closure.env_reg = env;
+    if (!jm_closure_tracker_reserve(&mt->last_closure, count)) {
+        if (assigned) hashmap_free(assigned);
+        return;
+    }
+    mt->last_closure.count = count;
     for (int ci = 0; ci < count; ci++) {
-        mt->last_closure_capture_names[ci] = jm_persist_name(JM_CAPTURE_ARRAY(fc)[ci].name);
-        mt->last_closure_capture_bindings[ci] = JM_CAPTURE_ARRAY(fc)[ci].entry;
-        mt->last_closure_capture_slots[ci] =
+        mt->last_closure.captures[ci].name = jm_persist_name(JM_CAPTURE_ARRAY(fc)[ci].name);
+        mt->last_closure.captures[ci].binding = JM_CAPTURE_ARRAY(fc)[ci].entry;
+        mt->last_closure.captures[ci].slot =
             use_capture_slots ? jm_capture_env_slot(&JM_CAPTURE_ARRAY(fc)[ci], ci) : ci;
-        mt->last_closure_capture_is_transitive[ci] =
+        mt->last_closure.captures[ci].is_transitive =
             JM_CAPTURE_ARRAY(fc)[ci].grandparent_slot >= 0;
-        mt->last_closure_capture_is_nfe[ci] = JM_CAPTURE_ARRAY(fc)[ci].is_nfe_binding;
+        mt->last_closure.captures[ci].is_nfe = JM_CAPTURE_ARRAY(fc)[ci].is_nfe_binding;
         bool capture_assigned = false;
         if (assigned) {
             capture_assigned = jm_binding_set_has(assigned,
@@ -6858,10 +6861,10 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
         }
         // readback is only valid for captures this closure can mutate; read-only
         // captures can be stale private copies and must not overwrite caller locals.
-        mt->last_closure_capture_is_assigned[ci] = capture_assigned;
+        mt->last_closure.captures[ci].is_assigned = capture_assigned;
     }
     if (assigned) hashmap_free(assigned);
-    mt->last_closure_has_env = count > 0;
+    mt->last_closure.has_env = count > 0;
 }
 
 static void jm_track_tdz_closure_captures(JsMirTranspiler* mt, MIR_reg_t env,
@@ -6871,9 +6874,22 @@ static void jm_track_tdz_closure_captures(JsMirTranspiler* mt, MIR_reg_t env,
         JsMirVarEntry* var = jm_find_var_by_binding(mt,
             JM_CAPTURE_ARRAY(fc)[ci].entry);
         if (!var || !var->is_let_const || !var->tdz_active) continue;
-        if (mt->tdz_closure_capture_count >= JS_MIR_TDZ_CLOSURE_CAPTURE_MAX) {
-            log_error("js-mir: TDZ closure capture tracker overflow");
-            return;
+        if (mt->tdz_closure_capture_count >= mt->tdz_closure_capture_capacity) {
+            int capacity = mt->tdz_closure_capture_capacity
+                ? mt->tdz_closure_capture_capacity * 2 : 16;
+            JsMirTdzClosureCapture* grown =
+                (JsMirTdzClosureCapture*)mem_realloc(mt->tdz_closure_captures,
+                    (size_t)capacity * sizeof(JsMirTdzClosureCapture),
+                    MEM_CAT_JS_RUNTIME);
+            if (!grown) {
+                log_error("js-mir: cannot grow TDZ closure capture tracker");
+                return;
+            }
+            memset(grown + mt->tdz_closure_capture_capacity, 0,
+                   (size_t)(capacity - mt->tdz_closure_capture_capacity) *
+                       sizeof(JsMirTdzClosureCapture));
+            mt->tdz_closure_captures = grown;
+            mt->tdz_closure_capture_capacity = capacity;
         }
         JsMirTdzClosureCapture* tracked =
             &mt->tdz_closure_captures[mt->tdz_closure_capture_count++];
@@ -7331,7 +7347,7 @@ static MirValue jm_expression_value(JsMirTranspiler* mt, JsAstNode* item,
 MirValue jm_transpile_expression_value(JsMirTranspiler* mt, JsAstNode* item,
         uint32_t demand, ValueRep required) {
     if (required != VALUE_REP_NONE) demand |= MIR_VALUE_REQUIRED_REP;
-    return em_apply_value_demand(&mt->em,
+    return em_apply_value_demand(&mt->func_em->em,
         jm_transpile_expression_direct(mt, item), demand, required);
 }
 
@@ -7346,7 +7362,7 @@ static MirValue jm_profile_lower_value(void* owner, AstNode* node) {
 
 static MIR_reg_t jm_profile_emit_condition(void* owner, MirValue value) {
     JsMirTranspiler* mt = (JsMirTranspiler*)owner;
-    value = em_apply_value_demand(&mt->em, value,
+    value = em_apply_value_demand(&mt->func_em->em, value,
         MIR_VALUE_REQUIRED_REP, VALUE_REP_ITEM);
     return jm_emit_is_truthy(mt, value);
 }
@@ -7466,7 +7482,7 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
     }
 
     // Case 3: generic boxed fallback through the shared branch-demand owner.
-    MirLoweringProfile profile = {&mt->em, mt, jm_profile_lower_value,
+    MirLoweringProfile profile = {&mt->func_em->em, mt, jm_profile_lower_value,
         jm_profile_emit_condition};
     return em_lower_profile_condition(&profile, (AstNode*)expr);
 }
@@ -7599,7 +7615,7 @@ static MirValue jm_transpile_expression_direct(JsMirTranspiler* mt,
         // v11: comma operator — evaluate all expressions, return last
         JsSequenceNode* seq = (JsSequenceNode*)expr;
         JsSequenceLowering sequence = {
-            {&mt->em, mt, jm_profile_lower_value, jm_profile_emit_condition},
+            {&mt->func_em->em, mt, jm_profile_lower_value, jm_profile_emit_condition},
             jm_expression_value(mt, expr, jm_emit_null(mt), LMD_TYPE_NULL,
                 VALUE_REP_ITEM)};
         em_visit_linked_nodes(seq->expressions, &sequence,

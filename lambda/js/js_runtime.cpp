@@ -7702,16 +7702,32 @@ extern "C" void js_func_init_property(Item fn_item, Item key, Item value) {
         key = key_root.get();
         value = value_root.get();
         String* key_string = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
+        bool identity_key = key_string && property_key_requires_identity(key_string);
+        NameId identity_id = identity_key ? property_key_id(key_string) : NAME_ID_NONE;
         JsShapeSlotStatus status = key_string
-            ? js_own_shape_slot_status(fn->properties_map, key_string->chars,
-                (int)key_string->len, NULL, NULL)
+            ? (identity_key
+                ? js_own_shape_slot_status_name_id(fn->properties_map, identity_id,
+                    NULL, NULL)
+                : js_own_shape_slot_status(fn->properties_map, key_string->chars,
+                    (int)key_string->len, NULL, NULL))
             : JS_SHAPE_SLOT_ABSENT;
         if (key_string && status == JS_SHAPE_SLOT_ABSENT) {
-            map_put_heap(fn->properties_map.map, key_string, value, js_input);
+            // Symbol/private bytes are diagnostic only; a matching string key
+            // must not absorb a new function property.
+            if (identity_key) {
+                js_define_own_key_storage(fn->properties_map, key, value);
+            } else {
+                map_put_heap(fn->properties_map.map, key_string, value, js_input);
+            }
         } else {
             if (key_string && status == JS_SHAPE_SLOT_DELETED) {
-                js_shape_entry_set_deleted(fn->properties_map,
-                    key_string->chars, (int)key_string->len, false);
+                if (identity_key) {
+                    js_shape_entry_update_flags_name_id(fn->properties_map,
+                        identity_id, 0, JSPD_DELETED);
+                } else {
+                    js_shape_entry_set_deleted(fn->properties_map,
+                        key_string->chars, (int)key_string->len, false);
+                }
             }
             fn_map_set(fn->properties_map, key, value);
         }
@@ -16051,7 +16067,8 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
     }
     if (rd->bt) {
         // spec backtracking matcher for backref / hard-lookbehind patterns
-        int starts[JS_REGEX_MAX_GROUPS], ends[JS_REGEX_MAX_GROUPS];
+        JsRegexScratch<int> starts_buf(num_groups), ends_buf(num_groups);
+        int* starts = starts_buf.slots; int* ends = ends_buf.slots;
         bool anchor_start = (anchor == re2::RE2::ANCHOR_START);
         int result = js_bt_exec(rd->bt, input, input_len, start_pos, anchor_start,
                                 starts, ends, num_groups);
@@ -16067,7 +16084,8 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
     }
     if (rd->wrapper && rd->wrapper->has_filters) {
         // use wrapper with post-filter verification
-        int starts[JS_REGEX_MAX_GROUPS], ends[JS_REGEX_MAX_GROUPS];
+        JsRegexScratch<int> starts_buf(num_groups), ends_buf(num_groups);
+        int* starts = starts_buf.slots; int* ends = ends_buf.slots;
         bool anchor_start = (anchor == re2::RE2::ANCHOR_START);
         int result = js_regex_wrapper_exec(rd->wrapper, input, input_len, start_pos, anchor_start,
                                     starts, ends, num_groups);
@@ -16118,8 +16136,8 @@ static void js_regex_reset_stale_repeated_captures(JsRegexData* rd,
         int parent;
         bool repeated;
     };
-    RegexGroupInfo groups[JS_REGEX_MAX_GROUPS];
-    int stack[JS_REGEX_MAX_GROUPS];
+    RegexGroupInfo groups[JS_REGEX_ANALYSIS_GROUPS];
+    int stack[JS_REGEX_ANALYSIS_GROUPS];
     int stack_depth = 0;
     int group_count = 0;
     bool in_class = false;
@@ -16143,16 +16161,16 @@ static void js_regex_reset_stale_repeated_captures(JsRegexData* rd,
         if (ch == '(') {
             int idx = 0;
             if (js_regex_pattern_group_is_capturing(pattern, i) &&
-                group_count + 1 < JS_REGEX_MAX_GROUPS) {
+                group_count + 1 < JS_REGEX_ANALYSIS_GROUPS) {
                 group_count++;
                 idx = group_count;
                 groups[idx].parent = stack_depth > 0 ? stack[stack_depth - 1] : 0;
                 groups[idx].repeated = false;
             }
-            if (stack_depth < JS_REGEX_MAX_GROUPS) stack[stack_depth++] = idx;
+            if (stack_depth < JS_REGEX_ANALYSIS_GROUPS) stack[stack_depth++] = idx;
         } else if (ch == ')' && stack_depth > 0) {
             int idx = stack[--stack_depth];
-            if (idx > 0 && idx < JS_REGEX_MAX_GROUPS) {
+            if (idx > 0 && idx < JS_REGEX_ANALYSIS_GROUPS) {
                 groups[idx].repeated = js_regex_pattern_has_quantifier_after(pattern, i + 1);
             }
         }
@@ -16168,7 +16186,7 @@ static void js_regex_reset_stale_repeated_captures(JsRegexData* rd,
             if (child == parent || !matches[child].data()) continue;
             int ancestor = groups[child].parent;
             bool inside_parent = false;
-            while (ancestor > 0 && ancestor < JS_REGEX_MAX_GROUPS) {
+            while (ancestor > 0 && ancestor < JS_REGEX_ANALYSIS_GROUPS) {
                 if (ancestor == parent) {
                     inside_parent = true;
                     break;
@@ -18540,8 +18558,9 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     }
 
     int num_groups = js_regex_num_groups(rd);
-    if (num_groups > JS_REGEX_MAX_GROUPS) num_groups = JS_REGEX_MAX_GROUPS;
-    re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
+    JsRegexScratch<re2::StringPiece> matches_buf(num_groups);
+    num_groups = matches_buf.count;
+    re2::StringPiece* matches = matches_buf.slots;
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
     int match_start_pos = utf16_subject ?
         js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
@@ -18798,8 +18817,9 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
 
     // perform match with captures
     int num_groups = js_regex_num_groups(rd);
-    if (num_groups > JS_REGEX_MAX_GROUPS) num_groups = JS_REGEX_MAX_GROUPS;
-    re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
+    JsRegexScratch<re2::StringPiece> matches_buf(num_groups);
+    num_groups = matches_buf.count;
+    re2::StringPiece* matches = matches_buf.slots;
     // sticky: must match at exactly start_pos (ANCHOR_START from start_pos)
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
     int match_start_pos = code_unit_indices ?
@@ -21674,8 +21694,9 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
         // regex-based replace
         re2::StringPiece input(s->chars, s->len);
         int ngroups = js_regex_num_groups(rd);
-        if (ngroups > JS_REGEX_MAX_GROUPS) ngroups = JS_REGEX_MAX_GROUPS;
-        re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
+        JsRegexScratch<re2::StringPiece> matches_buf(ngroups);
+        ngroups = matches_buf.count;
+        re2::StringPiece* matches = matches_buf.slots;
         StrBuf* buf = strbuf_new();
         int pos = 0;
         bool found_match = false;
@@ -23113,8 +23134,9 @@ static Item js_string_intrinsic_algorithm(Item str,
                 Item result = js_array_new(0);
                 int offset = 0;
                 int num_groups = js_regex_num_groups(rd);
-                if (num_groups > JS_REGEX_MAX_GROUPS) num_groups = JS_REGEX_MAX_GROUPS;
-                re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
+                JsRegexScratch<re2::StringPiece> matches_buf(num_groups);
+                num_groups = matches_buf.count;
+                re2::StringPiece* matches = matches_buf.slots;
                 while (offset < (int)s->len) {
                     bool matched = js_regex_match_internal(rd, s->chars, (int)s->len, offset,
                         re2::RE2::UNANCHORED, matches, num_groups);
@@ -26429,15 +26451,86 @@ extern "C" Item js_get_css_object_value() {
 }
 
 // =============================================================================
-// Intl namespace — minimal Intl.Segmenter (word granularity, ASCII heuristic).
+// Intl namespace — compact English-locale support plus Intl.Segmenter.
 //
-// Only enough for the editor's caret word-navigation (`new Intl.Segmenter(
-// undefined, { granularity: 'word' }).segment(text)` iterated for isWordLike
-// segments). A word char is [A-Za-z0-9_] plus any byte with the high bit set
-// (so multi-byte UTF-8 letters stay in the current segment rather than
-// splitting the sequence). No locale handling; higher-fidelity Unicode word
-// breaking is a follow-up.
+// The runtime ships no CLDR/ICU database, so its locale data currently has one
+// canonical entry (`en`). NumberFormat still exposes ECMA-402's feature probe
+// and default decimal formatter rather than leaving consumers with a missing
+// constructor. Segmenter remains the editor's ASCII-oriented word helper.
 // =============================================================================
+static bool js_intl_number_format_is_available_locale(Item locale) {
+    if (get_type_id(locale) != LMD_TYPE_STRING) return false;
+    String* value = it2s(locale);
+    return value && value->len == 2 &&
+        (value->chars[0] == 'e' || value->chars[0] == 'E') &&
+        (value->chars[1] == 'n' || value->chars[1] == 'N');
+}
+
+static Item js_intl_number_format_supported_locales_of(Item* args, int argc) {
+    RootFrame roots(3);
+    Rooted<Item> locales_root(roots,
+        argc > 0 && args ? args[0] : make_js_undefined());
+    Rooted<Item> locale_root(roots, ItemNull);
+    Rooted<Item> result_root(roots, js_array_new(0));
+    if (get_type_id(locales_root.get()) == LMD_TYPE_UNDEFINED) {
+        return result_root.get();
+    }
+
+    bool emitted_english = false;
+    if (get_type_id(locales_root.get()) == LMD_TYPE_STRING) {
+        locale_root.set(locales_root.get());
+        if (js_intl_number_format_is_available_locale(locale_root.get())) {
+            js_array_push(result_root.get(), js_make_string_len("en", 2));
+        }
+        return result_root.get();
+    }
+    if (get_type_id(locales_root.get()) != LMD_TYPE_ARRAY) {
+        if (get_type_id(locales_root.get()) == LMD_TYPE_NULL) {
+            return js_throw_type_error("Cannot convert null to object");
+        }
+        // Array-like locale objects with no indexed entries produce no
+        // supported locales until the runtime gains a general locale backend.
+        return result_root.get();
+    }
+
+    int64_t count = js_array_length(locales_root.get());
+    for (int64_t index = 0; index < count; index++) {
+        locale_root.set(js_elements_get_int(locales_root.get(), index));
+        Item locale_string = js_to_string(locale_root.get());
+        if (item_is_error(locale_string)) return locale_string;
+        locale_root.set(locale_string);
+        if (!emitted_english &&
+                js_intl_number_format_is_available_locale(locale_root.get())) {
+            js_array_push(result_root.get(), js_make_string_len("en", 2));
+            emitted_english = true;
+        }
+    }
+    return result_root.get();
+}
+
+static Item js_intl_number_format_format(Item /*this_value*/, Item* args,
+        int argc) {
+    Item value = argc > 0 && args ? args[0] : make_js_undefined();
+    Item number = js_to_number(value);
+    return item_is_error(number) ? number : js_to_string(number);
+}
+
+static Item js_intl_number_format_construct_body(Item /*callee*/, Item* /*args*/,
+        int /*argc*/, Item new_target, uint64_t* result_home) {
+    JS_ROOTS(roots, target_root, new_target, result_root, js_new_object());
+    Item result = js_apply_constructed_default_prototype(result_root.get(),
+        target_root.get(), JS_CLASS_OBJECT);
+    if (result_home) *result_home = result.item;
+    return result;
+}
+
+static Item js_intl_number_format_call_body(Item callee, Item /*this_value*/,
+        Item* args, int argc, uint64_t* result_home) {
+    // Intl.NumberFormat() is specified to initialize a formatter as well.
+    return js_intl_number_format_construct_body(callee, args, argc, callee,
+        result_home);
+}
+
 static inline bool js_intl_segmenter_is_word_byte(unsigned char c) {
     if (c >= 'A' && c <= 'Z') return true;
     if (c >= 'a' && c <= 'z') return true;
@@ -26506,22 +26599,41 @@ extern "C" void js_reset_intl_object() { js_intl_object = (Item){.item = ITEM_NU
 extern "C" Item js_get_intl_object_value() {
     if (!js_namespace_cache_is_empty(js_intl_object)) return js_intl_object;
     js_runtime_namespaces_ensure_roots();
-    RootFrame roots(4);
+    RootFrame roots(8);
     Rooted<Item> intl_root(roots, js_object_create(ItemNull));
-    Rooted<Item> ctor_root(roots,
+    Rooted<Item> segmenter_ctor_root(roots,
         js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body,
             js_intl_segmenter_construct_body, 0));
-    Rooted<Item> proto_root(roots, js_new_object());
-    Rooted<Item> method_root(roots,
+    Rooted<Item> segmenter_proto_root(roots, js_new_object());
+    Rooted<Item> segmenter_method_root(roots,
         js_new_native_function(js_intl_segmenter_segment));
-    js_set_function_name(ctor_root.get(), js_name_item("Segmenter"));
-    js_set_key_cstr(proto_root.get(), "constructor", ctor_root.get());
-    js_set_key_cstr(proto_root.get(), "segment", method_root.get());
+    Rooted<Item> number_format_ctor_root(roots,
+        js_new_native_body_constructor(js_intl_number_format_call_body,
+            js_intl_number_format_construct_body, 0));
+    Rooted<Item> number_format_proto_root(roots, js_new_object());
+    Rooted<Item> number_format_method_root(roots,
+        js_new_native_this_span_function(js_intl_number_format_format));
+    Rooted<Item> supported_locales_root(roots,
+        js_new_native_span_function(js_intl_number_format_supported_locales_of));
+    js_set_function_name(segmenter_ctor_root.get(), js_name_item("Segmenter"));
+    js_set_key_cstr(segmenter_proto_root.get(), "constructor", segmenter_ctor_root.get());
+    js_set_key_cstr(segmenter_proto_root.get(), "segment", segmenter_method_root.get());
     // D6.2.2v2: Intl.Segmenter owns [[Construct]] and a shared prototype;
     // publishing it as a native function erased that capability after Tune4.
-    js_initialize_native_constructor_prototype(ctor_root.get(), proto_root.get());
+    js_initialize_native_constructor_prototype(segmenter_ctor_root.get(),
+        segmenter_proto_root.get());
+    js_set_function_name(number_format_ctor_root.get(), js_name_item("NumberFormat"));
+    js_set_key_cstr(number_format_proto_root.get(), "constructor",
+        number_format_ctor_root.get());
+    js_set_key_cstr(number_format_proto_root.get(), "format",
+        number_format_method_root.get());
+    js_initialize_native_constructor_prototype(number_format_ctor_root.get(),
+        number_format_proto_root.get());
+    js_set_key_cstr(number_format_ctor_root.get(), "supportedLocalesOf",
+        supported_locales_root.get());
     js_intl_object = intl_root.get();
-    js_set_key_cstr(intl_root.get(), "Segmenter", ctor_root.get());
+    js_set_key_cstr(intl_root.get(), "Segmenter", segmenter_ctor_root.get());
+    js_set_key_cstr(intl_root.get(), "NumberFormat", number_format_ctor_root.get());
     js_namespace_set_to_string_tag(intl_root.get(), "Intl", 4);
     return intl_root.get();
 }

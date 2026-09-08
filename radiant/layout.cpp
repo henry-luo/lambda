@@ -4902,6 +4902,36 @@ static void layout_store_last_remembered_sizes(DomNode* node) {
     }
 }
 
+static thread_local DomDocument* s_layout_active_documents[8] = {};
+static thread_local int s_layout_active_document_count = 0;
+
+class LayoutDocumentActivity {
+public:
+    bool tracked;
+
+    explicit LayoutDocumentActivity(DomDocument* doc) : tracked(false) {
+        if (!doc || s_layout_active_document_count >= 8) return;
+        s_layout_active_documents[s_layout_active_document_count++] = doc;
+        tracked = true;
+    }
+
+    ~LayoutDocumentActivity() {
+        if (!tracked) return;
+        s_layout_active_document_count--;
+        s_layout_active_documents[s_layout_active_document_count] = nullptr;
+    }
+
+    LayoutDocumentActivity(const LayoutDocumentActivity&) = delete;
+    LayoutDocumentActivity& operator=(const LayoutDocumentActivity&) = delete;
+};
+
+extern "C" bool dom_engine_layout_active(DomDocument* doc) {
+    for (int index = 0; index < s_layout_active_document_count; index++) {
+        if (s_layout_active_documents[index] == doc) return true;
+    }
+    return false;
+}
+
 void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
@@ -4910,6 +4940,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
 
     LayoutContext lycon;
     if (!doc) return;
+    LayoutDocumentActivity layout_activity(doc);
     if (!is_reflow && !doc->root && doc->view_tree && doc->view_tree->root) {
         doc_state_set_lifecycle((DocState*)doc->state, DOC_LIFECYCLE_COMMITTED);
         return;

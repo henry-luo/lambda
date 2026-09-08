@@ -76,20 +76,22 @@ Other limits:
 
 | Structure | Size then | Size now | Landed as | Note |
 |---|---:|---:|---|---|
-| `JsObserverRuntimeState` | 1,598,480 | **1,598,480** | — | **untouched; now the largest struct in the tree.** 64 observers × 32 targets, fixed filters, transient roots |
+| `JsObserverRuntimeState` | 1,598,480 | **32** | JSCUO5 | observers held by pointer (their Item slots are registered roots, so the array must be address-stable); targets a growable array; both caps deleted |
 | `JsRuntimeState` | 1,138,728 | **27,064** | JSCU9/10/14/16 | records became pointers; generator, async, code-store and realm slabs left the record |
 | `ParsedRequest` | 815,168 | **104** | JSCU23 | replaced by `HttpRequestHead` + header spans; was an automatic variable at three sites |
 | `NodeRuntimeSession` | — | 805,648 | JSCU16 | the Node-only slabs (trace, permission policy) moved here and are paid only by a live session |
-| `JsDomCollectionRuntimeState` | 753,696 | **753,696** | — | **untouched.** four 4,096-entry registries, two with identical entry layouts |
+| `JsDomCollectionRuntimeState` | 753,696 | **72** | JSCUO5 | four registries grow on demand; entries' `array` slots are WEAK GC registrations by address, so growth re-points them |
 | `NodeTraceState` | 528,912 | gone | JSCU16 | absorbed into `NodeRuntimeSession` |
 | `JsPermissionPolicy` | 263,174 | gone | JSCU16 | absorbed into `NodeRuntimeSession` |
 | `JsCryptoNativeState` | 131,112 | **1** | JSCU24 | four 4,096-pointer tables replaced by the Jube generation-checked rid table |
-| `JsXhrRuntimeState` | 72,720 | **72,720** | — | **untouched.** 64 XHR records, each with 64 fixed request headers |
+| `JsXhrRuntimeState` | 72,720 | **24** | JSCUO5 | pool and per-record header table both grow; nothing here is collector-registered |
 | `JsDeferredMirState` | 65,544 | gone | JSCU16 | replaced by the dynamic `JsCodeStore` |
 | `JsDeepEqualContext` | 65,544 | gone | JSCU16 | fixed Item-pair stack retired |
 | `JsAssertPartialContext` | 65,544 | gone | JSCU16 | duplicated the deep-equality storage; retired with it |
 | `JsEvalState` | 40,936 | **4,304** | JSCU14(c) | twelve fixed Item lanes became `RootVector`s |
-| `JsMirTranspiler` | 23,560 | **30,840** | — | **untouched and it grew.** 106 members; the whole JS MIR compiler in one record |
+| `JsMirTranspiler` | 23,560 | **2,720** | §9.3 | closure capture, TDZ capture and generator-label arrays all grow now; the §9.2 lifetime split is still open |
+| `JsMirLastClosureSnapshot` | 11,792 | **16** | §9.3 | a save is now a journal mark, not a copy of 512 captures |
+| `JsMirBranchState` | 11,864 | **80** | §9.3 | embedded the snapshot |
 | `JsEvalBridgeState` | 22,888 | **2,920** | JSCU14(c) | parallel fixed arrays retired |
 | `JsFunction` | 280 | **128** | JSCU19/20, JSCUO8/O9 | one payload word; GC slot 384 → 128 (see JSCUO9 on the size-class constant) |
 | `JsFuncCollected` | 984 | **96** | parent §9.1 | |
@@ -102,8 +104,10 @@ named has landed. The three largest remaining records are all *web-object*
 state — `JsObserverRuntimeState`, `JsDomCollectionRuntimeState` and
 `JsXhrRuntimeState`, about 2.4 MB together — and none of them was in scope for
 items 1–4. They are now the dominant fixed-capacity pressure in the tree and
-are tracked as **JSCUO5**. `JsMirTranspiler` is the fourth and has grown since
-this table was first written.
+are tracked as **JSCUO5**. `JsMirTranspiler`'s closure-capture duplication (§9.3) is also done; its §9.2
+lifetime split remains. The largest record in the tree is now
+`NodeRuntimeSession` at 805,648 B, which JSCU16 made lazy on purpose — it is
+paid only by a live Node session.
 
 `JsRuntimeState` is large mainly because it embeds maximum-sized members by value:
 
@@ -402,6 +406,9 @@ After the D5.4.1 context migration is complete, ordinary function values do not 
 
 ### 9.1 `JsFuncCollected`
 
+**DONE.** The record is **984 → 96 B** with 13 members, not 58. The original
+ruling follows.
+
 Replace the 58-field bag with ID-keyed authorities:
 
 | Table/record | Owns |
@@ -415,6 +422,23 @@ Replace the 58-field bag with ID-keyed authorities:
 The existing dynamically sized captures and shared `FnAnalysis` are the direction to keep. The four fixed constructor-shape arrays and cached scope-walk hashmaps do not belong in every function record.
 
 ### 9.2 `JsMirTranspiler`
+
+**First split LANDED 2026-09-08: `JsMirFunctionEmitter`.** See §14.1 for the
+result and the naming trap. The other four records this section names
+(`JsMirModuleEmitter`, `JsControlFlowState`, `JsGeneratorLoweringState`,
+`JsEvalLoweringState`) are still inline in a 664 B coordinator; the ratchet is
+met and further splitting is structure-only.
+
+**Earlier assessment, kept because it still applies to the remaining four:** §9.3 took the record from 30,840 B to
+**2,720 B**, so the size argument for the lifetime split is gone. What remains
+is the architectural case — D8.2.4/D8.2.5 lifetime hygiene, so that lowering
+consumes resolved IDs and facts rather than carrying analysis as mutable
+emitter flags — against a five-way split of a ~100-member record that every
+lowering file touches. That is the same shape as JSCU25/26: ratified, no
+measurable payoff left, high blast radius. It wants an explicit decision rather
+than being taken as the next item by default.
+
+The original ruling follows.
 
 Split by lifetime:
 
@@ -437,7 +461,48 @@ The same 512-capture shape currently appears in:
 
 The two snapshot structs are layout-equivalent 7,696-byte copies; branch state adds the same arrays plus cloned lexical-scope maps.
 
+**LANDED 2026-09-08.** `JsClosureCapture` (name, binding, slot, and the three
+flags) replaces the six parallel arrays, and `JsClosureTracker` holds them in a
+grow-on-demand list. A save is a **mark into a transpiler-owned journal**, not a
+copy: `jm_save_last_closure_snapshot` pushes the live captures and records where
+they start, `jm_restore_last_closure_snapshot` copies them back and truncates to
+the mark. That choice matters because every snapshot is a stack local at six
+call sites with multiple return paths — a snapshot owning its own allocation
+would leak on any early return, whereas the journal is owned by the transpiler
+and freed once in `jm_destroy_mir_transpiler`.
+
+`JsMirTranspiler` 30,840 → 19,088 B, `JsMirLastClosureSnapshot` 11,792 → 16 B,
+`JsMirBranchState` 11,864 → 80 B. The 512-capture ceiling is gone, and with it a
+real source-language limit: `jm_last_closure_track_count` used to silently drop
+capture read-back past 512, so a closure mutating more than 512 outer bindings
+lost the write-back. Verified with a 700-capture closure, which now reads back
+correctly. Gates: test262 40261/40261 with 0 regressions, JS gtest, script gtest,
+rooting core, MIR GC stress, callable catalog, lambda baseline 5077/5077 (the
+memtrack gate), node slice identical to pristine, radiant baseline at its five
+pre-existing failures.
+
+The original ruling follows.
+
 Introduce one dynamic `JsClosureTracker` containing exact-sized `JsClosureCapture` records. Branching uses a small `JsClosureCheckpoint`/scope-journal mark and restores by rollback, not by copying 512 possible entries. One save/restore implementation serves statements, expressions and conditional branches.
+
+**LANDED 2026-09-08, and it was a correctness fix, not a size one.**
+`gen_state_labels` was a fixed 64-entry array, and two clamps existed to match
+it: `if (yield_count > 63) yield_count = 63;` for generators and the identical
+line for `await_count` in async functions. Both truncated **silently**. A
+generator with 100 yields summed only its first 62 values — it returned 1891
+instead of 4950 — and a 150-await async function was wrong the same way. No gate
+caught this: test262, the JS suites and the node slice all passed with the bug
+present, because nothing in them has more than 62 suspension points in one
+function. The label array is now exact-sized from the pre-counted state count,
+`jm_next_resume_state` checks the real capacity instead of a literal 64, and
+both clamps are deleted. Verified: 100-yield generator, 200-yield async
+generator and 150-await async function all produce correct results.
+
+`tdz_closure_captures[512]` (16,384 B, 86 % of what was left of
+`JsMirTranspiler`) also grows on demand now; `JsMirTranspiler` is
+**30,840 → 2,720 B** across §9.3.
+
+The original ruling follows.
 
 Generator resume-label arrays are exact-sized from the pre-counted yield count. Property-name caches and other small bounded optimization caches may remain bounded only when overflow has a correct generic path and measurements justify inline storage; they must not impose a source-language limit.
 
@@ -572,6 +637,79 @@ Large resource records such as `JsSocket`, `JsTlsSocket`, and `JsSpawnProcess` a
 ## 14. Acceptance gates
 
 ### 14.1 Structural ratchets
+
+**Status 2026-09-08.** Twelve of thirteen ratchets are met; the one that
+misses is named below the table.
+
+| Ratchet | Target | Now | |
+|---|---:|---:|---|
+| `sizeof(JsObserverRuntimeState)` | ≤ 128 | **32** | met |
+| `sizeof(ParsedRequest)` → `HttpRequestHead` | ≤ 256 | **104** | met |
+| `sizeof(JsFunction)` | ≤ 160 | **128** | met, and it changed the GC size class (384 → 128) |
+| fixed DOM collection entries | 0 | **0** | met |
+| fixed XHR records | 0 | **0** | met |
+| fixed crypto handle slots | 0 | **0** | met |
+| generator / async / reset-registry capacities | none | **none** | met |
+| closure capture arrays copied by snapshots | 0 fixed | **0** | met |
+| `sizeof(JsMirTranspiler)` | ≤ 2,048 | **664** | met (§9.2 split) |
+| `sizeof(JsRuntimeState)` | ≤ 1,024 | **9,120** | misses by 8,096 |
+
+**`JsMirTranspiler` — ratchet MET 2026-09-08 at 664 B.** §9.3 took it from
+30,840 to 2,720 B; §9.2's first split takes it to **664 B**, well under 2,048.
+`JsMirFunctionEmitter` (1,560 B) now holds the per-function lowering state:
+`MirEmitter em`, `MirValue last_call_result`, and the two 32-entry name caches
+with their counts and function-item guards. Those caches are what identified the
+boundary — each invalidates itself against `em.func_item`, which is the
+definition of per-function state sitting in a compilation-unit record. 319
+accesses were rewritten across eleven files.
+
+⚠ The member is named `func_em`, not `fn`: the call macros in
+`js_mir_internal.hpp` already bind a parameter called `fn`, so `(mt)->fn->em`
+expanded the macro argument into the member path and produced nonsense that
+still parsed at some sites.
+
+**Honest note on what this buys.** `JsMirTranspiler` is one instance per
+compilation unit, so the byte count was never memory pressure — the value is
+that the per-function boundary now has a name and one record to reset, instead
+of a dozen fields reset by scattered assignments. Lowering is sequential, so the
+emitter is allocated once and reused rather than reallocated per function; §14.1
+would object to that shape for a record every realm carries, but here the
+coordinator genuinely no longer contains state whose lifetime is a function
+body. The remaining four records §9.2 names — control flow, generator lowering,
+eval lowering — are still inline; they are small, and splitting them further
+buys structure rather than either bytes or a ratchet.
+
+**`JsRuntimeState` — 27,064 → 9,120 B this session; ratchet ≤ 1,024 still
+misses.** Two things came out:
+
+- **`JsDomPlatformState` (5,680 B) became a lazy context capsule.** Local and
+  session storage and media-query state are DOM-only, so a plain JS realm never
+  materialises them. Read paths use `context_capsule`, not
+  `context_capsule_ensure` — a batch reset of a realm that never touched storage
+  must not allocate the capsule just to clear it.
+- **The native wrapper cache (12,288 B) grows instead of being two fixed 512-entry
+  tables.** This was 57 % of the record. It also stopped being a cache in
+  ordinary use: a bare realm already reaches ~5,000 reachable functions, so the
+  512 slots saturated and every later wrapper simply missed. Function identity
+  is unaffected either way — verified against Node before and after — because a
+  compiled function's Item is stored once at its binding rather than rebuilt per
+  reference, so this was a size and hit-rate problem, not a correctness one. The
+  cached wrappers are pool-backed and carry no registered GC root, so the arrays
+  may move.
+
+**What reaching ≤ 1,024 now requires.** The remainder is almost entirely the ~38
+records still embedded by value. The largest is `JsEvalState` (4,304 B), of
+which `JsEvalBridgeState` is 2,920 B — four `bool[512]` flag arrays parallel to
+`RootVector`s plus three `int` frame-mark arrays, exactly the "parallel fixed
+arrays encode records by position" shape §2 flagged. Those caps are *diagnosed*
+(`js-eval-env: binding stack overflow`), unlike the silent ones fixed elsewhere,
+so converting them is a size change rather than a correctness fix. Beyond that,
+closing the ratchet is §4's capsule-directory conversion applied to the whole
+set, and the honest test stays the one above: a record every realm uses is not
+served by a pointer, only the ones a plain JS realm never touches become
+capsules.
+
+The original table follows.
 
 | Metric | Current | Target |
 |---|---:|---:|

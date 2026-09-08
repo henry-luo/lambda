@@ -22,7 +22,6 @@
 #define JS_WITH_STACK_MAX 16
 // derived-constructor nesting depth: a checked policy limit, not a struct size
 #define JS_SUPER_THIS_STACK_MAX 128
-#define JS_FUNCTION_CACHE_CAPACITY 512
 #define JS_READLINE_INPUT_MAP_MAX 256
 #define JS_GLOBAL_VAR_MODULE_BINDING_CAP 512
 #define JS_GLOBAL_LEX_BIND_MAX 1024
@@ -910,7 +909,6 @@ struct JsRuntimeState {
     JsFsState fs = {};
     JsClipboardState clipboard = {};
     JsDomState dom = {};
-    JsDomPlatformState dom_platform = {};
     // Listener records contain native precise-root slots and DOM pins. Keep
     // their opaque storage with the owning realm; dispatch reads it directly
     // after the context has been bound, with no shared synchronization.
@@ -963,15 +961,22 @@ struct JsRuntimeState {
     void* mir_compile_recovery_state = NULL;
     // Wrapper identity is observable through .prototype and must therefore be
     // private to the context that owns the function objects and their heap.
+    // §14.1: the two fixed 512-entry tables were 12,288 B — 57 % of this
+    // record — while a bare realm already reaches thousands of functions, so
+    // the cache saturated in ordinary use and simply stopped deduplicating.
+    // The cached wrappers are pool-backed and carry no registered GC root, so
+    // the arrays may move freely.
     struct JsFunctionCacheKey {
         uint64_t target_bits;
         int16_t arity;
         uint8_t kind;
         uint8_t policy;
         uint8_t capabilities;
-    } function_cache_keys[JS_FUNCTION_CACHE_CAPACITY] = {};
-    JsFunction* function_cache_values[JS_FUNCTION_CACHE_CAPACITY] = {};
+    };
+    JsFunctionCacheKey* function_cache_keys = nullptr;
+    JsFunction** function_cache_values = nullptr;
     int function_cache_count = 0;
+    int function_cache_capacity = 0;
     int function_cache_suppress_depth = 0;
     // Resumable code retains function environments after its creating native
     // frame has returned.  The fixed tables are context-owned so resumes never

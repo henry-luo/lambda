@@ -368,6 +368,11 @@ typedef struct FontFaceSource {
     const char* format;         // "truetype", "opentype", "woff", "woff2", or NULL
 } FontFaceSource;
 
+typedef struct FontFaceUnicodeRange {
+    uint32_t start_codepoint;
+    uint32_t end_codepoint;
+} FontFaceUnicodeRange;
+
 // descriptor for a registered font face (one @font-face rule = one descriptor)
 typedef struct FontFaceDesc {
     const char*   family;       // font-family value
@@ -375,6 +380,8 @@ typedef struct FontFaceDesc {
     FontSlant     slant;        // font-style (normal/italic/oblique)
     FontFaceSource*  sources;      // ordered src list (tried in order)
     int           source_count;
+    FontFaceUnicodeRange* unicode_ranges; // NULL means the full Unicode range
+    int           unicode_range_count;
 } FontFaceDesc;
 
 // register a font face descriptor (called by Radiant after parsing @font-face).

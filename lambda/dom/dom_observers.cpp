@@ -18,8 +18,6 @@
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern Item js_make_number(double d);
 
-#define JS_OBSERVER_CAP 64
-#define JS_OBSERVER_TARGET_CAP 32
 
 typedef enum JsObserverKind {
     JS_OBSERVER_MUTATION,
@@ -59,13 +57,24 @@ typedef struct JsObserverState {
     bool root_margin_percent[4];
     float thresholds[16];
     int threshold_count;
-    JsObserverTarget targets[JS_OBSERVER_TARGET_CAP];
+    // JSCUO5: grown on demand. A target is 776 B and the fixed 32-slot table
+    // made every observer 24,976 B whether it watched anything or not.
+    JsObserverTarget* targets;
     int target_count;
+    int target_capacity;
 } JsObserverState;
 
+// JSCUO5: observers are individually allocated and held by pointer, not
+// inlined into a 64-slot table. Two reasons, and the second is the binding one:
+// the table cost 1,598,480 B in every realm that merely *could* observe, and
+// each observer's `object`/`callback` slots are registered GC roots, so the
+// array holding them must be address-stable — growing an array of embedded
+// records by realloc would leave every registered root dangling. Growing an
+// array of *pointers* moves nothing the collector knows about.
 struct JsObserverRuntimeState {
-    JsObserverState observers[JS_OBSERVER_CAP] = {};
+    JsObserverState** observers = nullptr;
     int observer_count = 0;
+    int observer_capacity = 0;
     bool delivery_scheduled = false;
     uint64_t roots_epoch = 0;
 };
@@ -77,6 +86,11 @@ static const ContextCapsuleOps dom_observer_capsule_ops = {
     NULL, NULL, dom_observer_capsule_destroy
 };
 
+// Releases every live observer's pins, target array and record. `free_array`
+// also drops the pointer array itself, which only capsule teardown wants —
+// a batch reset keeps it so the next script reuses the capacity.
+static void observer_state_release_all(JsObserverRuntimeState* state, bool free_array);
+
 static JsObserverRuntimeState* js_observer_runtime_state() {
     if (!js_active_runtime_state) return nullptr;
     return (JsObserverRuntimeState*)context_capsule_ensure(
@@ -87,20 +101,63 @@ static JsObserverRuntimeState* js_observer_runtime_state() {
 #define observer_count (js_observer_runtime_state()->observer_count)
 #define observer_delivery_scheduled (js_observer_runtime_state()->delivery_scheduled)
 #define observer_roots_epoch (js_observer_runtime_state()->roots_epoch)
+#define observer_capacity (js_observer_runtime_state()->observer_capacity)
 extern __thread EvalContext* context;
 extern "C" uint64_t js_get_heap_epoch(void);
 
 static Item js_geometry_observer_initial_sample(void);
 
 
+// Re-register every live observer's two Item slots after a heap replacement.
+// Only live observers are walked now; the old table registered 128 slots up
+// front, most of them for observers that never existed.
 static void observer_register_roots(void) {
     uint64_t epoch = js_get_heap_epoch();
     if (observer_roots_epoch == epoch) return;
-    for (int i = 0; i < JS_OBSERVER_CAP; i++) {
-        heap_register_gc_root(&observers[i].object.item);
-        heap_register_gc_root(&observers[i].callback.item);
+    for (int i = 0; i < observer_count; i++) {
+        heap_register_gc_root(&observers[i]->object.item);
+        heap_register_gc_root(&observers[i]->callback.item);
     }
     observer_roots_epoch = epoch;
+}
+
+// Append one observer. The record is allocated on its own so its registered
+// root slots keep a stable address; only the pointer array grows.
+static JsObserverState* observer_append(void) {
+    if (!js_observer_runtime_state()) return nullptr;
+    if (observer_count >= observer_capacity) {
+        int capacity = observer_capacity ? observer_capacity * 2 : 4;
+        JsObserverState** grown = (JsObserverState**)mem_realloc(observers,
+            (size_t)capacity * sizeof(JsObserverState*), MEM_CAT_JS_RUNTIME);
+        if (!grown) return nullptr;
+        observers = grown;
+        observer_capacity = capacity;
+    }
+    JsObserverState* observer = (JsObserverState*)mem_calloc(1, sizeof(JsObserverState),
+                                                            MEM_CAT_JS_RUNTIME);
+    if (!observer) return nullptr;
+    observers[observer_count++] = observer;
+    // the slots must be roots before either Item is published into them
+    heap_register_gc_root(&observer->object.item);
+    heap_register_gc_root(&observer->callback.item);
+    return observer;
+}
+
+// Reserve one more target slot. Targets hold DOM pointers and pinned refs, not
+// Items, so this array may move freely.
+static JsObserverTarget* observer_append_target(JsObserverState* observer) {
+    if (!observer) return nullptr;
+    if (observer->target_count >= observer->target_capacity) {
+        int capacity = observer->target_capacity ? observer->target_capacity * 2 : 4;
+        JsObserverTarget* grown = (JsObserverTarget*)mem_realloc(observer->targets,
+            (size_t)capacity * sizeof(JsObserverTarget), MEM_CAT_JS_RUNTIME);
+        if (!grown) return nullptr;
+        observer->targets = grown;
+        observer->target_capacity = capacity;
+    }
+    JsObserverTarget* target = &observer->targets[observer->target_count++];
+    memset(target, 0, sizeof(*target));
+    return target;
 }
 JS_FORWARD_STATIC_ITEM(observer_key, (const char* name), js_make_string, (name))
 JS_FORWARD_STATIC_ITEM(observer_pending, (JsObserverState* observer), dom_realm_get, (observer->object, observer_key("__lambdaObserverRecords")))
@@ -117,7 +174,7 @@ static void observer_replace_pending(JsObserverState* observer) {
 static JsObserverState* observer_from_this(void) {
     Item receiver = dom_realm_receiver();
     for (int i = 0; i < observer_count; i++) {
-        if (observers[i].object.item == receiver.item) return &observers[i];
+        if (observers[i]->object.item == receiver.item) return observers[i];
     }
     return nullptr;
 }
@@ -171,14 +228,10 @@ static Item observer_create(JsObserverKind kind, Item callback, JsObserverState*
     if (!dom_realm_is_callable(callback)) {
         return dom_realm_throw_type_error("Observer callback must be callable");
     }
-    if (observer_count >= JS_OBSERVER_CAP) {
-        log_error("dom-observer: observer capacity %d exhausted", JS_OBSERVER_CAP);
-        return js_status_ok();
-    }
     observer_register_roots();
     JS_ROOTS(roots, callback_root, callback, object_root, ItemNull);
-    JsObserverState* observer = &observers[observer_count++];
-    memset(observer, 0, sizeof(*observer));
+    JsObserverState* observer = observer_append();
+    if (!observer) return dom_realm_throw_type_error("Observer allocation failed");
     observer->kind = kind;
     observer->callback = callback_root.get();
     object_root.set(js_new_object());
@@ -332,12 +385,8 @@ static Item js_mutation_observer_observe(Item target_item, Item options) {
     }
     JsObserverTarget* target = observer_find_target(observer, node);
     if (!target) {
-        if (observer->target_count >= JS_OBSERVER_TARGET_CAP) {
-            log_error("dom-observer: MutationObserver target capacity exhausted");
-            return make_js_undefined();
-        }
-        target = &observer->targets[observer->target_count++];
-        memset(target, 0, sizeof(*target));
+        target = observer_append_target(observer);
+        if (!target) return make_js_undefined();
         target->node = node;
         target->owner_doc = observer_node_document(node);
         if (!observer_pin_node(target->owner_doc, node, &target->node_ref)) {
@@ -396,12 +445,8 @@ static Item js_geometry_observer_observe(Item target_item) {
         return make_js_undefined();
     }
     if (observer_find_target(observer, node)) return make_js_undefined();
-    if (observer->target_count >= JS_OBSERVER_TARGET_CAP) {
-        log_error("dom-observer: geometry observer target capacity exhausted");
-        return make_js_undefined();
-    }
-    JsObserverTarget* target = &observer->targets[observer->target_count++];
-    memset(target, 0, sizeof(*target));
+    JsObserverTarget* target = observer_append_target(observer);
+    if (!target) return make_js_undefined();
     target->node = node;
     target->owner_doc = observer_node_document(node);
     if (!observer_pin_node(target->owner_doc, node, &target->node_ref)) {
@@ -418,10 +463,15 @@ static Item js_geometry_observer_observe(Item target_item) {
 
 static Item js_observer_deliver(void) {
     observer_delivery_scheduled = false;
-    DomDocument* sweep_docs[JS_OBSERVER_CAP * JS_OBSERVER_TARGET_CAP] = {};
+    // JSCUO5: this deduplicates owner documents across every observed target.
+    // It used to be a 2,048-pointer stack array sized from the two capacities;
+    // with those gone it would be unbounded, so it grows on the heap instead.
+    // The distinct-document count is normally one.
+    DomDocument** sweep_docs = nullptr;
     int sweep_doc_count = 0;
+    int sweep_doc_capacity = 0;
     for (int i = 0; i < observer_count; i++) {
-        JsObserverState* observer = &observers[i];
+        JsObserverState* observer = observers[i];
         RootFrame roots(3);
         Rooted<Item> records_root(roots, observer_pending(observer));
         Rooted<Item> object_root(roots, observer->object);
@@ -444,11 +494,21 @@ static Item js_observer_deliver(void) {
                         break;
                     }
                 }
-                if (owner_doc && !known) sweep_docs[sweep_doc_count++] = owner_doc;
+                if (!owner_doc || known) continue;
+                if (sweep_doc_count >= sweep_doc_capacity) {
+                    int capacity = sweep_doc_capacity ? sweep_doc_capacity * 2 : 8;
+                    DomDocument** grown = (DomDocument**)mem_realloc(sweep_docs,
+                        (size_t)capacity * sizeof(DomDocument*), MEM_CAT_JS_RUNTIME);
+                    if (!grown) break;
+                    sweep_docs = grown;
+                    sweep_doc_capacity = capacity;
+                }
+                sweep_docs[sweep_doc_count++] = owner_doc;
             }
         }
     }
     for (int i = 0; i < sweep_doc_count; i++) dom_retire_sweep(sweep_docs[i]);
+    if (sweep_docs) mem_free(sweep_docs);
     return make_js_undefined();
 }
 
@@ -639,7 +699,7 @@ extern "C" void dom_observers_mutation_notify(DomJsMutationKind kind,
     if (!observed_node) return;
 
     for (int i = 0; i < observer_count; i++) {
-        JsObserverState* observer = &observers[i];
+        JsObserverState* observer = observers[i];
         if (observer->kind != JS_OBSERVER_MUTATION) continue;
         for (int j = 0; j < observer->target_count; j++) {
             JsObserverTarget* registration = &observer->targets[j];
@@ -680,7 +740,7 @@ extern "C" void dom_observers_child_replace_notify(void* parent_ptr,
     DomNode* removed = (DomNode*)removed_ptr;
     if (!parent) return;
     for (int i = 0; i < observer_count; i++) {
-        JsObserverState* observer = &observers[i];
+        JsObserverState* observer = observers[i];
         if (observer->kind != JS_OBSERVER_MUTATION) continue;
         for (int j = 0; j < observer->target_count; j++) {
             JsObserverTarget* registration = &observer->targets[j];
@@ -744,7 +804,7 @@ extern "C" void dom_observers_post_layout(void) {
     UiContext* uicon = (UiContext*)dom_get_ui_context();
     if (!uicon) return;
     for (int i = 0; i < observer_count; i++) {
-        JsObserverState* observer = &observers[i];
+        JsObserverState* observer = observers[i];
         if (observer->kind == JS_OBSERVER_MUTATION) continue;
         for (int j = 0; j < observer->target_count; j++) {
             JsObserverTarget* target = &observer->targets[j];
@@ -827,18 +887,10 @@ extern "C" void dom_observers_reset(void) {
     // that never used an observer; doing so made every test262 reset pay its
     // full zeroing cost.
     if (!js_active_runtime_state || !context_capsule(context, CONTEXT_CAPSULE_DOM_OBSERVER)) return;
-    for (int i = 0; i < observer_count; i++) {
-        JsObserverState* observer = &observers[i];
-        for (int j = 0; j < observer->target_count; j++) {
-            observer_release_target(&observer->targets[j]);
-        }
-        if (observer->root && observer->root_ref.address) {
-            dom_node_unpin(observer->root->doc, observer->root_ref,
-                           DOM_NODE_PIN_OBSERVER);
-        }
-    }
-    memset(observers, 0, sizeof(observers));
-    observer_count = 0;
+    // JSCUO5: observers are individual allocations now, so this releases each
+    // one. The old code zeroed the embedded table with `sizeof(observers)`,
+    // which after the change would memset eight bytes through a pointer.
+    observer_state_release_all(js_observer_runtime_state(), false);
     observer_delivery_scheduled = false;
 }
 
@@ -846,11 +898,13 @@ extern "C" void dom_observers_reset(void) {
 #undef observer_count
 #undef observer_delivery_scheduled
 #undef observer_roots_epoch
+#undef observer_capacity
 
-static void dom_observer_capsule_destroy(void* capsule) {
-    JsObserverRuntimeState* state = (JsObserverRuntimeState*)capsule;
+static void observer_state_release_all(JsObserverRuntimeState* state, bool free_array) {
+    if (!state) return;
     for (int i = 0; i < state->observer_count; i++) {
-        JsObserverState* observer = &state->observers[i];
+        JsObserverState* observer = state->observers[i];
+        if (!observer) continue;
         for (int j = 0; j < observer->target_count; j++) {
             observer_release_target(&observer->targets[j]);
         }
@@ -858,6 +912,22 @@ static void dom_observer_capsule_destroy(void* capsule) {
             dom_node_unpin(observer->root->doc, observer->root_ref,
                            DOM_NODE_PIN_OBSERVER);
         }
+        // JSCUO5: the target array and the observer are separate allocations
+        // now and die here rather than with the enclosing struct.
+        if (observer->targets) mem_free(observer->targets);
+        mem_free(observer);
+        state->observers[i] = nullptr;
     }
+    state->observer_count = 0;
+    if (free_array && state->observers) {
+        mem_free(state->observers);
+        state->observers = nullptr;
+        state->observer_capacity = 0;
+    }
+}
+
+static void dom_observer_capsule_destroy(void* capsule) {
+    JsObserverRuntimeState* state = (JsObserverRuntimeState*)capsule;
+    observer_state_release_all(state, true);
     mem_free(state);
 }

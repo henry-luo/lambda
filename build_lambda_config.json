@@ -3031,6 +3031,7 @@
             "additional_sources": [
               "radiant/animation.cpp",
               "radiant/css_animation.cpp",
+              "radiant/view_transform.cpp",
               "radiant/view_geometry.cpp",
               "radiant/css_display.cpp",
               "radiant/css_cascade.cpp",

@@ -27,8 +27,8 @@ static void jm_install_for_generator_var(JsMirTranspiler* mt, MIR_reg_t value,
     memset(&entry, 0, sizeof(entry));
     char backend_name[32];
     mir_format_backend_name(backend_name, sizeof(backend_name), name_prefix,
-        (uint64_t)mt->em.label_counter);
-    entry.name = mir_em_persist_cstr(&mt->em, backend_name).str;
+        (uint64_t)mt->func_em->em.label_counter);
+    entry.name = mir_em_persist_cstr(&mt->func_em->em, backend_name).str;
     entry.var.reg = value;
     entry.var.from_env = true;
     entry.var.env_slot = env_slot;
@@ -102,14 +102,14 @@ void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
     MIR_reg_t val = jm_is_native_type(type_id) ? jm_box_native(mt, val_reg, type_id) : val_reg;
     MIR_reg_t last_env = 0;
     int last_slot = -1;
-    if (mt->last_closure_has_env && mt->last_closure_env_reg != 0) {
-        int capture_count = jm_last_closure_capture_count_clamped(mt->last_closure_capture_count);
+    if (mt->last_closure.has_env && mt->last_closure.env_reg != 0) {
+        int capture_count = jm_last_closure_capture_count_clamped(mt->last_closure.count);
         for (int i = 0; i < capture_count; i++) {
-            if (mt->last_closure_capture_is_nfe[i]) continue;
-            if (mt->last_closure_capture_bindings[i] != binding) continue;
-            int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
-            MIR_reg_t target_env = mt->last_closure_env_reg;
-            if (mt->last_closure_capture_is_transitive[i]) {
+            if (mt->last_closure.captures[i].is_nfe) continue;
+            if (mt->last_closure.captures[i].binding != binding) continue;
+            int slot = mt->last_closure.captures[i].slot >= 0 ? mt->last_closure.captures[i].slot : i;
+            MIR_reg_t target_env = mt->last_closure.env_reg;
+            if (mt->last_closure.captures[i].is_transitive) {
                 JsMirVarEntry* var = jm_find_var_by_binding(mt, binding);
                 if (!jm_resolve_transitive_capture_env(var, &target_env, &slot)) continue;
             }
@@ -1104,7 +1104,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
 
     jm_emit_branch(mt, MIR_BF, l_else, test_val);
     JsErrorLaneTrack branch_exc = jm_error_lane_state(mt);
-    MirValue branch_result = mt->last_call_result;
+    MirValue branch_result = mt->func_em->last_call_result;
 
     // Consequent
     if (if_node->consequent) {
@@ -1144,7 +1144,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
     // the alternate arm starts with the condition's result, not the
     // consequent arm's path-local throw result; without this bridge a normal
     // arm can test an Item written only by the sibling arm.
-    mt->last_call_result = branch_result;
+    mt->func_em->last_call_result = branch_result;
     if (if_node->alternate) {
         // Phase 3.5: narrow variable type inside the alternate when typeof !== guard matched
         bool alternate_narrowed = false;
@@ -1572,7 +1572,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         jm_clear_last_closure_snapshot(mt);
         TypeId upd_type = jm_get_effective_type(mt, for_node->update);
         if (jm_is_native_type(upd_type)) {
-            (void)em_apply_value_demand(&mt->em,
+            (void)em_apply_value_demand(&mt->func_em->em,
                 jm_transpile_expression_value(mt, for_node->update),
                 MIR_VALUE_DISCARD);
         } else {
@@ -1582,7 +1582,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         // inspect an update register that does not exist on a zero-iteration exit.
         jm_emit_error_lane_propagate_check(mt);
         if (init_is_lexical_decl && for_lexical_init_name &&
-                for_lexical_init_name[0] && mt->last_closure_has_env) {
+                for_lexical_init_name[0] && mt->last_closure.has_env) {
             jm_scope_env_reload_vars(mt);
             JsMirVarEntry* loop_var = jm_find_var_by_binding(mt,
                 for_lexical_init_binding);
@@ -2215,7 +2215,7 @@ static void jm_precreate_loop_binding(JsMirTranspiler* mt, const char* vname,
 // Uses fn_len + js_get_reference for arrays, or js_object_keys for objects
 void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Js55 P19: save and reset last-closure tracking so a prior loop's closure
-    // (still referenced via mt->last_closure_env_reg) cannot capture this loop's
+    // (still referenced via mt->last_closure.env_reg) cannot capture this loop's
     // let/const initializers. Without this, `const rab = ...` inside a second
     // `for (let ctor of ctors) {...}` would write back to the FIRST loop's
     // last evil's env, and reads of the body's bindings would route through
@@ -2551,7 +2551,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         loop_var_env_slot = lv_slot;
         jm_install_for_generator_var(mt, iterator, 'i', iter_slot);
         jm_install_for_generator_var(mt, loop_var, 'v', lv_slot);
-        mt->em.label_counter++;
+        mt->func_em->em.label_counter++;
     }
 
     MIR_label_t l_test = jm_new_label(mt);
@@ -2587,7 +2587,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             int hret_slot = mt->gen_local_slot_count++;
             jm_install_for_generator_var(mt, forit_return_val, 'i', ret_slot);
             jm_install_for_generator_var(mt, forit_has_return, 'h', hret_slot);
-            mt->em.label_counter++;
+            mt->func_em->em.label_counter++;
         }
         jm_try_context_setup(tc, l_iter_error, 0, l_forit_ret,
             forit_return_val, forit_has_return, true, false, NULL, 0);
@@ -3282,7 +3282,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // expression statements inside control flow (for/while/if/switch)
             // propagate their value as the eval() result.
             if (mt->eval_completion_reg) {
-                em_move_value_to_destination(&mt->em, value,
+                em_move_value_to_destination(&mt->func_em->em, value,
                     mt->eval_completion_reg, VALUE_REP_ITEM);
             }
         }

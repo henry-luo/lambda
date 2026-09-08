@@ -112,6 +112,8 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span);
 void target_text_view(EventContext* evcon, ViewText* text);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard);
+void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event);
+void event_context_cleanup(EventContext* evcon);
 
 static WebViewHandle* focused_layer_webview_handle(View* focused) {
     // A focused element can become display:none before script restores focus;
@@ -1361,6 +1363,27 @@ void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
     else {
         log_error("Invalid root view: %d", root_view ? root_view->view_type : -1);
     }
+}
+
+void* radiant_document_element_from_point(DomDocument* doc, float x, float y) {
+    if (!doc || !doc->view_tree || !doc->view_tree->root ||
+        !doc->js.host_ui_context) return nullptr;
+    UiContext* uicon = (UiContext*)doc->js.host_ui_context;
+    RdtEvent hit_event = {};
+    hit_event.type = RDT_EVENT_MOUSE_MOVE;
+    hit_event.mouse_position.x = x;
+    hit_event.mouse_position.y = y;
+    EventContext evcon;
+    DomDocument* saved_document = uicon->document;
+    uicon->document = doc;
+    event_context_init(&evcon, uicon, &hit_event);
+    target_html_doc(&evcon, doc->view_tree);
+    uicon->document = saved_document;
+    DomNode* node = static_cast<DomNode*>(evcon.target);
+    while (node && !node->is_element()) node = node->parent;
+    void* hit = node && node->is_element() ? (void*)node->as_element() : nullptr;
+    event_context_cleanup(&evcon);
+    return hit;
 }
 
 ArrayList* build_view_stack(EventContext* evcon, View* view) {
@@ -7505,6 +7528,46 @@ extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* targe
         (mods & RDT_MOD_CTRL) != 0, (mods & RDT_MOD_SHIFT) != 0,
         (mods & RDT_MOD_ALT) != 0, (mods & RDT_MOD_SUPER) != 0,
         pointer_type ? pointer_type : "touch");
+}
+
+typedef struct {
+    const char* type;
+    double client_x;
+    double client_y;
+    bool ctrl;
+    bool shift;
+    bool alt;
+    bool meta;
+    bool is_active;
+    double timestamp_ms;
+} TouchEventBuildArgs;
+
+static Item build_touch_event_item(void* userdata) {
+    TouchEventBuildArgs* args = (TouchEventBuildArgs*)userdata;
+    Item event = js_create_native_touch_event(args->type, args->client_x, args->client_y,
+        args->ctrl, args->shift, args->alt, args->meta, args->is_active);
+    if (args->timestamp_ms >= 0.0) {
+        js_event_set_timestamp(event, args->timestamp_ms);
+    }
+    return event;
+}
+
+extern "C" bool radiant_dispatch_event_sim_touch(UiContext* uicon, View* target,
+    const char* type, double client_x, double client_y, int mods,
+    bool is_active, double timestamp_ms)
+{
+    if (!uicon || !uicon->document || !target || !type) return false;
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = uicon->document;
+    TouchEventBuildArgs args = {
+        type, client_x, client_y,
+        (mods & RDT_MOD_CTRL) != 0, (mods & RDT_MOD_SHIFT) != 0,
+        (mods & RDT_MOD_ALT) != 0, (mods & RDT_MOD_SUPER) != 0,
+        is_active, timestamp_ms
+    };
+    return radiant_dispatch_built_event(&evcon, target, build_touch_event_item,
+        &args, true, nullptr, true, type);
 }
 
 /**

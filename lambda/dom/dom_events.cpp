@@ -1648,6 +1648,15 @@ extern "C" Item js_ctor_pointer_event_fn(Item type_arg, Item init_arg) {
     return ev;
 }
 
+extern "C" Item js_ctor_touch_event_fn(Item type_arg, Item init_arg) {
+    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, "TouchEvent"));
+    stamp_modifiers(ev, init_arg);
+    event_set_item(ev, "touches", init_item(init_arg, "touches"));
+    event_set_item(ev, "targetTouches", init_item(init_arg, "targetTouches"));
+    event_set_item(ev, "changedTouches", init_item(init_arg, "changedTouches"));
+    return ev;
+}
+
 static Item js_ctor_timing_event(Item type_arg, Item init_arg, JsClass class_id,
                                  const char* name_key) {
     RootFrame roots(3);
@@ -1764,6 +1773,51 @@ extern "C" Item js_create_native_pointer_event(const char* type,
     event_set_str(init, "pointerType", pointer_type ? pointer_type : "mouse");
     event_set_bool(init, "isPrimary", is_primary);
     return js_create_trusted_native_event(type, init, js_ctor_pointer_event_fn);
+}
+
+static Item js_create_native_touch_point(double client_x, double client_y) {
+    RootFrame roots(1);
+    Rooted<Item> touch_root(roots, js_new_object());
+    Item touch = touch_root.get();
+    event_set_int(touch, "identifier", 1);
+    event_set_double(touch, "clientX", client_x);
+    event_set_double(touch, "clientY", client_y);
+    event_set_double(touch, "pageX", client_x);
+    event_set_double(touch, "pageY", client_y);
+    event_set_double(touch, "screenX", client_x);
+    event_set_double(touch, "screenY", client_y);
+    event_set_double(touch, "radiusX", 1.0);
+    event_set_double(touch, "radiusY", 1.0);
+    event_set_double(touch, "rotationAngle", 0.0);
+    event_set_double(touch, "force", 0.5);
+    return touch_root.get();
+}
+
+extern "C" Item js_create_native_touch_event(const char* type,
+    double client_x, double client_y,
+    bool ctrl, bool shift, bool alt, bool meta,
+    bool is_active)
+{
+    RootFrame roots(5);
+    Rooted<Item> touch_root(roots, js_create_native_touch_point(client_x, client_y));
+    Rooted<Item> touches_root(roots, js_array_new(0));
+    Rooted<Item> target_touches_root(roots, js_array_new(0));
+    Rooted<Item> changed_touches_root(roots, js_array_new(0));
+    if (is_active) {
+        js_array_push(touches_root.get(), touch_root.get());
+        js_array_push(target_touches_root.get(), touch_root.get());
+    }
+    js_array_push(changed_touches_root.get(), touch_root.get());
+
+    Rooted<Item> event_root(roots, js_create_event_init_with_class(type ? type : "", true,
+        true, true, JS_CLASS_TOUCH_EVENT));
+    Item event = event_root.get();
+    event_set_item(event, "touches", touches_root.get());
+    event_set_item(event, "targetTouches", target_touches_root.get());
+    event_set_item(event, "changedTouches", changed_touches_root.get());
+    stamp_modifier_init(event, ctrl, shift, alt, meta);
+    event_set_bool(event, "isTrusted", true);
+    return event_root.get();
 }
 
 extern "C" Item js_create_native_css_event(const char* type,

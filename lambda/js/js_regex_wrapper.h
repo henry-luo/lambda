@@ -11,18 +11,56 @@
 
 #include <re2/re2.h>
 #include <stdbool.h>
+#include "../../lib/mem.h"
+#include "../../lib/log.h"
+
+// LR09-30: there is no ceiling on capture groups. ECMAScript sets none and V8
+// allows 32,767; the former `JS_REGEX_MAX_GROUPS 256` silently truncated, so a
+// 300-group pattern reported 255 groups with the last one undefined and a
+// `$300` replacement resolved to nothing. Match scratch is sized from the
+// compiled pattern's own group count instead.
+//
+// Enough slots for the overwhelming majority of patterns to need no allocation
+// on the match path. Above this a match allocates once and frees at scope exit.
+#define JS_REGEX_INLINE_GROUPS 32
+
+// Pattern-analysis passes walk group indices rather than match slots; this is
+// how deep their bookkeeping goes before they stop tracking ancestry.
+#define JS_REGEX_ANALYSIS_GROUPS 256
 
 #ifdef __cplusplus
+// Match scratch sized from a pattern's group count, with inline storage so an
+// ordinary match still allocates nothing. `count` is the number of slots the
+// caller may actually use: it equals the requested count unless the allocation
+// failed, which is the only remaining reason a match reports fewer groups.
+// T is a trivially constructible match slot (re2::StringPiece, int, bool).
+template <typename T>
+struct JsRegexScratch {
+    T   inline_slots[JS_REGEX_INLINE_GROUPS];
+    T*  slots;
+    int count;
+
+    explicit JsRegexScratch(int requested) : slots(inline_slots), count(requested) {
+        if (requested <= JS_REGEX_INLINE_GROUPS) {
+            if (count < 0) count = 0;
+            return;
+        }
+        T* heap = (T*)mem_calloc((size_t)requested, sizeof(T), MEM_CAT_JS_RUNTIME);
+        if (heap) { slots = heap; return; }
+        log_error("js-regex: cannot size match scratch for %d groups", requested);
+        count = JS_REGEX_INLINE_GROUPS;
+    }
+    ~JsRegexScratch() { if (slots != inline_slots) mem_free(slots); }
+    JsRegexScratch(const JsRegexScratch&) = delete;
+    JsRegexScratch& operator=(const JsRegexScratch&) = delete;
+};
+
 extern "C" {
 #endif
 
 // Maximum number of post-filters per compiled regex
 #define JS_REGEX_MAX_FILTERS 16
 
-// Maximum capture groups copied out of a RegExp match. Test262 includes
-// legacy stress cases with hundreds of captures, so this must be well above
-// the old $1..$9 static-property limit.
-#define JS_REGEX_MAX_GROUPS 256
 
 // Post-filter types for runtime match verification
 enum JsRegexFilterType {
@@ -106,6 +144,12 @@ extern "C" int js_regex_wrapper_lookup_property_ranges(const char* name, int nam
 int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int input_len,
                   int start_pos, bool anchor_start,
                   int* match_starts, int* match_ends, int max_groups);
+
+/**
+ * Capture-group slots a wrapper can fill, including group 0. Callers size their
+ * match scratch from this rather than from a fixed ceiling (LR09-30).
+ */
+int js_regex_wrapper_group_count(JsRegexCompiled* compiled);
 
 /**
  * Test if a compiled regex matches anywhere in the input.

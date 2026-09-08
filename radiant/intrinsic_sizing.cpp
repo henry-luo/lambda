@@ -3842,7 +3842,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // (styles may not be resolved yet during early intrinsic sizing).
             {
                 float specified_width = -1;
-                if (view_block_replaced->blk && view_block_replaced->block_mut()->given_width >= 0) {
+                // A cyclic percentage is provisionally resolved during layout;
+                // intrinsic sizing must retain the image's natural contribution.
+                if (view_block_replaced->blk &&
+                    view_block_replaced->block_mut()->given_width >= 0 &&
+                    !percentage_width_is_intrinsic_auto) {
                     specified_width = view_block_replaced->block()->given_width;
                 } else {
                     const char* attr_w = element->get_attribute("width");

@@ -1405,8 +1405,14 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
 
     AssertionInfo infos[32];
     int assert_count = scan_assertions(original, out->original_group_count, infos, 32);
-    bool erased_original_group[JS_REGEX_MAX_GROUPS];
-    for (int i = 0; i < JS_REGEX_MAX_GROUPS; i++) erased_original_group[i] = false;
+    // LR09-30: sized from the pattern. A fixed window here silently stopped the
+    // erased-group remap partway, which rewrote the pattern wrongly and made a
+    // lookahead over more than ~256 total groups fail to match at all.
+    int erased_capacity = out->original_group_count + 2;
+    JsRegexScratch<bool> erased_buf(erased_capacity);
+    bool* erased_original_group = erased_buf.slots;
+    erased_capacity = erased_buf.count;
+    for (int i = 0; i < erased_capacity; i++) erased_original_group[i] = false;
     bool pattern_has_backref = false;
     for (int a = 0; a < assert_count; a++) {
         if (infos[a].kind == ASSERT_BACKREF) {
@@ -1571,7 +1577,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 int erased_count = count_capture_groups(info.inner);
                 for (int eg = 0; eg < erased_count; eg++) {
                     int group_idx = erased_start + eg;
-                    if (group_idx > 0 && group_idx < JS_REGEX_MAX_GROUPS) {
+                    if (group_idx > 0 && group_idx < erased_capacity) {
                         erased_original_group[group_idx] = true;
                     }
                 }
@@ -1640,7 +1646,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 int erased_count = count_capture_groups(info.inner);
                 for (int eg = 0; eg < erased_count; eg++) {
                     int group_idx = erased_start + eg;
-                    if (group_idx > 0 && group_idx < JS_REGEX_MAX_GROUPS) {
+                    if (group_idx > 0 && group_idx < erased_capacity) {
                         erased_original_group[group_idx] = true;
                     }
                 }
@@ -1699,7 +1705,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
         out->group_remap_count = remap_size;
         for (int i = 0; i < remap_size; i++) out->group_remap[i] = -1;
         out->group_remap[0] = 0; // group 0 always maps to itself
-        for (int i = 1; i < remap_size && i < JS_REGEX_MAX_GROUPS; i++) {
+        for (int i = 1; i < remap_size && i < erased_capacity; i++) {
             if (erased_original_group[i]) out->group_remap[i] = -1;
         }
 
@@ -1749,7 +1755,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 syn_re2_idx[syn_idx] = re2_idx;
             } else {
                 orig_idx++;
-                while (orig_idx < remap_size && orig_idx < JS_REGEX_MAX_GROUPS &&
+                while (orig_idx < remap_size && orig_idx < erased_capacity &&
                        erased_original_group[orig_idx]) {
                     orig_idx++;
                 }
@@ -2116,11 +2122,13 @@ static bool js_regex_assert_marker_matches(JsRegexFilter& f, const char* input, 
     if (check_offset < 0 || check_offset > input_len) return false;
 
     if (f.reject_wrapper) {
-        int starts[JS_REGEX_MAX_GROUPS], ends[JS_REGEX_MAX_GROUPS];
+        // sized from the assertion pattern's own group count (LR09-30)
+        int reject_groups = js_regex_wrapper_group_count(f.reject_wrapper);
+        JsRegexScratch<int> starts_buf(reject_groups), ends_buf(reject_groups);
         // Keep the whole subject: slicing at the marker makes \b treat the
         // slice boundary as a word boundary and accepts a false lookahead.
         return js_regex_wrapper_exec(f.reject_wrapper, input, input_len, check_offset, true,
-                                     starts, ends, JS_REGEX_MAX_GROUPS) > 0;
+                                     starts_buf.slots, ends_buf.slots, starts_buf.count) > 0;
     }
     if (f.reject_pattern) {
         re2::StringPiece check_text(input, input_len);
@@ -2132,9 +2140,10 @@ static bool js_regex_assert_marker_matches(JsRegexFilter& f, const char* input, 
 
 static bool js_regex_reject_filter_matches(JsRegexFilter& f, const char* check_start, int check_len) {
     if (f.reject_wrapper) {
-        int starts[JS_REGEX_MAX_GROUPS], ends[JS_REGEX_MAX_GROUPS];
+        int reject_groups = js_regex_wrapper_group_count(f.reject_wrapper);
+        JsRegexScratch<int> starts_buf(reject_groups), ends_buf(reject_groups);
         return js_regex_wrapper_exec(f.reject_wrapper, check_start, check_len, 0, true,
-                                     starts, ends, JS_REGEX_MAX_GROUPS) > 0;
+                                     starts_buf.slots, ends_buf.slots, starts_buf.count) > 0;
     }
     if (f.reject_pattern) {
         re2::StringPiece check_text(check_start, check_len);
@@ -2194,15 +2203,18 @@ static bool js_regex_retry_marker_same_start(const std::string& refined_pattern,
 
     int prefix_ngroups = prefix_re2.NumberOfCapturingGroups() + 1;
     int suffix_ngroups = suffix_re2.NumberOfCapturingGroups() + 1;
-    if (prefix_ngroups > JS_REGEX_MAX_GROUPS) prefix_ngroups = JS_REGEX_MAX_GROUPS;
-    if (suffix_ngroups > JS_REGEX_MAX_GROUPS) suffix_ngroups = JS_REGEX_MAX_GROUPS;
+    JsRegexScratch<re2::StringPiece> prefix_buf(prefix_ngroups);
+    JsRegexScratch<re2::StringPiece> suffix_buf(suffix_ngroups);
+    prefix_ngroups = prefix_buf.count;
+    suffix_ngroups = suffix_buf.count;
+    re2::StringPiece* prefix_groups = prefix_buf.slots;
+    re2::StringPiece* suffix_groups = suffix_buf.slots;
 
     for (int boundary = marker_offset + 1; boundary <= input_len; boundary++) {
         if (!is_utf8_boundary(input, input_len, boundary)) continue;
 
         int prefix_len = boundary - match_start;
         re2::StringPiece prefix_text(input + match_start, prefix_len);
-        re2::StringPiece prefix_groups[JS_REGEX_MAX_GROUPS];
         if (!prefix_re2.Match(prefix_text, 0, prefix_len, re2::RE2::ANCHOR_BOTH,
                               prefix_groups, prefix_ngroups)) {
             continue;
@@ -2216,7 +2228,6 @@ static bool js_regex_retry_marker_same_start(const std::string& refined_pattern,
         }
 
         re2::StringPiece suffix_text(input + boundary, input_len - boundary);
-        re2::StringPiece suffix_groups[JS_REGEX_MAX_GROUPS];
         if (!suffix_re2.Match(suffix_text, 0, input_len - boundary,
                               re2::RE2::ANCHOR_START,
                               suffix_groups, suffix_ngroups)) {
@@ -2295,6 +2306,18 @@ JsRegexCompiled* js_regex_wrapper_compile(const char* pattern, int pattern_len,
     return result;
 }
 
+// LR09-30: the rewritten RE2 pattern can carry more groups than the original JS
+// pattern (assertions get absorbed as captures), so size from the compiled
+// pattern, not from `original_group_count`.
+int js_regex_wrapper_group_count(JsRegexCompiled* compiled) {
+    if (!compiled || !compiled->re2) return 1;
+    int groups = compiled->re2->NumberOfCapturingGroups() + 1;
+    if (compiled->original_group_count + 1 > groups) {
+        groups = compiled->original_group_count + 1;
+    }
+    return groups;
+}
+
 int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int input_len,
                   int start_pos, bool anchor_start,
                   int* match_starts, int* match_ends, int max_groups) {
@@ -2302,9 +2325,11 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
 
     re2::StringPiece text(input, input_len);
     int ngroups = compiled->re2->NumberOfCapturingGroups() + 1;
-    if (ngroups > JS_REGEX_MAX_GROUPS) ngroups = JS_REGEX_MAX_GROUPS;
 
-    re2::StringPiece groups[JS_REGEX_MAX_GROUPS];
+
+    JsRegexScratch<re2::StringPiece> groups_buf(ngroups);
+    ngroups = groups_buf.count;
+    re2::StringPiece* groups = groups_buf.slots;
 
     re2::RE2::Anchor anchor = anchor_start ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
 
@@ -2453,8 +2478,9 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                                         re2::RE2 refined_re2(refined_pattern, refined_opts);
                                         if (!refined_re2.ok()) continue;
                                         int refined_ngroups = refined_re2.NumberOfCapturingGroups() + 1;
-                                        if (refined_ngroups > JS_REGEX_MAX_GROUPS) refined_ngroups = JS_REGEX_MAX_GROUPS;
-                                        re2::StringPiece refined_groups[JS_REGEX_MAX_GROUPS];
+                                        JsRegexScratch<re2::StringPiece> refined_buf(refined_ngroups);
+                                        refined_ngroups = refined_buf.count;
+                                        re2::StringPiece* refined_groups = refined_buf.slots;
                                         found = refined_re2.Match(text, match_start, input_len,
                                                                   re2::RE2::ANCHOR_START,
                                                                   refined_groups, refined_ngroups);
@@ -2529,8 +2555,9 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                 re2::RE2 refined_re2(refined_pattern, refined_opts);
                 if (refined_re2.ok()) {
                     int refined_ngroups = refined_re2.NumberOfCapturingGroups() + 1;
-                    if (refined_ngroups > JS_REGEX_MAX_GROUPS) refined_ngroups = JS_REGEX_MAX_GROUPS;
-                    re2::StringPiece refined_groups[JS_REGEX_MAX_GROUPS];
+                    JsRegexScratch<re2::StringPiece> refined_buf(refined_ngroups);
+                    refined_ngroups = refined_buf.count;
+                    re2::StringPiece* refined_groups = refined_buf.slots;
                     // Try matching at the same position the first pass found
                     found = refined_re2.Match(text, match_start, input_len,
                                               re2::RE2::ANCHOR_START,

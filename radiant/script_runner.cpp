@@ -25,6 +25,7 @@
 #include "../lambda/js/js_host_hooks.h"
 #include "../lambda/dom/dom_xhr.h"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/mir_policy.hpp"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/edit_bridge.h"
 #include "../lambda/runtime/module_registry.h"
@@ -66,6 +67,7 @@
 
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
+extern "C" int g_mir_interp_mode;
 extern Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
 extern void jm_cleanup_active_mir(void);
 extern void jm_abandon_active_mir_after_signal(void);
@@ -1428,6 +1430,36 @@ static size_t script_task_collection_source_bytes(JsScriptTaskCollection* collec
     return bytes;
 }
 
+static bool script_task_collection_requires_ast_realm(
+        JsScriptTaskCollection* collection) {
+    if (!collection) return false;
+    ArrayList* lists[] = {collection->scripts, collection->onload_handlers};
+    for (int list_index = 0; list_index < 2; list_index++) {
+        ArrayList* list = lists[list_index];
+        if (!list) continue;
+        for (int task_index = 0; task_index < list->length; task_index++) {
+            JsScriptTask* task = (JsScriptTask*)arraylist_get(list, task_index);
+            if (!task || task->status != JS_SCRIPT_TASK_READY ||
+                    !task->source || task->source_len == 0) continue;
+            // An indexed AST cannot contain more nodes than its syntax bytes
+            // plus its program root, so small sources need no duplicate parse.
+            if (task->source_len < MIR_RADIANT_AST_NODE_THRESHOLD - 1) continue;
+            JsTranspiler* probe = js_transpiler_create(NULL);
+            if (!probe) continue;
+            bool parsed = js_transpiler_parse_c(probe, task->source,
+                task->source_len, JS_PARSE_AUTO);
+            uint32_t node_count = parsed ? probe->ast_index.count : 0;
+            js_transpiler_destroy(probe);
+            if (node_count > MIR_RADIANT_AST_NODE_THRESHOLD) {
+                log_info("script_runner: document selects AST backend; script #%d has %u AST nodes",
+                    task->document_order, node_count);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static int loaded_external_scripts = 0;
 static int failed_external_scripts = 0;
 
@@ -1954,7 +1986,8 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         if (task->kind == JS_SCRIPT_TASK_MODULE) {
             result = execute_js_module_source(
                 runtime, source, task->source_len, filename);
-        } else if (task->external && s_js_mir_cache && !s_retain_js_state) {
+        } else if (task->external && s_js_mir_cache && !s_retain_js_state &&
+                   !runtime->js_ast_backend) {
             result = execute_cached_external_classic(
                 runtime, preamble, source, task->source_len, filename, timing);
         } else {
@@ -2106,7 +2139,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 #endif
     const char* preamble_filename = "<document-preamble>";
     const JsPreambleState* cached_preamble = nullptr;
-    if (s_js_mir_cache && !s_retain_js_state) {
+    if (s_js_mir_cache && !s_retain_js_state && !runtime->js_ast_backend) {
         if (timing) timing->cache_lookups++;
         cached_preamble = js_mir_cache_lookup(
             s_js_mir_cache, true,
@@ -2117,7 +2150,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         }
     }
 
-    if (s_js_mir_cache && !s_retain_js_state) {
+    if (s_js_mir_cache && !s_retain_js_state && !runtime->js_ast_backend) {
         if (!cached_preamble) {
             result = compile_js_mir_preamble_len(runtime, preamble_buf->str,
                                                  preamble_buf->length,
@@ -2352,6 +2385,11 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     runtime_init(runtime);
     runtime->dom_doc = (void*)dom_doc;
     runtime->dom_ui_context = dom_doc->js.host_ui_context;
+    // Select once before the preamble so script callbacks retain one closure
+    // ABI throughout this DOM realm rather than crossing AST/MIR boundaries.
+    runtime->js_ast_backend = g_mir_interp_mode == 0 &&
+        !mir_explicit_interpreter_requested() && mir_large_interp_enabled() &&
+        script_task_collection_requires_ast_realm(&script_tasks);
     Context* saved_input_context = input_context;
     EvalContext* document_context = runtime_get_eval_context(runtime);
     if (!document_context) {
@@ -2383,7 +2421,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     dom_set_ui_context(runtime->dom_ui_context);
     dom_set_host_driven_loop(dom_doc->js.host_driven_loop);
 
-    if (s_js_mir_cache && !s_retain_js_state) {
+    if (s_js_mir_cache && !s_retain_js_state && !runtime->js_ast_backend) {
         const JubeModuleDef* radiant = jube_find_static_module("radiant");
         // The compile-only preamble runs before normal document binding, but
         // its document member ordinals must see the same Jube registry as the

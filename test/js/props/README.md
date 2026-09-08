@@ -37,3 +37,5 @@ part of `test_js_gtest.exe` in batch mode and complete in <1s collectively.
 | `tune5_elements_transitions.js` | numeric arrays promote in place for undefined, holes, gaps, while preserving identity and companion overlays | D5.3.1–D5.3.5 |
 | `tune5_array_descriptors.js` | indexed and length descriptors remain authoritative through the array companion overlay | D3.4.4v2, D5.3.3 |
 | `tune5_array_proto_epoch.js` | array-hole fast paths observe prototype indexed-property mutation immediately | D5.4.1–D5.4.4 |
+| `symbol_function_key_identity.js` | a unique Symbol key cannot collide with a same-spelling built-in function property | D3.4.4, D4.6.2v2 |
+| `intl_number_format_supported_locales.js` | the built-in English NumberFormat reports exactly its available locale | ECMA-402 §9.2.2 |

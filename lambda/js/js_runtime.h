@@ -37,6 +37,7 @@ Item js_undefined(void);
 Item make_js_undefined(void);
 Item js_make_string_len(const char* str, int len);
 Item js_make_string(const char* str);
+Item js_domexception_new(Item message, Item name_arg);
 bool js_string_equals(Item value, const char* expected);
 bool js_is_vm_context_error(Item value);
 bool js_descriptor_is_enumerable(Item descriptor);

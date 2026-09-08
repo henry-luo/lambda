@@ -103,8 +103,27 @@ static const uint64_t ITEM_TRUE_VAL  = ((uint64_t)LMD_TYPE_BOOL << 56) | 1;
 static const uint64_t ITEM_FALSE_VAL = ((uint64_t)LMD_TYPE_BOOL << 56) | 0;
 static const uint64_t STR_TAG        = (uint64_t)LMD_TYPE_STRING << 56;
 
-static const int JS_MIR_LAST_CLOSURE_CAPTURE_MAX = 512;
-static const int JS_MIR_TDZ_CLOSURE_CAPTURE_MAX = 512;
+// §9.3: one capture record replaces six parallel arrays that appeared three
+// times over — in JsMirTranspiler, in JsMirLastClosureSnapshot, and through that
+// snapshot in JsMirBranchState — each fixed at 512 entries, which was also a
+// hard source-language limit on captures per closure.
+struct JsClosureCapture {
+    const char* name;
+    NameEntry*  binding;
+    int         slot;
+    bool        is_transitive;
+    bool        is_nfe;
+    bool        is_assigned;
+};
+
+// Grow-on-demand capture list plus the env register the captures live in.
+struct JsClosureTracker {
+    JsClosureCapture* captures;
+    int               count;
+    int               capacity;
+    MIR_reg_t         env_reg;
+    bool              has_env;
+};
 
 typedef MirImportEntry JsMirImportEntry;
 
@@ -376,12 +395,43 @@ struct JsMirArgStackScope {
     MIR_reg_t args_reg;
 };
 
+// §9.2: per-function lowering state, split out of the module coordinator.
+// Its lifetime is one function body — `jm_begin_function_frame` opens it and
+// the two name caches invalidate themselves against the function item they
+// were built for — so it does not belong in a record whose lifetime is the
+// whole compilation unit. Grouping it also gives the boundary a name: what
+// used to be scattered per-function fields is now one record to reset.
+struct JsMirFunctionEmitter {
+    MirEmitter em;
+    // The transition emitter remembers the most recent boxed call result so
+    // in-band mode can test its ERROR tag without issuing a separate poll.
+    // This remains a full descriptor because branch restoration and GC rooting
+    // must not turn the error carrier back into an untyped MIR register.
+    MirValue last_call_result;
+    struct {
+        uint32_t module_name_index;
+        NameId direct_name_id;
+        MIR_reg_t reg;
+    } property_name_cache[32];
+    int property_name_cache_count;
+    MIR_item_t property_name_cache_func;
+    struct {
+        uint32_t module_name_index;
+        NameId direct_name_id;
+        MIR_reg_t reg;
+    } module_name_id_cache[32];
+    int module_name_id_cache_count;
+    MIR_item_t module_name_id_cache_func;
+};
+
 struct JsMirTranspiler {
     JsTranspiler* tp;        // access to AST, name_pool, scopes
+    // §9.2: per-function lowering state; see JsMirFunctionEmitter. Named
+    // func_em rather than fn because the call macros already bind fn.
+    JsMirFunctionEmitter* func_em;
 
     MIR_context_t ctx;
     MIR_module_t module;
-    MirEmitter em;
 
     // Local function items: name -> MIR_item_t
     struct hashmap* local_funcs;
@@ -440,20 +490,6 @@ struct JsMirTranspiler {
     JsFuncCollected* current_fc;    // current function being transpiled
     JsAstNode* discarded_expression; // outer expression whose value is unobserved
 
-    struct {
-        uint32_t module_name_index;
-        NameId direct_name_id;
-        MIR_reg_t reg;
-    } property_name_cache[32];
-    int property_name_cache_count;
-    MIR_item_t property_name_cache_func;
-    struct {
-        uint32_t module_name_index;
-        NameId direct_name_id;
-        MIR_reg_t reg;
-    } module_name_id_cache[32];
-    int module_name_id_cache_count;
-    MIR_item_t module_name_id_cache_func;
     // TCO state
     JsFuncCollected* tco_func;      // function being TCO'd (NULL if not active)
     MIR_label_t tco_label;          // loop-back label for tail calls
@@ -478,18 +514,20 @@ struct JsMirTranspiler {
     bool in_main;                    // true when transpiling Phase 3 (js_main)
 
     // Closure env read-back for mutable captures (forEach, reduce, etc.)
-    MIR_reg_t last_closure_env_reg;
-    int last_closure_capture_count;
-    const char* last_closure_capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
-    NameEntry* last_closure_capture_bindings[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
-    int last_closure_capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
-    bool last_closure_capture_is_transitive[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
-    bool last_closure_capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
-    bool last_closure_capture_is_assigned[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
-    bool last_closure_has_env;
+    JsClosureTracker last_closure;
+    // Scoped saves push the live captures here and restore by truncating back
+    // to a mark, so a snapshot is a mark rather than an 11,792-byte copy and
+    // owns no storage a stack-local's early return could leak.
+    JsClosureCapture* closure_journal;
+    int closure_journal_count;
+    int closure_journal_capacity;
     // Hoisted closures can be created while a later lexical binding is still
     // TDZ. Retain every such cell until that binding initializes.
-    JsMirTdzClosureCapture tdz_closure_captures[JS_MIR_TDZ_CLOSURE_CAPTURE_MAX];
+    // §9.3: grown on demand. The fixed 512 entries were 16,384 B — 86 % of
+    // what remained of this record — and overflowing them dropped the retention
+    // a TDZ-captured cell depends on rather than degrading gracefully.
+    JsMirTdzClosureCapture* tdz_closure_captures;
+    int tdz_closure_capture_capacity;
     int tdz_closure_capture_count;
     bool force_closure_env_copy;    // class field initializers need a stable lexical this cell
 
@@ -516,7 +554,12 @@ struct JsMirTranspiler {
     MIR_reg_t gen_state_reg;         // register for state parameter (int64_t)
     int gen_yield_index;             // counter for next yield state assignment
     int gen_yield_count;             // total yield count (from pre-scan)
-    MIR_label_t gen_state_labels[64];  // labels for each resume state (1..yield_count)
+    // §9.3: exact-sized from the pre-scanned yield count. The fixed 64 entries
+    // were not a graceful cap: jm_next_resume_state refused states past 63, so
+    // a generator with more yields SILENTLY produced wrong results (a 100-yield
+    // generator summed only its first 62 values).
+    MIR_label_t* gen_state_labels;
+    int gen_state_label_capacity;
     MIR_label_t gen_done_label;      // label for done state (function end)
     // Generator variable-to-env-slot mapping
     int gen_local_slot_count;        // total env slots (captures + params + locals)
@@ -532,7 +575,6 @@ struct JsMirTranspiler {
     // in-band mode can test its ERROR tag without issuing a separate poll.
     // This remains a full descriptor because branch restoration and GC rooting
     // must not turn the error carrier back into an untyped MIR register.
-    MirValue last_call_result;
     // A function-level exceptional edge must retain the exact Item that
     // triggered the branch; later cleanup emitted on the normal path may
     // legitimately replace last_call_result before the landing pad.
@@ -620,9 +662,9 @@ static inline bool jm_current_function_is_iife_body(JsMirTranspiler* mt) {
 
 static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {
     if (!mt) return;
-    if (mt->em.import_cache) {
-        hashmap_free(mt->em.import_cache);
-        mt->em.import_cache = NULL;
+    if (mt->func_em->em.import_cache) {
+        hashmap_free(mt->func_em->em.import_cache);
+        mt->func_em->em.import_cache = NULL;
     }
     if (mt->local_funcs) {
         hashmap_free(mt->local_funcs);
@@ -691,5 +733,5 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         mem_free(mt->module_fc.scope_env_bindings);
         mt->module_fc.scope_env_bindings = NULL;
     }
-    em_frame_dispose(&mt->em);
+    em_frame_dispose(&mt->func_em->em);
 }

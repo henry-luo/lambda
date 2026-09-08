@@ -6,6 +6,7 @@
 #include "view.hpp"
 #include "grid_track.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lib/arraylist.h"
 #include "../lib/arraylist.hpp"
@@ -3747,103 +3748,11 @@ inline float layout_resolve_font_size(LayoutContext* lycon, const CssValue* valu
     return result.value;
 }
 
-struct LayoutFontShorthandParts {
-    const CssValue* group;
-    const CssValue* size;
-    const CssValue* line_height;
-    const CssValue* weight;
-    const CssValue* style;
-    size_t family_start;
-    bool small_caps;
-};
+using LayoutFontShorthandParts = CssFontShorthandParts;
 
 inline bool layout_parse_font_shorthand(const CssValue* value,
                                         LayoutFontShorthandParts* parts) {
-    if (!parts) return false;
-    *parts = {nullptr, nullptr, nullptr, nullptr, nullptr, 0, false};
-    if (!value || value->type != CSS_VALUE_TYPE_LIST || value->data.list.count < 2) {
-        return false;
-    }
-    const CssValue* group = value;
-    if (value->data.list.values[0] &&
-        value->data.list.values[0]->type == CSS_VALUE_TYPE_LIST) {
-        group = value->data.list.values[0];
-    }
-    size_t count = group->data.list.count;
-    if (count < 2) return false;
-    parts->group = group;
-    parts->family_start = count;
-    // A global keyword mixed into a shorthand invalidates the declaration;
-    // sharing this boundary keeps intrinsic and computed font parsing aligned.
-    for (size_t i = 0; i < count; i++) {
-        const CssValue* item = group->data.list.values[i];
-        if (item && item->type == CSS_VALUE_TYPE_KEYWORD) {
-            const CssEnumInfo* info = css_enum_info(item->data.keyword);
-            if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return false;
-        }
-    }
-
-    for (size_t i = 0; i < count; i++) {
-        const CssValue* item = group->data.list.values[i];
-        if (!item) continue;
-        if ((item->type == CSS_VALUE_TYPE_LENGTH ||
-             item->type == CSS_VALUE_TYPE_PERCENTAGE) && !parts->size) {
-            parts->size = item;
-            size_t next = i + 1;
-            if (next < count) {
-                const CssValue* slash = group->data.list.values[next];
-                bool is_slash = slash && slash->type == CSS_VALUE_TYPE_CUSTOM &&
-                    slash->data.custom_property.name &&
-                    strcmp(slash->data.custom_property.name, "/") == 0;
-                if (is_slash && next + 1 < count) {
-                    const CssValue* line_height = group->data.list.values[next + 1];
-                    bool valid_line_height = line_height &&
-                        (line_height->type == CSS_VALUE_TYPE_LENGTH ||
-                         line_height->type == CSS_VALUE_TYPE_PERCENTAGE ||
-                         line_height->type == CSS_VALUE_TYPE_NUMBER ||
-                         (line_height->type == CSS_VALUE_TYPE_KEYWORD &&
-                          (line_height->data.keyword == CSS_VALUE_NORMAL ||
-                           line_height->data.keyword == CSS_VALUE_INHERIT)));
-                    if (valid_line_height) {
-                        parts->line_height = line_height;
-                        next += 2;
-                    }
-                }
-            }
-            parts->family_start = next;
-            break;
-        }
-        if (item->type == CSS_VALUE_TYPE_KEYWORD) {
-            const CssEnumInfo* info = css_enum_info(item->data.keyword);
-            if (!info) continue;
-            if (info->group == CSS_VALUE_GROUP_FONT_WEIGHT) {
-                parts->weight = item;
-            } else if (info->group == CSS_VALUE_GROUP_FONT_STYLE) {
-                parts->style = item;
-            } else if (item->data.keyword == CSS_VALUE_SMALL_CAPS) {
-                parts->small_caps = true;
-            } else if (info->group == CSS_VALUE_GROUP_FONT_SIZE && !parts->size) {
-                parts->size = item;
-                if (i + 2 < count) {
-                    const CssValue* slash = group->data.list.values[i + 1];
-                    bool is_slash = slash && slash->type == CSS_VALUE_TYPE_CUSTOM &&
-                        slash->data.custom_property.name &&
-                        strcmp(slash->data.custom_property.name, "/") == 0;
-                    if (is_slash) {
-                        parts->line_height = group->data.list.values[i + 2];
-                        parts->family_start = i + 3;
-                        break;
-                    }
-                }
-                parts->family_start = i + 1;
-                break;
-            }
-        } else if (item->type == CSS_VALUE_TYPE_NUMBER && !parts->weight) {
-            int weight = (int)item->data.number.value; // INT_CAST_OK: CSS numeric weight.
-            if (weight >= 1 && weight <= 1000) parts->weight = item;
-        }
-    }
-    return parts->size != nullptr;
+    return css_parse_font_shorthand(value, parts);
 }
 
 /**

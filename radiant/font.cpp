@@ -179,6 +179,7 @@ void fontface_cleanup(UiContext* uicon) {
             }
             mem_free(descriptor->src_entries);
         }
+        if (descriptor->unicode_ranges) mem_free(descriptor->unicode_ranges);
         mem_free(descriptor);
     }
 

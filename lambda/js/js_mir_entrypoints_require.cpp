@@ -52,6 +52,9 @@ static Item js_require_module_not_found(const char* specifier) {
 static JsMirPhaseTiming g_last_js_mir_phase_timing;
 static JsMirPhaseTiming g_document_js_mir_phase_timing;
 static bool g_document_js_mir_phase_timing_active = false;
+static bool js_ast_is_es_module(JsAstNode* ast);
+static bool js_test262_source_has_build_string_helper(const char* source,
+    size_t source_len, const char* filename);
 
 Item js_mir_execute_compiled_entry(void* entry_func) {
     if (!entry_func || !context) return ItemError;
@@ -121,6 +124,34 @@ static void js_mir_finish_script_turn(Runtime* runtime, Item result) {
     js_process_emit_exit(exit_code);
     node_trace_events_flush();
     js_process_current_exit_code();
+}
+
+static Item js_mir_execute_ast_script(Runtime* runtime, JsTranspiler* tp,
+        JsAstNode* js_ast, char* owned_source, const char* js_source,
+        size_t js_source_len, const char* filename, uint64_t* result_home,
+        bool test262_native_harness) {
+    // The AST tier owns the retained JsScript, but uses the same source parse,
+    // early-error pass, Runtime catalog, and EvalContext setup as MIR lowering.
+    jm_clear_active_js_transpile(tp, NULL, NULL);
+    JsScript* script = js_script_adopt_transpiler(tp, runtime, filename);
+    if (!script) {
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
+        mem_free(owned_source);
+        return ItemError;
+    }
+    script->test262_native_harness = test262_native_harness;
+    script->test262_native_build_string =
+        js_test262_source_has_build_string_helper(js_source, js_source_len, filename);
+    jm_clear_active_js_transpile(NULL, NULL, owned_source);
+    mem_free(owned_source);
+    Item result = js_ast_is_es_module(js_ast)
+        ? js_interp_execute_es_module_script(runtime, script, result_home)
+        : js_interp_execute_script(runtime, script, result_home);
+    js_mir_finish_script_turn(runtime, result);
+    // AST direct eval can schedule callbacks backed by deferred MIR code.
+    // Drain the script turn before matching the JIT fresh-turn cleanup.
+    if (!js_batch_execution_mode) jm_cleanup_deferred_mir();
+    return result;
 }
 
 bool js_activate_runtime_name_pool(void) {
@@ -679,11 +710,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // Check env var for interpreter mode (once, as fallback for CLI --mir-interp)
     static bool interp_checked = false;
     if (!interp_checked) {
-        if (!g_mir_interp_mode) {
-            const char* env = getenv("JS_MIR_INTERP");
-            if (env && (strcmp(env, "1") == 0 || strcmp(env, "true") == 0)) {
-                g_mir_interp_mode = 1;
-            }
+        if (!g_mir_interp_mode && mir_explicit_interpreter_requested()) {
+            g_mir_interp_mode = 1;
         }
         if (g_mir_interp_mode) {
             log_info("js-mir: INTERPRETER MODE enabled");
@@ -735,31 +763,20 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             runtime, NULL, true);
     }
 
-    if (js_ast_interpreter_requested()) {
-        // The AST tier owns the retained JsScript, but uses the same source
-        // parse, early-error pass, Runtime catalog, and EvalContext setup as
-        // the MIR tier. Unsupported syntax is a deterministic admission
-        // error; this explicit selector never silently falls back to MIR.
-        jm_clear_active_js_transpile(tp, NULL, NULL);
-        JsScript* script = js_script_adopt_transpiler(tp, runtime, filename);
-        if (!script) {
-            jm_clear_active_js_transpile(NULL, NULL, owned_source);
-            mem_free(owned_source);
-            return ItemError;
+    bool document_ast_too_large = runtime && runtime->dom_doc != NULL &&
+        g_mir_interp_mode == 0 && mir_large_interp_enabled() &&
+        tp->ast_index.count > JM_RADIANT_AST_NODE_THRESHOLD;
+    if (js_ast_interpreter_requested() || document_ast_too_large) {
+        if (document_ast_too_large) {
+            // MIR's interpreter stores this activation's virtual registers in
+            // alloca memory; its AST size predicts that native-stack overflow.
+            // Keep later scripts in this realm on the same closure ABI.
+            runtime->js_ast_backend = true;
+            log_info("js-mir: document AST (%u nodes) uses AST executor", tp->ast_index.count);
         }
-        script->test262_native_harness = test262_native_harness;
-        script->test262_native_build_string =
-            js_test262_source_has_build_string_helper(js_source, js_source_len, filename);
-        jm_clear_active_js_transpile(NULL, NULL, owned_source);
-        mem_free(owned_source);
-        Item result = js_ast_is_es_module(js_ast)
-            ? js_interp_execute_es_module_script(runtime, script, result_home)
-            : js_interp_execute_script(runtime, script, result_home);
-        js_mir_finish_script_turn(runtime, result);
-        // AST direct eval can schedule callbacks backed by deferred MIR code.
-        // Drain the script turn before matching the JIT fresh-turn cleanup.
-        if (!js_batch_execution_mode) jm_cleanup_deferred_mir();
-        return result;
+        return js_mir_execute_ast_script(runtime, tp, js_ast, owned_source,
+            js_source, js_source_len, filename, result_home,
+            test262_native_harness);
     }
 
     // Set up the canonical evaluation context early so module objects and

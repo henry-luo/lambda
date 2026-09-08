@@ -136,7 +136,7 @@ bool jm_has_tail_call(JsMirTranspiler* mt, JsFuncCollected* fc) {
 void jm_register_local_func(JsMirTranspiler* mt, const char* name, MIR_item_t func_item) {
     JsLocalFuncEntry entry;
     memset(&entry, 0, sizeof(entry));
-    entry.name = mir_em_persist_cstr(&mt->em, name).str;
+    entry.name = mir_em_persist_cstr(&mt->func_em->em, name).str;
     entry.func_item = func_item;
     hashmap_set(mt->local_funcs, &entry);
 }
@@ -152,7 +152,7 @@ const char* jm_make_fn_name(JsFunctionNode* fn, JsMirTranspiler* mt) {
         strbuf_append_str_n(sb, fn->name->chars, fn->name->len);
     } else {
         strbuf_append_str(sb, "anon");
-        strbuf_append_int(sb, mt->em.label_counter++);
+        strbuf_append_int(sb, mt->func_em->em.label_counter++);
     }
     strbuf_append_char(sb, '_');
     strbuf_append_int(sb, fn->source_span.start_byte);

@@ -16,7 +16,8 @@ static const char* jm_suspend_kind_name(JsMirSuspendKind kind) {
 int jm_next_resume_state(JsMirTranspiler* mt, JsMirSuspendKind kind) {
     if (!mt) return -1;
     int next_state = ++mt->gen_yield_index;
-    if (next_state > mt->gen_yield_count || next_state >= 64 ||
+    if (next_state > mt->gen_yield_count ||
+        next_state >= mt->gen_state_label_capacity ||
         !mt->gen_state_labels[next_state]) {
         log_error("js-mir resume-state: %s index %d exceeds allocated labels (%d)",
             jm_suspend_kind_name(kind), next_state, mt->gen_yield_count);
@@ -189,13 +190,13 @@ static MIR_reg_t jm_emit_error_lane_const(JsMirTranspiler* mt, int64_t value,
 
 static void jm_capture_routed_error_lane(JsMirTranspiler* mt, JsTryContext* context) {
     if (!mt) return;
-    MIR_reg_t value = mt->last_call_result.reg;
+    MIR_reg_t value = mt->func_em->last_call_result.reg;
     if (!context) {
         if (!value) {
             // Every fallible call publishes its merged lane. Reaching a
             // function exit without one is a lowering invariant violation,
             // but still preserve a valid error lane for the caller.
-            value = em_call_1(&mt->em, "js_throw_value", MIR_T_I64,
+            value = em_call_1(&mt->func_em->em, "js_throw_value", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, jm_emit_null(mt)), true);
         }
         if (!mt->func_error_lane_value_reg) {
@@ -216,7 +217,7 @@ static void jm_capture_routed_error_lane(JsMirTranspiler* mt, JsTryContext* cont
     }
     // Every fallible call publishes its merged lane in the result register;
     // reaching this edge without one is a lowering invariant violation.
-    MIR_reg_t fallback = em_call_1(&mt->em, "js_throw_value",
+    MIR_reg_t fallback = em_call_1(&mt->func_em->em, "js_throw_value",
         MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, jm_emit_null(mt)), true);
     if (!context->incoming_error_lane_val_reg) {
         context->incoming_error_lane_val_reg = jm_new_reg(mt, "_try_exc", MIR_T_I64);
@@ -241,17 +242,17 @@ MIR_reg_t jm_emit_error_lane_return(JsMirTranspiler* mt) {
             return context->incoming_error_lane_val_reg;
         }
     }
-    if (mt->last_call_result.reg) return mt->last_call_result.reg;
+    if (mt->func_em->last_call_result.reg) return mt->func_em->last_call_result.reg;
     MIR_reg_t null_value = jm_emit_null(mt);
     // Exception exits preserve the last boxed helper result.  The fallback is
     // only for an impossible hand-written lowering edge and creates the same
     // valid LambdaError lane instead of manufacturing a null-plus-flag state.
-    return em_call_1(&mt->em, "js_throw_value", MIR_T_I64,
+    return em_call_1(&mt->func_em->em, "js_throw_value", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, null_value), true);
 }
 
 MIR_reg_t jm_arg_frame_base(JsMirTranspiler* mt) {
-    if (!mt || !mt->em.frame.active || !mt->em.frame.root_base) {
+    if (!mt || !mt->func_em->em.frame.active || !mt->func_em->em.frame.root_base) {
         log_error("js-mir arg-frame invariant: base without active root frame");
         abort();
     }
@@ -259,12 +260,12 @@ MIR_reg_t jm_arg_frame_base(JsMirTranspiler* mt) {
     mt->arg_frame_base = jm_new_reg(mt, "js_arg_frame", MIR_T_I64);
     mt->arg_frame_base_add = MIR_new_insn(mt->ctx, MIR_ADD,
         MIR_new_reg_op(mt->ctx, mt->arg_frame_base),
-        MIR_new_reg_op(mt->ctx, mt->em.frame.root_base),
+        MIR_new_reg_op(mt->ctx, mt->func_em->em.frame.root_base),
         MIR_new_int_op(mt->ctx, 0));
     // The semantic-root count is known only after liveness coloring. Keep one
     // entry add and patch its displacement when the complete frame is fixed.
-    MIR_insert_insn_after(mt->ctx, mt->em.func_item,
-        mt->em.frame.anchor, mt->arg_frame_base_add);
+    MIR_insert_insn_after(mt->ctx, mt->func_em->em.func_item,
+        mt->func_em->em.frame.anchor, mt->arg_frame_base_add);
     return mt->arg_frame_base;
 }
 
@@ -306,9 +307,9 @@ MIR_reg_t jm_emit_error_lane_test(JsMirTranspiler* mt) {
         return jm_emit_error_lane_const(mt, 0, "exc_dead");
     case JS_ERROR_LANE_UNKNOWN:
     default:
-        if (mt->last_call_result.reg) {
+        if (mt->func_em->last_call_result.reg) {
             MIR_reg_t tag = jm_new_reg(mt, "exc_tag", MIR_T_I64);
-            jm_emit_reg_binary_op(mt, MIR_URSH, tag, mt->last_call_result.reg,
+            jm_emit_reg_binary_op(mt, MIR_URSH, tag, mt->func_em->last_call_result.reg,
                 MIR_new_int_op(mt->ctx, 56));
             MIR_reg_t is_error = jm_new_reg(mt, "exc_inband", MIR_T_I64);
             jm_emit_reg_binary_op(mt, MIR_EQ, is_error, tag, MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR));
@@ -423,7 +424,7 @@ MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MirValue value) {
     if (JM_JS_FACT(mt->current_fc, return_type) != LMD_TYPE_FLOAT) return value.reg;
     // Delayed completions publish an Item lane. Requesting the native return
     // carrier from its descriptor avoids recovering that fact from MIR.
-    return em_require_rep(&mt->em, value, VALUE_REP_F64).reg;
+    return em_require_rep(&mt->func_em->em, value, VALUE_REP_F64).reg;
 }
 
 static void jm_emit_throw_completion_impl(JsMirTranspiler* mt, MIR_reg_t value,
