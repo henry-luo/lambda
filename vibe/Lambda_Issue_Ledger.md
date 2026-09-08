@@ -527,6 +527,70 @@ paths check it before triggering (`:628`, `:846`), so an allocation made *during
 tracing or a finalize callback simply skips collecting rather than asserting.
 Acceptable, but unguarded against pathological growth inside a callback.
 
+<a id="lr09-30"></a>**LR09-30 · Regex capture groups silently truncate at 256 · RESOLVED (2026-09-08)**
+A regular expression with more than 255 capture groups reports the wrong result
+and gives no diagnostic. Repro:
+
+```js
+const n = 300;
+const re = new RegExp('(a)'.repeat(n));
+const m = 'a'.repeat(n).match(re);
+console.log(m.length - 1, m[n]);   // Lambda: 255 undefined   Node: 300 a
+```
+
+`$300` in a `replace` pattern likewise resolves to nothing. The cause is
+`JS_REGEX_MAX_GROUPS` (256, `js_regex_wrapper.h:25`) with clamps of the form
+`if (ngroups > JS_REGEX_MAX_GROUPS) ngroups = JS_REGEX_MAX_GROUPS;` at seven
+sites across `js_runtime.cpp` and `js_regex_wrapper.cpp`. The constant sizes
+about a dozen **stack** arrays (`re2::StringPiece matches[...]`,
+`int starts[...]/ends[...]`, `RegexGroupInfo groups[...]`), so removing it means
+either heap-allocating on the match path or sizing from the compiled pattern's
+group count. ECMAScript sets no such limit and V8 allows 32,767.
+
+**Fixed 2026-09-08.** `JS_REGEX_MAX_GROUPS` is gone. Match scratch is sized
+from the compiled pattern's own group count through one `JsRegexScratch<T>`
+helper (`js_regex_wrapper.h`) that keeps `JS_REGEX_INLINE_GROUPS` (32) slots
+inline and heap-allocates only above that, so an ordinary pattern still
+allocates nothing on the match path. Every clamp is deleted.
+
+**There were three caps, not one, and the first fix only moved the boundary.**
+After the match-scratch conversion a 300-group pattern matched correctly but a
+*lookahead* over 128 groups still failed. Two more fixed limits stood behind it:
+
+- `erased_original_group[256]` in the wrapper's assertion-rewrite pass, whose
+  guards silently stopped the erased-group remap partway, producing a wrong
+  rewritten pattern. Now sized from `original_group_count`.
+- The backtracking matcher (`js_bt_regex.cpp`), which had `int cap_start[256]`,
+  `cap_end[256]`, per-iteration `saved_s/saved_e[256]` and per-lookaround
+  `sv_s/sv_e[256]`, plus an explicit `if (ng + 1 > 256) return 0; // fall back`.
+  That return is reported to the caller as **no match**, so it was not a
+  fallback at all — a large lookahead pattern silently failed. All four arrays
+  are sized from the pattern and the refusal is deleted.
+
+Verified against Node on match, `exec`, high-numbered `$n` replacement and
+lookahead at 128/150/200/300 groups: byte-identical output. Regression test
+`test/js/regex_many_capture_groups.{js,txt}` covers all six cases; JS gtest is
+371 tests, up from 370.
+
+No performance cost: the ordinary-pattern match path got *faster* in a
+debug-build A/B (813 ms vs 1017 ms over 600k matches), which is consistent with
+no longer placing 4 KB of `re2::StringPiece[256]` and 2 KB of `int[256]` on the
+stack per match. Per rule 10 that debug figure is directional only; the point is
+that it is not a regression.
+
+Gates: test262 40261/40261 with 0 regressions, JS gtest 371/371, script gtest,
+rooting core, MIR GC stress, lambda baseline 5078/5078 (the memtrack gate), node
+slice identical to pristine.
+
+<a id="lr08-12"></a>**LR08-12 · Generator/async suspension states capped at 64 · RESOLVED (2026-09-08)**
+`JsMirTranspiler::gen_state_labels` was `MIR_label_t[64]`, and two clamps
+matched it — `if (yield_count > 63) yield_count = 63;` and the identical line
+for `await_count`. Both truncated silently: a 100-yield generator summed only
+its first 62 values (1891 instead of 4950), and a 150-await async function was
+wrong the same way. Fixed by exact-sizing the label array from the pre-counted
+state count, checking that capacity in `jm_next_resume_state` instead of a
+literal 64, and deleting both clamps. Same sweep produced LR09-30 above.
+
 <a id="lr08-11"></a>**LR08-11 · Native realm construction is not GC-safe · RESOLVED (2026-09-08)**
 The JS realm's native module builders were written against an implicit
 "no collection happens here" assumption. Under

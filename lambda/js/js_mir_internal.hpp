@@ -107,16 +107,14 @@ typedef struct JsMirReference {
 
 // One saved closure-writeback state is shared by expression, statement, and
 // branch lowering so sibling paths cannot retain each other's closure env.
+// A save is a mark into the transpiler-owned closure journal, not a copy of 512
+// possible captures. Restoring truncates the journal back to the mark, so no
+// stack-local snapshot owns storage an early return could leak.
 typedef struct JsMirLastClosureSnapshot {
     bool has_env;
     MIR_reg_t env_reg;
     int capture_count;
-    const char* capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
-    NameEntry* capture_bindings[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
-    int capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
-    bool capture_is_transitive[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
-    bool capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
-    bool capture_is_assigned[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    int journal_mark;
 } JsMirLastClosureSnapshot;
 
 typedef struct JsMirLexicalThisRebind {
@@ -355,6 +353,7 @@ JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
 JsMirVarEntry* jm_find_var_at(JsMirTranspiler* mt, const char* name,
     int depth);
 int jm_last_closure_capture_count_clamped(int count);
+bool jm_closure_tracker_reserve(JsClosureTracker* tracker, int n);
 void jm_save_last_closure_snapshot(JsMirTranspiler* mt,
     JsMirLastClosureSnapshot* snapshot);
 void jm_clear_last_closure_snapshot(JsMirTranspiler* mt);

@@ -147,7 +147,7 @@ void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
 void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
     float s = rdcon->raster_scale;
     if (block->scroll()->has_clip) {
-        // Inset clip by border widths for padding-box clipping (CSS spec: overflow clips to padding edge)
+        // Overflow clipping uses the padding edge, inset once from the stored border box.
         BoxEdges border = layout_boundary_border_edges(
             block->bound ? block->boundary() : nullptr);
         float bl = border.left;
@@ -554,9 +554,11 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
                        block->scroll()->overflow_y == CSS_VALUE_CLIP;
     if (should_clip) {
         block->scroller->has_clip = true;
-        block->scroll_mut()->clip.left = block->boundary()->border ? block->boundary()->border->width.left : 0;
-        block->scroll_mut()->clip.top = block->boundary()->border ? block->boundary()->border->width.top : 0;
-        block->scroll_mut()->clip.right = block->width - (block->boundary()->border ? block->boundary()->border->width.right : 0);
-        block->scroll_mut()->clip.bottom = block->height - (block->boundary()->border ? block->boundary()->border->width.bottom : 0);
+        // Keep ScrollProp::clip in border-box coordinates; setup_scroller owns
+        // the single inset to the CSS overflow padding edge during rendering.
+        block->scroll_mut()->clip.left = 0.0f;
+        block->scroll_mut()->clip.top = 0.0f;
+        block->scroll_mut()->clip.right = block->width;
+        block->scroll_mut()->clip.bottom = block->height;
     }
 }

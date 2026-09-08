@@ -102,14 +102,14 @@ void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
     MIR_reg_t val = jm_is_native_type(type_id) ? jm_box_native(mt, val_reg, type_id) : val_reg;
     MIR_reg_t last_env = 0;
     int last_slot = -1;
-    if (mt->last_closure_has_env && mt->last_closure_env_reg != 0) {
-        int capture_count = jm_last_closure_capture_count_clamped(mt->last_closure_capture_count);
+    if (mt->last_closure.has_env && mt->last_closure.env_reg != 0) {
+        int capture_count = jm_last_closure_capture_count_clamped(mt->last_closure.count);
         for (int i = 0; i < capture_count; i++) {
-            if (mt->last_closure_capture_is_nfe[i]) continue;
-            if (mt->last_closure_capture_bindings[i] != binding) continue;
-            int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
-            MIR_reg_t target_env = mt->last_closure_env_reg;
-            if (mt->last_closure_capture_is_transitive[i]) {
+            if (mt->last_closure.captures[i].is_nfe) continue;
+            if (mt->last_closure.captures[i].binding != binding) continue;
+            int slot = mt->last_closure.captures[i].slot >= 0 ? mt->last_closure.captures[i].slot : i;
+            MIR_reg_t target_env = mt->last_closure.env_reg;
+            if (mt->last_closure.captures[i].is_transitive) {
                 JsMirVarEntry* var = jm_find_var_by_binding(mt, binding);
                 if (!jm_resolve_transitive_capture_env(var, &target_env, &slot)) continue;
             }
@@ -1582,7 +1582,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         // inspect an update register that does not exist on a zero-iteration exit.
         jm_emit_error_lane_propagate_check(mt);
         if (init_is_lexical_decl && for_lexical_init_name &&
-                for_lexical_init_name[0] && mt->last_closure_has_env) {
+                for_lexical_init_name[0] && mt->last_closure.has_env) {
             jm_scope_env_reload_vars(mt);
             JsMirVarEntry* loop_var = jm_find_var_by_binding(mt,
                 for_lexical_init_binding);
@@ -2215,7 +2215,7 @@ static void jm_precreate_loop_binding(JsMirTranspiler* mt, const char* vname,
 // Uses fn_len + js_get_reference for arrays, or js_object_keys for objects
 void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Js55 P19: save and reset last-closure tracking so a prior loop's closure
-    // (still referenced via mt->last_closure_env_reg) cannot capture this loop's
+    // (still referenced via mt->last_closure.env_reg) cannot capture this loop's
     // let/const initializers. Without this, `const rab = ...` inside a second
     // `for (let ctor of ctors) {...}` would write back to the FIRST loop's
     // last evil's env, and reads of the body's bindings would route through

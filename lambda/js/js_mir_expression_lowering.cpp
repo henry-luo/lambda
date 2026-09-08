@@ -4473,27 +4473,27 @@ bool jm_resolve_transitive_capture_env(JsMirVarEntry* var,
 }
 
 void jm_readback_closure_env(JsMirTranspiler* mt) {
-    if (!mt->last_closure_has_env) return;
-    if (mt->last_closure_env_reg == 0) return;
+    if (!mt->last_closure.has_env) return;
+    if (mt->last_closure.env_reg == 0) return;
     int readback_count = jm_last_closure_capture_count_clamped(
-        mt->last_closure_capture_count);
+        mt->last_closure.count);
     MIR_label_t readback_done = jm_new_label(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
         MIR_new_label_op(mt->ctx, readback_done),
-        MIR_new_reg_op(mt->ctx, mt->last_closure_env_reg),
+        MIR_new_reg_op(mt->ctx, mt->last_closure.env_reg),
         MIR_new_int_op(mt->ctx, 0)));
     for (int i = 0; i < readback_count; i++) {
-        if (mt->last_closure_capture_is_nfe[i]) continue;
-        if (!mt->last_closure_capture_is_assigned[i]) continue;
+        if (mt->last_closure.captures[i].is_nfe) continue;
+        if (!mt->last_closure.captures[i].is_assigned) continue;
         JsMirVarEntry* var = jm_find_var_by_binding(mt,
-            mt->last_closure_capture_bindings[i]);
+            mt->last_closure.captures[i].binding);
         if (!var) {
             continue;
         }
         if (var->from_block_func_decl) continue;
-        int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
-        MIR_reg_t read_env = mt->last_closure_env_reg;
-        if (mt->last_closure_capture_is_transitive[i]) {
+        int slot = mt->last_closure.captures[i].slot >= 0 ? mt->last_closure.captures[i].slot : i;
+        MIR_reg_t read_env = mt->last_closure.env_reg;
+        if (mt->last_closure.captures[i].is_transitive) {
             jm_resolve_transitive_capture_env(var, &read_env, &slot);
         }
         // Js56 P2: BOOL vars are stored BOXED (var-decl falls into the
@@ -4532,7 +4532,7 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
             }
         }
     }
-    // Js56 P2: do NOT reset last_closure_has_env after readback. The closure's
+    // Js56 P2: do NOT reset last_closure.has_env after readback. The closure's
     // env is kept alive by the closure object itself and remains the canonical
     // storage for the captured vars; readback on every subsequent call to the
     // same closure propagates env mutations back to the outer's var->reg.
@@ -6805,11 +6805,10 @@ static void jm_promote_capture_to_scope_env(JsMirTranspiler* mt, JsMirVarEntry* 
     jm_emit_store_i64(mt, slot * (int)sizeof(uint64_t), mt->scope_env_reg, val);
 }
 
+// §9.3: every capture is tracked now. The old 512 ceiling silently dropped
+// read-back for any closure past it, which was a source-language limit.
 static int jm_last_closure_track_count(JsFuncCollected* fc) {
     if (!fc || JM_CAPTURE_COUNT(fc) <= 0) return 0;
-    if (JM_CAPTURE_COUNT(fc) > JS_MIR_LAST_CLOSURE_CAPTURE_MAX) {
-        return JS_MIR_LAST_CLOSURE_CAPTURE_MAX;
-    }
     return JM_CAPTURE_COUNT(fc);
 }
 
@@ -6841,16 +6840,20 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
         jm_collect_indexed_func_assignments(mt, fc->node->body, assigned);
         jm_collect_descendant_func_assignments(mt, fc, assigned);
     }
-    mt->last_closure_env_reg = env;
-    mt->last_closure_capture_count = count;
+    mt->last_closure.env_reg = env;
+    if (!jm_closure_tracker_reserve(&mt->last_closure, count)) {
+        if (assigned) hashmap_free(assigned);
+        return;
+    }
+    mt->last_closure.count = count;
     for (int ci = 0; ci < count; ci++) {
-        mt->last_closure_capture_names[ci] = jm_persist_name(JM_CAPTURE_ARRAY(fc)[ci].name);
-        mt->last_closure_capture_bindings[ci] = JM_CAPTURE_ARRAY(fc)[ci].entry;
-        mt->last_closure_capture_slots[ci] =
+        mt->last_closure.captures[ci].name = jm_persist_name(JM_CAPTURE_ARRAY(fc)[ci].name);
+        mt->last_closure.captures[ci].binding = JM_CAPTURE_ARRAY(fc)[ci].entry;
+        mt->last_closure.captures[ci].slot =
             use_capture_slots ? jm_capture_env_slot(&JM_CAPTURE_ARRAY(fc)[ci], ci) : ci;
-        mt->last_closure_capture_is_transitive[ci] =
+        mt->last_closure.captures[ci].is_transitive =
             JM_CAPTURE_ARRAY(fc)[ci].grandparent_slot >= 0;
-        mt->last_closure_capture_is_nfe[ci] = JM_CAPTURE_ARRAY(fc)[ci].is_nfe_binding;
+        mt->last_closure.captures[ci].is_nfe = JM_CAPTURE_ARRAY(fc)[ci].is_nfe_binding;
         bool capture_assigned = false;
         if (assigned) {
             capture_assigned = jm_binding_set_has(assigned,
@@ -6858,10 +6861,10 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
         }
         // readback is only valid for captures this closure can mutate; read-only
         // captures can be stale private copies and must not overwrite caller locals.
-        mt->last_closure_capture_is_assigned[ci] = capture_assigned;
+        mt->last_closure.captures[ci].is_assigned = capture_assigned;
     }
     if (assigned) hashmap_free(assigned);
-    mt->last_closure_has_env = count > 0;
+    mt->last_closure.has_env = count > 0;
 }
 
 static void jm_track_tdz_closure_captures(JsMirTranspiler* mt, MIR_reg_t env,
@@ -6871,9 +6874,22 @@ static void jm_track_tdz_closure_captures(JsMirTranspiler* mt, MIR_reg_t env,
         JsMirVarEntry* var = jm_find_var_by_binding(mt,
             JM_CAPTURE_ARRAY(fc)[ci].entry);
         if (!var || !var->is_let_const || !var->tdz_active) continue;
-        if (mt->tdz_closure_capture_count >= JS_MIR_TDZ_CLOSURE_CAPTURE_MAX) {
-            log_error("js-mir: TDZ closure capture tracker overflow");
-            return;
+        if (mt->tdz_closure_capture_count >= mt->tdz_closure_capture_capacity) {
+            int capacity = mt->tdz_closure_capture_capacity
+                ? mt->tdz_closure_capture_capacity * 2 : 16;
+            JsMirTdzClosureCapture* grown =
+                (JsMirTdzClosureCapture*)mem_realloc(mt->tdz_closure_captures,
+                    (size_t)capacity * sizeof(JsMirTdzClosureCapture),
+                    MEM_CAT_JS_RUNTIME);
+            if (!grown) {
+                log_error("js-mir: cannot grow TDZ closure capture tracker");
+                return;
+            }
+            memset(grown + mt->tdz_closure_capture_capacity, 0,
+                   (size_t)(capacity - mt->tdz_closure_capture_capacity) *
+                       sizeof(JsMirTdzClosureCapture));
+            mt->tdz_closure_captures = grown;
+            mt->tdz_closure_capture_capacity = capacity;
         }
         JsMirTdzClosureCapture* tracked =
             &mt->tdz_closure_captures[mt->tdz_closure_capture_count++];

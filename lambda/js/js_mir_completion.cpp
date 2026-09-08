@@ -16,7 +16,8 @@ static const char* jm_suspend_kind_name(JsMirSuspendKind kind) {
 int jm_next_resume_state(JsMirTranspiler* mt, JsMirSuspendKind kind) {
     if (!mt) return -1;
     int next_state = ++mt->gen_yield_index;
-    if (next_state > mt->gen_yield_count || next_state >= 64 ||
+    if (next_state > mt->gen_yield_count ||
+        next_state >= mt->gen_state_label_capacity ||
         !mt->gen_state_labels[next_state]) {
         log_error("js-mir resume-state: %s index %d exceeds allocated labels (%d)",
             jm_suspend_kind_name(kind), next_state, mt->gen_yield_count);
