@@ -988,6 +988,92 @@ universal; it must not be removed earlier." It is universal as of
 > slice identical to pristine, and all 26 built-in modules still byte-identical
 > under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`.
 
+> **JSCUO8 RATIFIED and LANDED 2026-09-08 — one payload word, not six.**
+> `JsFunctionPayload` holds the six optional records (`bound`, `klass`, `with`,
+> `ast`, `native`, `eval_origin`) and the value carries a single pointer to it.
+> The change was contained because JSCU20's accessors already hid the pointers:
+> only the tracer, the destroy hook, the `ensure` helpers and two sites in
+> `js_runtime.cpp` touched them directly. Accessor signatures are unchanged, so
+> no call site moved. `sizeof(JsFunction)` **216 → 176 B**, and the payload side
+> of the tracer is now one null check instead of five.
+>
+> **The trade is better than the byte count suggests, and for a different
+> reason than the ratchet.** An ordinary compiled closure has *no* payload at
+> all — no `native` (not a wrapper), no `ast` (compiled body), and
+> `bound`/`klass`/`with`/`eval_origin` only in the cases that name them. It
+> therefore allocates no container: the unbounded population of script closures
+> shrinks by 40 B and pays nothing. The bounded population of native builtins,
+> which each hold exactly one record, pays one 48 B container apiece, once per
+> realm.
+>
+> **JSCUO9 RESOLVED 2026-09-08 — the ratchet is restated as ≤ 128 B and met.**
+> `sizeof(JsFunction)` is now **exactly 128 B** and the record allocates from
+> the 128 B GC slot. Three changes got the last 48 B:
+>
+> - **`bound_this_store[2]` moved into `JsBoundData`** (−16 B). Only a bound
+>   function has a bound receiver, and the setter is already called one line
+>   after `js_fn_bound_ensure`, so the home belongs with the rest of that state.
+>   JSCUO6 had kept the offset-48 pin as a tripwire and said moving the field
+>   was safe once its inventory block was updated in the same change; it was.
+> - **`home_class` moved into the payload** (−8 B). Only a method carries one.
+> - **The remaining fields are ordered by alignment** (−24 B). The old source
+>   order left six 4- and 1-byte fields each sitting in an 8-byte hole: 30 B of
+>   interior padding in a 152 B record. This is pure layout and changes no
+>   semantics.
+>
+> **`source_text` cannot move, and the NO_GC audit is what proved it.** Putting
+> it in the payload made `js_set_function_source` — a `JIT_EFFECT_NO_GC` import
+> in `sys_func_registry.c` — able to allocate, because a lazily minted payload
+> allocates. `make test-gc-rooting-core` failed the transitive audit
+> immediately. The field stays on the value; `home_class` was taken instead
+> because its setter `js_set_function_home_class` is `JIT_EFFECT_MAY_GC`.
+> **A field's mobility is decided by its setter's JIT effect class, not by how
+> optional the field looks.**
+>
+> **The allocation class was also stale, and that is most of the win.**
+> `JS_FUNCTION_SIZE_CLASS` selects a slot from `gc_object_zone.c`'s table; it
+> is that constant, not `sizeof`, that the allocator honours. It was **7 — the
+> 384 B slot** — which the record genuinely needed at 328 B when item 4 began,
+> but every shrink after that kept handing out 384 B slots. It is now class 5.
+> So the measured result is **384 B of slot per function value → 128 B**, a
+> third of the previous footprint, and the earlier field moves only convert
+> into a saving now that the constant tracks the size. Keep the constant and
+> the `static_assert` moving together.
+>
+> Gates: test262 40261/40261 with 0 regressions, JS gtest 370/370, JS script
+> gtest clean, rooting core 107/107 **including the NO_GC transitive audit**,
+> MIR GC stress clean, GC heap clean, callable catalog clean, both Jube node
+> gates clean, node slice identical to pristine, 26/26 built-in modules
+> identical under forced GC, and `bind`, `super`, `new Function`, `with`,
+> `toString` on plain/class/bound/native functions and both execution tiers all
+> identical with and without forced GC.
+
+> **JSCUO9 (original) — the ≤ 160 B ratchet is measured against the wrong scale.**
+> The GC object zone allocates in classes of 16, 32, 48, 64, 96, 128, 256 and
+> 384 B (`gc_object_zone.h`). **216 B and 176 B both land in the 256 B class,
+> and so does 160 B.** The ratchet as written therefore buys nothing at the
+> allocator; the only threshold that changes a function value's real footprint
+> is **≤ 128 B**, which halves the slot. From 176 B that needs 48 B more:
+> dropping the `bound_this_store[2]` tripwire recovers 16 (JSCUO6 found it
+> backs no reader), and moving the remaining script code facts into
+> `JsCallableCode` — `source_text`, `param_count`, `catalog_id`,
+> `module_state_id`, `formal_length`, `intrinsic_class`, the typed-array
+> element byte, `body_kind` and `eval_initializer_context`, about 34 B of
+> fields behind one pointer — recovers roughly 26 more, landing near 134 B.
+> Closing the last few bytes would mean moving `invoke`/`construct` off the
+> value, which JSCU21 deliberately keeps there as cached projections for call
+> speed. So ≤ 128 is reachable only by re-opening JSCU21, and the ratchet
+> should be restated as ≤ 128 with that dependency named, or dropped as a
+> target in favour of the per-population argument above.
+>
+> Gates: test262 40261/40261 with 0 regressions, JS gtest 370/370, JS script
+> gtest clean, rooting core 107/107, MIR GC stress clean, GC heap clean,
+> callable catalog clean, both Jube node gates clean, node slice identical to
+> pristine, 26/26 built-in modules identical under forced GC, and `bind`
+> chains, class `super`, `new Function`, `with` capture and a 200-iteration
+> bind churn all identical with and without
+> `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`.
+
 ### 4.3 Rulings (original)
 
 **JSCU19 — One `FunctionCode` header, extended by `JsCallableCode`.**
@@ -1243,7 +1329,22 @@ changes an `S#`/`D#` ruling.
 ---
 
 ## 7. Open issues
-**JSCUO8 — Collapse the six payload pointers into one `JsFunctionPayload*`?**
+**JSCUO5 — web-object fixed capacities are now the dominant pressure.** The
+2026-09-08 census puts the three DOM web-object states at the top of the tree:
+`JsObserverRuntimeState` 1,598,480 B (64 observers × 32 targets),
+`JsDomCollectionRuntimeState` 753,696 B (four 4,096-entry registries, two with
+identical entry layouts) and `JsXhrRuntimeState` 72,720 B (64 XHR records × 64
+fixed request headers) — about 2.4 MB together, against `JsRuntimeState`'s
+27,064 B after items 1–4. None was in scope for the four items. They are the
+natural next unit and the same two mechanisms already proven here apply: a
+GC-owned carrier or dynamic store in place of the fixed table, and a context
+capsule for the lifecycle. `JsMirTranspiler` (30,840 B, 106 members) is fourth
+and has *grown* since the parent proposal's table was written.
+
+**JSCUO8 — RESOLVED 2026-09-08, ratified by the user and landed.** See §4.3.
+The original question follows.
+
+**JSCUO8 (original) — Collapse the six payload pointers into one `JsFunctionPayload*`?**
 JSCU20 specifies a single payload pointer; the implementation landed six
 (`bound`, `klass`, `with`, `ast`, `native`, `eval_origin`), costing 48 B on
 every value. One pointer to a container recovers 40 B and is the only route

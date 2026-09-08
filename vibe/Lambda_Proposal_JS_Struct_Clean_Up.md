@@ -74,24 +74,36 @@ Other limits:
 
 ## 2. Measured pressure points
 
-| Structure | Size | Fields | Current role | Finding |
+| Structure | Size then | Size now | Landed as | Note |
 |---|---:|---:|---|---|
-| `JsObserverRuntimeState` | 1,598,480 | 4 | lazy realm observer registry | embeds 64 observers × 32 targets, with fixed filters and transient roots |
-| `JsRuntimeState` | 1,138,728 | 111 | canonical JS context capsule | eagerly embeds unrelated realm, execution, Node, async, compiler-cleanup and diagnostic state |
-| `ParsedRequest` | 815,168 | 18 | HTTP/1 request parse result | duplicates raw/normalized header and trailer text in fixed matrices; often automatic storage |
-| `JsDomCollectionRuntimeState` | 753,696 | 9 | live DOM collection cache | four 4,096-entry registries, including two identical entry layouts |
-| `NodeTraceState` | 528,912 | 8 | Node trace-event buffer | optional diagnostics now live under the lazy `NodeRuntimeSession` |
-| `JsPermissionPolicy` | 263,174 | 8 | Node permission policy | two 128-entry arrays, each entry carrying `PATH_MAX` bytes; now paid only by `NodeRuntimeSession` |
-| `JsCryptoNativeState` | 131,112 | 9 | crypto native context registry | four independent 4,096-pointer tables and counters; now paid only by `NodeRuntimeSession` |
-| `JsXhrRuntimeState` | 72,720 | 3 | XHR state pool | 64 XHR records, each with 64 fixed request headers |
-| `JsDeferredMirState` | 65,544 | 3 | deferred code cleanup | two parallel 4,096-entry ownership arrays |
-| `JsDeepEqualContext` | 65,544 | 2 | cycle traversal | same 4,096 Item-pair stack concept as assert partial matching |
-| `JsAssertPartialContext` | 65,544 | 2 | cycle traversal | duplicates the deep-equality traversal storage |
-| `JsEvalState` | 40,936 | 3 | eval source/binding transactions | several fixed root arrays and parallel mark arrays |
-| `JsMirTranspiler` | 23,560 | 118 | whole JS MIR compiler | module, current function, scopes, flow, closure, generator, eval and pass facts share one record |
-| `JsEvalBridgeState` | 22,888 | 24 | eval binding journal | parallel fixed arrays encode records by position |
-| `JsFunction` | 280 | 41 | every JS function value | immutable code/ABI facts, per-value roots, bound state, class state, eval origin and context ownership are combined |
-| `JsFuncCollected` | 984 | 58 | function pre-pass record | declaration, analysis, environment plan, ABI plan, class facts and cached walks are combined |
+| `JsObserverRuntimeState` | 1,598,480 | **1,598,480** | — | **untouched; now the largest struct in the tree.** 64 observers × 32 targets, fixed filters, transient roots |
+| `JsRuntimeState` | 1,138,728 | **27,064** | JSCU9/10/14/16 | records became pointers; generator, async, code-store and realm slabs left the record |
+| `ParsedRequest` | 815,168 | **104** | JSCU23 | replaced by `HttpRequestHead` + header spans; was an automatic variable at three sites |
+| `NodeRuntimeSession` | — | 805,648 | JSCU16 | the Node-only slabs (trace, permission policy) moved here and are paid only by a live session |
+| `JsDomCollectionRuntimeState` | 753,696 | **753,696** | — | **untouched.** four 4,096-entry registries, two with identical entry layouts |
+| `NodeTraceState` | 528,912 | gone | JSCU16 | absorbed into `NodeRuntimeSession` |
+| `JsPermissionPolicy` | 263,174 | gone | JSCU16 | absorbed into `NodeRuntimeSession` |
+| `JsCryptoNativeState` | 131,112 | **1** | JSCU24 | four 4,096-pointer tables replaced by the Jube generation-checked rid table |
+| `JsXhrRuntimeState` | 72,720 | **72,720** | — | **untouched.** 64 XHR records, each with 64 fixed request headers |
+| `JsDeferredMirState` | 65,544 | gone | JSCU16 | replaced by the dynamic `JsCodeStore` |
+| `JsDeepEqualContext` | 65,544 | gone | JSCU16 | fixed Item-pair stack retired |
+| `JsAssertPartialContext` | 65,544 | gone | JSCU16 | duplicated the deep-equality storage; retired with it |
+| `JsEvalState` | 40,936 | **4,304** | JSCU14(c) | twelve fixed Item lanes became `RootVector`s |
+| `JsMirTranspiler` | 23,560 | **30,840** | — | **untouched and it grew.** 106 members; the whole JS MIR compiler in one record |
+| `JsEvalBridgeState` | 22,888 | **2,920** | JSCU14(c) | parallel fixed arrays retired |
+| `JsFunction` | 280 | **128** | JSCU19/20, JSCUO8/O9 | one payload word; GC slot 384 → 128 (see JSCUO9 on the size-class constant) |
+| `JsFuncCollected` | 984 | **96** | parent §9.1 | |
+
+Census re-run 2026-09-08 (`python3 utils/struct_census.py -j 1 --top 60`);
+`vibe/meta/ds/struct_census.{csv,json}` regenerated in the same change.
+
+**What the numbers say about what is left.** Every structure the four items
+named has landed. The three largest remaining records are all *web-object*
+state — `JsObserverRuntimeState`, `JsDomCollectionRuntimeState` and
+`JsXhrRuntimeState`, about 2.4 MB together — and none of them was in scope for
+items 1–4. They are now the dominant fixed-capacity pressure in the tree and
+are tracked as **JSCUO5**. `JsMirTranspiler` is the fourth and has grown since
+this table was first written.
 
 `JsRuntimeState` is large mainly because it embeds maximum-sized members by value:
 

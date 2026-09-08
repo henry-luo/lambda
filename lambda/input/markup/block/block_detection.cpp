@@ -378,8 +378,11 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
         return BlockType::QUOTE;
     }
 
-    // Table row (|) - GFM extension, disabled in CommonMark mode
-    if (parser->config.flavor != Flavor::COMMONMARK && is_table_line(line)) {
+    // Markdown tables require the adapter's separator-row check above. This
+    // generic fallback mistakes pipes inside Markdown link and image URLs for
+    // cell delimiters.
+    if (parser->config.format != Format::MARKDOWN &&
+        parser->config.flavor != Flavor::COMMONMARK && is_table_line(line)) {
         return BlockType::TABLE;
     }
 
