@@ -16,7 +16,6 @@
 // CommonJS metadata is semantic Node module state. A nested require observes
 // its own parent stack, but unrelated JS realms must never share the stack.
 struct JsCjsState {
-    Item module_stack_slots[JS_CJS_STACK_MAX] = {};
     JsItemStack module_stack = {};
 };
 

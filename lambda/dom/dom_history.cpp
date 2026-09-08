@@ -35,23 +35,23 @@ struct JsHistoryRuntimeState {
     bool drain_scheduled = false;
 };
 
+extern __thread EvalContext* context;
+static void js_history_capsule_destroy(void* capsule);
+static const ContextCapsuleOps js_history_capsule_ops = {
+    "js-history", CONTEXT_CAPSULE_LIFETIME_REALM, sizeof(JsHistoryRuntimeState),
+    NULL, NULL, js_history_capsule_destroy
+};
+
 JS_FORWARD_STATIC_EXPRESSION(JsHistoryRuntimeState*, js_history_runtime_state_get, (),
-    (js_active_runtime_state ? (JsHistoryRuntimeState*)js_runtime_state.history_state : nullptr))
+    ((JsHistoryRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_HISTORY)))
 
 static bool js_history_runtime_state_ensure() {
     if (!js_active_runtime_state) return false;
-    if (js_history_runtime_state_get()) return true;
-    JsHistoryRuntimeState* state = (JsHistoryRuntimeState*)mem_calloc(1,
-        sizeof(JsHistoryRuntimeState), MEM_CAT_JS_RUNTIME);
-    if (!state) {
-        log_error("js-history: failed to allocate context state");
-        return false;
-    }
-    js_runtime_state.history_state = state;
-    return true;
+    return context_capsule_ensure(context, CONTEXT_CAPSULE_DOM_HISTORY,
+                                  &js_history_capsule_ops) != nullptr;
 }
 
-#define js_history_state ((JsHistoryRuntimeState*)js_runtime_state.history_state)
+#define js_history_state ((JsHistoryRuntimeState*)context_capsule(context, CONTEXT_CAPSULE_DOM_HISTORY))
 #define js_history_event_tasks (js_history_state->event_tasks)
 #define js_history_drain_scheduled (js_history_state->drain_scheduled)
 
@@ -234,15 +234,12 @@ extern "C" void js_history_install_globals(void) {
 #undef js_history_event_tasks
 #undef js_history_drain_scheduled
 
-extern "C" void js_history_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->history_state) return;
-    JsHistoryRuntimeState* state =
-        (JsHistoryRuntimeState*)runtime_state->history_state;
+static void js_history_capsule_destroy(void* capsule) {
+    JsHistoryRuntimeState* state = (JsHistoryRuntimeState*)capsule;
     // The heap-release phase drains rooted traversal tasks before the capsule
     // itself is freed, so no callback Item can outlive its owner heap.
     if (state->event_tasks || state->drain_scheduled) {
         log_error("js-history: context destroyed before traversal tasks were reset");
     }
     mem_free(state);
-    runtime_state->history_state = nullptr;
 }

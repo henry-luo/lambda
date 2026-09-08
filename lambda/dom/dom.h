@@ -488,9 +488,6 @@ struct DomDocument;
 struct JsRuntimeState;
 
 /** Per-runtime-state teardown for the DOM-owned caches. */
-void dom_collections_destroy_context(JsRuntimeState* state);
-void dom_foreign_documents_destroy_context(JsRuntimeState* state);
-
 /** contenteditable HTML insertion, driven by the editing waist. */
 bool dom_exec_insert_html(DomDocument* doc, const char* html);
 

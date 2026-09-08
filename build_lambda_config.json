@@ -678,6 +678,8 @@
         "lambda/runtime/lambda-eval.cpp",
         "lambda/runtime/lambda-proc.cpp",
         "lambda/runtime/lambda-mem.cpp",
+        "lambda/runtime/root_vector.cpp",
+        "lambda/runtime/context_capsule.cpp",
         "lambda/runtime/lambda-stack.cpp",
         "lambda/runtime/lambda-vector.cpp",
         "lambda/runtime/lambda-eval-num.cpp",
