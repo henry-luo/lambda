@@ -7,7 +7,7 @@
     {"type": "wait", "ms": 250},
     {"type": "assert_count", "target": {"selector": ".rdt-surface h2 + figure"}, "equals": 1},
     {"type": "assert_count", "target": {"selector": ".rdt-surface figure"}, "equals": 1},
-    {"type": "drag_and_drop", "target": {"selector": ".rdt-surface figure img"}, "to_target": {"selector": ".rdt-surface h1"}},
+    {"type": "drag_and_drop", "target": {"selector": ".rdt-surface figure img"}, "to_target": {"selector": ".rdt-surface h1", "offset_y": 0}},
     {"type": "wait", "ms": 200},
     {"type": "assert_count", "target": {"selector": ".rdt-surface figure"}, "equals": 1},
     {"type": "assert_count", "target": {"selector": ".rdt-surface figure img"}, "equals": 1},

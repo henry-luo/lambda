@@ -199,6 +199,9 @@ struct SimEvent {
     bool has_target_offset;      // true when offset_x/offset_y were specified
     char* to_target_selector;    // for mouse_drag: destination CSS selector
     char* to_target_text;        // for mouse_drag: destination text target
+    float to_target_offset_x;    // optional logical offset from drag destination top-left
+    float to_target_offset_y;
+    bool has_to_target_offset;
     char* pointer_type;           // for pointer_drag: PointerEvent.pointerType
     char* input_text;            // for type action: text to type
     bool clear_first;            // for type action: select-all + delete before typing

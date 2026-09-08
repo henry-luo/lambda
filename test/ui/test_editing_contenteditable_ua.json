@@ -1,6 +1,6 @@
 {
   "name": "Contenteditable default UA action matrix",
-  "html": "test/html/editor-ua.html",
+  "html": "test/ui/editor-ua.html",
   "viewport": {"width": 960, "height": 900},
   "events": [
     {"type": "log", "message": "=== contenteditable_default_ua ==="},

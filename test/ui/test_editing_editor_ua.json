@@ -1,0 +1,34 @@
+{
+  "name": "UA WYSIWYG editor toolbar uses contenteditable commands",
+  "html": "test/html/editor-ua.html",
+  "viewport": {"width": 1100, "height": 720},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#editor"}, "attribute": "contenteditable", "equals": "true"},
+    {"type": "assert_text", "target": {"selector": "#ua-mode"}, "equals": "UA mode: ready"},
+
+    {"type": "set_editing_selection", "target": {"selector": "#toolbar-target"}, "start": 0, "end": 11},
+    {"type": "click", "target": {"selector": "#toolbar-bold"}},
+    {"type": "assert_count", "target": {"selector": "#toolbar-target b"}, "equals": 1},
+    {"type": "assert_text", "target": {"selector": "#ua-status"}, "contains": "action: bold | applied: true"},
+
+    {"type": "set_editing_selection", "target": {"selector": "#italic-target"}, "start": 0, "end": 8},
+    {"type": "click", "target": {"selector": "#toolbar-text-color"}},
+    {"type": "assert_count", "target": {"selector": "#italic-target font[color=\"#2563eb\"]"}, "equals": 1},
+    {"type": "set_editing_selection", "target": {"selector": "#italic-target"}, "start": 0, "end": 8},
+    {"type": "click", "target": {"selector": "#toolbar-italic"}},
+    {"type": "assert_count", "target": {"selector": "#italic-target i"}, "equals": 1},
+
+    {"type": "set_editing_selection", "target": {"selector": "#heading-target"}, "start": 0, "end": 4},
+    {"type": "click", "target": {"selector": "#toolbar-highlight-color"}},
+    {"type": "assert_count", "target": {"selector": "#heading-target span[style=\"background-color:#fef08a;\"]"}, "equals": 1},
+    {"type": "set_editing_selection", "target": {"selector": "#heading-target"}, "start": 0, "end": 4},
+    {"type": "select_option", "target": {"selector": "#block-format"}, "value": "h2"},
+    {"type": "assert_count", "target": {"selector": "h2#heading-target"}, "equals": 1},
+    {"type": "assert_count", "target": {"selector": "#editor h2"}, "equals": 2},
+
+    {"type": "set_editing_selection", "target": {"selector": "#list-target"}, "start": 0, "end": 4},
+    {"type": "click", "target": {"selector": "#toolbar-ul"}},
+    {"type": "assert_count", "target": {"selector": "#editor > ul"}, "equals": 2},
+    {"type": "assert_count", "target": {"selector": "#editor > ul > li > #list-target"}, "equals": 1}
+  ]
+}
