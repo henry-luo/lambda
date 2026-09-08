@@ -407,6 +407,21 @@ TEST_F(CssParserUnitTest, Declaration_Font_Shorthand) {
     ASSERT_NE(decl->value, nullptr);
 }
 
+TEST_F(CssParserUnitTest, Declaration_FontShorthandRequiresFamily) {
+    auto parser = CreateParser();
+
+    EXPECT_EQ(parser.ParseDeclaration("font: 700 24px/21px"), nullptr);
+    EXPECT_NE(parser.ParseDeclaration("font: 700 24px/21px Arial"), nullptr);
+}
+
+TEST_F(CssParserUnitTest, Declaration_FontSizeRejectsUnitlessNonzeroNumber) {
+    auto parser = CreateParser();
+
+    EXPECT_EQ(parser.ParseDeclaration("font-size: 14"), nullptr);
+    EXPECT_NE(parser.ParseDeclaration("font-size: 0"), nullptr);
+    EXPECT_NE(parser.ParseDeclaration("font-size: 14px"), nullptr);
+}
+
 // =============================================================================
 // Category 8: Declaration Parsing - !important
 // =============================================================================

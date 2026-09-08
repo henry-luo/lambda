@@ -477,11 +477,9 @@ bool css_property_validate_value(CssPropertyCode id, CssValue* value) {
                     return false; // Negative percentage is invalid
                 }
             } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                // Unitless values are generally invalid for font-size (except 0 in some contexts)
-                // For safety, reject negative numbers
-                if (value->data.number.value < 0) {
-                    return false;
-                }
+                // CSS Values permits a unitless number as a length only when
+                // it is zero, so nonzero font sizes must carry a unit.
+                if (value->data.number.value != 0.0) return false;
             }
             break;
         }
