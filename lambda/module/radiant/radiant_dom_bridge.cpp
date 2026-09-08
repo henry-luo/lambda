@@ -3315,7 +3315,7 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
             return 1;
         }
         CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->document_pool);
-        if (!selector_group) {
+        if (!selector_group || css_selector_group_contains_generic_pseudo(selector_group)) {
             *out = radiant_dom_throw_named_error("SyntaxError", "is not a valid selector");
             return 1;
         }
@@ -3337,7 +3337,7 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
             return 1;
         }
         CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->document_pool);
-        if (!selector_group) {
+        if (!selector_group || css_selector_group_contains_generic_pseudo(selector_group)) {
             *out = radiant_dom_throw_named_error("SyntaxError", "is not a valid selector");
             return 1;
         }
@@ -3370,7 +3370,15 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
     }
 
     if (operation == RADIANT_DOCUMENT_CREATE_TEXT_NODE) {
-        const char* text = argc >= 1 ? fn_to_cstr(args[0]) : nullptr;
+        RootFrame roots(1);
+        Rooted<Item> text_value(roots, js_to_string(
+            argc >= 1 ? args[0] : make_js_undefined()));
+        if (item_is_error(text_value.get())) {
+            *out = text_value.get();
+            return 1;
+        }
+        // Web IDL coerces createTextNode's DOMString argument before allocation.
+        const char* text = fn_to_cstr(text_value.get());
         DomText* text_node = (doc && text)
             ? DomText::create_detached_copy(doc, text, strlen(text)) : nullptr;
         *out = radiant_dom_node_item((DomNode*)text_node);

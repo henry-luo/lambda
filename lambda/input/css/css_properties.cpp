@@ -486,6 +486,38 @@ bool css_property_validate_value(CssPropertyCode id, CssValue* value) {
             break;
         }
 
+        case CSS_PROPERTY_LINE_HEIGHT: {
+            // CSS Inline: invalid dimensions must not replace a valid inherited line-height.
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                return value->data.number.value >= 0.0;
+            }
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                return value->data.percentage.value >= 0.0;
+            }
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                return value->data.length.value >= 0.0 &&
+                    css_unit_is_length(value->data.length.unit);
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum keyword = value->data.keyword;
+                return keyword == CSS_VALUE_NORMAL || keyword == CSS_VALUE_INITIAL ||
+                    keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET ||
+                    keyword == CSS_VALUE_REVERT;
+            }
+            if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+                const CssFunction* function = value->data.function;
+                if (!function || !function->name) return false;
+                return strcmp(function->name, "var") == 0 ||
+                    strcmp(function->name, "env") == 0 ||
+                    strcmp(function->name, "attr") == 0 ||
+                    strcmp(function->name, "calc") == 0 ||
+                    strcmp(function->name, "min") == 0 ||
+                    strcmp(function->name, "max") == 0 ||
+                    strcmp(function->name, "clamp") == 0;
+            }
+            return false;
+        }
+
         case CSS_PROPERTY_WIDTH:
         case CSS_PROPERTY_HEIGHT:
         case CSS_PROPERTY_MIN_WIDTH:

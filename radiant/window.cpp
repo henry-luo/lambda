@@ -1128,6 +1128,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             false,
             headless && sim_ctx != nullptr,
             0.0,
+            0.0,
             false,
             false
         };

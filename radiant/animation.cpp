@@ -272,6 +272,29 @@ void animation_scheduler_remove_views(AnimationScheduler* scheduler) {
     }
 }
 
+void animation_scheduler_prune_disconnected_css_views(AnimationScheduler* scheduler,
+                                                       DomDocument* document) {
+    if (!scheduler || !document || !document->root) return;
+
+    for (AnimationInstance* anim = scheduler->first; anim; ) {
+        AnimationInstance* next = anim->next;
+        if (anim->type == ANIM_CSS_ANIMATION || anim->type == ANIM_CSS_TRANSITION) {
+            DomElement* element = static_cast<DomElement*>(anim->target);
+            bool connected = element && element->doc == document;
+            for (DomNode* node = connected ? static_cast<DomNode*>(element) : nullptr;
+                 connected && node; node = node->parent) {
+                if (node == static_cast<DomNode*>(document->root)) break;
+                if (!node->parent) connected = false;
+            }
+            if (!connected) {
+                // A detached DOM target cannot participate in a later layout epoch.
+                animation_scheduler_cancel(scheduler, anim);
+            }
+        }
+        anim = next;
+    }
+}
+
 // ============================================================================
 // Animation Tick
 // ============================================================================

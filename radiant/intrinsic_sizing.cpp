@@ -3430,17 +3430,25 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         (width_is_percentage || max_width_is_percentage) &&
         (lycon->available_space.width.is_intrinsic() || parent_has_intrinsic_width ||
          parent_has_auto_inline_width);
+    bool intrinsic_width_context = lycon->available_space.width.is_intrinsic() ||
+        parent_has_intrinsic_width || parent_has_auto_inline_width;
     bool percentage_replaced_size_is_intrinsic_auto = max_width_is_percentage &&
         layout_element_is_replaced(element) &&
-        ((has_definite_width &&
-          (lycon->available_space.width.is_intrinsic() || parent_has_intrinsic_width ||
-           parent_has_auto_inline_width)) ||
+        ((has_definite_width && intrinsic_width_context) ||
          percentage_size_resolves_to_zero);
+    bool percentage_replaced_max_width_min_content_zero = max_width_is_percentage &&
+        layout_element_is_replaced(element) &&
+        !is_form_control(element) &&
+        (intrinsic_width_context || percentage_size_resolves_to_zero) &&
+        // CSS Sizing 3 §5.2.1 leaves native form-control compression UA-defined;
+        // preserve Chromium's control floor while ordinary replaced content shrinks.
+        !has_intrinsic_min_width;
     // CSS Sizing 3 §5.2.1: a replaced max percentage contributes zero to
     // min-content in an indefinite containing block; otherwise its natural size
     // inflates the shrink-to-fit parent before the percentage can resolve.
     bool percentage_width_min_content_zero =
-        (percentage_width_is_intrinsic_auto || percentage_replaced_size_is_intrinsic_auto) &&
+        (percentage_width_is_intrinsic_auto || percentage_replaced_size_is_intrinsic_auto ||
+         percentage_replaced_max_width_min_content_zero) &&
         !layout_block_inline_axis_is_vertical(resolved_width_view);
     bool percentage_min_width_intrinsic_zero = min_width_declaration &&
         min_width_declaration->value &&

@@ -131,6 +131,7 @@ struct FontHandle {
     char*       family_name;            // arena-allocated
     char*       metric_family_name;     // optional arena-allocated browser metric family alias
     bool        is_document_font;       // loaded from @font-face (cleared between documents in batch mode)
+    bool        is_explicit_scan_font;  // loaded from a caller-supplied scan directory
     bool        metrics_from_platform_ref; // fallback metrics use the retained platform face
 };
 
@@ -261,6 +262,9 @@ struct FontContext {
 
     // font database
     FontDatabase*   database;
+
+    // caller-supplied font directories whose files must retain exact-face metrics
+    ArrayList*       explicit_font_directories;
 
     // face cache: cache_key → FontHandle*
     struct hashmap*  face_cache;
@@ -399,7 +403,7 @@ bool                font_database_load_cache_internal(FontDatabase* db, const ch
 
 // font_platform.c
 void                font_platform_add_default_dirs(FontDatabase* db);
-char*               font_platform_find_fallback(const char* font_name);
+char*               font_platform_find_fallback(const char* font_name, int* out_face_index);
 #ifdef _WIN32
 void                scan_windows_registry_fonts(FontDatabase* db);
 #endif

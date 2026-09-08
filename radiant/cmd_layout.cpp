@@ -73,6 +73,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/runtime/render_map.h"
 #include "../lambda/runtime/template_state.h"
 #include "../lambda/dom/dom.h"
+#include "../lambda/dom/dom_cssom.h"
 
 // JS runtime batch reset functions (from lambda/js/)
 extern "C" void js_batch_reset(void);
@@ -1219,6 +1220,8 @@ static void prefetch_document_subresources(Element* html_root, const char* base_
     if (urls) mem_free(urls);
 }
 
+static DomElement* find_dom_element_for_source(DomElement* root, const Element* source);
+
 // load one linked stylesheet; document traversal owns source ordering.
 static void load_linked_stylesheet(Element* elem, CssEngine* engine, const char* base_path,
                                    Pool* pool, CssStylesheet*** stylesheets,
@@ -1397,7 +1400,7 @@ static CssStylesheet* parse_inline_style_chunks(CssEngine* engine,
     css[offset] = '\0';
     CssStylesheet* stylesheet = parse_and_collect_stylesheet(
         engine, css, "<inline-style>", base_path, pool, stylesheets, count, capacity, 0);
-    if (stylesheet) stylesheet->owner_style_element = owner;
+    if (stylesheet) stylesheet->owner_element = owner;
     return stylesheet;
 }
 
@@ -1419,6 +1422,10 @@ static void collect_stylesheets_in_document_order(Element* elem, DomElement* dom
                                    stylesheets, count, capacity);
             if (linked_count && *count > before) {
                 *linked_count += *count - before;
+            }
+            DomElement* owner = find_dom_element_for_source(dom_root, elem);
+            for (int i = before; i < *count; i++) {
+                (*stylesheets)[i]->owner_element = owner;
             }
         } else if (str_ieq_const(type->name.str, strlen(type->name.str), "style")) {
             const char* media = extract_element_attribute(elem, "media", nullptr);
@@ -1504,52 +1511,6 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const c
         }
         child = child->next_sibling;
     }
-}
-
-static bool dom_node_subtree_has_tag(DomNode* node, const char* tag_name) {
-    if (!node || !tag_name || !node->is_element()) return false;
-    DomElement* elem = lam::dom_require_element(node);
-    if (!elem) return false;
-    if (elem->tag_name && strcasecmp(elem->tag_name, tag_name) == 0) return true;
-
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        if (dom_node_subtree_has_tag(child, tag_name)) return true;
-    }
-    return false;
-}
-
-static bool dom_node_or_parent_is_tag(DomJsMutationRecord* record, const char* tag_name) {
-    return record &&
-           (dom_node_subtree_has_tag(record->target, tag_name) ||
-            dom_node_subtree_has_tag(record->parent, tag_name));
-}
-
-static bool dom_js_mutation_requires_inline_stylesheet_rescan(DomDocument* doc) {
-    if (!doc) return true;
-    if (doc->js.mutation_record_overflow > 0) return true;
-
-    for (int i = 0; i < doc->js.mutation_record_count; i++) {
-        DomJsMutationRecord* record = &doc->js.mutation_records[i];
-        switch (record->kind) {
-            case DOM_JS_MUTATION_CHILD_INSERT:
-            case DOM_JS_MUTATION_CHILD_REMOVE:
-            case DOM_JS_MUTATION_TREE_REPLACE:
-                if (dom_node_or_parent_is_tag(record, "style")) return true;
-                break;
-            case DOM_JS_MUTATION_TEXT:
-            case DOM_JS_MUTATION_ATTRIBUTE:
-                if (dom_node_or_parent_is_tag(record, "style")) return true;
-                break;
-            case DOM_JS_MUTATION_UNKNOWN:
-                return true;
-            case DOM_JS_MUTATION_STYLE:
-            case DOM_JS_MUTATION_STYLE_REPAINT:
-            case DOM_JS_MUTATION_CONTROL_VALUE:
-            default:
-                break;
-        }
-    }
-    return false;
 }
 
 // collect linked and inline document stylesheets in source order.
@@ -1650,22 +1611,15 @@ static void layout_apply_css_stylesheets(DomDocument* doc, DomElement* root,
 
 static void apply_load_css_cascade(DomDocument* dom_doc,
                                    DomElement* dom_root,
-                                   CssStylesheet* external_stylesheet,
-                                   CssStylesheet** inline_stylesheets,
-                                   int inline_stylesheet_count,
                                    CssEngine* css_engine,
                                    Pool* pool,
                                    const char* phase) {
     if (!dom_doc || !dom_root || !pool || !css_engine) return;
     using namespace std::chrono;
     auto t_cascade_start = high_resolution_clock::now();
-    CssStylesheet* external[] = {external_stylesheet};
-    int stylesheet_count = 0;
-    CssStylesheet** stylesheets = layout_merge_css_sources(
-        pool, external_stylesheet ? external : nullptr, external_stylesheet ? 1 : 0,
-        inline_stylesheets, inline_stylesheet_count, &stylesheet_count);
     layout_apply_css_stylesheets(
-        dom_doc, dom_root, stylesheets, stylesheet_count, pool, css_engine);
+        dom_doc, dom_root, dom_doc->stylesheets, dom_doc->stylesheet_count,
+        pool, css_engine);
     log_info("[TIMING] load: CSS cascade (%s): %.1fms",
              phase ? phase : "load",
              duration<double, std::milli>(high_resolution_clock::now() - t_cascade_start).count());
@@ -2102,6 +2056,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         dom_doc->js.auto_close_event_loop = js_host_config->auto_close_event_loop;
         dom_doc->js.virtual_clock_enabled = js_host_config->virtual_clock_enabled;
         dom_doc->js.virtual_clock_ms = js_host_config->virtual_clock_ms;
+        dom_doc->js.post_load_settle_ms = js_host_config->post_load_settle_ms;
         dom_doc->js.redirect_stdout_to_stderr = js_host_config->redirect_stdout_to_stderr;
         dom_doc->disable_css_animations = js_host_config->disable_css_animations;
     }
@@ -2167,12 +2122,11 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 
     // Extract and parse <link rel="stylesheet"> and <style> elements
     int inline_stylesheet_count = 0;
-    int linked_stylesheet_count = 0;
     const char* css_base_path = url_get_href(html_url);
     g_css_document_charset = dom_doc->document_charset; // set fallback encoding for CSS files
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
         html_root, dom_root, css_engine, css_base_path, pool,
-        &inline_stylesheet_count, &linked_stylesheet_count);
+        &inline_stylesheet_count);
     g_css_document_charset = nullptr; // reset after CSS collection
 
     auto t_css_parse = high_resolution_clock::now();
@@ -2205,9 +2159,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // single ordering invariant; the retired pre-cascade mode made that state
     // dependent on an environment variable.
     log_mem_stage("load_html: before_pre_script_cascade");
-    apply_load_css_cascade(dom_doc, dom_root, external_stylesheet,
-                           inline_stylesheets, inline_stylesheet_count,
-                           css_engine, pool, "pre-script");
+    apply_load_css_cascade(dom_doc, dom_root, css_engine, pool, "pre-script");
     log_mem_stage("load_html: pre_script_cascade_done");
     auto t_initial_cascade = timing ? high_resolution_clock::now() : t_inline_style;
     auto t_post_script = t_initial_cascade;
@@ -2243,44 +2195,9 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
             log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve after scripts",
                      dom_doc->js.mutation_count);
 
-            if (dom_js_mutation_requires_inline_stylesheet_rescan(dom_doc)) {
-                // CSSOM edits mutate parsed CssStylesheet objects; only reparse when a <style> subtree changed.
-                int rescan_inline_count = 0;
-                int rescan_inline_capacity = 0;
-                CssStylesheet** rescan_inline_sheets = nullptr;
-                collect_inline_styles_from_dom(dom_root, css_engine, css_base_path, pool,
-                                               &rescan_inline_sheets, &rescan_inline_count,
-                                               &rescan_inline_capacity);
-
-                int old_inline_only = inline_stylesheet_count - linked_stylesheet_count;
-                if (rescan_inline_count != old_inline_only) {
-                    log_info("[CSS] Re-scan found %d inline <style> stylesheets (was %d before JS)",
-                             rescan_inline_count, old_inline_only);
-                }
-
-                int merged_count = linked_stylesheet_count + rescan_inline_count;
-                CssStylesheet** merged_sheets = (CssStylesheet**)pool_alloc(pool, merged_count * sizeof(CssStylesheet*));
-
-                for (int i = 0; i < linked_stylesheet_count; i++) {
-                    merged_sheets[i] = inline_stylesheets[i];
-                }
-                for (int i = 0; i < rescan_inline_count; i++) {
-                    merged_sheets[linked_stylesheet_count + i] = rescan_inline_sheets[i];
-                }
-
-                inline_stylesheets = merged_sheets;
-                inline_stylesheet_count = merged_count;
-            }
-
-            store_document_stylesheets(dom_doc,
-                                       external_stylesheet ? external_sources : nullptr,
-                                       external_stylesheet ? 1 : 0,
-                                       inline_stylesheets, inline_stylesheet_count, pool);
-
+            dom_cssom_sync_mutated_inline_stylesheets(dom_doc);
             clear_load_stylesheet_cascade_recursive(static_cast<DomNode*>(dom_root));
-            apply_load_css_cascade(dom_doc, dom_root, external_stylesheet,
-                                   inline_stylesheets, inline_stylesheet_count,
-                                   css_engine, pool, "post-script");
+            apply_load_css_cascade(dom_doc, dom_root, css_engine, pool, "post-script");
             log_mem_stage("load_html: post_script_cascade_done");
         }
 
@@ -4456,6 +4373,7 @@ struct LayoutOptions {
     const char* timing_output_file;              // optional JSONL phase timing output
     const char* memory_profile_output_file;      // post-layout six-domain snapshot
     bool auto_close;                            // cancel async JS timers after load/onload
+    int post_load_settle_ms;                    // deterministic timer window before auto-close
     bool disable_animations;                    // freeze CSS animation/transition effects for snapshots
     bool stream_layout_results;                 // write compact framed results to stdout
 };
@@ -4506,6 +4424,8 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         {nullptr, "--continue-on-error", nullptr, &opts->continue_on_error, LAYOUT_OPTION_FLAG},
         {nullptr, "--summary", nullptr, &opts->summary, LAYOUT_OPTION_FLAG},
         {nullptr, "--auto-close", nullptr, &opts->auto_close, LAYOUT_OPTION_FLAG},
+        {nullptr, "--post-load-settle-ms", "--post-load-settle-ms",
+         &opts->post_load_settle_ms, LAYOUT_OPTION_INTEGER},
         {nullptr, "--disable-animations", nullptr, &opts->disable_animations, LAYOUT_OPTION_FLAG},
         {nullptr, "--stream-layout-results", nullptr,
          &opts->stream_layout_results, LAYOUT_OPTION_FLAG}
@@ -4570,7 +4490,10 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         log_error("Error: --view-memory-profile requires exactly one input file");
         return false;
     }
-
+    if (opts->post_load_settle_ms < 0) {
+        log_error("Error: --post-load-settle-ms must be non-negative");
+        return false;
+    }
     return true;
 }
 
@@ -4810,6 +4733,7 @@ static bool layout_single_file(
     FILE* timing_file = nullptr,
     const char* memory_profile_output_file = nullptr,
     bool auto_close = false,
+    int post_load_settle_ms = 0,
     bool disable_animations = false,
     FILE* result_stream = nullptr
 ) {
@@ -4837,8 +4761,9 @@ static bool layout_single_file(
         ui_context,
         false,
         auto_close,
-        false,
+        post_load_settle_ms > 0,
         0.0,
+        (double)post_load_settle_ms,
         result_stream != nullptr,
         disable_animations
     };
@@ -5383,6 +5308,22 @@ int cmd_layout(int argc, char** argv) {
     bool batch_mode = (opts.input_file_count > 1) || (opts.output_dir != nullptr) ||
         opts.stream_layout_results;
     bool auto_close = opts.auto_close || shell_getenv("LAMBDA_AUTO_CLOSE") != nullptr;
+    int post_load_settle_ms = opts.post_load_settle_ms;
+    if (post_load_settle_ms == 0) {
+        const char* settle_env = shell_getenv("LAMBDA_POST_LOAD_SETTLE_MS");
+        if (settle_env) {
+            post_load_settle_ms = (int)str_to_int64_default(
+                settle_env, strlen(settle_env), 0); // INT_CAST_OK: CLI timing option
+        }
+    }
+    if (post_load_settle_ms < 0) {
+        log_error("Error: post-load settle duration must be non-negative");
+        return 1;
+    }
+    if (post_load_settle_ms > 0 && !auto_close) {
+        log_error("Error: post-load settle duration requires --auto-close");
+        return 1;
+    }
 
     if (batch_mode) {
         log_disable_all();
@@ -5460,6 +5401,7 @@ int cmd_layout(int argc, char** argv) {
                 timing_file,
                 opts.memory_profile_output_file,
                 auto_close,
+                post_load_settle_ms,
                 opts.disable_animations,
                 opts.stream_layout_results ? stdout : nullptr
                 );

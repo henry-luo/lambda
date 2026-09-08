@@ -844,3 +844,8 @@ const char* css_unit_to_string(CssUnit unit) {
     if (unit == CSS_UNIT_NONE) return "";
     return "unknown";
 }
+
+bool css_unit_is_length(CssUnit unit) {
+    // CssUnit keeps every CSS <length> unit in one contiguous enum range.
+    return unit >= CSS_UNIT_PX && unit <= CSS_UNIT_CQMAX;
+}

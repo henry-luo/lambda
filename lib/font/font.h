@@ -272,7 +272,8 @@ float font_measure_char(FontHandle* handle, uint32_t codepoint);
 
 // platform-specific font path fallback (CoreText on macOS, directory search on Linux/Win).
 // returns a mem_strdup'd path that the caller must free with mem_free(), or NULL.
-char* font_platform_find_fallback(const char* font_name);
+// out_face_index receives the selected collection face when the path is a TTC/OTC.
+char* font_platform_find_fallback(const char* font_name, int* out_face_index);
 
 // find a font that supports a specific codepoint, given a style hint.
 // searches registered font face descriptors first, then system fonts.

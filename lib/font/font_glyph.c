@@ -28,7 +28,7 @@ static bool should_use_ct_advance_override(FontHandle* handle) {
     // document fonts are created from exact @font-face data. A separate
     // CoreText catalog lookup can resolve to a fallback/non-exact face, so keep
     // the raster/table advance from the loaded font file for layout.
-    if (handle->is_document_font) return false;
+    if (handle->is_document_font || handle->is_explicit_scan_font) return false;
 
     // system color bitmap fonts can expose different advances when CoreText is
     // created from raw font bytes than when the same font is resolved through

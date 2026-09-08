@@ -1,0 +1,31 @@
+<!doctype html>
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; }
+#container { width: 1170px; margin: 0 auto; padding: 0 15px; }
+#row { min-height: 1px; margin: 0 -15px; }
+#item { float: left; min-height: 1px; width: 25%; padding: 0 15px; }
+#tile { height: 175px; }
+</style>
+<style id="cascade-first">#cascade-target { width: 10px; }</style>
+<style id="cascade-last">#cascade-target { width: 20px; }</style>
+<style>
+#abs-outer { width: 750px; }
+#abs-parent { position: relative; padding: 0 40px; }
+#abs-target { position: absolute; width: 60%; height: 1px; }
+#invalid-line-height { font-size: 18px; line-height: 1; }
+#invalid-line-height { line-height: 1x; }
+#number-line-height-parent { font-size: 20px; line-height: 1.5; }
+#number-line-height-child { font-size: 10px; }
+#percentage-line-height-parent { font-size: 20px; line-height: 150%; }
+#percentage-line-height-child { font-size: 10px; }
+#static-position-parent { width: 300px; text-align: center; }
+#static-position-child { position: absolute; left: 50%; width: 24px; margin-left: -12px; }
+</style>
+<div id="container"><div id="row"><div id="item"><div id="tile"></div></div></div></div>
+<div id="cascade-target"></div>
+<div id="abs-outer"><div id="abs-parent"><div id="abs-target"></div></div></div>
+<div id="invalid-line-height">x</div>
+<div id="number-line-height-parent"><span id="number-line-height-child">x</span></div>
+<div id="percentage-line-height-parent"><span id="percentage-line-height-child">x</span></div>
+<div id="static-position-parent"><a id="static-position-anchor"><i id="static-position-child"></i></a></div>

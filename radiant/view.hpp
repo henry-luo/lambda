@@ -48,6 +48,9 @@ enum CssPropValueKind : uint8_t {
 
 enum CssPropAccessorFlags : uint8_t {
     CSS_PROP_ACCESSOR_USED_VALUE = 1u << 0,
+    // The accessor resolves its CSSOM value directly from the cascaded tree,
+    // so it remains valid before an initial layout snapshot exists.
+    CSS_PROP_ACCESSOR_CASCADE_RESOLVED = 1u << 1,
 };
 
 struct CssPropAccessor;
@@ -106,6 +109,8 @@ void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
 // so test assertions and DOM rectangles do not observe different boxes.
 void view_get_visual_bounds(View* view, float* out_x, float* out_y,
                             float* out_width, float* out_height);
+typedef bool (*RadiantCssomUsedValueSync)(DomDocument* doc);
+void radiant_set_cssom_used_value_sync(RadiantCssomUsedValueSync sync);
 bool dom_ensure_computed(DomElement* element, bool needs_used_value = false);
 
 // ===== animation =====
@@ -235,6 +240,8 @@ void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance
 void animation_scheduler_cancel(AnimationScheduler* scheduler, AnimationInstance* anim);
 void animation_scheduler_remove_by_target(AnimationScheduler* scheduler, void* target);
 void animation_scheduler_remove_views(AnimationScheduler* scheduler);
+void animation_scheduler_prune_disconnected_css_views(AnimationScheduler* scheduler,
+                                                       DomDocument* document);
 AnimationInstance* animation_instance_create(AnimationScheduler* scheduler);
 void animation_instance_pause(AnimationInstance* anim, double now);
 void animation_instance_resume(AnimationInstance* anim, double now);
@@ -1546,6 +1553,7 @@ typedef struct PositionProp {
     ViewBlock* last_abs_child;    // last child absolute/fixed positioned view
     ViewBlock* next_abs_sibling;    // next sibling absolute/fixed positioned view
     ViewBlock* next_static_line_alignment; // current line's deferred static self-alignment link
+    ViewBlock* next_static_inline_position; // current line's deferred inline static-position link
     float static_line_initial_extent; // provisional line-box extent used for static self-alignment
     bool static_x_needs_parent_offset;  // flex static x was computed in parent-local coords
     bool static_x_needs_inline_cb_extent; // inline CB width is finalized after abs layout
@@ -3759,6 +3767,7 @@ typedef struct DocumentJsHostConfig {
     bool auto_close_event_loop;
     bool virtual_clock_enabled;
     double virtual_clock_ms;
+    double post_load_settle_ms;
     bool redirect_stdout_to_stderr;
     bool disable_css_animations;
 } DocumentJsHostConfig;

@@ -1445,33 +1445,6 @@ static void shift_descendant_float_boxes(BlockContext* bfc, ViewBlock* ancestor,
     block_context_recompute_lowest_float_bottom(bfc);
 }
 
-static bool radiant_verify_incremental_layout_enabled() {
-    static int cached = -1;
-    if (cached < 0) {
-        const char* value = getenv("RADIANT_VERIFY_INCREMENTAL_LAYOUT");
-        cached = (value && value[0] == '1') ? 1 : 0;
-    }
-    return cached == 1;
-}
-
-static void verify_incremental_layout_skip(LayoutContext* lycon, DomNode* child,
-                                           float pre_advance_y) {
-    if (!lycon || !child || !radiant_verify_incremental_layout_enabled()) return;
-    float cached_contribution = child->layout_height_contribution;
-    {
-        radiant::LayoutMeasureScope verify_scope(lycon, child);
-        lycon->run_mode = radiant::RunMode::PerformLayout;
-        layout_flow_node(lycon, child);
-        float replayed_contribution = lycon->block.advance_y - pre_advance_y;
-        float delta = fabsf(replayed_contribution - cached_contribution);
-        if (delta > 0.5f) {
-            log_error("[RAD_VERIFY_INCREMENTAL] stale layout_height_contribution for %s: cached=%.3f replayed=%.3f",
-                      child->source_loc(), cached_contribution, replayed_contribution);
-            assert(delta <= 0.5f);
-        }
-    }
-}
-
 extern double g_table_layout_time;
 extern double g_flex_layout_time;
 extern double g_grid_layout_time;
@@ -5835,45 +5808,10 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     }
                     do {
                         float pre_advance_y = lycon->block.advance_y;
-                        bool child_is_floated = false;
-                        bool child_has_clear = false;
-                        if (child->is_element()) {
-                            DomElement* child_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
-                            CssEnum child_float = get_element_float_value(child_elem);
-                            child_is_floated = child_float == CSS_VALUE_LEFT || child_float == CSS_VALUE_RIGHT;
-                            // The retained position prop is cleared before style
-                            // resolution, so inspect the declaration when deciding
-                            // whether clearance makes reuse unsafe.
-                            CssEnum child_clear = layout_specified_keyword(
-                                child_elem, CSS_PROPERTY_CLEAR, CSS_VALUE_NONE);
-                            child_has_clear = child_clear == CSS_VALUE_LEFT ||
-                                child_clear == CSS_VALUE_RIGHT ||
-                                child_clear == CSS_VALUE_BOTH;
-                        }
-                        if (lycon->doc && lycon->doc->incremental_layout
-                            && child->is_element() && !child->layout_dirty
-                            && !child_is_floated
-                            // incremental reuse cannot skip clearance because it
-                            // depends on the current BFC float list.
-                            && !child_has_clear
-                            && child->height > 0 && child->view_type != RDT_VIEW_NONE) {
-                            DomElement* skip_elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
-                            verify_incremental_layout_skip(lycon, child, pre_advance_y);
-                            skip_elem->y = lycon->block.advance_y;
-                            lycon->block.advance_y += skip_elem->layout_height_contribution;
-                            if (skip_elem->bound) {
-                                lycon->block.max_width = max(lycon->block.max_width,
-                                    lycon->line.left + skip_elem->width
-                                    + skip_elem->boundary()->margin.left + skip_elem->boundary()->margin.right);
-                            } else {
-                                lycon->block.max_width = max(lycon->block.max_width,
-                                    lycon->line.left + skip_elem->width);
-                            }
-                            log_info("[TIMING] Phase 16: skip unchanged subtree %s (h=%.1f, contrib=%.1f)",
-                                skip_elem->source_loc(), skip_elem->height, skip_elem->layout_height_contribution);
-                        } else {
-                            layout_flow_node(lycon, child);
-                        }
+                        // A retained DOM subtree can still depend on the current
+                        // line and float context, so its prior advance is not a
+                        // valid layout result after a sibling mutation.
+                        layout_flow_node(lycon, child);
                         child->layout_height_contribution = lycon->block.advance_y - pre_advance_y;
                         ViewBlock* child_block = child->is_element()
                             ? lam::view_as_block(static_cast<View*>(child)) : nullptr;
@@ -9314,8 +9252,10 @@ static int layout_block_count = 0;
 static void align_and_discard_phantom_inline_line(LayoutContext* lycon) {
     if (!lycon || !lycon->line.is_line_start) return;
     // CSS 2.1 §9.4.2 suppresses the phantom line's height, but §16.2 still
-    if (lycon->line.start_view && lycon->line.has_phantom_inline_fragment) {
+    if (lycon->line.first_static_inline_position ||
+        (lycon->line.start_view && lycon->line.has_phantom_inline_fragment)) {
         line_align(lycon);
+        layout_finalize_static_inline_positions(lycon);
     }
     lycon->line.start_view = NULL;
     lycon->line.has_phantom_inline_fragment = false;

@@ -512,6 +512,87 @@ static inline void dom_record_mutation_detail(DomJsMutationKind kind,
     }
 }
 
+static void dom_record_inline_stylesheet_owner(DomDocument* doc,
+                                               DomElement* style) {
+    if (!doc || !style) return;
+    DomJsRuntime* js = &doc->js;
+    for (int i = 0; i < js->inline_stylesheet_mutation_count; i++) {
+        if (js->inline_stylesheet_mutations[i] == style) return;
+    }
+    if (js->inline_stylesheet_mutation_count >=
+        js->inline_stylesheet_mutation_capacity) {
+        int capacity = js->inline_stylesheet_mutation_capacity > 0
+            ? js->inline_stylesheet_mutation_capacity * 2 : 4;
+        DomElement** styles = (DomElement**)pool_alloc(
+            doc->document_pool, (size_t)capacity * sizeof(DomElement*));
+        if (!styles) {
+            log_error("dom mutation: failed to retain inline stylesheet owner");
+            return;
+        }
+        if (js->inline_stylesheet_mutations &&
+            js->inline_stylesheet_mutation_count > 0) {
+            memcpy(styles, js->inline_stylesheet_mutations,
+                   (size_t)js->inline_stylesheet_mutation_count *
+                       sizeof(DomElement*));
+        }
+        js->inline_stylesheet_mutations = styles;
+        js->inline_stylesheet_mutation_capacity = capacity;
+    }
+    js->inline_stylesheet_mutations[js->inline_stylesheet_mutation_count++] = style;
+}
+
+static void dom_record_inline_stylesheets_in_subtree(DomDocument* doc,
+                                                      DomNode* node) {
+    if (!node) return;
+    if (node->is_element()) {
+        DomElement* element = static_cast<DomElement*>(node);
+        if (element->tag_name && strcasecmp(element->tag_name, "style") == 0) {
+            dom_record_inline_stylesheet_owner(doc, element);
+        }
+        for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+            dom_record_inline_stylesheets_in_subtree(doc, child);
+        }
+    }
+}
+
+static DomElement* dom_inline_stylesheet_mutation_owner(DomNode* target,
+                                                         DomNode* parent) {
+    DomNode* candidates[] = {target, parent};
+    for (DomNode* node : candidates) {
+        if (!node) continue;
+        DomElement* element = node->is_element()
+            ? static_cast<DomElement*>(node)
+            : (node->parent && node->parent->is_element()
+                ? static_cast<DomElement*>(node->parent) : nullptr);
+        if (element && element->tag_name && strcasecmp(element->tag_name, "style") == 0) {
+            return element;
+        }
+    }
+    return nullptr;
+}
+
+static void dom_record_inline_stylesheet_mutation(DomDocument* doc,
+                                                   DomJsMutationKind kind,
+                                                   DomNode* target,
+                                                   DomNode* parent) {
+    DomJsRuntime* js = doc ? &doc->js : nullptr;
+    if (!js || (kind != DOM_JS_MUTATION_CHILD_INSERT &&
+                kind != DOM_JS_MUTATION_CHILD_REMOVE &&
+                kind != DOM_JS_MUTATION_TREE_REPLACE &&
+                kind != DOM_JS_MUTATION_TEXT)) {
+        return;
+    }
+    if (kind == DOM_JS_MUTATION_CHILD_INSERT ||
+        kind == DOM_JS_MUTATION_CHILD_REMOVE ||
+        kind == DOM_JS_MUTATION_TREE_REPLACE) {
+        // A subtree replacement can introduce several <style> descendants.
+        dom_record_inline_stylesheets_in_subtree(doc, target);
+    }
+    DomElement* style = dom_inline_stylesheet_mutation_owner(target, parent);
+    if (!style) return;
+    dom_record_inline_stylesheet_owner(doc, style);
+}
+
 // A host may retain generic DOM observations while applying an atomic edit
 // transaction. The core stays usable without Radiant: its weak default simply
 // publishes mutations immediately.
@@ -546,6 +627,7 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     doc->js.mutation_count++;
     doc->js.mutation_sequence++;
     doc->mutation_epoch++;
+    dom_record_inline_stylesheet_mutation(doc, kind, target, parent);
 
     bool has_pending_structural_record = false;
     if (doc->js.mutation_record_count > 0) {
@@ -1666,6 +1748,8 @@ extern "C" void dom_set_document(void* dom_doc) {
         // HTMLOptionsCollection) so existence and instanceof checks work.
         extern void dom_install_collection_globals(void);
         dom_install_collection_globals();
+        // Image reuses the HTMLImageElement interface installed above.
+        dom_install_image_constructor();
         // F-5: install HTMLOptionElement Option() constructor.
         extern void dom_install_option_constructor(void);
         dom_install_option_constructor();
@@ -1686,6 +1770,7 @@ JS_FORWARD_EXPRESSION(void*, dom_get_document, (void),
 extern "C" void dom_set_ui_context(void* ui_context) {
     if (!js_active_runtime_state) return;
     _js_current_ui_context = (UiContext*)ui_context;
+    radiant_set_cssom_used_value_sync(ui_context ? dom_ensure_geometry_snapshot : nullptr);
 }
 
 JS_FORWARD_EXPRESSION(void*, dom_get_ui_context, (void),
@@ -1802,6 +1887,7 @@ static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"a", "HTMLAnchorElement"},
     {"button", "HTMLButtonElement"},
     {"form", "HTMLFormElement"},
+    {"img", "HTMLImageElement"},
     {"input", "HTMLInputElement"},
     {"option", "HTMLOptionElement"},
     {"select", "HTMLSelectElement"},
@@ -3579,7 +3665,36 @@ extern "C" bool dom_navigate_submit_target(const char* target_name, const char* 
 // returns the wrapped element. The element is NOT inserted into the DOM tree;
 // the caller (script) does that explicitly via appendChild/insertBefore.
 // ----------------------------------------------------------------------------
+static Item dom_image_dimension_attribute(Item dimension, char* buffer,
+                                         size_t buffer_size) {
+    // Web IDL converts Image's supplied dimensions as unsigned long values.
+    JS_ASSIGN_OR_RETURN(number, js_to_number(dimension));
+    uint32_t value = (uint32_t)js_to_int32(it2d(number));
+    int written = snprintf(buffer, buffer_size, "%u", (unsigned int)value);
+    if (written < 0 || (size_t)written >= buffer_size) {
+        return js_throw_type_error("Image dimension conversion failed");
+    }
+    return ItemNull;
+}
+
 extern "C" Item js_image_construct(Item width_arg, Item height_arg, int argc) {
+    RootFrame roots(2);
+    Rooted<Item> width_root(roots, width_arg);
+    Rooted<Item> height_root(roots, height_arg);
+    char width_attribute[16];
+    char height_attribute[16];
+    if (argc >= 1) {
+        // ToNumber can execute user code, so root constructor arguments first.
+        JS_RETURN_IF_ERROR(dom_image_dimension_attribute(width_root.get(),
+                                                           width_attribute,
+                                                           sizeof(width_attribute)));
+    }
+    if (argc >= 2) {
+        JS_RETURN_IF_ERROR(dom_image_dimension_attribute(height_root.get(),
+                                                           height_attribute,
+                                                           sizeof(height_attribute)));
+    }
+
     DomDocument* doc = _js_current_document;
     if (!doc) return ItemNull;
     MarkBuilder builder(doc->input);
@@ -3588,14 +3703,22 @@ extern "C" Item js_image_construct(Item width_arg, Item height_arg, int argc) {
     DomElement* dom_elem = dom_element_create(doc, "img", elem);
     if (!dom_elem) return ItemNull;
     if (argc >= 1) {
-        const char* w = fn_to_cstr(width_arg);
-        if (w) dom_elem->set_attribute("width", w);
+        dom_elem->set_attribute("width", width_attribute);
     }
     if (argc >= 2) {
-        const char* h = fn_to_cstr(height_arg);
-        if (h) dom_elem->set_attribute("height", h);
+        dom_elem->set_attribute("height", height_attribute);
     }
     return dom_wrap_element(dom_elem);
+}
+
+extern "C" Item dom_image_constructor_body(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home) {
+    (void)callee;
+    (void)this_value;
+    (void)result_home;
+    Item width_arg = argc >= 1 && args ? args[0] : make_js_undefined();
+    Item height_arg = argc >= 2 && args ? args[1] : make_js_undefined();
+    return js_image_construct(width_arg, height_arg, argc);
 }
 
 // Public: create an empty foreign XML/generic document. qualified_name may be
@@ -9619,7 +9742,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (elem->bound && elem->boundary()->border) {
             bw = elem->boundary()->border->width.left + elem->boundary()->border->width.right;
         }
-        return (Item){.item = i2it((int64_t)(elem->width - bw))};
+        return (Item){.item = i2it((int64_t)llroundf(elem->width - bw))};
     }
     if (prop_id == JS_DOM_PROP_CLIENT_HEIGHT) {
         dom_ensure_geometry_snapshot(elem->doc);
@@ -9627,7 +9750,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (elem->bound && elem->boundary()->border) {
             bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
         }
-        return (Item){.item = i2it((int64_t)(elem->height - bh))};
+        return (Item){.item = i2it((int64_t)llroundf(elem->height - bh))};
     }
 
     // offsetTop / offsetLeft — position relative to offsetParent
@@ -13411,11 +13534,13 @@ extern "C" Item dom_get_bounding_client_rect_bridge(void* dom_elem) {
     if (layout_noscript_content_suppressed(elem)) {
         return dom_make_rect_object_in(elem->doc, 0.0f, 0.0f, 0.0f, 0.0f);
     }
-    RdtLogicalPoint origin = view_geometry_node_viewport_origin(
-        static_cast<View*>(elem));
-    float width = elem->width;
-    float height = elem->height;
-    return dom_make_rect_object_in(elem->doc, origin.x, origin.y,
+    float x = 0.0f;
+    float y = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+    // CSSOM View §6 returns the visual border-box after CSS transforms.
+    view_get_visual_bounds(static_cast<View*>(elem), &x, &y, &width, &height);
+    return dom_make_rect_object_in(elem->doc, x, y,
         width > 0.0f ? width : (float)dom_geometry_dimension(elem, true),
         height > 0.0f ? height : (float)dom_geometry_dimension(elem, false));
 }
@@ -13428,17 +13553,18 @@ extern "C" Item dom_get_client_rects_bridge(void* dom_elem) {
         return js_array_new(0);
     }
 
-    RdtLogicalPoint origin = view_geometry_node_viewport_origin(
-        static_cast<View*>(elem));
-    float w = elem->width;
-    float h = elem->height;
+    float x = 0.0f;
+    float y = 0.0f;
+    float w = 0.0f;
+    float h = 0.0f;
+    view_get_visual_bounds(static_cast<View*>(elem), &x, &y, &w, &h);
     if (w <= 0.0f) w = (float)dom_geometry_dimension(elem, true);
     if (h <= 0.0f) h = (float)dom_geometry_dimension(elem, false);
 
     // This built the same eight fields by hand, which is why it kept crashing
     // after dom_make_rect learned a realm-free path: one rect, one builder.
     // (The hand-rolled copy also truncated every coordinate to an integer.)
-    Item rect = dom_make_rect_in(elem->doc, origin.x, origin.y, w, h);
+    Item rect = dom_make_rect_in(elem->doc, x, y, w, h);
 
     Item arr = js_array_new(0);
     js_array_push(arr, rect);
@@ -14758,40 +14884,6 @@ extern "C" Item dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
-static bool dom_selector_contains_generic_pseudo(const CssSelector* selector) {
-    if (!selector) return false;
-    for (size_t i = 0; i < selector->compound_selector_count; i++) {
-        CssCompoundSelector* compound = selector->compound_selectors[i];
-        if (!compound) continue;
-        for (size_t j = 0; j < compound->simple_selector_count; j++) {
-            CssSimpleSelector* simple = compound->simple_selectors[j];
-            if (!simple) continue;
-            if (simple->type == CSS_SELECTOR_PSEUDO_GENERIC ||
-                simple->type == CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC) {
-                return true;
-            }
-            for (size_t k = 0; k < simple->function_selector_count; k++) {
-                if (dom_selector_contains_generic_pseudo(
-                        simple->function_selectors[k])) {
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
-}
-
-static bool dom_selector_group_contains_generic_pseudo(
-        const CssSelectorGroup* group) {
-    if (!group) return false;
-    for (size_t i = 0; i < group->selector_count; i++) {
-        if (dom_selector_contains_generic_pseudo(group->selectors[i])) {
-            return true;
-        }
-    }
-    return false;
-}
-
 extern "C" Item dom_element_operation_impl(Item elem_item,
         JubeDomElementOperation operation, Item* args, int argc) {
     DomNode* node = (DomNode*)dom_unwrap_element(elem_item);
@@ -15121,7 +15213,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) return dom_throw_syntax_error("Invalid selector");
-        if (dom_selector_group_contains_generic_pseudo(selector_group)) {
+        if (css_selector_group_contains_generic_pseudo(selector_group)) {
             return dom_throw_syntax_error("Invalid selector");
         }
 
@@ -15150,7 +15242,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         arr->capacity = 0;
 
         if (!selector_group) return dom_throw_syntax_error("Invalid selector");
-        if (dom_selector_group_contains_generic_pseudo(selector_group)) {
+        if (css_selector_group_contains_generic_pseudo(selector_group)) {
             return dom_throw_syntax_error("Invalid selector");
         }
 
@@ -15177,7 +15269,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) return dom_throw_syntax_error("Invalid selector");
-        if (dom_selector_group_contains_generic_pseudo(selector_group)) {
+        if (css_selector_group_contains_generic_pseudo(selector_group)) {
             return dom_throw_syntax_error("Invalid selector");
         }
 
@@ -15196,7 +15288,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) return dom_throw_syntax_error("Invalid selector");
-        if (dom_selector_group_contains_generic_pseudo(selector_group)) {
+        if (css_selector_group_contains_generic_pseudo(selector_group)) {
             return dom_throw_syntax_error("Invalid selector");
         }
 

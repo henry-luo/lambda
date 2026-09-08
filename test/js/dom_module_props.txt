@@ -77,6 +77,10 @@ svg
 true
 3
 Factory
+178
+null
+undefined
+true
 8
 factory-comment
 true

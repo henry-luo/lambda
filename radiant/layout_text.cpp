@@ -2033,6 +2033,9 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.reset_space();
     lycon->line.is_line_start = true;
     lycon->line.start_view = NULL;
+    lycon->line.first_static_inline_position = NULL;
+    lycon->line.last_static_inline_position = NULL;
+    lycon->line.static_inline_alignment_offset_x = 0.0f;
     lycon->line.has_phantom_inline_fragment = false;
     lycon->line.line_start_font = lycon->font;
     lycon->line.prev_glyph_index = 0; // reset kerning state
@@ -2518,6 +2521,7 @@ void line_break(LayoutContext* lycon) {
     align_forced_break_rect_to_line_baseline(lycon);
 
     line_align(lycon);
+    layout_finalize_static_inline_positions(lycon);
     layout_trim_isolated_inline_text_edges(lycon, lycon->line.start_view);
     place_rtl_initial_letter_line(lycon);
     // CSS Text 3 §4.1.3: RTL hanging space text rect adjustment.

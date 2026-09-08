@@ -3240,11 +3240,7 @@ void line_align(LayoutContext* lycon) {
             }
         }
 
-        if (!view) {
-            return;
-        }
-
-        float offset = 0;
+        float offset = 0.0f;
 
         if (text_align == CSS_VALUE_CENTER) {
             offset = (available_width - line_width) / 2;
@@ -3259,10 +3255,18 @@ void line_align(LayoutContext* lycon) {
             lycon->block.establishing_element->position &&
             (lycon->block.establishing_element->positionp()->position == CSS_VALUE_ABSOLUTE ||
              lycon->block.establishing_element->positionp()->position == CSS_VALUE_FIXED);
+        if (!view) {
+            if ((text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT) &&
+                (offset > 0 || (is_rtl && offset < 0 && !vertical_out_of_flow_line))) {
+                lycon->line.static_inline_alignment_offset_x = offset;
+            }
+            return;
+        }
         // CSS Writing Modes: the RTL overflow shift is invalid for an
         // out-of-flow vertical line whose physical text origin is already set.
         if ((text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT) &&
             (offset > 0 || (is_rtl && offset < 0 && !vertical_out_of_flow_line))) {
+            lycon->line.static_inline_alignment_offset_x = offset;
             if (is_wrapped_continuation) {
                 align_wrapped_continuation(lycon, offset, view);
             } else {

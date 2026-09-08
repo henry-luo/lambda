@@ -1,0 +1,18 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+#field { display: table; width: 555px; text-align: center; position: relative; }
+#static-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+#control { display: block; width: 100%; min-height: 20px; }
+#addon { display: table-cell; width: 150px; height: 20px; }
+</style>
+<div id="field"><label id="static-label">Message</label><textarea id="control"></textarea><div id="addon">Submit</div></div>

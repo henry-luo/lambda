@@ -19122,23 +19122,43 @@ static Item js_regexp_symbol_match(Item this_val, Item arg0) {
 //   - Reads captures from exec result object (not directly from RE2 engine)
 //   - Supports functional replacer with correct (matched, cap1…, position, S, groups?) args
 static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) {
+    // regexp execution and callback conversion allocate; retain every live JS value
+    // because native stack locals are not GC roots (D5.3).
+    RootFrame roots(8);
+    Rooted<Item> regex_root(roots, this_val);
+    Rooted<Item> str_root(roots, str);
+    Rooted<Item> replacement_root(roots, replacement);
+    Rooted<Item> results_root(roots, ItemNull);
+    Rooted<Item> result_root(roots, ItemNull);
+    Rooted<Item> value_root(roots, ItemNull);
+    Rooted<Item> matched_root(roots, ItemNull);
+    Rooted<Item> named_captures_root(roots, ItemNull);
+    RootSpan captures_roots(64);
+    RootSpan callback_args_roots(70);
+    Item* captures_buf = captures_roots.items();
+    Item* fn_args_buf = callback_args_roots.items();
+    if (!captures_buf || !fn_args_buf) return ItemError;
+    for (int index = 0; index < 64; index++) captures_buf[index] = make_js_undefined();
+    for (int index = 0; index < 70; index++) fn_args_buf[index] = make_js_undefined();
     // Step 2: Type check
-    TypeId ttid = get_type_id(this_val);
+    TypeId ttid = get_type_id(regex_root.get());
     if (ttid != LMD_TYPE_MAP && ttid != LMD_TYPE_ARRAY)
         return js_throw_type_error("RegExp.prototype[@@replace] called on incompatible receiver");
     // Step 3: S = ToString(string)
-    if (get_type_id(str) != LMD_TYPE_STRING) {
-        JS_ASSIGN_OR_RETURN_INTO(str, js_to_string(str));
+    if (get_type_id(str_root.get()) != LMD_TYPE_STRING) {
+        JS_ASSIGN_OR_RETURN_INTO(str, js_to_string(str_root.get()));
+        str_root.set(str);
     }
-    String* S = it2s(str);
+    String* S = it2s(str_root.get());
     int lengthS = S ? (int)S->len : 0;
     // Step 5: functionalReplace = IsCallable(replaceValue)
-    bool functional_replace = js_is_callable(replacement);
+    bool functional_replace = js_is_callable(replacement_root.get());
     // Step 6: If not functional, replaceValue = ToString(replaceValue)
     if (!functional_replace) {
-        JS_ASSIGN_OR_RETURN_INTO(replacement, js_to_string(replacement));
+        JS_ASSIGN_OR_RETURN_INTO(replacement, js_to_string(replacement_root.get()));
+        replacement_root.set(replacement);
     }
-    JsRegexData* fast_rd = js_get_regex_data(this_val);
+    JsRegexData* fast_rd = js_get_regex_data(regex_root.get());
     // Js55 P10b: js_regex_exec returns match.index in UTF-16 code units whenever
     // the input string has non-ASCII bytes (see `code_unit_indices` at
     // js_runtime.cpp:15856). The replace loop below uses `position` as either
@@ -19153,55 +19173,59 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         js_utf16_len(S->chars, (int)S->len, (bool)S->is_ascii) : lengthS;
     if (fast_rd && fast_rd->global && !functional_replace) {
         bool own_global_fast = false;
-        Item own_global_val = js_map_shape_lookup_ext(this_val.map, "global", 6, &own_global_fast);
+        Item own_global_val = js_map_shape_lookup_ext(regex_root.get().map, "global", 6, &own_global_fast);
         bool own_flags_fast = false;
-        Item own_flags_val = js_map_shape_lookup_ext(this_val.map, "flags", 5, &own_flags_fast);
+        Item own_flags_val = js_map_shape_lookup_ext(regex_root.get().map, "flags", 5, &own_flags_fast);
         String* own_flags_str = own_flags_fast ? it2s(own_flags_val) : NULL;
         JS_ASSIGN_OR_RETURN(own_global_bool, own_global_fast ? js_to_boolean(own_global_val) : (Item){.item = ITEM_FALSE});
         if (own_global_fast && it2b(own_global_bool) &&
             own_flags_str && own_flags_str->len == 1 && own_flags_str->chars[0] == 'g') {
             Item li_key_fast = js_name_item("lastIndex", 9);
-            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(this_val, li_key_fast, 0));
-            Item fast = js_try_fast_replace_non_whitespace(this_val, str, replacement, fast_rd, false);
+            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex_root.get(), li_key_fast, 0));
+            Item fast = js_try_fast_replace_non_whitespace(regex_root.get(), str_root.get(),
+                replacement_root.get(), fast_rd, false);
             if (fast.item != ItemNull.item || item_is_error(fast)) return fast;
         }
     }
     // Step 6.a.i (ES2021): if not functionalReplace, read Get(rx,"flags") to propagate getter errors
     // (test: get-flags-err.js, flags-tostring-error.js). We don't use the result for global detection.
     if (!functional_replace) {
-        JS_ASSIGN_OR_RETURN(flags_val, js_string_matchall_get_flags(this_val));
+        JS_ASSIGN_OR_RETURN(flags_val, js_string_matchall_get_flags(regex_root.get()));
         JS_ASSIGN_OR_RETURN(flags_string, js_to_string(flags_val));
     }
     // Step 7 (ES2015): global = ToBoolean(Get(rx, "global")) — read directly so overrides work
     // (test: coerce-global.js — r.global=undefined must be respected)
-    JS_ASSIGN_OR_RETURN(global_val, js_get_name_key(this_val, "global", 6));
+    JS_ASSIGN_OR_RETURN(global_val, js_get_name_key(regex_root.get(), "global", 6));
     JS_ASSIGN_OR_RETURN(global_bool, js_to_boolean(global_val));
     bool global = it2b(global_bool);
     Item li_key = js_name_item("lastIndex", 9);
     bool full_unicode = false;
     if (global) {
-        JS_ASSIGN_OR_RETURN(unicode_val, js_get_name_key(this_val, "unicode", 7));
+        JS_ASSIGN_OR_RETURN(unicode_val, js_get_name_key(regex_root.get(), "unicode", 7));
         full_unicode = it2b(js_to_boolean(unicode_val));
         // Step 8: Set rx.lastIndex = 0 (Throw=true)
-        JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(this_val, li_key, 0));
+        JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex_root.get(), li_key, 0));
     }
     if (!utf16_replace) {
-        Item fast = js_try_fast_replace_non_whitespace(this_val, str, replacement, fast_rd, functional_replace);
+        Item fast = js_try_fast_replace_non_whitespace(regex_root.get(), str_root.get(),
+            replacement_root.get(), fast_rd, functional_replace);
         if (fast.item != ItemNull.item || item_is_error(fast)) return fast;
     }
     // Steps 9-11: collect all RegExpExec results
-    Item results_array = js_array_new(0);
+    results_root.set(js_array_new(0));
     for (int safety = 0; safety < 2000000; safety++) {
-        JS_ASSIGN_OR_RETURN(result, js_regexp_exec_dispatch(this_val, str));
-        if (result.item == ItemNull.item) break;
-        js_array_push(results_array, result);
+        result_root.set(js_regexp_exec_dispatch(regex_root.get(), str_root.get()));
+        if (item_is_error(result_root.get())) return result_root.get();
+        if (result_root.get().item == ItemNull.item) break;
+        Item pushed = js_array_push(results_root.get(), result_root.get());
+        if (item_is_error(pushed)) return pushed;
         if (!global) break;
         // For global: if empty match, advance lastIndex to avoid infinite loop
-        JS_ASSIGN_OR_RETURN(match_str_raw, js_get_name_key(result, "0", 1));
+        JS_ASSIGN_OR_RETURN(match_str_raw, js_get_name_key(result_root.get(), "0", 1));
         JS_ASSIGN_OR_RETURN(match_str_val, js_to_string(match_str_raw));
         String* ms = it2s(match_str_val);
         if (!ms || ms->len == 0) {
-            JS_ASSIGN_OR_RETURN(li, js_get_key_default(this_val, li_key));
+            JS_ASSIGN_OR_RETURN(li, js_get_key_default(regex_root.get(), li_key));
             JS_ASSIGN_OR_RETURN(li_num, js_to_number(li));
             // ToLength(lastIndex): clamp to [0, 2^53-1]
             int64_t idx = 0;
@@ -19219,20 +19243,18 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
             int64_t next_idx = utf16_replace ?
                 js_regex_advance_string_index_units(S, idx, full_unicode) :
                 js_regex_advance_string_index_bytes(S, idx, full_unicode);
-            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(this_val, li_key, next_idx));
+            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(regex_root.get(), li_key, next_idx));
         }
     }
     // Steps 12-15: build result string
     StrBuf* buf = strbuf_new();
     int next_source_pos = 0;
-    int nresults = results_array.array ? results_array.array->length : 0;
+    int nresults = results_root.get().array ? results_root.get().array->length : 0;
     // fixed-size buffers to avoid alloca-in-loop stack growth
-    Item captures_buf[64];
-    Item fn_args_buf[70]; // max: 1 matched + 64 captures + 1 position + 1 S + 1 groups
     for (int ri = 0; ri < nresults; ri++) {
-        Item result = js_elements_get_int(results_array, ri);
+        result_root.set(js_elements_get_int(results_root.get(), ri));
         // Step 14a: nCaptures = max(ToLength(Get(result,"length")) - 1, 0)
-        Item len_val = js_get_name_key(result, "length", 6);
+        Item len_val = js_get_name_key(result_root.get(), "length", 6);
         if (item_is_error(len_val)) { strbuf_free(buf); return len_val; }
         int result_length = 0;
         {
@@ -19253,15 +19275,15 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         int n_captures = (result_length > 1) ? result_length - 1 : 0;
         if (n_captures > 64) n_captures = 64;
         // Step 14b: matched = ToString(Get(result,"0"))
-        Item matched_raw = js_get_name_key(result, "0", 1);
+        Item matched_raw = js_get_name_key(result_root.get(), "0", 1);
         if (item_is_error(matched_raw)) { strbuf_free(buf); return matched_raw; }
-        Item matched = js_to_string(matched_raw);
-        if (item_is_error(matched)) { strbuf_free(buf); return matched; }
-        String* matched_s = it2s(matched);
+        matched_root.set(js_to_string(matched_raw));
+        if (item_is_error(matched_root.get())) { strbuf_free(buf); return matched_root.get(); }
+        String* matched_s = it2s(matched_root.get());
         const char* matched_chars = matched_s ? matched_s->chars : "";
         int matched_len = matched_s ? (int)matched_s->len : 0;
         // Step 14e: position = max(ToInteger(Get(result,"index")), 0)
-        Item index_val = js_get_name_key(result, "index", 5);
+        Item index_val = js_get_name_key(result_root.get(), "index", 5);
         if (item_is_error(index_val)) { strbuf_free(buf); return index_val; }
         Item index_num = js_to_number(index_val);
         if (item_is_error(index_num)) { strbuf_free(buf); return index_num; }
@@ -19281,7 +19303,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         for (int n = 1; n <= n_captures; n++) {
             char idx_buf[8];
             int idx_blen = snprintf(idx_buf, sizeof(idx_buf), "%d", n);
-            Item capN = js_get_name_key(result, idx_buf, idx_blen);
+            Item capN = js_get_name_key(result_root.get(), idx_buf, idx_blen);
             if (item_is_error(capN)) { strbuf_free(buf); return capN; }
             if (get_type_id(capN) != LMD_TYPE_UNDEFINED && capN.item != ItemNull.item) {
                 Item capN_str = js_to_string(capN);
@@ -19292,42 +19314,44 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
             }
         }
         // Step 14i: namedCaptures = Get(result, "groups")
-        Item named_captures = js_get_name_key(result, "groups", 6);
-        if (item_is_error(named_captures)) { strbuf_free(buf); return named_captures; }
+        named_captures_root.set(js_get_name_key(result_root.get(), "groups", 6));
+        if (item_is_error(named_captures_root.get())) { strbuf_free(buf); return named_captures_root.get(); }
         // Step 14j/k: compute replacement string
         Item replacement_str;
         if (functional_replace) {
             // replacerArgs = [matched, cap1, ..., capN, position, S, groups?]
-            bool has_groups = !js_regexp_is_undefined(named_captures);
+            bool has_groups = !js_regexp_is_undefined(named_captures_root.get());
             int fn_argc = 1 + n_captures + 2 + (has_groups ? 1 : 0);
             int ai = 0;
-            fn_args_buf[ai++] = matched;
+            fn_args_buf[ai++] = matched_root.get();
             for (int n = 0; n < n_captures; n++) fn_args_buf[ai++] = captures_buf[n];
             fn_args_buf[ai++] = (Item){.item = i2it(position)};
-            fn_args_buf[ai++] = str;
-            if (has_groups) fn_args_buf[ai++] = named_captures;
-            Item replValue = js_call_function(replacement, make_js_undefined(), fn_args_buf, fn_argc);
-            if (item_is_error(replValue)) { strbuf_free(buf); return replValue; }
-            replacement_str = js_to_string(replValue);
-            if (item_is_error(replacement_str)) { strbuf_free(buf); return replacement_str; }
+            fn_args_buf[ai++] = str_root.get();
+            if (has_groups) fn_args_buf[ai++] = named_captures_root.get();
+            value_root.set(js_call_function(replacement_root.get(), make_js_undefined(),
+                fn_args_buf, fn_argc));
+            if (item_is_error(value_root.get())) { strbuf_free(buf); return value_root.get(); }
+            value_root.set(js_to_string(value_root.get()));
+            if (item_is_error(value_root.get())) { strbuf_free(buf); return value_root.get(); }
+            replacement_str = value_root.get();
         } else {
-            if (!js_regexp_is_undefined(named_captures)) {
-                TypeId nctid = get_type_id(named_captures);
-                if (named_captures.item == ItemNull.item || nctid == LMD_TYPE_NULL) {
+            if (!js_regexp_is_undefined(named_captures_root.get())) {
+                TypeId nctid = get_type_id(named_captures_root.get());
+                if (named_captures_root.get().item == ItemNull.item || nctid == LMD_TYPE_NULL) {
                     strbuf_free(buf);
                     return js_throw_type_error("RegExp replace groups cannot be null");
                 }
-                named_captures = js_to_object(named_captures);
-                if (item_is_error(named_captures)) { strbuf_free(buf); return named_captures; }
+                named_captures_root.set(js_to_object(named_captures_root.get()));
+                if (item_is_error(named_captures_root.get())) { strbuf_free(buf); return named_captures_root.get(); }
             }
             // GetSubstitution: apply $-patterns in replacement string
-            String* rs = it2s(replacement);
+            String* rs = it2s(replacement_root.get());
             if (rs && rs->len > 0) {
                 StrBuf* rb = strbuf_new();
                 Item replacement_status = js_apply_replacement_from_items(rb, rs->chars, (int)rs->len,
                     S ? S->chars : "", lengthS, position,
                     matched_chars, matched_len,
-                    captures_buf, n_captures, named_captures);
+                    captures_buf, n_captures, named_captures_root.get());
                 if (item_is_error(replacement_status)) {
                     strbuf_free(rb);
                     strbuf_free(buf);
@@ -19340,18 +19364,19 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
                 replacement_str = js_name_item("", 0);
             }
         }
+        value_root.set(replacement_str);
         // Step 14l: if position >= nextSourcePosition, append prefix + replacement
         if (position >= next_source_pos && S) {
             if (position > next_source_pos) {
                 if (utf16_replace) {
-                    Item prefix = js_str_substring_utf16(str, next_source_pos, position);
-                    String* ps = it2s(prefix);
+                    named_captures_root.set(js_str_substring_utf16(str_root.get(), next_source_pos, position));
+                    String* ps = it2s(named_captures_root.get());
                     if (ps) strbuf_append_str_n(buf, ps->chars, ps->len);
                 } else {
                     strbuf_append_str_n(buf, S->chars + next_source_pos, position - next_source_pos);
                 }
             }
-            String* rs = it2s(replacement_str);
+            String* rs = it2s(value_root.get());
             if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
             if (utf16_replace) {
                 int64_t matched_units = matched_s ?
@@ -19365,8 +19390,8 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
     // Step 15: append remaining string
     if (S && next_source_pos < (utf16_replace ? source_units : lengthS)) {
         if (utf16_replace) {
-            Item suffix = js_str_substring_utf16(str, next_source_pos, source_units);
-            String* ss = it2s(suffix);
+            named_captures_root.set(js_str_substring_utf16(str_root.get(), next_source_pos, source_units));
+            String* ss = it2s(named_captures_root.get());
             if (ss) strbuf_append_str_n(buf, ss->chars, ss->len);
         } else {
             strbuf_append_str_n(buf, S->chars + next_source_pos, lengthS - next_source_pos);
