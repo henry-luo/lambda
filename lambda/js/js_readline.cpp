@@ -29,15 +29,15 @@ extern "C" void js_stream_flush_data_now(Item self);
 extern "C" int64_t js_key_is_symbol_c(Item key);
 extern Item js_make_number(double d);
 
-#define readline_namespace (js_runtime_state.readline.namespace_object)
-#define readline_promises_namespace (js_runtime_state.readline.promises_namespace)
-#define readline_completion_rl (js_runtime_state.readline.completion_interface)
-#define readline_create_promises_mode (js_runtime_state.readline.create_promises_mode)
+#define readline_namespace (js_runtime_state.readline->namespace_object)
+#define readline_promises_namespace (js_runtime_state.readline->promises_namespace)
+#define readline_completion_rl (js_runtime_state.readline->completion_interface)
+#define readline_create_promises_mode (js_runtime_state.readline->create_promises_mode)
 #define READLINE_INPUT_MAP_MAX JS_READLINE_INPUT_MAP_MAX
-#define readline_inputs (js_runtime_state.readline.inputs)
-#define readline_interfaces (js_runtime_state.readline.interfaces)
-#define readline_input_count (js_runtime_state.readline.input_count)
-JS_FORWARD_STATIC_EXPRESSION(bool, readline_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.readline.roots)))
+#define readline_inputs (js_runtime_state.readline->inputs)
+#define readline_interfaces (js_runtime_state.readline->interfaces)
+#define readline_input_count (js_runtime_state.readline->input_count)
+JS_FORWARD_STATIC_EXPRESSION(bool, readline_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.readline->roots)))
 JS_FORWARD_STATIC_ITEM(readline_get, (Item obj, const char* name), js_get_key_default, (obj, make_string_item(name)))
 JS_FORWARD_STATIC_VOID( readline_set, (Item obj, const char* name, Item value), js_set_key_default, (obj, make_string_item(name), value))
 JS_FORWARD_STATIC_RETURN(bool, readline_has_own, (Item obj, const char* name), it2b, (js_has_own_property(obj, make_string_item(name))))

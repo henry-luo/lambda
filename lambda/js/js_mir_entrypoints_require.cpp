@@ -990,7 +990,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // v14: initialize event loop before execution. Dynamic import runs inside
     // an active script, so preserve the caller's pending PromiseJobs.
     if (!g_jm_preamble_compile_only && execution_scope.is_outermost() &&
-            !js_runtime_state.event_loop.callback_running &&
+            !js_runtime_state.event_loop->callback_running &&
             js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
@@ -1094,7 +1094,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         // the context now would leave dangling func_ptr pointers → SIGBUS.
         jm_defer_mir_cleanup(ctx);
         if (module_mir_context_count > 0) {
-            module_mir_source_buffers[module_mir_context_count - 1] = owned_source;
+            js_code_store_attach_source(js_module_code_store, owned_source);
             jm_clear_active_js_transpile(NULL, NULL, owned_source);
             owned_source = NULL;
         }
@@ -1263,7 +1263,7 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
     if (runtime->dom_ui_context) dom_set_ui_context(runtime->dom_ui_context);
     if (runtime->dom_doc) dom_set_document(runtime->dom_doc);
     if (execution_scope.is_outermost() &&
-            !js_runtime_state.event_loop.callback_running &&
+            !js_runtime_state.event_loop->callback_running &&
             js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
@@ -1427,7 +1427,7 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     // not resolve through the prior batch document's discarded global object.
     (void)js_get_global_this();
     if (execution_scope.is_outermost() &&
-            !js_runtime_state.event_loop.callback_running) {
+            !js_runtime_state.event_loop->callback_running) {
         js_event_loop_init();
     }
     if (runtime->dom_doc) dom_set_document(runtime->dom_doc);

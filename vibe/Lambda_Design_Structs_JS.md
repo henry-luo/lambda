@@ -616,6 +616,68 @@ clearing checklist.
 > collapsed to one `context_capsule_destroy_all` (JSCU18's shape, for these
 > subsystems). `EvalContext` is 600 B.
 >
+> **JSCU16 (code store) LANDED 2026-09-08.** `JsDeferredMirState`'s two
+> parallel 4,096-entry arrays are replaced by a dynamic `JsCodeStore` of
+> `JsCompiledArtifact` records, one owner per compiled unit holding its MIR
+> context and the source buffer that unit's generated code still reads. The
+> `JS_DEFERRED_MIR_MAX` cap is gone: the store grows by doubling, and the
+> old overflow path (which silently leaked a context once the table filled)
+> now only triggers on a genuine allocation failure, with the same
+> leak-rather-than-`MIR_finish` behaviour because JIT function pointers are
+> still live. `sizeof(JsRuntimeState)` **184,504 → 118,976 B** (−65,528);
+> `sizeof(JsCodeStore)` is 16 B. The store keeps its current lifetime inside
+> the JS capsule; promoting it to a `CONTEXT`-lifetime capsule so compiled
+> preamble code explicitly survives a realm reset is the follow-on.
+>
+> **JSCU16 (realm records) LANDED 2026-09-08.** The five remaining large
+> embedded records -- global bindings (18,040 B), the event-loop queue
+> (16,504), timers (14,400), async hooks (10,336) and global var module
+> bindings (8,272) -- are allocated beside `JsRuntimeState` instead of
+> inside it. They are created with the realm rather than lazily, because
+> every realm uses them immediately and that keeps every use site
+> infallible; the ratchet this serves is "optional subsystem records
+> embedded by value: 0", not lazy construction for its own sake.
+>
+> The obstacle named at the end of item 2 is now resolved: each record's
+> precise root span is published by `js_runtime_state_alloc_records` at the
+> moment the record is allocated, so their five catalog entries are deleted
+> outright rather than relocated. Registration stays epoch-guarded through
+> the existing `js_root_range_ensure_registered` at the use sites, so heap
+> replacement behaves exactly as before. `sizeof(JsRuntimeState)`
+> **118,976 → 51,464 B**; the catalog is down to 26 entries from 43 at the
+> start of item 2.
+>
+> Gates: test262 baseline **0 regressions** (40261/40261); rooting gate exit
+> 0 (15,809 functions hazard-clean); JS gtest 369/370; the Node
+> timers/async_hooks/process slice **72 pass with the same 66 pre-existing
+> failures as pristine HEAD, 0 regressed**; nextTick/microtask/timer
+> ordering, global lexical bindings and `async_hooks` correct under
+> `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`.
+>
+> **JSCU16 (second record batch) LANDED 2026-09-08.** Twelve more records
+> follow the same shape: readline, builtin cache, global string caches,
+> assert, intrinsics, string concat, AsyncLocalStorage, constructors, the
+> Test262 agent, process, iterators and namespaces. Their catalog entries
+> needed no relocation this time -- allocation happens at realm init, before
+> the catalog is ever prepared, so the entries simply follow the pointer.
+> `sizeof(JsRuntimeState)` **51,464 → 27,056 B**; 28 records remain embedded.
+>
+> **A build hazard this exposed, worth stating plainly.** Changing
+> `JsRuntimeState`'s layout silently breaks the dynamic Node modules:
+> `modules/node-*.dylib` compile against the struct and bake in field
+> offsets, and `make build` does not rebuild them. The symptom is not a link
+> error but a wrong-offset read -- here, `jube_specifier_resolve("crypto")`
+> failing, which surfaced as `tune4_global_callable_binding` losing its
+> lazy-global section while `process` and `Buffer` (built into the
+> executable) still worked. **Any layout change to `JsRuntimeState` must be
+> followed by `make build-node-{core,fs,net,crypto,zlib}` before any gate is
+> believed**, and an A/B must rebuild the modules on both sides.
+>
+> Gates, all with modules rebuilt on both sides: test262 baseline **0
+> regressions** (40261/40261); rooting gate exit 0; JS gtest 369/370; the
+> Node timers/async_hooks/process/crypto slice **137 pass with the same 133
+> pre-existing failures as pristine HEAD, 0 regressed**.
+>
 > What is *not* yet done: the ensure paths still guard on
 > `js_active_runtime_state`, so a Lambda-only page still constructs no DOM
 > capsule. Relaxing that guard is JSCUO3 and is a behaviour change, kept out

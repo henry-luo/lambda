@@ -927,24 +927,24 @@ typedef struct JsAtomicsRuntimeState {
 
 static JsAtomicsRuntimeState* js_atomics_runtime_state(void) {
     return js_active_runtime_state ?
-        (JsAtomicsRuntimeState*)js_runtime_state.test262_agent.atomics_waiter_state : NULL;
+        (JsAtomicsRuntimeState*)js_runtime_state.test262_agent->atomics_waiter_state : NULL;
 }
 
 extern "C" bool js_atomics_runtime_state_ensure(void) {
     if (!js_active_runtime_state) return false;
-    if (!js_runtime_state.test262_agent.atomics_waiter_state) {
+    if (!js_runtime_state.test262_agent->atomics_waiter_state) {
         // Atomics namespace creation is cold; waiter lookup and notification
         // below use direct owner-context storage without synchronization.
         JsAtomicsRuntimeState* state = (JsAtomicsRuntimeState*)mem_calloc(1,
             sizeof(JsAtomicsRuntimeState), MEM_CAT_JS_RUNTIME);
         if (!state) return false;
         state->next_waiter_id = 1;
-        js_runtime_state.test262_agent.atomics_waiter_state = state;
+        js_runtime_state.test262_agent->atomics_waiter_state = state;
     }
     return true;
 }
 
-#define js_atomics_state (*(JsAtomicsRuntimeState*)js_runtime_state.test262_agent.atomics_waiter_state)
+#define js_atomics_state (*(JsAtomicsRuntimeState*)js_runtime_state.test262_agent->atomics_waiter_state)
 #define js_atomics_waiters (js_atomics_state.waiters)
 #define js_atomics_next_waiter_id (js_atomics_state.next_waiter_id)
 #define js_atomics_last_waiter_by_agent (js_atomics_state.last_waiter_by_agent)
@@ -1096,9 +1096,9 @@ extern "C" void js_atomics_reset_waiters(void) {
 }
 
 extern "C" void js_atomics_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->test262_agent.atomics_waiter_state) return;
-    mem_free(runtime_state->test262_agent.atomics_waiter_state);
-    runtime_state->test262_agent.atomics_waiter_state = NULL;
+    if (!runtime_state || !runtime_state->test262_agent->atomics_waiter_state) return;
+    mem_free(runtime_state->test262_agent->atomics_waiter_state);
+    runtime_state->test262_agent->atomics_waiter_state = NULL;
 }
 
 extern "C" int js_atomics_report_waiter_for_agent(int agent_slot, Item report_string) {

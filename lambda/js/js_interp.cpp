@@ -5726,7 +5726,7 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     if (!js_activate_runtime_name_pool()) return ItemError;
     RuntimeExecutionScope execution_scope;
     if (execution_scope.is_outermost() &&
-            !js_runtime_state.event_loop.callback_running &&
+            !js_runtime_state.event_loop->callback_running &&
             js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
@@ -6017,7 +6017,7 @@ Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
     if (!js_activate_runtime_name_pool()) return ItemError;
     RuntimeExecutionScope execution_scope;
     if (execution_scope.is_outermost() &&
-            !js_runtime_state.event_loop.callback_running &&
+            !js_runtime_state.event_loop->callback_running &&
             js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }

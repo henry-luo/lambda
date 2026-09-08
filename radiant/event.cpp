@@ -6477,7 +6477,7 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     // A queued callback may change the DOM immediately before dispatching a
     // custom event. Its records belong to that callback turn and must survive
     // until the nested dispatch scope reconciles them.
-    if (!js_runtime_state.event_loop.callback_running) {
+    if (!js_runtime_state.event_loop->callback_running) {
         dom_js_mutation_reset_records(s->doc);
     }
     s->active = true;

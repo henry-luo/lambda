@@ -686,12 +686,12 @@ static bool js_function_push_vm_stack_source(JsFunction* fn) {
                                        fn->vm_stack_column_offset) != 0;
 }
 
-#define js_global_var_module_binding_keys (js_runtime_state.global_var_module_bindings.keys)
-#define js_global_var_module_binding_indices (js_runtime_state.global_var_module_bindings.indices)
-#define js_global_var_module_binding_state_ids (js_runtime_state.global_var_module_bindings.module_state_ids)
-#define js_global_var_module_binding_count (js_runtime_state.global_var_module_bindings.count)
-#define js_global_var_module_binding_epoch (js_runtime_state.global_var_module_bindings.epoch)
-#define js_global_var_module_binding_global (js_runtime_state.global_var_module_bindings.global)
+#define js_global_var_module_binding_keys (js_runtime_state.global_var_module_bindings->keys)
+#define js_global_var_module_binding_indices (js_runtime_state.global_var_module_bindings->indices)
+#define js_global_var_module_binding_state_ids (js_runtime_state.global_var_module_bindings->module_state_ids)
+#define js_global_var_module_binding_count (js_runtime_state.global_var_module_bindings->count)
+#define js_global_var_module_binding_epoch (js_runtime_state.global_var_module_bindings->epoch)
+#define js_global_var_module_binding_global (js_runtime_state.global_var_module_bindings->global)
 
 extern "C" Item js_vm_swap_global_this(Item next_global);
 extern "C" uint64_t js_get_heap_epoch(void);
@@ -26318,11 +26318,11 @@ static Item js_array_intrinsic_algorithm_into(Item arr,
 // =============================================================================
 
 // backing store for user-defined Math properties (e.g. Math.sumPrecise polyfill)
-#define js_math_object (js_runtime_state.namespaces.math)
+#define js_math_object (js_runtime_state.namespaces->math)
 
 JS_FORWARD_STATIC_EXPRESSION(bool, js_runtime_namespaces_ensure_roots, (void),
     js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.namespaces.roots))
+        js_root_range_ensure_registered(&js_runtime_state.namespaces->roots))
 
 // Root-range cleanup clears the context-owned slots to zero. Treat that
 // representation like ItemNull so a later realm rebuilds its namespace
@@ -26383,7 +26383,7 @@ static Item js_get_math_object() {
 JS_FORWARD_ITEM(js_get_math_object_value, (void), js_get_math_object, ())
 
 // v18n: JSON and console as global objects for bare identifier resolution
-#define js_json_object (js_runtime_state.namespaces.json)
+#define js_json_object (js_runtime_state.namespaces->json)
 void js_reset_json_object() { js_json_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_json_object_value() {
@@ -26402,7 +26402,7 @@ extern "C" Item js_get_json_object_value() {
 // =============================================================================
 // CSS Namespace Object (CSS.supports, CSS.escape)
 // =============================================================================
-#define js_css_namespace_object (js_runtime_state.namespaces.css)
+#define js_css_namespace_object (js_runtime_state.namespaces->css)
 extern "C" void js_reset_css_namespace_object() { js_css_namespace_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_css_object_value() {
@@ -26492,7 +26492,7 @@ static Item js_intl_segmenter_construct_body(Item callee, Item* args, int argc,
         target_root.get(), JS_CLASS_OBJECT);
 }
 
-#define js_intl_object (js_runtime_state.namespaces.intl)
+#define js_intl_object (js_runtime_state.namespaces->intl)
 extern "C" void js_reset_intl_object() { js_intl_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_intl_object_value() {
@@ -26518,7 +26518,7 @@ extern "C" Item js_get_intl_object_value() {
     return intl_root.get();
 }
 
-#define js_console_object (js_runtime_state.namespaces.console)
+#define js_console_object (js_runtime_state.namespaces->console)
 void js_reset_console_object() { js_console_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_console_object_value() {
@@ -26575,18 +26575,18 @@ extern "C" Item js_get_console_object_value() {
 }
 
 // test262 host object $262 — provides detachArrayBuffer for typed array tests
-#define js_262_object (js_runtime_state.namespaces.test262)
+#define js_262_object (js_runtime_state.namespaces->test262)
 #define JS_262_AGENT_MAX JS_TEST262_AGENT_MAX
 #define JS_262_AGENT_REPORT_MAX JS_TEST262_AGENT_REPORT_MAX
-#define js_262_eval_script_active (js_runtime_state.test262_agent.eval_script_active)
-#define js_262_agent_object (js_runtime_state.test262_agent.object)
-#define js_262_agent_callbacks (js_runtime_state.test262_agent.callbacks)
-#define js_262_agent_reports (js_runtime_state.test262_agent.reports)
-#define js_262_agent_report_waiters (js_runtime_state.test262_agent.report_waiters)
-#define js_262_agent_callback_count (js_runtime_state.test262_agent.callback_count)
-#define js_262_agent_report_head (js_runtime_state.test262_agent.report_head)
-#define js_262_agent_report_count (js_runtime_state.test262_agent.report_count)
-#define js_262_agent_current_slot (js_runtime_state.test262_agent.current_slot)
+#define js_262_eval_script_active (js_runtime_state.test262_agent->eval_script_active)
+#define js_262_agent_object (js_runtime_state.test262_agent->object)
+#define js_262_agent_callbacks (js_runtime_state.test262_agent->callbacks)
+#define js_262_agent_reports (js_runtime_state.test262_agent->reports)
+#define js_262_agent_report_waiters (js_runtime_state.test262_agent->report_waiters)
+#define js_262_agent_callback_count (js_runtime_state.test262_agent->callback_count)
+#define js_262_agent_report_head (js_runtime_state.test262_agent->report_head)
+#define js_262_agent_report_count (js_runtime_state.test262_agent->report_count)
+#define js_262_agent_current_slot (js_runtime_state.test262_agent->current_slot)
 
 static void js_262_agent_reset_state() {
     js_262_agent_object = (Item){.item = ITEM_NULL};
@@ -26626,7 +26626,7 @@ static Item js_262_eval_script(Item code) {
 }
 
 static Item js_262_agent_start(Item code) {
-    js_root_range_ensure_registered(&js_runtime_state.test262_agent.roots);
+    js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
     if (js_262_agent_callback_count >= JS_262_AGENT_MAX) {
         return js_throw_type_error("$262.agent.start capacity exceeded");
     }
@@ -26641,7 +26641,7 @@ static Item js_262_agent_start(Item code) {
 }
 
 static Item js_262_agent_receive_broadcast(Item callback) {
-    js_root_range_ensure_registered(&js_runtime_state.test262_agent.roots);
+    js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
     if (js_262_agent_current_slot < 0 || js_262_agent_current_slot >= JS_262_AGENT_MAX) {
         return make_js_undefined();
     }
@@ -26653,7 +26653,7 @@ static Item js_262_agent_receive_broadcast(Item callback) {
 }
 
 static Item js_262_agent_broadcast(Item value) {
-    js_root_range_ensure_registered(&js_runtime_state.test262_agent.roots);
+    js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
     for (int i = 0; i < js_262_agent_callback_count; i++) {
         Item callback = js_262_agent_callbacks[i];
         if (!js_is_callable(callback)) continue;
@@ -26668,7 +26668,7 @@ static Item js_262_agent_broadcast(Item value) {
 }
 
 static Item js_262_agent_report(Item value) {
-    js_root_range_ensure_registered(&js_runtime_state.test262_agent.roots);
+    js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
     if (js_262_agent_report_count >= JS_262_AGENT_REPORT_MAX) {
         return js_throw_type_error("$262.agent.report capacity exceeded");
     }
@@ -26681,7 +26681,7 @@ static Item js_262_agent_report(Item value) {
 }
 
 static Item js_262_agent_get_report() {
-    js_root_range_ensure_registered(&js_runtime_state.test262_agent.roots);
+    js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
     if (js_262_agent_report_count <= 0) return ItemNull;
     int ready_offset = -1;
     for (int offset = 0; offset < js_262_agent_report_count; offset++) {
@@ -26723,7 +26723,7 @@ static Item js_262_agent_sleep(Item ms) {
 }
 
 static Item js_262_get_agent_object() {
-    js_root_range_ensure_registered(&js_runtime_state.test262_agent.roots);
+    js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
     if (!js_namespace_cache_is_empty(js_262_agent_object)) return js_262_agent_object;
     js_262_agent_object = js_new_object();
 #define JS_262_AGENT_METHODS(M) \
@@ -26760,7 +26760,7 @@ extern "C" Item js_get_262_object_value() {
 }
 
 // v25: Reflect global object for bare identifier resolution
-#define js_reflect_object (js_runtime_state.namespaces.reflect)
+#define js_reflect_object (js_runtime_state.namespaces->reflect)
 void js_reset_reflect_object() { js_reflect_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_reflect_object_value() {
@@ -26778,7 +26778,7 @@ extern "C" Item js_get_reflect_object_value() {
 }
 
 // Atomics namespace object
-#define js_atomics_object (js_runtime_state.namespaces.atomics)
+#define js_atomics_object (js_runtime_state.namespaces->atomics)
 void js_reset_atomics_object() { js_atomics_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_atomics_object_value() {
@@ -27886,9 +27886,9 @@ extern "C" Item js_gen_await_result(Item value, int64_t next_state) {
 //   gen → %GeneratorFunction%.prototype.prototype → %GeneratorPrototype% → %IteratorPrototype% → Object.prototype
 // The test262 test does Object.getPrototypeOf(Object.getPrototypeOf(gen)) to get %GeneratorPrototype%.
 // We implement two shared levels: a direct proto (depth 1) and the shared prototype (depth 2, has toStringTag).
-#define js_generator_proto_depth2_cache (js_runtime_state.iterators.generator_proto_depth2)
-#define js_async_generator_proto_depth2_cache (js_runtime_state.iterators.async_generator_proto_depth2)
-#define js_async_iterator_proto_cache (js_runtime_state.iterators.async_iterator_prototype)
+#define js_generator_proto_depth2_cache (js_runtime_state.iterators->generator_proto_depth2)
+#define js_async_generator_proto_depth2_cache (js_runtime_state.iterators->async_generator_proto_depth2)
+#define js_async_iterator_proto_cache (js_runtime_state.iterators->async_iterator_prototype)
 
 static Item js_get_async_iterator_proto() {
     if (!js_iterator_state_ensure_roots()) return ItemNull;
@@ -28104,12 +28104,12 @@ extern "C" JsGeneratorStateRecord* js_generator_get_ast_state(Item generator) {
     return js_get_generator(generator);
 }
 
-#define js_gen_return_signal_marker (js_runtime_state.iterators.generator_return_marker)
-#define js_gen_throw_signal_marker (js_runtime_state.iterators.generator_throw_marker)
+#define js_gen_return_signal_marker (js_runtime_state.iterators->generator_return_marker)
+#define js_gen_throw_signal_marker (js_runtime_state.iterators->generator_throw_marker)
 
 static bool js_iterator_state_ensure_roots(void) {
     return js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.iterators.roots);
+        js_root_range_ensure_registered(&js_runtime_state.iterators->roots);
 }
 
 static Item js_get_gen_return_signal_marker() {
@@ -28700,12 +28700,12 @@ extern "C" bool js_is_async_generator(Item obj) {
 // For objects with [Symbol.iterator]: calls it and returns the result.
 // =============================================================================
 
-#define js_iterator_proto_cache (js_runtime_state.iterators.iterator_prototype)
-#define js_array_iterator_proto_cache (js_runtime_state.iterators.array_iterator_prototype)
-#define js_string_iterator_proto_cache (js_runtime_state.iterators.string_iterator_prototype)
-#define js_map_iterator_proto_cache (js_runtime_state.iterators.map_iterator_prototype)
-#define js_set_iterator_proto_cache (js_runtime_state.iterators.set_iterator_prototype)
-#define js_regexp_string_iterator_proto_cache (js_runtime_state.iterators.regexp_string_iterator_prototype)
+#define js_iterator_proto_cache (js_runtime_state.iterators->iterator_prototype)
+#define js_array_iterator_proto_cache (js_runtime_state.iterators->array_iterator_prototype)
+#define js_string_iterator_proto_cache (js_runtime_state.iterators->string_iterator_prototype)
+#define js_map_iterator_proto_cache (js_runtime_state.iterators->map_iterator_prototype)
+#define js_set_iterator_proto_cache (js_runtime_state.iterators->set_iterator_prototype)
+#define js_regexp_string_iterator_proto_cache (js_runtime_state.iterators->regexp_string_iterator_prototype)
 
 extern "C" void js_iterator_proto_cache_reset(void) {
     js_iterator_proto_cache = (Item){0};
@@ -34908,15 +34908,15 @@ static Item js_internal_repl_create(Item env, Item opts, Item cb) {
     return repl;
 }
 
-#define js_als_instances (js_runtime_state.async_local_storage.instances)
-#define js_als_instance_count (js_runtime_state.async_local_storage.instance_count)
+#define js_als_instances (js_runtime_state.async_local_storage->instances)
+#define js_als_instance_count (js_runtime_state.async_local_storage->instance_count)
 
 static Item js_als_store_key(void) {
     return js_name_item("_store", 6);
 }
 
 static void js_als_register_instance(Item instance) {
-    if (!js_root_range_ensure_registered(&js_runtime_state.async_local_storage.roots)) return;
+    if (!js_root_range_ensure_registered(&js_runtime_state.async_local_storage->roots)) return;
     for (int i = 0; i < js_als_instance_count; i++) {
         if (js_als_instances[i].item == instance.item) return;
     }
@@ -35094,14 +35094,14 @@ static Item js_als_withScope(Item store) {
 
 #define JS_ASYNC_HOOK_MAX JS_ASYNC_HOOK_STATE_MAX
 #define JS_ASYNC_PENDING_DESTROY_MAX JS_ASYNC_PENDING_DESTROY_STATE_MAX
-#define js_async_hooks_enabled_count (js_runtime_state.async_hooks.enabled_count)
-#define js_async_hooks_root_resource (js_runtime_state.async_hooks.root_resource)
-#define js_async_hooks_current_resource (js_runtime_state.async_hooks.current_resource)
-#define js_async_hooks_next_id (js_runtime_state.async_hooks.next_id)
-#define js_async_hooks (js_runtime_state.async_hooks.hooks)
-#define js_async_hook_count (js_runtime_state.async_hooks.hook_count)
-#define js_async_pending_destroy_resources (js_runtime_state.async_hooks.pending_destroy_resources)
-#define js_async_pending_destroy_count (js_runtime_state.async_hooks.pending_destroy_count)
+#define js_async_hooks_enabled_count (js_runtime_state.async_hooks->enabled_count)
+#define js_async_hooks_root_resource (js_runtime_state.async_hooks->root_resource)
+#define js_async_hooks_current_resource (js_runtime_state.async_hooks->current_resource)
+#define js_async_hooks_next_id (js_runtime_state.async_hooks->next_id)
+#define js_async_hooks (js_runtime_state.async_hooks->hooks)
+#define js_async_hook_count (js_runtime_state.async_hooks->hook_count)
+#define js_async_pending_destroy_resources (js_runtime_state.async_hooks->pending_destroy_resources)
+#define js_async_pending_destroy_count (js_runtime_state.async_hooks->pending_destroy_count)
 
 static Item js_async_hooks_symbol_key(const char* name, int name_len) {
     return js_symbol_for(js_name_item(name, name_len));
@@ -35118,7 +35118,7 @@ static void js_async_hooks_stamp_id_symbols(Item resource, int64_t async_id, int
 
 static Item js_async_hooks_ensure_root_resource(void) {
     if (js_async_hooks_root_resource.item == 0) {
-        js_root_range_ensure_registered(&js_runtime_state.async_hooks.roots);
+        js_root_range_ensure_registered(&js_runtime_state.async_hooks->roots);
         js_async_hooks_root_resource = js_new_object();
     }
     return js_async_hooks_root_resource;
@@ -35145,7 +35145,7 @@ extern "C" void js_async_hooks_restore_resource(Item previous) {
 }
 
 static void js_async_hooks_add_hook(Item hook) {
-    js_root_range_ensure_registered(&js_runtime_state.async_hooks.roots);
+    js_root_range_ensure_registered(&js_runtime_state.async_hooks->roots);
     for (int i = 0; i < js_async_hook_count; i++) {
         if (js_async_hooks[i].item == hook.item) return;
     }
@@ -35258,7 +35258,7 @@ static void js_async_resource_emit_destroy(Item resource) {
 }
 
 static void js_async_hooks_queue_destroy(Item resource) {
-    js_root_range_ensure_registered(&js_runtime_state.async_hooks.roots);
+    js_root_range_ensure_registered(&js_runtime_state.async_hooks->roots);
     if (js_async_pending_destroy_count >= JS_ASYNC_PENDING_DESTROY_MAX) return;
     js_async_pending_destroy_resources[js_async_pending_destroy_count++] = resource;
 }

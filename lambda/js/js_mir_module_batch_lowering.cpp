@@ -805,14 +805,11 @@ void jm_compile_recovery_state_destroy_context(JsRuntimeState* runtime_state) {
 }
 
 void jm_defer_mir_cleanup(MIR_context_t ctx) {
-    if (module_mir_context_count < JS_DEFERRED_MIR_MAX) {
-        module_mir_source_buffers[module_mir_context_count] = NULL;
-        module_mir_contexts[module_mir_context_count++] = ctx;
-    } else {
-        // Cannot MIR_finish — JIT-compiled function pointers still live and
-        // would crash on call. Just leak the context (rare path; survives
-        // until process exit anyway).
-        log_error("module: exceeded max deferred MIR contexts (%d) — leaking ctx", JS_DEFERRED_MIR_MAX);
+    // A failed push cannot MIR_finish here: JIT-compiled function pointers
+    // still live and would crash on call, so the context leaks to process
+    // exit exactly as the old overflow path did.
+    if (!js_code_store_push(js_module_code_store, ctx)) {
+        log_error("module: cannot retain deferred MIR context — leaking ctx");
     }
 }
 
@@ -821,20 +818,19 @@ void jm_cleanup_deferred_mir() {
     // has been released there is no remaining per-context entry to finish.
     if (!js_active_runtime_state) return;
     js_dynfunc_cache_reset();
-    for (int i = 0; i < module_mir_context_count; i++) {
+    JsCodeStore* store = js_module_code_store;
+    for (int i = 0; i < store->count; i++) {
         // Deferred eval units use the same JIT generator as ordinary units;
         // finishing only MIR leaves the generator arena and native code live.
-        jit_cleanup_mode(module_mir_contexts[i], !g_mir_interp_mode);
-        if (module_mir_source_buffers[i]) mem_free(module_mir_source_buffers[i]);
+        jit_cleanup_mode((MIR_context_t)store->artifacts[i].mir_context,
+            !g_mir_interp_mode);
+        if (store->artifacts[i].source_owner) mem_free(store->artifacts[i].source_owner);
     }
-    module_mir_context_count = 0;
+    store->count = 0;
 }
 
 void* jm_get_last_deferred_mir_ctx() {
-    if (module_mir_context_count > 0) {
-        return module_mir_contexts[module_mir_context_count - 1];
-    }
-    return NULL;
+    return js_code_store_last_context(js_module_code_store);
 }
 
 static bool jm_path_has_lambda_ext(const char* path) {
@@ -3952,7 +3948,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return ItemNull;
     }
     if (execution_scope.is_outermost() &&
-            !js_runtime_state.event_loop.callback_running &&
+            !js_runtime_state.event_loop->callback_running &&
             js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }

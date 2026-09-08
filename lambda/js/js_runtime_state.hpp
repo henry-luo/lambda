@@ -22,7 +22,6 @@
 #define JS_WITH_STACK_MAX 16
 // derived-constructor nesting depth: a checked policy limit, not a struct size
 #define JS_SUPER_THIS_STACK_MAX 128
-#define JS_DEFERRED_MIR_MAX 4096
 #define JS_FUNCTION_CACHE_CAPACITY 512
 #define JS_READLINE_INPUT_MAP_MAX 256
 #define JS_GLOBAL_VAR_MODULE_BINDING_CAP 512
@@ -183,11 +182,25 @@ struct JsWithScopeState {
 // Generated closures retain only their MIR context and source buffer. Names
 // and observable strings are materialized through the owning module NameId
 // table, so compiler pools never cross the compile/execute boundary.
-struct JsDeferredMirState {
-    void* contexts[JS_DEFERRED_MIR_MAX] = {};
-    char* source_buffers[JS_DEFERRED_MIR_MAX] = {};
-    int count = 0;
+// JSCU16: one owner per compiled unit -- its MIR context and the source
+// buffer that unit's generated code still reads -- held in a dynamic store
+// instead of two parallel fixed arrays with a hard cap.
+struct JsCompiledArtifact {
+    void* mir_context = NULL;
+    char* source_owner = NULL;   // freed with the context; may be NULL
 };
+
+struct JsCodeStore {
+    JsCompiledArtifact* artifacts = NULL;
+    int count = 0;
+    int capacity = 0;
+};
+
+bool js_code_store_push(JsCodeStore* store, void* mir_context);
+// Hands the last pushed artifact ownership of a source buffer.
+void js_code_store_attach_source(JsCodeStore* store, char* source_owner);
+void* js_code_store_last_context(JsCodeStore* store);
+void js_code_store_destroy(JsCodeStore* store);
 
 // Node DNS exports are per-realm objects and must not retain values from a
 // different heap through file-static cache slots.
@@ -879,8 +892,8 @@ struct JsIntrinsicState {
 
 struct JsRuntimeState {
     JsDnsState dns = {};
-    JsBuiltinCacheState builtin_cache = {};
-    JsReadlineState readline = {};
+    JsBuiltinCacheState* builtin_cache = NULL;
+    JsReadlineState* readline = NULL;
     JsBufferState buffer = {};
     JsHttpsState https = {};
     JsUtilState util = {};
@@ -889,7 +902,7 @@ struct JsRuntimeState {
     JsTlsState tls = {};
     JsStreamState stream = {};
     JsHttpState http = {};
-    JsAssertState assert = {};
+    JsAssertState* assert = NULL;
     JsNetState net = {};
     JsHostHooksState host_hooks = {};
     JsFsState fs = {};
@@ -902,29 +915,29 @@ struct JsRuntimeState {
     // JSCU17: DOM/web state moved to context capsules (peers of this JS
     // capsule, not children of it); see runtime/context_capsule.h.
     HashMap* dom_attached_expando_roots = NULL;
-    JsStringConcatState string_concat = {};
-    JsGlobalVarModuleBindingState global_var_module_bindings = {};
+    JsStringConcatState* string_concat = NULL;
+    JsGlobalVarModuleBindingState* global_var_module_bindings = NULL;   // JSCU16: allocated with the realm, not embedded
     JsRuntimeCoreCacheState runtime_core_cache = {};
     JsFunctionPrototypeState function_prototypes = {};
-    JsGlobalStringCacheState global_string_caches = {};
-    JsGlobalBindingState global_bindings = {};
-    JsConstructorCacheState constructors = {};
-    JsRuntimeNamespaceState namespaces = {};
+    JsGlobalStringCacheState* global_string_caches = NULL;
+    JsGlobalBindingState* global_bindings = NULL;   // JSCU16: allocated with the realm, not embedded
+    JsConstructorCacheState* constructors = NULL;
+    JsRuntimeNamespaceState* namespaces = NULL;
     // VM namespaces and generated module identifiers are observable realm
     // state. Keeping them here prevents a new document from accepting an
     // equal epoch and reusing an Item from a retired document heap.
     JsVmRuntimeState vm = {};
-    JsTest262AgentState test262_agent = {};
-    JsProcessState process = {};
-    JsIteratorState iterators = {};
+    JsTest262AgentState* test262_agent = NULL;
+    JsProcessState* process = NULL;
+    JsIteratorState* iterators = NULL;
     JsConsoleState console = {};
     JsRuntimeOperationState operations = {};
     JsWellKnownRefs well_known = {};
-    JsAsyncHooksState async_hooks = {};
+    JsAsyncHooksState* async_hooks = NULL;   // JSCU16: allocated with the realm, not embedded
     JsPromiseRuntimeState promises = {};
     JsModuleRuntimeState modules = {};
     JsClusterState cluster = {};
-    JsAsyncLocalStorageState async_local_storage = {};
+    JsAsyncLocalStorageState* async_local_storage = NULL;
     JsPerformanceState performance = {};
     // Native buffer ownership and tagged-template identity are realm-local
     // caches. Their pointer lookups remain ordinary context-local accesses.
@@ -935,12 +948,12 @@ struct JsRuntimeState {
     void* regex_permanent_cache = NULL;
     Input* input = NULL;
     bool strict_mode = false;
-    JsIntrinsicState intrinsics = {};
+    JsIntrinsicState* intrinsics = NULL;
     JsEvalState eval = {};
-    JsEventLoopQueueState event_loop = {};
-    JsEventLoopTimerState timers = {};
+    JsEventLoopQueueState* event_loop = NULL;   // JSCU16: allocated with the realm, not embedded
+    JsEventLoopTimerState* timers = NULL;   // JSCU16: allocated with the realm, not embedded
     JsWithScopeState with_scope = {};
-    JsDeferredMirState deferred_mir = {};
+    JsCodeStore code_store = {};
     void* dynamic_function_cache_state = NULL;
     // Timeout recovery may interrupt JS compilation before the ordinary
     // teardown path runs.  Its compiler owners stay with this realm, never in
@@ -1029,7 +1042,7 @@ extern "C" bool js_promise_initial_unhandled_rejections_strict(void);
 
 #define js_input (js_runtime_state.input)
 #define js_strict_mode (js_runtime_state.strict_mode)
-#define js_intrinsic_state (js_runtime_state.intrinsics)
+#define js_intrinsic_state (*js_runtime_state.intrinsics)
 #define g_array_sym_iter_ever_set (js_intrinsic_state.array_sym_iter_ever_set)
 #define js_heap_epoch (js_runtime_state.heap_epoch)
 #define js_regexp_last_match (js_runtime_state.regexp_last_match)

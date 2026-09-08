@@ -2080,33 +2080,33 @@ static int js_process_bootstrap_argc_raw = 0;
 static int js_process_bootstrap_exec_argc_raw = 0;
 
 JS_FORWARD_STATIC_EXPRESSION(bool*, js_process_exit_requested_slot, (void),
-    js_active_runtime_state ? &js_runtime_state.process.exit_requested : NULL)
-#define js_process_argv_items (js_runtime_state.process.argv)
-#define js_process_exec_argv_items (js_runtime_state.process.exec_argv)
+    js_active_runtime_state ? &js_runtime_state.process->exit_requested : NULL)
+#define js_process_argv_items (js_runtime_state.process->argv)
+#define js_process_exec_argv_items (js_runtime_state.process->exec_argv)
 #define js_process_argv_raw js_process_bootstrap_argv_raw
 #define js_process_exec_argv_raw js_process_bootstrap_exec_argv_raw
 #define js_process_argc_raw js_process_bootstrap_argc_raw
 #define js_process_exec_argc_raw js_process_bootstrap_exec_argc_raw
-#define js_process_object (js_runtime_state.process.object)
-#define js_process_exit_code_value (js_runtime_state.process.exit_code)
-#define js_process_exit_requested_value (js_runtime_state.process.exit_requested)
-#define process_exit_listeners (js_runtime_state.process.exit_listeners)
-#define process_exit_listener_count (js_runtime_state.process.exit_listener_count)
-#define process_uncaught_listeners (js_runtime_state.process.uncaught_listeners)
-#define process_uncaught_listener_count (js_runtime_state.process.uncaught_listener_count)
-#define js_process_exiting (js_runtime_state.process.exiting)
-#define process_listener_map (js_runtime_state.process.listener_map)
-#define process_total_listener_count (js_runtime_state.process.total_listener_count)
-#define process_ipc_liveness_listener_count (js_runtime_state.process.ipc_liveness_listener_count)
-#define js_process_ipc_active (js_runtime_state.process.ipc_active)
-#define js_process_ipc_closing (js_runtime_state.process.ipc_closing)
-#define js_process_ipc_disconnect_emitted (js_runtime_state.process.ipc_disconnect_emitted)
-#define js_process_ipc_force_ref (js_runtime_state.process.ipc_force_ref)
-#define js_process_ipc_pending_messages (js_runtime_state.process.ipc_pending_messages)
-#define js_process_ipc_buf (js_runtime_state.process.ipc_buffer)
-#define js_process_ipc_len (js_runtime_state.process.ipc_length)
-#define js_process_ipc_cap (js_runtime_state.process.ipc_capacity)
-JS_FORWARD_STATIC_EXPRESSION(bool, js_process_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.process.roots)))
+#define js_process_object (js_runtime_state.process->object)
+#define js_process_exit_code_value (js_runtime_state.process->exit_code)
+#define js_process_exit_requested_value (js_runtime_state.process->exit_requested)
+#define process_exit_listeners (js_runtime_state.process->exit_listeners)
+#define process_exit_listener_count (js_runtime_state.process->exit_listener_count)
+#define process_uncaught_listeners (js_runtime_state.process->uncaught_listeners)
+#define process_uncaught_listener_count (js_runtime_state.process->uncaught_listener_count)
+#define js_process_exiting (js_runtime_state.process->exiting)
+#define process_listener_map (js_runtime_state.process->listener_map)
+#define process_total_listener_count (js_runtime_state.process->total_listener_count)
+#define process_ipc_liveness_listener_count (js_runtime_state.process->ipc_liveness_listener_count)
+#define js_process_ipc_active (js_runtime_state.process->ipc_active)
+#define js_process_ipc_closing (js_runtime_state.process->ipc_closing)
+#define js_process_ipc_disconnect_emitted (js_runtime_state.process->ipc_disconnect_emitted)
+#define js_process_ipc_force_ref (js_runtime_state.process->ipc_force_ref)
+#define js_process_ipc_pending_messages (js_runtime_state.process->ipc_pending_messages)
+#define js_process_ipc_buf (js_runtime_state.process->ipc_buffer)
+#define js_process_ipc_len (js_runtime_state.process->ipc_length)
+#define js_process_ipc_cap (js_runtime_state.process->ipc_capacity)
+JS_FORWARD_STATIC_EXPRESSION(bool, js_process_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.process->roots)))
 
 // root-range cleanup clears expired realm cache slots to zero, while an
 // explicit realm reset uses ItemNull; neither value is a JS object.
@@ -3168,7 +3168,7 @@ typedef struct JsProcessIpcWriteReq {
 } JsProcessIpcWriteReq;
 
 JS_FORWARD_STATIC_EXPRESSION(uv_pipe_t*, js_process_ipc_pipe_ptr, (void),
-    (uv_pipe_t*)js_runtime_state.process.ipc_pipe)
+    (uv_pipe_t*)js_runtime_state.process->ipc_pipe)
 #define js_process_ipc_pipe (*js_process_ipc_pipe_ptr())
 
 typedef struct JsProcessIpcScope {
@@ -3245,7 +3245,7 @@ static void js_process_ipc_close_cb(uv_handle_t* handle) {
     }
     js_process_ipc_len = 0;
     js_process_ipc_cap = 0;
-    js_runtime_state.process.ipc_pipe = NULL;
+    js_runtime_state.process->ipc_pipe = NULL;
     js_process_ipc_exit(&scope);
     mem_free(handle);
 }
@@ -3465,9 +3465,9 @@ static void js_process_ipc_init_from_env(void) {
         log_error("process_ipc: event loop not initialized");
         return;
     }
-    if (!js_runtime_state.process.ipc_pipe) {
-        js_runtime_state.process.ipc_pipe = mem_calloc(1, sizeof(uv_pipe_t), MEM_CAT_JS_RUNTIME);
-        if (!js_runtime_state.process.ipc_pipe) {
+    if (!js_runtime_state.process->ipc_pipe) {
+        js_runtime_state.process->ipc_pipe = mem_calloc(1, sizeof(uv_pipe_t), MEM_CAT_JS_RUNTIME);
+        if (!js_runtime_state.process->ipc_pipe) {
             log_error("process_ipc: failed to allocate context-owned pipe");
             return;
         }
@@ -4624,22 +4624,22 @@ extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item);
 extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_t cp);
 extern "C" uint64_t js_get_heap_epoch();
 
-#define g_uri_last_four_byte_string (js_runtime_state.global_string_caches.uri_last_four_byte_string)
-#define g_uri_last_four_byte_cp (js_runtime_state.global_string_caches.uri_last_four_byte_cp)
-#define g_uri_last_four_byte_epoch (js_runtime_state.global_string_caches.uri_last_four_byte_epoch)
-#define g_last_from_char_code_string (js_runtime_state.global_string_caches.last_from_char_code_string)
-#define g_last_from_char_code_cp (js_runtime_state.global_string_caches.last_from_char_code_cp)
-#define g_last_from_char_code_epoch (js_runtime_state.global_string_caches.last_from_char_code_epoch)
-#define g_ascii_char_pool (js_runtime_state.global_string_caches.ascii_chars)
-#define g_ascii_char_pool_epoch (js_runtime_state.global_string_caches.ascii_chars_epoch)
-#define js_decode_uri_component_error (js_runtime_state.global_string_caches.decode_uri_component_error)
-#define js_decode_uri_component_error_epoch (js_runtime_state.global_string_caches.decode_uri_component_error_epoch)
-#define js_decode_uri_error (js_runtime_state.global_string_caches.decode_uri_error)
-#define js_decode_uri_error_epoch (js_runtime_state.global_string_caches.decode_uri_error_epoch)
+#define g_uri_last_four_byte_string (js_runtime_state.global_string_caches->uri_last_four_byte_string)
+#define g_uri_last_four_byte_cp (js_runtime_state.global_string_caches->uri_last_four_byte_cp)
+#define g_uri_last_four_byte_epoch (js_runtime_state.global_string_caches->uri_last_four_byte_epoch)
+#define g_last_from_char_code_string (js_runtime_state.global_string_caches->last_from_char_code_string)
+#define g_last_from_char_code_cp (js_runtime_state.global_string_caches->last_from_char_code_cp)
+#define g_last_from_char_code_epoch (js_runtime_state.global_string_caches->last_from_char_code_epoch)
+#define g_ascii_char_pool (js_runtime_state.global_string_caches->ascii_chars)
+#define g_ascii_char_pool_epoch (js_runtime_state.global_string_caches->ascii_chars_epoch)
+#define js_decode_uri_component_error (js_runtime_state.global_string_caches->decode_uri_component_error)
+#define js_decode_uri_component_error_epoch (js_runtime_state.global_string_caches->decode_uri_component_error_epoch)
+#define js_decode_uri_error (js_runtime_state.global_string_caches->decode_uri_error)
+#define js_decode_uri_error_epoch (js_runtime_state.global_string_caches->decode_uri_error_epoch)
 
 static bool js_global_string_caches_ensure_roots(void) {
     if (!js_active_runtime_state) return false;
-    JsRootRange* roots = &js_runtime_state.global_string_caches.roots;
+    JsRootRange* roots = &js_runtime_state.global_string_caches->roots;
     if (roots->roots_epoch == js_get_heap_epoch()) return true;
     return js_root_range_ensure_registered(roots);
 }
@@ -9390,7 +9390,7 @@ extern "C" Item js_test262_decimal_to_percent_hex_string(Item n_item) {
     // These strings survive hot-batch resets; store them in the context root
     // range so a later collection cannot turn the 256-entry table into stale Items.
     bool cache_rooted = js_global_string_caches_ensure_roots();
-    Item* cached = js_runtime_state.global_string_caches.test262_percent_hex;
+    Item* cached = js_runtime_state.global_string_caches->test262_percent_hex;
     if (cache_rooted && cached[byte].item) return cached[byte];
     char buf[3];
     buf[0] = '%';
@@ -9417,7 +9417,7 @@ static inline bool js_test262_percent_escape_cp_from_append(String* left, uint32
     // the prior static pointer outlived both GC and hot-realm reset boundaries.
     bool cache_rooted = js_global_string_caches_ensure_roots();
     Item left_value = (Item){.item = s2it(left)};
-    Item cached_left_item = js_runtime_state.global_string_caches.test262_cached_percent_left;
+    Item cached_left_item = js_runtime_state.global_string_caches->test262_cached_percent_left;
     uint32_t byte0 = 0;
     uint32_t byte1 = 0;
     uint32_t byte2 = 0;
@@ -9433,15 +9433,15 @@ static inline bool js_test262_percent_escape_cp_from_append(String* left, uint32
         byte1 = (uint32_t)((b1_high << 4) | b1_low);
         byte2 = (uint32_t)((b2_high << 4) | b2_low);
         if (cache_rooted) {
-            js_runtime_state.global_string_caches.test262_cached_percent_left = left_value;
-            js_runtime_state.global_string_caches.test262_percent_byte0 = byte0;
-            js_runtime_state.global_string_caches.test262_percent_byte1 = byte1;
-            js_runtime_state.global_string_caches.test262_percent_byte2 = byte2;
+            js_runtime_state.global_string_caches->test262_cached_percent_left = left_value;
+            js_runtime_state.global_string_caches->test262_percent_byte0 = byte0;
+            js_runtime_state.global_string_caches->test262_percent_byte1 = byte1;
+            js_runtime_state.global_string_caches->test262_percent_byte2 = byte2;
         }
     } else {
-        byte0 = js_runtime_state.global_string_caches.test262_percent_byte0;
-        byte1 = js_runtime_state.global_string_caches.test262_percent_byte1;
-        byte2 = js_runtime_state.global_string_caches.test262_percent_byte2;
+        byte0 = js_runtime_state.global_string_caches->test262_percent_byte0;
+        byte1 = js_runtime_state.global_string_caches->test262_percent_byte1;
+        byte2 = js_runtime_state.global_string_caches->test262_percent_byte2;
     }
     if (byte0 < 0xF0 || byte0 > 0xF4) return false;
     if ((byte1 & 0xC0) != 0x80 || (byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80) return false;
@@ -12926,23 +12926,23 @@ extern "C" Item js_escape(Item str_item) {
 
 // globalThis and lexical bindings are direct fields of the active context.
 // Their public lookup paths never use a lock or an atomic operation.
-#define js_global_this_obj (js_runtime_state.global_bindings.global_this)
-#define js_global_var_cached_defined_keys (js_runtime_state.global_bindings.var_defined_keys)
-#define js_global_var_cached_defined_count (js_runtime_state.global_bindings.var_defined_count)
-#define js_global_var_cached_defined_epoch (js_runtime_state.global_bindings.var_defined_epoch)
-#define js_global_var_cached_global (js_runtime_state.global_bindings.var_defined_global)
-#define js_window_event_value (js_runtime_state.global_bindings.window_event)
-#define js_window_event_intercept_enabled (js_runtime_state.global_bindings.window_event_intercept_enabled)
-#define js_global_lexical_keys (js_runtime_state.global_bindings.lexical_keys)
-#define js_global_lexical_values (js_runtime_state.global_bindings.lexical_values)
-#define js_global_lexical_immutable (js_runtime_state.global_bindings.lexical_immutable)
-#define js_global_lexical_binding_count (js_runtime_state.global_bindings.lexical_count)
-#define js_global_lexical_epoch (js_runtime_state.global_bindings.lexical_epoch)
-#define js_global_lexical_global (js_runtime_state.global_bindings.lexical_global)
+#define js_global_this_obj (js_runtime_state.global_bindings->global_this)
+#define js_global_var_cached_defined_keys (js_runtime_state.global_bindings->var_defined_keys)
+#define js_global_var_cached_defined_count (js_runtime_state.global_bindings->var_defined_count)
+#define js_global_var_cached_defined_epoch (js_runtime_state.global_bindings->var_defined_epoch)
+#define js_global_var_cached_global (js_runtime_state.global_bindings->var_defined_global)
+#define js_window_event_value (js_runtime_state.global_bindings->window_event)
+#define js_window_event_intercept_enabled (js_runtime_state.global_bindings->window_event_intercept_enabled)
+#define js_global_lexical_keys (js_runtime_state.global_bindings->lexical_keys)
+#define js_global_lexical_values (js_runtime_state.global_bindings->lexical_values)
+#define js_global_lexical_immutable (js_runtime_state.global_bindings->lexical_immutable)
+#define js_global_lexical_binding_count (js_runtime_state.global_bindings->lexical_count)
+#define js_global_lexical_epoch (js_runtime_state.global_bindings->lexical_epoch)
+#define js_global_lexical_global (js_runtime_state.global_bindings->lexical_global)
 
 JS_FORWARD_STATIC_EXPRESSION(bool, js_global_bindings_ensure_roots, (void),
     js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.global_bindings.roots))
+        js_root_range_ensure_registered(&js_runtime_state.global_bindings->roots))
 
 static bool js_key_is_event_name(Item key) {
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
@@ -12951,7 +12951,7 @@ static bool js_key_is_event_name(Item key) {
 }
 
 static void js_window_event_ensure_rooted() {
-    if (js_runtime_state.global_bindings.roots.roots_epoch == js_get_heap_epoch()) return;
+    if (js_runtime_state.global_bindings->roots.roots_epoch == js_get_heap_epoch()) return;
     js_global_bindings_ensure_roots();
 }
 
@@ -12993,21 +12993,21 @@ extern "C" void js_globals_batch_reset() {
     // Partial batch resets retain the heap but recreate realm builtins; clear
     // URI/character fast-cache Items so a later decode cannot retain a stale
     // error/prototype graph from the prior test realm.
-    js_runtime_state.global_string_caches.uri_last_four_byte_string = (Item){0};
-    js_runtime_state.global_string_caches.last_from_char_code_string = (Item){0};
-    js_runtime_state.global_string_caches.decode_uri_component_error = (Item){0};
-    js_runtime_state.global_string_caches.decode_uri_error = (Item){0};
-    memset(js_runtime_state.global_string_caches.ascii_chars, 0,
-           sizeof(js_runtime_state.global_string_caches.ascii_chars));
-    memset(js_runtime_state.global_string_caches.test262_percent_hex, 0,
-           sizeof(js_runtime_state.global_string_caches.test262_percent_hex));
-    js_runtime_state.global_string_caches.test262_cached_percent_left = (Item){0};
-    js_runtime_state.global_string_caches.uri_last_four_byte_epoch = 0;
-    js_runtime_state.global_string_caches.last_from_char_code_cp = -1;
-    js_runtime_state.global_string_caches.last_from_char_code_epoch = 0;
-    js_runtime_state.global_string_caches.ascii_chars_epoch = ~0ULL;
-    js_runtime_state.global_string_caches.decode_uri_component_error_epoch = 0;
-    js_runtime_state.global_string_caches.decode_uri_error_epoch = 0;
+    js_runtime_state.global_string_caches->uri_last_four_byte_string = (Item){0};
+    js_runtime_state.global_string_caches->last_from_char_code_string = (Item){0};
+    js_runtime_state.global_string_caches->decode_uri_component_error = (Item){0};
+    js_runtime_state.global_string_caches->decode_uri_error = (Item){0};
+    memset(js_runtime_state.global_string_caches->ascii_chars, 0,
+           sizeof(js_runtime_state.global_string_caches->ascii_chars));
+    memset(js_runtime_state.global_string_caches->test262_percent_hex, 0,
+           sizeof(js_runtime_state.global_string_caches->test262_percent_hex));
+    js_runtime_state.global_string_caches->test262_cached_percent_left = (Item){0};
+    js_runtime_state.global_string_caches->uri_last_four_byte_epoch = 0;
+    js_runtime_state.global_string_caches->last_from_char_code_cp = -1;
+    js_runtime_state.global_string_caches->last_from_char_code_epoch = 0;
+    js_runtime_state.global_string_caches->ascii_chars_epoch = ~0ULL;
+    js_runtime_state.global_string_caches->decode_uri_component_error_epoch = 0;
+    js_runtime_state.global_string_caches->decode_uri_error_epoch = 0;
     js_global_var_define_cache_reset();
     // reset constructor cache (function objects from old pool)
     extern void js_ctor_cache_reset();
@@ -15520,8 +15520,8 @@ extern "C" Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_
 
 // Global builtin function values retain the catalog ID that selected them.
 // The registry is the sole owner of names, arities, and cache identity.
-#define global_builtin_fn_cache (js_runtime_state.constructors.global_builtin_functions)
-#define global_builtin_fn_cache_init (js_runtime_state.constructors.global_builtin_initialized)
+#define global_builtin_fn_cache (js_runtime_state.constructors->global_builtin_functions)
+#define global_builtin_fn_cache_init (js_runtime_state.constructors->global_builtin_initialized)
 
 // The preamble snapshot owns the realm's catalog-backed global functions too;
 // partial reset must keep their identity alongside Number.parseFloat and the
@@ -15581,8 +15581,8 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
 // `Array.prototype.push` work correctly.
 // =============================================================================
 
-#define js_constructor_cache (js_runtime_state.constructors.constructors)
-#define js_ctor_cache_init (js_runtime_state.constructors.constructors_initialized)
+#define js_constructor_cache (js_runtime_state.constructors->constructors)
+#define js_ctor_cache_init (js_runtime_state.constructors->constructors_initialized)
 static void js_typed_array_base_reset();
 
 // Forward declaration: snapshot mechanism preserves ctor identity across batch resets.
@@ -15789,12 +15789,12 @@ static void js_typed_array_base_reset(); // forward declaration
 
 // %TypedArray% intrinsic: shared base constructor for all TypedArray types.
 // (Forward declarations moved up so the snapshot code below can reference them.)
-#define js_typed_array_base (js_runtime_state.constructors.typed_array_base)
-#define js_typed_array_base_proto (js_runtime_state.constructors.typed_array_base_prototype)
+#define js_typed_array_base (js_runtime_state.constructors->typed_array_base)
+#define js_typed_array_base_proto (js_runtime_state.constructors->typed_array_base_prototype)
 // float16array is still part of the typed-array surface; the prototype snapshot
 // table must cover every JsTypedArrayType enum slot.
 #define JS_TYPED_ARRAY_TYPE_COUNT JS_TYPED_ARRAY_CACHE_TYPE_COUNT
-#define js_typed_array_per_type_proto (js_runtime_state.constructors.typed_array_prototypes)
+#define js_typed_array_per_type_proto (js_runtime_state.constructors->typed_array_prototypes)
 
 // Map snapshot: the pristine shadow is a rooted GC Map, rather than untraced raw
 // bytes, so accessors and other pointer fields remain alive across collections.

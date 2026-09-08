@@ -895,7 +895,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     // together with the MIR context.  Dynamic functions can outlive this helper,
     // and their generated code/source metadata still depends on these buffers.
     if (module_mir_context_count > 0) {
-        module_mir_source_buffers[module_mir_context_count - 1] = source;
+        js_code_store_attach_source(js_module_code_store, source);
         if (cacheable && get_type_id(fn_item) == LMD_TYPE_FUNC) {
             js_dynfunc_cache_insert(source_hash, source, source_len, argc, dynfunc_kind,
                 ctx, js_main_fn);
