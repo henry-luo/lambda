@@ -18,6 +18,11 @@ typedef struct CssFontFaceSrc {
     char* format;                // Format string from format(...), e.g. "woff", "truetype"
 } CssFontFaceSrc;
 
+typedef struct CssFontFaceUnicodeRange {
+    uint32_t start_codepoint;
+    uint32_t end_codepoint;
+} CssFontFaceUnicodeRange;
+
 // Font face descriptor extracted from @font-face rule
 typedef struct CssFontFaceDescriptor {
     char* family_name;           // font-family value
@@ -28,6 +33,8 @@ typedef struct CssFontFaceDescriptor {
     CssEnum font_style;          // normal, italic, oblique
     CssEnum font_weight;         // normal, bold, or numeric 100-900
     CssEnum font_display;        // auto, block, swap, fallback, optional
+    CssFontFaceUnicodeRange* unicode_ranges; // CSS unicode-range descriptor
+    int unicode_range_count;
 } CssFontFaceDescriptor;
 
 /**

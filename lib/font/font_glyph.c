@@ -760,6 +760,41 @@ static void fill_loaded_glyph_font_metrics(FontHandle* h) {
     s_loaded_glyph.font_normal_descender = split_desc;
 }
 
+static LoadedGlyph* try_load_first_document_font_glyph(FontHandle* primary,
+                                                        const FontStyleDesc* style,
+                                                        uint32_t codepoint) {
+    if (!primary || !primary->ctx || !style) return NULL;
+    const char* cursor = style->family;
+    char family[256];
+    if (!font_family_list_next(&cursor, family, sizeof(family)) ||
+        !font_face_family_registered(primary->ctx, family)) {
+        return NULL;
+    }
+    FontStyleDesc first_family = *style;
+    first_family.family = family;
+    FontHandle* document = font_resolve_document_face_for_codepoint(
+        primary->ctx, &first_family, codepoint);
+    if (!document) return NULL;
+    if (document == primary) {
+        font_handle_release(document);
+        return NULL;
+    }
+
+    LoadedGlyph* result = try_load_from_handle_backend(document, codepoint);
+#ifdef __APPLE__
+    if (!result && document->ct_raster_ref) {
+        result = try_load_from_handle_ct(document, codepoint);
+    }
+#else
+    if (!result && document->tvg_raster_ctx && document->tables) {
+        result = try_load_from_handle_tvg(document, codepoint);
+    }
+#endif
+    if (result) fill_loaded_glyph_font_metrics(document);
+    font_handle_release(document);
+    return result;
+}
+
 LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
                               uint32_t codepoint, bool for_rendering) {
     if (!handle) return NULL;
@@ -785,6 +820,13 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
     }
 
     LoadedGlyph* result = NULL;
+
+    // unicode-range selects the first declared document family before its broad face.
+    result = try_load_first_document_font_glyph(handle, style, codepoint);
+    if (result) {
+        if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering, false);
+        return result;
+    }
 
     result = try_load_from_handle_backend(handle, codepoint);
     if (result) {

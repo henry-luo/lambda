@@ -20,47 +20,6 @@
 bool font_face_register(FontContext* ctx, const FontFaceDesc* desc) {
     if (!ctx || !desc || !desc->family) return false;
 
-    // check if an entry with the same family/weight/slant already exists —
-    // if so, merge the new sources into it (supports Google Fonts subsets
-    // where multiple @font-face rules cover different unicode-ranges)
-    for (int i = 0; i < ctx->face_descriptor_count; i++) {
-        FontFaceEntry* existing = ctx->face_descriptors[i];
-        if (!existing || !existing->family) continue;
-        if (str_icmp(existing->family, strlen(existing->family),
-                     desc->family, strlen(desc->family)) != 0) continue;
-        if (existing->weight != desc->weight || existing->slant != desc->slant) continue;
-
-        // merge: append new sources to existing entry
-        if (desc->source_count > 0 && desc->sources) {
-            int old_count = existing->source_count;
-            int new_count = old_count + desc->source_count;
-            struct FontFaceEntrySrc* merged = (struct FontFaceEntrySrc*)pool_calloc(
-                ctx->pool, (size_t)new_count * sizeof(struct FontFaceEntrySrc));
-            if (!merged) return false;
-
-            // copy existing sources
-            if (existing->sources && old_count > 0) {
-                memcpy(merged, existing->sources,
-                       (size_t)old_count * sizeof(struct FontFaceEntrySrc));
-            }
-            // append new sources
-            for (int j = 0; j < desc->source_count; j++) {
-                if (desc->sources[j].path) {
-                    merged[old_count + j].path = arena_strdup(ctx->arena, desc->sources[j].path);
-                }
-                if (desc->sources[j].format) {
-                    merged[old_count + j].format = arena_strdup(ctx->arena, desc->sources[j].format);
-                }
-            }
-            existing->sources = merged;
-            existing->source_count = new_count;
-
-            log_info("font_face: merged %d sources into '%s' (weight=%d, slant=%d, total=%d)",
-                     desc->source_count, desc->family, (int)desc->weight, (int)desc->slant, new_count);
-        }
-        return true;
-    }
-
     // grow the array if needed
     if (ctx->face_descriptor_count >= ctx->face_descriptor_capacity) {
         int new_cap = (ctx->face_descriptor_capacity == 0) ? 8
@@ -105,10 +64,21 @@ bool font_face_register(FontContext* ctx, const FontFaceDesc* desc) {
         }
     }
 
+    if (desc->unicode_range_count > 0 && desc->unicode_ranges) {
+        entry->unicode_ranges = (FontFaceUnicodeRange*)pool_calloc(
+            ctx->pool, (size_t)desc->unicode_range_count * sizeof(FontFaceUnicodeRange));
+        if (!entry->unicode_ranges) return false;
+        memcpy(entry->unicode_ranges, desc->unicode_ranges,
+               (size_t)desc->unicode_range_count * sizeof(FontFaceUnicodeRange));
+        entry->unicode_range_count = desc->unicode_range_count;
+    }
+
     ctx->face_descriptors[ctx->face_descriptor_count++] = entry;
 
-    log_info("font_face: registered '%s' (weight=%d, slant=%d, sources=%d)",
-             desc->family, (int)desc->weight, (int)desc->slant, desc->source_count);
+    // Retain distinct rules: unicode-range and source order select a face per glyph.
+    log_info("font_face: registered '%s' (weight=%d, slant=%d, sources=%d, ranges=%d)",
+             desc->family, (int)desc->weight, (int)desc->slant, desc->source_count,
+             desc->unicode_range_count);
     return true;
 }
 
@@ -117,36 +87,52 @@ static int slant_distance(FontSlant a, FontSlant b) {
     return 100; // penalty for slant mismatch
 }
 
-// ============================================================================
-// Find best-matching registered descriptor
-// ============================================================================
+static bool font_face_range_includes(const FontFaceEntry* entry, uint32_t codepoint) {
+    if (!entry || entry->unicode_range_count == 0 || !entry->unicode_ranges) return true;
+    for (int i = 0; i < entry->unicode_range_count; i++) {
+        FontFaceUnicodeRange range = entry->unicode_ranges[i];
+        if (codepoint >= range.start_codepoint && codepoint <= range.end_codepoint) return true;
+    }
+    return false;
+}
 
-const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* family,
-                                              FontWeight weight, FontSlant slant) {
+static const FontFaceEntry* font_face_find_matching(FontContext* ctx, const char* family,
+                                                     FontWeight weight, FontSlant slant,
+                                                     bool filter_codepoint, uint32_t codepoint) {
     if (!ctx || !family) return NULL;
 
     const FontFaceEntry* best = NULL;
     int best_slant_distance = INT32_MAX;
-
-    for (int i = 0; i < ctx->face_descriptor_count; i++) {
+    // CSS resolves overlapping matching @font-face rules in reverse definition order.
+    for (int i = ctx->face_descriptor_count - 1; i >= 0; i--) {
         FontFaceEntry* entry = ctx->face_descriptors[i];
         if (!entry || !entry->family) continue;
-
-        // family must match (case-insensitive)
         if (str_icmp(entry->family, strlen(entry->family), family, strlen(family)) != 0) continue;
+        if (filter_codepoint && !font_face_range_includes(entry, codepoint)) continue;
 
         int entry_slant_distance = slant_distance(entry->slant, slant);
         if (!best || entry_slant_distance < best_slant_distance ||
             (entry_slant_distance == best_slant_distance &&
              font_css_weight_is_better((int)weight, (int)entry->weight,
                                        (int)best->weight))) {
-            // css searches weights directionally; equal numeric distance must not let source order win.
             best_slant_distance = entry_slant_distance;
             best = entry;
         }
     }
-
     return best;
+}
+
+// ============================================================================
+// Find best-matching registered descriptor
+// ============================================================================
+
+const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* family,
+                                              FontWeight weight, FontSlant slant) {
+    // A FontProp needs one face before individual glyphs are known; use basic
+    // Latin for its default metrics and select the exact range per glyph later.
+    const FontFaceEntry* latin = font_face_find_matching(
+        ctx, family, weight, slant, true, (uint32_t)'a');
+    return latin ? latin : font_face_find_matching(ctx, family, weight, slant, false, 0);
 }
 
 bool font_face_family_registered(FontContext* ctx, const char* family) {
@@ -186,6 +172,8 @@ const FontFaceDesc* font_face_find(FontContext* ctx, const FontStyleDesc* style)
     desc.family = entry->family;
     desc.weight = entry->weight;
     desc.slant  = entry->slant;
+    desc.unicode_ranges = entry->unicode_ranges;
+    desc.unicode_range_count = entry->unicode_range_count;
 
     int n = entry->source_count;
     if (n > 16) n = 16;
@@ -221,6 +209,8 @@ int font_face_list(FontContext* ctx, const char* family,
         d->family = entry->family;
         d->weight = entry->weight;
         d->slant  = entry->slant;
+        d->unicode_ranges = entry->unicode_ranges;
+        d->unicode_range_count = entry->unicode_range_count;
 
         int n = entry->source_count;
         if (n > 16) n = 16;
@@ -242,13 +232,9 @@ int font_face_list(FontContext* ctx, const char* family,
 // Load a font from a registered descriptor (tries sources in order)
 // ============================================================================
 
-FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
-                            float size_px) {
-    if (!ctx || !desc) return NULL;
-
-    // find the internal entry to check if already loaded
-    const FontFaceEntry* entry = font_face_find_internal(
-        ctx, desc->family, desc->weight, desc->slant);
+static FontHandle* font_face_load_entry(FontContext* ctx, const FontFaceEntry* entry,
+                                        float size_px) {
+    if (!ctx || !entry) return NULL;
 
     float pixel_ratio = ctx->config.pixel_ratio;
     float physical_size = size_px * pixel_ratio;
@@ -261,14 +247,9 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
         return entry->loaded_handle;
     }
 
-    // try each source in order
-    FontHandle* fallback_handle = NULL;  // last successfully loaded font (may lack Latin chars)
-#ifndef NDEBUG
-    int fallback_source_idx = -1;
-    const char* fallback_src_path = NULL;
-#endif
-    for (int i = 0; i < desc->source_count; i++) {
-        const char* src_path = desc->sources[i].path;
+    // A src list is a format fallback list, not a glyph-coverage preference list.
+    for (int i = 0; i < entry->source_count; i++) {
+        const char* src_path = entry->sources[i].path;
         if (!src_path) continue;
 
         FontHandle* handle = NULL;
@@ -276,17 +257,17 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
         // check if it's a data URI
         if (strncmp(src_path, "data:", 5) == 0) {
             FontStyleDesc style = {
-                .family = desc->family,
+                .family = entry->family,
                 .size_px = size_px,
-                .weight = desc->weight,
-                .slant = desc->slant,
+                .weight = entry->weight,
+                .slant = entry->slant,
             };
             handle = font_load_from_data_uri(ctx, src_path, &style);
         } else {
             // local file path
             handle = font_load_face_internal(ctx, src_path, 0,
                                               size_px, physical_size,
-                                              desc->weight, desc->slant);
+                                              entry->weight, entry->slant);
         }
 
         if (handle) {
@@ -296,28 +277,8 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
             // render as empty boxes. Try the next source instead.
             if (!handle->tables) {
                 log_debug("font_face: source %d for '%s' has no parsable tables, trying next",
-                          i, desc->family);
+                          i, entry->family);
                 font_handle_release(handle);
-                continue;
-            }
-
-            // verify the font has basic Latin characters — subsetted fonts
-            // (e.g. Google Fonts unicode-range subsets) may load successfully
-            // but lack common characters
-            CmapTable* cmap = font_tables_get_cmap(handle->tables);
-            if (cmap && (cmap_lookup(cmap, 'a') == 0 ||
-                         cmap_lookup(cmap, 'A') == 0) &&
-                        i + 1 < desc->source_count) {
-                // this source lacks Latin chars — save as fallback and try next
-                // (icon fonts like FontAwesome legitimately lack Latin chars)
-                log_debug("font_face: source %d for '%s' lacks Latin chars, trying next",
-                          i, desc->family);
-                if (fallback_handle) font_handle_release(fallback_handle);
-                fallback_handle = handle;
-#ifndef NDEBUG
-                fallback_source_idx = i;
-                fallback_src_path = src_path;
-#endif
                 continue;
             }
 
@@ -334,34 +295,49 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
                 font_handle_retain(handle); // entry holds a ref too
             }
             log_info("font_face: loaded '%s' from source %d: %s",
-                     desc->family, i, src_path);
-            if (fallback_handle) font_handle_release(fallback_handle);
+                     entry->family, i, src_path);
             return handle;
         }
 
-        log_debug("font_face: source %d failed for '%s': %s", i, desc->family, src_path);
+        log_debug("font_face: source %d failed for '%s': %s", i, entry->family, src_path);
     }
 
-    // If no source had Latin chars but we have a loadable fallback, use it
-    // (icon/symbol fonts legitimately lack Latin characters)
-    if (fallback_handle) {
-        fallback_handle->is_document_font = true; // @font-face: cleared between documents
-        if (entry) {
-            FontFaceEntry* mutable_entry = (FontFaceEntry*)entry;
-            // loaded_handle caches only one size; replacing it must drop the
-            // previous retained size-specific handle or document fonts leak.
-            if (mutable_entry->loaded_handle && mutable_entry->loaded_handle != fallback_handle) {
-                font_handle_release(mutable_entry->loaded_handle);
-            }
-            mutable_entry->loaded_handle = fallback_handle;
-            font_handle_retain(fallback_handle);
-        }
-        log_info("font_face: loaded '%s' from source %d (icon/symbol font): %s",
-                 desc->family, fallback_source_idx, fallback_src_path);
-        return fallback_handle;
-    }
+    log_error("font_face: all sources failed for '%s'", entry->family);
+    return NULL;
+}
 
-    log_error("font_face: all sources failed for '%s'", desc->family);
+FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
+                            float size_px) {
+    if (!ctx || !desc) return NULL;
+    const FontFaceEntry* entry = font_face_find_internal(
+        ctx, desc->family, desc->weight, desc->slant);
+    return font_face_load_entry(ctx, entry, size_px);
+}
+
+static FontHandle* font_face_load_for_codepoint(FontContext* ctx,
+                                                const FontStyleDesc* style,
+                                                uint32_t codepoint) {
+    if (!ctx || !style) return NULL;
+    const FontFaceEntry* entry = font_face_find_matching(
+        ctx, style->family, style->weight, style->slant, true, codepoint);
+    return font_face_load_entry(ctx, entry, style->size_px);
+}
+
+FontHandle* font_resolve_document_face_for_codepoint(FontContext* ctx,
+                                                      const FontStyleDesc* style,
+                                                      uint32_t codepoint) {
+    if (!ctx || !style || !style->family) return NULL;
+
+    const char* cursor = style->family;
+    char family[256];
+    while (font_family_list_next(&cursor, family, sizeof(family))) {
+        if (!font_face_family_registered(ctx, family)) continue;
+        FontStyleDesc candidate = *style;
+        candidate.family = family;
+        FontHandle* handle = font_face_load_for_codepoint(ctx, &candidate, codepoint);
+        if (handle && font_has_codepoint(handle, codepoint)) return handle;
+        if (handle) font_handle_release(handle);
+    }
     return NULL;
 }
 
