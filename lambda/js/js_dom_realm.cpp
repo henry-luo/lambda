@@ -124,6 +124,206 @@ static void _set_ctor_int_constant(Item ctor, const char* name, int64_t value) {
         (Item){.item = i2it(value)});
 }
 
+// CustomElementRegistry stores definitions in the native Map backing of its
+// registry object. That keeps constructor identity and pending promises out of
+// observable expando properties while remaining owned by the current realm.
+static bool _custom_element_name_is_valid(Item name) {
+    if (get_type_id(name) != LMD_TYPE_STRING) return false;
+    String* text = it2s(name);
+    if (!text || text->len < 2 || text->chars[0] < 'a' || text->chars[0] > 'z') {
+        return false;
+    }
+    bool has_hyphen = false;
+    for (size_t index = 0; index < text->len; index++) {
+        unsigned char c = (unsigned char)text->chars[index];
+        if (c == '-') has_hyphen = true;
+        if (c >= 'A' && c <= 'Z') return false;
+        if (c < 0x80 && !((c >= 'a' && c <= 'z') ||
+                (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.')) {
+            return false;
+        }
+    }
+    if (!has_hyphen) return false;
+    static const char* reserved_names[] = {
+        "annotation-xml", "color-profile", "font-face", "font-face-src",
+        "font-face-uri", "font-face-format", "font-face-name", "missing-glyph",
+    };
+    for (size_t index = 0; index < sizeof(reserved_names) / sizeof(reserved_names[0]); index++) {
+        size_t reserved_len = strlen(reserved_names[index]);
+        if (text->len == reserved_len &&
+                memcmp(text->chars, reserved_names[index], reserved_len) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static Item _custom_elements_dom_exception(const char* name, const char* message) {
+    RootFrame roots(1);
+    Rooted<Item> exception_root(roots, js_domexception_new(js_name_item(message),
+        js_name_item(name)));
+    return js_throw_value(exception_root.get());
+}
+
+static bool _custom_elements_is_registry(Item value) {
+    if (get_type_id(value) != LMD_TYPE_MAP) return false;
+    Item global = js_get_global_this();
+    Item ctor = js_get_key_default(global, js_name_item("CustomElementRegistry"));
+    Item proto = js_get_key_cstr(ctor, "prototype");
+    return proto.item != ItemNull.item && js_get_prototype(value).item == proto.item;
+}
+
+static Item _custom_elements_record(Item registry, Item name, bool create) {
+    RootFrame roots(3);
+    Rooted<Item> registry_root(roots, registry);
+    Rooted<Item> name_root(roots, name);
+    Rooted<Item> record_root(roots, js_collection_method(registry_root.get(), 1,
+        name_root.get(), ItemNull));
+    if (item_is_error(record_root.get()) ||
+            get_type_id(record_root.get()) != LMD_TYPE_UNDEFINED || !create) {
+        return record_root.get();
+    }
+    record_root.set(js_new_object());
+    js_set_key_default(record_root.get(), js_name_item("constructor"),
+        make_js_undefined());
+    js_set_key_default(record_root.get(), js_name_item("waiters"), js_array_new(0));
+    Item stored = js_collection_method(registry_root.get(), 0, name_root.get(),
+        record_root.get());
+    return item_is_error(stored) ? stored : record_root.get();
+}
+
+static Item _custom_elements_define(Item /*callee*/, Item registry, Item* args,
+        int argc, uint64_t* /*result_home*/) {
+    if (!_custom_elements_is_registry(registry)) {
+        return js_throw_type_error("CustomElementRegistry.define called on incompatible receiver");
+    }
+    RootFrame roots(6);
+    Rooted<Item> name_root(roots, argc > 0 && args ? js_to_string(args[0]) :
+        make_js_undefined());
+    Rooted<Item> constructor_root(roots, argc > 1 && args ? args[1] :
+        make_js_undefined());
+    Rooted<Item> record_root(roots, ItemNull);
+    Rooted<Item> waiters_root(roots, ItemNull);
+    Rooted<Item> promise_root(roots, ItemNull);
+    Rooted<Item> stored_root(roots, ItemNull);
+    if (item_is_error(name_root.get())) return name_root.get();
+    if (!_custom_element_name_is_valid(name_root.get())) {
+        return _custom_elements_dom_exception("SyntaxError", "Invalid custom element name");
+    }
+    if (!js_has_construct_capability(constructor_root.get())) {
+        return js_throw_type_error("Custom element constructor is not a constructor");
+    }
+    if (argc > 2 && args && get_type_id(args[2]) != LMD_TYPE_UNDEFINED &&
+            get_type_id(args[2]) != LMD_TYPE_NULL) {
+        Item extends_value = js_get_key_cstr(args[2], "extends");
+        if (item_is_error(extends_value)) return extends_value;
+        if (get_type_id(extends_value) != LMD_TYPE_UNDEFINED) {
+            return _custom_elements_dom_exception("NotSupportedError",
+                "Customized built-in elements are not supported");
+        }
+    }
+    record_root.set(_custom_elements_record(registry, name_root.get(), true));
+    if (item_is_error(record_root.get())) return record_root.get();
+    stored_root.set(js_get_key_default(record_root.get(), js_name_item("constructor")));
+    if (get_type_id(stored_root.get()) != LMD_TYPE_UNDEFINED) {
+        return _custom_elements_dom_exception("NotSupportedError",
+            "Custom element name is already defined");
+    }
+    js_set_key_default(record_root.get(), js_name_item("constructor"),
+        constructor_root.get());
+    waiters_root.set(js_get_key_default(record_root.get(), js_name_item("waiters")));
+    if (get_type_id(waiters_root.get()) == LMD_TYPE_ARRAY) {
+        int64_t count = js_array_length(waiters_root.get());
+        for (int64_t index = 0; index < count; index++) {
+            promise_root.set(js_elements_get_int(waiters_root.get(), index));
+            js_promise_fulfill_existing(promise_root.get(), constructor_root.get());
+        }
+        js_set_key_default(record_root.get(), js_name_item("waiters"), js_array_new(0));
+    }
+    return make_js_undefined();
+}
+
+static Item _custom_elements_get(Item /*callee*/, Item registry, Item* args,
+        int argc, uint64_t* /*result_home*/) {
+    if (!_custom_elements_is_registry(registry)) {
+        return js_throw_type_error("CustomElementRegistry.get called on incompatible receiver");
+    }
+    RootFrame roots(2);
+    Rooted<Item> name_root(roots, argc > 0 && args ? js_to_string(args[0]) :
+        make_js_undefined());
+    Rooted<Item> record_root(roots, ItemNull);
+    if (item_is_error(name_root.get()) || !_custom_element_name_is_valid(name_root.get())) {
+        return item_is_error(name_root.get()) ? name_root.get() : make_js_undefined();
+    }
+    record_root.set(_custom_elements_record(registry, name_root.get(), false));
+    if (item_is_error(record_root.get()) || get_type_id(record_root.get()) == LMD_TYPE_UNDEFINED) {
+        return record_root.get();
+    }
+    return js_get_key_default(record_root.get(), js_name_item("constructor"));
+}
+
+static Item _custom_elements_when_defined(Item /*callee*/, Item registry, Item* args,
+        int argc, uint64_t* /*result_home*/) {
+    if (!_custom_elements_is_registry(registry)) {
+        return js_throw_type_error("CustomElementRegistry.whenDefined called on incompatible receiver");
+    }
+    RootFrame roots(5);
+    Rooted<Item> name_root(roots, argc > 0 && args ? js_to_string(args[0]) :
+        make_js_undefined());
+    Rooted<Item> record_root(roots, ItemNull);
+    Rooted<Item> constructor_root(roots, ItemNull);
+    Rooted<Item> waiters_root(roots, ItemNull);
+    Rooted<Item> promise_root(roots, ItemNull);
+    if (item_is_error(name_root.get())) return name_root.get();
+    if (!_custom_element_name_is_valid(name_root.get())) {
+        return _custom_elements_dom_exception("SyntaxError", "Invalid custom element name");
+    }
+    record_root.set(_custom_elements_record(registry, name_root.get(), true));
+    if (item_is_error(record_root.get())) return record_root.get();
+    constructor_root.set(js_get_key_default(record_root.get(), js_name_item("constructor")));
+    if (get_type_id(constructor_root.get()) != LMD_TYPE_UNDEFINED) {
+        return js_promise_resolve(constructor_root.get());
+    }
+    promise_root.set(js_promise_create_pending());
+    if (item_is_error(promise_root.get())) return promise_root.get();
+    waiters_root.set(js_get_key_default(record_root.get(), js_name_item("waiters")));
+    if (get_type_id(waiters_root.get()) != LMD_TYPE_ARRAY) return ItemError;
+    js_array_push(waiters_root.get(), promise_root.get());
+    return promise_root.get();
+}
+
+extern "C" void dom_install_custom_elements_global(void) {
+    RootFrame roots(7);
+    Rooted<Item> global_root(roots, js_get_global_this());
+    _install_iface(global_root.get(), "CustomElementRegistry");
+    Rooted<Item> ctor_root(roots, js_get_key_default(global_root.get(),
+        js_name_item("CustomElementRegistry")));
+    Rooted<Item> proto_root(roots, js_get_key_cstr(ctor_root.get(), "prototype"));
+    Rooted<Item> registry_root(roots, js_get_key_default(global_root.get(),
+        js_name_item("customElements")));
+    Rooted<Item> define_root(roots, js_new_native_payload_function(
+        _custom_elements_define, 0, 2));
+    Rooted<Item> get_root(roots, js_new_native_payload_function(
+        _custom_elements_get, 0, 1));
+    Rooted<Item> when_defined_root(roots, js_new_native_payload_function(
+        _custom_elements_when_defined, 0, 1));
+    js_set_key_cstr(proto_root.get(), "define", define_root.get());
+    js_set_key_cstr(proto_root.get(), "get", get_root.get());
+    js_set_key_cstr(proto_root.get(), "whenDefined", when_defined_root.get());
+    js_mark_non_enumerable(proto_root.get(), js_name_item("define"));
+    js_mark_non_enumerable(proto_root.get(), js_name_item("get"));
+    js_mark_non_enumerable(proto_root.get(), js_name_item("whenDefined"));
+    if (get_type_id(registry_root.get()) != LMD_TYPE_MAP) {
+        registry_root.set(js_map_collection_new());
+        // The Map payload is a realm-private registry table; its public
+        // prototype remains the WebIDL CustomElementRegistry interface.
+        js_set_prototype(registry_root.get(), proto_root.get());
+        js_set_key_default(global_root.get(), js_name_item("customElements"),
+            registry_root.get());
+        js_mark_non_enumerable(global_root.get(), js_name_item("customElements"));
+    }
+}
+
 JS_FORWARD_STATIC_VOID( _install_xpath_evaluator, (Item global), dom_install_value_constructor, (global, "XPathEvaluator", dom_xpath_evaluator_ctor, false))
 
 static void _install_node_iface(Item global) {

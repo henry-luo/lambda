@@ -74,6 +74,7 @@ bool dom_engine_event_cascade_active(void);
 
 // view tree: commit pending mutations, refresh a pseudo-class flag
 void dom_engine_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
+bool dom_engine_layout_active(DomDocument* doc);
 void dom_engine_sync_pseudo_state(void* view, uint32_t pseudo_flag, bool set);
 
 // HTML image loading: the engine owns decoding and intrinsic-image state; the

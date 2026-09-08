@@ -7179,6 +7179,9 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             descriptor_root.set(js_new_object());
             return js_property_descriptor_from_pd(&pd);
         }
+        // A missing Symbol/private key cannot fall through to byte-based
+        // builtin reflection: a same-spelling string property is distinct.
+        return make_js_undefined();
     }
 
     Item exotic_result = ItemNull;

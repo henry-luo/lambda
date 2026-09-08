@@ -1,0 +1,7 @@
+object
+true
+true
+true
+NotSupportedError
+SyntaxError
+true

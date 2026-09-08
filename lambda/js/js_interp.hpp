@@ -5,13 +5,16 @@
 
 #include "js_transpiler.hpp"
 #include "js_function.hpp"
+#include "../runtime/runtime-state.h"
 
 // Tree-walking execution tier. It intentionally shares the JS object/value
 // helpers and the Runtime/EvalContext ownership model with MIR lowering.
 static inline bool js_ast_interpreter_requested(void) {
     const char* backend = getenv("JS_EXECUTION_BACKEND");
-    return backend && (strcmp(backend, "ast") == 0 ||
+    bool environment_requests_ast = backend && (strcmp(backend, "ast") == 0 ||
         strcmp(backend, "interpreter") == 0);
+    return environment_requests_ast ||
+        (context && context->runtime && context->runtime->js_ast_backend);
 }
 // Parse, bind, and retain a classic Script without evaluating it. Batch hosts
 // use this to keep a harness AST across fresh per-test realms.

@@ -63,6 +63,7 @@ extern "C" void dom_install_option_constructor(void);
 extern "C" void dom_install_image_constructor(void);
 extern "C" void dom_install_window_dialog_globals(void);
 extern "C" void dom_install_window_computed_style_global(void);
+extern "C" void dom_install_custom_elements_global(void);
 
 /** The frame windows of the active document, as a fresh array. */
 extern "C" Item dom_collect_frame_windows_array(void);
