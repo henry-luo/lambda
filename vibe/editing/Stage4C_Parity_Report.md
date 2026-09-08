@@ -41,4 +41,4 @@ Reconciliation: Radiant pass (1931) + excluded React (29) = 1960 vs oracle total
 | **Total excluded** | **29** |
 
 ---
-*Regenerate: `make editor-4c-parity` (or `node test/editor-js/tools/parity-report.mjs --refresh-oracle`).*
+*Regenerate: `make editor-4c` (or `node test/editor-js/tools/parity-report.mjs --refresh-oracle`).*
