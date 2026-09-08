@@ -1,9 +1,9 @@
 10 20 2
 blue
 4
-2
-2
-3
+1 integer
+1 symbol
+2 true
 ["a=1", "b=2", "c=3"]
 99 2
 42

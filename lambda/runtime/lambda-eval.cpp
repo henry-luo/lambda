@@ -82,7 +82,7 @@ extern "C" void lambda_recovery_publish_fault(
         prior_error_code);
 }
 
-extern "C" void vmap_set(Item vmap_item, Item key, Item value);
+extern "C" Item vmap_set(Item vmap_item, Item key, Item value);
 
 // create_match_map helper for find() (implemented in re2_wrapper.cpp)
 extern "C" Map* create_match_map_ext(const char* match_str, size_t match_len, int64_t index);
@@ -1922,8 +1922,13 @@ Bool fn_is_nan(Item a) {
 // maximum recursion depth for structural equality comparison
 #define EQ_MAX_DEPTH 256
 
+typedef enum EqualityMode {
+    EQUALITY_VALUE = 0,
+    EQUALITY_STRICT,
+} EqualityMode;
+
 // forward declaration for recursive structural equality
-static Bool fn_eq_depth(Item a_item, Item b_item, int depth);
+static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityMode mode);
 
 static Bool numeric_items_equal_exact(Item a_item, Item b_item) {
     LambdaNumericComparison comparison = lambda_numeric_compare(a_item, b_item);
@@ -1935,11 +1940,11 @@ static Bool numeric_items_equal_exact(Item a_item, Item b_item) {
 static Item _map_field_value(TypeMap* map_type, void* data, ShapeEntry* field);
 
 // helper: structural equality for list/array items (element-wise comparison)
-static Bool list_eq(List* a, List* b, int depth) {
+static Bool list_eq(List* a, List* b, int depth, EqualityMode mode) {
     if (a == b) return BOOL_TRUE;  // pointer identity fast-path
     if (a->length != b->length) return BOOL_FALSE;
     for (int64_t i = 0; i < a->length; i++) {
-        Bool r = fn_eq_depth(a->items[i], b->items[i], depth + 1);
+        Bool r = fn_eq_depth(a->items[i], b->items[i], depth + 1, mode);
         if (r == BOOL_ERROR) return BOOL_ERROR;
         if (r == BOOL_FALSE) return BOOL_FALSE;
     }
@@ -1981,7 +1986,7 @@ static inline bool array_num_elem_type_is_float(ArrayNumElemType et) {
 }
 
 // helper: structural equality for typed numeric arrays
-static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth) {
+static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth, EqualityMode mode) {
     if (a == b) return BOOL_TRUE;
     if (a->length != b->length) return BOOL_FALSE;
     if (!array_num_shape_eq(a, b)) {
@@ -1989,11 +1994,12 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth) {
         return BOOL_FALSE;
     }
     if (a->get_elem_type() != b->get_elem_type()) {
+        if (mode == EQUALITY_STRICT) return BOOL_FALSE;
         // different elem types compare as values; double promotion loses high int64/u64 bits.
         for (int64_t i = 0; i < a->length; i++) {
             Item val_a = array_num_read_item(a, i);
             Item val_b = array_num_read_item(b, i);
-            Bool r = fn_eq_depth(val_a, val_b, depth + 1);
+            Bool r = fn_eq_depth(val_a, val_b, depth + 1, mode);
             if (r != BOOL_TRUE) return r;
         }
         return BOOL_TRUE;
@@ -2009,7 +2015,7 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth) {
         for (int64_t i = 0; i < a->length; i++) {
             Item val_a = array_num_read_item(a, i);
             Item val_b = array_num_read_item(b, i);
-            Bool r = fn_eq_depth(val_a, val_b, depth + 1);
+            Bool r = fn_eq_depth(val_a, val_b, depth + 1, mode);
             if (r != BOOL_TRUE) return r;
         }
         return BOOL_TRUE;
@@ -2034,7 +2040,8 @@ static ShapeEntry* map_find_matching_field(TypeMap* map_type, ShapeEntry* needle
 }
 
 // helper: structural equality for map-shaped data (order-independent key-value comparison)
-static Bool map_data_eq(TypeMap* type_a, void* data_a, TypeMap* type_b, void* data_b, int depth) {
+static Bool map_data_eq(TypeMap* type_a, void* data_a, TypeMap* type_b, void* data_b,
+        int depth, EqualityMode mode) {
     if (type_a == type_b && data_a == data_b) return BOOL_TRUE;  // pointer identity fast-path
     if (!type_a || !type_b) return BOOL_FALSE;
     if (type_a->length != type_b->length) return BOOL_FALSE;
@@ -2044,7 +2051,7 @@ static Bool map_data_eq(TypeMap* type_a, void* data_a, TypeMap* type_b, void* da
         FOR_EACH_MAP_FIELD(type_a, field) {
             Item val_a = _map_field_value(type_a, data_a, field);
             Item val_b = _map_field_value(type_b, data_b, field);
-            Bool r = fn_eq_depth(val_a, val_b, depth + 1);
+            Bool r = fn_eq_depth(val_a, val_b, depth + 1, mode);
             if (r == BOOL_ERROR) return BOOL_ERROR;
             if (r == BOOL_FALSE) return BOOL_FALSE;
         }
@@ -2058,7 +2065,7 @@ static Bool map_data_eq(TypeMap* type_a, void* data_a, TypeMap* type_b, void* da
 
         Item val_a = _map_field_value(type_a, data_a, field_a);
         Item val_b = _map_field_value(type_b, data_b, field_b);
-        Bool r = fn_eq_depth(val_a, val_b, depth + 1);
+        Bool r = fn_eq_depth(val_a, val_b, depth + 1, mode);
         if (r == BOOL_ERROR) return BOOL_ERROR;
         if (r == BOOL_FALSE) return BOOL_FALSE;
     }
@@ -2067,13 +2074,13 @@ static Bool map_data_eq(TypeMap* type_a, void* data_a, TypeMap* type_b, void* da
 }
 
 // helper: structural equality for maps (order-independent key-value comparison)
-static Bool map_eq(Map* a, Map* b, int depth) {
+static Bool map_eq(Map* a, Map* b, int depth, EqualityMode mode) {
     if (a == b) return BOOL_TRUE;  // pointer identity fast-path
-    return map_data_eq((TypeMap*)a->type, a->data, (TypeMap*)b->type, b->data, depth);
+    return map_data_eq((TypeMap*)a->type, a->data, (TypeMap*)b->type, b->data, depth, mode);
 }
 
 // helper: structural equality for elements (tag + attrs + children)
-static Bool element_eq(Element* a, Element* b, int depth) {
+static Bool element_eq(Element* a, Element* b, int depth, EqualityMode mode) {
     if (a == b) return BOOL_TRUE;  // pointer identity fast-path
 
     // compare tag names
@@ -2086,13 +2093,14 @@ static Bool element_eq(Element* a, Element* b, int depth) {
     if (!target_equal(type_a->ns, type_b->ns)) return BOOL_FALSE;
 
     // Element stores list fields before attr type/data, so attrs must compare by explicit attr storage.
-    Bool attr_r = map_data_eq((TypeMap*)type_a, a->data, (TypeMap*)type_b, b->data, depth);
+    Bool attr_r = map_data_eq((TypeMap*)type_a, a->data, (TypeMap*)type_b, b->data,
+        depth, mode);
     if (attr_r != BOOL_TRUE) return attr_r;
 
     // compare children (list part)
     if (a->length != b->length) return BOOL_FALSE;
     for (int64_t i = 0; i < a->length; i++) {
-        Bool r = fn_eq_depth(a->items[i], b->items[i], depth + 1);
+        Bool r = fn_eq_depth(a->items[i], b->items[i], depth + 1, mode);
         if (r == BOOL_ERROR) return BOOL_ERROR;
         if (r == BOOL_FALSE) return BOOL_FALSE;
     }
@@ -2100,7 +2108,7 @@ static Bool element_eq(Element* a, Element* b, int depth) {
 }
 
 // helper: structural equality for VMaps (virtual maps)
-static Bool vmap_eq(VMap* a, VMap* b, int depth) {
+static Bool vmap_eq(VMap* a, VMap* b, int depth, EqualityMode mode) {
     if (a == b) return BOOL_TRUE;
     Item a_item = {.vmap = a};
     Item b_item = {.vmap = b};
@@ -2117,7 +2125,7 @@ static Bool vmap_eq(VMap* a, VMap* b, int depth) {
         Item val_a = a->vtable->value_at(a->data, i);
         Item val_b = b->vtable->get(b->data, key);
         // if key not found in B, val_b will be null but val_a shouldn't be
-        Bool r = fn_eq_depth(val_a, val_b, depth + 1);
+        Bool r = fn_eq_depth(val_a, val_b, depth + 1, mode);
         if (r == BOOL_ERROR) return BOOL_ERROR;
         if (r == BOOL_FALSE) return BOOL_FALSE;
     }
@@ -2151,7 +2159,8 @@ static inline int64_t seq_get_length(Item item, TypeId tid) {
 
 // helper: cross-type sequence equality (range vs list, list vs array, etc.)
 // element-wise comparison with numeric promotion
-static Bool cross_seq_eq(Item a_item, TypeId a_tid, Item b_item, TypeId b_tid, int depth) {
+static Bool cross_seq_eq(Item a_item, TypeId a_tid, Item b_item, TypeId b_tid,
+        int depth, EqualityMode mode) {
     int64_t len_a = seq_get_length(a_item, a_tid);
     int64_t len_b = seq_get_length(b_item, b_tid);
     if (len_a != len_b) return BOOL_FALSE;
@@ -2159,14 +2168,14 @@ static Bool cross_seq_eq(Item a_item, TypeId a_tid, Item b_item, TypeId b_tid, i
     for (int64_t i = 0; i < len_a; i++) {
         Item elem_a = seq_get_element(a_item, a_tid, i);
         Item elem_b = seq_get_element(b_item, b_tid, i);
-        Bool r = fn_eq_depth(elem_a, elem_b, depth + 1);
+        Bool r = fn_eq_depth(elem_a, elem_b, depth + 1, mode);
         if (r == BOOL_ERROR) return BOOL_ERROR;
         if (r == BOOL_FALSE) return BOOL_FALSE;
     }
     return BOOL_TRUE;
 }
 
-static Bool function_eq(Function* a, Function* b, int depth) {
+static Bool function_eq(Function* a, Function* b, int depth, EqualityMode mode) {
     if (a == b) return BOOL_TRUE;
     if (!a || !b) return BOOL_FALSE;
     if (a->ptr != b->ptr || a->arity != b->arity || a->entry_abi != b->entry_abi ||
@@ -2182,7 +2191,7 @@ static Bool function_eq(Function* a, Function* b, int depth) {
         Item* a_fields = (Item*)a->closure_env;
         Item* b_fields = (Item*)b->closure_env;
         for (uint8_t i = 0; i < a->closure_field_count; i++) {
-            Bool r = fn_eq_depth(a_fields[i], b_fields[i], depth + 1);
+            Bool r = fn_eq_depth(a_fields[i], b_fields[i], depth + 1, mode);
             if (r != BOOL_TRUE) return r;
         }
         return BOOL_TRUE;
@@ -2195,8 +2204,9 @@ static Bool function_eq(Function* a, Function* b, int depth) {
 }
 
 // 3-states comparison with depth tracking for structural equality
-static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
+static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityMode mode) {
     if (depth > EQ_MAX_DEPTH) {
+        if (mode == EQUALITY_STRICT) return BOOL_FALSE;
         // Equality depth is a language-visible runtime failure, not a native
         // fault. Return the existing three-state error lane so every caller
         // unwinds through its own completion path (D1.4v3/DI15v2).
@@ -2207,6 +2217,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
 
     TypeId a_type_id = get_type_id(a_item);
     TypeId b_type_id = get_type_id(b_item);
+    if (mode == EQUALITY_STRICT && a_type_id != b_type_id) return BOOL_FALSE;
     if (a_type_id == LMD_TYPE_COMPLEX || b_type_id == LMD_TYPE_COMPLEX) {
         if (a_type_id == LMD_TYPE_COMPLEX && b_type_id == LMD_TYPE_COMPLEX) {
             Complex* a = a_item.get_complex();
@@ -2231,6 +2242,12 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         return value ? numeric_items_equal_exact(push_d(value->real), rooted_real.get()) : BOOL_FALSE;
     }
     if (IS_NUMERIC_ID(a_type_id) && IS_NUMERIC_ID(b_type_id)) {
+        if (mode == EQUALITY_STRICT &&
+                (a_type_id != b_type_id ||
+                 (a_type_id == LMD_TYPE_NUM_SIZED &&
+                  a_item.get_num_type() != b_item.get_num_type()))) {
+            return BOOL_FALSE;
+        }
         return numeric_items_equal_exact(a_item, b_item);
     }
     if (a_type_id != b_type_id) {
@@ -2262,7 +2279,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         bool b_is_seq = (b_tid == LMD_TYPE_ARRAY ||
                          b_tid == LMD_TYPE_ARRAY_NUM || b_tid == LMD_TYPE_RANGE);
         if (a_is_seq && b_is_seq) {
-            return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
+            return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth, mode);
         }
 
         // equality is total across families; incompatible concrete families are unequal.
@@ -2333,7 +2350,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
             bool b_is_seq = (b_tid == LMD_TYPE_ARRAY ||
                              b_tid == LMD_TYPE_ARRAY_NUM || b_tid == LMD_TYPE_RANGE);
             if (a_is_seq && b_is_seq) {
-                return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
+                return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth, mode);
             }
             return BOOL_FALSE;
         }
@@ -2351,27 +2368,27 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         }
         // list structural equality
         if (a_tid == LMD_TYPE_ARRAY) {
-            return list_eq(a_item.array, b_item.array, depth);
+            return list_eq(a_item.array, b_item.array, depth, mode);
         }
         // generic array (array of Items) structural equality
         if (a_tid == LMD_TYPE_ARRAY) {
-            return list_eq((List*)a_item.array, (List*)b_item.array, depth);
+            return list_eq((List*)a_item.array, (List*)b_item.array, depth, mode);
         }
         // typed array equality
         if (a_tid == LMD_TYPE_ARRAY_NUM) {
-            return array_num_eq(a_item.array_num, b_item.array_num, depth);
+            return array_num_eq(a_item.array_num, b_item.array_num, depth, mode);
         }
         // map structural equality (order-independent)
         if (a_tid == LMD_TYPE_MAP) {
-            return map_eq(a_item.map, b_item.map, depth);
+            return map_eq(a_item.map, b_item.map, depth, mode);
         }
         // element structural equality (tag + attrs + children)
         if (a_tid == LMD_TYPE_ELEMENT) {
-            return element_eq(a_item.element, b_item.element, depth);
+            return element_eq(a_item.element, b_item.element, depth, mode);
         }
         // vmap structural equality
         if (a_tid == LMD_TYPE_VMAP) {
-            return vmap_eq(a_item.vmap, b_item.vmap, depth);
+            return vmap_eq(a_item.vmap, b_item.vmap, depth, mode);
         }
         // range equality (start, end, length)
         if (a_tid == LMD_TYPE_RANGE) {
@@ -2383,7 +2400,7 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         }
         // function reference equality
         if (a_tid == LMD_TYPE_FUNC) {
-            return function_eq(a_item.function, b_item.function, depth);
+            return function_eq(a_item.function, b_item.function, depth, mode);
         }
         log_error("eq unsupported container type: %s", get_type_name(a_tid));
         return BOOL_ERROR;
@@ -2414,7 +2431,16 @@ Bool fn_sym_eq_ptr(Symbol* a, Symbol* b) {
 
 // 3-states comparison (public entry point)
 Bool fn_eq(Item a_item, Item b_item) {
-    return fn_eq_depth(a_item, b_item, 0);
+    return fn_eq_depth(a_item, b_item, 0, EQUALITY_VALUE);
+}
+
+Bool fn_eq_strict(Item a_item, Item b_item) {
+    Bool result = fn_eq_depth(a_item, b_item, 0, EQUALITY_STRICT);
+    return result == BOOL_TRUE ? BOOL_TRUE : BOOL_FALSE;
+}
+
+bool item_deep_equal(Item a_item, Item b_item) {
+    return fn_eq_strict(a_item, b_item) == BOOL_TRUE;
 }
 
 Bool fn_ne(Item a_item, Item b_item) {
@@ -4267,12 +4293,14 @@ Item fn_index_set(Item item, Item key, Item value) {
             "invalid element member write: key must be an exact integer or string/symbol");
         return ItemError;
     }
-    if (item_type == LMD_TYPE_MAP ||
-            item_type == LMD_TYPE_VMAP) {
+    if (item_type == LMD_TYPE_MAP) {
         if (has_name_key) return fn_map_set(item, key, value);
         set_runtime_error(ERR_TYPE_MISMATCH,
             "invalid named member write: key must be string or symbol");
         return ItemError;
+    }
+    if (item_type == LMD_TYPE_VMAP) {
+        return vmap_set(item, key, value);
     }
 
     set_runtime_error(ERR_TYPE_MISMATCH,
@@ -9337,15 +9365,9 @@ Item fn_map_set(Item map_item, Item key, Item value) {
 
     // VMap: in-place mutation via vtable
     if (map_type_id == LMD_TYPE_VMAP) {
-        if (!is_text_type_id(get_type_id(key))) {
-            set_runtime_error(ERR_TYPE_MISMATCH,
-                "invalid named member write: key must be string or symbol");
-            return ItemError;
-        }
         // VMap backing storage is lazy for host wrappers; route all writes
         // through the public setter so ordinary maps allocate on first write.
-        vmap_set(map_item, key, value);
-        return ItemNull;
+        return vmap_set(map_item, key, value);
     }
 
     // support both Map and Element (Element has map-like attributes)

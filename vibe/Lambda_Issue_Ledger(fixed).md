@@ -315,7 +315,7 @@ The fallout is real and is tracked separately as [LR09-9](#lr09-9): the change m
 
 <a id="lr09-9"></a>**LR09-9 · The `len(e)`-bound child walk, and the `content(e)` accessor that replaces it · RESOLVED 2026-09-04 (USER ruling)**
 
-Closing LR09-8 removed the accident that made `for (i in 0 to len(e) - 1) e[i]` a correct child walk. An IntKey subscript reaches only children (S8.2.1v3) while `len` now also counts attributes, so the loop overran and `e[i]` read `null` past the last child. It was **not** merely inefficient: the phantom nulls are indistinguishable from real children, and three shapes of silent corruption showed up — a schema validator reporting each null as *"Scalar content is not permitted directly under \<graph>"*, a rebuilt content list gaining trailing nulls, and a `group by` aggregate turning `total: 15` into `null`.
+Closing LR09-8 removed the accident that made `for (i in 0 to len(e) - 1) e[i]` a correct child walk. An IntKey subscript reaches only children (S8.2.1v4) while `len` now also counts attributes, so the loop overran and `e[i]` read `null` past the last child. It was **not** merely inefficient: the phantom nulls are indistinguishable from real children, and three shapes of silent corruption showed up — a schema validator reporting each null as *"Scalar content is not permitted directly under \<graph>"*, a rebuilt content list gaining trailing nulls, and a `group by` aggregate turning `total: 15` into `null`.
 
 **Ruled: `content(e)`**, a system function returning the element's content sequence. `len(content(e))` is the child count and `content(e)[i]` the child index walk, so the arithmetic disappears rather than being re-spelled. Rejected alternatives: `e.content` (dot resolves the key domain first under S8.2.2v2, so it would silently return a user attribute named `content` — and `content` is a live child/attr name across the graph schema) and `size(e)` (a second length-ish name, reintroducing exactly the confusion LR09-8 removed, and no way to index).
 
@@ -323,7 +323,7 @@ Closing LR09-8 removed the accident that made `for (i in 0 to len(e) - 1) e[i]` 
 
 **Three defects the view surfaced, each worth remembering.** (1) The view must be **rooted across the descriptor allocation** — that allocation can collect, and with conservative stack scanning retired a view held only in the C frame is invisible, so it was reclaimed mid-construction and its slot handed to the next array; `content(e)` then returned an unrelated later array. (2) The descriptor is nursery data and must be **promoted** in the compact pass, or `extra` dangles after the zone reset. (3) An element's items buffer **moves**, so the view is excluded from owned-data compaction and instead rebound from its base — forcing the base's promotion first, since the sweep order is arbitrary. All three only appear under `LAMBDA_GC_FORCE_EVERY`.
 
-**Four runtime consumers were real bugs, not migrations** — every place that pairs a count with an IntKey read, since an IntKey reaches content only (S8.2.1v3) while `len` now also counts attributes. Found by test failure: the **mapping pipe**, which sized its traversal with `fn_len`, so `g |> ~["amount"]` gained a null row per attribute and poisoned `sum` — its own comment already said elements pipe over content. Found afterwards by audit, with NO test covering them: **`last`** (`e[last]` read `null` instead of the final child, on both tiers) and the **set operators** `fn_union`/`fn_intersect`/`fn_exclude` plus the mixed-type array concat (`e | f` leaked a trailing `null`).
+**Four runtime consumers were real bugs, not migrations** — every place that pairs a count with an IntKey read, since an IntKey reaches content only (S8.2.1v4) while `len` now also counts attributes. Found by test failure: the **mapping pipe**, which sized its traversal with `fn_len`, so `g |> ~["amount"]` gained a null row per attribute and poisoned `sum` — its own comment already said elements pipe over content. Found afterwards by audit, with NO test covering them: **`last`** (`e[last]` read `null` instead of the final child, on both tiers) and the **set operators** `fn_union`/`fn_intersect`/`fn_exclude` plus the mixed-type array concat (`e | f` leaked a trailing `null`).
 
 All five now call one shared `extern "C" int64_t fn_seq_count(Item)` — the count of positions a positional traversal visits, which is content length for an element and `fn_len` otherwise — so the rule has exactly one definition and cannot drift between the tiers. `slice`/`drop`/`take_last` need no change: `vector_length` returns -1 for an element, so those refused elements before this ruling and still do.
 
@@ -943,6 +943,25 @@ gone. `lambda/runtime/vmap.cpp:330` is now a single
 lists are `LMD_TYPE_ARRAY` at runtime and that `LMD_TYPE_ARRAY_NUM` is
 *intentionally* rejected because its packed layout is unsuitable — so the second
 clause was not a missing `ARRAY_NUM` case after all.
+
+<a id="oi1-r1"></a><a id="lr03-r1-oi1"></a>**OI-1-R1 / LR03-R1 · value equality, strict structural equality, and VMap keys · RESOLVED 2026-09-08**
+**S5.2.1v2** now makes Lambda numeric equality exact mathematical-value equality
+across numeric ranks and makes decimal scale non-semantic. **S8.2.1v4** narrows
+the public VMap key domain to `NameKey` and `IntKey`: string/symbol spellings
+share a name key, while a finite exactly integral float or decimal canonicalizes
+with integer ranks (`1`, `1.0`, `1n`, `1.0m`, and `1.00m` are one key).
+Fractional or poison numeric keys fail checked construction/writes and have a
+total `null` read; host raw backing stores retain their interop key relation.
+
+`fn_eq_strict` now serves `item_deep_equal` for Radiant no-op elision. It keeps
+numeric ranks and sequence families distinct and returns unequal at its depth
+cap without publishing a runtime error. Public VMap insertion validates and
+canonicalizes keys before mutation; the MIR Direct COW path preserves the prior
+binding if a rejected write is handled. Regressions cover all admitted numeric
+ranks and decimal scales, name-key normalization, invalid-key recovery, and
+strict no-promotion equality. Verified by `make test-lambda-baseline`:
+5,083/5,083 combined tests and 2,979/2,979 Lambda runtime tests; and by
+`make test262-baseline`: 40,261/40,261 baseline tests with zero regressions.
 
 ### A.4 Strings, symbols & vectors (LR_05)
 

@@ -724,7 +724,7 @@ numerics section:*
 
 **1. Dedup and grouping are defined by `==`, with no special cases.**
 `null == null` → true (null is a value; it equals itself), while `nan`/`error`
-never equal anything (C8.5). Extended to `unique`, `set`, and map keys, this
+never equal anything (C8.5). Extended to `unique`, `set`, and grouping, this
 gives exactly the designer's intent: **nulls group together; each `nan`/`error`
 stands by its own** — and it needs *zero* special-casing, because it falls out of
 defining dedup purely via `==`.
@@ -740,9 +740,8 @@ construction. Divergence note for the docs: JS `Set` (SameValueZero) and Python
 `set` (identity shortcut) keep a *single* NaN; Lambda keeps every nan — the
 consistent-with-`==` choice, with the poison rationale ("two unknowns are not
 known duplicates"). Adjacent items flagged, not yet ruled: `sort`/`order by`
-placement of poison values (SQL's NULLS FIRST/LAST precedent); whether `nan`/
-`error` can even be map keys (Lambda keys are symbols/strings — likely moot;
-confirm for dynamic `map()` construction).
+placement of poison values (SQL's NULLS FIRST/LAST precedent). VMap keys are
+the deliberately narrower canonical-key relation in C8.6a.
 
 **2. Maps are ordered under Lambda; `==` is order-sensitive:
 `{a:1, b:2} != {b:2, a:1}`.** This must be clearly documented — and it is a
@@ -815,6 +814,33 @@ Consequences, recorded:
   so models must reproduce source *order* to match goldens even though `==`
   would not care — which level 1 (ordered storage) is precisely what
   guarantees.
+
+#### C8.6a VMap key canonicalization (2026-09-08, designer ruling)
+
+**Spec linkage:** S5.2.1v2, S8.2.1v4, S5.6.2, S7.1.1v3, S7.1.3v2.
+
+A Lambda VMap has exactly two canonical key classes:
+
+1. **NameKey (symbol).** A string or symbol is accepted as input; exact
+   contents normalize both spellings to one name key. The source spelling and
+   storage representation are invisible.
+2. **IntKey.** Every finite numeric value that is mathematically integral is
+   accepted. `1`, `1.0`, `1n`, `1.0m`, and `1.00m` are one key. Decimal scale
+   is metadata, so it cannot create another key. Fractions, `nan`, infinities,
+   booleans, containers, and all other values are not VMap keys. Unlike a
+   sequence position, a VMap IntKey may be negative.
+
+This is a key-domain relation, not a change to language `==`: numeric `==`
+remains exact mathematical-value equality across ranks, and scale-free numeric
+comparison/hashing is the one relation used for every accepted IntKey. A
+fractional VMap read is total and yields `null`; a construction or write with
+one raises the ordinary checked-write error. Host raw backing stores remain an
+interop boundary and do not inherit the Lambda VMap key restriction.
+
+The rejected alternative was arbitrary-key VMaps. It made `map()` a second,
+unstated equality and ordering language and left decimal scales/ranks exposed
+to hash-table accidents. Two canonical domains keep document names and numeric
+coordinates usable without expanding the language's observable equality model.
 
 #### C8.7 Implementation notes (code-level, 2026-07-04)
 
