@@ -2,6 +2,7 @@
 #include "render.hpp"
 #include "layout.hpp"
 #include "../lib/log.h"
+#include "../lambda/core/well_known_markup_names.h"
 
 struct ScrollConfig {
     float SCROLLBAR_SIZE;
@@ -214,13 +215,20 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
             ScrollInteractionState interaction = {};
             scroll_state_get_interaction_for_view(state, static_cast<View*>(block),
                                                   &interaction);
+            // Iframe layout transfers the embedded document's viewport scroll
+            // to this outer block. Unlike an ordinary auto scroller, pointer
+            // targeting enters the child document, so wheel scrolling never
+            // produces a scrollbar-hover state for the iframe itself.
+            bool iframe_scrollport = block->tag() == MARKUP_NAME_IFRAME;
             // Chromium's auto scrollbars overlay only appear while interacted with;
             // painting them at rest obscures content in static document renders.
             bool show_hz_scroll = block->scroll()->has_hz_scroll &&
                 (block->scroll()->overflow_x == CSS_VALUE_SCROLL ||
+                 iframe_scrollport ||
                  interaction.h_hovered || interaction.h_dragging);
             bool show_vt_scroll = block->scroll()->has_vt_scroll &&
                 (block->scroll()->overflow_y == CSS_VALUE_SCROLL ||
+                 iframe_scrollport ||
                  interaction.v_hovered || interaction.v_dragging);
             scrollpane_render(rdcon, block->scroll()->pane, &rect,
                 block->content_width * s, block->content_height * s, &rdcon->block.clip, s,

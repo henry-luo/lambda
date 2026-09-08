@@ -1,8 +1,9 @@
 {
   "html": "test/ui/test_iframe_hover_repaint.html",
-  "description": "Hover inside an iframe must relayout the iframe document and repaint the parent surface.",
+  "description": "Hover inside an iframe must relayout the iframe document, repaint the parent surface, and retain its overflow scrollbar.",
   "events": [
     {"type": "assert_pixel", "target": {"selector": "#frame", "offset_x": 20, "offset_y": 20}, "min_r": 230, "min_g": 230, "min_b": 230},
+    {"type": "assert_pixel", "target": {"selector": "#frame", "offset_x": 214, "offset_y": 10}, "max_r": 210, "max_g": 210, "max_b": 210},
     {"type": "mouse_move", "target": {"selector": "#frame", "offset_x": 20, "offset_y": 20}},
     {"type": "render_pending"},
     {"type": "assert_pixel", "target": {"selector": "#frame", "offset_x": 20, "offset_y": 20}, "force_render": false, "min_r": 105, "max_r": 135, "min_g": 165, "max_g": 195, "min_b": 225, "max_b": 255},
