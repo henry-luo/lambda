@@ -97,6 +97,11 @@ typedef struct JsMirReference {
     bool is_private;
     bool computed_key;
     bool property_key_canonicalized;
+    // T10-1/D-A: a computed key carried in a native numeric register stays in
+    // a double lane. ToPropertyKey would format it as text, intern the text in
+    // the NamePool, and have the kernel parse it back into an index.
+    bool key_is_number;
+    MIR_reg_t key_num_reg;      // MIR_T_D, valid only when key_is_number
     uint32_t named_key_index;
     NameId named_key_id;
     int jube_slot;
@@ -352,7 +357,6 @@ JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
     JsVarScopeEntry* entry);
 JsMirVarEntry* jm_find_var_at(JsMirTranspiler* mt, const char* name,
     int depth);
-int jm_last_closure_capture_count_clamped(int count);
 bool jm_closure_tracker_reserve(JsClosureTracker* tracker, int n);
 void jm_save_last_closure_snapshot(JsMirTranspiler* mt,
     JsMirLastClosureSnapshot* snapshot);
@@ -413,23 +417,23 @@ void jm_call_void_2_or_inline(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2);
 #define jm_call_0(mt, fn, ret) \
     (jm_preserve_error_lane_carrier((mt), fn, true), \
-     jm_publish_call_result((mt), em_call_0(&(mt)->em, fn, ret, true), fn))
+     jm_publish_call_result((mt), em_call_0(&(mt)->func_em->em, fn, ret, true), fn))
 #define jm_call_1(mt, fn, ret, ...) jm_call_1_or_inline(mt, fn, ret, __VA_ARGS__)
 #define jm_call_2(mt, fn, ret, ...) \
     (jm_preserve_error_lane_carrier((mt), fn, true), \
-     jm_publish_call_result((mt), em_call_2(&(mt)->em, fn, ret, __VA_ARGS__, true), fn))
+     jm_publish_call_result((mt), em_call_2(&(mt)->func_em->em, fn, ret, __VA_ARGS__, true), fn))
 #define jm_call_3(mt, fn, ret, ...) \
     (jm_preserve_error_lane_carrier((mt), fn, true), \
-     jm_publish_call_result((mt), em_call_3(&(mt)->em, fn, ret, __VA_ARGS__, true), fn))
+     jm_publish_call_result((mt), em_call_3(&(mt)->func_em->em, fn, ret, __VA_ARGS__, true), fn))
 #define jm_call_4(mt, fn, ret, ...) \
     (jm_preserve_error_lane_carrier((mt), fn, true), \
-     jm_publish_call_result((mt), em_call_4(&(mt)->em, fn, ret, __VA_ARGS__, true), fn))
+     jm_publish_call_result((mt), em_call_4(&(mt)->func_em->em, fn, ret, __VA_ARGS__, true), fn))
 #define jm_call_5(mt, fn, ret, ...) \
     (jm_preserve_error_lane_carrier((mt), fn, true), \
-     jm_publish_call_result((mt), em_call_5(&(mt)->em, fn, ret, __VA_ARGS__, true), fn))
+     jm_publish_call_result((mt), em_call_5(&(mt)->func_em->em, fn, ret, __VA_ARGS__, true), fn))
 #define jm_call_6(mt, fn, ret, ...) \
     (jm_preserve_error_lane_carrier((mt), fn, true), \
-     jm_publish_call_result((mt), em_call_6(&(mt)->em, fn, ret, __VA_ARGS__, true), fn))
+     jm_publish_call_result((mt), em_call_6(&(mt)->func_em->em, fn, ret, __VA_ARGS__, true), fn))
 static inline MIR_reg_t jm_publish_call_result(JsMirTranspiler* mt,
                                                 MIR_reg_t result,
                                                 const char* helper_name = NULL) {
@@ -438,19 +442,19 @@ static inline MIR_reg_t jm_publish_call_result(JsMirTranspiler* mt,
     // emitted an unreachable ERROR-tag branch; use the catalog's value class.
     if (mt) {
         MIR_type_t result_type = result
-            ? MIR_reg_type(mt->ctx, result, mt->em.func) : MIR_T_UNDEF;
+            ? MIR_reg_type(mt->ctx, result, mt->func_em->em.func) : MIR_T_UNDEF;
         JitImportMetadata metadata;
         bool cataloged = helper_name && jit_import_get_metadata(helper_name, &metadata);
         bool boxed_result = !cataloged || metadata.ret_class == JIT_VALUE_UNKNOWN
             ? result_type == MIR_T_I64
             : metadata.ret_class == JIT_VALUE_BOXED_ITEM;
         if (boxed_result && result_type == MIR_T_I64) {
-            mt->last_call_result = em_value_for_rep(result, LMD_TYPE_ANY,
+            mt->func_em->last_call_result = em_value_for_rep(result, LMD_TYPE_ANY,
                 VALUE_REP_ITEM);
         } else if (!cataloged || metadata.exception_effect != JIT_EXCEPTION_PRESERVES) {
             // A PRESERVES scalar cannot replace an earlier Item carrier.  Clearing
             // it here made a known SET lane rethrow null after a scalar helper.
-            mt->last_call_result = {};
+            mt->func_em->last_call_result = {};
         }
     }
     return result;
@@ -462,13 +466,13 @@ static inline void jm_preserve_error_lane_carrier(JsMirTranspiler* mt,
     JitImportMetadata metadata;
     bool preserves = helper_name && jit_import_get_metadata(helper_name, &metadata) &&
         metadata.exception_effect == JIT_EXCEPTION_PRESERVES;
-    if (!preserves || !mt->last_call_result.reg ||
+    if (!preserves || !mt->func_em->last_call_result.reg ||
             mt->error_lane_track == JS_ERROR_LANE_CLEAN ||
             mt->error_lane_track == JS_ERROR_LANE_UNREACHABLE) return;
     if (metadata.gc_effect != JIT_EFFECT_NO_GC) {
         // A collecting PRESERVES import has no replacement Item. Keep the
         // existing carrier alive in its exact side-root slot for D8.4.3.
-        jm_create_gc_root_slot(mt, mt->last_call_result.reg);
+        jm_create_gc_root_slot(mt, mt->func_em->last_call_result.reg);
         return;
     }
     if (!helper_has_result || metadata.ret_class != JIT_VALUE_NON_GC_SCALAR) return;
@@ -478,8 +482,8 @@ static inline void jm_preserve_error_lane_carrier(JsMirTranspiler* mt,
     MIR_reg_t carrier = jm_new_reg(mt, "exc_carrier", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, carrier),
-        MIR_new_reg_op(mt->ctx, mt->last_call_result.reg)));
-    mt->last_call_result = em_value_for_rep(carrier, LMD_TYPE_ANY,
+        MIR_new_reg_op(mt->ctx, mt->func_em->last_call_result.reg)));
+    mt->func_em->last_call_result = em_value_for_rep(carrier, LMD_TYPE_ANY,
         VALUE_REP_ITEM);
 }
 MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
@@ -499,16 +503,16 @@ MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
         int arg_count, MIR_reg_t* arg_regs);
 MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
 #define jm_call_void_0(mt, fn) \
-    (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_0(&(mt)->em, fn, true))
+    (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_0(&(mt)->func_em->em, fn, true))
 #define jm_call_void_1(mt, fn, ...) \
-    (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_1(&(mt)->em, fn, __VA_ARGS__, true))
+    (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_1(&(mt)->func_em->em, fn, __VA_ARGS__, true))
 #define jm_call_void_2(mt, fn, ...) jm_call_void_2_or_inline(mt, fn, __VA_ARGS__)
 #define jm_call_void_3(mt, fn, ...) \
-    (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_3(&(mt)->em, fn, __VA_ARGS__, true))
+    (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_3(&(mt)->func_em->em, fn, __VA_ARGS__, true))
 #define jm_call_void_5(mt, fn, ...) \
-    (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_5(&(mt)->em, fn, __VA_ARGS__, true))
+    (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_5(&(mt)->func_em->em, fn, __VA_ARGS__, true))
 #define jm_call_void_6(mt, fn, ...) \
-    (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_6(&(mt)->em, fn, __VA_ARGS__, true))
+    (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_6(&(mt)->func_em->em, fn, __VA_ARGS__, true))
 
 // Register-operand call shorthand for helpers whose operands are all I64 registers.
 #define JM_REG(mt, r) MIR_T_I64, MIR_new_reg_op((mt)->ctx, (r))

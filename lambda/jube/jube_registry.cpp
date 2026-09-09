@@ -1046,6 +1046,9 @@ extern "C" Item dom_document_design_mode_bridge(void);
 extern "C" Item dom_document_active_element_bridge(void* doc);
 extern "C" Item dom_normalize_bridge(void* elem);
 extern "C" Item dom_live_child_collection_bridge(void* elem, bool elements_only);
+extern "C" Item dom_attribute_collection_bridge(void* elem);
+extern "C" Item dom_token_list_operation(Item receiver, int operation,
+                                            Item* args, int argc);
 extern "C" Item dom_live_document_forms_bridge(void* doc);
 extern "C" Item dom_live_form_elements_bridge(void* elem);
 extern "C" Item dom_live_document_get_elements_by_tag_name_bridge(void* doc, Item query);
@@ -1537,6 +1540,8 @@ static const JubeHostRealmAPI jube_host_realm_api = {
     dom_expando_delete_property,
     dom_expando_own_property_names,
     dom_live_child_collection_bridge,
+    dom_attribute_collection_bridge,
+    dom_token_list_operation,
     dom_live_document_forms_bridge,
     dom_live_form_elements_bridge,
     dom_live_document_get_elements_by_tag_name_bridge,
@@ -3098,9 +3103,11 @@ static int jube_host_value_kind(Item value) {
         case LMD_TYPE_INT64:
         case LMD_TYPE_FLOAT: return JUBE_VALUE_NUMBER;
         case LMD_TYPE_STRING: return JUBE_VALUE_STRING;
-        case LMD_TYPE_ARRAY: return JUBE_VALUE_ARRAY;
+        case LMD_TYPE_ARRAY:
+        case LMD_TYPE_VARRAY: return JUBE_VALUE_ARRAY;
         case LMD_TYPE_MAP:
-        case LMD_TYPE_VMAP: return JUBE_VALUE_OBJECT;
+        case LMD_TYPE_VMAP:
+        case LMD_TYPE_VELMT: return JUBE_VALUE_OBJECT;
         case LMD_TYPE_FUNC: return JUBE_VALUE_FUNCTION;
         case LMD_TYPE_SYMBOL: return JUBE_VALUE_SYMBOL;
         case LMD_TYPE_DECIMAL: {
@@ -3131,20 +3138,30 @@ static bool jube_host_value_number_to_int64_exact(Item value, int64_t* out_value
 }
 
 static Item jube_host_value_native_object_new(const JubeTypeDef* type, void* payload) {
-    if (!type || !(type->flags & JUBE_TYPE_OWNING_NATIVE)) return ItemNull;
-    Item object = vmap_new();
-    if (get_type_id(object) != LMD_TYPE_VMAP || !object.vmap) return ItemNull;
-    // Only the host writes VMap metadata: modules receive a branded wrapper
-    // without coupling their ABI to its moving-GC object layout.
-    object.vmap->host_type = (const void*)type;
-    object.vmap->host_data = payload;
+    if (!type) return ItemNull;
+    Item object = ItemNull;
+    switch (type->carrier) {
+    case JUBE_CARRIER_VARRAY:
+        object = varray_new((const VArrayVtable*)type->carrier_ops, payload,
+                            (const void*)type, payload);
+        break;
+    case JUBE_CARRIER_VELMT:
+        object = velmt_new((const VelmtVtable*)type->carrier_ops, payload,
+                           (const void*)type, payload);
+        break;
+    case JUBE_CARRIER_VMAP:
+    default:
+        object = vmap_new();
+        virtual_host_set(object, (const void*)type, payload);
+        break;
+    }
     return object;
 }
 
 static void* jube_host_value_native_object_data(Item object, const JubeTypeDef* type) {
-    if (!type || get_type_id(object) != LMD_TYPE_VMAP || !object.vmap ||
-            object.vmap->host_type != (const void*)type) return NULL;
-    return object.vmap->host_data;
+    if (!type || get_type_id(object) != jube_carrier_type_id(type->carrier) ||
+            virtual_host_type(object) != (const void*)type) return NULL;
+    return virtual_host_data(object);
 }
 
 static bool jube_host_value_string_copy(Item value, char* out, size_t out_size,

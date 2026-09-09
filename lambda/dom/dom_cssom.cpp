@@ -12,6 +12,7 @@
 #include "../js/js_class.h"
 #include "../js/js_object_meta.h"
 #include "../runtime/lambda-root-frame.hpp"
+#include "../runtime/gc/gc_heap.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../../lib/log.h"
@@ -34,6 +35,9 @@ extern "C" Item vmap_new(void);
 extern "C" const void* radiant_dom_stylesheet_host_type(void);
 extern "C" const void* radiant_dom_css_rule_host_type(void);
 extern "C" const void* radiant_dom_rule_style_decl_host_type(void);
+extern "C" const void* radiant_dom_style_sheet_list_host_type(void);
+extern "C" const void* radiant_dom_css_rule_list_host_type(void);
+extern "C" Item dom_document_proxy_for_doc_bridge(void* doc);
 
 // Forward declaration
 extern "C" void* dom_document_from_item(Item item);
@@ -341,34 +345,120 @@ static const char* serialize_style_rule_css_text(CssRule* rule, Pool* pool) {
 // CSSStyleSheet Property Access
 // =============================================================================
 
+typedef enum CssomVArrayKind {
+    CSSOM_VARRAY_STYLE_SHEETS,
+    CSSOM_VARRAY_RULES,
+} CssomVArrayKind;
+
+typedef struct CssomVArray {
+    Item owner;
+    CssomVArrayKind kind;
+} CssomVArray;
+
+static int64_t cssom_rule_list_count(CssStylesheet* sheet) {
+    if (!sheet) return 0;
+    int64_t count = 0;
+    for (size_t i = 0; i < sheet->rule_count; i++) {
+        if (sheet->rules[i] && sheet->rules[i]->type != CSS_RULE_CHARSET) count++;
+    }
+    return count;
+}
+
+static CssRule* cssom_rule_list_at(CssStylesheet* sheet, int64_t index) {
+    if (!sheet || index < 0) return nullptr;
+    int64_t visible = 0;
+    for (size_t i = 0; i < sheet->rule_count; i++) {
+        CssRule* rule = sheet->rules[i];
+        if (!rule || rule->type == CSS_RULE_CHARSET) continue;
+        if (visible++ == index) return rule;
+    }
+    return nullptr;
+}
+
+static int64_t cssom_varray_count(void* data) {
+    CssomVArray* collection = (CssomVArray*)data;
+    if (!collection) return 0;
+    if (collection->kind == CSSOM_VARRAY_STYLE_SHEETS) {
+        DomDocument* doc = (DomDocument*)dom_document_from_item(collection->owner);
+        return doc && doc->stylesheet_count > 0 ? doc->stylesheet_count : 0;
+    }
+    return cssom_rule_list_count(unwrap_stylesheet(collection->owner));
+}
+
+static VirtualOpStatus cssom_varray_get(void* data, int64_t index, Item* out) {
+    CssomVArray* collection = (CssomVArray*)data;
+    if (!collection || !out || index < 0) return VIRTUAL_OP_MISSING;
+    if (collection->kind == CSSOM_VARRAY_STYLE_SHEETS) {
+        DomDocument* doc = (DomDocument*)dom_document_from_item(collection->owner);
+        if (!doc || index >= doc->stylesheet_count) return VIRTUAL_OP_MISSING;
+        *out = dom_cssom_wrap_stylesheet(doc->stylesheets[index]);
+    } else {
+        CssStylesheet* sheet = unwrap_stylesheet(collection->owner);
+        CssRule* rule = cssom_rule_list_at(sheet, index);
+        if (!rule) return VIRTUAL_OP_MISSING;
+        *out = dom_cssom_wrap_rule(rule, sheet_pool(sheet));
+    }
+    return get_type_id(*out) == LMD_TYPE_VMAP
+        ? VIRTUAL_OP_OK : VIRTUAL_OP_ERROR;
+}
+
+static VirtualOpStatus cssom_varray_readonly_set(
+        void*, int64_t, Item, Item*) {
+    return VIRTUAL_OP_READONLY;
+}
+
+static VirtualOpStatus cssom_varray_readonly_splice(
+        void*, int64_t, int64_t, const Item*, int64_t, Item*) {
+    return VIRTUAL_OP_READONLY;
+}
+
+static void cssom_varray_destroy(void* data) {
+    mem_free(data);
+}
+
+static void cssom_varray_trace(void* data, gc_heap* gc) {
+    CssomVArray* collection = (CssomVArray*)data;
+    if (collection && gc) gc_mark_item(gc, collection->owner.item);
+}
+
+extern "C" const VArrayVtable dom_cssom_collection_varray_vtable = {
+    {LAMBDA_VIRTUAL_ABI_VERSION, LMD_TYPE_VARRAY, {0, 0, 0},
+     cssom_varray_destroy, cssom_varray_trace, nullptr},
+    {cssom_varray_count, cssom_varray_get,
+     cssom_varray_readonly_set, cssom_varray_readonly_splice}
+};
+
+static Item cssom_varray_new(Item owner, CssomVArrayKind kind,
+                             const void* host_type) {
+    RootFrame roots(1);
+    Rooted<Item> owner_root(roots, owner);
+    CssomVArray* collection = (CssomVArray*)mem_calloc(
+        1, sizeof(CssomVArray), MEM_CAT_JS_RUNTIME);
+    if (!collection) return ItemNull;
+    collection->owner = owner_root.get();
+    collection->kind = kind;
+    Item result = varray_new(&dom_cssom_collection_varray_vtable, collection,
+                             host_type, collection);
+    if (get_type_id(result) != LMD_TYPE_VARRAY) {
+        cssom_varray_destroy(collection);
+        return ItemNull;
+    }
+    return result;
+}
+
 // Receiver-explicit per-property getters (DOM3 declared-interface bindings).
 extern "C" Item dom_cssom_stylesheet_get_css_rules(Item sheet_item) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return ItemNull;
-    Pool* pool = sheet_pool(sheet);
-    // array of wrapped CSSRule objects (excluding @charset per CSSOM spec)
-    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-    arr->type_id = LMD_TYPE_ARRAY;
-    arr->items = nullptr;
-    arr->length = 0;
-    arr->capacity = 0;
-    for (size_t i = 0; i < sheet->rule_count; i++) {
-        if (sheet->rules[i] && sheet->rules[i]->type == CSS_RULE_CHARSET) continue;
-        array_push(arr, dom_cssom_wrap_rule(sheet->rules[i], pool));
-    }
-    return (Item){.array = arr};
+    return cssom_varray_new(sheet_item, CSSOM_VARRAY_RULES,
+        radiant_dom_css_rule_list_host_type());
 }
 
 extern "C" Item dom_cssom_stylesheet_get_length(Item sheet_item) {
     CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
     if (!sheet) return ItemNull;
     // exclude @charset rules from length count
-    size_t count = 0;
-    for (size_t i = 0; i < sheet->rule_count; i++) {
-        if (sheet->rules[i] && sheet->rules[i]->type == CSS_RULE_CHARSET) continue;
-        count++;
-    }
-    return (Item){.item = i2it((int64_t)count)};
+    return (Item){.item = i2it(cssom_rule_list_count(sheet))};
 }
 
 extern "C" Item dom_cssom_stylesheet_get_disabled(Item sheet_item) {
@@ -896,28 +986,27 @@ extern "C" Item dom_cssom_decl_css_has(Item decl_item, Item prop_name) {
 // document.styleSheets
 // =============================================================================
 
-static Item stylesheets_array_for(DomDocument* doc) {
-    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-    arr->type_id = LMD_TYPE_ARRAY;
-    arr->items = nullptr;
-    arr->length = 0;
-    arr->capacity = 0;
-    if (doc && doc->stylesheets) {
-        for (int i = 0; i < doc->stylesheet_count; i++) {
-            array_push(arr, dom_cssom_wrap_stylesheet(doc->stylesheets[i]));
-        }
+static Item stylesheets_varray_for(DomDocument* doc, Item owner) {
+    if (!doc) return ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> owner_root(roots, owner);
+    if (get_type_id(owner_root.get()) != LMD_TYPE_VELMT) {
+        owner_root.set(dom_document_proxy_for_doc_bridge(doc));
     }
-    return (Item){.array = arr};
+    return cssom_varray_new(owner_root.get(), CSSOM_VARRAY_STYLE_SHEETS,
+        radiant_dom_style_sheet_list_host_type());
 }
 
 // JS's door: the ambient document, which is realm state.
 extern "C" Item dom_cssom_get_document_stylesheets(void) {
-    return stylesheets_array_for((DomDocument*)dom_get_document());
+    DomDocument* doc = (DomDocument*)dom_get_document();
+    return stylesheets_varray_for(doc, ItemNull);
 }
 
 // Lambda's door: the script names its document (ESO113 pattern, ESO114).
 extern "C" Item dom_cssom_get_document_stylesheets_for(Item doc_item) {
-    return stylesheets_array_for((DomDocument*)dom_document_from_item(doc_item));
+    return stylesheets_varray_for(
+        (DomDocument*)dom_document_from_item(doc_item), doc_item);
 }
 
 // Item-uniform twin of stylesheet_index for the Lambda face; the native

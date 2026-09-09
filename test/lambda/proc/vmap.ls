@@ -26,26 +26,36 @@ pn main() {
     print(len(m3))
     print("\n")
 
-    // Test 4: Set with boolean keys
+    // Test 4: Integral numeric forms update one integer key
     let m4 = map()
-    m4.set(true, "yes")
-    m4.set(false, "no")
+    m4.set(1, "int")
+    m4.set(1.0, "float")
+    m4.set(1.00m, "decimal")
+    m4.set(1n, "integer")
     print(len(m4))
+    print(" ")
+    print(m4[1])
     print("\n")
 
-    // Test 5: Set with float keys
+    // Test 5: String and symbol forms update one name key
     let m5 = map()
-    m5.set(3.14, "pi")
-    m5.set(2.718, "e")
+    m5.set("flag", "string")
+    m5.set('flag', "symbol")
     print(len(m5))
+    print(" ")
+    print(m5.flag)
     print("\n")
 
-    // Test 6: Mixed key types via set
+    // Test 6: Mixed canonical key kinds via set
     let m6 = map()
     m6.set("name", "test")
     m6.set(42, "answer")
-    m6.set(true, "flag")
+    m6.set(42.0m, "decimal answer")
+    var invalid_key = null
+    m6.set(3.5, "fractional") ^ { invalid_key = ^ }
     print(len(m6))
+    print(" ")
+    print(invalid_key is error)
     print("\n")
 
     // Test 7: Set then for-loop

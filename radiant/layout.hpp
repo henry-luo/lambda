@@ -1489,31 +1489,35 @@ struct LayoutTableAxis {
 
 TableMetadata* table_metadata_create(ScratchArena* scratch, int cols, int rows);
 void table_metadata_destroy(TableMetadata* meta);
+
 // tier-3: layout-transient, valid within pass
-typedef struct VelmtBox {
+typedef struct RadiantVelmtBox {
     float x;
     float y;
     float width;
     float height;
-} VelmtBox;
+} RadiantVelmtBox;
+
 // tier-3: layout-transient, valid within pass
-typedef BoxEdges VelmtEdges;
+typedef BoxEdges RadiantVelmtEdges;
+
 // tier-3: layout-transient, valid within pass
-typedef struct Velmt {
+typedef struct RadiantVelmt {
     View* view;
     DomElement* element;
     int index;
-    VelmtBox border_box;
-    VelmtEdges margin;
-    VelmtEdges border;
-    VelmtEdges padding;
-} Velmt;
+    RadiantVelmtBox border_box;
+    RadiantVelmtEdges margin;
+    RadiantVelmtEdges border;
+    RadiantVelmtEdges padding;
+} RadiantVelmt;
+
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutContext {
     LayoutContext* lycon;
     ViewBlock* parent;
     const char* layout_name;
-    Velmt* children;
+    RadiantVelmt* children;
     int child_count;
     float available_width;
     float available_height;
@@ -1528,6 +1532,7 @@ typedef struct CustomLayoutContext {
     CssEnum direction;
     const char* writing_mode;
 } CustomLayoutContext;
+
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutPlacement {
     int child_index;
@@ -1536,17 +1541,20 @@ typedef struct CustomLayoutPlacement {
     int z;
     bool has_z;
 } CustomLayoutPlacement;
+
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutPaintLayer {
     Element* content;
     int z;
     int order;
 } CustomLayoutPaintLayer;
+
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutPaintState {
     CustomLayoutPaintLayer* layers;
     int layer_count;
 } CustomLayoutPaintState;
+
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutResult {
     CustomLayoutPlacement* placements;
@@ -1566,7 +1574,8 @@ bool custom_layout_register(const char* name, CustomLayoutFn fn);
 CustomLayoutFn custom_layout_lookup(const char* name);
 void custom_layout_registry_clear(void);
 bool custom_layout_result_place(CustomLayoutResult* result, int child_index, float x, float y);
-void custom_layout_fill_velmt_from_view(Velmt* velmt, View* child, int index, bool normalize_origin);
+void custom_layout_fill_radiant_velmt_from_view(
+    RadiantVelmt* velmt, View* child, int index, bool normalize_origin);
 
 const char* custom_layout_name_from_css_value(const CssValue* value);
 const char* custom_layout_name_for_element(DomElement* element);
@@ -1583,6 +1592,7 @@ bool layout_list_item_has_in_flow_content(DomElement* element);
 const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyCode css_property,
                                             LayoutContext* lycon);
 void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
+
 // One in-flow item used by both direct and nested multicol distribution.
 // Keeping the break and fragmentation facts beside the measured extent avoids
 // two collectors drifting when a new fragmentation rule is added.
@@ -1607,6 +1617,7 @@ typedef struct MulticolFlowItem {
     // the tail after a forced break in a parallel float, including its margins
     float parallel_balance_tail;
 } MulticolFlowItem;
+
 // tier-3: layout-transient, valid within one multicol pass
 typedef struct ColumnState {
     int column_index;
@@ -1616,6 +1627,7 @@ typedef struct ColumnState {
     float balanced_height;
     bool balancing;
 } ColumnState;
+
 // tier-3: layout-transient, owned by the scratch-backed ColumnGroup
 typedef struct ColumnFragment {
     int fragment_index;
@@ -1627,6 +1639,7 @@ typedef struct ColumnFragment {
     float target_height;
     float used_height;
 } ColumnFragment;
+
 // All multicol balancing passes use the same bounded group scratch shape.
 // Keeping allocation and reverse-order release together prevents the nested
 // spanner path and the ordinary container path from drifting in ownership.
@@ -1680,6 +1693,7 @@ struct MulticolGroupScratch {
         content_heights = nullptr;
     }
 };
+
 // Keep the bounded flow-item buffer paired with its scratch lifetime; nested
 // and top-level multicol passes otherwise duplicate the same allocation path.
 struct MulticolFlowScratch {
@@ -1696,6 +1710,7 @@ struct MulticolFlowScratch {
         items = nullptr;
     }
 };
+
 // tier-3: layout-transient, valid while distributing one multicol group
 typedef struct ColumnGroup {
     ViewBlock* container;
@@ -1712,6 +1727,7 @@ typedef struct ColumnGroup {
     bool wraps_rows;
     bool vertical_writing;
 } ColumnGroup;
+
 // tier-3: layout-transient, cursor into a ColumnGroup
 typedef struct FragmentedFlowCursor {
     ColumnGroup* group;
@@ -1721,6 +1737,7 @@ typedef struct FragmentedFlowCursor {
     bool has_item_in_fragment;
     ColumnFragment virtual_fragment;
 } FragmentedFlowCursor;
+
 // A normalized projection avoids separate fragment-index math in text and
 // block paths; both must clamp negative offsets and use the same row pitch.
 // tier-3: layout-transient, returned by one projection calculation

@@ -594,7 +594,7 @@ This baseline already contains significant JS semantic machinery:
 - object creation and property definition are runtime calls;
 - calls use the separately registered `js_args` stack;
 - exception propagation is explicit `js_check_exception` plus branches;
-- truthiness and property access use runtime helpers/inline caches;
+- truthiness and property access use runtime helpers (the named `NameId` heads; there are no inline caches — D8.4.1v2/LC1v2);
 - normal, implicit, and exception returns are separate.
 
 Those are existing JS-lowering costs, not stack-frame additions.
@@ -893,8 +893,8 @@ additional to the existing MIR in the middle column.
 | `x = value` | `mov x, value` plus env/module writeback when applicable | post-instruction binding scan; matching rooted register emits `ROOT(x, slot)` |
 | `a + b` with boxed operands | `call js_add` | publish all live scope vars; root `a`, `b`; root result |
 | object literal | `js_new_object`, string literal, `js_create_data_property` | full publication at every helper; object, string, and helper results get slots |
-| property read | named-IC helper plus exception check | full publication before property helper and exception helper; both results rooted |
-| property write | named-IC setter | full publication; receiver/value rooted again; result rooted even if unused |
+| property read | named `NameId` head (`js_get_name_id`) plus exception check | full publication before property helper and exception helper; both results rooted |
+| property write | named `NameId` head (`js_set_name_id`) | full publication; receiver/value rooted again; result rooted even if unused |
 | `if (x)` | `js_is_truthy`, `uext8`, branch labels | publication before truthiness call; truthiness result gets a root slot |
 | dynamic JS call | args save/push/store, `js_call_function`, restore, exception checks | publication/rooting around every one of those helper calls |
 | direct local call | direct `MIR_CALL` | `jm_emit()` roots live scope, inputs, and outputs |

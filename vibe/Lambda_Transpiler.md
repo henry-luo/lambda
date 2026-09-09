@@ -18,7 +18,8 @@
   DD5+ extend the series over the rest of the area.
 - **Spec linkage:** D8 (compilation pipeline), D8.1 (structure), D8.3
   (dual-function compiling), D8.4 (dispatch policy), D8.5 (MIR module cache),
-  D3.4 (shape and typed-map field layout), LC1 (specialization over caching).
+  D3.4 (shape and typed-map field layout), LC1v2 (specialization over caching,
+  both lanes).
 - **Convention:** source references name symbols, not line numbers — line
   numbers drift.
 - **Related:** [`Lambda_Design_Compiling.md`](Lambda_Design_Compiling.md) (LC1–LC2 — cross-cutting policy, wins on conflict),

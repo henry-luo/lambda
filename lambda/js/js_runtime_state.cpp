@@ -115,6 +115,15 @@ static void js_root_range_set_storage(JsRootRange* range, Item* slots,
                                      int slot_count, const char* name);
 
 static void js_runtime_state_free_records(JsRuntimeState* state) {
+    // the wrapper cache tables are separate allocations now
+    if (state) {
+        if (state->function_cache_keys) mem_free(state->function_cache_keys);
+        if (state->function_cache_values) mem_free(state->function_cache_values);
+        state->function_cache_keys = NULL;
+        state->function_cache_values = NULL;
+        state->function_cache_capacity = 0;
+        state->function_cache_count = 0;
+    }
     if (!state) return;
     if (state->global_bindings) mem_free(state->global_bindings);
     if (state->event_loop) mem_free(state->event_loop);
@@ -348,7 +357,6 @@ void js_runtime_state_destroy_context(void) {
     // optional Node session while its heap-backed state is still valid.
     jube_modules_runtime_detach();
     js_runtime_owned_cache_destroy_context(runtime_context->js_state);
-    dom_platform_destroy_context(runtime_context->js_state);
     // JSCU18: the DOM/web capsules leave through the directory's own walk
     // instead of eight hand-maintained calls.
     context_capsule_destroy_all(runtime_context);

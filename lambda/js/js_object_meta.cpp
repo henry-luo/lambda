@@ -169,7 +169,7 @@ const JsClassMeta* js_object_meta(Item value) {
     if (type == LMD_TYPE_VMAP && js_promise_vmap_is(value)) {
         return &js_promise_vmap_meta;
     }
-    if (type == LMD_TYPE_VMAP && value.vmap && value.vmap->host_type) {
+    if (is_virtual_container_type_id(type) && virtual_host_type(value)) {
         return js_class_meta_for_id(JS_CLASS_WEB_API_RESOURCE);
     }
     if (type == LMD_TYPE_MAP && value.map &&

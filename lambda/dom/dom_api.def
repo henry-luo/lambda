@@ -325,10 +325,10 @@ DOM_OP(DERIVED, previous_element_sibling, node, 1, "fn(n: any) -> any", dom_fp_p
        "element_or_prev(previous_sibling(n))")
 DOM_OP(DERIVED, parent_element,  node, 1, "fn(n: any) -> any", dom_fp_parent_element, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "if (parent_node(n) != null and node_type(parent_node(n)) == 1) parent_node(n) else null")
-DOM_OP(DERIVED, children,        node, 1, "fn(n: any) -> array", dom_fp_children, DOM_F_NEUTRAL | DOM_F_SNAPSHOT | DOM_F_FASTPATH,
-       "[for (c in child_nodes(n) where node_type(c) == 1) c]")
-DOM_OP(DERIVED, child_nodes,     node, 1, "fn(n: any) -> array", dom_fp_child_nodes, DOM_F_NEUTRAL | DOM_F_SNAPSHOT | DOM_F_FASTPATH,
-       "siblings_from(first_child(n))")
+DOM_OP(DERIVED, children,        node, 1, "fn(n: any) -> array", dom_fp_children, DOM_F_NEUTRAL | DOM_F_FASTPATH,
+       "n.children")
+DOM_OP(DERIVED, child_nodes,     node, 1, "fn(n: any) -> array", dom_fp_child_nodes, DOM_F_NEUTRAL | DOM_F_FASTPATH,
+       "n.child_nodes")
 DOM_OP(DERIVED, contains,        node, 2, "fn(a: any, b: any) -> bool", dom_fp_contains, DOM_F_NEUTRAL | DOM_F_FASTPATH,
        "same_node(b, a) or (parent_node(b) != null and contains(a, parent_node(b)))")
 DOM_OP(DERIVED, equal_node,      node, 2, "fn(a: any, b: any) -> bool", dom_fp_equal_node, DOM_F_NEUTRAL | DOM_F_FASTPATH,

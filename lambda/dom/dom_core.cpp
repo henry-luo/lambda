@@ -685,18 +685,10 @@ extern "C" Item dom_fp_document_element(Item n) {
 extern "C" Item dom_fp_contains(Item a, Item b)        { return dom_op1(a, JUBE_DOM_CONTAINS, b); }
 extern "C" Item dom_fp_equal_node(Item a, Item b)      { return dom_op1(a, JUBE_DOM_IS_EQUAL_NODE, b); }
 
-// children / child_nodes: snapshot arrays (S9.2.2) built from the core links,
-// which is exactly the derivation; the JS live collections are not used.
-static Item dom_link_snapshot(Item n, const char* first, const char* next) {
-    Item out = js_array_new(0);
-    for (Item c = dom_prop_get(n, first); get_type_id(c) != LMD_TYPE_NULL;
-         c = dom_prop_get(c, next)) {
-        js_array_push(out, c);
-    }
-    return out;
-}
-extern "C" Item dom_fp_children(Item n)    { return dom_link_snapshot(n, "firstElementChild", "nextElementSibling"); }
-extern "C" Item dom_fp_child_nodes(Item n) { return dom_link_snapshot(n, "firstChild", "nextSibling"); }
+// D7.4.5v2: Lambda and JS share the owner-backed VArray; Lambda's DOM remains
+// fixed for the run, so no second membership snapshot is needed.
+extern "C" Item dom_fp_children(Item n)    { return dom_prop_get(n, "children"); }
+extern "C" Item dom_fp_child_nodes(Item n) { return dom_prop_get(n, "childNodes"); }
 
 extern "C" Item dom_fp_append_child(Item parent, Item child) {
     return dom_op1(parent, JUBE_DOM_APPEND_CHILD, child);

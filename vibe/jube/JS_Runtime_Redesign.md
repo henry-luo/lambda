@@ -1,7 +1,18 @@
 # LJS Runtime Redesign — One Mechanism per Concept, on Lambda's Mechanisms
 
 **Date**: 2026-08-13  **Status**: JR2/JR3/JR4/JR5/JR6 IMPLEMENTED — JR4
-and JR7 carrier rulings adopted as D3.4.7 and D7.4.1v2
+and JR7 carrier rulings adopted as D3.4.7 and D7.4.1v2; **JR8 RETIRED
+2026-09-09**
+
+> **JR8 is withdrawn.** The owner ruled on 2026-09-09 that LambdaJS, like the
+> Lambda lane, has **no inline caches and no feedback vectors** (**D8.4.1v2**,
+> LC1v2 in `../Lambda_Design_Compiling.md`). The per-site `JsLoadIC`/`JsStoreIC`
+> machinery JR8 was to unify had already been deleted on 2026-08-15
+> (`../Lambda_Design_JS_IC_Retire.md`). Every "JR8 will own it" handoff in this
+> document and its companions is therefore void; the replacement is
+> **compile-predicted specialization with an inline guard and the shared
+> semantic kernel on a miss** — IC_Retire Tier A (IR10–IR15), planned in
+> `JS_Tune10_Fast_Paths.md`. §JR8 below is kept as the rejected alternative.
 **Implementation anchor**: current worktree after the Tune6 object-metadata
 and exotic-operation handoff
 **Companions**: `JS_Profiling_Helpers.md` (measured evidence),
@@ -807,7 +818,13 @@ mechanism within those rulings.
 becomes moot. JR4 provides stable Promise metadata and host/property bridging
 for the temporary wrapper but does not reinterpret or relocate Promise state.
 
-### JR8 — Feedback vectors: one IC mechanism, out of the code
+### JR8 — Feedback vectors: one IC mechanism, out of the code — **RETIRED 2026-09-09**
+
+> Rejected by **D8.4.1v2** / **LC1v2**: no per-site mutable dispatch state in
+> either lane. The evidence below (four site-state shapes, IC structs addressed
+> by absolute address from JIT code) was in fact an argument for *deleting* the
+> cells, which is what IC_Retire did. Read the successor plan in
+> `JS_Tune10_Fast_Paths.md` instead.
 
 **Evidence.** `JsLoadIC`/`JsStoreIC`/callsite caches/shape-guard sites are
 four site-state shapes (`js_runtime.h:106/114/126`); IC structs are allocated

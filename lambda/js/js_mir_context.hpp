@@ -239,7 +239,6 @@ static inline int jm_scope_env_slot_for_capture(const JsFuncCollected* fc,
 #define JM_CAPTURE_COUNT(fc) (jm_function_analysis(fc)->capture_count)
 #define JM_JS_FACT(fc, field) (jm_function_analysis(fc)->js_##field)
 #define JM_PARAM_COUNT(fc) (jm_function_analysis(fc)->param_count)
-#define JM_JS_CACHE(fc, field) (jm_function_analysis(fc)->js_cached_##field)
 
 static inline FnParamTypeInfo* jm_param_info(JsFuncCollected* fc, int index) {
     FnAnalysis* analysis = jm_function_analysis(fc);
@@ -395,12 +394,43 @@ struct JsMirArgStackScope {
     MIR_reg_t args_reg;
 };
 
+// §9.2: per-function lowering state, split out of the module coordinator.
+// Its lifetime is one function body — `jm_begin_function_frame` opens it and
+// the two name caches invalidate themselves against the function item they
+// were built for — so it does not belong in a record whose lifetime is the
+// whole compilation unit. Grouping it also gives the boundary a name: what
+// used to be scattered per-function fields is now one record to reset.
+struct JsMirFunctionEmitter {
+    MirEmitter em;
+    // The transition emitter remembers the most recent boxed call result so
+    // in-band mode can test its ERROR tag without issuing a separate poll.
+    // This remains a full descriptor because branch restoration and GC rooting
+    // must not turn the error carrier back into an untyped MIR register.
+    MirValue last_call_result;
+    struct {
+        uint32_t module_name_index;
+        NameId direct_name_id;
+        MIR_reg_t reg;
+    } property_name_cache[32];
+    int property_name_cache_count;
+    MIR_item_t property_name_cache_func;
+    struct {
+        uint32_t module_name_index;
+        NameId direct_name_id;
+        MIR_reg_t reg;
+    } module_name_id_cache[32];
+    int module_name_id_cache_count;
+    MIR_item_t module_name_id_cache_func;
+};
+
 struct JsMirTranspiler {
     JsTranspiler* tp;        // access to AST, name_pool, scopes
+    // §9.2: per-function lowering state; see JsMirFunctionEmitter. Named
+    // func_em rather than fn because the call macros already bind fn.
+    JsMirFunctionEmitter* func_em;
 
     MIR_context_t ctx;
     MIR_module_t module;
-    MirEmitter em;
 
     // Local function items: name -> MIR_item_t
     struct hashmap* local_funcs;
@@ -459,20 +489,6 @@ struct JsMirTranspiler {
     JsFuncCollected* current_fc;    // current function being transpiled
     JsAstNode* discarded_expression; // outer expression whose value is unobserved
 
-    struct {
-        uint32_t module_name_index;
-        NameId direct_name_id;
-        MIR_reg_t reg;
-    } property_name_cache[32];
-    int property_name_cache_count;
-    MIR_item_t property_name_cache_func;
-    struct {
-        uint32_t module_name_index;
-        NameId direct_name_id;
-        MIR_reg_t reg;
-    } module_name_id_cache[32];
-    int module_name_id_cache_count;
-    MIR_item_t module_name_id_cache_func;
     // TCO state
     JsFuncCollected* tco_func;      // function being TCO'd (NULL if not active)
     MIR_label_t tco_label;          // loop-back label for tail calls
@@ -558,7 +574,6 @@ struct JsMirTranspiler {
     // in-band mode can test its ERROR tag without issuing a separate poll.
     // This remains a full descriptor because branch restoration and GC rooting
     // must not turn the error carrier back into an untyped MIR register.
-    MirValue last_call_result;
     // A function-level exceptional edge must retain the exact Item that
     // triggered the branch; later cleanup emitted on the normal path may
     // legitimately replace last_call_result before the landing pad.
@@ -646,9 +661,9 @@ static inline bool jm_current_function_is_iife_body(JsMirTranspiler* mt) {
 
 static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {
     if (!mt) return;
-    if (mt->em.import_cache) {
-        hashmap_free(mt->em.import_cache);
-        mt->em.import_cache = NULL;
+    if (mt->func_em->em.import_cache) {
+        hashmap_free(mt->func_em->em.import_cache);
+        mt->func_em->em.import_cache = NULL;
     }
     if (mt->local_funcs) {
         hashmap_free(mt->local_funcs);
@@ -717,5 +732,5 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         mem_free(mt->module_fc.scope_env_bindings);
         mt->module_fc.scope_env_bindings = NULL;
     }
-    em_frame_dispose(&mt->em);
+    em_frame_dispose(&mt->func_em->em);
 }

@@ -269,7 +269,7 @@ Targets: splay typed ≤ untyped; deltablue ≤6x Node; richards ≤4.5x Node.
   verify against the R18 line, not just v25.
 - **LambdaJS**: unchanged this round (16.0x geo; havlak 338x, cd 270x, hashmap 220x,
   sha1 205x); remains its own round with the dynamic-key/NameId fast path as the top
-  item (LJS may use ICs — D8.4.1 restricts Lambda script only).
+  item (2026-09-09: LJS may NOT use ICs either — D8.4.1v2/LC1v2 now cover both lanes).
 
 ## 4. Gates and acceptance (house rules, unchanged)
 

@@ -1,0 +1,21 @@
+1 2 {"x":1,"y":2} x|y
+true true true 1
+42 42 _s false
+1 false
+strict throws: true
+prevExt: undefined false
+seal: 9 undefined {"b":9}
+freeze: 1 undefined
+freeze-empty: undefined false
+strict prevExt throws: true
+true false
+7 false
+3 1
+40
+1 2 pub
+1 0
+2
+5 false
+{"a":1,"c":3} 2 a|c
+1 deep
+k0,k1,k2,k3,k4 3 {"n":0}

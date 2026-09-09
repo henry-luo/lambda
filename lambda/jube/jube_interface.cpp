@@ -14,21 +14,18 @@
 #include "jube_registry.h"
 #include "../lambda.hpp"
 #include "../js/js_runtime_internal.hpp"
+#include "../runtime/lambda-number-runtime.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/hashmap.h"
 #include "../runtime/parser/lambda_rd_parser.h"
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
 // engine entry points not exposed through public headers
 extern __thread EvalContext* context;
-// raw VMap backing-store access (vmap.cpp); bypasses host-object routing so
-// the generic expando store cannot recurse back into member dispatch
-extern "C" Item vmap_backing_get(VMap* vm, Item key);
-extern "C" bool vmap_backing_set(VMap* vm, Item key, Item value);
-
 // ============================================================================
 // Compiled records
 // ============================================================================
@@ -134,6 +131,28 @@ static Item jube_name_item(const char* name) {
     return (Item){.item = s2it(heap_create_name(name))};
 }
 
+static bool jube_index_from_key(Item key, int64_t* out) {
+    int64_t index = -1;
+    if (!lambda_item_to_int64_exact(key, &index)) {
+        const char* digits = NULL;
+        uint32_t length = 0;
+        if (!jube_item_key_chars(key, &digits, &length) || length == 0) {
+            return false;
+        }
+        index = 0;
+        for (uint32_t i = 0; i < length; i++) {
+            if (digits[i] < '0' || digits[i] > '9' ||
+                    index > (INT64_MAX - (digits[i] - '0')) / 10) {
+                return false;
+            }
+            index = index * 10 + (digits[i] - '0');
+        }
+    }
+    if (index < 0) return false;
+    *out = index;
+    return true;
+}
+
 static char* jube_strndup(const char* src, size_t len) {
     // Interface metadata outlives individual JS heaps and is released after
     // memtrack may change mode, so it cannot use a phase-bound tracked block.
@@ -173,17 +192,18 @@ static JubeTypeRecord* jube_record_for_type(const void* host_type) {
 }
 
 static JubeTypeRecord* jube_record_for(Item receiver) {
-    if (get_type_id(receiver) != LMD_TYPE_VMAP || !receiver.vmap ||
-            !receiver.vmap->host_type) {
-        return NULL;
-    }
-    return jube_record_for_type(receiver.vmap->host_type);
+    const void* host_type = virtual_host_type(receiver);
+    return host_type ? jube_record_for_type(host_type) : NULL;
 }
 
 void* jube_host_identity(Item item) {
     JubeTypeRecord* trec = jube_record_for(item);
     if (!trec) return NULL;
-    return item.vmap->host_data;
+    return virtual_host_data(item);
+}
+
+static bool jube_native_alive(Item receiver) {
+    return virtual_host_data(receiver) != NULL;
 }
 
 // resolve a key against the type's compiled ordinal index.
@@ -200,23 +220,28 @@ static JubeMemberRecord* jube_resolve_member(JubeTypeRecord* trec, Item receiver
 }
 
 // ============================================================================
-// Generic expando store: a plain JS object kept in the wrapper's own lazy
-// VMap backing store under a reserved key. GC marks backing entries, so the
-// expando object needs no explicit rooting and dies with the wrapper.
+// Generic expando store: every virtual carrier owns one explicit Item edge.
+// GC marks that edge, so the expando object dies with the wrapper.
 // ============================================================================
 
-#define JUBE_EXPANDO_KEY "__jube_expando__"
-
 static Item jube_expando_object(Item receiver, bool create) {
-    VMap* vm = receiver.vmap;
-    Item reserved = jube_name_item(JUBE_EXPANDO_KEY);
-    Item existing = vmap_backing_get(vm, reserved);
+    VirtualContainer* container = virtual_container_from_item(receiver);
+    if (!container) return jube_undefined_item();
+    Item existing = container->expando;
     if (get_type_id(existing) == LMD_TYPE_MAP && existing.map) return existing;
     if (!create) return jube_undefined_item();
+
+    RootFrame roots(2);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> object_root(roots, ItemNull);
     const JubeHostAPI* host = jube_internal_host_api();
-    Item obj = host->value->new_object();
-    if (!vmap_backing_set(vm, reserved, obj)) return jube_undefined_item();
-    return obj;
+    object_root.set(host->value->new_object());
+    container = virtual_container_from_item(receiver_root.get());
+    if (!container || get_type_id(object_root.get()) != LMD_TYPE_MAP) {
+        return jube_undefined_item();
+    }
+    container->expando = object_root.get();
+    return object_root.get();
 }
 
 static bool jube_expando_value_present(Item value) {
@@ -510,7 +535,7 @@ static int jube_dispatch_set_record(Item receiver, JubeTypeRecord* trec,
                                     JubeMemberRecord* rec, Item value, Item* out) {
     if (!trec || !rec || !out) return 0;
     if (rec->readonly || rec->kind != JUBE_MEMBER_FIELD) {
-        if (trec->binding && trec->binding->named_set && receiver.vmap->host_data &&
+        if (trec->binding && trec->binding->named_set && jube_native_alive(receiver) &&
                 trec->binding->named_set(receiver, jube_name_item(rec->camel_name),
                                           value, out)) return 1;
         *out = value;
@@ -598,7 +623,7 @@ extern "C" int jube_member_get_by_ordinal(Item receiver, int slot,
     JubeTypeRecord* trec = NULL;
     JubeMemberRecord* rec = jube_record_at_guarded(receiver, slot, ordinal, &trec);
     if (!trec || !rec || !out) return 0;
-    if (!receiver.vmap->host_data) {
+    if (!jube_native_alive(receiver)) {
         // the native payload is gone, but the wrapper identity remains a valid husk.
         *out = jube_undefined_item();
         return 1;
@@ -611,7 +636,7 @@ extern "C" int jube_member_set_by_ordinal(Item receiver, int slot,
     JubeTypeRecord* trec = NULL;
     JubeMemberRecord* rec = jube_record_at_guarded(receiver, slot, ordinal, &trec);
     if (!trec || !rec || !out) return 0;
-    if (!receiver.vmap->host_data) {
+    if (!jube_native_alive(receiver)) {
         *out = jube_undefined_item();
         return 1;
     }
@@ -625,14 +650,14 @@ extern "C" int jube_member_call_by_ordinal(Item receiver, int slot,
     JubeMemberRecord* rec = jube_record_at_guarded(receiver, slot, ordinal, &trec);
     if (!trec || !rec || !out || rec->kind != JUBE_MEMBER_METHOD ||
             !rec->bind || !rec->bind->call) return 0;
-    if (!receiver.vmap->host_data) return 0;
+    if (!jube_native_alive(receiver)) return 0;
     return rec->bind->call(receiver, args, argc, out) ? 1 : 0;
 }
 
 int jube_member_get(Item receiver, Item key, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
-    if (!receiver.vmap->host_data) {
+    if (!jube_native_alive(receiver)) {
         // neutered husk (post-release / document teardown): every read degrades
         // to undefined instead of touching the freed native payload
         *out = jube_undefined_item();
@@ -646,21 +671,8 @@ int jube_member_get(Item receiver, Item key, Item* out) {
     // keys arrive as ints or all-digit strings depending on the access path
     if (trec->binding && trec->binding->indexed_get) {
         int64_t index = -1;
-        TypeId key_type = get_type_id(key);
-        if (key_type == LMD_TYPE_INT) {
-            index = it2i(key);
-        } else {
-            const char* digits = NULL;
-            uint32_t dlen = 0;
-            if (jube_item_key_chars(key, &digits, &dlen) && dlen > 0) {
-                index = 0;
-                for (uint32_t i = 0; i < dlen; i++) {
-                    if (digits[i] < '0' || digits[i] > '9') { index = -1; break; }
-                    index = index * 10 + (digits[i] - '0');
-                }
-            }
-        }
-        if (index >= 0 && trec->binding->indexed_get(receiver, index, out)) return 1;
+        if (jube_index_from_key(key, &index) &&
+                trec->binding->indexed_get(receiver, index, out)) return 1;
     }
     if (trec->binding && trec->binding->named_get &&
             trec->binding->named_get(receiver, key, out)) {
@@ -702,7 +714,7 @@ int jube_member_get(Item receiver, Item key, Item* out) {
 
 int jube_member_projected_get(Item receiver, Item key, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
-    if (!trec || !out || !receiver.vmap->host_data) return 0;
+    if (!trec || !out || !jube_native_alive(receiver)) return 0;
     JubeMemberRecord* rec = jube_resolve_member(trec, receiver, key);
     if (!rec) return 0;
     // Host own-property descriptors need declared record members only; full
@@ -713,7 +725,7 @@ int jube_member_projected_get(Item receiver, Item key, Item* out) {
 int jube_member_set(Item receiver, Item key, Item value, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
-    if (!receiver.vmap->host_data) {
+    if (!jube_native_alive(receiver)) {
         *out = jube_undefined_item();
         return 1;
     }
@@ -738,17 +750,23 @@ int jube_member_has(Item receiver, Item key, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
     bool present = jube_resolve_member(trec, receiver, key) != NULL;
+    if (!present && get_type_id(receiver) == LMD_TYPE_VARRAY &&
+            trec->binding && trec->binding->indexed_get) {
+        int64_t index = -1;
+        present = jube_index_from_key(key, &index) &&
+            index < varray_count(receiver.varray);
+    }
     if (!present && trec->binding && trec->binding->object_has &&
-            receiver.vmap->host_data &&
+            jube_native_alive(receiver) &&
             trec->binding->object_has(receiver, key, out)) {
         return 1;
     }
     if (!present && trec->binding && trec->binding->named_has &&
-            receiver.vmap->host_data &&
+            jube_native_alive(receiver) &&
             trec->binding->named_has(receiver, key, out)) {
         return 1;
     }
-    if (!present && receiver.vmap->host_data) {
+    if (!present && jube_native_alive(receiver)) {
         Item expando = jube_expando_object(receiver, false);
         if (get_type_id(expando) == LMD_TYPE_MAP) {
             Item value = jube_internal_host_api()->value->property_get(expando, key);
@@ -766,13 +784,13 @@ int jube_member_delete(Item receiver, Item key, Item* out) {
         *out = (Item){.item = b2it(false)};
         return 1;
     }
-    if (trec->binding && trec->binding->object_delete && receiver.vmap->host_data &&
+    if (trec->binding && trec->binding->object_delete && jube_native_alive(receiver) &&
             trec->binding->object_delete(receiver, key, out)) {
         return 1;
     }
     // open-name members (CSS properties on style objects) refuse deletion,
     // matching the projected-property non-configurable contract
-    if (trec->binding && trec->binding->named_has && receiver.vmap->host_data) {
+    if (trec->binding && trec->binding->named_has && jube_native_alive(receiver)) {
         Item present = ItemNull;
         if (trec->binding->named_has(receiver, key, &present) &&
                 present.item == b2it(true)) {
@@ -780,7 +798,7 @@ int jube_member_delete(Item receiver, Item key, Item* out) {
             return 1;
         }
     }
-    if (receiver.vmap->host_data) {
+    if (jube_native_alive(receiver)) {
         Item expando = jube_expando_object(receiver, false);
         if (get_type_id(expando) == LMD_TYPE_MAP) {
             *out = jube_internal_host_api()->script->reflect_delete_property(expando, key);
@@ -818,19 +836,36 @@ int jube_member_descriptor(Item receiver, Item key, Item* out) {
     Rooted<Item> key_root(roots, key);
     Rooted<Item> value_root(roots, ItemNull);
     Rooted<Item> expando_root(roots, ItemNull);
-    if (trec->binding && trec->binding->object_descriptor && receiver.vmap->host_data &&
+    if (trec->binding && trec->binding->object_descriptor && jube_native_alive(receiver) &&
             trec->binding->object_descriptor(receiver_root.get(), key_root.get(), out)) {
         return 1;
     }
+    if (get_type_id(receiver_root.get()) == LMD_TYPE_VARRAY &&
+            trec->binding && trec->binding->indexed_get &&
+            jube_native_alive(receiver_root.get())) {
+        int64_t index = -1;
+        if (jube_index_from_key(key_root.get(), &index) &&
+                index < varray_count(receiver_root.get().varray)) {
+            Item indexed_value = ItemNull;
+            if (!trec->binding->indexed_get(receiver_root.get(), index,
+                    &indexed_value)) {
+                *out = jube_undefined_item();
+                return 1;
+            }
+            value_root.set(indexed_value);
+            *out = jube_make_data_descriptor(value_root.get(), false, true);
+            return 1;
+        }
+    }
     JubeMemberRecord* rec = jube_resolve_member(trec, receiver_root.get(), key_root.get());
-    if (rec && rec->kind != JUBE_MEMBER_METHOD && receiver_root.get().vmap->host_data) {
+    if (rec && rec->kind != JUBE_MEMBER_METHOD && jube_native_alive(receiver_root.get())) {
         Item member_value = jube_undefined_item();
         jube_member_get(receiver_root.get(), key_root.get(), &member_value);
         value_root.set(member_value);
         *out = jube_make_data_descriptor(value_root.get(), !rec->readonly, false);
         return 1;
     }
-    if (receiver_root.get().vmap->host_data) {
+    if (jube_native_alive(receiver_root.get())) {
         expando_root.set(jube_expando_object(receiver_root.get(), false));
         if (get_type_id(expando_root.get()) == LMD_TYPE_MAP) {
             value_root.set(jube_internal_host_api()->value->property_get(
@@ -857,19 +892,30 @@ int jube_member_own_keys(Item receiver, Item* out) {
     Rooted<Item> rooted_name(roots, ItemNull);
     Rooted<Item> rooted_expando(roots, ItemNull);
     Rooted<Item> rooted_expando_keys(roots, ItemNull);
-    if (trec->binding && trec->binding->object_own_keys && receiver.vmap->host_data &&
+    if (trec->binding && trec->binding->object_own_keys && jube_native_alive(receiver) &&
             trec->binding->object_own_keys(rooted_receiver.get(), out)) {
         return 1;
     }
     const JubeHostAPI* host = jube_internal_host_api();
     rooted_keys.set(host->value->array_new(0));
+    if (get_type_id(rooted_receiver.get()) == LMD_TYPE_VARRAY &&
+            trec->binding && trec->binding->indexed_get &&
+            jube_native_alive(rooted_receiver.get())) {
+        int64_t count = varray_count(rooted_receiver.get().varray);
+        for (int64_t i = 0; i < count; i++) {
+            char index_name[32];
+            snprintf(index_name, sizeof(index_name), "%lld", (long long)i);
+            rooted_name.set(jube_name_item(index_name));
+            host->value->array_push(rooted_keys.get(), rooted_name.get());
+        }
+    }
     for (int i = 0; i < trec->member_count; i++) {
         JubeMemberRecord* rec = &trec->members[i];
         if (!rec->enumerable) continue;
         rooted_name.set(jube_name_item(rec->camel_name));
         host->value->array_push(rooted_keys.get(), rooted_name.get());
     }
-    if (rooted_receiver.get().vmap->host_data) {
+    if (jube_native_alive(rooted_receiver.get())) {
         rooted_expando.set(jube_expando_object(rooted_receiver.get(), false));
         jube_append_expando_keys(host, rooted_keys.get(), rooted_expando.get(),
             &rooted_expando_keys, &rooted_name);
@@ -923,7 +969,7 @@ int jube_member_projection_keys(Item receiver, Item* out) {
         rooted_name.set(jube_name_item(rec->snake_name));
         host->value->array_push(rooted_keys.get(), rooted_name.get());
     }
-    if (rooted_receiver.get().vmap->host_data) {
+    if (jube_native_alive(rooted_receiver.get())) {
         rooted_expando.set(jube_expando_object(rooted_receiver.get(), false));
         jube_append_expando_keys(host, rooted_keys.get(), rooted_expando.get(),
             &rooted_expando_keys, &rooted_name);
@@ -935,7 +981,7 @@ int jube_member_projection_keys(Item receiver, Item* out) {
 int jube_member_prototype(Item receiver, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
-    if (trec->binding && trec->binding->object_prototype && receiver.vmap->host_data &&
+    if (trec->binding && trec->binding->object_prototype && jube_native_alive(receiver) &&
             trec->binding->object_prototype(receiver, out)) {
         // DOM nodes need receiver-specific Element/Text/Document prototypes;
         // a static prototype_seed cannot preserve that WebIDL identity.

@@ -11,6 +11,7 @@
 #include "../../lib/byte_storage.h"
 #include "../input/css/dom_element.hpp"  // DomElement, dom_element_to_element, element_to_dom_element
 #include "../input/css/dom_node.hpp"     // DomText, dom_text_to_string, string_to_dom_text
+#include "../jube/jube_interface.h"
 #include <math.h>
 
 // data zone allocation helpers (defined in lambda-mem.cpp)
@@ -2866,6 +2867,8 @@ Item item_at(Item data, int64_t index) {
         return ItemNull;  // indexing scalars returns null silently
     case LMD_TYPE_ARRAY:
         return array_get(data.array, index);
+    case LMD_TYPE_VARRAY:
+        return varray_get(data.varray, index);
     case LMD_TYPE_ARRAY_NUM:
         return array_num_get(data.array_num, index);
     case LMD_TYPE_RANGE: {
@@ -2881,6 +2884,8 @@ Item item_at(Item data, int64_t index) {
         List* content = lambda_content_list(type_id, data.element);
         return content ? list_get(content, index) : ItemNull;
     }
+    case LMD_TYPE_VELMT:
+        return velmt_child_get(data.velmt, index);
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
         const char* chars = data.get_chars();
         uint32_t byte_len = data.get_len();
@@ -2982,6 +2987,12 @@ Item item_attr(Item data, const char* key) {
     case LMD_TYPE_VMAP: {
         VMap* vm = data.vmap;
         return vmap_get_by_str(vm, key);
+    }
+    case LMD_TYPE_VELMT: {
+        Item key_item = {.item = s2it(heap_create_name(key))};
+        Item projected = ItemNull;
+        if (jube_member_projected_get(data, key_item, &projected)) return projected;
+        return velmt_attr_get(data.velmt, key_item);
     }
     case LMD_TYPE_ELEMENT: {
         if (lambda_value_nominal(type_id, data.element)) {
@@ -3139,6 +3150,20 @@ SymbolKeyList* item_keys(Item data) {
         }
         return NULL;
     }
+    case LMD_TYPE_VELMT: {
+        Velmt* element = data.velmt;
+        int64_t count = velmt_attr_count(element);
+        SymbolKeyList* keys = symbol_key_list_new(count > 0 ? count : 4);
+        if (!keys || !element || !element->vtable) return keys;
+        for (int64_t i = 0; i < count; i++) {
+            Item key = ItemNull;
+            if (element->vtable->element.attrs.key_at(element->data, i, &key) !=
+                    VIRTUAL_OP_OK || !is_text_type_id(get_type_id(key))) continue;
+            symbol_key_list_append(keys,
+                heap_create_symbol(key.get_chars(), key.get_len()));
+        }
+        return keys;
+    }
     // S8.1.2v2/S8.3.1v2: an object's attribute names are its `at` axis. There
     // was no OBJECT arm at all, so item_keys returned NULL and `for (v in obj)`
     // yielded nothing while `len(obj)` reported the field count — the two sides
@@ -3229,7 +3254,6 @@ Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
     int64_t key_count = symbol_key_list_len(keys_ptr);
 
     if (is_element_family_type_id(type_id)) {
-        List* content = lambda_content_list(type_id, data.element);
         if (key_filter == 2) {
             // SYMBOL: attrs only
             if (idx < key_count) {
@@ -3240,14 +3264,14 @@ Item iter_val_at(Item data, void* keys_ptr, int64_t idx, int key_filter) {
         }
         if (key_filter == 1) {
             // INT: children only
-            return content ? list_get(content, idx) : ItemNull;
+            return item_at(data, idx);
         }
         // ALL: attrs first, then children
         if (idx < key_count) {
             Symbol* key_sym = symbol_key_list_at(keys_ptr, idx);
             return item_attr(data, key_sym->chars);
         }
-        return content ? list_get(content, idx - key_count) : ItemNull;
+        return item_at(data, idx - key_count);
     }
     if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_VMAP) {
         if (idx < key_count) {

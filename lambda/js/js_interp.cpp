@@ -2929,6 +2929,33 @@ static JsAstNode* js_interp_pattern_assignment_reference_target(JsAstNode* patte
         pattern->node_type == AST_NODE_INDEX_EXPR) ? pattern : NULL;
 }
 
+// Resolve an assignment-pattern reference for one array-destructuring element.
+// The rest element and the ordinary element ran identical 18-line copies of
+// this; the shared shape has to stay a macro because every failure arm returns
+// out of the enclosing binder (D5.4.2 keeps the iterator rooted across it).
+#define JS_INTERP_RESOLVE_ARRAY_BINDING_REFERENCE(target_node)                  \
+    JsAstNode* reference_target = !initialize                                   \
+        ? js_interp_pattern_assignment_reference_target(target_node) : NULL;    \
+    if (reference_target) {                                                     \
+        JsInterpCompletion resolved = js_interp_eval_reference(frame,           \
+            reference_target, &reference, reference_object_root.home(),         \
+            reference_key_root.home(), true);                                   \
+        if (resolved.kind != JS_INTERP_NORMAL) {                                \
+            if (resolved.kind == JS_INTERP_YIELD &&                             \
+                    !js_interp_generator_suspend_array_binding(frame, pattern,  \
+                        element, iterator_root.get(), iterator_done,            \
+                        ItemNull, false, NULL)) {                               \
+                return js_interp_throw(ItemError);                              \
+            }                                                                   \
+            if (resolved.kind != JS_INTERP_YIELD &&                             \
+                    resolved.kind != JS_INTERP_AWAIT) {                         \
+                js_interp_generator_clear_array_binding(frame, pattern);        \
+            }                                                                   \
+            return js_interp_finish_array_binding(iterator_root.get(),          \
+                iterator_done, resolved);                                       \
+        }                                                                       \
+        has_reference = true;
+
 static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
         JsAstNode* pattern, Item input, bool initialize,
         const JsInterpReference* pre_reference = NULL) {
@@ -3026,28 +3053,7 @@ static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
                         has_reference = true;
                     }
                 } else {
-                    JsAstNode* reference_target = !initialize
-                        ? js_interp_pattern_assignment_reference_target(
-                            (JsAstNode*)rest->argument) : NULL;
-                    if (reference_target) {
-                        JsInterpCompletion resolved = js_interp_eval_reference(frame,
-                            reference_target, &reference, reference_object_root.home(),
-                            reference_key_root.home(), true);
-                        if (resolved.kind != JS_INTERP_NORMAL) {
-                            if (resolved.kind == JS_INTERP_YIELD &&
-                                    !js_interp_generator_suspend_array_binding(frame, pattern,
-                                        element, iterator_root.get(), iterator_done,
-                                        ItemNull, false, NULL)) {
-                                return js_interp_throw(ItemError);
-                            }
-                            if (resolved.kind != JS_INTERP_YIELD &&
-                                    resolved.kind != JS_INTERP_AWAIT) {
-                                js_interp_generator_clear_array_binding(frame, pattern);
-                            }
-                            return js_interp_finish_array_binding(iterator_root.get(),
-                                iterator_done, resolved);
-                        }
-                        has_reference = true;
+                    JS_INTERP_RESOLVE_ARRAY_BINDING_REFERENCE((JsAstNode*)rest->argument)
                     }
                     value_root.set(iterator_done ? js_array_new(0)
                         : js_iterator_collect_rest(iterator_root.get()));
@@ -3087,27 +3093,7 @@ static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
                     has_reference = true;
                 }
             } else {
-                JsAstNode* reference_target = !initialize
-                    ? js_interp_pattern_assignment_reference_target(element) : NULL;
-                if (reference_target) {
-                    JsInterpCompletion resolved = js_interp_eval_reference(frame,
-                        reference_target, &reference, reference_object_root.home(),
-                        reference_key_root.home(), true);
-                    if (resolved.kind != JS_INTERP_NORMAL) {
-                        if (resolved.kind == JS_INTERP_YIELD &&
-                                !js_interp_generator_suspend_array_binding(frame, pattern,
-                                    element, iterator_root.get(), iterator_done,
-                                    ItemNull, false, NULL)) {
-                            return js_interp_throw(ItemError);
-                        }
-                        if (resolved.kind != JS_INTERP_YIELD &&
-                                resolved.kind != JS_INTERP_AWAIT) {
-                            js_interp_generator_clear_array_binding(frame, pattern);
-                        }
-                        return js_interp_finish_array_binding(iterator_root.get(),
-                            iterator_done, resolved);
-                    }
-                    has_reference = true;
+                JS_INTERP_RESOLVE_ARRAY_BINDING_REFERENCE(element)
                 }
                 if (iterator_done) {
                     value_root.set(make_js_undefined());

@@ -564,6 +564,55 @@ struct PrintItemVisitor {
         strbuf_append_char(strbuf, '}');
     }
 
+    void operator()(lam::ItemOf<LMD_TYPE_VARRAY> item) const {
+        VArray* array = item.ptr();
+        int64_t count = varray_count(array);
+        strbuf_append_char(strbuf, '[');
+        for (int64_t i = 0; i < count; i++) {
+            if (i) strbuf_append_str(strbuf, ", ");
+            print_item(strbuf, varray_get(array, i), depth + 1, indent);
+        }
+        strbuf_append_char(strbuf, ']');
+    }
+
+    void operator()(lam::ItemOf<LMD_TYPE_VELMT> item) const {
+        Velmt* element = item.ptr();
+        Item tag = ItemNull;
+        if (element && element->vtable && element->vtable->element.tag) {
+            element->vtable->element.tag(element->data, &tag);
+        }
+        const char* tag_chars = is_text_type_id(get_type_id(tag))
+            ? tag.get_chars() : "element";
+        uint32_t tag_length = is_text_type_id(get_type_id(tag))
+            ? tag.get_len() : 7;
+        strbuf_append_format(strbuf, "<%.*s", (int)tag_length, tag_chars);
+        int64_t attr_count = velmt_attr_count(element);
+        for (int64_t i = 0; i < attr_count; i++) {
+            Item key = ItemNull;
+            Item value = ItemNull;
+            if (element->vtable->element.attrs.key_at(element->data, i, &key) !=
+                    VIRTUAL_OP_OK) continue;
+            element->vtable->element.attrs.value_at(element->data, i, &value);
+            strbuf_append_str(strbuf, i == 0 ? " " : ", ");
+            if (is_text_type_id(get_type_id(key))) {
+                strbuf_append_str_n(strbuf, key.get_chars(), key.get_len());
+            } else {
+                print_item(strbuf, key, depth + 1, indent);
+            }
+            strbuf_append_str(strbuf, ": ");
+            print_item(strbuf, value, depth + 1, indent);
+        }
+        int64_t child_count = velmt_child_count(element);
+        if (child_count > 0) {
+            if (attr_count > 0) strbuf_append_char(strbuf, ',');
+            for (int64_t i = 0; i < child_count; i++) {
+                strbuf_append_char(strbuf, ' ');
+                print_item(strbuf, velmt_child_get(element, i), depth + 1, indent);
+            }
+        }
+        strbuf_append_char(strbuf, '>');
+    }
+
     // S2.1.3: an element and an object print through one body — `<tag attrs,
     // content>` — because an object IS a nominally-typed element and its
     // literal is the element form. The two differ only in where the tag name

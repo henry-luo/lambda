@@ -161,7 +161,15 @@ static JsObserverTarget* observer_append_target(JsObserverState* observer) {
 }
 JS_FORWARD_STATIC_ITEM(observer_key, (const char* name), js_make_string, (name))
 JS_FORWARD_STATIC_ITEM(observer_pending, (JsObserverState* observer), dom_realm_get, (observer->object, observer_key("__lambdaObserverRecords")))
-JS_FORWARD_STATIC_VOID( observer_replace_pending, (JsObserverState* observer), dom_realm_set, (observer->object, observer_key("__lambdaObserverRecords"), js_array_new(0)))
+
+static void observer_replace_pending(JsObserverState* observer) {
+    if (!observer) return;
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, observer->object);
+    Rooted<Item> key_root(roots, observer_key("__lambdaObserverRecords"));
+    Rooted<Item> pending_root(roots, js_array_new(0));
+    dom_realm_set(object_root.get(), key_root.get(), pending_root.get());
+}
 
 static JsObserverState* observer_from_this(void) {
     Item receiver = dom_realm_receiver();
@@ -464,11 +472,17 @@ static Item js_observer_deliver(void) {
     int sweep_doc_capacity = 0;
     for (int i = 0; i < observer_count; i++) {
         JsObserverState* observer = observers[i];
-        Item records = observer_pending(observer);
-        if (js_array_length(records) <= 0) continue;
+        RootFrame roots(3);
+        Rooted<Item> records_root(roots, observer_pending(observer));
+        Rooted<Item> object_root(roots, observer->object);
+        Rooted<Item> callback_root(roots, observer->callback);
+        if (js_array_length(records_root.get()) <= 0) continue;
+        // Replacing the observer-owned pending slot removes its last ordinary
+        // edge to the delivery array, so retain it explicitly across the
+        // allocating replacement and callback boundary (D5.1.1v2).
         observer_replace_pending(observer);
-        Item args[2] = {records, observer->object};
-        dom_realm_call(observer->callback, make_js_undefined(), args, 2);
+        Item args[2] = {records_root.get(), object_root.get()};
+        dom_realm_call(callback_root.get(), make_js_undefined(), args, 2);
         if (observer->kind == JS_OBSERVER_MUTATION) {
             for (int j = 0; j < observer->target_count; j++) {
                 DomDocument* owner_doc = observer->targets[j].owner_doc;
@@ -510,18 +524,26 @@ static void observer_queue_record(JsObserverState* observer, Item record) {
 }
 
 static void observer_install_common_methods(JsObserverState* observer, bool mutation) {
-    dom_realm_set(observer->object, observer_key("disconnect"),
+    RootFrame roots(3);
+    Rooted<Item> object_root(roots, observer->object);
+    Rooted<Item> key_root(roots, observer_key("disconnect"));
+    Rooted<Item> method_root(roots,
         dom_realm_new_function(js_observer_disconnect));
+    dom_realm_set(object_root.get(), key_root.get(), method_root.get());
     if (mutation) {
-        dom_realm_set(observer->object, observer_key("observe"),
-            dom_realm_new_function(js_mutation_observer_observe));
-        dom_realm_set(observer->object, observer_key("takeRecords"),
-            dom_realm_new_function(js_observer_take_records));
+        key_root.set(observer_key("observe"));
+        method_root.set(dom_realm_new_function(js_mutation_observer_observe));
+        dom_realm_set(object_root.get(), key_root.get(), method_root.get());
+        key_root.set(observer_key("takeRecords"));
+        method_root.set(dom_realm_new_function(js_observer_take_records));
+        dom_realm_set(object_root.get(), key_root.get(), method_root.get());
     } else {
-        dom_realm_set(observer->object, observer_key("observe"),
-            dom_realm_new_function(js_geometry_observer_observe));
-        dom_realm_set(observer->object, observer_key("unobserve"),
-            dom_realm_new_function(js_observer_unobserve));
+        key_root.set(observer_key("observe"));
+        method_root.set(dom_realm_new_function(js_geometry_observer_observe));
+        dom_realm_set(object_root.get(), key_root.get(), method_root.get());
+        key_root.set(observer_key("unobserve"));
+        method_root.set(dom_realm_new_function(js_observer_unobserve));
+        dom_realm_set(object_root.get(), key_root.get(), method_root.get());
     }
 }
 
@@ -624,14 +646,28 @@ static void observer_queue_child_record(JsObserverState* observer,
                                         DomNode* parent,
                                         DomNode* added,
                                         DomNode* removed) {
-    Item record = js_new_object();
-    Item added_nodes = js_array_new(0);
-    Item removed_nodes = js_array_new(0);
-    if (added) js_array_push(added_nodes, dom_wrap_element(added));
-    if (removed) js_array_push(removed_nodes, dom_wrap_element(removed));
-    observer_set_record_fields(record, js_make_string("childList"),
-        dom_wrap_element(parent), added_nodes, removed_nodes, ItemNull, ItemNull);
-    observer_queue_record(observer, record);
+    RootFrame roots(6);
+    Rooted<Item> record_root(roots, js_new_object());
+    Rooted<Item> added_root(roots, js_array_new(0));
+    Rooted<Item> removed_root(roots, js_array_new(0));
+    Rooted<Item> node_root(roots, ItemNull);
+    Rooted<Item> parent_root(roots, ItemNull);
+    Rooted<Item> type_root(roots, ItemNull);
+    if (added) {
+        node_root.set(dom_wrap_element(added));
+        js_array_push(added_root.get(), node_root.get());
+    }
+    if (removed) {
+        node_root.set(dom_wrap_element(removed));
+        js_array_push(removed_root.get(), node_root.get());
+    }
+    added_root.set(dom_static_node_list_from_array(added_root.get()));
+    removed_root.set(dom_static_node_list_from_array(removed_root.get()));
+    type_root.set(js_make_string("childList"));
+    parent_root.set(dom_wrap_element(parent));
+    observer_set_record_fields(record_root.get(), type_root.get(),
+        parent_root.get(), added_root.get(), removed_root.get(), ItemNull, ItemNull);
+    observer_queue_record(observer, record_root.get());
 
     // A removed subtree remains observed through the microtask checkpoint,
     // which is why mutations made before delivery still belong to this observer's batch.

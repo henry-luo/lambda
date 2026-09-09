@@ -270,7 +270,6 @@ JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
 #define JS_PD_ENUMERABLE       0x80u  // [[Enumerable]] bit (when HAS_ENUMERABLE)
 // [[Configurable]] uses bit in `flags2` to keep this a single byte. Use
 // helper functions below.
-#define JS_PD_CONFIGURABLE_VALUE (1u << 8)
 
 typedef struct JsPropertyDescriptor {
     uint8_t flags;     // JS_PD_HAS_* + JS_PD_WRITABLE / JS_PD_ENUMERABLE

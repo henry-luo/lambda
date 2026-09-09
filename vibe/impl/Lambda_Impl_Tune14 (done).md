@@ -131,7 +131,8 @@ GC mark is a solved problem everywhere except gcbench — the `alloc_bits` bitma
 This is Result15's #2–#4 confirmed still live and now dominant: the property-access path is
 string-keyed end to end. Integer/interned-ID keys through `js_map_get_fast`, cached
 `well_known_name_id` results at the access site, and integer fast paths for numeric keys are
-the LJS round. (LJS may keep inline caches — the no-IC rule is Lambda-script-only, D8.4.1.)
+the LJS round. *(Stale as of 2026-09-09: the no-IC rule is no longer
+Lambda-script-only — D8.4.1v2/LC1v2 extend it to LambdaJS.)*
 
 ### 2.6 Corrections to rev 1's unmeasured claims
 
@@ -218,8 +219,9 @@ precise roots preserved [S1.4–S1.6].
    round-trip through `snprintf`/`__dtoa`/`sscanf`. Key the fast map path on an integer or
    interned NameId variant instead of `char const*`.
 2. **Stop probing `well_known_name_id` per access**: resolve the name once at the access site
-   (compile-time for static names, per-shape cache otherwise). LJS may use inline caches
-   (LC1/D8.4.1 restricts Lambda script only).
+   (compile-time for static names, per-shape lookup otherwise). *(Superseded 2026-09-09:
+   LC1v2/D8.4.1v2 now ban inline caches in LambdaJS too; the JS answer is a compile-predicted
+   shape guard, not a cache — `vibe/jube/JS_Tune10_Fast_Paths.md` T10-2.)*
 3. **No hot-path `name_pool_create_strview`**: transient lookups must not intern.
 
 Beneficiaries (measured): hashmap 207x, cd 268x, havlak 444x, deltablue 82x, triangl,

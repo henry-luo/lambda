@@ -14,9 +14,14 @@
 
 ---
 
-## LC1 — Specialization over caching: no inline caches in Lambda script
+## LC1v2 — Specialization over caching: no inline caches in Lambda script or LambdaJS
 
-**Status: DECIDED 2026-08-01.**
+**Status: DECIDED 2026-08-01; revised to v2 on 2026-09-09.** v2 extends the
+ruling to LambdaJS. Formal authority: **D8.4.1v2** in
+[`../doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The v1 text
+carved LambdaJS out ("LJS keeps its ICs"); the IC retirement of 2026-08-15
+([`Lambda_Design_JS_IC_Retire.md`](Lambda_Design_JS_IC_Retire.md) IR1-IR8) and
+the owner's ruling of 2026-09-09 close that carve-out.
 
 ### Decision
 
@@ -31,9 +36,16 @@ Stated in terms of *lanes and sites*, not functions:
    compile to plain runtime dispatch (`fn_add`-style closed switch) today,
    and to **multi-version compilation / guard hoisting** tomorrow
    (dual-func §10, DF16). **Never inline caches.**
-3. **LambdaJS keeps its ICs.** JS has no type system to specialize against;
-   the IC *is* its type feedback. Existing and future LJS IC work (Tune6
-   lineage, store ICs, shape identity) is unaffected by this ADR.
+3. **LambdaJS has no inline caches either (v2).** JS has no declared types to
+   specialize against, but it does have compile-time facts: per-site literal
+   shapes, constructor `this.x = ...` prefixes, integer-index lanes, and static
+   `NameId`s. LambdaJS fast routes are therefore **compile-predicted shape
+   specialization with an inline guard and the shared semantic kernel on a
+   miss** - the same physical route untyped Lambda already uses for `map.field`
+   (the T20-1c guarded member read) and `arr[i]` (int lane into `item_at`) -
+   never mutable per-site cache cells, feedback vectors, or JR8-style call ICs.
+   Replacement design: [`jube/JS_Tune10_Fast_Paths.md`](jube/JS_Tune10_Fast_Paths.md)
+   T10-1/T10-2. Retirement record: IC_Retire IR1-IR8.
 
 ### Original framing and the grey-area resolution
 
@@ -78,8 +90,12 @@ untyped-Lambda IC question reopen.
 - **R5 — Precedent.** Julia is exactly this policy (no ICs anywhere;
   multi-version specialization + dynamic-dispatch fallback) and is the
   best-performing system of its shape; SBCL and Static Hermes match on the
-  typed lane. V8/JSC-style ICs are the workaround for a language with
-  nothing to specialize against — LJS inherits that world; Lambda does not.
+  typed lane. V8/JSC-style ICs are the workaround for a language with nothing
+  to specialize against. QuickJS is the counter-example that settles the JS
+  half: no ICs at all, atoms plus a shape probe inline in the ordinary path,
+  generic semantics only on a miss - and quickjs-ng added ICs then removed
+  them again (IC_Retire §3, JS_Tune9 §7.3). That is the LambdaJS route under
+  v2.
 
 ### Accepted costs
 
@@ -107,40 +123,19 @@ untyped-Lambda IC question reopen.
 
 ---
 
-## LambdaJS implementation note — guarded named-property inline caches
+## LambdaJS implementation note - named-property inline caches (RETIRED)
 
-LambdaJS uses bounded, mutable **cache cells** beside otherwise immutable MIR;
-it does not patch generated instructions. For the general compiled
-non-computed named-member paths (`obj.field` and `obj.field = value`), lowering
-allocates one `JsLoadIC` or `JsStoreIC` per site and passes its address, the
-interned field name, and its length to `js_property_access_named_ic` or
-`js_property_set_named_ic`.
-
-Each cache entry records the receiver kind, the exact `TypeMap*` shape, its
-`ShapeEntry*`, and the field byte offset. A cache starts empty, becomes
-monomorphic after its first eligible receiver, holds up to four shapes in its
-polymorphic state, and becomes megamorphic thereafter. On a hit, the helper
-checks the receiver kind and exact shape pointer, then reads or writes the
-cached slot directly. This replaces a property-key conversion/lookup and the
-ordinary descriptor/prototype/exotic dispatch with a small, predictable guard
-plus an offset access.
-
-The fast path is intentionally narrow: it caches only descriptor-free,
-non-deleted own data properties on plain maps (and eligible array companion
-maps). Accessors, inherited and builtin properties, Proxies and other exotic
-objects, computed/private names, and incompatible stores fall back to the
-ordinary JavaScript `[[Get]]`/`[[Set]]` path. Stores first run that ordinary
-path on a miss and are cached only if the resulting own slot can safely accept
-the value type. This is guard-based rather than invalidation-based: structural
-changes give the receiver a new `TypeMap*`, while descriptor changes move it
-off the plain-map fast path, so stale entries cannot be used.
-
-Constructor shape caching complements the per-site ICs by sharing a canonical
-`TypeMap` among same-layout instances, allowing their exact-shape guards to
-hit. Prototype-method call ICs are not implemented; inherited method lookup
-remains on the normal dispatch path. The implementation lives in
-`lambda/js/js_mir_expression_lowering.cpp`, `lambda/js/js_runtime.{h,cpp}`,
-and uses the `TypeMap`/`ShapeEntry` layout in `lambda/lambda-data.hpp`.
+The per-site `JsLoadIC`/`JsStoreIC` cells, the `js_property_access_named_ic` /
+`js_property_set_named_ic` probes, the per-module IC tables, and the
+constructor shape cache that earlier revisions of this note described were
+removed on 2026-08-15 ([`Lambda_Design_JS_IC_Retire.md`](Lambda_Design_JS_IC_Retire.md)
+IR6). Named accesses now lower to `js_get_name_id(obj, name_id)` and
+`js_set_name_id(obj, name_id, value, strict)`, whose stateless fast head probes
+the receiver's `TypeMap` by `NameId` (D3.4.4v2, D4.6.1v2) and falls back to the
+shared property kernel. The replacement fast route - compile-predicted shapes
+with an inline guard, kernel on miss - is specified in
+[`jube/JS_Tune10_Fast_Paths.md`](jube/JS_Tune10_Fast_Paths.md) T10-2 and is not
+yet implemented.
 
 ---
 

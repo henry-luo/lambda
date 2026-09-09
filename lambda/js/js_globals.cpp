@@ -997,7 +997,7 @@ static Item js_require_object_type(Item arg, const char* method_name) {
     TypeId t = get_type_id(arg);
     if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY ||
         js_is_ordinary_numeric_array(arg) || t == LMD_TYPE_FUNC ||
-        t == LMD_TYPE_ELEMENT || t == LMD_TYPE_VMAP)
+        t == LMD_TYPE_ELEMENT || is_virtual_container_type_id(t))
         return js_status_ok();
     Item type_name = js_name_item("TypeError");
     char msg[128];
@@ -1008,7 +1008,8 @@ static Item js_require_object_type(Item arg, const char* method_name) {
 }
 
 bool js_property_ops_has_property(Item object, Item key, TypeId type, Item* out_result) {
-    if (type == LMD_TYPE_VMAP && js_host_object_has_property(object, key, out_result)) {
+    if (is_virtual_container_type_id(type) &&
+            js_host_object_has_property(object, key, out_result)) {
         return true;
     }
     if (js_is_proxy(object)) {
@@ -1060,7 +1061,7 @@ bool js_property_ops_has_property(Item object, Item key, TypeId type, Item* out_
 }
 
 bool js_property_ops_delete_property(Item obj, Item key, Item* out_result) {
-    if (get_type_id(obj) == LMD_TYPE_VMAP &&
+    if (is_virtual_container_type_id(get_type_id(obj)) &&
         js_host_object_delete_property(obj, key, out_result)) {
         return true;
     }
@@ -1086,7 +1087,7 @@ bool js_property_ops_delete_property(Item obj, Item key, Item* out_result) {
 static bool js_is_engine_internal_enumeration_key(const char* name, int name_len);
 
 bool js_property_ops_own_property_names(Item object, Item* out_result) {
-    if (get_type_id(object) == LMD_TYPE_VMAP &&
+    if (is_virtual_container_type_id(get_type_id(object)) &&
         js_host_object_own_property_names(object, out_result)) {
         return true;
     }
@@ -1144,7 +1145,7 @@ bool js_property_ops_own_property_descriptor(Item obj, Item name,
         *out_result = js_proxy_trap_get_own_property_descriptor(obj, name);
         return true;
     }
-    if (type == LMD_TYPE_VMAP &&
+    if (is_virtual_container_type_id(type) &&
         js_host_object_own_property_descriptor(obj, name, out_result)) {
         return true;
     }
@@ -5441,7 +5442,7 @@ extern "C" Item js_console_assert_fn(Item cond, Item msg) {
 using JsFuncName = JsFunction;
 
 static Item js_instanceof_impl(Item left, Item right, bool skip_symbol);
-JS_FORWARD_STATIC_EXPRESSION(bool, js_instanceof_is_object_like_type, (TypeId type), (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP))
+JS_FORWARD_STATIC_EXPRESSION(bool, js_instanceof_is_object_like_type, (TypeId type), (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT || is_virtual_container_type_id(type)))
 JS_FORWARD_STATIC_RETURN(bool, js_instanceof_can_walk_prototype, (Item item), js_is_js_array, (item) || js_instanceof_is_object_like_type(get_type_id(item)))
 
 static Item js_prototype_chain_contains(Item left, Item target_proto) {
@@ -5759,7 +5760,7 @@ extern "C" Item js_in(Item key, Item object) {
     // ES spec: TypeError if RHS is not an object
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY &&
         !js_is_ordinary_numeric_array(object) && type != LMD_TYPE_FUNC
-        && type != LMD_TYPE_ELEMENT && type != LMD_TYPE_VMAP) {
+        && type != LMD_TYPE_ELEMENT && !is_virtual_container_type_id(type)) {
         return js_throw_type_error("Cannot use 'in' operator to search for a property in a non-object");
     }
     if (get_type_id(key) == LMD_TYPE_STRING &&
@@ -5979,7 +5980,6 @@ JS_FORWARD_RETURN(bool, js_is_typed_array_ctor_name, (const char* name, int len)
 
 using JsFuncFlagsAccess = JsFunction;
 #define JS_FUNC_FLAG_GENERATOR_EARLY 1
-#define JS_FUNC_FLAG_ASYNC_EARLY     128
 
 static Item js_setup_dynamic_function_prototype(Item proto, Item ctor_fn,
         const char* ctor_name) {
@@ -6097,8 +6097,10 @@ extern "C" Item js_get_prototype_of(Item object) {
         // js_get_prototype supplies the intrinsic NativeError fallback.
         return js_get_prototype(object);
     }
-    if (ot == LMD_TYPE_VMAP) {
-        if (js_promise_vmap_is(object)) return js_get_prototype(object);
+    if (is_virtual_container_type_id(ot)) {
+        if (ot == LMD_TYPE_VMAP && js_promise_vmap_is(object)) {
+            return js_get_prototype(object);
+        }
         Item host_proto = ItemNull;
         if (js_host_object_prototype(object, &host_proto)) {
             return get_type_id(host_proto) == LMD_TYPE_MAP ? host_proto : ItemNull;
@@ -6234,11 +6236,6 @@ static Item js_reflect_create_list_from_array_like(Item array_like, Item** out_a
 
 // Check if a function value is a constructor (has [[Construct]] internal method).
 // Arrow functions, generators, and built-in prototype methods are NOT constructors.
-#define JS_FUNC_FLAG_GENERATOR_G 1
-#define JS_FUNC_FLAG_ARROW_G     2
-#define JS_FUNC_FLAG_TYPED_ARRAY_METHOD_G 4
-#define JS_FUNC_FLAG_METHOD_G    32
-#define JS_FUNC_FLAG_ASYNC_G     128
 
 using JsFunctionLayout = JsFunction;
 JS_FORWARD_STATIC_RETURN(bool, js_func_is_constructor, (Item func_item), js_has_construct_capability, (func_item))
@@ -6400,15 +6397,23 @@ static Item js_make_reflect_set_value_desc(Item value, bool include_create_attrs
     return desc_root.get();
 }
 
+static bool js_virtual_define_uses_exotic_storage(Item receiver) {
+    TypeId type = get_type_id(receiver);
+    // Preserve VMap's established behavior (including Promise carriers).
+    // VArray/Velmt use this route only when Jube metadata owns their writes.
+    return type == LMD_TYPE_VMAP ||
+        ((type == LMD_TYPE_VARRAY || type == LMD_TYPE_VELMT) &&
+            js_host_object_type(receiver));
+}
+
 static Item js_reflect_set_define_receiver(Item receiver, Item key, Item value, bool include_create_attrs) {
     RootFrame roots(4);
     Rooted<Item> receiver_root(roots, receiver);
     Rooted<Item> key_root(roots, key);
     Rooted<Item> value_root(roots, value);
-    if (get_type_id(receiver_root.get()) == LMD_TYPE_VMAP) {
-        // Host VMaps expose DefineOwn through their named Set hook; routing
-        // this receiver through Reflect.defineProperty would skip that hook
-        // because VMap has no ordinary Map descriptor storage (D4.6.1v2).
+    if (js_virtual_define_uses_exotic_storage(receiver_root.get())) {
+        // Branded virtual carriers expose DefineOwn through their named Set
+        // hook; none has ordinary Map descriptor storage (D4.6.1v2/D7.4.5v2).
         Item stored = js_define_own_key_storage(receiver_root.get(),
             key_root.get(), value_root.get());
         return item_is_error(stored) ? stored : (Item){.item = b2it(true)};
@@ -6433,8 +6438,8 @@ static bool js_dataset_set_through_api(Item dataset, Item key, Item value) {
          strncmp(key_string->chars, "__lambda_dataset_element", 24) == 0)) {
         return false;
     }
-    Item owner = js_get_key_cstr(dataset, "__lambda_dataset_element");
-    if (get_type_id(owner) != LMD_TYPE_VMAP) return false;
+    Item owner = js_dataset_owner(dataset);
+    if (!is_element_family_type_id(get_type_id(owner))) return false;
     jube_internal_host_api()->dom_catalog->set_data(owner, key, value);
     return true;
 }
@@ -6452,6 +6457,99 @@ static bool js_reflect_receiver_accepts_data(Item receiver_descriptor,
     Item writable = js_map_shape_lookup_ext(receiver_descriptor.map,
         it2s(writable_key)->chars, (int)it2s(writable_key)->len, &has_writable);
     return !has_writable || it2b(js_to_boolean(writable));
+}
+
+// T10-3/D-B: OrdinarySet that creates a new own data property on an ordinary
+// extensible object. The general algorithm below proves the same facts by
+// materializing a descriptor object per prototype link and then re-parsing one
+// in Reflect.defineProperty; that cost lands on every constructor store and
+// every object-literal-shaped add (~7us per `new P(x,y)` in Result38, against
+// 200ns in QuickJS). This kernel proves them from shape storage alone and then
+// performs the single slot write. Anything it cannot prove cheaply returns
+// false, leaving the unchanged algorithm as the semantics.
+// Input-owned shape entries carry NAME_ID_NONE, so absence is only proved once
+// the byte-confirmed seam has also missed (same two probes as
+// js_named_fast_lookup).
+static ShapeEntry* js_ordinary_shape_entry_for(TypeMap* tm, NameId name_id,
+        uint32_t name_hash, const char* name, int name_len) {
+    if (!tm || !typemap_ptr_is_plausible(tm) || !tm->shape) return NULL;
+    ShapeEntry* entry = typemap_hash_lookup_by_name_id(tm, name_id, name_hash);
+    return entry ? entry : typemap_hash_lookup_idless(tm, name, name_len);
+}
+
+static bool js_ordinary_add_prototype_chain_is_clear(Item target, NameId name_id,
+        uint32_t name_hash, const char* name, int name_len) {
+    Item cur = js_get_prototype_of(target);
+    for (int depth = 0; depth < 64; depth++) {
+        TypeId t = get_type_id(cur);
+        if (t == LMD_TYPE_NULL || t == LMD_TYPE_UNDEFINED) return true;
+        // Only ordinary shape-backed maps can be cleared this cheaply: an
+        // exotic or branded prototype may synthesize a governing descriptor
+        // (String indices, RegExp flags, Proxy traps) that shape storage does
+        // not hold.
+        if (t != LMD_TYPE_MAP || !cur.map) return false;
+        uint8_t kind = cur.map->map_kind;
+        if (kind != MAP_KIND_PLAIN && kind != MAP_KIND_DESC) return false;
+        if (!js_object_uses_ordinary_shape(cur)) return false;
+        TypeMap* tm = (TypeMap*)cur.map->type;
+        if (!tm || !typemap_ptr_is_plausible(tm)) return false;
+        if (js_ordinary_shape_entry_for(tm, name_id, name_hash, name, name_len)) {
+            // An inherited entry governs this Set (accessor, non-writable, or
+            // a plain shadowed data property); let the full algorithm decide.
+            return false;
+        }
+        cur = js_get_prototype_of(cur);
+    }
+    return false;
+}
+
+// preventExtensions/seal/freeze are recorded as ordinary own marker properties,
+// so extensibility is a shape question. The name spellings and the truthiness
+// test mirror js_object_is_extensible's Map branch exactly; only the interning
+// and prototype-aware map_get are dropped, neither of which can change the
+// answer for an own marker slot.
+static bool js_ordinary_map_is_extensible(Map* m) {
+    bool found = false;
+    // The 17 here is the length every writer and reader in this file uses.
+    Item marker = js_map_shape_lookup_ext(m, "__non_extensible__", 17, &found);
+    if (found && js_is_truthy(marker)) return false;
+    marker = js_map_shape_lookup_ext(m, "__sealed__", 10, &found);
+    if (found && js_is_truthy(marker)) return false;
+    marker = js_map_shape_lookup_ext(m, "__frozen__", 10, &found);
+    return !(found && js_is_truthy(marker));
+}
+
+static bool js_ordinary_add_own_data_property(Item target, Item key, Item value) {
+    if (get_type_id(target) != LMD_TYPE_MAP || !target.map) return false;
+    // MAP_KIND_PLAIN means no ShapeEntry on this object carries descriptor
+    // attributes, so a hit in shape storage is always a plain data slot. It
+    // also excludes proxies, typed arrays, dataset views and every other exotic.
+    if (target.map->map_kind != MAP_KIND_PLAIN) return false;
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    NameRef key_ref = it2s(key);
+    if (!key_ref || property_key_kind(key_ref) != NAME_KEY_STRING) return false;
+    NameId name_id = property_key_id(key_ref);
+    if (name_id == NAME_ID_NONE) return false;
+    // `__proto__` is an accessor on Object.prototype, not an own data slot.
+    if (key_ref->len == 9 && memcmp(key_ref->chars, "__proto__", 9) == 0) {
+        return false;
+    }
+    if (!js_object_uses_ordinary_shape(target)) return false;
+    uint32_t name_hash = property_key_hash(key_ref);
+    const char* name = key_ref->chars;
+    int name_len = (int)key_ref->len;
+    if (js_ordinary_shape_entry_for((TypeMap*)target.map->type, name_id,
+            name_hash, name, name_len)) {
+        // Not an add: an existing own slot has its own writability and
+        // stored-type rules, which the named fast path already tried.
+        return false;
+    }
+    if (!js_ordinary_map_is_extensible(target.map)) return false;
+    if (!js_ordinary_add_prototype_chain_is_clear(target, name_id, name_hash,
+            name, name_len)) {
+        return false;
+    }
+    return !item_is_error(js_define_own_key_storage(target, key, value));
 }
 
 extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
@@ -6542,7 +6640,8 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
             // TypedArraySetElement (S#7.3.32).
             if (!target_valid_index) return (Item){.item = b2it(true)};
             TypeId rt = get_type_id(receiver);
-            bool recv_is_obj = (rt == LMD_TYPE_MAP || rt == LMD_TYPE_VMAP ||
+            bool recv_is_obj = (rt == LMD_TYPE_MAP ||
+                                is_virtual_container_type_id(rt) ||
                                 js_is_js_array(receiver) || rt == LMD_TYPE_FUNC ||
                                 rt == LMD_TYPE_ELEMENT);
             if (!recv_is_obj) return (Item){.item = b2it(false)};
@@ -6626,10 +6725,11 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
             return (Item){.item = b2it(true)};
         }
     }
-    if (get_type_id(target) == LMD_TYPE_VMAP && receiver.item == target.item) {
+    if (js_virtual_define_uses_exotic_storage(target_root.get()) &&
+            receiver.item == target.item) {
         Item exotic_result = ItemNull;
-        // VMap carriers have no ordinary Map descriptor to drive the receiver
-        // fast path. Dispatch their metadata-owned Set operation before the
+        // Virtual carriers have no ordinary Map descriptor to drive the
+        // receiver fast path. Dispatch their metadata-owned Set operation before the
         // descriptor walk, otherwise Promise expando writes (including an
         // overridden `then`) are diverted into a discarded DefineOwn shell.
         if (js_dispatch_property_op(JS_EXOTIC_SET, target_root.get(), 0,
@@ -6646,6 +6746,12 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     bool target_is_typed_array = get_type_id(target) == LMD_TYPE_MAP &&
         js_object_has_class(target, JS_CLASS_TYPED_ARRAY);
     if (receiver.item == target.item && !target_is_typed_array) {
+        // T10-3: the ordinary "create a new own data property" case, decided
+        // from shape storage before any descriptor object is built.
+        if (js_ordinary_add_own_data_property(target_root.get(), key_root.get(),
+                value_root.get())) {
+            return (Item){.item = b2it(true)};
+        }
         bool can_fast_set = true;
         // Shape-flag shortcut. js_object_get_own_property_descriptor allocates a
         // whole descriptor Map (js_new_object plus four interned-key writes)
@@ -8562,7 +8668,7 @@ extern "C" Item js_object_keys(Item object) {
             ? js_object_keys(properties) : js_array_new(0);
     }
     TypeId type = get_type_id(object);
-    if (type == LMD_TYPE_VMAP) {
+    if (is_virtual_container_type_id(type)) {
         Item host_keys = ItemNull;
         if (!js_host_object_own_property_names(object, &host_keys) ||
                 get_type_id(host_keys) != LMD_TYPE_ARRAY || !host_keys.array) {
@@ -8748,8 +8854,9 @@ extern "C" Item js_for_in_keys(Item object) {
         return js_object_keys(object);
     }
 
-    // for functions: enumerate own enumerable properties, then inherited enumerable strings
-    if (type == LMD_TYPE_FUNC) {
+    // S8.1.1/S8.1.2v2: callable and virtual object carriers enumerate their
+    // projected own keys, then the same inherited enumerable string keys.
+    if (type == LMD_TYPE_FUNC || is_virtual_container_type_id(type)) {
         JS_ROOTS(roots,
             object_root, object,
             result_root, js_object_keys(object_root.get()),
@@ -9009,7 +9116,8 @@ extern "C" bool js_for_in_key_is_live(Item object, Item key) {
     TypeId object_type = get_type_id(object_root.get());
     if (object_root.get().item == ItemNull.item || object_type == LMD_TYPE_UNDEFINED) return false;
     if (object_type != LMD_TYPE_MAP && !js_is_js_array(object) &&
-        object_type != LMD_TYPE_FUNC && object_type != LMD_TYPE_ELEMENT) {
+        object_type != LMD_TYPE_FUNC && object_type != LMD_TYPE_ELEMENT &&
+        !is_virtual_container_type_id(object_type)) {
         object_root.set(js_to_object(object_root.get()));
     }
 
@@ -9018,7 +9126,8 @@ extern "C" bool js_for_in_key_is_live(Item object, Item key) {
     while (current_root.get().item != ItemNull.item && depth < 64) {
         TypeId current_type = get_type_id(current_root.get());
         if (current_type != LMD_TYPE_MAP && !js_is_js_array(current_root.get()) &&
-            current_type != LMD_TYPE_FUNC && current_type != LMD_TYPE_ELEMENT) {
+            current_type != LMD_TYPE_FUNC && current_type != LMD_TYPE_ELEMENT &&
+            !is_virtual_container_type_id(current_type)) {
             break;
         }
         // Shape-flag shortcut: allocating a descriptor Map per prototype level
@@ -9043,7 +9152,8 @@ extern "C" bool js_for_in_key_is_live(Item object, Item key) {
             Item enumerable = js_get_key_default(desc_root.get(), key_root.get());
             return js_is_truthy(enumerable);
         }
-        current_root.set(current_type == LMD_TYPE_FUNC
+        current_root.set((current_type == LMD_TYPE_FUNC ||
+                is_virtual_container_type_id(current_type))
             ? js_get_prototype_of(current_root.get())
             : js_get_prototype(current_root.get()));
         depth++;
@@ -10303,7 +10413,8 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
         (target.item == 0 && tid != LMD_TYPE_INT)) {
         return js_throw_type_error("Cannot convert undefined or null to object");
     }
-    bool keep_host_target = (tid == LMD_TYPE_VMAP && js_host_object_type(target));
+    bool keep_host_target = is_virtual_container_type_id(tid) &&
+        js_host_object_type(target);
     if (tid != LMD_TYPE_MAP && !js_is_js_array(target) && tid != LMD_TYPE_FUNC &&
             !keep_host_target) {
         // host VMAPs expose setters; boxing them would strand Object.assign() writes.
@@ -10347,7 +10458,7 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         if (js_dispatch_property_op(JS_EXOTIC_HAS_OWN, obj, 0, key, obj,
                 ItemNull, ItemNull, false, &proxy_result)) return proxy_result;
     }
-    if (get_type_id(obj) == LMD_TYPE_VMAP ||
+    if (is_virtual_container_type_id(get_type_id(obj)) ||
             (get_type_id(obj) == LMD_TYPE_MAP &&
                 js_object_has_class(obj, JS_CLASS_TYPED_ARRAY))) {
         Item exotic_result = ItemNull;
@@ -13354,14 +13465,15 @@ static bool js_message_port_event_name_matches(Item event, const char* expected)
 
 static bool js_message_port_is_object(Item value) {
     TypeId type = get_type_id(value);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP;
+    return type == LMD_TYPE_MAP || is_virtual_container_type_id(type);
 }
 
 static bool js_worker_transfer_markable(Item value) {
     TypeId type = get_type_id(value);
     // array-family: a numeric or freshly built [] is LMD_TYPE_ARRAY_NUM, which
     // the bare tag misses, so markAsUntransferable([]) silently did nothing.
-    return is_array_family_type_id(type) || type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP ||
+    return is_materialized_array_type_id(type) || type == LMD_TYPE_MAP ||
+        is_virtual_container_type_id(type) ||
         type == LMD_TYPE_ELEMENT;
 }
 
@@ -14260,7 +14372,8 @@ static bool js_with_binding_key_same(Item a, Item b) {
 static bool js_with_scope_is_object(Item value) {
     TypeId type = get_type_id(value);
     return type == LMD_TYPE_MAP || js_is_js_array(value) ||
-           type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP;
+           type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT ||
+           is_virtual_container_type_id(type);
 }
 
 extern "C" void js_with_batch_reset(void) {

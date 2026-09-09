@@ -229,7 +229,7 @@ not an engine change.
 
 Non-goals: migrating behavior *implementations* to Lambda script (that is
 `Lambda_Design_DOM_Pkg.md` Phase 3 — DOM3 builds its seam); event objects (already ordinary
-maps; no dispatch to fix); inline caches (enabled by this design, not included); binary signature
+maps; no dispatch to fix); inline caches (**ruled out entirely** by D8.4.1v2/LC1v2 as of 2026-09-09 — static resolution and compile-predicted guards are the sanctioned mechanisms); binary signature
 form (D0b); dataset (`js_dataset_get_property` is already zero-strcmp algorithmic conversion —
 it becomes a named-hook, unchanged).
 
@@ -907,8 +907,10 @@ same 4,602,200-hop shape after §2.4 removed per-hop transforms and chains.
 Release-build microbenchmark of hot property access (`parentNode` walk, `value` read on
 text controls, computed-style read) before/after; record numbers in this doc. Explicitly
 **deferred**: binary signature blobs (D0b), interned-pointer key fast path (needs pooled keys at
-the JS atom layer — worth doing when measurements say so), per-site inline caches keyed on
-(typedef, interned name).
+the JS atom layer — worth doing when measurements say so). *(The former third item, per-site
+inline caches keyed on (typedef, interned name), is **withdrawn**: D8.4.1v2/LC1v2 ban per-site
+cache state in LambdaJS as of 2026-09-09. The equivalent win comes from DOM4 static ordinal
+resolution plus compile-predicted guards.)*
 
 ### Sequencing and exit
 

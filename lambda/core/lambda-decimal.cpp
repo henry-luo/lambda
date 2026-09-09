@@ -79,6 +79,24 @@ void lambda_finite_double_to_shortest(double d, char* out, int out_size) {
         d = -d;
     }
 
+    // T10-0/D-A: integral magnitudes below 2^53 are their own shortest form —
+    // adjacent doubles there are at least 1 apart, so no shorter decimal can
+    // round-trip, and ES Number::toString emits the exact integer digits (k<=e<=21).
+    // Array indices and most JS numbers land here; the generic path below cost up
+    // to 21 snprintf/sscanf round trips per `a[i]` key conversion.
+    if (d < 9007199254740992.0 && d == (double)(int64_t)d) {
+        char buf[24];
+        int n = 0;
+        uint64_t v = (uint64_t)(int64_t)d;
+        do { buf[n++] = (char)('0' + (int)(v % 10)); v /= 10; } while (v);
+        char* o = out;
+        char* end = out + out_size - 1;
+        if (neg && o < end) *o++ = '-';
+        while (n > 0 && o < end) *o++ = buf[--n];
+        *o = '\0';
+        return;
+    }
+
     char sci[64];
     int best_len = 0;
     for (int prec = 1; prec <= 21; prec++) {

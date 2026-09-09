@@ -158,16 +158,37 @@ reverses the symbol encoding (`js_internal_symbol_name_to_symbol`).
 
 ---
 
-## 10. Constructor shape pre-allocation
+## 10. Constructor shape pre-allocation — RETIRED, replacement specified
 
-To make `new C()` and `this.prop = …` fast, the compiler pre-computes a shape:
+**Status (2026-09-09): the mechanism described here no longer exists.** The
+per-call-site shape cache went out with the inline caches on 2026-08-15
+(`vibe/Lambda_Design_JS_IC_Retire.md` IR6); `js_set_class_ctor_shape_metadata`,
+`js_constructor_create_object_shaped_cached`, and `js_get_shaped_slot` are gone
+from the tree. Without it every `this.prop = …` in a constructor is a property
+**add**, which runs the full `OrdinarySet` → descriptor-object →
+`Reflect.defineProperty` path; that is 25–40% of `havlak`, `cd`, `deltablue`,
+and `prettier_ast` in Result38.
 
-- `js_set_class_ctor_shape_metadata` records constructor field layout in the
-  callable class carrier; it does not publish a class/prototype sentinel.
-- `js_constructor_create_object_shaped_cached` (`:2566`) captures the freshly-built `TypeMap*` into a per-call-site `void** shape_cache` on first `new`, so subsequent instances from the same call site share the blueprint.
-- `js_get_shaped_slot` / `js_set_shaped_slot` (`:2584`) read/write by slot index — O(1) via `tm->slot_entries[]`, O(n) `shape` walk otherwise — writing the raw native value into `Map.data + byte_offset`.
+The replacement must not reintroduce a cache: **D8.4.1v2** and **LC1v2** ban
+per-site mutable state in LambdaJS as well as in the Lambda lane. The
+sanctioned design is a **compile-predicted** shape — immutable metadata derived
+from the constructor's `this.x = …` prefix and from each object-literal site —
+allocated with reserved slots so constructor stores are existing-slot writes,
+guarded inline at the access site, with the shared kernel on a miss. See
+`vibe/jube/JS_Tune10_Fast_Paths.md` T10-2/T10-3.
 
-Because instances **share** the cached `TypeMap`, any per-instance attribute change must first `js_typemap_clone_for_mutation` (`js_property_attrs.cpp:129`) to avoid corrupting siblings. The compile-time side of this optimization (the ctor field scan, "A5") is in [JS_07 — Classes](JS_07_Classes.md); the perf rationale is in [JS_15 — Performance](JS_15_Performance.md).
+What the retired mechanism did, for reference: `js_set_class_ctor_shape_metadata`
+recorded the constructor field layout in the callable class carrier without
+publishing a class/prototype sentinel; `js_constructor_create_object_shaped_cached`
+captured the freshly-built `TypeMap*` into a per-call-site `void** shape_cache`
+on the first `new`, so later instances from that site shared the blueprint; and
+`js_get_shaped_slot` / `js_set_shaped_slot` read and wrote by slot index,
+writing the raw native value into `Map.data + byte_offset`. Because instances
+shared the cached `TypeMap`, a per-instance attribute change had to
+`js_typemap_clone_for_mutation` (`js_property_attrs.cpp:129`) first. The
+per-call-site cache cell is exactly what **D8.4.1v2** now forbids; the
+compile-time ctor field scan ("A5") it depended on still exists and is
+described in [JS_07 — Classes](JS_07_Classes.md); the perf rationale is in [JS_15 — Performance](JS_15_Performance.md).
 
 ---
 

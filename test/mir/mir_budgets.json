@@ -399,12 +399,12 @@
       "name": "js_error_lane_tag_budget",
       "script": "test/mir/js/error_lane_dynamic_catch.js",
       "language": "js",
-      "description": "D8.4.3 standing emission ratchet: the deliberate dynamic property-access error path emits no redundant ERROR-tag comparison. Any added lane check must be reviewed and re-baselined in this file.",
+      "description": "D8.4.3 standing emission ratchet: the deliberate dynamic property-access error path emits exactly one ERROR-tag comparison. The counter already targeted tag 27; D7.4.5v2 made that the live Error tag, exposing the stale zero budget. Any added lane check must be reviewed and re-baselined in this file.",
       "budgets": {
         "default": {
           "functions": {
             "_js_dynamicCaught_#_body": {
-              "error_lane_tag_tests": 0
+              "error_lane_tag_tests": 1
             }
           }
         }

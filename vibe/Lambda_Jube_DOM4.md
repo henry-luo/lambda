@@ -17,8 +17,9 @@
 > **Spec anchors**: **D7.4.4** (single host-object protocol — this doc's charter ruling,
 > minted from D4k/D4j), D3.4.7 / D7.4.1–D7.4.3 (host-family metadata, single VMap/Jube bridge),
 > D6.2.2v2 (observable Get-then-`[[Call]]` for method calls), D5.4.3/D5.4.4 (no realm state
-> baked into shared MIR), D8 (compilation). LC1 applies to Lambda script only; LJS keeps its
-> caches — but DOM4 is *static resolution*, not an inline cache.
+> baked into shared MIR), D8 (compilation). LC1v2 / D8.4.1v2 ban inline caches in **both**
+> lanes (LambdaJS included, since 2026-09-09) — DOM4 is *static resolution*, which is exactly
+> the sanctioned mechanism.
 
 ## 0. The DOM1→DOM4 arc
 
@@ -277,7 +278,8 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
   with a companion-map `namedItem`/`constructor` decoration, kept "live" by a
   4096-entry issued-collection cache re-walked on every DOM mutation
   (dom.cpp:1868, refresh sweeps) — copies on read *and* sweeps on write;
-  **element-shaped hosts are flattened** — Radiant's `Velmt` memcpys the struct into a
+  **element-shaped hosts are flattened** — Radiant's native `RadiantVelmt` snapshot is
+  copied into a
   VMap payload and strcmp-projects `tag`/`attrs`/`children`/`text` through the map-only
   interface. The carriers:
   - **vmap** — virtual map (exists; `VMapVtable`).
@@ -286,9 +288,11 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
     become varrays over the parent's live child state — **live by reading**, deleting
     the materialization and the mutation-refresh machinery. Declared element type
     (`dom_node[]`) feeds the D4e lattice, resolving OQ3's loop-variable typing.
+    Lambda reads that native state directly while its execution holds the DOM fixed;
+    there is no boundary snapshot hook or membership copy.
   - **velmt** — virtual element: Lambda `Element`'s dual nature virtualized — list face
-    (children), map face (attrs/named members), tag. First client: Radiant `Velmt`
-    custom-layout handles (the name already agrees); candidate: the Lambda/Mark
+    (children), map face (attrs/named members), tag. First client: Radiant custom-layout
+    handles; candidate: the Lambda/Mark
     projection of DOM nodes, where an element *is* the natural data shape.
   Orthogonality pin: declared interfaces / member records / ordinals are the
   **named-member** protocol and apply identically to all three carriers (D7.4.4); the
@@ -299,6 +303,10 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
   on the existing VMap carrier; nothing in DOM4 depends on the new carriers existing.
   Collections stay materialized Arrays for now (the refresh-sweep cost is accepted,
   known, and quarantined behind D4l as the future fix); DOM-node carrier move = OQ9.
+  The proposed carrier ABI, runtime integration surface, and complete DOM migration
+  inventory are refined as D4l.1–D4l.10 in
+  [`Lambda_Design_Type_Virtual.md`](Lambda_Design_Type_Virtual.md). This was
+  direction-only at DOM4 closure; implementation now follows **D7.4.5v2**.
 
 ## 3. Mechanism
 

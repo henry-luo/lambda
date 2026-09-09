@@ -240,7 +240,7 @@ static TypeId jube_signature_type_id(const char* text) {
         for (int j = 0; j < module->type_count; j++) {
             const JubeTypeDef* type = &module->types[j];
             if (type->name && jube_type_name_matches(text, type->name)) {
-                return LMD_TYPE_VMAP;
+                return jube_carrier_type_id(type->carrier);
             }
         }
     }
@@ -3047,7 +3047,8 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
                 // causing wrong accessor functions (e.g. array_get vs array_int_get).
                 Type* orig = entry->node->type;
                 TypeId tid = orig->type_id;
-                if (tid >= LMD_TYPE_CONTAINER) {
+                if (is_container_type_id(tid) || tid == LMD_TYPE_TYPE ||
+                        tid == LMD_TYPE_FUNC) {
                     ast_node->type = orig;
                 } else {
                     ast_node->type = alloc_type(tp->pool, tid, sizeof(Type));

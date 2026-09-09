@@ -28,9 +28,11 @@ template<> struct ItemTagToType<LMD_TYPE_PATH> { typedef Path type; enum { is_po
 template<> struct ItemTagToType<LMD_TYPE_RANGE> { typedef Range type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_ARRAY_NUM> { typedef ArrayNum type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_ARRAY> { typedef Array type; enum { is_pointer = true, is_direct_pointer = true }; };
+template<> struct ItemTagToType<LMD_TYPE_VARRAY> { typedef VArray type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_MAP> { typedef Map type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_VMAP> { typedef VMap type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_ELEMENT> { typedef Element type; enum { is_pointer = true, is_direct_pointer = true }; };
+template<> struct ItemTagToType<LMD_TYPE_VELMT> { typedef Velmt type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_TYPE> { typedef Type type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_FUNC> { typedef Function type; enum { is_pointer = true, is_direct_pointer = true }; };
 template<> struct ItemTagToType<LMD_TYPE_ANY> { typedef void type; enum { is_pointer = false, is_direct_pointer = false }; };
@@ -178,9 +180,11 @@ decltype(auto) visit(Item it, F&& f) {
         case LMD_TYPE_RANGE: return f(require<LMD_TYPE_RANGE>(it));
         case LMD_TYPE_ARRAY_NUM: return f(require<LMD_TYPE_ARRAY_NUM>(it));
         case LMD_TYPE_ARRAY: return f(require<LMD_TYPE_ARRAY>(it));
+        case LMD_TYPE_VARRAY: return f(require<LMD_TYPE_VARRAY>(it));
         case LMD_TYPE_MAP: return f(require<LMD_TYPE_MAP>(it));
         case LMD_TYPE_VMAP: return f(require<LMD_TYPE_VMAP>(it));
         case LMD_TYPE_ELEMENT: return f(require<LMD_TYPE_ELEMENT>(it));
+        case LMD_TYPE_VELMT: return f(require<LMD_TYPE_VELMT>(it));
         case LMD_TYPE_TYPE: return f(require<LMD_TYPE_TYPE>(it));
         case LMD_TYPE_FUNC: return f(require<LMD_TYPE_FUNC>(it));
         case LMD_TYPE_ANY: return f(require<LMD_TYPE_ANY>(it));

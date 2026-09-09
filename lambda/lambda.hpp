@@ -109,6 +109,9 @@ typedef struct Item {
         ArrayNum* array_float;    // compat alias (elem_type == ELEM_FLOAT64)
         Map* map;
         VMap* vmap;
+        VArray* varray;
+        Velmt* velmt;
+        VirtualContainer* virtual_container;
         Element* element;
         Object* object;
         Type* type;
@@ -254,6 +257,10 @@ struct ConstItem {
         const ArrayNum* array_int64;    // compat alias
         const ArrayNum* array_float;    // compat alias
         const Map* map;
+        const VMap* vmap;
+        const VArray* varray;
+        const Velmt* velmt;
+        const VirtualContainer* virtual_container;
         const Element* element;
         const Object* object;
         const Type* type;
@@ -811,6 +818,7 @@ struct VMap : Container {
     VMapVtable* vtable;    // dispatch table
     const void* host_type;  // optional branded native host type; NULL for ordinary VMaps
     void* host_data;        // optional native payload for host-object adapters
+    Item expando;           // generic host expando root; VMap currently uses its backing store
 };
 
 // VMap access helpers implemented by the runtime's C++ VMap backends.
@@ -829,6 +837,229 @@ static_assert(offsetof(VMapVtable, trace) == LAMBDA_GC_OFF_VMAP_VTABLE_TRACE,
               "VMap trace hook must match the GC ABI");
 #pragma clang diagnostic pop
 
+#define LAMBDA_VIRTUAL_ABI_VERSION 1u
+
+// D7.4.5v2: VArray and Velmt use the same host metadata prefix as VMap while
+// exposing structural callbacks for their actual semantic container kind.
+struct VirtualVtable {
+    uint32_t abi_version;
+    TypeId carrier_type;
+    uint8_t reserved[3];
+    void (*destroy)(void* data);
+    void (*trace)(void* data, gc_heap* gc);
+    uint64_t (*version)(void* data);
+};
+
+struct VMapOps {
+    VirtualOpStatus (*get)(void* data, Item key, Item* out);
+    VirtualOpStatus (*set)(void* data, Item key, Item value, Item* out);
+    VirtualOpStatus (*has)(void* data, Item key, bool* out);
+    VirtualOpStatus (*remove)(void* data, Item key, bool* out);
+    int64_t (*count)(void* data);
+    VirtualOpStatus (*key_at)(void* data, int64_t index, Item* out);
+    VirtualOpStatus (*value_at)(void* data, int64_t index, Item* out);
+};
+
+struct VArrayOps {
+    int64_t (*count)(void* data);
+    VirtualOpStatus (*get_at)(void* data, int64_t index, Item* out);
+    VirtualOpStatus (*set_at)(void* data, int64_t index, Item value, Item* out);
+    VirtualOpStatus (*splice)(void* data, int64_t start, int64_t remove_count,
+                              const Item* values, int64_t value_count, Item* out);
+};
+
+struct VArrayVtable {
+    VirtualVtable common;
+    VArrayOps items;
+};
+
+struct VelmtOps {
+    VirtualOpStatus (*tag)(void* data, Item* out);
+    VirtualOpStatus (*namespace_uri)(void* data, Item* out);
+    VMapOps attrs;
+    VArrayOps children;
+};
+
+struct VelmtVtable {
+    VirtualVtable common;
+    VelmtOps element;
+};
+
+// This is the carrier-neutral object prefix used by Jube and GC. Concrete
+// structs retain typed vtable pointers but are offset-identical to this view.
+struct VirtualContainer : Container {
+    void* data;
+    const void* vtable;
+    const void* host_type;
+    void* host_data;
+    Item expando;
+};
+
+struct VArray : Container {
+    void* data;
+    const VArrayVtable* vtable;
+    const void* host_type;
+    void* host_data;
+    Item expando;
+};
+
+struct Velmt : Container {
+    void* data;
+    const VelmtVtable* vtable;
+    const void* host_type;
+    void* host_data;
+    Item expando;
+};
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+static_assert(offsetof(VMap, data) == LAMBDA_GC_OFF_VIRTUAL_DATA &&
+              offsetof(VMap, vtable) == LAMBDA_GC_OFF_VIRTUAL_VTABLE &&
+              offsetof(VMap, host_type) == LAMBDA_GC_OFF_VIRTUAL_HOST_TYPE &&
+              offsetof(VMap, host_data) == LAMBDA_GC_OFF_VIRTUAL_HOST_DATA &&
+              offsetof(VMap, expando) == LAMBDA_GC_OFF_VIRTUAL_EXPANDO,
+              "VMap must share the virtual-container metadata prefix");
+static_assert(offsetof(VArray, data) == LAMBDA_GC_OFF_VIRTUAL_DATA &&
+              offsetof(VArray, vtable) == LAMBDA_GC_OFF_VIRTUAL_VTABLE &&
+              offsetof(VArray, host_type) == LAMBDA_GC_OFF_VIRTUAL_HOST_TYPE &&
+              offsetof(VArray, host_data) == LAMBDA_GC_OFF_VIRTUAL_HOST_DATA &&
+              offsetof(VArray, expando) == LAMBDA_GC_OFF_VIRTUAL_EXPANDO,
+              "VArray must share the virtual-container metadata prefix");
+static_assert(offsetof(Velmt, data) == LAMBDA_GC_OFF_VIRTUAL_DATA &&
+              offsetof(Velmt, vtable) == LAMBDA_GC_OFF_VIRTUAL_VTABLE &&
+              offsetof(Velmt, host_type) == LAMBDA_GC_OFF_VIRTUAL_HOST_TYPE &&
+              offsetof(Velmt, host_data) == LAMBDA_GC_OFF_VIRTUAL_HOST_DATA &&
+              offsetof(Velmt, expando) == LAMBDA_GC_OFF_VIRTUAL_EXPANDO,
+              "Velmt must share the virtual-container metadata prefix");
+static_assert(offsetof(VirtualVtable, destroy) == LAMBDA_GC_OFF_VIRTUAL_VTABLE_DESTROY &&
+              offsetof(VirtualVtable, trace) == LAMBDA_GC_OFF_VIRTUAL_VTABLE_TRACE,
+              "virtual lifecycle hooks must match the GC ABI");
+#pragma clang diagnostic pop
+
+static inline VirtualContainer* virtual_container_from_item(Item item) {
+    return is_virtual_container_type_id(get_type_id(item))
+        ? (VirtualContainer*)(uintptr_t)item.item : nullptr;
+}
+
+static inline const void* virtual_host_type(Item item) {
+    VirtualContainer* container = virtual_container_from_item(item);
+    return container ? container->host_type : nullptr;
+}
+
+static inline void* virtual_host_data(Item item) {
+    VirtualContainer* container = virtual_container_from_item(item);
+    return container ? container->host_data : nullptr;
+}
+
+static inline void virtual_host_set(Item item, const void* host_type, void* host_data) {
+    VirtualContainer* container = virtual_container_from_item(item);
+    if (!container) return;
+    container->host_type = host_type;
+    container->host_data = host_data;
+}
+
+static inline int64_t varray_count(const VArray* array) {
+    return array && array->vtable && array->vtable->items.count
+        ? array->vtable->items.count(array->data) : 0;
+}
+
+static inline Item varray_get(const VArray* array, int64_t index) {
+    Item out = ItemNull;
+    if (!array || !array->vtable || !array->vtable->items.get_at) return out;
+    return array->vtable->items.get_at(array->data, index, &out) == VIRTUAL_OP_OK
+        ? out : ItemNull;
+}
+
+static inline VirtualOpStatus varray_set(VArray* array, int64_t index,
+        Item value, Item* out) {
+    if (out) *out = ItemNull;
+    if (!array || !array->vtable || !array->vtable->items.set_at) {
+        return VIRTUAL_OP_READONLY;
+    }
+    return array->vtable->items.set_at(array->data, index, value, out);
+}
+
+static inline int64_t velmt_attr_count(const Velmt* element) {
+    return element && element->vtable && element->vtable->element.attrs.count
+        ? element->vtable->element.attrs.count(element->data) : 0;
+}
+
+static inline int64_t velmt_child_count(const Velmt* element) {
+    return element && element->vtable && element->vtable->element.children.count
+        ? element->vtable->element.children.count(element->data) : 0;
+}
+
+static inline Item velmt_child_get(const Velmt* element, int64_t index) {
+    Item out = ItemNull;
+    if (!element || !element->vtable || !element->vtable->element.children.get_at) return out;
+    return element->vtable->element.children.get_at(element->data, index, &out) == VIRTUAL_OP_OK
+        ? out : ItemNull;
+}
+
+static inline Item velmt_attr_get(const Velmt* element, Item key) {
+    Item out = ItemNull;
+    if (!element || !element->vtable || !element->vtable->element.attrs.get) return out;
+    return element->vtable->element.attrs.get(element->data, key, &out) == VIRTUAL_OP_OK
+        ? out : ItemNull;
+}
+
+static inline VirtualOpStatus velmt_tag(const Velmt* element, Item* out) {
+    if (out) *out = ItemNull;
+    if (!element || !element->vtable || !element->vtable->element.tag) {
+        return VIRTUAL_OP_MISSING;
+    }
+    return element->vtable->element.tag(element->data, out);
+}
+
+static inline VirtualOpStatus velmt_namespace_uri(const Velmt* element, Item* out) {
+    if (out) *out = ItemNull;
+    if (!element || !element->vtable || !element->vtable->element.namespace_uri) {
+        return VIRTUAL_OP_MISSING;
+    }
+    return element->vtable->element.namespace_uri(element->data, out);
+}
+
+static inline VirtualOpStatus velmt_attr_key_at(const Velmt* element,
+        int64_t index, Item* out) {
+    if (out) *out = ItemNull;
+    if (!element || !element->vtable || !element->vtable->element.attrs.key_at) {
+        return VIRTUAL_OP_MISSING;
+    }
+    return element->vtable->element.attrs.key_at(element->data, index, out);
+}
+
+static inline VirtualOpStatus velmt_attr_value_at(const Velmt* element,
+        int64_t index, Item* out) {
+    if (out) *out = ItemNull;
+    if (!element || !element->vtable || !element->vtable->element.attrs.value_at) {
+        return VIRTUAL_OP_MISSING;
+    }
+    return element->vtable->element.attrs.value_at(element->data, index, out);
+}
+
+static inline VirtualOpStatus velmt_attr_set(Velmt* element, Item key,
+        Item value, Item* out) {
+    if (out) *out = ItemNull;
+    if (!element || !element->vtable || !element->vtable->element.attrs.set) {
+        return VIRTUAL_OP_READONLY;
+    }
+    return element->vtable->element.attrs.set(element->data, key, value, out);
+}
+
+static inline VirtualOpStatus velmt_child_set(Velmt* element, int64_t index,
+        Item value, Item* out) {
+    if (out) *out = ItemNull;
+    if (!element || !element->vtable || !element->vtable->element.children.set_at) {
+        return VIRTUAL_OP_READONLY;
+    }
+    return element->vtable->element.children.set_at(element->data, index, value, out);
+}
+
+extern "C" Item varray_new(const VArrayVtable* vtable, void* data,
+                            const void* host_type, void* host_data);
+extern "C" Item velmt_new(const VelmtVtable* vtable, void* data,
+                           const void* host_type, void* host_data);
+
 // Object: nominally-typed map with type name and methods
 // Same memory layout as Map for field access compatibility
 
@@ -837,12 +1068,13 @@ static_assert(offsetof(VMapVtable, trace) == LAMBDA_GC_OFF_VMAP_VTABLE_TRACE,
 // named accessor so content-face sites read the same way and the kind check
 // lives in one place. Returns NULL for anything without a content face.
 static inline List* lambda_content_list(TypeId type_id, const void* container) {
-    if (!container || !is_element_family_type_id(type_id)) return nullptr;
+    if (!container || type_id != LMD_TYPE_ELEMENT) return nullptr;
     return (List*)(Element*)(void*)container;
 }
 
 // Content item count for either kind; 0 when absent.
 static inline int64_t lambda_content_count(TypeId type_id, const void* container) {
+    if (type_id == LMD_TYPE_VELMT) return velmt_child_count((const Velmt*)container);
     List* content = lambda_content_list(type_id, container);
     return content ? content->length : 0;
 }
@@ -860,7 +1092,7 @@ struct TypeMap;
 // too, but theirs is the JS-props companion (`ArrayPropsShape`), not Lambda
 // attributes, so they stay out of this predicate.
 static inline bool lambda_type_id_has_attr_face(TypeId type_id) {
-    return is_element_family_type_id(type_id) || type_id == LMD_TYPE_MAP;
+    return type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_MAP;
 }
 
 // D2.6.6v2: every container extends Map, so the shape and its buffer sit at ONE

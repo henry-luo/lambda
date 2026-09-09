@@ -23,7 +23,7 @@ static void jm_module_slot_store_item(void* owner, uint32_t slot,
 }
 
 MIR_reg_t jm_load_module_var(JsMirTranspiler* mt, uint32_t slot) {
-    MirModuleSlotProfile profile = {&mt->em, mt, jm_module_slot_load_item,
+    MirModuleSlotProfile profile = {&mt->func_em->em, mt, jm_module_slot_load_item,
         jm_module_slot_store_item};
     return em_load_module_slot(&profile, slot, LMD_TYPE_ANY,
         MIR_VALUE_REQUIRED_REP, VALUE_REP_ITEM).reg;
@@ -32,7 +32,7 @@ MIR_reg_t jm_load_module_var(JsMirTranspiler* mt, uint32_t slot) {
 void jm_store_module_var(JsMirTranspiler* mt, uint32_t slot, MIR_reg_t item) {
     MirValue value = em_value(item, MIR_T_I64, LMD_TYPE_ANY, VALUE_REP_ITEM,
         JIT_VALUE_BOXED_ITEM);
-    MirModuleSlotProfile profile = {&mt->em, mt, jm_module_slot_load_item,
+    MirModuleSlotProfile profile = {&mt->func_em->em, mt, jm_module_slot_load_item,
         jm_module_slot_store_item};
     em_store_module_slot(&profile, slot, value);
 }
@@ -43,14 +43,14 @@ MIR_reg_t jm_call_1_or_inline(JsMirTranspiler* mt, const char* fn_name,
     // Resolve it in the native helper so MIR cannot retain a pointer to the
     // retired exact allocation across a nested eval or compilation.
     jm_preserve_error_lane_carrier(mt, fn_name, true);
-    MIR_reg_t result = em_call_1(&mt->em, fn_name, ret_type, a1t, a1, true);
+    MIR_reg_t result = em_call_1(&mt->func_em->em, fn_name, ret_type, a1t, a1, true);
     return jm_publish_call_result(mt, result, fn_name);
 }
 
 void jm_call_void_2_or_inline(JsMirTranspiler* mt, const char* fn_name,
         MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2) {
     jm_preserve_error_lane_carrier(mt, fn_name, false);
-    em_call_void_2(&mt->em, fn_name, a1t, a1, a2t, a2, true);
+    em_call_void_2(&mt->func_em->em, fn_name, a1t, a1, a2t, a2, true);
 }
 
 struct JsMirScalarResultHome {
@@ -61,10 +61,10 @@ struct JsMirScalarResultHome {
 static JsMirScalarResultHome jm_new_scalar_result_home(JsMirTranspiler* mt,
         const char* operation) {
     JsMirScalarResultHome result = {-1, 0};
-    if (!mt || !mt->em.frame.active) return result;
-    result.id = em_scalar_home_new(&mt->em);
-    result.reg = em_materialize_frame_ref(&mt->em,
-        em_scalar_home_ref(&mt->em, result.id));
+    if (!mt || !mt->func_em->em.frame.active) return result;
+    result.id = em_scalar_home_new(&mt->func_em->em);
+    result.reg = em_materialize_frame_ref(&mt->func_em->em,
+        em_scalar_home_ref(&mt->func_em->em, result.id));
     if (!result.reg) {
         // every dynamic Item result needs a caller-owned scalar destination.
         log_error("js-mir scalar-home: failed to materialize %s result home",
@@ -76,20 +76,20 @@ static JsMirScalarResultHome jm_new_scalar_result_home(JsMirTranspiler* mt,
 
 static MIR_reg_t jm_finish_scalar_result_home(JsMirTranspiler* mt,
         JsMirScalarResultHome home, MIR_reg_t result) {
-    em_scalar_home_bind(&mt->em, home.id, result);
+    em_scalar_home_bind(&mt->func_em->em, home.id, result);
     return result;
 }
 
 static MIR_reg_t jm_adopt_direct_scalar_result(JsMirTranspiler* mt,
         const FnVariantAnalysis* body, MIR_reg_t result) {
-    if (!mt || !result || !mt->em.frame.active) return result;
+    if (!mt || !result || !mt->func_em->em.frame.active) return result;
     ScalarReturnClass mode = body
         ? body->result.normal.scalar_class
         : SCALAR_RETURN_DYNAMIC;
     if (mode == SCALAR_RETURN_NONE) return result;
-    int home_id = em_scalar_home_new(&mt->em);
-    MIR_reg_t home = em_materialize_frame_ref(&mt->em,
-        em_scalar_home_ref(&mt->em, home_id));
+    int home_id = em_scalar_home_new(&mt->func_em->em);
+    MIR_reg_t home = em_materialize_frame_ref(&mt->func_em->em,
+        em_scalar_home_ref(&mt->func_em->em, home_id));
     if (!home) {
         log_error("js-mir scalar-home: failed to materialize direct-call result home");
         abort();
@@ -98,10 +98,10 @@ static MIR_reg_t jm_adopt_direct_scalar_result(JsMirTranspiler* mt,
     // transient activation; adopt it before a local or closure can retain it.
     // The no-GC adopter already classifies packed values, so keep that check in
     // one runtime helper instead of expanding a tag branch at every call site.
-    MIR_reg_t adopted = em_call_2(&mt->em, "lambda_item_adopt_scalar_home",
+    MIR_reg_t adopted = em_call_2(&mt->func_em->em, "lambda_item_adopt_scalar_home",
         MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
         MIR_T_P, MIR_new_reg_op(mt->ctx, home), true);
-    em_scalar_home_bind(&mt->em, home_id, adopted);
+    em_scalar_home_bind(&mt->func_em->em, home_id, adopted);
     return adopted;
 }
 
@@ -125,10 +125,10 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
     MirCallOptions options = {true, false, 0};
     FnVariantAnalysis* body = fn_analysis_variant(jm_function_analysis(callee),
         FN_ENTRY_BOXED_BODY);
-    MirCallResult direct = em_call_direct(&mt->em, callee->body_name,
+    MirCallResult direct = em_call_direct(&mt->func_em->em, callee->body_name,
         callee->body_func_item, body, arg_count, types, ops,
         &options);
-    direct.normal = em_finish_direct_call_normal(&mt->em, direct,
+    direct.normal = em_finish_direct_call_normal(&mt->func_em->em, direct,
         MIR_PENDING_REASON_UNKNOWN_CALL);
     MIR_reg_t result = jm_adopt_direct_scalar_result(mt, body, direct.normal.reg);
     return jm_publish_call_result(mt, result);
@@ -224,19 +224,19 @@ MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
     FnVariantAnalysis* native = fn_analysis_variant(jm_function_analysis(callee),
         FN_ENTRY_NATIVE_BODY);
     MirCallOptions options = {true, false, 0};
-    MirCallResult direct = em_call_direct(&mt->em, callee->name,
+    MirCallResult direct = em_call_direct(&mt->func_em->em, callee->name,
         callee->native_func_item, native, arg_count, types, ops,
         &options);
-    direct.normal = em_finish_direct_call_normal(&mt->em, direct,
+    direct.normal = em_finish_direct_call_normal(&mt->func_em->em, direct,
         MIR_PENDING_REASON_UNKNOWN_CALL);
     MIR_reg_t result = direct.normal.reg;
-    mt->last_call_result = {};
+    mt->func_em->last_call_result = {};
     return result;
 }
 
 JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
     MIR_type_t ret_type, int nargs, MIR_var_t* args, int nres) {
-    JsMirImportEntry* entry = em_ensure_import(&mt->em, name, ret_type, nargs, args, nres, true);
+    JsMirImportEntry* entry = em_ensure_import(&mt->func_em->em, name, ret_type, nargs, args, nres, true);
     return entry;
 }
 
@@ -279,7 +279,7 @@ MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt) {
 
 MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt) {
     MIR_reg_t r = jm_new_reg(mt, "item_error", MIR_T_I64);
-    mir_emit_i64_const_to_reg(mt->ctx, mt->em.func_item, r,
+    mir_emit_i64_const_to_reg(mt->ctx, mt->func_em->em.func_item, r,
         (int64_t)(((uint64_t)LMD_TYPE_ERROR) << 56));
     return r;
 }
@@ -323,11 +323,11 @@ static MIR_reg_t jm_emit_double_bits(JsMirTranspiler* mt, MIR_reg_t d_reg) {
     // Result15: the call edge to the 2-insn helper made numeric loops
     // placement-sensitive; reinterpret inline via the shared per-function
     // scratch slot (see em_emit_double_bits for the full rationale).
-    return em_emit_double_bits(&mt->em, d_reg);
+    return em_emit_double_bits(&mt->func_em->em, d_reg);
 }
 
 static MIR_reg_t jm_emit_bits_double(JsMirTranspiler* mt, MIR_reg_t bits_reg) {
-    return em_emit_bits_double(&mt->em, bits_reg);
+    return em_emit_bits_double(&mt->func_em->em, bits_reg);
 }
 
 // Box double -> Item; the hot in-band arm is inline.
@@ -525,25 +525,25 @@ bool jm_build_property_key_image(const PropertyKeySpec* inherited,
 
 MIR_reg_t jm_module_name_id_at_index(JsMirTranspiler* mt, uint32_t index) {
     if (!mt) return 0;
-    if (mt->em.func_item != mt->module_name_id_cache_func) {
-        mt->module_name_id_cache_func = mt->em.func_item;
-        mt->module_name_id_cache_count = 0;
+    if (mt->func_em->em.func_item != mt->func_em->module_name_id_cache_func) {
+        mt->func_em->module_name_id_cache_func = mt->func_em->em.func_item;
+        mt->func_em->module_name_id_cache_count = 0;
     }
-    for (int i = 0; i < mt->module_name_id_cache_count; i++) {
-        if (mt->module_name_id_cache[i].module_name_index == index &&
-                mt->module_name_id_cache[i].direct_name_id == NAME_ID_NONE) {
-            return mt->module_name_id_cache[i].reg;
+    for (int i = 0; i < mt->func_em->module_name_id_cache_count; i++) {
+        if (mt->func_em->module_name_id_cache[i].module_name_index == index &&
+                mt->func_em->module_name_id_cache[i].direct_name_id == NAME_ID_NONE) {
+            return mt->func_em->module_name_id_cache[i].reg;
         }
     }
     MIR_reg_t result = jm_call_1(mt, "lambda_active_module_name_id", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)index));
-    if (result && mt->module_name_id_cache_count <
-            (int)(sizeof(mt->module_name_id_cache) /
-                  sizeof(mt->module_name_id_cache[0]))) {
-        int slot = mt->module_name_id_cache_count++;
-        mt->module_name_id_cache[slot].module_name_index = index;
-        mt->module_name_id_cache[slot].direct_name_id = NAME_ID_NONE;
-        mt->module_name_id_cache[slot].reg = result;
+    if (result && mt->func_em->module_name_id_cache_count <
+            (int)(sizeof(mt->func_em->module_name_id_cache) /
+                  sizeof(mt->func_em->module_name_id_cache[0]))) {
+        int slot = mt->func_em->module_name_id_cache_count++;
+        mt->func_em->module_name_id_cache[slot].module_name_index = index;
+        mt->func_em->module_name_id_cache[slot].direct_name_id = NAME_ID_NONE;
+        mt->func_em->module_name_id_cache[slot].reg = result;
     }
     return result;
 }
@@ -556,25 +556,25 @@ MIR_reg_t jm_module_name_id(JsMirTranspiler* mt,
     // table lookup (D4.6.1v2, D4.6.2v2).
     NameId generated_id = well_known_name_id({chars, length});
     if (generated_id != NAME_ID_NONE) {
-        if (mt->em.func_item != mt->module_name_id_cache_func) {
-            mt->module_name_id_cache_func = mt->em.func_item;
-            mt->module_name_id_cache_count = 0;
+        if (mt->func_em->em.func_item != mt->func_em->module_name_id_cache_func) {
+            mt->func_em->module_name_id_cache_func = mt->func_em->em.func_item;
+            mt->func_em->module_name_id_cache_count = 0;
         }
-        for (int i = 0; i < mt->module_name_id_cache_count; i++) {
-            if (mt->module_name_id_cache[i].module_name_index == UINT32_MAX &&
-                    mt->module_name_id_cache[i].direct_name_id == generated_id) {
-                return mt->module_name_id_cache[i].reg;
+        for (int i = 0; i < mt->func_em->module_name_id_cache_count; i++) {
+            if (mt->func_em->module_name_id_cache[i].module_name_index == UINT32_MAX &&
+                    mt->func_em->module_name_id_cache[i].direct_name_id == generated_id) {
+                return mt->func_em->module_name_id_cache[i].reg;
             }
         }
         MIR_reg_t id = jm_new_reg(mt, "nameid", MIR_T_I64);
         jm_emit_reg_op(mt, MIR_MOV, id, MIR_new_int_op(mt->ctx, (int64_t)generated_id));
-        if (mt->module_name_id_cache_count <
-                (int)(sizeof(mt->module_name_id_cache) /
-                      sizeof(mt->module_name_id_cache[0]))) {
-            int slot = mt->module_name_id_cache_count++;
-            mt->module_name_id_cache[slot].module_name_index = UINT32_MAX;
-            mt->module_name_id_cache[slot].direct_name_id = generated_id;
-            mt->module_name_id_cache[slot].reg = id;
+        if (mt->func_em->module_name_id_cache_count <
+                (int)(sizeof(mt->func_em->module_name_id_cache) /
+                      sizeof(mt->func_em->module_name_id_cache[0]))) {
+            int slot = mt->func_em->module_name_id_cache_count++;
+            mt->func_em->module_name_id_cache[slot].module_name_index = UINT32_MAX;
+            mt->func_em->module_name_id_cache[slot].direct_name_id = generated_id;
+            mt->func_em->module_name_id_cache[slot].reg = id;
         }
         return id;
     }
@@ -588,26 +588,26 @@ MIR_reg_t jm_box_property_name_literal(JsMirTranspiler* mt,
     NameId direct_name_id = well_known_name_id({chars, length});
     uint32_t module_name_index = direct_name_id == NAME_ID_NONE
         ? jm_module_name_index(mt, chars, length) : UINT32_MAX;
-    if (mt->em.func_item != mt->property_name_cache_func) {
-        mt->property_name_cache_func = mt->em.func_item;
-        mt->property_name_cache_count = 0;
+    if (mt->func_em->em.func_item != mt->func_em->property_name_cache_func) {
+        mt->func_em->property_name_cache_func = mt->func_em->em.func_item;
+        mt->func_em->property_name_cache_count = 0;
     }
-    for (int i = 0; i < mt->property_name_cache_count; i++) {
-        if (mt->property_name_cache[i].module_name_index == module_name_index &&
-                mt->property_name_cache[i].direct_name_id == direct_name_id) {
-            return mt->property_name_cache[i].reg;
+    for (int i = 0; i < mt->func_em->property_name_cache_count; i++) {
+        if (mt->func_em->property_name_cache[i].module_name_index == module_name_index &&
+                mt->func_em->property_name_cache[i].direct_name_id == direct_name_id) {
+            return mt->func_em->property_name_cache[i].reg;
         }
     }
     MIR_reg_t result = jm_call_2(mt, "lambda_active_module_name_item", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)module_name_index),
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)direct_name_id));
-    if (result && mt->property_name_cache_count <
-            (int)(sizeof(mt->property_name_cache) /
-                  sizeof(mt->property_name_cache[0]))) {
-        int slot = mt->property_name_cache_count++;
-        mt->property_name_cache[slot].module_name_index = module_name_index;
-        mt->property_name_cache[slot].direct_name_id = direct_name_id;
-        mt->property_name_cache[slot].reg = result;
+    if (result && mt->func_em->property_name_cache_count <
+            (int)(sizeof(mt->func_em->property_name_cache) /
+                  sizeof(mt->func_em->property_name_cache[0]))) {
+        int slot = mt->func_em->property_name_cache_count++;
+        mt->func_em->property_name_cache[slot].module_name_index = module_name_index;
+        mt->func_em->property_name_cache[slot].direct_name_id = direct_name_id;
+        mt->func_em->property_name_cache[slot].reg = result;
     }
     return result;
 }
@@ -814,7 +814,7 @@ MIR_reg_t jm_emit_unbox_int(JsMirTranspiler* mt, MIR_reg_t item) {
 // Unbox Item → native double; inline the raw-bit arm for self-tagged floats.
 MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
     // Safety: if item is already a native double, return it directly
-    MIR_type_t rt = MIR_reg_type(mt->ctx, item, mt->em.func);
+    MIR_type_t rt = MIR_reg_type(mt->ctx, item, mt->func_em->em.func);
     if (rt == MIR_T_D) return item;
     if (rt == MIR_T_F) {
         MIR_reg_t d = jm_new_reg(mt, "f2d_ub", MIR_T_D);
@@ -901,7 +901,7 @@ MirValue jm_convert_rep(void* owner, MirValue value,
     }
     if (!reg) return value;
     MirValue converted = em_value_for_rep(reg, value.semantic_type, required);
-    converted.scalar_home_id = em_scalar_home_for_reg(&mt->em, reg);
+    converted.scalar_home_id = em_scalar_home_for_reg(&mt->func_em->em, reg);
     converted.scalar_provenance = converted.scalar_home_id
         ? SCALAR_PROVENANCE_ACTIVATION_HOME : SCALAR_PROVENANCE_NONE;
     return converted;
@@ -913,7 +913,7 @@ MIR_reg_t jm_box_native(JsMirTranspiler* mt, MIR_reg_t reg,
         : type_id == LMD_TYPE_INT || type_id == LMD_TYPE_BOOL
             ? VALUE_REP_I64 : VALUE_REP_ITEM;
     MirValue value = em_value_for_rep(reg, type_id, actual);
-    return em_require_rep(&mt->em, value, VALUE_REP_ITEM).reg;
+    return em_require_rep(&mt->func_em->em, value, VALUE_REP_ITEM).reg;
 }
 
 // ============================================================================
@@ -1344,7 +1344,7 @@ MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MirValue value) {
         jm_emit_reg_binary(mt, MIR_AND, result, nonzero, notnan);
         return result;
     }
-    value = em_apply_value_demand(&mt->em, value,
+    value = em_apply_value_demand(&mt->func_em->em, value,
         MIR_VALUE_REQUIRED_REP, VALUE_REP_ITEM);
     return jm_emit_uext8(mt, jm_callr_1(mt, "js_is_truthy", MIR_T_I64,
         value.reg));
@@ -1378,9 +1378,9 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
 
     MirValue value = jm_transpile_expression_value(mt, expr);
     if (value.rep == VALUE_REP_RAW_NON_GC_POINTER) {
-        value = em_require_rep(&mt->em, value, VALUE_REP_ITEM);
+        value = em_require_rep(&mt->func_em->em, value, VALUE_REP_ITEM);
     }
     ValueRep target_rep = target_type == LMD_TYPE_FLOAT
         ? VALUE_REP_F64 : VALUE_REP_I64;
-    return em_require_rep(&mt->em, value, target_rep).reg;
+    return em_require_rep(&mt->func_em->em, value, target_rep).reg;
 }

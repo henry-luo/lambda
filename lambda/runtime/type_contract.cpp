@@ -83,6 +83,8 @@ ValueRep lambda_canonical_rep(Type* contract) {
     case LMD_TYPE_ARRAY:
     case LMD_TYPE_MAP:
     case LMD_TYPE_VMAP:
+    case LMD_TYPE_VARRAY:
+    case LMD_TYPE_VELMT:
     case LMD_TYPE_ELEMENT:
     case LMD_TYPE_FUNC:
         return VALUE_REP_RAW_GC_POINTER;
@@ -110,9 +112,11 @@ static Type* canonical_type_for_id(TypeId type_id) {
     case LMD_TYPE_DTIME: return &TYPE_DTIME;
     case LMD_TYPE_ARRAY_NUM: return (Type*)&TYPE_ARRAY;
     case LMD_TYPE_ARRAY: return (Type*)&TYPE_ARRAY;
+    case LMD_TYPE_VARRAY: return (Type*)&TYPE_ARRAY;
     case LMD_TYPE_RANGE: return &TYPE_RANGE;
     case LMD_TYPE_MAP: return &TYPE_MAP;
     case LMD_TYPE_VMAP: return &TYPE_MAP;
+    case LMD_TYPE_VELMT: return &TYPE_ELMT;
     case LMD_TYPE_ELEMENT: return &TYPE_ELMT;
     case LMD_TYPE_TYPE: return &TYPE_TYPE;
     case LMD_TYPE_FUNC: return &TYPE_FUNC;

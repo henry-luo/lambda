@@ -178,7 +178,7 @@ Velmt handles should be scoped:
 
 If a stale Velmt is used, the API should return an error value and log a distinct prefix such as `VELMT_STALE_HANDLE`.
 
-Current implementation note: Velmt is exposed to Lambda as a host-backed VMap handle with an immutable C-side layout snapshot. Handles are scoped to the active custom layout callback and result parse; after that pass, property reads return `null` rather than exposing stale native state. The public shape exposes `index`, `tag`, `id`, `attrs`, `style`, bounded `children`, descendant `text`, box metrics, and edge metrics. Map-shaped values remain accepted by the helper functions for unit tests and backward-compatible smoke tests.
+Current implementation note: the public handle is a Lambda Velmt backed by an immutable C-side `RadiantVelmt` layout snapshot; its `children` face is a pass-scoped VArray (**D7.4.5v2**). Handles are scoped to the active custom layout callback and result parse; after that pass, property reads return `null` rather than exposing stale native state. The public shape exposes `index`, `tag`, `id`, `attrs`, `style`, bounded `children`, descendant `text`, box metrics, and edge metrics. Map-shaped values remain accepted by the helper functions for unit tests and backward-compatible smoke tests.
 
 ## 6. Custom layout API
 
@@ -397,9 +397,9 @@ layout_flow_node
 The current implementation uses the same conceptual flow, with a few concrete bridge details:
 
 1. `layout_block` lays out normal in-flow children before invoking custom layout, so each child already has a resolved border-box size from the existing block/inline/flex/grid/table machinery.
-2. `layout_custom_apply` collects eligible child views into internal C `Velmt` snapshots. These snapshots are not the public Lambda value; they are the native payload used to preserve the child pointer, child index, normalized border box, and edge metrics for this pass.
+2. `layout_custom_apply` collects eligible child views into internal C `RadiantVelmt` snapshots. These snapshots are not the public Lambda Velmt value; they are the native payload used to preserve the child pointer, child index, normalized border box, and edge metrics for this pass (**D7.4.5v2**).
 3. Each top-level child snapshot normalizes the input box to border-box top-left `(0, 0)` with its resolved `width` and `height`. Nested `children` reads preserve each nested child view's existing local geometry.
-4. Before calling Lambda, the Radiant module starts a pass id and builds host-backed Velmt VMaps for `parent` and `children`. Each host object owns an immutable copy of the C snapshot and records the active pass id.
+4. Before calling Lambda, the Radiant module starts a pass id, builds host-backed Lambda Velmt values for `parent` and each child, and exposes the child sequence through VArray. Each host object owns an immutable copy of the C snapshot and records the active pass id.
 5. The registered `radiant.register_layout(name, fn)` callback is invoked as `fn(parent, children, ctx)`. The callback can use direct property access such as `child.index`, `child.width`, and `child.style`, or the compatibility helpers such as `radiant.velmt_width(child)`.
 6. The callback returns placements. A placement may identify its child either by the Velmt handle in `child` or by an explicit `index`, depending on the result shape accepted by the parser.
 7. While the pass id is still active, Radiant parses the result and maps placements back to the collected child indices. This keeps returned Velmt handles usable for result parsing without allowing them to escape as live layout objects.
