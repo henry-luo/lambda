@@ -39,6 +39,7 @@ struct JsFunction;
 struct JsInterpEnv;
 struct JsInterpGeneratorLoopContinuation;
 struct JsInterpGeneratorListContinuation;
+struct JsInterpTryContinuation;
 struct JsInterpGeneratorArrayBindingContinuation;
 struct AstNode;
 struct DomDocument;
@@ -738,7 +739,8 @@ struct JsGeneratorStateRecord {
     // A destructuring target can suspend after IteratorStep. Retain its
     // iterator/value cursor so replay does not advance the iterator twice.
     JsInterpGeneratorArrayBindingContinuation* ast_array_binding_continuations = NULL;
-    bool ast_resumable_loop_active = false;
+    // A catch/finally clause that suspends must not replay the try's block.
+    JsInterpTryContinuation* ast_try_continuations = NULL;
     // Retain an injected throw/return while a finally block yields before it
     // can finish propagating that abrupt completion.
     int64_t ast_pending_resume_yield = 0;
@@ -762,9 +764,14 @@ struct JsAsyncContextStateRecord {
     Item ast_arguments = {};
     JsInterpEnv* ast_function_env = NULL;
     JsInterpEnv* ast_body_env = NULL;
-    AstNode* ast_resume_statement = NULL;
     Item ast_await_values = {};
     JsInterpGeneratorLoopContinuation* ast_loop_continuations = NULL;
+    // Statement cursors for every list on the suspension path, so a resume
+    // re-enters the awaiting statement instead of replaying the completed
+    // statements of each enclosing block/loop body.
+    JsInterpGeneratorListContinuation* ast_list_continuation = NULL;
+    // A catch/finally clause that suspends must not replay the try's block.
+    JsInterpTryContinuation* ast_try_continuations = NULL;
     int64_t ast_await_skip = 0;
     bool ast_initialized = false;
 };
@@ -983,6 +990,10 @@ struct JsRuntimeState {
     // JSCU10: async activations are GC-owned frames, not a fixed table. Only
     // the single await scratch value keeps an epoch-guarded root.
     Item async_resolved_value = {};
+    // The native calling convention returns an unboxed scalar and has no
+    // in-band ERROR carrier, so a throw inside a natively-typed body parks its
+    // lane here for the boxed entry (or a direct caller) to take on return.
+    Item native_throw_lane = {};
     void* async_roots_registered_gc = NULL;
     uint64_t async_roots_registered_epoch = UINT64_MAX;
     int dynamic_func_counter = 0;

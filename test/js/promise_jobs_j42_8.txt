@@ -19,7 +19,6 @@ guard-thenable-job
 thenable job
 resolve:assimilated
 caught:boom
-adopted:source
 pass-through:through
 resolver-guard:guard-ok
 throw-after-resolve-result:tar-ok
@@ -28,6 +27,7 @@ race-double-result:guard-ok
 thenable job
 await:assimilated
 await-reject:await-fail
+adopted:source
 all-double-result:first,later
 settled-double-result:fulfilled,settled-first,rejected,settled-second
 custom-all:custom-a,guard-ok

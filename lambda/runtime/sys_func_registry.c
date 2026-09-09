@@ -2733,7 +2733,21 @@ JitImport jit_runtime_imports[] = {
     // Phase 3: Promise.withResolvers
     {"js_await_sync", FPTR(js_await_sync)},
     // Phase 6: Async state machine runtime
+    // The native ABI's out-of-band throw channel. Publish is void: it parks
+    // the lane the caller will take and never delivers a replacement error
+    // Item, so it PRESERVES whatever carrier the caller already held. It only
+    // stores an Item into a registered root, so it neither collects nor
+    // re-enters user code.
+    {"js_native_throw_publish", FPTR(js_native_throw_publish),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM), 0, JIT_EXCEPTION_PRESERVES}},
+    // Take returns that lane as an ordinary boxed Item — an ERROR carrier when
+    // a native callee threw — so the emitter's tag test reads it directly.
+    {"js_native_throw_take", FPTR(js_native_throw_take),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM}},
+    {"js_async_wrap_return", FPTR(js_async_wrap_return)},
     {"js_async_must_suspend", FPTR(js_async_must_suspend)},
+    {"js_async_prepare_await", FPTR(js_async_prepare_await)},
     {"js_async_get_resolved", FPTR(js_async_get_resolved)},
     {"js_async_context_create", FPTR(js_async_context_create)},
     {"js_async_context_create_mir", FPTR(js_async_context_create_mir)},

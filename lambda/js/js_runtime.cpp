@@ -10239,15 +10239,17 @@ static Item js_invoke_fn_raw_or_async(JsFunction* fn, Item* args, int arg_count,
         return js_interp_start_async_function(fn, args, arg_count);
     }
 
-    // no-await async functions lower to a direct Promise.resolve return, so the
-    // call wrapper must provide the async-function Promise resource up front.
+    // Every compiled async body publishes its own result promise: a state
+    // machine returns its activation's, an await-less body returns
+    // js_async_wrap_return's. Minting a second one here and joining the two
+    // with a `.then` cost every async call an extra microtask tick.
+    Item result = js_invoke_fn_raw(fn, args, arg_count, scalar_result_home);
+    if (!item_is_error(result)) return result;
+    // A throw before the body could build its promise still has to surface as
+    // a rejected one, so the resource is created only on that path.
     RootFrame async_roots(1);
     Rooted<Item> async_promise_root(async_roots, js_promise_async_function_start());
-    // Adapter construction can allocate a rest array; keep the promise exact
-    // until the async-finishing helper has taken ownership of it.
-    Item result = js_invoke_fn_raw(fn, args, arg_count, scalar_result_home);
-    int64_t had_exception = item_is_error(result) ? 1 : 0;
-    return js_promise_async_function_finish(async_promise_root.get(), result, had_exception);
+    return js_promise_async_function_finish(async_promise_root.get(), result, 1);
 }
 
 static Item js_invoke_fn_with_source(JsFunction* fn, Item* args, int arg_count,
@@ -28448,7 +28450,7 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     gen->ast_loop_continuations = NULL;
     gen->ast_list_continuation = NULL;
     gen->ast_array_binding_continuations = NULL;
-    gen->ast_resumable_loop_active = false;
+    gen->ast_try_continuations = NULL;
     gen->ast_pending_resume_yield = 0;
     gen->ast_pending_resume_input = ItemNull;
     gen->ast_initialized = false;
@@ -28551,10 +28553,16 @@ static Item js_get_gen_return_signal_marker() {
 }
 
 extern "C" Item js_gen_return_signal(Item value) {
-    Item signal = js_array_new(2);
-    js_array_store_owned(signal.array, 0, value);
-    signal.array->items[1] = js_get_gen_return_signal_marker();
-    return signal;
+    // The marker is created lazily, so reading it can allocate and collect.
+    // Both the incoming value and the fresh array must be rooted across that
+    // call, exactly as js_gen_throw_signal does below.
+    RootFrame roots(3);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> signal_root(roots, js_array_new(2));
+    if (get_type_id(signal_root.get()) != LMD_TYPE_ARRAY) return ItemError;
+    js_array_store_owned(signal_root.get().array, 0, value_root.get());
+    signal_root.get().array->items[1] = js_get_gen_return_signal_marker();
+    return signal_root.get();
 }
 
 extern "C" int64_t js_gen_is_return_signal(Item value) {
@@ -30376,13 +30384,9 @@ static void js_promise_resolve_with_value(JsPromise* p, Item value);
 static void js_promise_schedule_unhandled_check(JsPromise* p);
 static void js_promise_mark_rejection_handled(JsPromise* p);
 
-// Forward declarations for promise microtask helpers
-static Item js_promise_microtask_resolve(Item next_promise_item, Item value);
-static Item js_promise_microtask_reject(Item next_promise_item, Item reason);
 static Item js_promise_async_hook_run(Item resource, Item job);
 static Item js_resolve_callback(Item resolving_state_item, Item value);
 static Item js_reject_callback(Item resolving_state_item, Item reason);
-static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item);
 static void js_promise_enqueue_passthrough(Item next_promise_item, JsPromiseState state, Item result, Item domain);
 enum JsPromiseCapabilityAction {
     JS_PROMISE_CAPABILITY_RESOLVE,
@@ -30492,44 +30496,6 @@ static bool js_promise_add_reaction(JsPromise* promise, Item on_fulfilled,
     return true;
 }
 
-static void js_promise_adopt_native(JsPromise* target, JsPromise* source) {
-    if (!target || !source) return;
-    if (target == source) {
-        Item error = js_promise_make_type_error("Chaining cycle detected for promise", 35);
-        js_promise_settle(target, JS_PROMISE_REJECTED, error);
-        return;
-    }
-    RootFrame roots(7);
-    Rooted<Item> target_root(roots, js_promise_to_item(target));
-    Rooted<Item> source_root(roots, js_promise_to_item(source));
-    Rooted<Item> resolve_base_root(roots, ItemNull);
-    Rooted<Item> reject_base_root(roots, ItemNull);
-    Rooted<Item> resolve_root(roots, ItemNull);
-    Rooted<Item> reject_root(roots, ItemNull);
-    js_promise_mark_rejection_handled(source);
-    source = js_get_promise(source_root.get());
-    target = js_get_promise(target_root.get());
-    if (!source || !target) return;
-    if (source->state != JS_PROMISE_PENDING) {
-        JsNativeP2 reaction = source->state == JS_PROMISE_FULFILLED
-            ? js_promise_microtask_resolve : js_promise_microtask_reject;
-        resolve_base_root.set(js_new_native_function(reaction));
-        Item target_item = target_root.get();
-        resolve_root.set(js_bind_function(resolve_base_root.get(), ItemNull, &target_item, 1));
-        // adopted-promise reactions must execute under the target promise resource.
-        js_promise_enqueue_handler(resolve_root.get(), source->result, target_root.get());
-        return;
-    }
-    resolve_base_root.set(js_new_native_function(js_promise_microtask_resolve));
-    reject_base_root.set(js_new_native_function(js_promise_microtask_reject));
-    Item target_item = target_root.get();
-    resolve_root.set(js_bind_function(resolve_base_root.get(), ItemNull, &target_item, 1));
-    // The resolve callback had no owner while reject construction allocated,
-    // allowing both adoption edges to alias the recycled reject function.
-    reject_root.set(js_bind_function(reject_base_root.get(), ItemNull, &target_item, 1));
-    js_promise_add_reaction(source, resolve_root.get(), reject_root.get(),
-        target_root.get(), ItemNull);
-}
 
 // PromiseResolveThenableJob: invoke the captured then method asynchronously.
 // Bound args: promise_item, thenable, then_fn.
@@ -30585,11 +30551,18 @@ static void js_promise_resolve_with_value(JsPromise* p, Item value) {
     p = js_get_promise(promise_root.get());
     if (!p || p->state != JS_PROMISE_PENDING) return;
 
+    // A native promise is an object with a callable `then`, so ResolvePromise
+    // hands it to PromiseResolveThenableJob like any other thenable: one tick
+    // for the job, one more for the reaction it registers. Short-cutting that
+    // to a single enqueued handler settled every adopted promise a tick early,
+    // which is observable against a parallel `.then` chain.
     JsPromise* native_promise = js_get_promise(value_root.get());
-    if (native_promise) {
-        js_promise_adopt_native(p, native_promise);
+    if (native_promise == p) {
+        Item error = js_promise_make_type_error("Chaining cycle detected for promise", 35);
+        js_promise_settle(js_get_promise(promise_root.get()), JS_PROMISE_REJECTED, error);
         return;
     }
+    if (native_promise) js_promise_mark_rejection_handled(native_promise);
 
     if (js_is_object_value(value_root.get())) {
         Item then_fn = js_get_name_key(value_root.get(), "then", 4);
@@ -30636,35 +30609,33 @@ static Item js_promise_microtask_run(Item handler, Item result, Item next_promis
     return ItemNull;
 }
 
-// Bound resolve/reject settle functions for promise chaining.
-// When a then() handler returns a pending promise, these are registered as then
-// handlers on that returned promise. When it settles, they settle the next promise.
-static Item js_promise_microtask_resolve(Item next_promise_item, Item value) {
-    JsPromise* next = js_get_promise(next_promise_item);
-    if (next) js_promise_resolve_with_value(next, value);
-    return ItemNull;
-}
-
-static Item js_promise_microtask_reject(Item next_promise_item, Item reason) {
-    JsPromise* next = js_get_promise(next_promise_item);
-    if (next) js_promise_settle(next, JS_PROMISE_REJECTED, reason);
-    return ItemNull;
-}
-
 extern "C" Item js_promise_async_function_start(void) {
     Item promise = js_promise_create_pending();
     js_async_hooks_emit_before_resource(promise);
     return promise;
 }
 
+// An await-less async body owns its result promise. It must be a *fresh*
+// promise even when the body returns one (`f() === Promise.resolve(v)` is
+// false), and resolving it with the returned value is what keeps the spec's
+// timing: a plain value settles it now, a thenable adopts it later. Handing
+// back `Promise.resolve(v)` instead collapsed those two cases into one
+// already-settled promise.
+extern "C" Item js_async_wrap_return(Item value) {
+    RootFrame roots(2);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> promise_root(roots, js_promise_create_pending());
+    if (!js_get_promise(promise_root.get())) return ItemError;
+    js_async_hooks_emit_before_resource(promise_root.get());
+    js_async_hooks_emit_after_resource(promise_root.get());
+    js_promise_resolve_with_value(js_get_promise(promise_root.get()), value_root.get());
+    return promise_root.get();
+}
+
 extern "C" Item js_promise_async_function_finish(Item promise, Item result, int64_t had_exception) {
-    RootFrame roots(7);
+    RootFrame roots(3);
     Rooted<Item> promise_root(roots, promise);
     Rooted<Item> result_root(roots, result);
-    Rooted<Item> resolve_base_root(roots, ItemNull);
-    Rooted<Item> reject_base_root(roots, ItemNull);
-    Rooted<Item> resolve_root(roots, ItemNull);
-    Rooted<Item> reject_root(roots, ItemNull);
     JsPromise* p = js_get_promise(promise_root.get());
     js_async_hooks_emit_after_resource(promise_root.get());
     if (!p) return result_root.get();
@@ -30677,19 +30648,11 @@ extern "C" Item js_promise_async_function_finish(Item promise, Item result, int6
         return promise_root.get();
     }
 
-    JsPromise* returned = js_get_promise(result_root.get());
-    if (returned && returned != p) {
-        resolve_base_root.set(js_new_native_function(js_promise_microtask_resolve));
-        reject_base_root.set(js_new_native_function(js_promise_microtask_reject));
-        Item promise_item = promise_root.get();
-        resolve_root.set(js_bind_function(resolve_base_root.get(), ItemNull, &promise_item, 1));
-        // Async return adoption constructs two callbacks before publishing either;
-        // rooting prevents the resolve callback from being recycled as reject.
-        reject_root.set(js_bind_function(reject_base_root.get(), ItemNull, &promise_item, 1));
-        js_promise_then(result_root.get(), resolve_root.get(), reject_root.get());
-    } else {
-        js_promise_resolve_with_value(p, result_root.get());
-    }
+    // ResolvePromise gives both cases their spec timing: a plain value settles
+    // now, a returned promise/thenable is adopted through
+    // PromiseResolveThenableJob. Joining with `.then` here instead cost one
+    // tick where the spec prescribes two.
+    js_promise_resolve_with_value(p, result_root.get());
     return promise_root.get();
 }
 
@@ -30817,23 +30780,6 @@ static void js_promise_enqueue_wrapped_job(Item thunk, Item resource, Item domai
     previous_root.set(js_async_hooks_enter_resource(resource_root.get()));
     js_microtask_enqueue(thunk_root.get());
     js_async_hooks_restore_resource(previous_root.get());
-}
-
-// Enqueue a promise handler as a microtask with proper chaining.
-// Creates a bound thunk: js_promise_microtask_run(handler, result, next_promise_item)
-static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item) {
-    JS_ROOTS(roots,
-        handler_root, handler,
-        result_root, result,
-        next_root, next_promise_item,
-        thunk_root, ItemNull,
-        runner_root, ItemNull);
-    runner_root.set(js_new_native_function(js_promise_microtask_run));
-    Item bound_args[3] = {handler_root.get(), result_root.get(), next_root.get()};
-    thunk_root.set(js_bind_function(runner_root.get(), ItemNull, bound_args, 3));
-    Item resource = get_type_id(next_root.get()) == LMD_TYPE_MAP
-        ? next_root.get() : js_async_hooks_get_current_resource();
-    js_promise_enqueue_wrapped_job(thunk_root.get(), resource, ItemNull);
 }
 
 static void js_promise_enqueue_handler_domain(Item handler, Item result, Item next_promise_item, Item domain) {
@@ -31773,12 +31719,46 @@ static void js_async_ensure_scratch_root() {
     js_runtime_state.async_roots_registered_gc = active_gc;
     js_runtime_state.async_roots_registered_epoch = active_epoch;
     heap_register_gc_root(&js_async_resolved_value.item);
+    heap_register_gc_root(&js_runtime_state.native_throw_lane.item);
+}
+
+// A native body reports a throw through these instead of its return value: the
+// native ABI returns an unboxed scalar, so there is no in-band ERROR carrier
+// for the caller to test. Publish happens on the native landing pad, take at
+// every site that calls a native entry directly; taking clears the slot so a
+// stale lane cannot be attributed to a later call.
+extern "C" void js_native_throw_publish(Item lane) {
+    js_async_ensure_scratch_root();
+    js_runtime_state.native_throw_lane = lane;
+}
+
+extern "C" Item js_native_throw_take(void) {
+    Item lane = js_runtime_state.native_throw_lane;
+    js_runtime_state.native_throw_lane = ItemNull;
+    return lane;
 }
 
 // Check if an awaited value requires suspension (pending promise)
 // Returns: true = pending (must suspend), false = resolved/rejected/non-promise
 // For resolved/non-promise: caches result in js_async_resolved_value
 // For rejected: calls js_throw_value (exception mechanism handles it)
+//
+// KNOWN DIVERGENCE: answering "false" continues the async body inline, so its
+// remaining statements run ahead of microtasks queued before the await, while
+// the spec makes every await a promise reaction job. Removing this fast path
+// (always suspending on PromiseResolve of the operand) fixes the ordering and
+// was verified against Node on the microtask corpus, but it exposes a latent
+// MIR defect that corrupts an awaited value in test/js/lib_floating_ui.js.
+// See the impl note before re-attempting.
+extern "C" Item js_async_prepare_await(Item value) {
+    RootFrame roots(1);
+    Rooted<Item> value_root(roots, value);
+    Item promise = js_promise_resolve(value_root.get());
+    if (item_is_error(promise)) { js_async_resolved_value = ItemNull; return promise; }
+    js_async_resolved_value = promise;
+    return ItemNull;
+}
+
 extern "C" Item js_async_must_suspend(Item value) {
     JsPromise* p = js_get_promise(value);
     if (!p) {
@@ -31884,13 +31864,17 @@ static void js_async_drive(Item frame_item, Item input, int64_t state) {
 
         // Bind resume/reject to the frame Item itself (JSCU10): the awaited
         // promise's reaction list then retains the activation until it settles.
-        Item resume_fn = js_new_native_function(js_async_resume_handler);
-        resume_root.set(js_bind_function(resume_fn, ItemNull, &frame_item, 1));
+        // js_bind_function allocates, so the freshly made native function has
+        // to be rooted before it is passed in, not only after it is bound;
+        // otherwise the bound callback can wrap a collected target and the
+        // suspended body is never resumed (**D1.5**, **D5.3.2**).
+        resume_root.set(js_new_native_function(js_async_resume_handler));
+        resume_root.set(js_bind_function(resume_root.get(), ItemNull, &frame_item, 1));
 
-        Item reject_fn = js_new_native_function(js_async_reject_handler);
         // The first callback has no owner while the second callback allocates;
         // keep both exact-rooted until the awaited promise records them.
-        reject_root.set(js_bind_function(reject_fn, ItemNull, &frame_item, 1));
+        reject_root.set(js_new_native_function(js_async_reject_handler));
+        reject_root.set(js_bind_function(reject_root.get(), ItemNull, &frame_item, 1));
 
         // Register on the pending promise
         js_promise_then(value_root.get(), resume_root.get(), reject_root.get());
@@ -31954,8 +31938,9 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
     ctx->ast_arguments = ast_arguments;
     ctx->ast_function_env = NULL;
     ctx->ast_body_env = NULL;
-    ctx->ast_resume_statement = NULL;
     ctx->ast_loop_continuations = NULL;
+    ctx->ast_list_continuation = NULL;
+    ctx->ast_try_continuations = NULL;
     ctx->ast_await_values = get_type_id(ast_function) == LMD_TYPE_FUNC
         ? js_array_new(0) : ItemNull;
     if (item_is_error(ctx->ast_await_values)) return ctx->ast_await_values;

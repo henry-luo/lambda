@@ -338,7 +338,7 @@ static MIR_reg_t jm_emit_computed_method_key(JsMirTranspiler* mt,
     int home_class_spill = -1;
     int preserve_spill = -1;
     int function_spill = -1;
-    if (mt->in_generator && jm_has_yield(mt, method->key_expr)) {
+    if (jm_can_suspend(mt, method->key_expr)) {
         destination_spill = jm_gen_spill_save(mt, policy->destination);
         if (policy->home_class != policy->destination) {
             home_class_spill = jm_gen_spill_save(mt, policy->home_class);
@@ -1393,6 +1393,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Exception landing pad for native function (return 0/0.0 on exception)
         if (mt->func_error_lane_label) {
             jm_emit_label(mt, mt->func_error_lane_label);
+            // The unboxed return cannot carry the ERROR Item, so hand the lane
+            // to the caller out of band before returning the placeholder;
+            // otherwise the throw is silently lost and the placeholder becomes
+            // the call's value.
+            jm_callr_void_1(mt, "js_native_throw_publish",
+                jm_emit_error_lane_return(mt));
             MIR_reg_t exc_ret = jm_new_reg(mt, "exc_ret", native_ret_type);
             if (native_ret_type == MIR_T_D) {
                 jm_emit_reg_op(mt, MIR_DMOV, exc_ret, MIR_new_double_op(mt->ctx, 0.0));
@@ -1444,7 +1450,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // `for await` need resume labels alongside source `yield` expressions.
         // +1 for implicit "param binding" yield that separates param destructuring
         // from body execution (ES spec: FunctionDeclarationInstantiation is eager)
-        int yield_count = jm_count_yields(mt, fn->body) + (fn->is_async ? jm_count_awaits(mt, fn->body) : 0) + 1;
+        int yield_count = jm_count_yields(mt, fn->body) +
+            jm_count_finally_inline_yields(fn->body) +
+            (fn->is_async ? jm_count_awaits(mt, fn->body) +
+                jm_count_finally_inline_awaits(fn->body) : 0) + 1;
         // §9.3: the old `if (yield_count > 63) yield_count = 63;` safety cap
         // matched a fixed 64-label array and truncated SILENTLY — a 100-yield
         // generator ran only its first 62 states and returned a wrong result.
@@ -1688,7 +1697,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     // --- Phase 6: Generate async state machine function if is_async with awaits ---
     if (fn->is_async && !fn->is_generator) {
-        int await_count = jm_count_awaits(mt, fn->body);
+        int await_count = jm_count_awaits(mt, fn->body) +
+            jm_count_finally_inline_awaits(fn->body);
         if (await_count > 0) {
             // §9.3: same silent-truncation bug as the yield cap above; the
             // resume-label array is exact-sized from this count now.
@@ -2070,6 +2080,26 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         // Box the result and return
         MIR_reg_t boxed_result = jm_box_native(mt, native_result, JM_JS_FACT(fc, return_type));
+        // A throw inside the native body arrives out of band; an unhandled lane
+        // leaves this function exactly as a boxed body's would — as the ERROR
+        // carrier, or as a rejected promise for an async function.
+        MIR_reg_t native_lane = jm_call_0(mt, "js_native_throw_take", MIR_T_I64);
+        // The take is the only fallibility signal on this edge and the catalog
+        // cannot know that, so the lane state has to be declared unknown before
+        // the tag test or the test folds to a constant "clean".
+        jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
+        MIR_reg_t native_threw = jm_emit_error_lane_test(mt);
+        MIR_label_t native_clean = jm_new_label(mt);
+        jm_emit_branch(mt, MIR_BF, native_clean, native_threw);
+        jm_emit_ret(mt, fn->is_async && !fn->is_generator
+            ? jm_emit_async_rejected_value(mt, native_lane) : native_lane);
+        jm_emit_label_with_state(mt, native_clean, JS_ERROR_LANE_CLEAN);
+        if (fn->is_async && !fn->is_generator) {
+            // The fast path returns the body's value directly, but an async
+            // function still owes its caller its own result promise — the
+            // boxed lowering builds one at every return.
+            boxed_result = jm_callr_1(mt, "js_async_wrap_return", MIR_T_I64, boxed_result);
+        }
         jm_emit_ret(mt, boxed_result);
         jm_emit_label(mt, boxed_slow_label);
     }
@@ -2706,7 +2736,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             } else {
                 MIR_reg_t val = jm_transpile_box_item(mt, fn->body);
                 if (fn->is_async) {
-                    val = jm_callr_1(mt, "js_promise_resolve", MIR_T_I64, val);
+                    val = jm_callr_1(mt, "js_async_wrap_return", MIR_T_I64, val);
                 }
                 jm_emit_eval_local_pop_if_needed(mt);
                 jm_emit_ret(mt, val);
@@ -2782,7 +2812,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 jm_emit_label(mt, async_no_return_label);
                 MIR_reg_t undef_val = jm_new_reg(mt, "_async_undef", MIR_T_I64);
                 jm_emit_reg_op(mt, MIR_MOV, undef_val, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED));
-                MIR_reg_t resolved = jm_callr_1(mt, "js_promise_resolve", MIR_T_I64, undef_val);
+                MIR_reg_t resolved = jm_callr_1(mt, "js_async_wrap_return", MIR_T_I64, undef_val);
                 jm_emit_eval_local_pop_if_needed(mt);
                 jm_emit_ret(mt, resolved);
             }

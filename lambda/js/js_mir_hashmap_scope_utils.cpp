@@ -234,6 +234,9 @@ JsTryContext* jm_try_context_push(JsMirTranspiler* mt) {
     if (!context) return NULL;
     memset(context, 0, sizeof(*context));
     context->end_label_error_lane_state = JS_ERROR_LANE_UNREACHABLE;
+    context->has_return_spill = -1;
+    context->return_val_spill = -1;
+    context->loop_depth_at_push = mt->loop_depth;
     mt->try_ctx_depth++;
     return context;
 }
