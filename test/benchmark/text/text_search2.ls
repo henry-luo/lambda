@@ -1,10 +1,10 @@
-// T22-0 typed source: only search-function parameters carry int[] contracts.
+// Typed variant: corpus, patterns, code points, and search results carry end-to-end contracts.
 
 let search_rounds = 1536
 let modulus = 1000000007
 
-pn build_corpus() {
-    var rows = []
+pn build_corpus() string {
+    var rows: array = []
     var index = 0
     while (index < 512) {
         rows.push("record-" ++ string(index) ++
@@ -15,14 +15,14 @@ pn build_corpus() {
     join(rows, "\n")
 }
 
-let patterns = [
+let patterns: string[] = [
     "record-0 alpha", "record-2048 alpha", "token-22 omega", "needle-10",
     "omega needle-7", "alpha aaaaaaaaaaaaaaaaaaaaaaaa token-3",
     "missing-marker", "record-2047 omega"
 ]
 
-pn to_codes(text) {
-    var codes = []
+pn to_codes(text: string) int[] {
+    var codes: array = []
     var index = 0
     while (index < len(text)) {
         codes.push(ord(text[index]))
@@ -31,7 +31,7 @@ pn to_codes(text) {
     codes
 }
 
-pn naive_search(text: int[], pattern: int[], start: int) {
+pn naive_search(text: int[], pattern: int[], start: int) int {
     if (len(pattern) == 0) { return start }
     var position = start
     while (position <= len(text) - len(pattern)) {
@@ -45,8 +45,8 @@ pn naive_search(text: int[], pattern: int[], start: int) {
     return -1
 }
 
-pn prefix_table(pattern: int[]) {
-    var table = fill(len(pattern), 0)
+pn prefix_table(pattern: int[]) int[] {
+    var table: int[] = fill(len(pattern), 0)
     var length = 0
     var index = 1
     while (index < len(pattern)) {
@@ -63,7 +63,7 @@ pn prefix_table(pattern: int[]) {
     table
 }
 
-pn kmp_search(text: int[], pattern: int[], start: int) {
+pn kmp_search(text: int[], pattern: int[], start: int) int {
     if (len(pattern) == 0) { return start }
     let table = prefix_table(pattern)
     var text_index = start
@@ -82,9 +82,9 @@ pn kmp_search(text: int[], pattern: int[], start: int) {
     return -1
 }
 
-pn boyer_moore_search(text: int[], pattern: int[], start: int) {
+pn boyer_moore_search(text: int[], pattern: int[], start: int) int {
     if (len(pattern) == 0) { return start }
-    var occurrences = fill(256, -1)
+    var occurrences: int[] = fill(256, -1)
     var index = 0
     while (index < len(pattern) - 1) {
         occurrences[pattern[index]] = index
@@ -107,7 +107,7 @@ pn boyer_moore_search(text: int[], pattern: int[], start: int) {
 pn main() {
     let corpus = build_corpus()
     let corpus_codes = to_codes(corpus)
-    var pattern_codes = []
+    var pattern_codes: array = []
     var pattern_index = 0
     while (pattern_index < len(patterns)) {
         pattern_codes.push(to_codes(patterns[pattern_index]))

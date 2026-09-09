@@ -1,28 +1,38 @@
-// T22-0 typed source: document maps intentionally remain untyped because
-// assigning a holder contract would reify and detach their shared storage.
+// Typed variant: the external JSON AST is heterogeneous, but the formatter's
+// recursive document algebra and render state use stable contracts.
+
+type Doc = {kind: string} |
+    {kind: string, value: string} |
+    {kind: string, parts: Doc[]} |
+    {kind: string, contents: Doc} |
+    {kind: string, contents: Doc, break_threshold: int} |
+    {kind: string, broken: Doc, flat: Doc}
+type RenderContext = {column: int, indent: int}
+type RenderResult = {value: string, column: int}
 
 let ast_path = "test/benchmark/text/prettier_ast.json"
 let print_width = 80
 let iterations = 256
 let large_length = 1000000000
 
-let line_doc = {kind: "line"}
-let softline_doc = {kind: "softline"}
-let hardline_doc = {kind: "hardline"}
+let line_doc: Doc = {kind: "line"}
+let softline_doc: Doc = {kind: "softline"}
+let hardline_doc: Doc = {kind: "hardline"}
 
-fn text_doc(value) => {kind: "text", value: string(value)}
+fn text_doc(value: any) Doc => {kind: "text", value: string(value)}
 
-fn concat_docs(parts) => {kind: "concat", parts: parts}
+fn concat_docs(parts: Doc[]) Doc => {kind: "concat", parts: parts}
 
-fn indent_doc(contents) => {kind: "indent", contents: contents}
+fn indent_doc(contents: Doc) Doc => {kind: "indent", contents: contents}
 
-fn group_doc(contents, break_threshold = large_length) =>
+fn group_doc(contents: Doc, break_threshold: int = large_length) Doc =>
     {kind: "group", contents: contents, break_threshold: break_threshold}
 
-fn if_break_doc(broken, flat = text_doc("")) =>
+fn if_break_doc(broken: Doc, flat: Doc = text_doc("")) Doc =>
     {kind: "if-break", broken: broken, flat: flat}
 
-fn join_docs_at(separator, parts, index, count, acc) {
+fn join_docs_at(separator: Doc, parts: Doc[], index: int, count: int,
+        acc: Doc[]) Doc {
     if (index >= count) concat_docs(acc)
     else {
         let next = if (index == 0) acc ++ [parts[index]]
@@ -31,14 +41,15 @@ fn join_docs_at(separator, parts, index, count, acc) {
     }
 }
 
-fn join_docs(separator, parts) => join_docs_at(separator, parts, 0, len(parts), [])
+fn join_docs(separator: Doc, parts: Doc[]) Doc =>
+    join_docs_at(separator, parts, 0, len(parts), [])
 
-fn flat_length_at(doc, index, count, acc) {
+fn flat_length_at(doc: Doc, index: int, count: int, acc: int) int {
     if (index >= count) acc
     else flat_length_at(doc, index + 1, count, acc + flat_length(doc.parts[index]))
 }
 
-fn flat_length(doc) {
+fn flat_length(doc: Doc) int {
     if (doc.kind == "text") len(doc.value)
     else if (doc.kind == "concat") flat_length_at(doc, 0, len(doc.parts), 0)
     else if (doc.kind == "indent") flat_length(doc.contents)
@@ -49,16 +60,18 @@ fn flat_length(doc) {
     else large_length
 }
 
-fn fits(doc, remaining) => flat_length(doc) <= remaining
+fn fits(doc: Doc, remaining: int) bool => flat_length(doc) <= remaining
 
-fn indent_string(level) {
+fn indent_string(level: int) string {
     if (level <= 0) ""
     else "  " ++ indent_string(level - 1)
 }
 
-fn render_result(value, column) => {value: value, column: column}
+fn render_result(value: string, column: int) RenderResult =>
+    {value: value, column: column}
 
-fn render_parts_at(parts, index, count, ctx, mode, acc) {
+fn render_parts_at(parts: Doc[], index: int, count: int, ctx: RenderContext,
+        mode: string, acc: string) RenderResult {
     if (index >= count) render_result(acc, ctx.column)
     else {
         let rendered = render_doc(parts[index], ctx, mode)
@@ -68,7 +81,7 @@ fn render_parts_at(parts, index, count, ctx, mode, acc) {
     }
 }
 
-fn render_doc(doc, ctx, mode) {
+fn render_doc(doc: Doc, ctx: RenderContext, mode: string) RenderResult {
     if (doc.kind == "text") {
         render_result(doc.value, ctx.column + len(doc.value))
     } else if (doc.kind == "concat") {
@@ -98,9 +111,10 @@ fn render_doc(doc, ctx, mode) {
     }
 }
 
-fn render_doc_root(doc) => render_doc(doc, {column: 0, indent: 0}, "break").value
+fn render_doc_root(doc: Doc) string =>
+    render_doc(doc, {column: 0, indent: 0}, "break").value
 
-fn json_quote(value) {
+fn json_quote(value: string) string {
     let escaped_backslash = replace(value, "\\", "\\\\")
     let escaped_quote = replace(escaped_backslash, "\"", "\\\"")
     let escaped_newline = replace(escaped_quote, "\n", "\\n")
@@ -109,7 +123,7 @@ fn json_quote(value) {
     "\"" ++ escaped_tab ++ "\""
 }
 
-fn literal_doc(node) {
+fn literal_doc(node: any) Doc {
     if (node.type == "StringLiteral") text_doc(json_quote(node.value))
     else if (node.type == "NumericLiteral") text_doc(node.value)
     else if (node.type == "BooleanLiteral") text_doc(if (node.value) "true" else "false")
@@ -117,28 +131,30 @@ fn literal_doc(node) {
     else text_doc("/" ++ node.pattern ++ "/" ++ node.flags)
 }
 
-fn print_nodes_at(nodes, index, count, acc) {
+fn print_nodes_at(nodes: array, index: int, count: int, acc: Doc[]) Doc[] {
     if (index >= count) acc
     else {
         print_nodes_at(nodes, index + 1, count, acc ++ [print_node(nodes[index])])
     }
 }
 
-fn print_nodes(nodes) => print_nodes_at(nodes, 0, len(nodes), [])
+fn print_nodes(nodes: array) Doc[] => print_nodes_at(nodes, 0, len(nodes), [])
 
-fn print_statements_at(nodes, index, count, acc) {
+fn print_statements_at(nodes: array, index: int, count: int,
+        acc: Doc[]) Doc[] {
     if (index >= count) acc
     else print_statements_at(nodes, index + 1, count, acc ++ [print_statement(nodes[index])])
 }
 
-fn print_statements(nodes) => print_statements_at(nodes, 0, len(nodes), [])
+fn print_statements(nodes: array) Doc[] =>
+    print_statements_at(nodes, 0, len(nodes), [])
 
-fn node_key(node) {
+fn node_key(node: any) Doc {
     if (node.computed) concat_docs([text_doc("["), print_node(node.key), text_doc("]")])
     else print_node(node.key)
 }
 
-fn parameter_list(params) {
+fn parameter_list(params: array) Doc {
     let printed = print_nodes(params)
     group_doc(concat_docs([
         text_doc("("),
@@ -149,13 +165,13 @@ fn parameter_list(params) {
     ]))
 }
 
-fn has_object_argument(args, index, count) {
+fn has_object_argument(args: array, index: int, count: int) bool {
     if (index >= count) false
     else if (args[index].type == "ObjectExpression") true
     else has_object_argument(args, index + 1, count)
 }
 
-fn argument_list(args) {
+fn argument_list(args: array) Doc {
     if (len(args) == 0) text_doc("()")
     else if (has_object_argument(args, 0, len(args)))
         concat_docs([text_doc("("), join_docs(text_doc(", "), print_nodes(args)), text_doc(")")])
@@ -168,7 +184,7 @@ fn argument_list(args) {
     ]))
 }
 
-fn array_doc(elements) {
+fn array_doc(elements: array) Doc {
     if (len(elements) == 0) text_doc("[]")
     else group_doc(concat_docs([
         text_doc("["),
@@ -179,7 +195,7 @@ fn array_doc(elements) {
     ]))
 }
 
-fn object_doc(properties) {
+fn object_doc(properties: array) Doc {
     if (len(properties) == 0) text_doc("{}")
     else group_doc(concat_docs([
         text_doc("{"),
@@ -189,7 +205,7 @@ fn object_doc(properties) {
     ]))
 }
 
-fn block_doc(body) {
+fn block_doc(body: array) Doc {
     if (len(body) == 0) text_doc("{}")
     else concat_docs([
         text_doc("{"),
@@ -199,7 +215,7 @@ fn block_doc(body) {
     ])
 }
 
-fn variable_doc(node, terminator) {
+fn variable_doc(node: any, terminator: bool) Doc {
     let declaration = concat_docs([
         text_doc(node.kind ++ " "),
         join_docs(concat_docs([text_doc(","), line_doc]), print_nodes(node.declarations))
@@ -207,7 +223,7 @@ fn variable_doc(node, terminator) {
     if (terminator) concat_docs([declaration, text_doc(";")]) else declaration
 }
 
-fn print_property(node) {
+fn print_property(node: any) Doc {
     if (node.type == "SpreadElement") concat_docs([text_doc("..."), print_node(node.argument)])
     else {
         let key = node_key(node)
@@ -216,7 +232,7 @@ fn print_property(node) {
     }
 }
 
-fn expression_precedence(node) {
+fn expression_precedence(node: any) int {
     if (node == null) 100
     else if (node.type == "AssignmentExpression" or node.type == "ArrowFunctionExpression") 1
     else if (node.type == "LogicalExpression") if (node.operator == "&&") 3 else 2
@@ -229,26 +245,27 @@ fn expression_precedence(node) {
     } else 20
 }
 
-fn print_expression(node, parent_precedence = 0) {
+fn print_expression(node: any, parent_precedence: int = 0) Doc {
     let doc = print_node(node)
     if (expression_precedence(node) < parent_precedence)
         concat_docs([text_doc("("), doc, text_doc(")")])
     else doc
 }
 
-fn flatten_additive(node, acc) {
+fn flatten_additive(node: any, acc: array) array {
     if (node.type == "BinaryExpression" and node.operator == "+")
         flatten_additive(node.left, acc) ++ [node.right]
     else acc ++ [node]
 }
 
-fn additive_tail_at(operands, index, count, acc) {
+fn additive_tail_at(operands: array, index: int, count: int,
+        acc: Doc[]) Doc[] {
     if (index >= count) acc
     else additive_tail_at(operands, index + 1, count,
         acc ++ [text_doc(" +"), line_doc, print_expression(operands[index], 12)])
 }
 
-fn additive_chain_doc(node) {
+fn additive_chain_doc(node: any) Doc {
     let operands = flatten_additive(node, [])
     group_doc(concat_docs([
         print_expression(operands[0], 11),
@@ -256,7 +273,7 @@ fn additive_chain_doc(node) {
     ]), 60)
 }
 
-fn print_node(node) {
+fn print_node(node: any) Doc {
     if (node == null) text_doc("")
     else if (node.type == "Identifier") text_doc(node.name)
     else if (node.type == "ThisExpression") text_doc("this")
@@ -322,7 +339,7 @@ fn print_node(node) {
     else print_statement(node)
 }
 
-fn print_statement(node) {
+fn print_statement(node: any) Doc {
     if (node.type == "VariableDeclaration") variable_doc(node, true)
     else if (node.type == "ReturnStatement") concat_docs([text_doc("return"), if (node.argument == null) text_doc("") else concat_docs([text_doc(" "), print_node(node.argument)]), text_doc(";")])
     else if (node.type == "ExpressionStatement") concat_docs([print_node(node.expression), text_doc(";")])
@@ -352,7 +369,11 @@ fn print_statement(node) {
     else text_doc("")
 }
 
-pn print_program(program) { render_doc_root(concat_docs([join_docs(hardline_doc, print_statements(program.body)), hardline_doc])) }
+pn print_program(program: any) string {
+    render_doc_root(concat_docs([
+        join_docs(hardline_doc, print_statements(program.body)), hardline_doc
+    ]))
+}
 
 pn main() {
     let ast = input(ast_path, {type: "json"}) ^ { null }

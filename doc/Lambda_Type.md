@@ -311,14 +311,14 @@ Nested arrays:
 <!-- code-fence: lambda type -->
 | Form | Meaning |
 |------|---------|
-| `int[][]` | Array of int arrays |
-| `string[][]` | 2D array of strings |
+| `(int*)*` | Array of int arrays |
+| `(string*)*` | 2D array of strings |
 
 Examples:
 
 ```lambda
 let nums: int[] = [1, 2, 3]
-let matrix: int[][] = [[1, 2], [3, 4]]
+let matrix: (int*)* = [[1, 2], [3, 4]]
 let names: [string+] = ["Alice", "Bob"]
 ```
 

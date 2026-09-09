@@ -8,18 +8,18 @@ let TREE_MODIFICATIONS = 80
 
 // Type definitions for direct struct field access
 // Field order must match the map literal order in create_node
-type SplayNode = {key: float, left: SplayNode?, right: SplayNode?, value: map?}
+type Payload = {arr: int[], str: float} |
+    {left_p: Payload, right_p: Payload}
+type SplayNode = {key: float, left: SplayNode?, right: SplayNode?, value: Payload}
 // The root carries the same fixed record contract as nodes; keeping it open
 // forces every root handoff through runtime map admission and erases C3's
 // direct-shape proof.
 type SplayTree = {root: SplayNode?}
 type RngState = {seed: int}
-type PayloadLeaf = {arr: array, str: float}
-type PayloadBranch = {left_p: map, right_p: map}
 
 // Node: {key, left, right, value}
 // SplayNode type annotation ensures runtime data layout matches direct access offsets
-pn create_node(key: float, value) SplayNode {
+pn create_node(key: float, value: Payload) SplayNode {
     var node: SplayNode = {key: key, left: null, right: null, value: value}
     return node
 }
@@ -51,7 +51,7 @@ pn splay(var tree: SplayTree, key: float) int {
     }
     // Rebuild each rotated subtree through a local owner before returning it.
     // The original top-down cursor links depended on mutable pointer aliases,
-    // which are snapshots under COW (D3.3.1).
+    // which are snapshots under COW (D3.3.1v2).
     var root: SplayNode? = tree.root
     root = splay_node(root, key)
     tree.root = root
@@ -145,7 +145,7 @@ pn splay_node(var node: SplayNode?, key: float) SplayNode? {
     return node
 }
 
-pn splay_insert(var tree: SplayTree, key: float, value) int {
+pn splay_insert(var tree: SplayTree, key: float, value: Payload) int {
     if (splay_is_empty(tree)) {
         tree.root = create_node(key, value)
         return 0
@@ -171,7 +171,7 @@ pn splay_insert(var tree: SplayTree, key: float, value) int {
     return 0
 }
 
-pn splay_remove(var tree: SplayTree, key: float) map? {
+pn splay_remove(var tree: SplayTree, key: float) SplayNode? {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -192,7 +192,7 @@ pn splay_remove(var tree: SplayTree, key: float) map? {
     return removed
 }
 
-pn splay_find(var tree: SplayTree, key: float) map? {
+pn splay_find(var tree: SplayTree, key: float) SplayNode? {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -210,7 +210,7 @@ pn splay_find_max(node: SplayNode) SplayNode {
     return node
 }
 
-pn splay_find_greatest_less_than(var tree: SplayTree, key: float) map? {
+pn splay_find_greatest_less_than(var tree: SplayTree, key: float) SplayNode? {
     if (splay_is_empty(tree)) {
         return null
     }
@@ -245,7 +245,7 @@ pn traverse_keys(node: SplayNode?, var keys: float[], idx_in: int) int {
 }
 
 // Generate payload tree for node values
-pn generate_payload(depth: int, tag: float) map {
+pn generate_payload(depth: int, tag: float) Payload {
     if (depth == 0) {
         var leaf = {arr: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], str: tag}
         return leaf
