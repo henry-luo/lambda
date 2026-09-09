@@ -2061,6 +2061,9 @@ JitImport jit_runtime_imports[] = {
     {"js_eq_raw", FPTR(js_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_loose_eq_raw", FPTR(js_loose_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_new_object", FPTR(js_new_object)},
+    {"js_new_object_shaped", FPTR(js_new_object_shaped)},
+    {"js_shaped_slot_get", FPTR(js_shaped_slot_get),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM}},
     {"js_get_key_default", FPTR(js_get_key_default)},
     // Property reads can materialize out-of-band numeric Items; the explicit
     // boxed contract lets MIR reserve a caller scalar home without treating

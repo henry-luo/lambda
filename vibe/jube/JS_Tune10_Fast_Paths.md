@@ -145,7 +145,7 @@ else (non-number key): today's js_to_property_key path
 
 This reuses the Lambda index lane: the same `item_at`-style entry and the same unboxed-int register the untyped tier uses, with JS-specific guards. Target: `a[i]` ≤ 15 ns (QuickJS 26 ns), primes ≤ 100 ms (v28 level), sieve/quicksort/fft/fannkuch/permute back to R28.
 
-### T10-2 Named access: predicted shape + inline guard, kernel on miss (D-C, D-E) — **items 1 and 3 LANDED, item 2 OPEN**
+### T10-2 Named access: predicted shape + inline guard, kernel on miss (D-C, D-E) — **item 3 LANDED 2026-09-09; items 1-2 LANDED for object literals 2026-09-09 (constructor prefixes and the `set` half still open — §12)**
 
 This is IC_Retire's **Tier A**, already designed there as IR10–IR15 (type identity and guard, `slot_entries[]` as the sole ordinal index, where `type_index` comes from, subtype admission by id ranges). Under LC1v2 it is no longer an optional follow-up but the only sanctioned route. It introduces **no per-site mutable state** and no MIR-cache-key churn:
 
@@ -319,11 +319,9 @@ its own `TypeMap`, which is T10-2 item 1.
 
 ### 8.5 What is still open
 
-1. **T10-2 items 1–2** — per-site `TypeMap` prediction for object literals and
-   constructor `this.x = …` prefixes, plus the inline guard + direct slot for
-   named get/set. This is the largest remaining item: it is what stands between
-   `new P` at 1.6 µs and QuickJS's 200 ns, and between `p.x` at ~30 ns and
-   QuickJS's 19 ns.
+1. **T10-2 items 1–2** — **superseded by §12.** The object-literal half of both
+   landed on 2026-09-09; what remains is the constructor `this.x = …` prefix,
+   the `set` half of the guard, and inlining the guard sequence itself.
 2. **T10-4** — `arguments` still costs ~50 µs per call when a function really
    uses it: `js_build_arguments_object` builds an array, a companion map, two
    throwaway descriptor objects (each with four interned attribute writes that
@@ -848,3 +846,141 @@ these were:
   but not a free one;
 * `js_object_meta` is still 6.2% after 11.1, but now spread across many callers
   rather than one avoidable ladder.
+
+
+---
+
+## 12. Round 5 — T10-2 items 1 and 2, for object literals
+
+Same control as every round since §8: the archived `lambda-v38-b23793e832`.
+
+### 12.1 Item 2 could not be built on item 2's own terms
+
+§5 item 2 says the guard fires "on a receiver whose static type carries a
+predicted shape". No such static type existed: JS object literals lowered to
+`js_new_object()` plus a sequence of adds, so there was no compile-time constant
+for a `TypeMap*` compare to name. That is D-E, and it had to be built first.
+
+Lambda's own T20-1a/1c is the precedent and it is instructive: its constant
+comes from `transpile_map` writing a per-site `TypeMap*` into the header, and
+its candidate comes from `mir_expr_candidate_shape` tracing an inference edge —
+a *candidate*, never a proof, with the guard supplying the proof at runtime.
+This round is the same shape of thing, one indirection further out because the
+JS shape does not exist until the realm does.
+
+### 12.2 How a JS literal names a shape it cannot see at compile time
+
+A site's shape is named by a **contiguous range of the active module's
+property-key table**: `(first_key_index, key_count)`, two integers baked as
+immediates. The realm is resolved through active module state exactly as
+`lambda_active_module_name_id` resolves a single name, so no realm pointer
+enters shared MIR (D5.4.3, D5.4.4) and IR10's rule is satisfied without a new
+module image section — the key table already transports everything a shape needs.
+
+`jm_module_name_append` (not `_index`) reserves the range, because it preserves
+duplicate spellings and therefore keeps the entries contiguous.
+
+**Every slot is NULL-typed at pointer width.** That is what makes the shape
+knowable without knowing value types, and it is the recipe the retired
+pre-shaping used verbatim: *"correct 8-byte spacing so INT, FLOAT, STRING, MAP,
+FUNC etc. all fit in-place via the NULL→same-byte-size fast path"*.
+
+Admission is narrow: plain, statically named, pairwise-distinct data properties,
+at most 16. Computed keys, spreads, accessors, methods, `__proto__` and
+duplicate keys all keep the generic path — each either makes the own-slot set
+dynamic or creates no data slot.
+
+### 12.3 The guard
+
+`js_shaped_slot_get(obj, first, count, slot, name_id)` guards tag →
+`MAP_KIND_PLAIN` → `TypeMap*` compare → bounds → deleted sentinel, then reads
+the slot; any miss falls through to `js_get_name_id`. Constants only, no code is
+ever rewritten: a guard chain, not an inline cache (D8.4.1v2, LC1v2).
+
+Shape identity subsumes most of what the kernel re-checks per access — every
+descriptor, accessor, delete, freeze and extension path clones the `TypeMap`
+before mutating it, so an instance that took any of them fails the compare. The
+sentinel test stays because a sentinel can be written without cloning.
+
+The candidate comes from the binding's own declarator through
+`NameEntry::node` (D8.2.4: the resolved binding, never a re-resolved spelling).
+An earlier version carried it as a flow fact on `VarEntry` and it was silently
+dropped: scope maps rebuild those entries field by field, copying only the
+fields they name. Reading the declarator removed both the failure mode and about
+forty lines.
+
+Per IR14 this is the **helper call**, not yet the inlined sequence. The operands
+are already the ones an inline expansion would use.
+
+### 12.4 The in-place retag, without which the guard is dead
+
+Instances were detaching from their predicted shape *during their own
+construction*: `js_create_data_property`'s fast path is gated on `!key_exists`,
+and a predicted slot exists from allocation, so every literal write fell to the
+descriptor path — the exact D-B cost T10-3 removed.
+
+An existing but still-unwritten slot is an **initialization**, not a
+redefinition. Two admissible cases and no third:
+
+* a **NULL slot** retags to the value's lane — the direction
+  `shape_entry_retag_is_safe` sanctions, since only T→NULL is refused on a
+  shared shape (that one would make the collector skip a sibling's live pointer);
+* an **already-typed slot** is admitted only when the value needs *no* retag.
+  The shape is shared by every instance of the site, so retagging INT→STRING
+  would have a sibling's integer read back as a pointer.
+
+Everything else falls through and detaches. The invariant this buys: **a
+predicted slot goes NULL→T exactly once and never changes again.**
+
+The store reuses the existing same-size helper;
+`js_array_companion_write_same_size_slot` was renamed
+`js_shape_write_same_size_slot` because nothing in its body was array-specific.
+
+### 12.5 Measured (min-of-3, release banner asserted, vs v38)
+
+| micro | v38 | after | |
+|---|---:|---:|---:|
+| `{x:i, y:1}` literal + read, 500k | 541 ms | **68** | **7.96×** |
+| `p.x + p.y`, 4M | 408 | **187** | **2.18×** |
+| **scalar control** | 134 | 133 | **1.00×** |
+
+The guard's own contribution, isolated: 238 → 191 ms on named reads (1.25×).
+The rest is the shaped allocation.
+
+### 12.6 Three defects this round produced, and what each cost to find
+
+1. **A silent wrong answer, caught by the new fixture on its first run.**
+   `delete d.k1; d.k1 = 9` returned the *stale* value with the right key
+   present. Cause: reserving every slot via `ctor_reserved_mask` pushed the
+   literal's own stores off the named fast path. A literal writes every slot
+   before the object is reachable, so there is no window to protect and the mask
+   is simply wrong here — a constructor prefix, where the window is real, will
+   still need it.
+2. **A 9.7× regression, invisible to its own A/B.** Admitting only the NULL case
+   in §12.4 meant just the first instance took the fast path; every later one hit
+   `key_exists` and landed in the descriptor path — 5237 ms against v38's 542.
+   The guard-on/guard-off A/B showed nothing because *both sides had it*. Only
+   the archived-binary control exposed it. Third time in this work that the
+   choice of control decided whether a regression was visible.
+3. **A dead guard.** Poisoning the hit path changed nothing, exactly as the
+   starved shape root did in §9.6. Liveness is now checked by poisoning, never
+   inferred from a passing test.
+
+### 12.7 What is left in T10-2
+
+* **Constructor `this.x = …` prefixes** — item 1's other half, and IR12's anchor
+  case. Needs the reserved mask that literals do not, because the window between
+  allocation and the field writes is real there.
+* **The `set` half of the guard.** Only `get` is guarded today.
+* **Inlining the guard sequence** (IR14's endgame). The helper stays as the
+  out-of-line miss body.
+* **Widening the candidate.** Only a receiver traced to its own declarator
+  qualifies; parameters and returns publish nothing, which is where Lambda's
+  T20-1b module-unique-shape fallback would map across.
+
+### 12.8 Gates
+
+test262 **40261/40261, 0 regressions**, peak 889 MB. `test_js_gtest` **381/381**.
+The `js_tune10_predicted_shape` fixture is Node-exact and pins property order,
+`delete`/re-add, per-site type polymorphism, descriptors, freeze, and the
+shared-shape cross-retag invariant of §12.4.
