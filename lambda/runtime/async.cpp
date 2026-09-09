@@ -1,6 +1,7 @@
 #include "async.h"
 
 #include "transpiler.hpp"
+#include "lambda-root-frame.hpp"
 
 enum { RUNTIME_JOB_ITEM_COUNT = 7 };
 
@@ -127,6 +128,47 @@ extern "C" void runtime_job_queue_clear(RuntimeJobQueue* queue) {
     queue->pending_count = 0;
 }
 
+extern "C" void runtime_callback_slots_init(RuntimeCallbackSlots* slots,
+        Context* owner, const char* name) {
+    if (!slots) return;
+    root_vector_init(&slots->values, owner, name);
+}
+
+extern "C" bool runtime_callback_slots_add(RuntimeCallbackSlots* slots,
+        Item callback, int64_t* out_slot) {
+    if (!slots || !out_slot) return false;
+    *out_slot = -1;
+    RootFrame roots(1);
+    Rooted<Item> callback_root(roots, callback);
+    int64_t slot = root_vector_count(&slots->values);
+    if (!root_vector_push(&slots->values, callback_root.get())) return false;
+    *out_slot = slot;
+    return true;
+}
+
+extern "C" Item runtime_callback_slots_take(RuntimeCallbackSlots* slots,
+        int64_t slot) {
+    if (!slots || slot < 0) return ItemNull;
+    Item* value = root_vector_at(&slots->values, slot);
+    Item callback = value ? *value : ItemNull;
+    if (value) *value = ItemNull;
+    // Tail shrinking retains stable indices for every completion still held
+    // by libuv while releasing historical callback storage promptly.
+    for (;;) {
+        int64_t count = root_vector_count(&slots->values);
+        if (count <= 0) break;
+        Item* last = root_vector_at(&slots->values, count - 1);
+        if (!last || last->item != ItemNull.item) break;
+        root_vector_pop(&slots->values);
+    }
+    return callback;
+}
+
+extern "C" void runtime_callback_slots_destroy(RuntimeCallbackSlots* slots) {
+    if (!slots) return;
+    root_vector_destroy(&slots->values);
+}
+
 enum {
     RUNTIME_RESOURCE_INDEX_BITS = 16,
     RUNTIME_RESOURCE_INDEX_MASK = (1u << RUNTIME_RESOURCE_INDEX_BITS) - 1u,
@@ -140,6 +182,8 @@ static const RuntimeResourceDescriptor runtime_resource_descriptors[] = {
     {RUNTIME_RESOURCE_CRYPTO_HASH, RUNTIME_RESOURCE_GROUP_CRYPTO, "crypto.hash"},
     {RUNTIME_RESOURCE_CRYPTO_SIGN, RUNTIME_RESOURCE_GROUP_CRYPTO, "crypto.sign"},
     {RUNTIME_RESOURCE_CRYPTO_CIPHER, RUNTIME_RESOURCE_GROUP_CRYPTO, "crypto.cipher"},
+    {RUNTIME_RESOURCE_FS_REQUEST, RUNTIME_RESOURCE_GROUP_NONE, "FSReqCallback"},
+    {RUNTIME_RESOURCE_DNS_REQUEST, RUNTIME_RESOURCE_GROUP_NETWORK, "DNSReqCallback"},
 };
 
 extern "C" const RuntimeResourceDescriptor*
@@ -182,6 +226,12 @@ extern "C" const RuntimeResourceEntry* runtime_resource_table_entry(
     return slot ? slot->entry : NULL;
 }
 
+extern "C" const RuntimeResourceEntry* runtime_resource_table_entry_owned(
+        RuntimeResourceTable* table, void* lifecycle_owner, uint32_t id) {
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry(table, id);
+    return entry && entry->lifecycle_owner == lifecycle_owner ? entry : NULL;
+}
+
 extern "C" int runtime_resource_table_slot_count(
         const RuntimeResourceTable* table) {
     return table && table->slots ? table->slots->length : 0;
@@ -190,6 +240,20 @@ extern "C" int runtime_resource_table_slot_count(
 extern "C" int runtime_resource_table_active_count(
         const RuntimeResourceTable* table) {
     return table ? table->active_count : 0;
+}
+
+extern "C" int runtime_resource_table_active_count_owned(
+        const RuntimeResourceTable* table, void* lifecycle_owner) {
+    if (!table || !table->slots) return 0;
+    int count = 0;
+    for (int i = 0; i < table->slots->length; i++) {
+        RuntimeResourceSlot* slot = (RuntimeResourceSlot*)table->slots->data[i];
+        if (slot && slot->entry && !slot->entry->closing &&
+                slot->entry->lifecycle_owner == lifecycle_owner) {
+            count++;
+        }
+    }
+    return count;
 }
 
 extern "C" const RuntimeResourceEntry* runtime_resource_table_entry_at(
@@ -214,6 +278,13 @@ extern "C" void* runtime_resource_table_user_data(RuntimeResourceTable* table,
     return entry ? entry->close_user : NULL;
 }
 
+extern "C" void* runtime_resource_table_user_data_owned(
+        RuntimeResourceTable* table, void* lifecycle_owner, uint32_t id) {
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(table,
+        lifecycle_owner, id);
+    return entry ? entry->close_user : NULL;
+}
+
 static void runtime_resource_table_release_entry(RuntimeResourceTable* table,
         RuntimeResourceSlot* slot, bool close_native) {
     if (!table || !slot || !slot->entry) return;
@@ -224,8 +295,11 @@ static void runtime_resource_table_release_entry(RuntimeResourceTable* table,
     slot->entry = NULL;
     if (table->active_count > 0) table->active_count--;
     if (close_native && entry->close_callback) entry->close_callback(entry->close_user);
-    Item* value = root_vector_at(&table->owner_values, entry->root_slot);
-    if (value) *value = ItemNull;
+    for (int i = 0; i < entry->root_count; i++) {
+        Item* value = root_vector_at(&table->owner_values,
+            entry->root_slot + i);
+        if (value) *value = ItemNull;
+    }
     mem_free(entry);
 }
 
@@ -235,10 +309,35 @@ extern "C" void runtime_resource_table_remove(RuntimeResourceTable* table,
     runtime_resource_table_release_entry(table, slot, true);
 }
 
+extern "C" void runtime_resource_table_remove_owned(RuntimeResourceTable* table,
+        void* lifecycle_owner, uint32_t id) {
+    RuntimeResourceSlot* slot = runtime_resource_table_slot(table, id);
+    if (!slot || !slot->entry || slot->entry->lifecycle_owner != lifecycle_owner) return;
+    runtime_resource_table_release_entry(table, slot, true);
+}
+
 extern "C" void runtime_resource_table_forget(RuntimeResourceTable* table,
         uint32_t id) {
     RuntimeResourceSlot* slot = runtime_resource_table_slot(table, id);
     runtime_resource_table_release_entry(table, slot, false);
+}
+
+extern "C" void runtime_resource_table_forget_owned(RuntimeResourceTable* table,
+        void* lifecycle_owner, uint32_t id) {
+    RuntimeResourceSlot* slot = runtime_resource_table_slot(table, id);
+    if (!slot || !slot->entry || slot->entry->lifecycle_owner != lifecycle_owner) return;
+    runtime_resource_table_release_entry(table, slot, false);
+}
+
+extern "C" void runtime_resource_table_clear_owned(RuntimeResourceTable* table,
+        void* lifecycle_owner) {
+    if (!table || !table->slots) return;
+    for (int i = 0; i < table->slots->length; i++) {
+        RuntimeResourceSlot* slot = (RuntimeResourceSlot*)table->slots->data[i];
+        if (slot && slot->entry && slot->entry->lifecycle_owner == lifecycle_owner) {
+            runtime_resource_table_release_entry(table, slot, true);
+        }
+    }
 }
 
 extern "C" void runtime_resource_table_clear(RuntimeResourceTable* table) {
@@ -261,11 +360,21 @@ extern "C" void runtime_resource_table_destroy(RuntimeResourceTable* table) {
     root_vector_destroy(&table->owner_values);
 }
 
-extern "C" uint32_t runtime_resource_table_add(RuntimeResourceTable* table,
-        Item value, const RuntimeResourceDescriptor* descriptor,
-        RuntimeResourceCloseCallback close_callback, void* close_user,
-        bool is_handle) {
-    if (!table || !value.item || !descriptor) return 0;
+extern "C" uint32_t runtime_resource_table_add_root_span_owned(
+        RuntimeResourceTable* table, void* lifecycle_owner,
+        const Item* root_values, int root_count,
+        const RuntimeResourceDescriptor* descriptor,
+    RuntimeResourceCloseCallback close_callback, void* close_user,
+    bool is_handle) {
+    if (!table || !root_values || root_count <= 0 || !root_values[0].item ||
+            !descriptor) return 0;
+    RootFrame roots((size_t)root_count);
+    for (int i = 0; i < root_count; i++) {
+        uint64_t* root = roots.slot((size_t)i);
+        if (!root) return 0;
+        *root = root_values[i].item;
+    }
+    Item value = (Item){.item = *roots.slot(0)};
     if (!table->slots) {
         table->slots = arraylist_new(8);
         if (!table->slots) return 0;
@@ -273,7 +382,8 @@ extern "C" uint32_t runtime_resource_table_add(RuntimeResourceTable* table,
     for (int i = 0; i < table->slots->length; i++) {
         RuntimeResourceSlot* slot = (RuntimeResourceSlot*)table->slots->data[i];
         RuntimeResourceEntry* entry = slot ? slot->entry : NULL;
-        if (entry && runtime_resource_table_value(table, entry).item == value.item) {
+        if (entry && entry->lifecycle_owner == lifecycle_owner &&
+                runtime_resource_table_value(table, entry).item == value.item) {
             // A script owner has exactly one native close authority.
             return close_callback ? 0 : entry->id;
         }
@@ -302,25 +412,54 @@ extern "C" uint32_t runtime_resource_table_add(RuntimeResourceTable* table,
     slot->generation++;
     if (slot->generation == 0) slot->generation++;
 
-    RootFrame roots(1);
-    Rooted<Item> value_root(roots, value);
     RuntimeResourceEntry* entry = (RuntimeResourceEntry*)mem_calloc(1,
         sizeof(RuntimeResourceEntry), MEM_CAT_SYSTEM);
     if (!entry) return 0;
     entry->id = ((uint32_t)slot->generation << RUNTIME_RESOURCE_INDEX_BITS) |
         (uint32_t)(index + 1);
     entry->root_slot = root_vector_count(&table->owner_values);
+    entry->root_count = root_count;
+    entry->lifecycle_owner = lifecycle_owner;
     entry->descriptor = descriptor;
     entry->close_callback = close_callback;
     entry->close_user = close_user;
     entry->is_handle = is_handle;
-    if (!root_vector_push(&table->owner_values, value_root.get())) {
+    for (int i = 0; i < root_count; i++) {
+        Item rooted_value = (Item){.item = *roots.slot((size_t)i)};
+        if (root_vector_push(&table->owner_values, rooted_value)) continue;
+        root_vector_shrink(&table->owner_values, entry->root_slot);
         mem_free(entry);
         return 0;
     }
     slot->entry = entry;
     table->active_count++;
     return entry->id;
+}
+
+extern "C" uint32_t runtime_resource_table_add_root_span(
+        RuntimeResourceTable* table, const Item* root_values, int root_count,
+        const RuntimeResourceDescriptor* descriptor,
+        RuntimeResourceCloseCallback close_callback, void* close_user,
+        bool is_handle) {
+    return runtime_resource_table_add_root_span_owned(table, NULL, root_values,
+        root_count, descriptor, close_callback, close_user, is_handle);
+}
+
+extern "C" uint32_t runtime_resource_table_add(RuntimeResourceTable* table,
+        Item value, const RuntimeResourceDescriptor* descriptor,
+        RuntimeResourceCloseCallback close_callback, void* close_user,
+        bool is_handle) {
+    return runtime_resource_table_add_root_span_owned(table, NULL, &value, 1, descriptor,
+        close_callback, close_user, is_handle);
+}
+
+extern "C" uint32_t runtime_resource_table_add_owned(RuntimeResourceTable* table,
+        void* lifecycle_owner, Item value,
+        const RuntimeResourceDescriptor* descriptor,
+        RuntimeResourceCloseCallback close_callback, void* close_user,
+        bool is_handle) {
+    return runtime_resource_table_add_root_span_owned(table, lifecycle_owner,
+        &value, 1, descriptor, close_callback, close_user, is_handle);
 }
 
 extern "C" void runtime_resource_table_close_group(RuntimeResourceTable* table,
@@ -330,6 +469,19 @@ extern "C" void runtime_resource_table_close_group(RuntimeResourceTable* table,
         RuntimeResourceSlot* slot = (RuntimeResourceSlot*)table->slots->data[i];
         RuntimeResourceEntry* entry = slot ? slot->entry : NULL;
         if (!entry || !entry->descriptor || entry->descriptor->group != group) continue;
+        runtime_resource_table_release_entry(table, slot, true);
+    }
+}
+
+extern "C" void runtime_resource_table_close_group_owned(
+        RuntimeResourceTable* table, void* lifecycle_owner,
+        RuntimeResourceGroup group) {
+    if (!table || group == RUNTIME_RESOURCE_GROUP_NONE || !table->slots) return;
+    for (int i = 0; i < table->slots->length; i++) {
+        RuntimeResourceSlot* slot = (RuntimeResourceSlot*)table->slots->data[i];
+        RuntimeResourceEntry* entry = slot ? slot->entry : NULL;
+        if (!entry || entry->lifecycle_owner != lifecycle_owner ||
+                !entry->descriptor || entry->descriptor->group != group) continue;
         runtime_resource_table_release_entry(table, slot, true);
     }
 }

@@ -354,7 +354,6 @@ typedef struct JsTimerHandle {
     NamePool*  runtime_name_pool;
     Pool*      runtime_pool;
     void*      runtime_doc;
-    bool       roots_registered;
     bool       closing;
     double     virtual_due_ms;
     double     virtual_repeat_ms;
@@ -362,8 +361,9 @@ typedef struct JsTimerHandle {
     bool       virtual_refed;
 } JsTimerHandle;
 
-#define timer_resources (js_runtime_state.timers->resources)
-#define timer_handle_count runtime_resource_table_active_count(&timer_resources)
+#define timer_resources (js_runtime_state.resources)
+#define timer_handle_count runtime_resource_table_active_count_owned(\
+    &timer_resources, js_runtime_state.timers)
 #define timer_slot_count runtime_resource_table_slot_count(&timer_resources)
 #define next_timer_id (js_runtime_state.timers->next_id)
 #define timer_progress_generation (js_runtime_state.timers->progress_generation)
@@ -377,13 +377,13 @@ typedef struct JsTimerHandle {
 #define mock_scheduler_waits (js_runtime_state.timers->mock_waits)
 
 static void close_all_timer_handles(void);
-static void timer_register_gc_roots(JsTimerHandle* th);
 static void timer_close_native_handle(JsTimerHandle* th);
 
 static JsTimerHandle* timer_handle_at(int index) {
     const RuntimeResourceEntry* entry = runtime_resource_table_entry_at(
         &timer_resources, index);
-    return entry ? (JsTimerHandle*)entry->close_user : NULL;
+    return entry && entry->lifecycle_owner == js_runtime_state.timers
+        ? (JsTimerHandle*)entry->close_user : NULL;
 }
 
 static void timer_resource_close(void* user) {
@@ -392,18 +392,28 @@ static void timer_resource_close(void* user) {
 
 static bool timer_registry_append(JsTimerHandle* handle) {
     if (!handle) return false;
-    RootFrame roots(1);
-    Rooted<Item> owner_root(roots,
+    JS_ROOTS(roots,
+        owner_root,
         handle->object.item ? handle->object : handle->job.callback);
+    Rooted<Item> callback_root(roots, handle->job.callback);
+    Rooted<Item> arguments_root(roots, handle->job.arguments);
+    Rooted<Item> resource_root(roots, handle->job.context.resource);
+    Rooted<Item> als_root(roots, handle->job.context.als_context);
+    Rooted<Item> domain_root(roots, handle->job.context.domain);
+    Item root_values[] = {
+        owner_root.get(), callback_root.get(), arguments_root.get(),
+        resource_root.get(), als_root.get(), domain_root.get(),
+    };
     const RuntimeResourceDescriptor* descriptor =
         runtime_resource_descriptor_from_legacy_name("timer");
-    handle->resource_id = runtime_resource_table_add(&timer_resources, owner_root.get(),
-        descriptor, timer_resource_close, handle, true);
+    handle->resource_id = runtime_resource_table_add_root_span_owned(
+        &timer_resources, js_runtime_state.timers, root_values, 6, descriptor,
+        timer_resource_close, handle, true);
     return handle->resource_id != 0;
 }
 
 static void timer_registry_clear(void) {
-    runtime_resource_table_clear(&timer_resources);
+    runtime_resource_table_clear_owned(&timer_resources, js_runtime_state.timers);
 }
 
 typedef struct JsTimerRuntimeScope {
@@ -469,54 +479,15 @@ static void timer_runtime_exit(JsTimerRuntimeScope* scope) {
     }
 }
 
-static void timer_unregister_gc_roots(JsTimerHandle *th) {
-    if (!th || !th->roots_registered) return;
-
-    // timer roots belong to the captured heap. they do not need the captured
-    // document, and re-entering a detached document can rebuild DOM globals on
-    // a runtime that is being torn down.
-    void* saved_doc = th->runtime_doc;
-    th->runtime_doc = nullptr;
-    JsTimerRuntimeScope scope;
-    if (timer_runtime_enter(th, &scope)) {
-        heap_unregister_gc_root(&th->job.callback.item);
-        heap_unregister_gc_root(&th->job.arguments.item);
-        heap_unregister_gc_root(&th->job.context.resource.item);
-        heap_unregister_gc_root(&th->job.context.als_context.item);
-        heap_unregister_gc_root(&th->job.context.domain.item);
-        timer_runtime_exit(&scope);
-    }
-    th->runtime_doc = saved_doc;
-    th->roots_registered = false;
-}
-
 static void timer_close_cb(uv_handle_t *handle) {
     JsTimerHandle *th = (JsTimerHandle *)handle->data;
-    timer_unregister_gc_roots(th);
     mem_free(th);
-}
-
-// Register the timer's one RuntimeJob envelope plus its public handle item.
-// The argument pack is an Array edge, so it traces every delayed argument.
-static void timer_register_gc_roots(JsTimerHandle *th) {
-    JsTimerRuntimeScope scope;
-    if (!timer_runtime_enter(th, &scope)) return;
-    heap_register_gc_root(&th->job.callback.item);
-    heap_register_gc_root(&th->job.arguments.item);
-    heap_register_gc_root(&th->job.context.resource.item);
-    heap_register_gc_root(&th->job.context.als_context.item);
-    heap_register_gc_root(&th->job.context.domain.item);
-    timer_runtime_exit(&scope);
-    th->roots_registered = true;
 }
 
 static void timer_close_native_handle(JsTimerHandle *th) {
     if (!th || th->closing) return;
     th->closing = true;
     th->virtual_active = false;
-    // close callbacks may run after document/runtime teardown; unregister roots
-    // while the captured heap is still valid so late libuv cleanup only frees.
-    timer_unregister_gc_roots(th);
     if (!timer_force_shutdown) {
         JsTimerRuntimeScope scope;
         if (timer_runtime_enter(th, &scope)) {
@@ -533,7 +504,8 @@ static void timer_close_handle(JsTimerHandle *th) {
     if (th->resource_id != 0) {
         uint32_t resource_id = th->resource_id;
         th->resource_id = 0;
-        runtime_resource_table_remove(&timer_resources, resource_id);
+        runtime_resource_table_remove_owned(&timer_resources,
+            js_runtime_state.timers, resource_id);
         return;
     }
     timer_close_native_handle(th);
@@ -552,7 +524,6 @@ static void timer_forget_unsafe_handle(JsTimerHandle* th) {
     th->runtime_heap = nullptr;
     th->runtime_name_pool = nullptr;
     th->runtime_pool = nullptr;
-    th->roots_registered = false;
     th->job.callback = ItemNull;
     th->job.arguments = ItemNull;
     th->object = ItemNull;
@@ -573,7 +544,8 @@ static void timer_abandon_all_without_uv(const char* reason_prefix) {
                   (long long)th->job.id);
         uint32_t resource_id = th->resource_id;
         th->resource_id = 0;
-        runtime_resource_table_forget(&timer_resources, resource_id);
+        runtime_resource_table_forget_owned(&timer_resources,
+            js_runtime_state.timers, resource_id);
         timer_forget_unsafe_handle(th);
     }
     timer_registry_clear();
@@ -956,11 +928,24 @@ static Item js_timer_finish_create(uv_loop_t* loop, JsTimerHandle* th,
         JsClass timer_class, uint64_t delay, uint64_t repeat,
         const char* capture_name, int capture_name_len) {
     timer_capture_runtime(th, capture_name, capture_name_len);
+    // The native timer is not GC-managed. Keep its whole job envelope exact
+    // while constructing the public handle, then publish that same envelope
+    // through the resource row below.
+    JS_ROOTS(roots,
+        callback_root, th->job.callback,
+        arguments_root, th->job.arguments,
+        resource_root, th->job.context.resource,
+        als_root, th->job.context.als_context,
+        domain_root, th->job.context.domain);
     uv_timer_init(loop, &th->timer);
     timer_start(loop, th, delay, repeat);
     Item timer_obj = make_timer_object(th->job.id, timer_class);
     th->object = timer_obj;
-    timer_register_gc_roots(th);
+    th->job.callback = callback_root.get();
+    th->job.arguments = arguments_root.get();
+    th->job.context.resource = resource_root.get();
+    th->job.context.als_context = als_root.get();
+    th->job.context.domain = domain_root.get();
     if (!timer_registry_append(th)) {
         timer_close_handle(th);
         return ItemNull;
@@ -1372,7 +1357,6 @@ static Item js_set_promise_timer(Item delay, Item value, Item options,
 
     uv_timer_init(loop, &th->timer);
     timer_start(loop, th, ms, 0);
-    timer_register_gc_roots(th);
 
     if (!timer_registry_append(th)) {
         timer_close_handle(th);
@@ -1464,7 +1448,6 @@ extern "C" void js_event_loop_cancel_document_timers(void* dom_doc) {
         log_debug("[JS_TIMER_DETACH] canceling timer %lld for document %p",
                   (long long)th->job.id, dom_doc);
         th->runtime_doc = nullptr;
-        timer_unregister_gc_roots(th);
         th->job.callback = ItemNull;
         th->job.arguments = ItemNull;
         th->job.context.resource = ItemNull;

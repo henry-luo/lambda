@@ -20,6 +20,8 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
+#include <limits.h>
+#include <new>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -129,8 +131,15 @@ static bool replace_capture_group_by_index(std::string* pat, int target_group,
 }
 
 static bool assertion_parent_has_alternation(const std::string& pat, size_t assertion_pos) {
+    if (assertion_pos >= (size_t)INT_MAX) return true;
+    int group_capacity = (int)assertion_pos + 1;
+    JsRegexScratch<size_t> group_stack_buf(group_capacity);
+    if (group_stack_buf.count != group_capacity) {
+        log_error("js-regex assertion analysis: cannot retain parent groups");
+        return true;
+    }
+    size_t* group_stack = group_stack_buf.slots;
     int depth = 0;
-    size_t group_stack[128];
     for (size_t i = 0; i < pat.size() && i < assertion_pos; i++) {
         if (pat[i] == '\\' && i + 1 < pat.size()) {
             i++;
@@ -145,7 +154,11 @@ static bool assertion_parent_has_alternation(const std::string& pat, size_t asse
             continue;
         }
         if (pat[i] == '(') {
-            if (depth < 128) group_stack[depth] = i;
+            if (depth >= group_capacity) {
+                log_error("js-regex assertion analysis: parent depth exceeds capacity");
+                return true;
+            }
+            group_stack[depth] = i;
             depth++;
         } else if (pat[i] == ')' && depth > 0) {
             depth--;
@@ -155,7 +168,7 @@ static bool assertion_parent_has_alternation(const std::string& pat, size_t asse
     int target_depth = depth;
     size_t segment_start = 0;
     size_t segment_end = pat.size();
-    if (target_depth > 0 && target_depth <= 128) {
+    if (target_depth > 0) {
         size_t parent_open = group_stack[target_depth - 1];
         segment_start = parent_open + 1;
         size_t parent_close = find_matching_paren(pat, parent_open);
@@ -353,6 +366,74 @@ struct AssertionInfo {
     bool is_trailing;     // true if preceded by non-assertion content
 };
 
+// Assertion analysis retains owned inner-pattern text, so this list constructs
+// and destroys its rows explicitly instead of treating non-POD facts as bytes.
+struct JsRegexAssertionList {
+    AssertionInfo* rows = nullptr;
+    int capacity = 0;
+
+    explicit JsRegexAssertionList(int requested) : capacity(requested) {
+        if (requested <= 0) {
+            capacity = 0;
+            return;
+        }
+        if ((uint64_t)requested > (uint64_t)(size_t)-1 / sizeof(AssertionInfo)) {
+            capacity = 0;
+            return;
+        }
+        rows = (AssertionInfo*)mem_alloc((size_t)requested * sizeof(AssertionInfo),
+            MEM_CAT_JS_RUNTIME);
+        if (!rows) {
+            capacity = 0;
+            return;
+        }
+        for (int i = 0; i < capacity; i++) new (&rows[i]) AssertionInfo();
+    }
+
+    ~JsRegexAssertionList() {
+        for (int i = 0; i < capacity; i++) rows[i].~AssertionInfo();
+        if (rows) mem_free(rows);
+    }
+
+    bool valid_for(int requested) const {
+        return requested == 0 || (rows && capacity == requested);
+    }
+};
+
+static void js_regex_filter_list_init(JsRegexFilterList* list) {
+    if (list) memset(list, 0, sizeof(*list));
+}
+
+static JsRegexFilter* js_regex_filter_list_append(JsRegexFilterList* list) {
+    if (!list) return nullptr;
+    if (list->count >= list->capacity) {
+        if (list->capacity > INT_MAX / 2) return nullptr;
+        int capacity = list->capacity ? list->capacity * 2 : 16;
+        JsRegexFilter* rows = (JsRegexFilter*)mem_realloc(list->rows,
+            (size_t)capacity * sizeof(JsRegexFilter), MEM_CAT_JS_RUNTIME);
+        if (!rows) return nullptr;
+        list->rows = rows;
+        list->capacity = capacity;
+    }
+    JsRegexFilter* row = &list->rows[list->count++];
+    memset(row, 0, sizeof(*row));
+    return row;
+}
+
+static void js_regex_filter_list_release(JsRegexFilterList* list) {
+    if (!list) return;
+    for (int i = 0; i < list->count; i++) {
+        if (list->rows[i].reject_pattern) {
+            lam::re2_glue_release(list->rows[i].reject_pattern);
+        }
+        if (list->rows[i].reject_wrapper) {
+            js_regex_compiled_free(list->rows[i].reject_wrapper);
+        }
+    }
+    if (list->rows) mem_free(list->rows);
+    js_regex_filter_list_init(list);
+}
+
 // Scan pattern for assertions and backreferences
 static int scan_assertions(const std::string& pat, int capture_group_count,
                            AssertionInfo* out_infos, int max_infos) {
@@ -448,12 +529,20 @@ static int scan_assertions(const std::string& pat, int capture_group_count,
 
 struct RewriteResult {
     std::string pattern;             // rewritten RE2 pattern
-    JsRegexFilter filters[JS_REGEX_MAX_FILTERS];
-    int filter_count;
+    JsRegexFilterList filters = {};
     int original_group_count;
     int* group_remap;                // malloc'd, caller frees
     int group_remap_count;
 };
+
+static bool js_regex_rewrite_fail(RewriteResult* out) {
+    if (!out) return false;
+    js_regex_filter_list_release(&out->filters);
+    if (out->group_remap) mem_free(out->group_remap);
+    out->group_remap = nullptr;
+    out->group_remap_count = 0;
+    return false;
+}
 
 // Compile a lookbehind subpattern Y so that matching it (UNANCHORED) against the
 // prefix input[0..p] tells us whether Y can match a substring *ending at* p. The
@@ -1307,6 +1396,8 @@ extern "C" bool js_regex_wrapper_rewrite_v_flag_classes_c(const char* in_buf, in
 static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, bool dot_all = false,
                             bool ignore_case = false, bool multiline = false,
                             bool unicode_sets = false) {
+    if (!out) return false;
+    js_regex_filter_list_init(&out->filters);
     // Js54 P10: under /v, first rewrite class set operations (--, &&) and
     // \q{X|Y|Z} alternation into RE2-compatible syntax. This MUST run before
     // the existing prepass so that the rest of the pipeline sees flat classes.
@@ -1397,14 +1488,17 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
         }
     }
 
-    out->filter_count = 0;
-    memset(out->filters, 0, sizeof(out->filters));
     out->group_remap = nullptr;
     out->group_remap_count = 0;
     out->original_group_count = count_capture_groups(original);
 
-    AssertionInfo infos[32];
-    int assert_count = scan_assertions(original, out->original_group_count, infos, 32);
+    if (original.size() >= (size_t)INT_MAX) return false;
+    int assertion_capacity = (int)original.size() + 1;
+    JsRegexAssertionList infos_buf(assertion_capacity);
+    if (!infos_buf.valid_for(assertion_capacity)) return false;
+    AssertionInfo* infos = infos_buf.rows;
+    int assert_count = scan_assertions(original, out->original_group_count,
+        infos, assertion_capacity);
     // LR09-30: sized from the pattern. A fixed window here silently stopped the
     // erased-group remap partway, which rewrote the pattern wrongly and made a
     // lookahead over more than ~256 total groups fail to match at all.
@@ -1434,9 +1528,11 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
     // so we can build a proper group remap after all rewrites.
     struct SyntheticEntry {
         size_t position;   // position of synthetic '(' in pattern string
-        int filter_idx;    // index into out->filters[] for this entry
+        int filter_idx;    // index into out->filters.rows[] for this entry
     };
-    SyntheticEntry synthetic[JS_REGEX_MAX_FILTERS];
+    JsRegexScratch<SyntheticEntry> synthetic_buf(assert_count > 0 ? assert_count : 1);
+    if (synthetic_buf.count < assert_count) return false;
+    SyntheticEntry* synthetic = synthetic_buf.slots;
     int synthetic_count = 0;
     auto shift_synthetic_positions = [&](size_t pivot, int delta) {
         for (int s = 0; s < synthetic_count; s++) {
@@ -1449,8 +1545,6 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
     // Process from right to left to keep indices valid
     for (int a = assert_count - 1; a >= 0; a--) {
         AssertionInfo& info = infos[a];
-
-        if (out->filter_count >= JS_REGEX_MAX_FILTERS) break;
 
         switch (info.kind) {
             case ASSERT_POS_LOOKAHEAD: {
@@ -1487,13 +1581,18 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                         int delta = (int)replacement.size() - (int)old_len;
                         shift_synthetic_positions(syn_pos, delta);
 
-                        int fi = out->filter_count;
-                        JsRegexFilter& f = out->filters[out->filter_count++];
-                        f.type = JS_PF_ASSERT_AT_MARKER;
-                        f.trim_group_idx = -1;
-                        f.reject_pattern = assert_re;
-                        f.reject_wrapper = assert_wrapper;
-                        f.reject_at_start = -1; // placeholder, fixed after pattern walk
+                        int fi = out->filters.count;
+                        JsRegexFilter* f = js_regex_filter_list_append(&out->filters);
+                        if (!f) {
+                            if (assert_re) lam::re2_glue_release(assert_re);
+                            if (assert_wrapper) js_regex_compiled_free(assert_wrapper);
+                            return js_regex_rewrite_fail(out);
+                        }
+                        f->type = JS_PF_ASSERT_AT_MARKER;
+                        f->trim_group_idx = -1;
+                        f->reject_pattern = assert_re;
+                        f->reject_wrapper = assert_wrapper;
+                        f->reject_at_start = -1; // placeholder, fixed after pattern walk
 
                         synthetic[synthetic_count++] = {syn_pos, fi};
                         break;
@@ -1511,24 +1610,29 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
 
                 int fi = -1;
                 if (info.is_trailing || !pattern_has_backref) {
-                    fi = out->filter_count;
-                    JsRegexFilter& f = out->filters[out->filter_count++];
-                    f.type = JS_PF_TRIM_GROUP;
-                    f.trim_group_idx = -1; // placeholder, fixed after pattern walk
-                    f.reject_pattern = nullptr;
-                    f.reject_wrapper = nullptr;
+                    fi = out->filters.count;
+                    JsRegexFilter* f = js_regex_filter_list_append(&out->filters);
+                    if (!f) return js_regex_rewrite_fail(out);
+                    f->type = JS_PF_TRIM_GROUP;
+                    f->trim_group_idx = -1; // placeholder, fixed after pattern walk
+                    f->reject_pattern = nullptr;
+                    f->reject_wrapper = nullptr;
                 } else {
                     re2::RE2::Options assert_opts = lam::re2_glue_default_options();
                     assert_opts.set_encoding(re2::RE2::Options::EncodingUTF8);
                     re2::RE2* assert_re = lam::re2_glue_compile(
                         info.inner.data(), info.inner.size(), assert_opts, nullptr);
                     if (assert_re) {
-                        fi = out->filter_count;
-                        JsRegexFilter& f = out->filters[out->filter_count++];
-                        f.type = JS_PF_ASSERT_MATCH;
-                        f.trim_group_idx = -1; // placeholder, fixed after pattern walk
-                        f.reject_pattern = assert_re;
-                        f.reject_wrapper = nullptr;
+                        fi = out->filters.count;
+                        JsRegexFilter* f = js_regex_filter_list_append(&out->filters);
+                        if (!f) {
+                            lam::re2_glue_release(assert_re);
+                            return js_regex_rewrite_fail(out);
+                        }
+                        f->type = JS_PF_ASSERT_MATCH;
+                        f->trim_group_idx = -1; // placeholder, fixed after pattern walk
+                        f->reject_pattern = assert_re;
+                        f->reject_wrapper = nullptr;
                     } else {
                         log_debug("js regex wrapper: failed to compile assertion pattern '%s'", info.inner.c_str());
                     }
@@ -1604,12 +1708,17 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 }
 
                 if (reject_re || reject_wrapper) {
-                    int fi = out->filter_count;
-                    JsRegexFilter& f = out->filters[out->filter_count++];
-                    f.type = JS_PF_REJECT_MATCH;
-                    f.reject_pattern = reject_re;
-                    f.reject_wrapper = reject_wrapper;
-                    f.reject_at_start = -1; // placeholder, will use marker group
+                    int fi = out->filters.count;
+                    JsRegexFilter* f = js_regex_filter_list_append(&out->filters);
+                    if (!f) {
+                        if (reject_re) lam::re2_glue_release(reject_re);
+                        if (reject_wrapper) js_regex_compiled_free(reject_wrapper);
+                        return js_regex_rewrite_fail(out);
+                    }
+                    f->type = JS_PF_REJECT_MATCH;
+                    f->reject_pattern = reject_re;
+                    f->reject_wrapper = reject_wrapper;
+                    f->reject_at_start = -1; // placeholder, will use marker group
 
                     synthetic[synthetic_count++] = {syn_pos, fi};
                 } else {
@@ -1657,13 +1766,17 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 int delta = (int)replacement.size() - (int)old_len;
                 shift_synthetic_positions(syn_pos, delta);
 
-                int fi = out->filter_count;
-                JsRegexFilter& f = out->filters[out->filter_count++];
-                f.type = JS_PF_LOOKBEHIND;
-                f.reject_pattern = lb_re;
-                f.reject_wrapper = nullptr;
-                f.reject_at_start = -1;   // placeholder → marker group RE2 index
-                f.lb_negative = negative;
+                int fi = out->filters.count;
+                JsRegexFilter* f = js_regex_filter_list_append(&out->filters);
+                if (!f) {
+                    lam::re2_glue_release(lb_re);
+                    return js_regex_rewrite_fail(out);
+                }
+                f->type = JS_PF_LOOKBEHIND;
+                f->reject_pattern = lb_re;
+                f->reject_wrapper = nullptr;
+                f->reject_at_start = -1;   // placeholder → marker group RE2 index
+                f->lb_negative = negative;
                 synthetic[synthetic_count++] = {syn_pos, fi};
                 break;
             }
@@ -1681,13 +1794,14 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 int delta = (int)replacement.size() - (int)old_len;
                 shift_synthetic_positions(syn_pos, delta);
 
-                int fi = out->filter_count;
-                JsRegexFilter& f = out->filters[out->filter_count++];
-                f.type = JS_PF_GROUP_EQUALITY;
-                f.eq_group_a = ref_num;  // original group number (will be remapped)
-                f.eq_group_b = -1;       // placeholder, fixed after pattern walk
-                f.reject_pattern = nullptr;
-                f.reject_wrapper = nullptr;
+                int fi = out->filters.count;
+                JsRegexFilter* f = js_regex_filter_list_append(&out->filters);
+                if (!f) return js_regex_rewrite_fail(out);
+                f->type = JS_PF_GROUP_EQUALITY;
+                f->eq_group_a = ref_num;  // original group number (will be remapped)
+                f->eq_group_b = -1;       // placeholder, fixed after pattern walk
+                f->reject_pattern = nullptr;
+                f->reject_wrapper = nullptr;
 
                 synthetic[synthetic_count++] = {syn_pos, fi};
                 break;
@@ -1702,6 +1816,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
         int orig_idx = 0;
         int remap_size = out->original_group_count + 1;
         out->group_remap = (int*)mem_calloc(remap_size, sizeof(int), MEM_CAT_JS_RUNTIME);
+        if (!out->group_remap) return js_regex_rewrite_fail(out);
         out->group_remap_count = remap_size;
         for (int i = 0; i < remap_size; i++) out->group_remap[i] = -1;
         out->group_remap[0] = 0; // group 0 always maps to itself
@@ -1710,7 +1825,9 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
         }
 
         // Map from synthetic entry index → RE2 group index
-        int syn_re2_idx[JS_REGEX_MAX_FILTERS];
+        JsRegexScratch<int> syn_re2_idx_buf(synthetic_count > 0 ? synthetic_count : 1);
+        if (syn_re2_idx_buf.count < synthetic_count) return js_regex_rewrite_fail(out);
+        int* syn_re2_idx = syn_re2_idx_buf.slots;
         for (int s = 0; s < synthetic_count; s++) syn_re2_idx[s] = -1;
 
         for (size_t i = 0; i < result.size(); i++) {
@@ -1769,7 +1886,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
         for (int s = 0; s < synthetic_count; s++) {
             int fi = synthetic[s].filter_idx;
             if (fi < 0) continue;
-            JsRegexFilter& f = out->filters[fi];
+            JsRegexFilter& f = out->filters.rows[fi];
 
             if (f.type == JS_PF_TRIM_GROUP || f.type == JS_PF_ASSERT_MATCH) {
                 f.trim_group_idx = syn_re2_idx[s];
@@ -2285,23 +2402,25 @@ JsRegexCompiled* js_regex_wrapper_compile(const char* pattern, int pattern_len,
     re2::RE2* compiled = lam::re2_glue_compile(
         rw.pattern.data(), rw.pattern.size(), final_opts, "js regex wrapper");
     if (!compiled) {
-        // free any reject patterns allocated
-        for (int i = 0; i < rw.filter_count; i++) {
-            if (rw.filters[i].reject_pattern) lam::re2_glue_release(rw.filters[i].reject_pattern);
-            if (rw.filters[i].reject_wrapper) js_regex_compiled_free(rw.filters[i].reject_wrapper);
-        }
+        js_regex_filter_list_release(&rw.filters);
         if (rw.group_remap) mem_free(rw.group_remap);
         return nullptr;
     }
 
     JsRegexCompiled* result = (JsRegexCompiled*)mem_calloc(1, sizeof(JsRegexCompiled), MEM_CAT_JS_RUNTIME);
+    if (!result) {
+        lam::re2_glue_release(compiled);
+        js_regex_filter_list_release(&rw.filters);
+        if (rw.group_remap) mem_free(rw.group_remap);
+        return nullptr;
+    }
     result->re2 = compiled;
-    result->filter_count = rw.filter_count;
-    result->has_filters = (rw.filter_count > 0);
+    result->filters = rw.filters;
+    js_regex_filter_list_init(&rw.filters);
+    result->has_filters = (result->filters.count > 0);
     result->original_group_count = rw.original_group_count;
     result->group_remap = rw.group_remap;
     result->group_remap_count = rw.group_remap_count;
-    memcpy(result->filters, rw.filters, sizeof(JsRegexFilter) * rw.filter_count);
 
     return result;
 }
@@ -2335,8 +2454,8 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
 
     // Check if we have backreference filters that need two-pass matching
     bool has_backref_filters = false;
-    for (int fi = 0; fi < compiled->filter_count; fi++) {
-        if (compiled->filters[fi].type == JS_PF_GROUP_EQUALITY) {
+    for (int fi = 0; fi < compiled->filters.count; fi++) {
+        if (compiled->filters.rows[fi].type == JS_PF_GROUP_EQUALITY) {
             has_backref_filters = true;
             break;
         }
@@ -2349,17 +2468,23 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
         // If pass 2 fails, advance start position and retry pass 1
 
         // Pre-sort backref filters by eq_group_b descending for correct replacement order
-        int backref_order[JS_REGEX_MAX_FILTERS];
+        JsRegexScratch<int> backref_order_buf(compiled->filters.count);
+        if (backref_order_buf.count < compiled->filters.count) {
+            log_error("js-regex backreference analysis: cannot retain filter order");
+            return 0;
+        }
+        int* backref_order = backref_order_buf.slots;
         int backref_count = 0;
-        for (int fi = 0; fi < compiled->filter_count; fi++) {
-            if (compiled->filters[fi].type == JS_PF_GROUP_EQUALITY) {
+        for (int fi = 0; fi < compiled->filters.count; fi++) {
+            if (compiled->filters.rows[fi].type == JS_PF_GROUP_EQUALITY) {
                 backref_order[backref_count++] = fi;
             }
         }
         for (int i = 1; i < backref_count; i++) {
             int key = backref_order[i];
             int j = i - 1;
-            while (j >= 0 && compiled->filters[backref_order[j]].eq_group_b < compiled->filters[key].eq_group_b) {
+            while (j >= 0 && compiled->filters.rows[backref_order[j]].eq_group_b <
+                    compiled->filters.rows[key].eq_group_b) {
                 backref_order[j + 1] = backref_order[j];
                 j--;
             }
@@ -2393,7 +2518,7 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                 int ref_group = -1;
                 bool single_ref_group = true;
                 for (int bi = 0; bi < backref_count; bi++) {
-                    JsRegexFilter& f = compiled->filters[backref_order[bi]];
+                    JsRegexFilter& f = compiled->filters.rows[backref_order[bi]];
                     if (ref_group < 0) ref_group = f.eq_group_a;
                     else if (ref_group != f.eq_group_a) {
                         single_ref_group = false;
@@ -2429,15 +2554,18 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                                         captured_literal.append(literal);
                                         captured_literal.append(")");
 
-                                        int replace_groups[JS_REGEX_MAX_FILTERS + 1];
-                                        std::string replacements[JS_REGEX_MAX_FILTERS + 1];
+                                        JsRegexScratch<int> replace_groups_buf(backref_count + 1);
+                                        if (replace_groups_buf.count < backref_count + 1) {
+                                            log_error("js-regex backreference analysis: cannot retain replacements");
+                                            return 0;
+                                        }
+                                        int* replace_groups = replace_groups_buf.slots;
                                         int replace_count = 0;
                                         replace_groups[replace_count] = ref_group;
-                                        replacements[replace_count] = captured_literal;
                                         replace_count++;
 
                                         for (int bi = 0; bi < backref_count; bi++) {
-                                            JsRegexFilter& f = compiled->filters[backref_order[bi]];
+                                            JsRegexFilter& f = compiled->filters.rows[backref_order[bi]];
                                             bool already_added = false;
                                             for (int ri = 0; ri < replace_count; ri++) {
                                                 if (replace_groups[ri] == f.eq_group_b) {
@@ -2445,30 +2573,26 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                                                     break;
                                                 }
                                             }
-                                            if (!already_added && replace_count < JS_REGEX_MAX_FILTERS + 1) {
+                                            if (!already_added) {
                                                 replace_groups[replace_count] = f.eq_group_b;
-                                                replacements[replace_count] = captured_literal;
                                                 replace_count++;
                                             }
                                         }
 
                                         for (int i = 1; i < replace_count; i++) {
                                             int group_key = replace_groups[i];
-                                            std::string repl_key = replacements[i];
                                             int j = i - 1;
                                             while (j >= 0 && replace_groups[j] < group_key) {
                                                 replace_groups[j + 1] = replace_groups[j];
-                                                replacements[j + 1] = replacements[j];
                                                 j--;
                                             }
                                             replace_groups[j + 1] = group_key;
-                                            replacements[j + 1] = repl_key;
                                         }
 
                                         bool replaced_all = true;
                                         for (int ri = 0; ri < replace_count; ri++) {
                                             if (!replace_capture_group_by_index(&refined_pattern,
-                                                    replace_groups[ri], replacements[ri])) {
+                                                    replace_groups[ri], captured_literal)) {
                                                 replaced_all = false;
                                                 break;
                                             }
@@ -2507,7 +2631,7 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
             bool needs_recompile = false;
 
             for (int bi = 0; bi < backref_count; bi++) {
-                JsRegexFilter& f = compiled->filters[backref_order[bi]];
+                JsRegexFilter& f = compiled->filters.rows[backref_order[bi]];
                 int ref_group = f.eq_group_a;
                 std::string literal;
                 if (ref_group >= 0 && ref_group < ngroups && groups[ref_group].data()) {
@@ -2597,8 +2721,8 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
             int match_begin_offset = (int)(match_begin - input);
             int match_end_offset = match_begin_offset + (int)groups[0].size();
 
-            for (int fi = 0; fi < compiled->filter_count; fi++) {
-                JsRegexFilter& f = compiled->filters[fi];
+            for (int fi = 0; fi < compiled->filters.count; fi++) {
+                JsRegexFilter& f = compiled->filters.rows[fi];
                 if (f.type == JS_PF_GROUP_EQUALITY) continue; // handled above
                 if (f.type == JS_PF_TRIM_GROUP) {
                     if (f.trim_group_idx < ngroups && groups[f.trim_group_idx].data()) {
@@ -2702,8 +2826,8 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                 int match_begin_offset = (int)(match_begin - input);
                 int match_end_offset = match_begin_offset + (int)groups[0].size();
 
-                for (int fi = 0; fi < compiled->filter_count; fi++) {
-                    JsRegexFilter& f = compiled->filters[fi];
+                for (int fi = 0; fi < compiled->filters.count; fi++) {
+                    JsRegexFilter& f = compiled->filters.rows[fi];
 
                     switch (f.type) {
                         case JS_PF_TRIM_GROUP: {
@@ -2828,12 +2952,7 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
 void js_regex_compiled_free(JsRegexCompiled* compiled) {
     if (!compiled) return;
     if (compiled->re2) lam::re2_glue_release(compiled->re2);
-    for (int i = 0; i < compiled->filter_count; i++) {
-        if (compiled->filters[i].reject_pattern) lam::re2_glue_release(compiled->filters[i].reject_pattern);
-        if (compiled->filters[i].reject_wrapper) {
-            js_regex_compiled_free(compiled->filters[i].reject_wrapper);
-        }
-    }
+    js_regex_filter_list_release(&compiled->filters);
     if (compiled->group_remap) mem_free(compiled->group_remap);
     mem_free(compiled);
 }

@@ -5,6 +5,34 @@
 // Statement transpilers
 // ============================================================================
 
+// One switch row keeps the source case and its emitted landing label together.
+// The lowering order is unbounded; a source program's case count is not an
+// implementation capacity policy.
+struct JsMirSwitchCaseRow {
+    JsSwitchCaseNode* node = NULL;
+    MIR_label_t label = 0;
+};
+
+static void jm_switch_case_rows_destroy(ArrayList* rows) {
+    if (!rows) return;
+    for (int i = 0; i < rows->length; i++) {
+        mem_free(arraylist_get(rows, i));
+    }
+    arraylist_free(rows);
+}
+
+struct JsMirUsingResourceRow {
+    MIR_reg_t value = 0;
+};
+
+static void jm_using_resource_rows_destroy(ArrayList* rows) {
+    if (!rows) return;
+    for (int i = 0; i < rows->length; i++) {
+        mem_free(arraylist_get(rows, i));
+    }
+    arraylist_free(rows);
+}
+
 static void jm_transpile_loop_body(JsMirTranspiler* mt, JsAstNode* body) {
     if (!body) return;
     if (body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -1864,28 +1892,13 @@ void jm_emit_class_length_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
 }
 
 void jm_emit_class_static_methods(JsMirTranspiler* mt, MIR_reg_t cls_obj,
-        MIR_reg_t class_proto_obj, JsClassEntry* ce, JsClassEntry* static_superclass,
+        MIR_reg_t class_proto_obj, JsClassEntry* ce,
         JsMirComputedKeyOrder own_key_order) {
     if (!mt || !ce) return;
-    JsClassEntry* static_chain[32];
-    int static_chain_length = 0;
-    for (JsClassEntry* parent = static_superclass;
-            parent && static_chain_length < 32; parent = parent->superclass) {
-        static_chain[static_chain_length++] = parent;
-    }
-    for (int class_index = static_chain_length - 1; class_index >= 0; class_index--) {
-        JsClassEntry* parent = static_chain[class_index];
-        MIR_reg_t parent_class = jm_emit_class_object_for_entry(mt, parent);
-        if (!parent_class) parent_class = cls_obj;
-        for (int member_index = 0; member_index < parent->member_count; member_index++) {
-            JsMirClassMethodInstallPolicy policy = {
-                cls_obj, parent_class, class_proto_obj, parent, member_index,
-                JS_MIR_CLASS_METHOD_INHERITED_STATIC,
-                JS_MIR_COMPUTED_KEY_AFTER_FUNCTION
-            };
-            jm_emit_class_method_install(mt, &policy);
-        }
-    }
+    // [[Prototype]] inheritance, linked after class creation, is the sole
+    // authority for inherited static methods. Reinstalling every ancestor's
+    // source methods duplicated that mechanism and made deep class chains
+    // expand recursively behind a 32-entry scratch cap.
     for (int member_index = 0; member_index < ce->member_count; member_index++) {
         JsMirClassMethodInstallPolicy policy = {
             cls_obj, cls_obj, class_proto_obj, ce, member_index,
@@ -1934,7 +1947,7 @@ void jm_emit_class_setup(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* c
         ((ce->node && ce->node->superclass) ? ce->node->superclass : NULL);
     setup->static_superclass = jm_matching_static_superclass(ce, setup->heritage);
     jm_emit_class_static_methods(mt, cls_obj, setup->class_proto_obj, ce,
-        setup->static_superclass, computed_key_before_function
+        computed_key_before_function
             ? JS_MIR_COMPUTED_KEY_BEFORE_FUNCTION : JS_MIR_COMPUTED_KEY_AFTER_FUNCTION);
     jm_emit_class_constructor_property(mt, cls_obj, ce, true);
     setup->class_proto_obj = jm_emit_current_class_prototype(mt, cls_obj,
@@ -2039,49 +2052,71 @@ void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
     // Push break label for the switch (break exits the switch)
     jm_push_loop_labels(mt, 0, l_end);
 
-    // Collect case labels and default
-    int case_count = 0;
-    JsSwitchCaseNode* cases[128];
-    JsAstNode* c = sw->cases;
-    while (c && case_count < 128) {
-        cases[case_count++] = (JsSwitchCaseNode*)c;
-        c = c->next;
+    // Collect source cases and emitted labels as one growable lowering row.
+    // A fixed 128-case scratch pair previously omitted later source cases.
+    ArrayList* cases = arraylist_new(8);
+    if (!cases) {
+        js_syntax_error(mt->tp, ((JsAstNode*)sw)->source_span,
+            "Cannot allocate switch lowering rows");
+        jm_emit_label(mt, l_end);
+        jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+        if (mt->loop_depth > 0) mt->loop_depth--;
+        mt->scope_env_reg = saved_scope_env_reg;
+        mt->scope_env_slot_count = saved_scope_env_slot_count;
+        jm_pop_scope(mt);
+        return;
     }
-
-    // Generate labels for each case body
-    MIR_label_t case_labels[128];
-    for (int i = 0; i < case_count; i++) {
-        case_labels[i] = jm_new_label(mt);
+    for (JsAstNode* c = sw->cases; c; c = c->next) {
+        JsMirSwitchCaseRow* row = (JsMirSwitchCaseRow*)mem_calloc(1,
+            sizeof(JsMirSwitchCaseRow), MEM_CAT_TEMP);
+        if (!row || !arraylist_append(cases, row)) {
+            if (row) mem_free(row);
+            js_syntax_error(mt->tp, ((JsAstNode*)sw)->source_span,
+                "Cannot retain switch lowering row");
+            jm_switch_case_rows_destroy(cases);
+            jm_emit_label(mt, l_end);
+            jm_restore_last_closure_snapshot(mt, &saved_last_closure);
+            if (mt->loop_depth > 0) mt->loop_depth--;
+            mt->scope_env_reg = saved_scope_env_reg;
+            mt->scope_env_slot_count = saved_scope_env_slot_count;
+            jm_pop_scope(mt);
+            return;
+        }
+        row->node = (JsSwitchCaseNode*)c;
+        row->label = jm_new_label(mt);
     }
 
     // Test phase: for each non-default case, compare discriminant with test value
     // and branch to the corresponding case body label
     int default_idx = -1;
-    for (int i = 0; i < case_count; i++) {
-        if (!cases[i]->test) {
+    for (int i = 0; i < cases->length; i++) {
+        JsMirSwitchCaseRow* row = (JsMirSwitchCaseRow*)arraylist_get(cases, i);
+        if (!row->node->test) {
             default_idx = i;
             continue;
         }
-        MIR_reg_t test_val = jm_transpile_box_item(mt, cases[i]->test);
+        MIR_reg_t test_val = jm_transpile_box_item(mt, row->node->test);
         MIR_reg_t eq = jm_callr_2(mt, "js_strict_equal", MIR_T_I64, discriminant, test_val);
         // v23: js_strict_equal returns boxed boolean — extract low bit directly
         MIR_reg_t truthy = jm_new_reg(mt, "trthy", MIR_T_I64);
         jm_emit_reg_binary_op(mt, MIR_AND, truthy, eq, MIR_new_int_op(mt->ctx, 1));
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, case_labels[i]),
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, row->label),
             MIR_new_reg_op(mt->ctx, truthy)));
     }
 
     // If no case matched, jump to default or end
     if (default_idx >= 0) {
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, case_labels[default_idx])));
+        JsMirSwitchCaseRow* row = (JsMirSwitchCaseRow*)arraylist_get(cases, default_idx);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, row->label)));
     } else {
         jm_emit_jmp(mt, l_end);
     }
 
     // Body phase: emit each case body with fall-through semantics
-    for (int i = 0; i < case_count; i++) {
-        jm_emit_label(mt, case_labels[i]);
-        JsAstNode* s = cases[i]->consequent;
+    for (int i = 0; i < cases->length; i++) {
+        JsMirSwitchCaseRow* row = (JsMirSwitchCaseRow*)arraylist_get(cases, i);
+        jm_emit_label(mt, row->label);
+        JsAstNode* s = row->node->consequent;
         while (s) {
             jm_transpile_statement(mt, s);
             s = s->next;
@@ -2090,6 +2125,7 @@ void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
     }
 
     jm_emit_label(mt, l_end);
+    jm_switch_case_rows_destroy(cases);
     // Case-local closure env registers are path-specific; after switch merge,
     // later callback readback must not use an env allocated in only one case.
     jm_restore_last_closure_snapshot(mt, &saved_last_closure);
@@ -2849,9 +2885,14 @@ static bool jm_statement_is_using_decl(JsAstNode* stmt) {
 }
 
 static void jm_emit_using_dispose_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* decl) {
-    MIR_reg_t resources[64];
-    int resource_count = 0;
-    for (JsAstNode* n = decl ? decl->declarations : NULL; n && resource_count < 64; n = n->next) {
+    // A using declaration's disposal order is source order reversed, not a
+    // 64-resource implementation policy. Retain one growable row per value.
+    ArrayList* resources = arraylist_new(4);
+    if (!resources) {
+        log_error("js-mir-using: cannot allocate disposal rows");
+        return;
+    }
+    for (JsAstNode* n = decl ? decl->declarations : NULL; n; n = n->next) {
         if (n->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
         JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)n;
         if (!d->id || d->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
@@ -2862,11 +2903,21 @@ static void jm_emit_using_dispose_decl(JsMirTranspiler* mt, JsVariableDeclaratio
         if (jm_is_native_type(var->type_id)) {
             value = jm_box_native(mt, var->reg, var->type_id);
         }
-        resources[resource_count++] = value;
+        JsMirUsingResourceRow* row = (JsMirUsingResourceRow*)mem_calloc(1,
+            sizeof(JsMirUsingResourceRow), MEM_CAT_TEMP);
+        if (!row || !arraylist_append(resources, row)) {
+            if (row) mem_free(row);
+            log_error("js-mir-using: cannot retain disposal value");
+            jm_using_resource_rows_destroy(resources);
+            return;
+        }
+        row->value = value;
     }
-    for (int i = resource_count - 1; i >= 0; i--) {
-        (void)jm_callr_1(mt, "js_using_dispose", MIR_T_I64, resources[i]);
+    for (int i = resources->length - 1; i >= 0; i--) {
+        JsMirUsingResourceRow* row = (JsMirUsingResourceRow*)arraylist_get(resources, i);
+        (void)jm_callr_1(mt, "js_using_dispose", MIR_T_I64, row->value);
     }
+    jm_using_resource_rows_destroy(resources);
 }
 
 static void jm_transpile_using_tail(JsMirTranspiler* mt, JsAstNode* tail,

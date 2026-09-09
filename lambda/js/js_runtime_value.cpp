@@ -1258,15 +1258,15 @@ extern "C" uint64_t js_get_heap_epoch();
 
 // These are context-local TLS-backed fields so a tight concatenation loop
 // remains direct loads/stores while never retaining another runtime's strings.
-#define g_last_four_byte_uri_escape_string (js_runtime_state.string_concat->last_four_byte_escape)
-#define g_last_four_byte_uri_escape_cp (js_runtime_state.string_concat->last_four_byte_cp)
-#define g_last_four_byte_uri_escape_epoch (js_runtime_state.string_concat->last_four_byte_epoch)
-#define js_percent_prefix_cache (js_runtime_state.string_concat->percent_prefixes)
-#define js_percent_byte_cache (js_runtime_state.string_concat->percent_bytes)
+#define g_last_four_byte_uri_escape_string (js_runtime_state.string_caches->last_four_byte_escape)
+#define g_last_four_byte_uri_escape_cp (js_runtime_state.string_caches->last_four_byte_cp)
+#define g_last_four_byte_uri_escape_epoch (js_runtime_state.string_caches->last_four_byte_epoch)
+#define js_percent_prefix_cache (js_runtime_state.string_caches->percent_prefixes)
+#define js_percent_byte_cache (js_runtime_state.string_caches->percent_bytes)
 
 static bool js_string_concat_caches_ensure_roots(void) {
     return js_active_runtime_state && js_root_range_ensure_registered(
-        &js_runtime_state.string_concat->roots);
+        &js_runtime_state.string_caches->roots);
 }
 
 static bool js_percent_escape_four_byte_cp(String* s, uint32_t* cp_out) {

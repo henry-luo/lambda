@@ -1213,6 +1213,76 @@ TEST(JavaScriptRegression, Jscu31MockSchedulerWaits) {
         "test/js/jscu31_mock_scheduler_waits.txt");
 }
 
+TEST(JavaScriptRegression, Jscu29NodeTestHookLedger) {
+    test_js_script_against_file("test/js/jscu29_node_test_hook_ledger.js",
+        "test/js/jscu29_node_test_hook_ledger.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29NodeTestMockRegistry) {
+    test_js_script_against_file("test/js/jscu29_node_test_mock_registry.js",
+        "test/js/jscu29_node_test_mock_registry.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29ConsoleLabelRegistry) {
+    test_js_script_against_file("test/js/jscu29_console_label_registry.js",
+        "test/js/jscu29_console_label_registry.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29NodeTestForceProbe) {
+    test_js_script_against_file("test/js/jscu29_node_test_force_probe.js",
+        "test/js/jscu29_node_test_force_probe.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29AssertPatternKeys) {
+    test_js_script_against_file("test/js/jscu29_assert_pattern_keys.js",
+        "test/js/jscu29_assert_pattern_keys.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29StringCacheState) {
+    test_js_script_against_file("test/js/jscu29_string_cache_state.js",
+        "test/js/jscu29_string_cache_state.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29IntrinsicSlotState) {
+    test_js_script_against_file("test/js/jscu29_intrinsic_slot_state.js",
+        "test/js/jscu29_intrinsic_slot_state.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29TypedArrayIntrinsicSlots) {
+    test_js_script_against_file("test/js/jscu29_typed_array_intrinsic_slots.js",
+        "test/js/jscu29_typed_array_intrinsic_slots.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29CryptoNamespaceRoot) {
+    test_js_script_against_file("test/js/jscu29_crypto_namespace_root.js",
+        "test/js/jscu29_crypto_namespace_root.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29DnsRootedState) {
+    test_js_script_against_file("test/js/jscu29_dns_rooted_state.js",
+        "test/js/jscu29_dns_rooted_state.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29ModuleNamespaceSlots) {
+    test_js_script_against_file("test/js/jscu29_module_namespace_slots.js",
+        "test/js/jscu29_module_namespace_slots.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29TemplateRegistry) {
+    test_js_script_against_file("test/js/jscu29_template_registry.js",
+        "test/js/jscu29_template_registry.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29AsyncAwaitHandoff) {
+    test_js_script_against_file("test/js/jscu29_async_await_handoff.js",
+        "test/js/jscu29_async_await_handoff.txt");
+}
+
+TEST(JavaScriptRegression, Jscu28UnorderedCollectionMatchLedger) {
+    test_js_script_against_file("test/js/jscu28_unordered_collection_match_ledger.js",
+        "test/js/jscu28_unordered_collection_match_ledger.txt");
+}
+
 TEST(JavaScriptRegression, Jscu31BlobUrlRegistry) {
     test_js_script_against_file("test/js/jscu31_blob_url_registry.js",
         "test/js/jscu31_blob_url_registry.txt");
@@ -1223,9 +1293,99 @@ TEST(JavaScriptRegression, Jscu31CjsModuleStack) {
         "test/js/jscu31_cjs_module_stack.txt");
 }
 
+TEST(JavaScriptRegression, Jscu31NetBlockList) {
+    test_js_script_against_file("test/js/jscu31_net_block_list.js",
+        "test/js/jscu31_net_block_list.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31DnsResourceTable) {
+    test_js_script_against_file("test/js/jscu31_dns_resource_table.js",
+        "test/js/jscu31_dns_resource_table.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31TlsWriteCallbackRoots) {
+    test_js_script_against_file("test/js/jscu31_tls_write_callback_roots.js",
+        "test/js/jscu31_tls_write_callback_roots.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31ProcessIpcCallbackRoots) {
+    test_js_script_against_file("test/js/jscu31_process_ipc_callback_roots.js",
+        "test/js/jscu31_process_ipc_callback_roots.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31HttpClientWriteCallbackRoots) {
+    test_js_script_against_file("test/js/jscu31_http_client_write_callback_roots.js",
+        "test/js/jscu31_http_client_write_callback_roots.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31NetSocketCallbackSlots) {
+    test_js_script_against_file("test/js/jscu31_net_socket_callback_slots.js",
+        "test/js/jscu31_net_socket_callback_slots.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31HttpResponseWriteTail) {
+    test_js_script_against_file("test/js/jscu31_http_response_write_tail.js",
+        "test/js/jscu31_http_response_write_tail.txt");
+}
+
 TEST(JavaScriptRegression, Jscu35DynamicFunctionCache) {
     test_js_script_against_file("test/js/jscu35_dynamic_function_cache.js",
         "test/js/jscu35_dynamic_function_cache.txt");
+}
+
+TEST(JavaScriptRegression, Jscu35RegexpNamedGroups) {
+    test_js_script_against_file("test/js/jscu35_regexp_named_groups.js",
+        "test/js/jscu35_regexp_named_groups.txt");
+}
+
+TEST(JavaScriptRegression, Jscu35RegexpRepeatedCaptureAnalysis) {
+    test_js_script_against_file("test/js/jscu35_regexp_repeated_capture_analysis.js",
+        "test/js/jscu35_regexp_repeated_capture_analysis.txt");
+}
+
+TEST(JavaScriptRegression, Jscu35RegexpFilterList) {
+    test_js_script_against_file("test/js/jscu35_regexp_filter_list.js",
+        "test/js/jscu35_regexp_filter_list.txt");
+}
+
+TEST(JavaScriptRegression, Jscu35RegexpDeepGroupAnalysis) {
+    test_js_script_against_file("test/js/jscu35_regexp_deep_group_analysis.js",
+        "test/js/jscu35_regexp_deep_group_analysis.txt");
+}
+
+TEST(JavaScriptRegression, Jscu35EarlyErrorNameLedger) {
+    test_js_script_against_file("test/js/jscu35_early_error_name_ledger.js",
+        "test/js/jscu35_early_error_name_ledger.txt");
+}
+
+TEST(JavaScriptRegression, Jscu35SwitchCaseRows) {
+    test_js_script_against_file("test/js/jscu35_switch_case_rows.js",
+        "test/js/jscu35_switch_case_rows.txt");
+}
+
+TEST(JavaScriptRegression, Jscu35VmTemporaryBindings) {
+    test_js_script_against_file("test/js/jscu35_vm_temporary_bindings.js",
+        "test/js/jscu35_vm_temporary_bindings.txt");
+}
+
+TEST(JavaScriptRegression, Jscu35DiagnosticsChannelArguments) {
+    test_js_script_against_file("test/js/jscu35_diagnostics_channel_arguments.js",
+        "test/js/jscu35_diagnostics_channel_arguments.txt");
+}
+
+TEST(JavaScriptRegression, Jscu35DecoratorSequence) {
+    test_js_script_against_file("test/js/jscu35_decorator_sequence.js",
+        "test/js/jscu35_decorator_sequence.txt");
+}
+
+TEST(JavaScriptRegression, Jscu35VmSourceTextModuleBindings) {
+    test_js_script_against_file("test/js/jscu35_vm_source_text_module_bindings.js",
+        "test/js/jscu35_vm_source_text_module_bindings.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31NetCreateConnectionArguments) {
+    test_js_script_against_file("test/js/jscu31_net_create_connection_arguments.js",
+        "test/js/jscu31_net_create_connection_arguments.txt");
 }
 
 TEST(JavaScriptRegression, Jscu29WithScopeStack) {
@@ -1236,6 +1396,16 @@ TEST(JavaScriptRegression, Jscu29WithScopeStack) {
 TEST(JavaScriptRegression, Jscu29EvalSourceRecords) {
     test_js_script_against_file("test/js/jscu29_eval_source_records.js",
         "test/js/jscu29_eval_source_records.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29EvalLocalJournal) {
+    test_js_script_against_file("test/js/jscu29_eval_local_journal.js",
+        "test/js/jscu29_eval_local_journal.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29EvalBridgeJournals) {
+    test_js_script_against_file("test/js/jscu29_eval_bridge_journals.js",
+        "test/js/jscu29_eval_bridge_journals.txt");
 }
 
 TEST(JavaScriptRegression, Jscu29DomStorageEntries) {

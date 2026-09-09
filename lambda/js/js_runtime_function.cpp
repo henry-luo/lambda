@@ -1050,21 +1050,42 @@ JS_NATIVE_CLOSURE_ARITIES(JS_DEFINE_NATIVE_CLOSURE_FACTORY)
     void js_schedule_native_env(void (*schedule)(Item), type target, \
             int adapter_arity, const Item* values, int count) { \
         if (!schedule || !target || count < 0 || (count > 0 && !values)) return; \
+        RootFrame roots((size_t)count + 1); \
+        Rooted<Item> callback_root(roots, ItemNull); \
+        for (int i = 0; i < count; i++) { \
+            uint64_t* value_root = roots.take_slot(); \
+            if (!value_root) return; \
+            *value_root = values[i].item; \
+        } \
         Item* env = js_alloc_env(count); \
         if (count > 0 && !env) return; \
-        for (int i = 0; i < count; i++) env[i] = values[i]; \
-        Item callback = js_new_native_closure(target, adapter_arity, env, count); \
-        if (!item_is_error(callback)) schedule(callback); \
+        for (int i = 0; i < count; i++) { \
+            uint64_t* value_root = roots.slot((size_t)i + 1); \
+            env[i] = (Item){.item = value_root ? *value_root : 0}; \
+        } \
+        callback_root.set(js_new_native_closure(target, adapter_arity, env, count)); \
+        if (!item_is_error(callback_root.get())) schedule(callback_root.get()); \
     } \
     Item js_schedule_native_env_timeout(type target, int adapter_arity, \
             Item delay, const Item* values, int count) { \
         if (!target || count < 0 || (count > 0 && !values)) return ItemError; \
+        RootFrame roots((size_t)count + 2); \
+        Rooted<Item> delay_root(roots, delay); \
+        Rooted<Item> callback_root(roots, ItemNull); \
+        for (int i = 0; i < count; i++) { \
+            uint64_t* value_root = roots.take_slot(); \
+            if (!value_root) return ItemError; \
+            *value_root = values[i].item; \
+        } \
         Item* env = js_alloc_env(count); \
         if (count > 0 && !env) return ItemError; \
-        for (int i = 0; i < count; i++) env[i] = values[i]; \
-        Item callback = js_new_native_closure(target, adapter_arity, env, count); \
-        if (item_is_error(callback)) return callback; \
-        return js_setTimeout(callback, delay); \
+        for (int i = 0; i < count; i++) { \
+            uint64_t* value_root = roots.slot((size_t)i + 2); \
+            env[i] = (Item){.item = value_root ? *value_root : 0}; \
+        } \
+        callback_root.set(js_new_native_closure(target, adapter_arity, env, count)); \
+        if (item_is_error(callback_root.get())) return callback_root.get(); \
+        return js_setTimeout(callback_root.get(), delay_root.get()); \
     }
 
 JS_NATIVE_ENV_ARITIES(JS_DEFINE_NATIVE_ENV_SCHEDULER)

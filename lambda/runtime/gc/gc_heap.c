@@ -1364,6 +1364,13 @@ static void* item_to_ptr(gc_heap_t* gc, uint64_t item) {
         return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
     }
 
+    // Accessor cells use the otherwise-unused FUNC tag to distinguish their
+    // raw pointer from a callable value in a shaped property slot.  They have
+    // a dedicated GC header and must remain traceable through that slot.
+    if (tag == LMD_TYPE_FUNC_) {
+        return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
+    }
+
     // Raw container pointers have a zero high byte; unknown high tags are
     // sentinels or invalid Items, not recoverable pointer encodings.
     if (tag >= LMD_TYPE_RANGE_) return NULL;

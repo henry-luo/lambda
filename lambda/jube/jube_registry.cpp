@@ -168,9 +168,6 @@ struct NodeRuntimeSession {
     uint64_t generation;
     bool live;
     bool detaching;
-    RuntimeResourceTable resources;
-    ArrayList* async_work;
-    uint32_t async_work_next_id;
     NodeTraceState* trace;
     JsCjsState cjs;
     JsCommonJsCompileCacheState* commonjs_compile_cache;
@@ -261,8 +258,6 @@ static void jube_node_session_state_init(NodeRuntimeSession* session) {
     // owner NULL: the session is used only on its attaching thread, so the
     // vector resolves the current context at each use (JSCU14).
     js_item_stack_init(&session->cjs.module_stack, NULL, "CommonJS module stack");
-    runtime_resource_table_init(&session->resources, (Context*)context,
-        "Node runtime resources");
 }
 
 static void jube_node_session_state_clear(NodeRuntimeSession* session) {
@@ -300,7 +295,8 @@ struct JubeNodeAsyncWork {
     JubeAsyncCompletionCallback complete;
     JubeAsyncDestroyCallback destroy;
     void* user;
-    uint32_t request_id;
+    uint32_t resource_id;
+    bool queued;
 };
 
 // Context identities remain raw host-owned values until every compatibility
@@ -811,6 +807,14 @@ static int jube_host_node_work_submit(void* session, JubeAsyncWorkCallback work,
                                       JubeAsyncDestroyCallback destroy, void* user,
                                       uint32_t* out_request_id);
 static int jube_host_node_work_cancel(void* session, uint32_t request_id);
+static int jube_host_node_work_submit_root_span(void* session, int resource_kind,
+                                                const Item* root_values, int root_count,
+                                                JubeAsyncWorkCallback work,
+                                                JubeAsyncCompletionCallback complete,
+                                                JubeAsyncDestroyCallback destroy, void* user,
+                                                uint32_t* out_resource_id);
+static Item jube_host_node_work_resource_value(void* session,
+                                               uint32_t resource_id, int root_index);
 static void jube_host_node_next_tick_callback(void* session, Item callback, Item error, Item result);
 static Item jube_host_node_emit_callback(Item env_item);
 static bool jube_host_node_is_typed_array(Item value);
@@ -1267,6 +1271,8 @@ static const JubeHostAsyncAPI jube_host_node_async_api = {
     jube_host_node_function_install_promisify_custom,
     jube_host_node_function_install_promisify_args,
     jube_host_node_next_tick_callback,
+    jube_host_node_work_submit_root_span,
+    jube_host_node_work_resource_value,
 };
 
 static const JubeHostBinaryAPI jube_host_node_binary_api = {
@@ -3564,32 +3570,46 @@ static void jube_host_node_next_tick_callback(void* session, Item callback, Item
     js_next_tick_enqueue(js_new_native_closure(jube_host_node_emit_callback, 0, env, 3));
 }
 
-static void jube_node_async_work_remove(JubeNodeAsyncWork* job) {
-    NodeRuntimeSession* session = job ? (NodeRuntimeSession*)job->session : NULL;
-    if (!session || !session->async_work) return;
-    for (int i = 0; i < session->async_work->length; i++) {
-        if (session->async_work->data[i] == job) {
-            arraylist_remove(session->async_work, i);
-            return;
-        }
-    }
-}
-
 static void jube_host_node_work_execute(uv_work_t* request) {
     JubeNodeAsyncWork* job = request ? (JubeNodeAsyncWork*)request->data : NULL;
     if (job && job->work) job->work(job->user);
 }
 
+static void jube_host_node_work_resource_close(void* user) {
+    JubeNodeAsyncWork* job = (JubeNodeAsyncWork*)user;
+    if (!job) return;
+    // Table removal invalidates the rid before this callback. A queued libuv
+    // request still owns the module POD tail until its completion callback.
+    job->resource_id = 0;
+    if (job->queued) (void)uv_cancel((uv_req_t*)&job->request);
+}
+
+static const RuntimeResourceDescriptor* jube_host_node_work_descriptor(
+        int resource_kind) {
+    switch (resource_kind) {
+        case JUBE_ASYNC_RESOURCE_FILESYSTEM_REQUEST:
+            return runtime_resource_descriptor_from_legacy_name("FSReqCallback");
+        default:
+            return NULL;
+    }
+}
+
 static void jube_host_node_work_complete(uv_work_t* request, int status) {
     JubeNodeAsyncWork* job = request ? (JubeNodeAsyncWork*)request->data : NULL;
     if (!job) return;
-    jube_node_async_work_remove(job);
+    job->queued = false;
     NodeRuntimeSession* session = (NodeRuntimeSession*)job->session;
     // Detached heaps must never receive a late completion; release only the
     // module-owned POD payload after libuv has returned ownership to the host.
     if (session && !session->detaching && jube_host_node_session_is_live(session) &&
             job->complete) {
         job->complete(job->user, status);
+    }
+    if (job->resource_id != 0 && session && js_active_runtime_state) {
+        uint32_t resource_id = job->resource_id;
+        job->resource_id = 0;
+        runtime_resource_table_remove_owned(&js_runtime_state.resources, session,
+            resource_id);
     }
     if (job->destroy) job->destroy(job->user);
     mem_free(job);
@@ -3599,64 +3619,82 @@ static int jube_host_node_work_submit(void* session, JubeAsyncWorkCallback work,
                                       JubeAsyncCompletionCallback complete,
                                       JubeAsyncDestroyCallback destroy, void* user,
                                       uint32_t* out_request_id) {
+    (void)session;
+    (void)work;
+    (void)complete;
+    (void)destroy;
+    (void)user;
     if (out_request_id) *out_request_id = 0;
+    // A hosted native request must publish exact owned Items with its rid.
+    // The rootless compatibility entry is retained only for ABI decoding.
+    return -1;
+}
+
+static int jube_host_node_work_submit_root_span(void* session, int resource_kind,
+        const Item* root_values, int root_count, JubeAsyncWorkCallback work,
+        JubeAsyncCompletionCallback complete, JubeAsyncDestroyCallback destroy,
+        void* user, uint32_t* out_resource_id) {
+    if (out_resource_id) *out_resource_id = 0;
     NodeRuntimeSession* node_session = (NodeRuntimeSession*)session;
-    if (!jube_host_node_session_is_live(session) || node_session->detaching || !work ||
-            !destroy || !lambda_uv_loop()) return -1;
-    if (!node_session->async_work) {
-        node_session->async_work = arraylist_new(8);
-        if (!node_session->async_work) return -1;
-    }
+    const RuntimeResourceDescriptor* descriptor =
+        jube_host_node_work_descriptor(resource_kind);
+    if (!jube_host_node_session_is_live(session) || node_session->detaching ||
+            !root_values || root_count <= 0 || !work || !destroy || !descriptor ||
+            !js_active_runtime_state || !lambda_uv_loop()) return -1;
     JubeNodeAsyncWork* job = (JubeNodeAsyncWork*)mem_calloc(1, sizeof(JubeNodeAsyncWork),
         MEM_CAT_SYSTEM);
     if (!job) return -1;
-    uint32_t request_id = ++node_session->async_work_next_id;
-    if (request_id == 0) request_id = ++node_session->async_work_next_id;
     job->session = session;
     job->work = work;
     job->complete = complete;
     job->destroy = destroy;
     job->user = user;
-    job->request_id = request_id;
     job->request.data = job;
-    if (!arraylist_append(node_session->async_work, job)) {
+    job->resource_id = runtime_resource_table_add_root_span_owned(
+        &js_runtime_state.resources, node_session, root_values, root_count,
+        descriptor, jube_host_node_work_resource_close, job, false);
+    if (job->resource_id == 0) {
         mem_free(job);
         return -1;
     }
     int status = uv_queue_work(lambda_uv_loop(), &job->request, jube_host_node_work_execute,
         jube_host_node_work_complete);
     if (status != 0) {
-        jube_node_async_work_remove(job);
+        uint32_t resource_id = job->resource_id;
+        job->resource_id = 0;
+        runtime_resource_table_remove_owned(&js_runtime_state.resources,
+            node_session, resource_id);
         mem_free(job);
         return status;
     }
-    if (out_request_id) *out_request_id = request_id;
+    job->queued = true;
+    if (out_resource_id) *out_resource_id = job->resource_id;
     return 0;
 }
 
 static int jube_host_node_work_cancel(void* session, uint32_t request_id) {
     NodeRuntimeSession* node_session = (NodeRuntimeSession*)session;
-    if (!jube_host_node_session_is_live(session) || request_id == 0 || !node_session->async_work) {
+    if (!jube_host_node_session_is_live(session) || request_id == 0 ||
+            !js_active_runtime_state) {
         return -1;
     }
-    for (int i = 0; i < node_session->async_work->length; i++) {
-        JubeNodeAsyncWork* job = (JubeNodeAsyncWork*)node_session->async_work->data[i];
-        if (job && job->session == session && job->request_id == request_id) {
-            return uv_cancel((uv_req_t*)&job->request);
-        }
-    }
-    return -1;
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
+        &js_runtime_state.resources, node_session, request_id);
+    JubeNodeAsyncWork* job = entry ? (JubeNodeAsyncWork*)entry->close_user : NULL;
+    return job && job->queued ? uv_cancel((uv_req_t*)&job->request) : -1;
 }
 
-static void jube_node_async_cancel_session(void* session) {
+static Item jube_host_node_work_resource_value(void* session,
+        uint32_t resource_id, int root_index) {
     NodeRuntimeSession* node_session = (NodeRuntimeSession*)session;
-    if (!node_session || !node_session->async_work) return;
-    for (int i = 0; i < node_session->async_work->length; i++) {
-        JubeNodeAsyncWork* job = (JubeNodeAsyncWork*)node_session->async_work->data[i];
-        if (job && job->session == session) {
-            (void)uv_cancel((uv_req_t*)&job->request);
-        }
-    }
+    if (!jube_host_node_session_is_live(session) || resource_id == 0 ||
+            root_index < 0 || !js_active_runtime_state) return ItemNull;
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
+        &js_runtime_state.resources, node_session, resource_id);
+    if (!entry || root_index >= entry->root_count) return ItemNull;
+    Item* value = root_vector_at(&js_runtime_state.resources.owner_values,
+        entry->root_slot + root_index);
+    return value ? *value : ItemNull;
 }
 
 static int jube_host_node_resolve_namespace(void* session, const char* specifier,
@@ -5876,8 +5914,11 @@ bool jube_node_module_enabled(const char* module_name) {
 }
 
 static void jube_node_resource_cleanup(NodeRuntimeSession* session) {
-    if (!session) return;
-    runtime_resource_table_destroy(&session->resources);
+    if (!session || session != jube_active_node_runtime_session ||
+            !js_active_runtime_state) return;
+    // The context table stays alive for timers and other hosts; Node detach
+    // releases only rows whose lifecycle key is this retiring session.
+    runtime_resource_table_clear_owned(&js_runtime_state.resources, session);
 }
 
 static uint32_t jube_node_resource_add_impl(void* session_handle, Item value, const char* kind,
@@ -5891,8 +5932,8 @@ static uint32_t jube_node_resource_add_impl(void* session_handle, Item value, co
         log_error("jube-resource: unregistered resource descriptor %s", kind);
         return 0;
     }
-    return runtime_resource_table_add(&session->resources, value, descriptor,
-        close_callback, close_user, is_handle);
+    return runtime_resource_table_add_owned(&js_runtime_state.resources, session,
+        value, descriptor, close_callback, close_user, is_handle);
 }
 
 uint32_t jube_node_resource_add_with_close(void* session_handle, Item value, const char* kind,
@@ -5913,8 +5954,8 @@ void jube_node_resource_close_kind(void* session_handle, const char* kind_prefix
     // Dynamic Node modules link this legacy bridge by name. Keep the ABI
     // narrow while translating it once to the table's typed close group.
     if (strcmp(kind_prefix, "crypto.") == 0) {
-        runtime_resource_table_close_group(&session->resources,
-            RUNTIME_RESOURCE_GROUP_CRYPTO);
+        runtime_resource_table_close_group_owned(&js_runtime_state.resources,
+            session, RUNTIME_RESOURCE_GROUP_CRYPTO);
     }
 }
 
@@ -5925,7 +5966,8 @@ uint32_t jube_node_resource_add(Item value, const char* kind) {
 void jube_node_resource_remove_for_session(void* session_handle, uint32_t resource_id) {
     NodeRuntimeSession* session = (NodeRuntimeSession*)session_handle;
     if (session != jube_active_node_runtime_session) return;
-    runtime_resource_table_remove(&session->resources, resource_id);
+    runtime_resource_table_remove_owned(&js_runtime_state.resources, session,
+        resource_id);
 }
 
 void jube_node_resource_remove(uint32_t resource_id) {
@@ -5935,7 +5977,8 @@ void jube_node_resource_remove(uint32_t resource_id) {
 void* jube_node_resource_user_data_for_session(void* session_handle, uint32_t resource_id) {
     NodeRuntimeSession* session = (NodeRuntimeSession*)session_handle;
     if (session != jube_active_node_runtime_session) return NULL;
-    return runtime_resource_table_user_data(&session->resources, resource_id);
+    return runtime_resource_table_user_data_owned(&js_runtime_state.resources,
+        session, resource_id);
 }
 
 void* jube_node_runtime_current_session(void) {
@@ -6021,23 +6064,27 @@ JsCryptoNativeState* jube_node_crypto_native_state(void* session) {
 
 void jube_node_resource_clear(void) {
     NodeRuntimeSession* session = jube_active_node_runtime_session;
-    if (session) runtime_resource_table_clear(&session->resources);
+    if (session && js_active_runtime_state) {
+        runtime_resource_table_clear_owned(&js_runtime_state.resources, session);
+    }
 }
 
 bool jube_node_resource_contains(uint32_t resource_id) {
     NodeRuntimeSession* session = jube_active_node_runtime_session;
-    return session && runtime_resource_table_entry(&session->resources, resource_id);
+    return session && js_active_runtime_state &&
+        runtime_resource_table_entry_owned(&js_runtime_state.resources, session,
+            resource_id);
 }
 
 Item jube_node_resource_active_handles(void) {
     Item handles = js_array_new(0);
     NodeRuntimeSession* session = jube_active_node_runtime_session;
     if (!session) return handles;
-    for (int i = 0; i < runtime_resource_table_slot_count(&session->resources); i++) {
+    for (int i = 0; i < runtime_resource_table_slot_count(&js_runtime_state.resources); i++) {
         const RuntimeResourceEntry* entry = runtime_resource_table_entry_at(
-            &session->resources, i);
-        if (entry && entry->is_handle) {
-            js_array_push(handles, runtime_resource_table_value(&session->resources, entry));
+            &js_runtime_state.resources, i);
+        if (entry && entry->lifecycle_owner == session && entry->is_handle) {
+            js_array_push(handles, runtime_resource_table_value(&js_runtime_state.resources, entry));
         }
     }
     return handles;
@@ -6047,10 +6094,11 @@ Item jube_node_resource_active_resources_info(void) {
     Item resources = js_array_new(0);
     NodeRuntimeSession* session = jube_active_node_runtime_session;
     if (!session) return resources;
-    for (int i = 0; i < runtime_resource_table_slot_count(&session->resources); i++) {
+    for (int i = 0; i < runtime_resource_table_slot_count(&js_runtime_state.resources); i++) {
         const RuntimeResourceEntry* entry = runtime_resource_table_entry_at(
-            &session->resources, i);
-        if (!entry || !entry->is_handle || !entry->descriptor) continue;
+            &js_runtime_state.resources, i);
+        if (!entry || entry->lifecycle_owner != session || !entry->is_handle ||
+                !entry->descriptor) continue;
         const char* name = entry->descriptor->display_name;
         js_array_push(resources, js_make_string_len(name, (int)strlen(name)));
     }
@@ -6184,7 +6232,6 @@ void jube_modules_runtime_detach(void) {
             active_session);
     }
     jube_node_shared_primitives_detach(session);
-    jube_node_async_cancel_session(session);
     jube_node_resource_cleanup(active_session);
     jube_node_session_module_states_destroy(active_session);
     jube_node_session_state_clear(active_session);
@@ -6209,14 +6256,6 @@ void jube_registry_cleanup(void) {
                 jube_node_runtime_sessions->data[i];
             jube_node_resource_cleanup(session);
             jube_node_session_module_states_destroy(session);
-            if (session->async_work) {
-                if (session->async_work->length != 0) {
-                    log_error("JUBE_ASYNC: %d work requests survived registry cleanup",
-                        session->async_work->length);
-                } else {
-                    arraylist_free(session->async_work);
-                }
-            }
             jube_node_session_state_clear(session);
             mem_free(session);
         }

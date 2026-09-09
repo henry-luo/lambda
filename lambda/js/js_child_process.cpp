@@ -50,6 +50,7 @@ extern "C" void js_net_close_ipc_sent_stream_defer_account(uv_stream_t* stream);
 extern "C" void* js_net_ipc_sent_stream_connection_account(uv_stream_t* stream);
 extern "C" void js_net_complete_transferred_connection_account(void* account);
 extern "C" uint64_t js_get_heap_epoch(void);
+extern __thread EvalContext* context;
 
 static void js_child_process_emit_or_queue_cluster_online(Item obj);
 
@@ -680,6 +681,7 @@ typedef struct JsSpawnProcess {
     Item*        ref_env;
     Item*        unref_env;
     Item*        abort_env;
+    RuntimeCallbackSlots ipc_write_callbacks;
     char*        ipc_buf;
     size_t       ipc_len;
     size_t       ipc_cap;
@@ -705,7 +707,7 @@ typedef struct SpawnWriteReq {
     bool close_sent_stream_after;
     uv_stream_t* sent_handle;
     void* transferred_connection_account;
-    Item callback;
+    int64_t callback_slot;
 } SpawnWriteReq;
 
 static Item spawn_signal_name_item(int signal_number);
@@ -1063,6 +1065,7 @@ static void spawn_release_process(JsSpawnProcess* sp) {
     spawn_drain_transferred_connections(sp);
     spawn_close_pending_sent_stream_wrappers(sp);
     spawn_clear_stdio_handle_properties(sp);
+    runtime_callback_slots_destroy(&sp->ipc_write_callbacks);
     if (sp->ipc_buf) mem_free(sp->ipc_buf);
     mem_free(sp);
 }
@@ -1185,7 +1188,10 @@ static void spawn_ipc_write_cb(uv_write_t* req, int status) {
     bool close_sent_stream_after = wr->close_sent_stream_after;
     uv_stream_t* sent_handle = wr->sent_handle;
     void* transferred_connection_account = wr->transferred_connection_account;
-    Item callback = wr->callback;
+    RootFrame roots(1);
+    Rooted<Item> callback_root(roots, sp
+        ? runtime_callback_slots_take(&sp->ipc_write_callbacks,
+            wr->callback_slot) : ItemNull);
     if (wr->data) mem_free(wr->data);
     mem_free(wr);
     if (close_sent_stream_after) {
@@ -1201,11 +1207,11 @@ static void spawn_ipc_write_cb(uv_write_t* req, int status) {
             js_net_close_ipc_sent_stream(sent_handle);
         }
     }
-    if (is_callable(callback)) {
+    if (is_callable(callback_root.get())) {
         Item err = status < 0 ? make_ipc_channel_closed_error() : make_js_undefined();
         // ChildProcess.send callbacks belong to the IPC write completion edge;
         // firing at queue time lets teardown race ahead of transferred handles.
-        schedule_spawn_send_callback(callback, err);
+        schedule_spawn_send_callback(callback_root.get(), err);
     }
     if (close_ipc_after && sp && sp->ipc_pipe_active && !uv_is_closing((uv_handle_t*)&sp->ipc_pipe)) {
         sp->ipc_pipe_active = false;
@@ -1280,12 +1286,15 @@ static void spawn_remove_abort_signal(JsSpawnProcess* sp) {
 static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* send_handle,
                                  bool close_send_handle_after, bool close_sent_stream_after,
                                  Item callback) {
+    RootFrame roots(2);
+    Rooted<Item> message_root(roots, message);
+    Rooted<Item> callback_root(roots, callback);
     if (!sp || !sp->ipc_pipe_active) return false;
-    Item wire_message = message;
+    Item wire_message = message_root.get();
     if (send_handle) {
         wire_message = js_new_object();
         js_set_key_cstr(wire_message, "__lambda_ipc_has_handle__", (Item){.item = ITEM_TRUE});
-        js_set_key_cstr(wire_message, "__lambda_ipc_payload__", message);
+        js_set_key_cstr(wire_message, "__lambda_ipc_payload__", message_root.get());
     }
     Item json = js_json_stringify(wire_message);
     if (item_is_error(json) || get_type_id(json) != LMD_TYPE_STRING) return false;
@@ -1303,7 +1312,14 @@ static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* 
     wr->data[s->len] = '\n';
     uv_buf_t buf = uv_buf_init(wr->data, (unsigned int)len);
     int r = 0;
-    wr->callback = callback;
+    wr->callback_slot = -1;
+    if (is_callable(callback_root.get()) &&
+            !runtime_callback_slots_add(&sp->ipc_write_callbacks,
+                callback_root.get(), &wr->callback_slot)) {
+        mem_free(wr->data);
+        mem_free(wr);
+        return false;
+    }
     if (send_handle) {
         wr->close_sent_handle_after = close_send_handle_after;
         wr->close_sent_stream_after = close_sent_stream_after;
@@ -1319,6 +1335,7 @@ static bool spawn_ipc_write_json(JsSpawnProcess* sp, Item message, uv_stream_t* 
     }
     if (r == 0) return true;
     if (close_sent_stream_after) spawn_close_sent_stream_wrapper(send_handle);
+    (void)runtime_callback_slots_take(&sp->ipc_write_callbacks, wr->callback_slot);
     mem_free(wr->data);
     mem_free(wr);
     return false;
@@ -1370,6 +1387,7 @@ static void spawn_ipc_send_disconnect_and_close(JsSpawnProcess* sp) {
             wr->data = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
             if (wr->data) {
                 wr->len = len;
+                wr->callback_slot = -1;
                 wr->close_ipc_after = true;
                 memcpy(wr->data, s->chars, s->len);
                 wr->data[s->len] = '\n';
@@ -2414,6 +2432,9 @@ extern "C" Item js_cp_spawn(Item rest_args) {
     }
 
     JsSpawnProcess* sp = (JsSpawnProcess*)mem_calloc(1, sizeof(JsSpawnProcess), MEM_CAT_JS_RUNTIME);
+    if (!sp) return ItemNull;
+    runtime_callback_slots_init(&sp->ipc_write_callbacks, (Context*)context,
+        "child process IPC write callbacks");
 
     // create JS object with stdout/stderr sub-objects
     Item obj = make_child_process_object();

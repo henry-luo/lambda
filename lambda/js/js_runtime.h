@@ -101,7 +101,6 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(JS_ITER_DONE_SENTINEL >> 5
 // Maximum module-level live bindings tracked in the compact slot table.
 // Generated Unicode identifier tests declare thousands of top-level vars; keep
 // this above those rows so they stay on the indexed binding path.
-#define JS_MAX_MODULE_VARS 16384
 
 // =============================================================================
 // Type Conversion Functions

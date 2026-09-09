@@ -382,11 +382,6 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
         (!method->name && !(method->computed && method->key_expr))) {
         return false;
     }
-    if (policy->mode == JS_MIR_CLASS_METHOD_INHERITED_STATIC &&
-        method->name && jm_is_private_name(method->name)) {
-        return false;
-    }
-
     MIR_reg_t method_key = 0;
     if (method->computed && method->key_expr &&
         policy->computed_key_order == JS_MIR_COMPUTED_KEY_BEFORE_FUNCTION) {

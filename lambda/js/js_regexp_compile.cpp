@@ -1,6 +1,7 @@
 #include "js_regexp_compile.h"
 #include "js_regex_wrapper.h"
 #include "js_runtime.h"
+#include "../../lib/arraylist.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/utf.h"
@@ -8,13 +9,59 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define JS_REGEXP_MAX_NAMED_GROUPS 96
-#define JS_REGEXP_MAX_NAMED_BACKREFS 96
-
 typedef struct JsRegExpNameRef {
     const char* name;
     int len;
+    int group_index;
 } JsRegExpNameRef;
+
+// Named captures and named backreferences are unbounded pattern facts. Their
+// rows borrow the pattern spelling for this one frontend/rewrite operation.
+typedef struct JsRegExpNameList {
+    ArrayList* rows;
+} JsRegExpNameList;
+
+static void js_regexp_name_list_clear(JsRegExpNameList* list) {
+    if (!list || !list->rows) return;
+    for (int i = 0; i < list->rows->length; i++) {
+        mem_free(arraylist_get(list->rows, i));
+    }
+    arraylist_free(list->rows);
+    list->rows = NULL;
+}
+
+static bool js_regexp_name_list_append(JsRegExpNameList* list,
+        const char* name, int len, int group_index) {
+    if (!list->rows) list->rows = arraylist_new(8);
+    JsRegExpNameRef* row = (JsRegExpNameRef*)mem_calloc(1,
+        sizeof(JsRegExpNameRef), MEM_CAT_JS_RUNTIME);
+    if (!row || !list->rows || !arraylist_append(list->rows, row)) {
+        mem_free(row);
+        return false;
+    }
+    row->name = name;
+    row->len = len;
+    row->group_index = group_index;
+    return true;
+}
+
+static int js_regexp_name_list_count(const JsRegExpNameList* list) {
+    return list && list->rows ? list->rows->length : 0;
+}
+
+static const JsRegExpNameRef* js_regexp_name_list_at(const JsRegExpNameList* list,
+        int index) {
+    return list && list->rows && index >= 0 && index < list->rows->length
+        ? (const JsRegExpNameRef*)arraylist_get(list->rows, index) : NULL;
+}
+
+static bool js_regexp_name_lists_return(JsRegExpNameList* groups,
+        JsRegExpNameList* backrefs, bool result) {
+    js_regexp_name_list_clear(groups);
+    js_regexp_name_list_clear(backrefs);
+    return result;
+}
+
 JS_FORWARD_STATIC_EXPRESSION(bool, js_regexp_same_name, (const JsRegExpNameRef* a, const char* b, int b_len), (a && a->len == b_len && memcmp(a->name, b, b_len) == 0))
 
 static bool js_regexp_name_is_identifier(const char* name, int name_len) {
@@ -45,10 +92,8 @@ static void js_regexp_set_error(JsRegExpCompileInfo* out, const char* fmt,
 
 static bool js_regexp_scan_named_groups(const char* pattern, int pattern_len,
     const char* flags, int flags_len, JsRegExpCompileInfo* out) {
-    JsRegExpNameRef groups[JS_REGEXP_MAX_NAMED_GROUPS];
-    JsRegExpNameRef backrefs[JS_REGEXP_MAX_NAMED_BACKREFS];
-    int group_count = 0;
-    int backref_count = 0;
+    JsRegExpNameList groups = {};
+    JsRegExpNameList backrefs = {};
     bool strict_names = out && (out->unicode || out->unicode_sets);
     bool in_class = false;
 
@@ -66,7 +111,7 @@ static bool js_regexp_scan_named_groups(const char* pattern, int pattern_len,
                         js_regexp_set_error(out,
                             "Invalid regular expression: /%.*s/%.*s: unterminated named backreference%s",
                             pattern, pattern_len, flags, flags_len, "");
-                        return false;
+                        return js_regexp_name_lists_return(&groups, &backrefs, false);
                     }
                     i++;
                     continue;
@@ -77,15 +122,17 @@ static bool js_regexp_scan_named_groups(const char* pattern, int pattern_len,
                         js_regexp_set_error(out,
                             "Invalid regular expression: /%.*s/%.*s: invalid named backreference%s",
                             pattern, pattern_len, flags, flags_len, "");
-                        return false;
+                        return js_regexp_name_lists_return(&groups, &backrefs, false);
                     }
                     i = j;
                     continue;
                 }
-                if (backref_count < JS_REGEXP_MAX_NAMED_BACKREFS) {
-                    backrefs[backref_count].name = pattern + name_start;
-                    backrefs[backref_count].len = name_len;
-                    backref_count++;
+                if (!js_regexp_name_list_append(&backrefs, pattern + name_start,
+                        name_len, 0)) {
+                    js_regexp_set_error(out,
+                        "Invalid regular expression: /%.*s/%.*s: cannot record named backreference%s",
+                        pattern, pattern_len, flags, flags_len, "");
+                    return js_regexp_name_lists_return(&groups, &backrefs, false);
                 }
                 i = j;
                 continue;
@@ -112,36 +159,42 @@ static bool js_regexp_scan_named_groups(const char* pattern, int pattern_len,
             js_regexp_set_error(out,
                 "Invalid regular expression: /%.*s/%.*s: unterminated named capture%s",
                 pattern, pattern_len, flags, flags_len, "");
-            return false;
+            return js_regexp_name_lists_return(&groups, &backrefs, false);
         }
         int name_len = j - name_start;
         if (!js_regexp_name_is_identifier(pattern + name_start, name_len)) {
             js_regexp_set_error(out,
                 "Invalid regular expression: /%.*s/%.*s: invalid named capture%s",
                 pattern, pattern_len, flags, flags_len, "");
-            return false;
+            return js_regexp_name_lists_return(&groups, &backrefs, false);
         }
-        for (int g = 0; g < group_count; g++) {
-            if (js_regexp_same_name(&groups[g], pattern + name_start, name_len)) {
+        for (int g = 0; g < js_regexp_name_list_count(&groups); g++) {
+            if (js_regexp_same_name(js_regexp_name_list_at(&groups, g),
+                    pattern + name_start, name_len)) {
                 js_regexp_set_error(out,
                     "Invalid regular expression: /%.*s/%.*s: duplicate capture group name%s",
                     pattern, pattern_len, flags, flags_len, "");
-                return false;
+                return js_regexp_name_lists_return(&groups, &backrefs, false);
             }
         }
-        if (group_count < JS_REGEXP_MAX_NAMED_GROUPS) {
-            groups[group_count].name = pattern + name_start;
-            groups[group_count].len = name_len;
-            group_count++;
+        if (!js_regexp_name_list_append(&groups, pattern + name_start, name_len, 0)) {
+            js_regexp_set_error(out,
+                "Invalid regular expression: /%.*s/%.*s: cannot record named capture%s",
+                pattern, pattern_len, flags, flags_len, "");
+            return js_regexp_name_lists_return(&groups, &backrefs, false);
         }
         i = j;
     }
 
-    if (group_count == 0 && !strict_names) return true;
-    for (int b = 0; b < backref_count; b++) {
+    if (js_regexp_name_list_count(&groups) == 0 && !strict_names) {
+        return js_regexp_name_lists_return(&groups, &backrefs, true);
+    }
+    for (int b = 0; b < js_regexp_name_list_count(&backrefs); b++) {
+        const JsRegExpNameRef* backref = js_regexp_name_list_at(&backrefs, b);
         bool found = false;
-        for (int g = 0; g < group_count; g++) {
-            if (js_regexp_same_name(&groups[g], backrefs[b].name, backrefs[b].len)) {
+        for (int g = 0; g < js_regexp_name_list_count(&groups); g++) {
+            if (backref && js_regexp_same_name(js_regexp_name_list_at(&groups, g),
+                    backref->name, backref->len)) {
                 found = true;
                 break;
             }
@@ -150,10 +203,10 @@ static bool js_regexp_scan_named_groups(const char* pattern, int pattern_len,
             js_regexp_set_error(out,
                 "Invalid regular expression: /%.*s/%.*s: invalid named capture referenced%s",
                 pattern, pattern_len, flags, flags_len, "");
-            return false;
+            return js_regexp_name_lists_return(&groups, &backrefs, false);
         }
     }
-    return true;
+    return js_regexp_name_lists_return(&groups, &backrefs, true);
 }
 
 bool js_regexp_compile_frontend(const char* pattern, int pattern_len,
@@ -237,12 +290,10 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
     if (out_len) *out_len = pattern_len;
     if (!pattern || pattern_len <= 0) return NULL;
 
-    JsRegExpNameRef groups[JS_REGEXP_MAX_NAMED_GROUPS];
+    JsRegExpNameList groups = {};
     int group_count = 0;
-    int named_group_count = 0;
     bool in_class = false;
     bool has_named_backref = false;
-    memset(groups, 0, sizeof(groups));
 
     for (int i = 0; i < pattern_len; i++) {
         unsigned char ch = (unsigned char)pattern[i];
@@ -275,17 +326,23 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
         int j = name_start;
         while (j < pattern_len && pattern[j] != '>') j++;
         if (j >= pattern_len) continue;
-        if (group_count <= JS_REGEXP_MAX_NAMED_GROUPS) {
-            groups[group_count - 1].name = pattern + name_start;
-            groups[group_count - 1].len = j - name_start;
-            named_group_count++;
+        if (!js_regexp_name_list_append(&groups, pattern + name_start,
+                j - name_start, group_count)) {
+            js_regexp_name_list_clear(&groups);
+            return NULL;
         }
         i = j;
     }
-    if (!has_named_backref) return NULL;
+    if (!has_named_backref) {
+        js_regexp_name_list_clear(&groups);
+        return NULL;
+    }
 
     char* rewritten = (char*)mem_alloc((size_t)pattern_len + 1, MEM_CAT_JS_RUNTIME);
-    if (!rewritten) return NULL;
+    if (!rewritten) {
+        js_regexp_name_list_clear(&groups);
+        return NULL;
+    }
     int out_pos = 0;
     in_class = false;
     for (int i = 0; i < pattern_len; i++) {
@@ -298,9 +355,10 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
             if (j < pattern_len) {
                 int name_len = j - name_start;
                 int numeric_index = 0;
-                for (int g = 0; g < group_count && g < JS_REGEXP_MAX_NAMED_GROUPS; g++) {
-                    if (js_regexp_same_name(&groups[g], pattern + name_start, name_len)) {
-                        numeric_index = g + 1;
+                for (int g = 0; g < js_regexp_name_list_count(&groups); g++) {
+                    const JsRegExpNameRef* group = js_regexp_name_list_at(&groups, g);
+                    if (js_regexp_same_name(group, pattern + name_start, name_len)) {
+                        numeric_index = group->group_index;
                         break;
                     }
                 }
@@ -310,7 +368,7 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
                     i = j;
                     continue;
                 }
-                if (named_group_count == 0) {
+                if (js_regexp_name_list_count(&groups) == 0) {
                     rewritten[out_pos++] = 'k';
                     for (int k = name_start - 1; k <= j; k++) {
                         rewritten[out_pos++] = pattern[k];
@@ -331,6 +389,7 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
     }
     rewritten[out_pos] = '\0';
     if (out_len) *out_len = out_pos;
+    js_regexp_name_list_clear(&groups);
     return rewritten;
 }
 

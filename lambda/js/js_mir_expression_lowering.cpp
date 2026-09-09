@@ -8058,7 +8058,7 @@ static MirValue jm_transpile_expression_direct(JsMirTranspiler* mt,
             jm_callr_1(mt, "js_check_class_heritage_constructor", MIR_T_I64, checked_heritage_val);
             jm_emit_error_lane_propagate_check(mt);
         }
-            jm_emit_class_static_methods(mt, cls_obj, 0, ce, static_superclass,
+            jm_emit_class_static_methods(mt, cls_obj, 0, ce,
                 JS_MIR_COMPUTED_KEY_AFTER_FUNCTION);
 
             // Store constructor body and instance prototype on the class function

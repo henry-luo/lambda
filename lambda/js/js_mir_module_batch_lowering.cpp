@@ -26,8 +26,7 @@ static JsModuleConstEntry* jm_register_module_var(JsMirTranspiler* mt,
         const char* name, int var_kind, TypeId modvar_type,
         bool is_nested_func_hoist, const char* log_kind,
         NameEntry* binding = NULL) {
-    if (!mt || !mt->module_consts || !name ||
-            mt->module_var_count >= JS_MAX_MODULE_VARS) return NULL;
+    if (!mt || !mt->module_consts || !name) return NULL;
     JsModuleConstEntry lookup;
     memset(&lookup, 0, sizeof(lookup));
     lookup.name = jm_persist_name(name);
@@ -867,14 +866,16 @@ void jm_cleanup_deferred_mir() {
     if (!js_active_runtime_state) return;
     js_dynfunc_cache_reset();
     JsCodeStore* store = js_module_code_store;
-    for (int i = 0; i < store->count; i++) {
+    for (int i = 0; i < js_code_store_count(store); i++) {
+        JsCompiledArtifact* artifact = js_code_store_artifact_at(store, i);
+        if (!artifact) continue;
         // Deferred eval units use the same JIT generator as ordinary units;
         // finishing only MIR leaves the generator arena and native code live.
-        jit_cleanup_mode((MIR_context_t)store->artifacts[i].mir_context,
+        jit_cleanup_mode((MIR_context_t)artifact->mir_context,
             !g_mir_interp_mode);
-        if (store->artifacts[i].source_owner) mem_free(store->artifacts[i].source_owner);
+        if (artifact->source_owner) mem_free(artifact->source_owner);
     }
-    store->count = 0;
+    js_code_store_clear_rows(store);
 }
 
 void* jm_get_last_deferred_mir_ctx() {
@@ -1817,7 +1818,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
             JsClassMember* member = &ce->members[member_index];
             if (member->kind != JS_CLASS_MEMBER_STATIC_FIELD) continue;
             JsStaticFieldEntry* sf = &member->as.static_field;
-            if (sf->name && ce->name && mt->module_var_count < JS_MAX_MODULE_VARS) {
+            if (sf->name && ce->name) {
                 sf->module_var_index = mt->module_var_count;
                 // Register as module const for ClassName.fieldName access pattern
                 JsModuleConstEntry mce;
@@ -1838,7 +1839,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
             JsClassMember* member = &ce->members[member_index];
             if (member->kind != JS_CLASS_MEMBER_STATIC_FIELD) continue;
             JsStaticFieldEntry* sf = &member->as.static_field;
-            if (sf->computed && sf->key_expr && mt->module_var_count < JS_MAX_MODULE_VARS) {
+            if (sf->computed && sf->key_expr) {
                 sf->key_module_var_index = mt->module_var_count++;
                 log_debug("js-mir: static field computed key slot class=%.*s field=%d module_var[%d]",
                     ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "",
@@ -1849,7 +1850,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
             JsClassMember* member = &ce->members[member_index];
             if (member->kind != JS_CLASS_MEMBER_INSTANCE_FIELD) continue;
             JsInstanceFieldEntry* inf = &member->as.instance_field;
-            if (inf->computed && inf->key_expr && mt->module_var_count < JS_MAX_MODULE_VARS) {
+            if (inf->computed && inf->key_expr) {
                 inf->key_module_var_index = mt->module_var_count++;
                 log_debug("js-mir: instance field computed key slot class=%.*s field=%d module_var[%d]",
                     ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "",

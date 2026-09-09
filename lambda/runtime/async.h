@@ -46,6 +46,13 @@ typedef struct RuntimeJobQueue {
     int64_t pending_count;
 } RuntimeJobQueue;
 
+// One owner can retain callbacks for native operations that complete out of
+// order. Requests carry only a stable slot index; releasing a callback never
+// moves a live slot (D5.1.1v2; JSCU31).
+typedef struct RuntimeCallbackSlots {
+    RootVector values;
+} RuntimeCallbackSlots;
+
 // A context-owned native resource has one generation-checked identity and one
 // rooted script owner. Individual protocols retain only their native payload
 // behind this common lifecycle record (D7.4.1v2; JSCU31).
@@ -58,6 +65,8 @@ typedef enum RuntimeResourceKind {
     RUNTIME_RESOURCE_CRYPTO_HASH,
     RUNTIME_RESOURCE_CRYPTO_SIGN,
     RUNTIME_RESOURCE_CRYPTO_CIPHER,
+    RUNTIME_RESOURCE_FS_REQUEST,
+    RUNTIME_RESOURCE_DNS_REQUEST,
 } RuntimeResourceKind;
 
 typedef enum RuntimeResourceGroup {
@@ -77,6 +86,10 @@ typedef void (*RuntimeResourceCloseCallback)(void* user);
 typedef struct RuntimeResourceEntry {
     uint32_t id;
     int64_t root_slot;
+    int root_count;
+    // Partitions one context-wide table by lifecycle without introducing a
+    // second resource registry.  It is an opaque stable native owner.
+    void* lifecycle_owner;
     const RuntimeResourceDescriptor* descriptor;
     RuntimeResourceCloseCallback close_callback;
     void* close_user;
@@ -102,6 +115,13 @@ int64_t runtime_job_queue_size(const RuntimeJobQueue* queue);
 bool runtime_job_queue_cancel(RuntimeJobQueue* queue, int64_t id);
 void runtime_job_queue_clear(RuntimeJobQueue* queue);
 
+void runtime_callback_slots_init(RuntimeCallbackSlots* slots, Context* owner,
+                                 const char* name);
+bool runtime_callback_slots_add(RuntimeCallbackSlots* slots, Item callback,
+                                int64_t* out_slot);
+Item runtime_callback_slots_take(RuntimeCallbackSlots* slots, int64_t slot);
+void runtime_callback_slots_destroy(RuntimeCallbackSlots* slots);
+
 const RuntimeResourceDescriptor* runtime_resource_descriptor_from_legacy_name(
     const char* name);
 void runtime_resource_table_init(RuntimeResourceTable* table, Context* owner,
@@ -112,22 +132,53 @@ uint32_t runtime_resource_table_add(RuntimeResourceTable* table, Item value,
     const RuntimeResourceDescriptor* descriptor,
     RuntimeResourceCloseCallback close_callback, void* close_user,
     bool is_handle);
+uint32_t runtime_resource_table_add_owned(RuntimeResourceTable* table,
+    void* lifecycle_owner, Item value,
+    const RuntimeResourceDescriptor* descriptor,
+    RuntimeResourceCloseCallback close_callback, void* close_user,
+    bool is_handle);
+// A resource row may own a semantic group of exact roots. The first Item is
+// the script-visible resource owner used for identity lookup.
+uint32_t runtime_resource_table_add_root_span(RuntimeResourceTable* table,
+    const Item* root_values, int root_count,
+    const RuntimeResourceDescriptor* descriptor,
+    RuntimeResourceCloseCallback close_callback, void* close_user,
+    bool is_handle);
+uint32_t runtime_resource_table_add_root_span_owned(RuntimeResourceTable* table,
+    void* lifecycle_owner, const Item* root_values, int root_count,
+    const RuntimeResourceDescriptor* descriptor,
+    RuntimeResourceCloseCallback close_callback, void* close_user,
+    bool is_handle);
 void runtime_resource_table_remove(RuntimeResourceTable* table, uint32_t id);
+void runtime_resource_table_remove_owned(RuntimeResourceTable* table,
+    void* lifecycle_owner, uint32_t id);
 // Unsafe-recovery paths detach an already-invalid native payload without
 // invoking its close operation; ordinary owners must use remove instead.
 void runtime_resource_table_forget(RuntimeResourceTable* table, uint32_t id);
+void runtime_resource_table_forget_owned(RuntimeResourceTable* table,
+    void* lifecycle_owner, uint32_t id);
+void runtime_resource_table_clear_owned(RuntimeResourceTable* table,
+    void* lifecycle_owner);
 const RuntimeResourceEntry* runtime_resource_table_entry(
     RuntimeResourceTable* table, uint32_t id);
+const RuntimeResourceEntry* runtime_resource_table_entry_owned(
+    RuntimeResourceTable* table, void* lifecycle_owner, uint32_t id);
 const RuntimeResourceEntry* runtime_resource_table_entry_at(
     RuntimeResourceTable* table, int index);
 int runtime_resource_table_slot_count(const RuntimeResourceTable* table);
 int runtime_resource_table_active_count(const RuntimeResourceTable* table);
+int runtime_resource_table_active_count_owned(const RuntimeResourceTable* table,
+    void* lifecycle_owner);
 Item runtime_resource_table_value(RuntimeResourceTable* table,
                                   const RuntimeResourceEntry* entry);
 void* runtime_resource_table_user_data(RuntimeResourceTable* table,
-                                       uint32_t id);
+    uint32_t id);
+void* runtime_resource_table_user_data_owned(RuntimeResourceTable* table,
+    void* lifecycle_owner, uint32_t id);
 void runtime_resource_table_close_group(RuntimeResourceTable* table,
-                                        RuntimeResourceGroup group);
+    RuntimeResourceGroup group);
+void runtime_resource_table_close_group_owned(RuntimeResourceTable* table,
+    void* lifecycle_owner, RuntimeResourceGroup group);
 
 #ifdef __cplusplus
 }

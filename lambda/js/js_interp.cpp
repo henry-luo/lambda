@@ -165,7 +165,6 @@ struct JsInterpGeneratorLoopContinuation {
     Item iterator;
     Item for_in_object;
     bool is_for_of;
-    bool async_roots_registered;
     struct JsInterpGeneratorLoopContinuation* next;
 };
 
@@ -386,11 +385,6 @@ static void js_interp_generator_remove_loop(JsInterpFrame* frame,
         if ((*link)->loop == loop) {
             JsInterpGeneratorLoopContinuation* removed = *link;
             *link = removed->next;
-            if (removed->async_roots_registered) {
-                heap_unregister_gc_root(&removed->iterator.item);
-                heap_unregister_gc_root(&removed->for_in_object.item);
-                heap_unregister_gc_object_root(removed->env);
-            }
             mem_free(removed);
             return;
         }
@@ -435,17 +429,9 @@ static bool js_interp_async_suspend_loop(JsInterpFrame* frame,
     continuation->iterator = iterator;
     continuation->for_in_object = for_in_object;
     continuation->is_for_of = is_for_of;
-    bool iterator_rooted = heap_try_register_gc_root(&continuation->iterator.item);
-    bool for_in_rooted = heap_try_register_gc_root(&continuation->for_in_object.item);
-    bool env_rooted = heap_try_register_gc_object_root(continuation->env);
-    if (!iterator_rooted || !for_in_rooted || !env_rooted) {
-        if (iterator_rooted) heap_unregister_gc_root(&continuation->iterator.item);
-        if (for_in_rooted) heap_unregister_gc_root(&continuation->for_in_object.item);
-        if (env_rooted) heap_unregister_gc_object_root(continuation->env);
-        mem_free(continuation);
-        return false;
-    }
-    continuation->async_roots_registered = true;
+    // The owning JsAsyncContextStateRecord traces every continuation edge in
+    // js_interp_async_trace_continuations. Do not add a second direct-root
+    // protocol for these same values.
     continuation->next = *frame->async_loop_continuations;
     *frame->async_loop_continuations = continuation;
     return true;
@@ -457,11 +443,6 @@ static void js_interp_async_clear_loops(
     JsInterpGeneratorLoopContinuation* current = *continuations;
     while (current) {
         JsInterpGeneratorLoopContinuation* next = current->next;
-        if (current->async_roots_registered) {
-            heap_unregister_gc_root(&current->iterator.item);
-            heap_unregister_gc_root(&current->for_in_object.item);
-            heap_unregister_gc_object_root(current->env);
-        }
         mem_free(current);
         current = next;
     }
