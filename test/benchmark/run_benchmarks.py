@@ -761,16 +761,25 @@ def time_run_benchmark(cmd, num_runs, timeout_s):
     walls, execs = [], []
     ok = False
     status_counts = {}
-    for _ in range(num_runs):
+    samples = []
+    for run_index in range(num_runs):
         w, e, success, status = time_run_once(cmd, timeout_s)
         status_counts[status] = status_counts.get(status, 0) + 1
+        # Preserve every observed value, including failures, so a report can
+        # show its range instead of turning a median into an unauditable claim.
+        samples.append({
+            "run": run_index + 1,
+            "wall_ms": w,
+            "exec_ms": e,
+            "status": status,
+        })
         if success:
             ok = True
             walls.append(w)
             if e is not None:
                 execs.append(e)
         print(".", end="", flush=True)
-    detail = {"status_counts": status_counts}
+    detail = {"status_counts": status_counts, "samples": samples}
     if not ok:
         status = max(status_counts, key=status_counts.get) if status_counts else "failed"
         return (None, None, False, status, detail)

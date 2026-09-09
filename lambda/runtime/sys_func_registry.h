@@ -65,6 +65,10 @@ typedef enum SysFuncResultKind {
     // type — these rows accept only text, so a non-text argument is a runtime
     // error whose type must not be guessed from the argument (SI14).
     SYS_RESULT_TEXT_SAME_AS_ARG0,
+    // split has two distinct result families. A proven text/null source
+    // succeeds with ordinary String parts; ArrayNum and open sources retain
+    // the row's generic array success contract.
+    SYS_RESULT_TEXT_SPLIT,
 } SysFuncResultKind;
 
 // System function metadata + JIT import pointer

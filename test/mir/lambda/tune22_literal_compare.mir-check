@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "T22-1b/c: short literal-RHS string equality emits a direct context-owned constant load and byte comparison, without either generic equality helper or a module-constant helper (S5.1.1/2, D5.4.3).",
+  "checks": [
+    {
+      "in_func": "_literal_match_tune22_#",
+      "expect": [
+        "i64:24(",
+        "u8:5(",
+        "\tbne\tL"
+      ],
+      "forbid": [
+        "call\tfn_eq_p, fn_eq",
+        "call\tfn_str_eq_ptr_p, fn_str_eq_ptr",
+        "call\tlambda_module_const_at_p, lambda_module_const_at"
+      ]
+    }
+  ]
+}

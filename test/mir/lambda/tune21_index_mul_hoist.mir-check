@@ -1,13 +1,12 @@
 {
   "schema_version": 1,
-  "description": "T21-1b: a counted-loop index product (`i * n + k`) whose operands the enclosing loops prove nonnegative is lowered as a plain i64 `mul` guarded by one unsigned compare per operand against 2^26 (exact: the product is then below 2^52), and the invalid case folds into the sign bit the bounds check already rejects (`or` with valid-1). No flag-carrying `mulo`/`bo` pair, no double-lane check and no xor poison select may appear in the kernel; those cost ~25 ALU ops per index against the old 4 and were Result36's matmul 2.5x.",
+  "description": "T21-1b: a counted-loop index product (`i * n + k`) whose operands the enclosing loops prove nonnegative is lowered as a plain i64 `mul` guarded by one unsigned compare per operand against 2^26 (exact: the product is then below 2^52), and the invalid case folds into the sign bit the bounds check already rejects (`or` with valid-1). No flag-carrying `mulo`/`bo` pair or xor poison select may appear in the kernel. T22's S5.1.2-correct loop-condition slow edge may convert an unproven parameter lane to double elsewhere in the function; it is not part of this index product.",
   "checks": [
     {
       "in_func": "_dot_rows_#",
       "forbid": [
         "mulo\t",
         "bo\t",
-        "i2d\t",
         "xor\t{{r}}, {{r}}, 9223372036854775807"
       ],
       "expect_seq": [

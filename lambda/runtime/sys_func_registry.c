@@ -28,6 +28,9 @@
 extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT, TYPE_COMPLEX;
 extern Type TYPE_STRING, TYPE_SYMBOL, TYPE_DTIME, TYPE_ANY, TYPE_ERROR, TYPE_TYPE;
 extern Type TYPE_NUMBER, TYPE_DECIMAL, TYPE_BINARY;
+// The registry is C while TypeArray is a C++ extension of Type. The exported
+// object's Type prefix is enough here; AST consumers see the full TypeArray.
+extern Type TYPE_ARRAY;
 // NOTE: do NOT reach for `TYPE_LIST` as a success_type here. It is a bare
 // `Type` singleton ({.type_id = LMD_TYPE_ARRAY}), but consumers of an
 // ARRAY-typed Type* cast it to `TypeArray*` and read `->nested` — past the end
@@ -619,11 +622,15 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_URL_RESOLVE, "url_resolve", 2, &TYPE_STRING, false, false, false, LMD_TYPE_STRING, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_url_resolve", FPTR(fn_url_resolve), NULL, NULL, false, 0},
 
-    {SYSFUNC_SPLIT, "split", 2, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_split2", FPTR(fn_split), NULL, NULL, false, 0},
+    {SYSFUNC_SPLIT, "split", 2, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_split2", FPTR(fn_split), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ (Type*)&TYPE_ARRAY, /* may_error */ true,
+     /* result */ SYS_RESULT_TEXT_SPLIT},
 
-    {SYSFUNC_SPLIT3, "split", 3, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_split3", FPTR(fn_split3), NULL, NULL, false, 0},
+    {SYSFUNC_SPLIT3, "split", 3, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_split3", FPTR(fn_split3), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ (Type*)&TYPE_ARRAY, /* may_error */ true,
+     /* result */ SYS_RESULT_TEXT_SPLIT},
 
     {SYSFUNC_JOIN, "join", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_join2", FPTR(fn_join2), NULL, NULL, false, 0},
@@ -1669,6 +1676,13 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"fn_string_char_eq_ascii", FPTR(fn_string_char_eq_ascii),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"it2l", FPTR(it2l),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
@@ -1934,6 +1948,7 @@ JitImport jit_runtime_imports[] = {
     {"cow_path_set_raw", FPTR(cow_path_set_raw)},
     {"cow_path_set", FPTR(cow_path_set)},
     {"cow_path_borrow", FPTR(cow_path_borrow)},
+    {"cow_path_borrow_fixed", FPTR(cow_path_borrow_fixed)},
     {"cow_path_set_inplace", FPTR(cow_path_set_inplace)},
     {"pn_push_cow", FPTR(pn_push_cow)},
     {"pn_splice_cow", FPTR(pn_splice_cow)},
@@ -3452,6 +3467,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_module_name_id_at",
         "lambda_active_module_name_id", "lambda_active_module_name_item",
         "lambda_async_frame_get_word",
+        // Exact String-character equality reads only the already-rooted Item.
+        "fn_string_char_eq_ascii",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         // v5 int lane: pure integer arithmetic on lane values, no allocation.
         "lambda_int_lane_to_double_c", "lambda_float_null_lane_c",

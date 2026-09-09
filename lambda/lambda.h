@@ -849,8 +849,11 @@ typedef struct ByteStorage ByteStorage;
 typedef struct ByteBufferHandle ByteBufferHandle;
 
 /*
-* The C verion of Lambda Item and data structures are defined primarily for MIR JIT ciompiler
-*/
+ * C-compatible Item and data-structure definitions support active C runtime
+ * components, including GC, MIR runtime/import handling, and Path. They mirror
+ * the C++ layouts in lambda.hpp for the shared runtime ABI; they are not a
+ * C2MIR input interface.
+ */
 
 // only define DateTime if not already defined by lib/datetime.h
 #ifndef __cplusplus
@@ -2405,6 +2408,7 @@ extern "C" {
     double array_float_get_value(ArrayNum *arr, int64_t index);
     Item list_get(List *list, int64_t index);
     Item fn_string_ascii_at(Item str, int64_t index);
+    uint8_t fn_string_char_eq_ascii(Item str, int64_t index, uint8_t expected);
     Item map_get(Map* map, Item key);
     Item elmt_get(Element *elmt, Item key);
     Item object_get(Object* obj, Item key);
@@ -3008,6 +3012,9 @@ extern "C" {
     Item cow_path_set_inplace(Item owner, Item path, Item value);
     // CW25: detach root..leaf and return the leaf, for a `var` path borrow.
     Item cow_path_borrow(Item owner, Item path);
+    // CW25: bounded descriptor form for compiler-known member/int paths.
+    Item cow_path_borrow_fixed(Item owner, int64_t count,
+        Item key0, Item key1, Item key2);
 
     // runtime type coercion for typed array annotations (int[], float[], etc.)
     // converts generic Array/List to typed array, or validates existing typed array

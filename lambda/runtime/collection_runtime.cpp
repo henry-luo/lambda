@@ -4,7 +4,6 @@
 #include "../io/input-allocation-context.h"
 #include "heap_api.h"
 #include "render_map.h"
-#include "../../lib/checked_math.hpp"
 #include "../../lib/log.h"
 #include <limits.h>
 
@@ -30,8 +29,10 @@ static Arena* ui_collection_arena() {
     return nullptr;
 }
 
-void expand_list(List* list, Arena* arena) {
-    if (!list) return;
+static bool list_reserve_capacity(List* list, int64_t required_capacity,
+        Arena* arena) {
+    if (!list || required_capacity <= list->capacity) return list != nullptr;
+    if (required_capacity <= 0) return false;
     // Arena-owned UI elements are not GC roots. Keep their child buffers in
     // the result arena so a collection cannot reclaim a live DOM child list.
     if (!arena) {
@@ -42,28 +43,28 @@ void expand_list(List* list, Arena* arena) {
         arena = input_allocation_context->arena;
     }
     int64_t previous_capacity = list->capacity;
-    int64_t new_capacity = previous_capacity ? previous_capacity * 2 : 8;
+    int64_t new_capacity = required_capacity;
     Item* old_items = list->items;
+    if ((uint64_t)new_capacity > SIZE_MAX / sizeof(Item)) return false;
+    size_t new_size = (size_t)new_capacity * sizeof(Item);
 
     if (arena && (old_items == nullptr || arena_owns(arena, old_items))) {
-        Item* new_items = (Item*)arena_alloc(arena, (size_t)new_capacity * sizeof(Item));
-        if (!new_items) return;
+        Item* new_items = (Item*)arena_alloc(arena, new_size);
+        if (!new_items) return false;
         if (old_items && previous_capacity > 0) {
             memcpy(new_items, old_items, (size_t)previous_capacity * sizeof(Item));
         }
         list->items = new_items;
         list->capacity = new_capacity;
         list_relocate_owned_tail(list, old_items, previous_capacity, new_items, new_capacity);
-        return;
+        return true;
     }
 
-    size_t new_size;
-    if (!lam::checked_mul((size_t)new_capacity, sizeof(Item), &new_size)) return;
     RootFrame roots(1);
     Rooted<List*> rooted_list(roots, list);
     Item* new_items = (Item*)heap_data_alloc(new_size);
     list = rooted_list.get();
-    if (!new_items) return;
+    if (!new_items) return false;
 
     // Collection may compact the old buffer. Reload the rooted owner before
     // copying so a runtime growth path never dereferences nursery storage.
@@ -74,6 +75,27 @@ void expand_list(List* list, Arena* arena) {
     list->items = new_items;
     list->capacity = new_capacity;
     list_relocate_owned_tail(list, old_items, previous_capacity, new_items, new_capacity);
+    return true;
+}
+
+void expand_list(List* list, Arena* arena) {
+    if (!list) return;
+    int64_t previous_capacity = list->capacity;
+    int64_t new_capacity = previous_capacity == 0 ? 8 :
+        (previous_capacity > INT64_MAX / 2 ? INT64_MAX : previous_capacity * 2);
+    if (new_capacity <= previous_capacity) return;
+    (void)list_reserve_capacity(list, new_capacity, arena);
+}
+
+bool array_reserve_append_slots(Array* array, int64_t append_count) {
+    if (!array || append_count < 0 ||
+            array->length > INT64_MAX - array->extra - append_count - 1) {
+        return false;
+    }
+    // array_push reserves one handoff slot beyond visible and scalar-tail
+    // storage. Matching that invariant avoids a final unnecessary growth.
+    int64_t required_capacity = array->length + array->extra + append_count + 1;
+    return list_reserve_capacity((List*)array, required_capacity, nullptr);
 }
 
 // D2.6.6v2: a JS array's companion property map now lives in the array's OWN

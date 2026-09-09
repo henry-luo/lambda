@@ -149,6 +149,13 @@ def report_engines(data, requested):
 def display_ms(bench_data, engine):
     """Format a timing and mark typed cells that reuse an untyped result."""
     value = fmt_ms(value_of(bench_data.get(engine)))
+    detail = bench_data.get("_status_detail", {}).get(engine, {})
+    samples = detail.get("samples", []) if isinstance(detail, dict) else []
+    sample_key = "wall_ms" if engine.endswith("_e2e") else "exec_ms"
+    observed = [sample.get(sample_key) for sample in samples
+                if isinstance(sample, dict) and isinstance(sample.get(sample_key), (int, float))]
+    if observed:
+        value += f" [{fmt_ms(min(observed))}\u2013{fmt_ms(max(observed))}]"
     if engine in ("mir_typed", "mir_typed_auto") and \
             status_of(bench_data, engine) == "untyped_fallback":
         return value + "*" if value != "---" else value
@@ -178,6 +185,16 @@ def collect_notables(data, engines):
 
 
 STATIC_CEILING_ENGINES = ["c2mir", "go"]
+
+# Result38 predated these four text workloads.  Keep the population boundary
+# explicit in later reports: a 59-row historical geomean is comparable with
+# Result38, while the complete 63-row value measures the expanded suite.
+RESULT38_TEXT_EXTENSION = {
+    "prettier_ast",
+    "text_search",
+    "three_way_merge",
+    "log_pipeline",
+}
 
 
 def collect_static_ceiling(data, engines):
@@ -216,6 +233,76 @@ def collect_static_ceiling(data, engines):
         "geo": {e: geo_mean([r["gaps"].get(e) for r in rows]) for e in present},
         "covered": {e: sum(1 for r in rows if r["gaps"].get(e) is not None) for e in present},
     }
+
+
+def population_metrics(data, engines):
+    """Return matched ratio geomeans for one explicitly selected row set."""
+    typed_engine = "mir_typed" if "mir_typed" in engines else "mir"
+    ratios = {
+        "typed_node": [],
+        "untyped_node": [],
+        "typed_c2mir": [],
+    }
+    rows = 0
+    c2mir_rows = 0
+    for suite in SUITE_ORDER:
+        for bench_data in data.get(suite, {}).values():
+            rows += 1
+            node = bench_data.get(NODE_ENGINE)
+            typed = bench_data.get(typed_engine)
+            untyped = bench_data.get("mir")
+            c2mir = bench_data.get("c2mir")
+            typed_node = ratio(typed, node)
+            untyped_node = ratio(untyped, node)
+            typed_c2mir = ratio(typed, c2mir)
+            if typed_node is not None:
+                ratios["typed_node"].append(typed_node)
+            if untyped_node is not None:
+                ratios["untyped_node"].append(untyped_node)
+            if typed_c2mir is not None:
+                ratios["typed_c2mir"].append(typed_c2mir)
+                c2mir_rows += 1
+    return {
+        "rows": rows,
+        "typed_node": geo_mean(ratios["typed_node"]),
+        "untyped_node": geo_mean(ratios["untyped_node"]),
+        "typed_c2mir": geo_mean(ratios["typed_c2mir"]),
+        "c2mir_rows": c2mir_rows,
+    }
+
+
+def omit_rows(data, omitted):
+    """Present a report-only row view without copying or altering raw results."""
+    return {
+        suite: {name: bench for name, bench in benches.items() if name not in omitted}
+        for suite, benches in data.items() if suite in SUITE_ORDER
+    }
+
+
+def write_population_accounting(w, data, engines):
+    """State Result38-comparable and complete-suite aggregates side by side."""
+    text_rows = set(data.get("text", {}))
+    if not RESULT38_TEXT_EXTENSION.issubset(text_rows):
+        return
+    shared = omit_rows(data, RESULT38_TEXT_EXTENSION)
+    populations = [
+        ("v38-comparable (without the four text extensions)", shared),
+        ("complete current suite", data),
+    ]
+    w("### Population Accounting")
+    w()
+    w("The first population is the only one comparable with Result38; the "
+      "complete-suite figure includes the four subsequently added text rows. "
+      "Do not compare geomeans across these populations.")
+    w()
+    w("| Population | Rows | MIR (typed)/Node geo | MIR (untyped)/Node geo | MIR (typed)/C2MIR geo | C2MIR matched rows |")
+    w("|---|---:|---:|---:|---:|---:|")
+    for label, subset in populations:
+        metrics = population_metrics(subset, engines)
+        w(f"| {label} | {metrics['rows']} | {fmt_ratio(metrics['typed_node'])} | "
+          f"{fmt_ratio(metrics['untyped_node'])} | {fmt_ratio(metrics['typed_c2mir'])} | "
+          f"{metrics['c2mir_rows']} |")
+    w()
 
 
 def write_static_ceiling(w, ceiling, total_rows):
@@ -488,6 +575,8 @@ def write_report(args, data):
         timeout_text += (f"; suites run in order `{order_text}`"
                          f" with a {cooldown_s}s idle gap between suites")
     w(f"- **Methodology:** {runs} run(s) per benchmark, median of self-reported `__TIMING__` milliseconds{timeout_text}")
+    w("- **Range notation:** per-row timing cells are `median [minimum–maximum]`; "
+      "the complete ordered sample set is retained in the result JSON's status detail.")
     w(f"- **Engines in this report:** {', '.join(ENGINE_LABELS.get(e, e) for e in engines)}")
     w(f"- **Results source:** `{args.input}`")
     # Columns folded in by merge_engine_results.py were measured in a separate
@@ -543,6 +632,7 @@ def write_report(args, data):
     w()
     total_rows = emit_summary_table(w, data, engines, NODE_ENGINE, canonicalized)
     w()
+    write_population_accounting(w, data, engines)
     if canonicalized:
         dedup = {"duplicates": []}
         w("> The benchmark runner keeps one canonical row for each known duplicate workload, so no reporting deduplication is required.")
