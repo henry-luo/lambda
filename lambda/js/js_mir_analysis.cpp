@@ -891,6 +891,7 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
     JsAstFunctionFacts facts = js_ast_collect_function_facts(fn->params, fn->body);
     analysis->js_has_direct_eval = facts.has_direct_eval;
     analysis->js_has_direct_super_call = facts.has_direct_super_call;
+    analysis->js_has_lexical_super_call = facts.has_lexical_super_call;
     analysis->js_first_direct_super_call_start = facts.first_direct_super_call_start;
 
     // Collect all identifier references in the body

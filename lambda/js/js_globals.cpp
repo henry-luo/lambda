@@ -15740,6 +15740,12 @@ extern "C" Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_
 // Function.prototype restricted accessors (D6.2.2v2).
 extern "C" bool js_proto_snapshot_is_valid();
 
+// Intrinsic caches seed their slots with ItemNull but a root-range clear zeroes
+// them, so both patterns mean "nothing cached here".
+static inline bool js_intrinsic_cache_slot_empty(Item slot) {
+    return slot.item == 0 || slot.item == ItemNull.item;
+}
+
 void js_global_builtin_fn_cache_reset() {
     if (js_proto_snapshot_is_valid()) return;
     global_builtin_fn_cache_init = false;
@@ -15758,7 +15764,7 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
     if (!spec || spec->id != global_id || spec->kind != JS_BUILTIN_GLOBAL_FUNCTION) {
         return ItemNull;
     }
-    if (global_builtin_fn_cache[spec->id].item != ItemNull.item) {
+    if (!js_intrinsic_cache_slot_empty(global_builtin_fn_cache[spec->id])) {
         return global_builtin_fn_cache[spec->id];
     }
 
@@ -16853,7 +16859,11 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
         for (int i = 0; i < JS_CTOR_MAX; i++) js_constructor_cache[i] = ItemNull;
         js_ctor_cache_init = true;
     }
-    if (js_constructor_cache[ctor_id].item != ItemNull.item) {
+    // A cleared root-range slot is zero, not ItemNull, so an emptiness test that
+    // only knows ItemNull reads a wiped slot as a cached null and hands it out
+    // forever. Zero means empty here, as it does for the generator caches in
+    // the same record.
+    if (!js_intrinsic_cache_slot_empty(js_constructor_cache[ctor_id])) {
         return js_constructor_cache[ctor_id];
     }
     js_intrinsic_state_ensure_epoch();

@@ -893,30 +893,25 @@ static void js_root_range_clear(JsRootRange* range) {
 }
 
 struct JsRuntimeRootResetOptions {
-    bool retain_builtin_function_cache;
+    bool retain_intrinsic_slots;
     bool retain_cluster_primary_options;
 };
-
-static void js_realm_intrinsic_slots_clear_except_builtin(
-        JsRealmIntrinsicSlots* slots) {
-    if (!slots) return;
-    // Hot preamble reuse preserves method identity, while every other
-    // intrinsic cache is rebuilt in the restored realm (D6.2.2v2).
-    memset(&slots->proto_key, 0, 4 * sizeof(Item));
-    memset(slots->global_builtin_functions, 0,
-        (size_t)(JS_REALM_INTRINSIC_SLOT_COUNT - 4 -
-            JS_INTRINSIC_BINDING_COUNT) * sizeof(Item));
-}
 
 static void js_runtime_state_clear_root_range(JsRootRange* range, Item*,
         int, const char*, void* options_data) {
     JsRuntimeRootResetOptions* options =
         (JsRuntimeRootResetOptions*)options_data;
-    if (options && options->retain_builtin_function_cache &&
+    // Every group in the intrinsic-slots range has an owner reset that already
+    // ran in js_reset_cached_realm_objects/js_globals_batch_reset, and the two
+    // snapshot-aware owners (js_ctor_cache_reset, js_global_builtin_fn_cache_reset)
+    // deliberately retain their Items so preamble-cached references keep their
+    // identity (D6.2.2v2). Clearing the range behind them wiped exactly what
+    // they kept while leaving their `*_initialized` flags set, so every
+    // constructor read back as a cached null and globalThis lost Object,
+    // Symbol, Error and friends for the rest of the batch.
+    if (options && options->retain_intrinsic_slots &&
             js_runtime_state.intrinsic_slots &&
             range == &js_runtime_state.intrinsic_slots->roots) {
-        js_realm_intrinsic_slots_clear_except_builtin(
-            js_runtime_state.intrinsic_slots);
         return;
     }
     if (options && options->retain_cluster_primary_options &&

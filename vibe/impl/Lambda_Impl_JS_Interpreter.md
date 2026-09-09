@@ -550,3 +550,103 @@ unreachable by identifier under `lambda.exe js-test-batch` (`typeof Symbol` is
 `"undefined"`), which fails 5450 test262 entries with
 `ReferenceError: Symbol is not defined` and friends. The failing set is
 byte-identical with and without this work.
+
+## Batch-mode globals: a cleared cache slot read as a cached null (2026-09-10)
+
+Under `lambda.exe js-test-batch`, every builtin **constructor** was missing from
+globalThis — `typeof Symbol` was `"undefined"`, `Symbol` threw
+`ReferenceError` — while the namespace objects (`Math`, `JSON`, `console`) were
+fine. 5450 test262 entries failed on it. Present on upstream `b9ca1a366`.
+
+The asymmetry is the tell: `js_get_global_this` installs a namespace
+unconditionally but a constructor only `if (get_type_id(ctor) == LMD_TYPE_FUNC)`,
+so a constructor that resolves to null is skipped in silence, and globalThis is
+then cached that way for the rest of the batch.
+
+Two mechanisms disagreed about what an empty cache slot looks like.
+`js_batch_reset_to` (the preamble/hot-reload partial reset) runs two passes over
+the realm caches:
+
+1. `js_ctor_cache_reset` / `js_global_builtin_fn_cache_reset` — both **skip**
+   when the prototype snapshot is valid, deliberately, so constructors keep the
+   identity the harness preamble already captured in its module vars.
+2. `js_root_range_reset_all(false)`, which then cleared the whole intrinsic-slots
+   range behind them, zeroing `constructors[]` and `global_builtin_functions[]`
+   while leaving `constructors_initialized` / `global_builtin_initialized` set.
+
+A cleared root-range slot is `0`. Those two caches seed their slots with
+`ItemNull` and test occupancy as `slot.item != ItemNull.item` — and
+`ITEM_NULL` is `LMD_TYPE_NULL << 56`, **not** zero. So a wiped slot passed the
+"is it cached?" test and was handed back as a cached null, forever.
+
+Both halves are fixed:
+
+- The retain-mode clear no longer touches the intrinsic-slots range at all.
+  Every group in it has an owner reset that already ran in
+  `js_reset_cached_realm_objects` / `js_globals_batch_reset`; clearing behind
+  those owners is what destroyed the Items the snapshot-aware ones meant to
+  keep. `js_realm_intrinsic_slots_clear_except_builtin` is gone and the option
+  is now honestly named `retain_intrinsic_slots`.
+- `js_intrinsic_cache_slot_empty` makes zero and `ItemNull` both mean empty, so a
+  range clear can never again be misread as a cached value. That is already the
+  convention elsewhere in the same record — the GeneratorFunction prototype
+  caches test `item != 0` and reset to `(Item){0}`.
+
+test262 goes from 34809/40261 to 40248/40261. The 13 that remain were all in the
+failing set before this fix and fail identically under `--no-hot-reload`, so they
+are independent of the preamble path: nine prototype-chain/Proxy cases
+(`Proxy` `has`/`set` through a prototype, `__lookupGetter__`/`__lookupSetter__`
+proto errors, `__proto__` cycle-shadowed) and four derived-class `super`-in-arrow
+cases. They were masked by the missing globals, not caused by their return.
+
+## The last 13 test262 entries (2026-09-10)
+
+Unmasked by the batch-globals fix above, and all pre-existing. Two root causes.
+
+### The acyclicity walk called a Proxy's [[GetPrototypeOf]] (9 tests)
+
+`Object.create(proxy)` invoked the proxy's `getPrototypeOf` trap. Per spec
+OrdinaryObjectCreate runs no user code at all, so with test262's
+`allowProxyTraps` — which fills every unlisted trap with a `Test262Error`
+thrower — the *creation of the test fixture* threw before a single assertion
+ran. That is why the failures reported a bare "JavaScript exception" and why
+`_handler` came back `undefined`: the `has` trap under test was never reached.
+
+The trap came from `js_set_prototype_impl`'s cycle check, which walked the
+candidate chain with `js_get_prototype_of` — correct for an ordinary link,
+user-visible for a Proxy. ES2024 10.1.2.1 step 8.c.i stops that walk at the
+first object whose `[[GetPrototypeOf]]` is not the ordinary internal method, so
+`js_prototype_walk_stops_here` now ends it at a Proxy or any exotic carrier with
+its own prototype accessor. That also fixes `__proto__/set-cycle-shadowed`,
+where the spec *deliberately* leaves a cycle undetected because a Proxy shadows
+the link: we were walking through it, finding the cycle, and rejecting the
+assignment.
+
+### super() inside an arrow bound the wrong activation (4 tests)
+
+`class B extends A { constructor() { (_ => super())(); } }` threw. The derived
+constructor's super state (`derived_constructor`, `super_this_bound`, the
+super-this home) lives on the *current* call activation, and an arrow has its
+own — so `super()` either reported "may only be called once" (the arrow's
+activation is no derived constructor) or bound `this` somewhere the constructor
+never reads, leaving its implicit return to throw "Must call super constructor
+before accessing 'this'". Three parts:
+
+- `js_this_binding_activation` implements GetThisEnvironment (9.1.2.4). An arrow
+  is the only construct that can lexically host a `super()` — it is a
+  SyntaxError anywhere else — so only an arrow may claim another frame's
+  binding, and it scans the whole activation chain rather than the adjacent
+  call: `for (x of it) return;` reaches super() through the iterator's own
+  `return()` method, several unrelated frames deep.
+- `js_super_bind_this` publishes the bound `this` to the owner activation's THIS
+  home as well as the running frame, so the constructor still sees it once the
+  arrow's activation is popped.
+- The MIR early throw for `this` before `super()` is a source-order
+  approximation of a purely dynamic rule, and a super() inside an arrow has no
+  source position to order against — so it reported *every* `this` in the
+  constructor as uninitialized. A new `has_lexical_super_call` fact (a super()
+  seen while the walk is past a function boundary but still inside the
+  constructor's lexical observation scope) suppresses the static guard and
+  defers to the runtime TDZ check, which was already correct.
+
+test262 is 40261/40261.

@@ -1,6 +1,6 @@
 {
   form_elements_checked: 38,
-  details_elements_checked: 22,
+  details_elements_checked: 23,
   radio_group_sizes: [3, 3, 3],
   details_group_sizes: [1, 1],
   form_owners: [],

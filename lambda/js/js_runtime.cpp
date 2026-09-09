@@ -13819,6 +13819,42 @@ Item js_intrinsic_262_realm_regexp_get_hasindices_body(Item callee,
         "RegExp.prototype getter called on incompatible receiver");
 }
 
+// GetThisEnvironment (ES2024 9.1.2.4). An arrow function has no this-binding of
+// its own, so a `super()` written inside one belongs to the nearest enclosing
+// activation that does have one. Reading the *current* activation instead made
+// every arrow-hosted super() miss the derived constructor: the call either
+// reported "may only be called once" (the arrow's activation is not a derived
+// constructor) or left the constructor's `this` unbound, so its implicit return
+// threw "Must call super constructor before accessing 'this'".
+static bool js_activation_callee_is_arrow(JsCallActivation* activation) {
+    if (!activation) return false;
+    Item* callee_home = activation->items[JS_CALL_ACTIVATION_CALLEE];
+    Item callee = callee_home ? *callee_home : ItemNull;
+    if (get_type_id(callee) != LMD_TYPE_FUNC) return false;
+    JsFunction* fn = (JsFunction*)callee.function;
+    return fn && (fn->flags & JS_FUNC_FLAG_ARROW) != 0;
+}
+
+static JsCallActivation* js_this_binding_activation(void) {
+    JsCallActivation* activation = js_call_activation_current();
+    if (!activation || activation->derived_constructor) return activation;
+    // An arrow is the only construct that can host a `super()` belonging to an
+    // enclosing derived constructor -- `super()` is a SyntaxError anywhere
+    // else -- so nothing but an arrow may claim another frame's binding. The
+    // arrow need not be called by that constructor: `for (x of it) return;`
+    // runs super() through the iterator's own return() method, several
+    // unrelated frames deep, so scan the chain instead of the adjacent call.
+    if (!js_activation_callee_is_arrow(activation)) return activation;
+    for (JsCallActivation* scan = activation->previous; scan; scan = scan->previous) {
+        if (scan->derived_constructor) return scan;
+    }
+    return activation;
+}
+
+static Item* js_activation_super_this_home(JsCallActivation* activation) {
+    return activation ? activation->items[JS_CALL_ACTIVATION_SUPER_THIS] : NULL;
+}
+
 static void js_super_this_binding_push(Item initial_this) {
     JsCallActivation* activation = js_call_activation_current();
     activation->derived_constructor = true;
@@ -13859,27 +13895,37 @@ static Item js_super_this_binding_finish(Item result) {
 extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
     if (item_is_error(construct_result)) return construct_result;
     Item bound_this = js_is_object_value(construct_result) ? construct_result : this_val;
-    JsCallActivation* activation = js_call_activation_current();
-    if (!activation->derived_constructor) {
+    JsCallActivation* activation = js_this_binding_activation();
+    if (!activation || !activation->derived_constructor) {
         return js_throw_super_called_twice();
     }
     if (activation->super_this_bound) {
         return js_throw_super_called_twice();
     }
+    Item* super_this_home = js_activation_super_this_home(activation);
     if (!js_is_object_value(bound_this) &&
         (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&
-        js_is_object_value(js_super_this_value)) {
-        bound_this = js_super_this_value;
+        super_this_home && js_is_object_value(*super_this_home)) {
+        bound_this = *super_this_home;
     }
     activation->super_this_bound = true;
+    if (super_this_home) *super_this_home = bound_this;
+    // The derived constructor reads `this` through its own activation's home,
+    // which outlives the arrow that ran super(); the arrow reads through the
+    // running frame. Publish to both, or the constructor still sees TDZ once
+    // the arrow's activation is popped.
+    Item* owner_this_home = activation->items[JS_CALL_ACTIVATION_THIS];
+    if (owner_this_home) *owner_this_home = bound_this;
     js_super_this_value = bound_this;
     js_current_this = bound_this;
     return bound_this;
 }
 
 extern "C" Item js_get_super_this_value(void) {
-    if (js_call_activation_current()->derived_constructor) {
-        return js_super_this_value;
+    JsCallActivation* activation = js_this_binding_activation();
+    if (activation && activation->derived_constructor) {
+        Item* home = js_activation_super_this_home(activation);
+        if (home) return *home;
     }
     return js_get_this();
 }
@@ -27836,6 +27882,14 @@ static void js_set_prototype_fresh(Item object, Item prototype) {
     js_set_prototype_impl(object, prototype, /*fresh_object=*/true);
 }
 
+// A chain link whose [[GetPrototypeOf]] is not the ordinary internal method:
+// a Proxy, or any exotic carrier that supplies its own prototype accessor.
+static bool js_prototype_walk_stops_here(Item value) {
+    if (js_is_proxy(value)) return true;
+    const JsClassMeta* meta = js_object_meta(value);
+    return meta && meta->ops && meta->ops->get_prototype_of;
+}
+
 static void js_set_prototype_impl(Item object, Item prototype,
         bool fresh_object) {
     // D3.4.7: prototype metadata is not a substitute for a rooted edge. The
@@ -27889,6 +27943,14 @@ static void js_set_prototype_impl(Item object, Item prototype,
                 log_error("js-set-prototype: cannot retain prototype mutation path");
                 return;
             }
+            // ES2024 10.1.2.1 step 8.c.i: the acyclicity walk stops at the
+            // first object whose [[GetPrototypeOf]] is not the ordinary one.
+            // Advancing through a Proxy here would call its trap — observable
+            // user code at a point the spec runs none, and one that throws for
+            // any handler with a getPrototypeOf stub (so `Object.create(proxy)`
+            // threw outright) — and it reports cycles the spec deliberately
+            // leaves undetected when a Proxy shadows the link.
+            if (js_prototype_walk_stops_here(current.get())) break;
             current.set(js_get_prototype_of(current.get()));
             if (item_is_error(current.get())) {
                 root_vector_destroy(&path);

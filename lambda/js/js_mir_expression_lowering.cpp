@@ -982,6 +982,11 @@ static bool jm_super_reference_before_constructor_super_call(JsMirTranspiler* mt
     if (!JM_JS_FACT(mt->current_fc, is_constructor)) return false;
     if (!mt->current_class->node || !mt->current_class->node->superclass) return false;
     FnAnalysis* analysis = jm_function_analysis(mt->current_fc);
+    // The early throw is a source-order approximation of a purely dynamic rule.
+    // A super() inside a nested arrow binds `this` at a point no static scan can
+    // order against, so the approximation reported *every* `this` in the
+    // constructor as uninitialized. Defer to the runtime TDZ check instead.
+    if (analysis && analysis->js_has_lexical_super_call) return false;
     return !analysis || !analysis->js_has_direct_super_call ||
         super_ref_node->source_span.start_byte <
             analysis->js_first_direct_super_call_start;
