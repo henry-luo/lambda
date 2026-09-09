@@ -1537,6 +1537,7 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
     // Leaving this one uninitialized made map_put dereference pool garbage.
     input->shape_transition_root = nullptr;
     input->shape_transition_shapes = 0;
+    input->predicted_shapes = nullptr;
     input->url = abs_url;
     input->path = nullptr;
     input->parent = parent;     // Set parent Input for hierarchical ownership

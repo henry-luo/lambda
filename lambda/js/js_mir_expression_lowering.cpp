@@ -6065,6 +6065,10 @@ static MIR_reg_t jm_emit_optional_member_access(JsMirTranspiler* mt,
     return result;
 }
 
+static MIR_reg_t jm_emit_predicted_shape_get(JsMirTranspiler* mt,
+        JsAstNode* receiver, MIR_reg_t obj, String* key_name,
+        MIR_reg_t name_id);
+
 static MirValue jm_emit_member_value(JsMirTranspiler* mt,
         JsMemberNode* mem) {
 
@@ -6122,7 +6126,11 @@ static MirValue jm_emit_member_value(JsMirTranspiler* mt,
                 if (mem_obj_spill >= 0) jm_gen_spill_load(mt, obj, mem_obj_spill);
                 MIR_reg_t name_id = jm_module_name_id(mt, key_name->chars,
                     key_name->len);
-                MIR_reg_t val = jm_callr_2(mt, "js_get_name_id", MIR_T_I64, obj, name_id);
+                MIR_reg_t val = jm_emit_predicted_shape_get(mt, mem->object,
+                    obj, key_name, name_id);
+                if (!val) {
+                    val = jm_callr_2(mt, "js_get_name_id", MIR_T_I64, obj, name_id);
+                }
                 jm_emit_error_lane_propagate_check(mt);
                 return jm_expression_value(mt, (JsAstNode*)mem, val,
                     jm_get_effective_type(mt, (JsAstNode*)mem), VALUE_REP_ITEM);
@@ -6300,13 +6308,171 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
 }
 
 // Object expression
+// T10-2 item 1, compiler half. An object literal can be allocated on a
+// predicted shape when every property is a plain, statically named data
+// property: the slot set and its order are then a compile-time fact, so the
+// instance starts with its slots instead of discovering one add at a time.
+//
+// Everything else is refused because it makes the own-slot set dynamic or
+// creates no slot at all: computed keys and spreads are not statically known,
+// accessors and `__proto__` create no data slot, and a duplicate key would put
+// two entries in the shape where the object has one property.
+//
+static uint32_t jm_object_literal_shape_keys_uncached(JsMirTranspiler* mt,
+        JsObjectNode* obj, uint32_t* out_count);
+
+// Returns the first index of the reserved module key range, or UINT32_MAX.
+//
+// Memoized by node: the declarator that records the flow fact and the member
+// sites that guard against it all ask the same question, and registering the
+// keys twice would append a second range to the module image. The table stores
+// [node, (first << 8) | count] pairs so a literal costs no allocation.
+static uint32_t jm_object_literal_shape_keys(JsMirTranspiler* mt,
+        JsObjectNode* obj, uint32_t* out_count) {
+    if (out_count) *out_count = 0;
+    if (!mt || !obj) return UINT32_MAX;
+    ArrayList* memo = mt->literal_shape_ranges;
+    if (memo) {
+        for (int i = 0; i + 1 < memo->length; i += 2) {
+            if (arraylist_get(memo, i) != (void*)obj) continue;
+            uintptr_t packed = (uintptr_t)arraylist_get(memo, i + 1);
+            if (packed == 0) return UINT32_MAX;
+            if (out_count) *out_count = (uint32_t)(packed & 0xffu);
+            return (uint32_t)(packed >> 8);
+        }
+    }
+    uint32_t memo_count = 0;
+    uint32_t memo_first = jm_object_literal_shape_keys_uncached(mt, obj,
+        &memo_count);
+    if (!memo) {
+        memo = arraylist_new(8);
+        mt->literal_shape_ranges = memo;
+    }
+    if (memo) {
+        uintptr_t packed = memo_first == UINT32_MAX ? 0
+            : (((uintptr_t)memo_first << 8) | (uintptr_t)memo_count);
+        arraylist_append(memo, (void*)obj);
+        arraylist_append(memo, (void*)packed);
+    }
+    if (out_count) *out_count = memo_count;
+    return memo_first;
+}
+
+static uint32_t jm_object_literal_shape_keys_uncached(JsMirTranspiler* mt,
+        JsObjectNode* obj, uint32_t* out_count) {
+    if (out_count) *out_count = 0;
+    if (!mt || !obj) return UINT32_MAX;
+    JsIdentifierNode* keys[JS_PREDICTED_SHAPE_MAX_SLOTS];
+    uint32_t count = 0;
+    for (JsAstNode* prop = obj->properties; prop; prop = prop->next) {
+        if (prop->node_type != JS_AST_NODE_PROPERTY) return UINT32_MAX;
+        JsPropertyNode* p = (JsPropertyNode*)prop;
+        if (!p->key || !p->value || p->computed || p->method ||
+                p->is_getter || p->is_setter) return UINT32_MAX;
+        if (p->key->node_type != JS_AST_NODE_IDENTIFIER) return UINT32_MAX;
+        JsIdentifierNode* id = (JsIdentifierNode*)p->key;
+        if (!id->name || id->name->len == 0) return UINT32_MAX;
+        if (js_ast_is_proto_literal_key(p->key)) return UINT32_MAX;
+        if (count >= JS_PREDICTED_SHAPE_MAX_SLOTS) return UINT32_MAX;
+        for (uint32_t i = 0; i < count; i++) {
+            if (keys[i]->name->len == id->name->len &&
+                    memcmp(keys[i]->name->chars, id->name->chars,
+                        id->name->len) == 0) {
+                return UINT32_MAX;
+            }
+        }
+        keys[count++] = id;
+    }
+    if (count == 0) return UINT32_MAX;
+    // Reserved only once every key has passed, so a refusal never leaves a
+    // partial range in the module image. jm_module_name_append (not _index)
+    // keeps the entries contiguous even when a spelling already appears.
+    uint32_t first = UINT32_MAX;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t at = jm_module_name_append(mt, keys[i]->name->chars,
+            (uint32_t)keys[i]->name->len);
+        if (at == UINT32_MAX) return UINT32_MAX;
+        if (i == 0) first = at;
+        else if (at != first + i) return UINT32_MAX;  // range broken; stay generic
+    }
+    if (out_count) *out_count = count;
+    return first;
+}
+
+
+// The slot a property name occupies in a registered range, or -1. The range's
+// spellings are the module name specs themselves, so this needs no second copy
+// of the key list (module index i maps to spec position i - module_name_base).
+static int jm_predicted_shape_slot_for(JsMirTranspiler* mt, uint32_t first,
+        uint32_t count, const char* name, uint32_t len) {
+    if (!mt || !mt->module_name_specs || !name || count == 0) return -1;
+    if (first < mt->module_name_base) return -1;
+    int base = (int)(first - mt->module_name_base);
+    for (uint32_t i = 0; i < count; i++) {
+        int at = base + (int)i;
+        if (at < 0 || at >= mt->module_name_specs->length) return -1;
+        NameRef spec = (NameRef)arraylist_get(mt->module_name_specs, at);
+        if (spec && spec->len == len && memcmp(spec->chars, name, len) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+// T10-2 item 2: the guarded read for `recv.name`, or 0 when this site has no
+// candidate shape.
+//
+// The candidate comes from the binding's own declarator (D8.2.4: the resolved
+// binding, never a re-resolved spelling), so it needs no flow fact carried on
+// the var entry -- which also means it cannot be lost when a scope map rebuilds
+// that entry. It is a CANDIDATE only: a later rebind, an alias, or any receiver
+// that simply is not this literal's object fails the emitted guard and takes
+// the ordinary named kernel.
+static MIR_reg_t jm_emit_predicted_shape_get(JsMirTranspiler* mt,
+        JsAstNode* receiver, MIR_reg_t obj, String* key_name,
+        MIR_reg_t name_id) {
+    if (!mt || !receiver || !key_name ||
+            receiver->node_type != JS_AST_NODE_IDENTIFIER) return 0;
+    JsIdentifierNode* id = (JsIdentifierNode*)receiver;
+    if (!id->entry || !id->entry->node) return 0;
+    JsAstNode* decl = (JsAstNode*)id->entry->node;
+    if (decl->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) return 0;
+    JsAstNode* init = (JsAstNode*)((JsVariableDeclaratorNode*)decl)->init;
+    if (!init || init->node_type != JS_AST_NODE_OBJECT_EXPRESSION) return 0;
+    uint32_t count = 0;
+    // Memoized by node, so this agrees with the range the literal's own
+    // lowering registers regardless of which of the two runs first.
+    uint32_t first = jm_object_literal_shape_keys(mt, (JsObjectNode*)init,
+        &count);
+    if (first == UINT32_MAX || count == 0) return 0;
+    int slot = jm_predicted_shape_slot_for(mt, first, count,
+        key_name->chars, (uint32_t)key_name->len);
+    if (slot < 0) return 0;
+    return jm_call_5(mt, "js_shaped_slot_get", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)first),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)count),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)slot),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_id));
+}
+
 static MirValue jm_emit_object_value(JsMirTranspiler* mt,
         JsObjectNode* obj) {
-    // Object literals use the ordinary property builder.  The former static
-    // shape shortcut embedded compiler-pool name arrays in delayed MIR; the
-    // normal path already canonicalizes each key through NameId and preserves
-    // the same observable insertion order (D5.4.3).
-    MIR_reg_t object = jm_call_0(mt, "js_new_object", MIR_T_I64);
+    // Property writes go through the ordinary builder either way; only the
+    // allocation differs. The retired static-shape shortcut embedded
+    // compiler-pool name arrays in delayed MIR -- this one bakes two module key
+    // indices, so the realm is resolved through active module state (D5.4.3).
+    uint32_t shape_key_count = 0;
+    uint32_t shape_first_key = jm_object_literal_shape_keys(mt, obj,
+        &shape_key_count);
+    MIR_reg_t object;
+    if (shape_first_key != UINT32_MAX && shape_key_count > 0) {
+        object = jm_call_2(mt, "js_new_object_shaped", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)shape_first_key),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)shape_key_count));
+    } else {
+        object = jm_call_0(mt, "js_new_object", MIR_T_I64);
+    }
 
     // Generator spill: if any property value/key/spread contains yield, save object ref to env
     int obj_spill_slot = -1;

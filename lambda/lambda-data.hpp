@@ -1232,6 +1232,12 @@ typedef struct Input {
     ShapePool* shape_pool;      // shape deduplication (NEW)
     TypeMap* shape_transition_root;
     int shape_transition_shapes;      // graph size, bounded by MAX_SHAPE_GRAPH
+    // T10-2: compile-predicted literal shapes, interned per realm by their
+    // (module, key-range) descriptor. Deliberately NOT in the transition graph:
+    // these slots start NULL-typed and are retagged in place by the first write,
+    // which would violate the graph's invariant that a transition target's entry
+    // type matches the edge's value_type.
+    ArrayList* predicted_shapes;      // of PredictedShapeEntry*, bounded
     ArrayList* type_list;       // list of types
     Item root;
     Input* parent;              // parent Input for hierarchical ownership (nullable)

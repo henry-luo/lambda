@@ -1,0 +1,18 @@
+x,y,z {"x":1,"y":2,"z":3}
+{"p":1,"q":7} {"p":"s","q":7} {"p":null,"q":7} {"p":{"n":1},"q":7}
+number string null {"n":1}
+true false undefined p,q
+k2 false
+k2,k1 9
+{"v1":10,"v2":20}
+a,c {"a":1,"c":2}
+v1,v2,w {"v1":10,"v2":20,"w":3}
+42 1 g,h
+5 1 own
+e 2
+true true true 1
+1 true
+outer,tail 1 2
+assign 11 number str string
+direct 33 number direct string
+defprop 55 number {"n":1}
