@@ -2092,10 +2092,6 @@ JS_FORWARD_STATIC_EXPRESSION(bool*, js_process_exit_requested_slot, (void),
 #define js_process_object (js_runtime_state.process->object)
 #define js_process_exit_code_value (js_runtime_state.process->exit_code)
 #define js_process_exit_requested_value (js_runtime_state.process->exit_requested)
-#define process_exit_listeners (js_runtime_state.process->exit_listeners)
-#define process_exit_listener_count (js_runtime_state.process->exit_listener_count)
-#define process_uncaught_listeners (js_runtime_state.process->uncaught_listeners)
-#define process_uncaught_listener_count (js_runtime_state.process->uncaught_listener_count)
 #define js_process_exiting (js_runtime_state.process->exiting)
 #define process_listener_map (js_runtime_state.process->listener_map)
 #define process_total_listener_count (js_runtime_state.process->total_listener_count)
@@ -2867,14 +2863,12 @@ template <typename Target>
 JS_FORWARD_STATIC_VOID( js_process_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
 // ─── process.on(event, listener) ────────────────────────────────────────────
-// simple event emitter for process: supports 'exit', 'uncaughtException', 'beforeExit'
-// plus general events via a listener map
-#define MAX_PROCESS_LISTENERS JS_PROCESS_LISTENER_MAX
+// One dynamic event map owns every process listener, including lifecycle
+// events, so delivery cannot diverge from process.listeners().
 
 static void js_process_ipc_refresh_ref(void);
 static void js_process_ipc_flush_pending(void);
 static void js_process_update_events_count(void);
-static void js_process_remove_from_fixed_list(Item* listeners, int* count, Item listener);
 
 static Item get_process_listener_map() {
     if (process_listener_map.item == 0) {
@@ -2891,32 +2885,6 @@ static bool process_event_name_equals(Item event_name, const char* name, int nam
 }
 JS_FORWARD_STATIC_RETURN(bool, js_process_is_ipc_event, (Item event_name), process_event_name_equals, (event_name, "message", 7) || process_event_name_equals(event_name, "disconnect", 10))
 
-static void js_process_update_fixed_list(Item event_name, Item listener, bool add) {
-    Item* listeners = NULL;
-    int* count = NULL;
-    if (process_event_name_equals(event_name, "exit", 4)) {
-        listeners = process_exit_listeners;
-        count = &process_exit_listener_count;
-    } else if (process_event_name_equals(event_name, "uncaughtException", 17)) {
-        listeners = process_uncaught_listeners;
-        count = &process_uncaught_listener_count;
-    }
-    if (!count) return;
-    if (add) {
-        if (*count < MAX_PROCESS_LISTENERS) listeners[(*count)++] = listener;
-    } else {
-        js_process_remove_from_fixed_list(listeners, count, listener);
-    }
-}
-
-static void js_process_clear_fixed_list(Item event_name) {
-    if (process_event_name_equals(event_name, "exit", 4)) {
-        process_exit_listener_count = 0;
-    } else if (process_event_name_equals(event_name, "uncaughtException", 17)) {
-        process_uncaught_listener_count = 0;
-    }
-}
-
 static void js_process_record_uncaught_handler_failure(void) {
     js_process_exit_code_value = 1;
     if (js_process_object.item != ITEM_NULL) {
@@ -2930,8 +2898,6 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
     bool is_sym = js_key_is_symbol_c(event_name);
     if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
     if (!js_is_callable(listener)) return js_process_object;
-    js_process_update_fixed_list(event_name, listener, true);
-
     // also store in general listener map
     Item map = get_process_listener_map();
     Item arr = js_get_key_default(map, event_name);
@@ -2994,8 +2960,17 @@ extern "C" void js_process_emit_exit(int code) {
     if (js_process_exiting) return;
     js_process_exiting = true;
     Item code_item = (Item){.item = i2it((int64_t)code)};
-    for (int i = 0; i < process_exit_listener_count; i++) {
-        js_call_function(process_exit_listeners[i], js_process_object, &code_item, 1);
+    Item map = get_process_listener_map();
+    Item listeners = js_get_key_default(map, js_name_item("exit", 4));
+    if (get_type_id(listeners) != LMD_TYPE_ARRAY) return;
+    int64_t listener_count = js_array_length(listeners);
+    for (int64_t i = 0; i < listener_count; i++) {
+        Item listener = js_elements_get_int(listeners, i);
+        if (js_is_callable(listener)) {
+            // Exit delivery has historically ignored listener failures while
+            // continuing the remaining callbacks.
+            js_call_function(listener, js_process_object, &code_item, 1);
+        }
     }
 }
 
@@ -3006,8 +2981,6 @@ extern "C" Item js_process_emit_before_exit(int code) {
 }
 
 extern "C" void js_process_reset_listeners(void) {
-    process_exit_listener_count = 0;
-    process_uncaught_listener_count = 0;
     js_process_exiting = false;
     js_process_exit_requested_value = false;
     process_total_listener_count = 0;
@@ -3056,23 +3029,12 @@ static void js_process_update_events_count(void) {
     js_set_key_cstr(js_process_object, "_eventsCount", (Item){.item = i2it((int64_t)process_total_listener_count)});
 }
 
-static void js_process_remove_from_fixed_list(Item* listeners, int* count, Item listener) {
-    int write = 0;
-    for (int read = 0; read < *count; read++) {
-        if (listeners[read].item == listener.item) continue;
-        listeners[write++] = listeners[read];
-    }
-    *count = write;
-}
-
 // process.removeListener(event, listener)
 extern "C" Item js_process_removeListener(Item event_name, Item listener) {
     TypeId etype = get_type_id(event_name);
     bool is_sym = js_key_is_symbol_c(event_name);
     if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
     if (!js_is_callable(listener)) return js_process_object;
-
-    js_process_update_fixed_list(event_name, listener, false);
 
     Item map = get_process_listener_map();
     Item arr = js_get_key_default(map, event_name);
@@ -3109,8 +3071,6 @@ extern "C" Item js_process_removeAllListeners(Item event_name) {
     extern void js_promise_note_unhandled_listener_reset(void);
     TypeId etype = get_type_id(event_name);
     if (etype == LMD_TYPE_UNDEFINED || event_name.item == ITEM_JS_UNDEFINED || event_name.item == ItemNull.item) {
-        process_exit_listener_count = 0;
-        process_uncaught_listener_count = 0;
         process_total_listener_count = 0;
         process_ipc_liveness_listener_count = 0;
         if (!js_process_ensure_roots()) return ItemNull;
@@ -3123,11 +3083,9 @@ extern "C" Item js_process_removeAllListeners(Item event_name) {
     bool is_sym = js_key_is_symbol_c(event_name);
     if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
 
-    if (etype == LMD_TYPE_STRING) {
-        js_process_clear_fixed_list(event_name);
-        if (process_event_name_equals(event_name, "unhandledRejection", 18)) {
-            js_promise_note_unhandled_listener_reset();
-        }
+    if (etype == LMD_TYPE_STRING &&
+            process_event_name_equals(event_name, "unhandledRejection", 18)) {
+        js_promise_note_unhandled_listener_reset();
     }
 
     Item map = get_process_listener_map();
@@ -3180,7 +3138,7 @@ typedef struct JsProcessIpcScope {
 static bool js_process_ipc_enter(uv_handle_t* handle, JsProcessIpcScope* scope) {
     memset(scope, 0, sizeof(*scope));
     EvalContext* owner = handle ? (EvalContext*)handle->data : NULL;
-    if (!owner || !owner->js_state) return false;
+    if (!owner || !js_runtime_state_for(owner)) return false;
     if (!eval_context_matches(owner) ||
             !js_runtime_state_thread_matches(owner)) {
         // libuv must deliver IPC completion on the context's owner loop.
@@ -13018,25 +12976,20 @@ extern "C" Item js_escape(Item str_item) {
 // v12: globalThis
 // =============================================================================
 
-// globalThis and lexical bindings are direct fields of the active context.
-// Their public lookup paths never use a lock or an atomic operation.
-#define js_global_this_obj (js_runtime_state.global_bindings->global_this)
-#define js_global_var_cached_defined_keys (js_runtime_state.global_bindings->var_defined_keys)
-#define js_global_var_cached_defined_count (js_runtime_state.global_bindings->var_defined_count)
-#define js_global_var_cached_defined_epoch (js_runtime_state.global_bindings->var_defined_epoch)
-#define js_global_var_cached_global (js_runtime_state.global_bindings->var_defined_global)
-#define js_window_event_value (js_runtime_state.global_bindings->window_event)
-#define js_window_event_intercept_enabled (js_runtime_state.global_bindings->window_event_intercept_enabled)
-#define js_global_lexical_keys (js_runtime_state.global_bindings->lexical_keys)
-#define js_global_lexical_values (js_runtime_state.global_bindings->lexical_values)
-#define js_global_lexical_immutable (js_runtime_state.global_bindings->lexical_immutable)
-#define js_global_lexical_binding_count (js_runtime_state.global_bindings->lexical_count)
-#define js_global_lexical_epoch (js_runtime_state.global_bindings->lexical_epoch)
-#define js_global_lexical_global (js_runtime_state.global_bindings->lexical_global)
+// Global object identity and every global binding row use the one realm-owned
+// RootVector. Their public paths remain owner-thread direct loads/stores.
+#define js_global_environment_state (js_runtime_state.global_environment)
+#define js_global_this_obj (js_global_environment_slot(js_global_environment_state, \
+    JS_GLOBAL_ENV_GLOBAL_THIS))
+#define js_window_event_value (js_global_environment_slot(js_global_environment_state, \
+    JS_GLOBAL_ENV_WINDOW_EVENT))
+#define js_window_event_intercept_enabled \
+    (js_global_environment_state->window_event_intercept_enabled)
 
-JS_FORWARD_STATIC_EXPRESSION(bool, js_global_bindings_ensure_roots, (void),
-    js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.global_bindings->roots))
+static bool js_global_bindings_ensure_roots() {
+    return js_active_runtime_state &&
+        js_global_environment_ensure(js_global_environment_state);
+}
 
 static bool js_key_is_event_name(Item key) {
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
@@ -13045,7 +12998,6 @@ static bool js_key_is_event_name(Item key) {
 }
 
 static void js_window_event_ensure_rooted() {
-    if (js_runtime_state.global_bindings->roots.roots_epoch == js_get_heap_epoch()) return;
     js_global_bindings_ensure_roots();
 }
 
@@ -13069,10 +13021,12 @@ extern "C" void js_set_window_event_global_value(Item value) {
 }
 
 static void js_global_var_define_cache_reset() {
-    memset(js_global_var_cached_defined_keys, 0, sizeof(js_global_var_cached_defined_keys));
-    js_global_var_cached_defined_count = 0;
-    js_global_var_cached_defined_epoch = 0;
-    js_global_var_cached_global = (Item){0};
+    if (!js_global_bindings_ensure_roots()) return;
+    js_global_environment_remove_kind(js_global_environment_state,
+        JS_GLOBAL_BINDING_OBJECT_VAR);
+    js_global_environment_state->object_var_epoch = 0;
+    js_global_environment_slot(js_global_environment_state,
+        JS_GLOBAL_ENV_OBJECT_VAR_GLOBAL) = ItemNull;
 }
 
 /**
@@ -13084,6 +13038,7 @@ extern "C" void js_globals_batch_reset() {
     js_global_this_obj = (Item){0};
     js_window_event_value = make_js_undefined();
     js_window_event_intercept_enabled = false;
+    js_global_environment_clear_bindings(js_global_environment_state);
     // Partial batch resets retain the heap but recreate realm builtins; clear
     // URI/character fast-cache Items so a later decode cannot retain a stale
     // error/prototype graph from the prior test realm.
@@ -14372,10 +14327,10 @@ extern "C" Item js_with_push(Item obj) {
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC) {
         JS_ASSIGN_OR_RETURN_INTO(obj, js_to_object(obj));
     }
-    if (js_with_stack_depth < JS_WITH_STACK_MAX) {
-        js_last_with_binding_valid = false;
-        js_item_stack_push(&js_with_stack_state, obj);
+    if (!js_item_stack_push(&js_with_stack_state, obj)) {
+        return js_throw_range_error("Could not grow with scope stack");
     }
+    js_last_with_binding_valid = false;
     return js_status_ok();
 }
 
@@ -14408,10 +14363,12 @@ extern "C" int js_with_save_stack(Item* out_stack, int max_depth) {
 extern "C" void js_with_set_stack(Item* stack, int depth) {
     if (!js_with_ensure_roots()) return;
     if (depth < 0) depth = 0;
-    if (depth > JS_WITH_STACK_MAX) depth = JS_WITH_STACK_MAX;
     js_item_stack_clear(&js_with_stack_state);
     for (int i = 0; i < depth; i++) {
-        if (!js_item_stack_push(&js_with_stack_state, stack ? stack[i] : ItemNull)) break;
+        if (!js_item_stack_push(&js_with_stack_state, stack ? stack[i] : ItemNull)) {
+            log_error("js-with: could not restore scope stack");
+            break;
+        }
     }
     js_last_with_binding_valid = false;
 }
@@ -14618,23 +14575,25 @@ extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_bin
 extern "C" uint64_t js_get_heap_epoch();
 
 static void js_global_lexical_refresh(void) {
+    if (!js_global_bindings_ensure_roots()) return;
     Item global = js_get_global_this();
     uint64_t epoch = js_get_heap_epoch();
-    if (js_global_lexical_epoch == epoch &&
-        js_global_lexical_global.item == global.item) {
+    Item& lexical_global = js_global_environment_slot(js_global_environment_state,
+        JS_GLOBAL_ENV_LEXICAL_GLOBAL);
+    if (js_global_environment_state->lexical_epoch == epoch &&
+        lexical_global.item == global.item) {
         return;
     }
-    js_global_lexical_epoch = epoch;
-    js_global_lexical_global = global;
-    js_global_lexical_binding_count = 0;
+    js_global_environment_state->lexical_epoch = epoch;
+    lexical_global = global;
+    js_global_environment_remove_kind(js_global_environment_state,
+        JS_GLOBAL_BINDING_LEXICAL);
 }
 
 static int js_global_lexical_find(Item key) {
     js_global_lexical_refresh();
-    for (int i = js_global_lexical_binding_count - 1; i >= 0; i--) {
-        if (js_with_binding_key_same(js_global_lexical_keys[i], key)) return i;
-    }
-    return -1;
+    return js_global_environment_find(js_global_environment_state,
+        JS_GLOBAL_BINDING_LEXICAL, key);
 }
 
 extern "C" int64_t js_global_lexical_binding_exists(Item key) {
@@ -14646,17 +14605,24 @@ extern "C" int64_t js_global_lexical_binding_exists(Item key) {
 extern "C" Item js_global_lexical_get_or_fallback(Item key, Item fallback) {
     JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     int idx = js_global_lexical_find(key);
-    return idx >= 0 ? js_global_lexical_values[idx] : fallback;
+    JsGlobalBinding* binding = js_global_environment_binding_at(
+        js_global_environment_state, idx);
+    return binding ? js_global_environment_binding_value(
+        js_global_environment_state, binding) : fallback;
 }
 
 extern "C" Item js_global_lexical_set_if_exists(Item key, Item value) {
     JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     int idx = js_global_lexical_find(key);
     if (idx < 0) return (Item){.item = b2it(false)};
-    if (js_global_lexical_immutable[idx]) {
+    JsGlobalBinding* binding = js_global_environment_binding_at(
+        js_global_environment_state, idx);
+    if (!binding) return (Item){.item = b2it(false)};
+    if (binding->immutable) {
         return js_throw_type_error("Assignment to constant variable");
     }
-    js_global_lexical_values[idx] = value;
+    js_global_environment_set_binding_value(js_global_environment_state,
+        binding, value);
     return (Item){.item = b2it(true)};
 }
 
@@ -14665,20 +14631,19 @@ extern "C" void js_global_lexical_declare(Item key, Item value, int64_t immutabl
     if (item_is_error(key)) return;
     int idx = js_global_lexical_find(key);
     if (idx >= 0) {
-        js_global_lexical_values[idx] = value;
-        js_global_lexical_immutable[idx] = immutable != 0;
-        return;
-    }
-    if (js_global_lexical_binding_count >= JS_GLOBAL_LEX_BIND_MAX) {
-        log_error("js-global-lexical: binding table overflow");
+        JsGlobalBinding* binding = js_global_environment_binding_at(
+            js_global_environment_state, idx);
+        if (!binding) return;
+        js_global_environment_set_binding_value(js_global_environment_state,
+            binding, value);
+        binding->immutable = immutable != 0;
         return;
     }
     // Script global lexical declarations live in the global environment record
     // but not on the global object, so Object.hasOwnProperty must stay false.
-    int binding_idx = js_global_lexical_binding_count++;
-    js_global_lexical_keys[binding_idx] = key;
-    js_global_lexical_values[binding_idx] = value;
-    js_global_lexical_immutable[binding_idx] = immutable != 0;
+    js_global_environment_upsert(js_global_environment_state,
+        JS_GLOBAL_BINDING_LEXICAL, key, value, immutable != 0, -1,
+        UINT32_MAX);
 }
 
 // js_get_global_property: look up a property on the global object by name string
@@ -14918,17 +14883,19 @@ extern "C" void js_define_global_property_v(int64_t kind, Item key, Item value) 
 }
 
 extern "C" void js_define_global_var_property(Item key, Item value) {
+    if (!js_global_bindings_ensure_roots()) return;
     Item global = js_get_global_this();
     uint64_t epoch = js_get_heap_epoch();
-    if (js_global_var_cached_defined_epoch != epoch ||
-        js_global_var_cached_global.item != global.item) {
+    if (js_global_environment_state->object_var_epoch != epoch ||
+        js_global_environment_slot(js_global_environment_state,
+            JS_GLOBAL_ENV_OBJECT_VAR_GLOBAL).item != global.item) {
         js_global_var_define_cache_reset();
-        js_global_var_cached_defined_epoch = epoch;
-        js_global_var_cached_global = global;
+        js_global_environment_state->object_var_epoch = epoch;
+        js_global_environment_slot(js_global_environment_state,
+            JS_GLOBAL_ENV_OBJECT_VAR_GLOBAL) = global;
     }
-    for (int i = 0; i < js_global_var_cached_defined_count; i++) {
-        if (js_global_var_cached_defined_keys[i].item == key.item) return;
-    }
+    if (js_global_environment_find(js_global_environment_state,
+            JS_GLOBAL_BINDING_OBJECT_VAR, key) >= 0) return;
 
     Item name = js_to_string(key);
     if (get_type_id(name) != LMD_TYPE_STRING) return;
@@ -14947,9 +14914,9 @@ extern "C" void js_define_global_var_property(Item key, Item value) {
     // non-configurable attribute required by CreateGlobalVarBinding.
     js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd,
         is_new_property, /*existing_accessor*/false);
-    if (js_global_var_cached_defined_count < 64) {
-        js_global_var_cached_defined_keys[js_global_var_cached_defined_count++] = key;
-    }
+    js_global_environment_upsert(js_global_environment_state,
+        JS_GLOBAL_BINDING_OBJECT_VAR, key, ItemNull, false, -1,
+        UINT32_MAX);
 }
 
 static bool js_define_global_var_property_fast_absent(Item global, Item key, Item value) {
@@ -17145,8 +17112,9 @@ static const JsWellKnownSymbolSpec* js_well_known_symbol_spec(uint64_t id) {
 }
 
 static NameId js_well_known_symbol_name_id(uint64_t id) {
-    if (!context || !context->js_state) return NULL;
-    JsWellKnownRefs* refs = &context->js_state->well_known;
+    JsRuntimeState* state = js_runtime_state_for(context);
+    if (!state) return NULL;
+    JsWellKnownRefs* refs = &state->well_known;
     NameId key = NAME_ID_NONE;
     switch (id) {
     case JS_SYMBOL_ID_ITERATOR: key = refs->symbol_iterator; break;

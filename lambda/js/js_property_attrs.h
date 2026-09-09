@@ -4,14 +4,14 @@
  * Replaces the legacy `__get_X`/`__set_X`/`__nw_X`/`__ne_X`/`__nc_X` magic-key
  * scheme with first-class metadata carried inline on `ShapeEntry::flags`.
  *
- * Storage scheme (Option 2 — LMD_TYPE_FUNC tagging):
+ * Storage scheme (dedicated accessor-cell carrier):
  * - `ShapeEntry::flags` holds the JSPD_* attribute bits (W/E/C/IS_ACCESSOR).
  *   Inverse-bit encoded so 0 == JS default (writable, enumerable, configurable, data).
  * - For data props, the map data slot at `byte_offset` holds the value Item directly.
  * - For accessor props (IS_ACCESSOR set), the slot holds an Item whose pointer
- *   points to a heap-allocated `JsAccessorPair`. The pair starts with
- *   `type_id = LMD_TYPE_FUNC` so `get_type_id()` returns FUNC for tag-safety;
- *   consumers MUST consult the shape flag before invoking it as a function.
+ *   points to a heap-allocated `JsAccessorCell`. The cell has its own GC tag
+ *   and is not a function Item; consumers consult the shape flag to interpret
+ *   the storage as getter/setter edges.
  *
  * Phase 1a (this file) provides foundation primitives only. Phase 1b will
  * migrate `js_globals.cpp` ValidateAndApplyPropertyDescriptor and
@@ -67,18 +67,16 @@ static inline void jspd_set_accessor(ShapeEntry* se, bool a) {
     else   se->flags &= (uint8_t)~JSPD_IS_ACCESSOR;
 }
 // =============================================================================
-// JsAccessorPair allocation and tagging
+// JsAccessorCell allocation and storage conversion
 // =============================================================================
 
-// Allocate a fresh JsAccessorPair on the JS GC heap. type_id is initialized to
-// LMD_TYPE_FUNC for tag compatibility with Option 2 storage. Either getter or
-// setter may be ItemNull (representing absent get / absent set per ES spec).
+// Allocate a fresh JsAccessorCell on the JS GC heap. Either getter or setter
+// may be ItemNull (representing absent get / absent set per ES spec).
 JsAccessorPair* js_alloc_accessor_pair(Item getter, Item setter);
 
-// Wrap a JsAccessorPair* as an Item suitable for storing in a map slot.
-// The Item's high-byte type_id reads as LMD_TYPE_FUNC (via the pair's first byte
-// when type_id() dereferences). Callers MUST set the IS_ACCESSOR flag on the
-// owning ShapeEntry before reads can correctly interpret this slot.
+// Wrap an accessor cell as its raw, non-callable Item identity. The store
+// boundary supplies the pointer-width map lane; callers MUST set IS_ACCESSOR
+// before readers may interpret this storage.
 static inline Item js_accessor_pair_to_item(JsAccessorPair* p) {
     Item it; it.function = (Function*)p; return it;
 }

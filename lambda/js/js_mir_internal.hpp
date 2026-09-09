@@ -51,7 +51,6 @@ static inline Runtime* js_current_runtime(void) {
 }
 #define js_dynamic_func_counter (js_runtime_state.dynamic_func_counter)
 
-#define JS_ACTIVE_TRANSPILE_MAX 32
 typedef struct ActiveJsTranspileOwner {
     JsTranspiler* tp;
     JsMirTranspiler* mt;
@@ -66,8 +65,7 @@ typedef struct JsMirCompileRecoveryState {
     JsTranspiler* active_js_transpiler;
     JsMirTranspiler* active_mir_transpiler;
     char* active_js_owned_source;
-    ActiveJsTranspileOwner stack[JS_ACTIVE_TRANSPILE_MAX];
-    int count;
+    ArrayList* stack;
 } JsMirCompileRecoveryState;
 
 JsMirCompileRecoveryState* jm_compile_recovery_state_ensure(void);
@@ -162,7 +160,7 @@ typedef struct JsMirClassMethodInstallPolicy {
     MIR_reg_t home_class;
     MIR_reg_t preserve_reg;
     JsClassEntry* owner_class;
-    int method_index;
+    int member_index;
     JsMirClassMethodInstallMode mode;
     JsMirComputedKeyOrder computed_key_order;
 } JsMirClassMethodInstallPolicy;

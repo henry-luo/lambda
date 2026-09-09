@@ -7749,8 +7749,8 @@ extern "C" Item js_get_crypto_namespace(void) {
 }
 
 static void crypto_reset_live_contexts(void) {
-    // Every live context is an entry in the session table; closing the kind
-    // runs each one's release callback.
+    // The host ABI maps this legacy prefix once to the shared table's frozen
+    // crypto group; resource-table teardown never dispatches on text.
     jube_node_resource_close_kind(jube_node_runtime_current_session(), "crypto.");
 }
 

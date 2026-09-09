@@ -33,6 +33,9 @@ extern "C" {
 #define GC_FLAG_FREED    0x01   // object has been freed / returned to free list
 #define GC_FLAG_LARGE    0x08   // large object allocated directly via memtrack
 #define GC_FLAG_BUMP     0x10   // object allocated from bump block, not object zone
+// One GC environment family has two payload descriptors. The common GC
+// header is the carrier because raw closure environments begin at Item slot 0.
+#define GC_FLAG_ENV_INTERP 0x20
 
 // Debug/stress fill used after a dead object's external payloads are finalized.
 #define GC_FREED_POISON_BYTE 0xDD
@@ -43,11 +46,11 @@ extern "C" {
 #define GC_GEN_MASK      0x06   // bits 1-2 for generation
 
 // Internal GC-only allocation tag. It is deliberately outside the public
-// TypeId/Item tag space because a JS environment is addressed as a raw Item[].
-#define GC_TYPE_JS_ENV   0x100
-// Interpreter lexical records need a raw-pointer outer edge and therefore
-// cannot use the Item-array layout above.
-#define GC_TYPE_JS_INTERP_ENV 0x101
+// TypeId/Item tag space because a closure environment is addressed as raw
+// Item slots. The header's environment layout flag selects the payload shape.
+#define GC_TYPE_ENVIRONMENT 0x100
+// Stored JS accessor cells own two callable Item edges but are not functions.
+#define GC_TYPE_JS_ACCESSOR 0x102
 
 /**
  * GCHeader - 16 bytes prepended to every GC-managed allocation.
@@ -568,6 +571,23 @@ void gc_set_collect_callback(gc_heap_t* gc, gc_collect_callback_t callback);
 static inline gc_header_t* gc_get_header(void* ptr) {
     if (!ptr) return NULL;
     return ((gc_header_t*)ptr) - 1;
+}
+
+static inline int gc_environment_is_interpreter(const gc_header_t* header) {
+    return header && header->type_tag == GC_TYPE_ENVIRONMENT &&
+        (header->gc_flags & GC_FLAG_ENV_INTERP) != 0;
+}
+
+static inline int gc_environment_is_item_slots(const gc_header_t* header) {
+    return header && header->type_tag == GC_TYPE_ENVIRONMENT &&
+        !gc_environment_is_interpreter(header);
+}
+
+static inline void gc_environment_set_interpreter(void* environment) {
+    gc_header_t* header = gc_get_header(environment);
+    if (header && header->type_tag == GC_TYPE_ENVIRONMENT) {
+        header->gc_flags |= GC_FLAG_ENV_INTERP;
+    }
 }
 
 #ifdef __cplusplus

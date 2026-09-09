@@ -641,12 +641,6 @@ static void js_array_store_owned(Array* arr, int64_t index, Item value) {
 
 // JsFunction layout and builtin ids live in js_runtime_internal.hpp.
 
-// Tracks the .prototype of the generator function being called.
-// Set by js_call_function before invoking a generator function, read by js_generator_create.
-#define js_generator_callee_proto (js_runtime_state.generator_callee_proto)
-#define js_current_private_home_class (js_runtime_state.current_private_home_class)
-
-
 static const char* JS_NATIVE_FUNCTION_SOURCE = "function () { [native code] }";
 static const int JS_NATIVE_FUNCTION_SOURCE_LEN = 29;
 
@@ -684,130 +678,87 @@ static bool js_function_push_vm_stack_source(JsFunction* fn) {
                                        origin->column_offset) != 0;
 }
 
-#define js_global_var_module_binding_keys (js_runtime_state.global_var_module_bindings->keys)
-#define js_global_var_module_binding_indices (js_runtime_state.global_var_module_bindings->indices)
-#define js_global_var_module_binding_state_ids (js_runtime_state.global_var_module_bindings->module_state_ids)
-#define js_global_var_module_binding_count (js_runtime_state.global_var_module_bindings->count)
-#define js_global_var_module_binding_epoch (js_runtime_state.global_var_module_bindings->epoch)
-#define js_global_var_module_binding_global (js_runtime_state.global_var_module_bindings->global)
-
 extern "C" Item js_vm_swap_global_this(Item next_global);
 extern "C" uint64_t js_get_heap_epoch(void);
 static Item js_262_eval_script(Item code);
 
-static bool js_global_var_binding_key_same(Item a, Item b) {
-    if (a.item == b.item) return true;
-    if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
-    String* as = it2s(a);
-    String* bs = it2s(b);
-    return as && bs && as->len == bs->len &&
-        memcmp(as->chars, bs->chars, (size_t)as->len) == 0;
+static JsGlobalEnvironment* js_global_environment_current(void) {
+    return js_active_runtime_state ? js_runtime_state.global_environment : NULL;
 }
 
 static void js_global_var_binding_refresh(void) {
+    JsGlobalEnvironment* environment = js_global_environment_current();
+    if (!js_global_environment_ensure(environment)) return;
     Item global = js_get_global_this();
     uint64_t epoch = js_get_heap_epoch();
-    if (js_global_var_module_binding_epoch == epoch &&
-        js_global_var_module_binding_global.item == global.item) {
+    Item& bound_global = js_global_environment_slot(environment,
+        JS_GLOBAL_ENV_MODULE_GLOBAL);
+    if (environment->module_epoch == epoch && bound_global.item == global.item) {
         return;
     }
-    js_global_var_module_binding_epoch = epoch;
-    js_global_var_module_binding_global = global;
-    js_global_var_module_binding_count = 0;
+    environment->module_epoch = epoch;
+    bound_global = global;
+    js_global_environment_remove_kind(environment, JS_GLOBAL_BINDING_MODULE_VAR);
 }
 
 extern "C" void js_register_global_var_module_binding(Item key, int64_t index) {
     js_global_var_binding_refresh();
     if (get_type_id(key) != LMD_TYPE_STRING || index < 0) return;
+    JsGlobalEnvironment* environment = js_global_environment_current();
+    if (!environment) return;
     uint32_t module_state_id = lambda_active_module_state_id();
-    for (int i = 0; i < js_global_var_module_binding_count; i++) {
-        if (js_global_var_binding_key_same(js_global_var_module_binding_keys[i], key)) {
-            js_global_var_module_binding_indices[i] = (int)index;
-            js_global_var_module_binding_state_ids[i] = module_state_id;
-            return;
-        }
-    }
-    if (js_global_var_module_binding_count >= JS_GLOBAL_VAR_MODULE_BINDING_CAP) return;
-    js_global_var_module_binding_keys[js_global_var_module_binding_count] = key;
-    js_global_var_module_binding_indices[js_global_var_module_binding_count] = (int)index;
-    js_global_var_module_binding_state_ids[js_global_var_module_binding_count] = module_state_id;
-    js_global_var_module_binding_count++;
+    js_global_environment_upsert(environment, JS_GLOBAL_BINDING_MODULE_VAR,
+        key, ItemNull, false, (int)index, module_state_id);
 }
 
 extern "C" void js_register_global_var_module_bindings_bulk(const Item* keys,
         const int* indices, int count) {
     js_global_var_binding_refresh();
     if (!keys || !indices || count <= 0) return;
+    JsGlobalEnvironment* environment = js_global_environment_current();
+    if (!environment) return;
     uint32_t module_state_id = lambda_active_module_state_id();
     for (int i = 0; i < count; i++) {
         Item key = keys[i];
         int index = indices[i];
         if (get_type_id(key) != LMD_TYPE_STRING || index < 0) continue;
-        bool updated = false;
-        for (int j = 0; j < js_global_var_module_binding_count; j++) {
-            if (js_global_var_binding_key_same(js_global_var_module_binding_keys[j], key)) {
-                js_global_var_module_binding_indices[j] = index;
-                js_global_var_module_binding_state_ids[j] = module_state_id;
-                updated = true;
-                break;
-            }
-        }
-        if (updated) continue;
-        if (js_global_var_module_binding_count >= JS_GLOBAL_VAR_MODULE_BINDING_CAP) return;
-        js_global_var_module_binding_keys[js_global_var_module_binding_count] = key;
-        js_global_var_module_binding_indices[js_global_var_module_binding_count] = index;
-        js_global_var_module_binding_state_ids[js_global_var_module_binding_count] = module_state_id;
-        js_global_var_module_binding_count++;
+        if (!js_global_environment_upsert(environment,
+                JS_GLOBAL_BINDING_MODULE_VAR, key, ItemNull, false, index,
+                module_state_id)) return;
     }
 }
 
 extern "C" void js_release_global_var_module_bindings_from(
         uint32_t first_module_state_id) {
-    if (first_module_state_id == UINT32_MAX) return;
-    int retained = 0;
-    for (int i = 0; i < js_global_var_module_binding_count; i++) {
-        if (js_global_var_module_binding_state_ids[i] >= first_module_state_id) {
-            continue;
-        }
-        if (retained != i) {
-            js_global_var_module_binding_keys[retained] =
-                js_global_var_module_binding_keys[i];
-            js_global_var_module_binding_indices[retained] =
-                js_global_var_module_binding_indices[i];
-            js_global_var_module_binding_state_ids[retained] =
-                js_global_var_module_binding_state_ids[i];
-        }
-        retained++;
-    }
-    // Registry keys borrow script NamePool storage; clear released slots before
-    // their generation destroys that pool (D5.3.3).
-    for (int i = retained; i < js_global_var_module_binding_count; i++) {
-        js_global_var_module_binding_keys[i] = ItemNull;
-        js_global_var_module_binding_indices[i] = 0;
-        js_global_var_module_binding_state_ids[i] = UINT32_MAX;
-    }
-    js_global_var_module_binding_count = retained;
+    js_global_environment_release_module_bindings(
+        js_global_environment_current(), first_module_state_id);
 }
 
 static void js_sync_global_var_module_binding(Item object, Item key, Item value) {
     js_global_var_binding_refresh();
-    if (object.item != js_global_var_module_binding_global.item ||
+    JsGlobalEnvironment* environment = js_global_environment_current();
+    if (!environment || object.item != js_global_environment_slot(environment,
+            JS_GLOBAL_ENV_MODULE_GLOBAL).item ||
         get_type_id(key) != LMD_TYPE_STRING) {
         return;
     }
-    for (int i = 0; i < js_global_var_module_binding_count; i++) {
-        if (js_global_var_binding_key_same(js_global_var_module_binding_keys[i], key)) {
+    int index = js_global_environment_find(environment,
+        JS_GLOBAL_BINDING_MODULE_VAR, key);
+    if (index >= 0) {
+        JsGlobalBinding* binding = js_global_environment_binding_at(
+            environment, index);
+        if (binding) {
             // Global `var` bindings are backed by the global object. When code
             // writes through `this.x`/`globalThis.x`, keep the optimized module
             // slot coherent without making every identifier read a property get.
             // The writer may be an indirect-eval function in another slab, so
             // update the binding's owner rather than its currently active slab.
-            uint32_t owner_state_id = js_global_var_module_binding_state_ids[i];
+            uint32_t owner_state_id = binding->module_state_id;
             RuntimeModuleStateScope module_state(context);
             if (owner_state_id != UINT32_MAX &&
                     !module_state.activate(owner_state_id)) return;
             lambda_active_module_var_store(
-                (uint32_t)js_global_var_module_binding_indices[i], value);
+                (uint32_t)binding->module_index, value);
             return;
         }
     }
@@ -9785,12 +9736,51 @@ JS_GLOBAL_UNARY_BODY(js_intrinsic_global_decode_uricomponent_body,
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_escape_body, js_escape(arg0))
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_unescape_body, js_unescape(arg0))
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_eval_body, js_builtin_eval(arg0, 1))
-JS_GLOBAL_BINARY_BODY(js_intrinsic_global_set_timeout_body,
-    js_setTimeout(arg0, arg1))
-JS_GLOBAL_BINARY_BODY(js_intrinsic_global_set_interval_body,
-    js_setInterval(arg0, arg1))
-JS_GLOBAL_UNARY_BODY(js_intrinsic_global_set_immediate_body,
-    js_setImmediate(arg0))
+static Item js_intrinsic_global_timer_body(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home, bool is_interval) {
+    (void)callee; (void)this_value; (void)result_home;
+    RootSpan actual_roots((size_t)(argc > 0 ? argc : 1));
+    if (!actual_roots.valid()) return ItemError;
+    for (int i = 0; i < argc; i++) actual_roots.words()[i] = args[i].item;
+    Item* actual = actual_roots.items();
+    RootFrame roots(3);
+    Rooted<Item> callback_root(roots, argc > 0 ? actual[0] : make_js_undefined());
+    Rooted<Item> delay_root(roots, argc > 1 ? actual[1] : make_js_undefined());
+    Rooted<Item> arguments_root(roots, ItemNull);
+    if (argc > 2) arguments_root.set(js_pack_args_span(actual + 2, argc - 2));
+    return is_interval
+        ? (argc > 2 ? js_setInterval_args(callback_root.get(), delay_root.get(),
+            arguments_root.get()) : js_setInterval(callback_root.get(), delay_root.get()))
+        : (argc > 2 ? js_setTimeout_args(callback_root.get(), delay_root.get(),
+            arguments_root.get()) : js_setTimeout(callback_root.get(), delay_root.get()));
+}
+
+Item js_intrinsic_global_set_timeout_body(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home) {
+    return js_intrinsic_global_timer_body(callee, this_value, args, argc,
+        result_home, false);
+}
+
+Item js_intrinsic_global_set_interval_body(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home) {
+    return js_intrinsic_global_timer_body(callee, this_value, args, argc,
+        result_home, true);
+}
+
+Item js_intrinsic_global_set_immediate_body(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home) {
+    (void)callee; (void)this_value; (void)result_home;
+    RootSpan actual_roots((size_t)(argc > 0 ? argc : 1));
+    if (!actual_roots.valid()) return ItemError;
+    for (int i = 0; i < argc; i++) actual_roots.words()[i] = args[i].item;
+    Item* actual = actual_roots.items();
+    RootFrame roots(2);
+    Rooted<Item> callback_root(roots, argc > 0 ? actual[0] : make_js_undefined());
+    Rooted<Item> arguments_root(roots, ItemNull);
+    if (argc > 1) arguments_root.set(js_pack_args_span(actual + 1, argc - 1));
+    return argc > 1 ? js_setImmediate_with_args(callback_root.get(),
+        arguments_root.get()) : js_setImmediate(callback_root.get());
+}
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_request_animation_frame_body,
     js_requestAnimationFrame(arg0))
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_structured_clone_body,
@@ -13543,13 +13533,10 @@ Item js_intrinsic_262_realm_regexp_get_hasindices_body(Item callee,
 }
 
 static void js_super_this_binding_push(Item initial_this) {
-    // the parallel bound-flag array is fixed; refuse deeper nesting explicitly
-    if (js_super_this_bound_depth >= JS_SUPER_THIS_STACK_MAX) return;
-    if (!js_item_stack_push(&js_runtime_state.super_this_values, initial_this)) {
-        log_error("js-super-this: failed to publish constructor binding root");
-        return;
-    }
-    js_super_this_bound_stack[js_super_this_bound_depth] = false;
+    JsCallActivation* activation = js_call_activation_current();
+    activation->derived_constructor = true;
+    activation->super_this_bound = false;
+    js_super_this_value = initial_this;
 }
 
 static Item js_throw_super_called_twice(void) {
@@ -13560,12 +13547,13 @@ static Item js_throw_super_called_twice(void) {
 }
 
 static Item js_super_this_binding_finish(Item result) {
-    if (js_super_this_bound_depth <= 0) return result;
-    int idx = js_super_this_bound_depth - 1;
-    bool initialized = js_super_this_bound_stack[idx];
-    Item bound_this = js_super_this_value_at(idx);
-    js_super_this_bound_stack[idx] = false;
-    js_item_stack_pop(&js_runtime_state.super_this_values);
+    JsCallActivation* activation = js_call_activation_current();
+    if (!activation->derived_constructor) return result;
+    bool initialized = activation->super_this_bound;
+    Item bound_this = js_super_this_value;
+    activation->derived_constructor = false;
+    activation->super_this_bound = false;
+    js_super_this_value = ItemNull;
 
     if (item_is_error(result)) return result;
     if (js_is_object_value(result)) return result;
@@ -13584,30 +13572,27 @@ static Item js_super_this_binding_finish(Item result) {
 extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
     if (item_is_error(construct_result)) return construct_result;
     Item bound_this = js_is_object_value(construct_result) ? construct_result : this_val;
-    if (js_super_this_bound_depth <= 0) {
+    JsCallActivation* activation = js_call_activation_current();
+    if (!activation->derived_constructor) {
         return js_throw_super_called_twice();
     }
-    if (js_super_this_bound_depth > 0) {
-        int idx = js_super_this_bound_depth - 1;
-        if (js_super_this_bound_stack[idx]) {
-            return js_throw_super_called_twice();
-        }
-        if (!js_is_object_value(bound_this) &&
-            (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&
-            js_is_object_value(js_super_this_value_at(idx))) {
-            bound_this = js_super_this_value_at(idx);
-        }
-        js_super_this_bound_stack[idx] = true;
-        js_super_this_value_at(idx) = bound_this;
+    if (activation->super_this_bound) {
+        return js_throw_super_called_twice();
     }
+    if (!js_is_object_value(bound_this) &&
+        (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&
+        js_is_object_value(js_super_this_value)) {
+        bound_this = js_super_this_value;
+    }
+    activation->super_this_bound = true;
+    js_super_this_value = bound_this;
     js_current_this = bound_this;
     return bound_this;
 }
 
 extern "C" Item js_get_super_this_value(void) {
-    if (js_super_this_bound_depth > 0) {
-        int idx = js_super_this_bound_depth - 1;
-        return js_super_this_value_at(idx);
+    if (js_call_activation_current()->derived_constructor) {
+        return js_super_this_value;
     }
     return js_get_this();
 }
@@ -13695,29 +13680,43 @@ static inline Item js_call_value(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted);
 
 
-// A `with` scope must not leak into a called function, so the call boundary
-// copies the caller's active with-scope objects into a native-stack array and
-// installs the callee's own (usually empty) with-env into the global stack.
-// That native copy is then the ONLY live reference to those scope objects while
-// the callee runs, so a GC during the callee would free them and the post-call
-// restore would write dangling pointers back. This RAII guard registers the
-// saved array as an exact GC root range for exactly that span and unregisters
-// before the native frame returns (by which point the values are back in the
-// GC-rooted global with-stack). Only pays a cost when a with-scope is actually
-// active across the call (depth > 0).
-struct JsSavedWithScopeRoots {
-    uint64_t* base;
-    JsSavedWithScopeRoots(Item* stack, int depth) : base(nullptr) {
-        if (depth > 0) {
-            base = (uint64_t*)stack;
-            heap_register_gc_root_range(base, depth);
+// A `with` scope must not leak into a called function. Its saved copy is a
+// dynamic exact root range because a lexical with-chain has no language cap.
+// The range remains live while the callee replaces the runtime stack.
+struct JsSavedWithScope {
+    Item* stack = NULL;
+    int depth = 0;
+    bool ready = true;
+    uint64_t* root_base = NULL;
+
+    explicit JsSavedWithScope(bool capture) {
+        if (!capture) return;
+        depth = js_with_save_stack(NULL, 0);
+        if (depth <= 0) return;
+        stack = (Item*)mem_alloc((size_t)depth * sizeof(Item), MEM_CAT_JS_RUNTIME);
+        if (!stack) {
+            depth = 0;
+            ready = false;
+            return;
         }
+        if (js_with_save_stack(stack, depth) != depth) {
+            mem_free(stack);
+            stack = NULL;
+            depth = 0;
+            ready = false;
+            return;
+        }
+        root_base = (uint64_t*)stack;
+        heap_register_gc_root_range(root_base, depth);
     }
-    ~JsSavedWithScopeRoots() {
-        if (base) heap_unregister_gc_root_range(base);
+
+    ~JsSavedWithScope() {
+        if (root_base) heap_unregister_gc_root_range(root_base);
+        mem_free(stack);
     }
-    JsSavedWithScopeRoots(const JsSavedWithScopeRoots&) = delete;
-    JsSavedWithScopeRoots& operator=(const JsSavedWithScopeRoots&) = delete;
+
+    JsSavedWithScope(const JsSavedWithScope&) = delete;
+    JsSavedWithScope& operator=(const JsSavedWithScope&) = delete;
 };
 
 // super() for class-expression superclasses: the class carrier is a function.
@@ -13837,7 +13836,7 @@ extern "C" Item js_super_apply_native(Item callee, Item this_val, Item args_arra
     return js_super_call_native(callee, this_val, args, argc);
 }
 
-#define js_call_stack_limit (js_runtime_state.call_stack_limit)
+#define js_call_stack_limit (js_runtime_state.execution.call_stack_limit)
 
 // global-ok: I (CLI policy frozen before the first JS context is created).
 // The executable accepts --stack-size before there is an EvalContext to own
@@ -14086,7 +14085,47 @@ extern "C" Item js_construct_value(Item callee, Item* args, int arg_count,
 // stack-overflow RangeError is semantics, so all call paths must advance the
 // same context-owned counter or deep recursion could escape the guard by
 // alternating paths.
-#define js_call_depth (js_runtime_state.call_depth)
+#define js_call_depth (js_runtime_state.execution.call_depth)
+
+static Item* js_call_activation_root_home(Rooted<Item>& rooted) {
+    return (Item*)(void*)rooted.home();
+}
+
+// One scope publishes all ambient call facts together. Its Item homes are in
+// the caller's RootFrame, so GC can update the active activation directly and
+// the destructor restores the previous call in one operation (JSCU28).
+class JsCallActivationScope {
+public:
+    JsCallActivationScope(Rooted<Item>& this_root, Rooted<Item>& new_target_root,
+            Rooted<Item>& generator_proto_root, Rooted<Item>& private_home_root,
+            Rooted<Item>& callee_root, Rooted<Item>& super_this_root,
+            Item* args, int arg_count, const char* source, int source_len,
+            int args_is_strict) {
+        activation_.items[JS_CALL_ACTIVATION_THIS] = js_call_activation_root_home(this_root);
+        activation_.items[JS_CALL_ACTIVATION_NEW_TARGET] =
+            js_call_activation_root_home(new_target_root);
+        activation_.items[JS_CALL_ACTIVATION_GENERATOR_CALLEE_PROTO] =
+            js_call_activation_root_home(generator_proto_root);
+        activation_.items[JS_CALL_ACTIVATION_PRIVATE_HOME_CLASS] =
+            js_call_activation_root_home(private_home_root);
+        activation_.items[JS_CALL_ACTIVATION_CALLEE] = js_call_activation_root_home(callee_root);
+        activation_.items[JS_CALL_ACTIVATION_SUPER_THIS] =
+            js_call_activation_root_home(super_this_root);
+        activation_.args = args;
+        activation_.arg_count = arg_count;
+        activation_.source = source;
+        activation_.source_len = source_len;
+        activation_.args_is_strict = args_is_strict;
+        js_call_activation_push(&activation_);
+    }
+
+    ~JsCallActivationScope() { js_call_activation_pop(&activation_); }
+
+    JsCallActivation* activation() { return &activation_; }
+
+private:
+    JsCallActivation activation_ = {};
+};
 
 static void js_prepare_new_target_for_call(bool install_new_target,
         Item construct_new_target) {
@@ -14119,21 +14158,23 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         ? (size_t)arg_count : 0);
     if (!js_prepare_owned_argument_span(args, arg_count, args_prerooted,
             call_arg_roots, "js-call-prerooted")) return ItemError;
-    RootFrame call_roots(7);
+    RootFrame call_roots(9);
     Rooted<Item> func_root(call_roots, func_item);
     Rooted<Item> this_root(call_roots, this_val);
     // Construct passes newTarget as an ordinary rooted operand. A zero value
     // identifies [[Call]] and cannot alias a published JavaScript value.
     Rooted<Item> construct_target_root(call_roots, construct_new_target);
-    // A nested call may collect before this dispatcher restores its caller
-    // state. These exact roots keep a super() call from restoring a moved
-    // receiver into js_current_this.
-    Rooted<Item> saved_this_root(call_roots, js_current_this);
-    Rooted<Item> saved_new_target_root(call_roots, js_new_target);
-    Rooted<Item> saved_private_home_class_root(call_roots,
-        js_current_private_home_class);
-    Rooted<Item> saved_pending_args_callee_root(call_roots,
-        js_pending_args_callee);
+    Rooted<Item> activation_this_root(call_roots, js_current_this);
+    Rooted<Item> activation_new_target_root(call_roots, js_new_target);
+    Rooted<Item> activation_generator_proto_root(call_roots, js_generator_callee_proto);
+    Rooted<Item> activation_private_home_root(call_roots, js_current_private_home_class);
+    Rooted<Item> activation_callee_root(call_roots, func_item);
+    Rooted<Item> activation_super_this_root(call_roots, ItemNull);
+    JsCallActivationScope call_activation(activation_this_root,
+        activation_new_target_root, activation_generator_proto_root,
+        activation_private_home_root, activation_callee_root,
+        activation_super_this_root, args, arg_count, js_pending_call_source,
+        js_pending_call_source_len, js_pending_args_is_strict);
     // Calls can allocate while resolving proxies, binding `this`, or invoking
     // callbacks; native locals are invisible to precise GC during that work.
     func_item = func_root.get();
@@ -14229,7 +14270,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         this_val = this_root.get();
         js_current_this = this_val;
     }
-    // v29: store callee for arguments.callee (used by js_build_arguments_object)
+    // `arguments.callee` and actual arguments belong to this activation, so a
+    // nested callback cannot overwrite its caller's view (D6.2.2v2; JSCU28).
     js_pending_args_callee = func_item;
     js_prepare_new_target_for_call(install_new_target,
         construct_target_root.get());
@@ -14246,10 +14288,13 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         fn->home_global.item != caller_global.item;
     if (switched_global) prev_global = js_vm_swap_global_this(fn->home_global);
     // Enter the callee's lexical with-environment, then restore caller state.
-    Item saved_with_stack[16];
-    int saved_with_depth = 0;
-    if (!common_lane) saved_with_depth = js_with_save_stack(saved_with_stack, 16);
-    JsSavedWithScopeRoots saved_with_roots(saved_with_stack, saved_with_depth);
+    JsSavedWithScope saved_with_scope(!common_lane);
+    if (!saved_with_scope.ready) {
+        if (switched_global) js_vm_swap_global_this(prev_global);
+        js_eval_initializer_context = prev_eval_initializer_context;
+        return js_throw_range_error("Could not save with scope stack");
+    }
+    int saved_with_depth = saved_with_scope.depth;
     // Ordinary calls usually have no caller or callee with-scope. A compiled
     // with body is the exception: an early return bypasses its generated pop,
     // so its empty entry stack still needs restoration after the call.
@@ -14260,7 +14305,6 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     }
     // For generator functions: set up callee proto so js_generator_create uses fn.prototype
     // If fn.prototype is not an object, js_generator_create falls back to depth-2.
-    Item saved_gen_callee_proto = js_generator_callee_proto;
     if (!common_lane && (fn->flags & JS_FUNC_FLAG_GENERATOR)) {
         js_generator_callee_proto = js_get_name_key(func_item, "prototype", 9);
     }
@@ -14278,20 +14322,13 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     Item result = js_invoke_fn_with_source(fn, args, arg_count, invoke_result_home,
         args_prerooted);
     if (pushed_vm_stack_source) js_eval_source_pop();
-    js_current_private_home_class = saved_private_home_class_root.get();
     if (derived_ctor_call) {
         result = js_super_this_binding_finish(result);
     }
-    js_generator_callee_proto = saved_gen_callee_proto;
     if (switched_with_stack) {
-        js_with_set_stack(saved_with_stack, saved_with_depth);
+        js_with_set_stack(saved_with_scope.stack, saved_with_depth);
     }
     if (switched_global) js_vm_swap_global_this(prev_global);
-    if (install_this) js_current_this = saved_this_root.get();
-    if (install_new_target) js_new_target = saved_new_target_root.get();
-    // D6.2.2v2: nested calls during parameter evaluation must not replace the
-    // generator callee whose current prototype is read after those parameters.
-    js_pending_args_callee = saved_pending_args_callee_root.get();
     js_eval_initializer_context = prev_eval_initializer_context;
     if (result_home && !uses_local_result_home &&
             lambda_item_uses_scalar_home(result)) {
@@ -26718,28 +26755,117 @@ extern "C" Item js_get_console_object_value() {
 
 // test262 host object $262 — provides detachArrayBuffer for typed array tests
 #define js_262_object (js_runtime_state.namespaces->test262)
-#define JS_262_AGENT_MAX JS_TEST262_AGENT_MAX
-#define JS_262_AGENT_REPORT_MAX JS_TEST262_AGENT_REPORT_MAX
 #define js_262_eval_script_active (js_runtime_state.test262_agent->eval_script_active)
 #define js_262_agent_object (js_runtime_state.test262_agent->object)
 #define js_262_agent_callbacks (js_runtime_state.test262_agent->callbacks)
-#define js_262_agent_reports (js_runtime_state.test262_agent->reports)
-#define js_262_agent_report_waiters (js_runtime_state.test262_agent->report_waiters)
-#define js_262_agent_callback_count (js_runtime_state.test262_agent->callback_count)
-#define js_262_agent_report_head (js_runtime_state.test262_agent->report_head)
-#define js_262_agent_report_count (js_runtime_state.test262_agent->report_count)
+#define js_262_agent_report_values (js_runtime_state.test262_agent->report_values)
+#define js_262_agent_report_rows (js_runtime_state.test262_agent->reports)
 #define js_262_agent_current_slot (js_runtime_state.test262_agent->current_slot)
+
+static void js_262_agent_report_rows_clear(JsTest262AgentState* state) {
+    if (!state) return;
+    if (state->reports) {
+        for (int i = state->reports->length - 1; i >= 0; i--) {
+            mem_free(state->reports->data[i]);
+        }
+        arraylist_free(state->reports);
+        state->reports = NULL;
+    }
+    root_vector_clear(&state->report_values);
+}
+
+void js_test262_agent_state_destroy(JsTest262AgentState* state) {
+    if (!state) return;
+    js_262_agent_report_rows_clear(state);
+    root_vector_destroy(&state->callbacks);
+    root_vector_destroy(&state->report_values);
+}
+
+static bool js_262_agent_report_rows_ensure(void) {
+    JsTest262AgentState* state = js_active_runtime_state
+        ? js_runtime_state.test262_agent : NULL;
+    if (!state) return false;
+    int row_count = state->reports ? state->reports->length : 0;
+    if (root_vector_count(&state->report_values) != row_count) {
+        // Heap replacement clears RootVector values, so report metadata may
+        // not retain slots into the former heap.
+        js_262_agent_report_rows_clear(state);
+    }
+    return true;
+}
+
+static Item js_262_agent_callback_at(int64_t slot) {
+    Item* callback = root_vector_at(&js_262_agent_callbacks, slot);
+    return callback ? *callback : ItemNull;
+}
+
+static Item js_262_agent_report_value(const JsTest262AgentReport* row) {
+    Item* value = row ? root_vector_at(&js_262_agent_report_values,
+        row->root_slot) : NULL;
+    return value ? *value : ItemNull;
+}
+
+static bool js_262_agent_enqueue_report(Item report, int waiter_id) {
+    if (!js_262_agent_report_rows_ensure()) return false;
+    RootFrame roots(1);
+    Rooted<Item> report_root(roots, report);
+    JsTest262AgentReport* row = (JsTest262AgentReport*)mem_calloc(1,
+        sizeof(JsTest262AgentReport), MEM_CAT_JS_RUNTIME);
+    if (!row) return false;
+    row->root_slot = root_vector_count(&js_262_agent_report_values);
+    row->waiter_id = waiter_id;
+    if (!root_vector_push(&js_262_agent_report_values, report_root.get())) {
+        mem_free(row);
+        return false;
+    }
+    if (!js_262_agent_report_rows) js_262_agent_report_rows = arraylist_new(8);
+    if (!js_262_agent_report_rows ||
+            !arraylist_append(js_262_agent_report_rows, row)) {
+        root_vector_pop(&js_262_agent_report_values);
+        mem_free(row);
+        return false;
+    }
+    return true;
+}
+
+static bool js_262_agent_remove_report(int index, Item* report,
+        int* waiter_id) {
+    if (!js_262_agent_report_rows_ensure() || !js_262_agent_report_rows ||
+            index < 0 || index >= js_262_agent_report_rows->length) return false;
+    JsTest262AgentReport* row = (JsTest262AgentReport*)
+        js_262_agent_report_rows->data[index];
+    if (report) *report = js_262_agent_report_value(row);
+    if (waiter_id) *waiter_id = row->waiter_id;
+    int64_t tail_slot = root_vector_count(&js_262_agent_report_values) - 1;
+    JsTest262AgentReport* tail_row = NULL;
+    for (int i = 0; i < js_262_agent_report_rows->length; i++) {
+        JsTest262AgentReport* candidate = (JsTest262AgentReport*)
+            js_262_agent_report_rows->data[i];
+        if (candidate->root_slot == tail_slot) {
+            tail_row = candidate;
+            break;
+        }
+    }
+    if (!tail_row) return false;
+    if (row != tail_row) {
+        Item* destination = root_vector_at(&js_262_agent_report_values,
+            row->root_slot);
+        if (destination) {
+            *destination = js_262_agent_report_value(tail_row);
+            // The native FIFO row points at the one moved root value.
+            tail_row->root_slot = row->root_slot;
+        }
+    }
+    root_vector_pop(&js_262_agent_report_values);
+    arraylist_remove(js_262_agent_report_rows, index);
+    mem_free(row);
+    return true;
+}
 
 static void js_262_agent_reset_state() {
     js_262_agent_object = (Item){.item = ITEM_NULL};
-    for (int i = 0; i < JS_262_AGENT_MAX; i++) js_262_agent_callbacks[i] = ItemNull;
-    for (int i = 0; i < JS_262_AGENT_REPORT_MAX; i++) {
-        js_262_agent_reports[i] = ItemNull;
-        js_262_agent_report_waiters[i] = 0;
-    }
-    js_262_agent_callback_count = 0;
-    js_262_agent_report_head = 0;
-    js_262_agent_report_count = 0;
+    root_vector_clear(&js_262_agent_callbacks);
+    js_262_agent_report_rows_clear(js_runtime_state.test262_agent);
     js_262_agent_current_slot = -1;
     js_atomics_reset_waiters();
 }
@@ -26769,14 +26895,13 @@ static Item js_262_eval_script(Item code) {
 
 static Item js_262_agent_start(Item code) {
     js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
-    if (js_262_agent_callback_count >= JS_262_AGENT_MAX) {
-        return js_throw_type_error("$262.agent.start capacity exceeded");
-    }
-    int slot = js_262_agent_callback_count++;
-    js_262_agent_callbacks[slot] = ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> code_root(roots, code);
+    int64_t slot = root_vector_count(&js_262_agent_callbacks);
+    if (!root_vector_push(&js_262_agent_callbacks, ItemNull)) return ItemError;
     int saved_slot = js_262_agent_current_slot;
-    js_262_agent_current_slot = slot;
-    Item result = js_builtin_eval(code, 1);
+    js_262_agent_current_slot = (int)slot;
+    Item result = js_builtin_eval(code_root.get(), 1);
     js_262_agent_current_slot = saved_slot;
     if (item_is_error(result)) return result;
     return get_type_id(result) == LMD_TYPE_UNDEFINED ? result : make_js_undefined();
@@ -26784,24 +26909,28 @@ static Item js_262_agent_start(Item code) {
 
 static Item js_262_agent_receive_broadcast(Item callback) {
     js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
-    if (js_262_agent_current_slot < 0 || js_262_agent_current_slot >= JS_262_AGENT_MAX) {
+    if (js_262_agent_current_slot < 0 || js_262_agent_current_slot >=
+            root_vector_count(&js_262_agent_callbacks)) {
         return make_js_undefined();
     }
     if (!js_is_callable(callback)) {
         return js_throw_type_error("$262.agent.receiveBroadcast requires a function");
     }
-    js_262_agent_callbacks[js_262_agent_current_slot] = callback;
+    Item* callback_slot = root_vector_at(&js_262_agent_callbacks,
+        js_262_agent_current_slot);
+    if (callback_slot) *callback_slot = callback;
     return make_js_undefined();
 }
 
 static Item js_262_agent_broadcast(Item value) {
     js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
-    for (int i = 0; i < js_262_agent_callback_count; i++) {
-        Item callback = js_262_agent_callbacks[i];
+    int64_t callback_count = root_vector_count(&js_262_agent_callbacks);
+    for (int64_t i = 0; i < callback_count; i++) {
+        Item callback = js_262_agent_callback_at(i);
         if (!js_is_callable(callback)) continue;
         Item args[1] = { value };
         int saved_slot = js_262_agent_current_slot;
-        js_262_agent_current_slot = i;
+        js_262_agent_current_slot = (int)i;
         Item callback_result = js_call_function(callback, js_262_agent_object, args, 1);
         js_262_agent_current_slot = saved_slot;
         if (item_is_error(callback_result)) return callback_result;
@@ -26811,24 +26940,22 @@ static Item js_262_agent_broadcast(Item value) {
 
 static Item js_262_agent_report(Item value) {
     js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
-    if (js_262_agent_report_count >= JS_262_AGENT_REPORT_MAX) {
-        return js_throw_type_error("$262.agent.report capacity exceeded");
-    }
     JS_ASSIGN_OR_RETURN(report, js_to_string(value));
-    int tail = (js_262_agent_report_head + js_262_agent_report_count) % JS_262_AGENT_REPORT_MAX;
-    js_262_agent_reports[tail] = report;
-    js_262_agent_report_waiters[tail] = js_atomics_report_waiter_for_agent(js_262_agent_current_slot, report);
-    js_262_agent_report_count++;
+    int waiter_id = js_atomics_report_waiter_for_agent(
+        js_262_agent_current_slot, report);
+    if (!js_262_agent_enqueue_report(report, waiter_id)) return ItemError;
     return make_js_undefined();
 }
 
 static Item js_262_agent_get_report() {
     js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
-    if (js_262_agent_report_count <= 0) return ItemNull;
+    if (!js_262_agent_report_rows_ensure() || !js_262_agent_report_rows ||
+            js_262_agent_report_rows->length == 0) return ItemNull;
     int ready_offset = -1;
-    for (int offset = 0; offset < js_262_agent_report_count; offset++) {
-        int idx = (js_262_agent_report_head + offset) % JS_262_AGENT_REPORT_MAX;
-        int waiter_id = js_262_agent_report_waiters[idx];
+    for (int offset = 0; offset < js_262_agent_report_rows->length; offset++) {
+        JsTest262AgentReport* row = (JsTest262AgentReport*)
+            js_262_agent_report_rows->data[offset];
+        int waiter_id = row->waiter_id;
         if (waiter_id <= 0 || js_atomics_report_waiter_ready(waiter_id)) {
             ready_offset = offset;
             break;
@@ -26836,22 +26963,18 @@ static Item js_262_agent_get_report() {
     }
     if (ready_offset < 0) return ItemNull;
 
-    int ready_idx = (js_262_agent_report_head + ready_offset) % JS_262_AGENT_REPORT_MAX;
-    int waiter_id = js_262_agent_report_waiters[ready_idx];
-    Item report = js_262_agent_reports[ready_idx];
-    if (waiter_id > 0) report = js_atomics_resolve_waiter_report(waiter_id, report);
-
-    for (int offset = ready_offset; offset < js_262_agent_report_count - 1; offset++) {
-        int dst = (js_262_agent_report_head + offset) % JS_262_AGENT_REPORT_MAX;
-        int src = (js_262_agent_report_head + offset + 1) % JS_262_AGENT_REPORT_MAX;
-        js_262_agent_reports[dst] = js_262_agent_reports[src];
-        js_262_agent_report_waiters[dst] = js_262_agent_report_waiters[src];
+    Item report = ItemNull;
+    int waiter_id = 0;
+    if (!js_262_agent_remove_report(ready_offset, &report, &waiter_id)) {
+        return ItemNull;
     }
-    int tail = (js_262_agent_report_head + js_262_agent_report_count - 1) % JS_262_AGENT_REPORT_MAX;
-    js_262_agent_reports[tail] = ItemNull;
-    js_262_agent_report_waiters[tail] = 0;
-    js_262_agent_report_count--;
-    return report;
+    RootFrame roots(1);
+    Rooted<Item> report_root(roots, report);
+    if (waiter_id > 0) {
+        report_root.set(js_atomics_resolve_waiter_report(waiter_id,
+            report_root.get()));
+    }
+    return report_root.get();
 }
 
 static Item js_262_agent_leaving() {
@@ -27978,21 +28101,31 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
 // [value, next_state] where next_state == -1 means done.
 using JsGenerator = JsGeneratorStateRecord;
 
+static void js_suspended_activation_gc_trace(
+        const JsSuspendedActivation* activation, gc_heap_t* gc) {
+    if (!activation || !gc) return;
+    if (activation->env) gc_mark_object_ptr(gc, activation->env);
+    gc_mark_item(gc, activation->ast_function.item);
+    gc_mark_item(gc, activation->ast_arguments.item);
+    gc_mark_item(gc, activation->ast_replay_values.item);
+    if (activation->ast_function_env) {
+        gc_mark_object_ptr(gc, activation->ast_function_env);
+    }
+    if (activation->ast_body_env) {
+        gc_mark_object_ptr(gc, activation->ast_body_env);
+    }
+}
+
 extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
     if (!map || !gc) return;
     Item generator_item = (Item){.map = map};
     if (!js_object_has_class(generator_item, JS_CLASS_GENERATOR)) return;
     JsGeneratorStateRecord* gen = &((JsGeneratorMapCarrier*)map)->state;
-    if (gen->env) gc_mark_object_ptr(gc, gen->env);
+    js_suspended_activation_gc_trace(gen, gc);
     gc_mark_item(gc, gen->private_home_class.item);
     gc_mark_item(gc, gen->delegate.item);
-    gc_mark_item(gc, gen->ast_function.item);
-    gc_mark_item(gc, gen->ast_arguments.item);
     gc_mark_item(gc, gen->ast_this.item);
-    gc_mark_item(gc, gen->ast_yield_values.item);
     gc_mark_item(gc, gen->ast_pending_resume_input.item);
-    if (gen->ast_function_env) gc_mark_object_ptr(gc, gen->ast_function_env);
-    if (gen->ast_body_env) gc_mark_object_ptr(gc, gen->ast_body_env);
     js_interp_generator_trace_continuations(gen, gc);
 }
 
@@ -28187,10 +28320,10 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     gen->ast_this = ast_this;
     gen->ast_function_env = NULL;
     gen->ast_body_env = NULL;
-    gen->ast_yield_skip = 0;
-    gen->ast_yield_values = get_type_id(ast_function) == LMD_TYPE_FUNC
+    gen->ast_replay_skip = 0;
+    gen->ast_replay_values = get_type_id(ast_function) == LMD_TYPE_FUNC
         ? js_array_new(0) : ItemNull;
-    if (item_is_error(gen->ast_yield_values)) return gen->ast_yield_values;
+    if (item_is_error(gen->ast_replay_values)) return gen->ast_replay_values;
     gen->ast_loop_continuations = NULL;
     gen->ast_list_continuation = NULL;
     gen->ast_array_binding_continuations = NULL;
@@ -28427,7 +28560,7 @@ static Item js_generator_resume_after_delegate_error(Item generator, JsGenerator
     if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
         // A delegate protocol failure completes yield* abruptly before the
         // AST replays its suspension point through the enclosing try/finally.
-        gen->ast_yield_skip++;
+        gen->ast_replay_skip++;
     }
     gen->delegate = ItemNull;
     gen->state = gen->delegate_resume;
@@ -28502,7 +28635,7 @@ extern "C" Item js_generator_next(Item generator, Item input) {
             if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
                 // Replaying the AST treats a completed yield* as one program
                 // point and injects the delegate's completion value there.
-                gen->ast_yield_skip++;
+                gen->ast_replay_skip++;
             }
             input = return_val;
             input_root.set(input);
@@ -28715,7 +28848,7 @@ static Item js_generator_delegate_abrupt_call(Item generator, JsGenerator* gen,
     if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
         // The AST generator has not counted the delegated yield yet. Replay
         // it as the completed yield* expression before delivering its result.
-        gen->ast_yield_skip++;
+        gen->ast_replay_skip++;
         return is_return ? js_generator_next(generator,
                 js_gen_return_signal(inner_value))
             : js_generator_next(generator, inner_value);
@@ -28778,7 +28911,7 @@ extern "C" Item js_generator_return(Item generator, Item value) {
             if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
                 // The delegate's initial yield belongs to yield*. Mark it
                 // complete before injecting the return completion into the AST.
-                gen->ast_yield_skip++;
+                gen->ast_replay_skip++;
                 return js_generator_next(generator, js_gen_return_signal(value));
             }
         }
@@ -29642,7 +29775,7 @@ extern "C" Item js_iterable_to_array(Item iterable) {
 // =============================================================================
 
 #define js_promise_unhandled_epoch (js_runtime_state.promises.unhandled_epoch)
-#define js_promise_unhandled_deque (js_runtime_state.promises.unhandled_deque)
+#define js_promise_unhandled_queue (js_runtime_state.promises.unhandled_queue)
 #define js_promise_unhandled_strict (js_runtime_state.promises.unhandled_strict)
 #define js_domain_current (js_runtime_state.promises.domain_current)
 #define js_domain_namespace (js_runtime_state.promises.domain_namespace)
@@ -30510,8 +30643,10 @@ static void js_promise_schedule_unhandled_check(JsPromise* p) {
     }
     p->unhandled_check_scheduled = true;
     p->unhandled_epoch = js_promise_unhandled_epoch;
-    Item record[1] = {js_promise_to_item(p)};
-    if (!runtime_async_deque_push(&js_promise_unhandled_deque, record)) {
+    RuntimeJob job = {};
+    job.arguments = js_promise_to_item(p);
+    job.kind = RUNTIME_JOB_UNHANDLED_REJECTION;
+    if (!runtime_job_queue_push(&js_promise_unhandled_queue, &job)) {
         p = js_get_promise(promise_root.get());
         if (!p) return;
         p->unhandled_check_scheduled = false;
@@ -30520,10 +30655,11 @@ static void js_promise_schedule_unhandled_check(JsPromise* p) {
 }
 
 extern "C" void js_promise_flush_unhandled_checks(void) {
-    Item record[1] = {};
-    while (runtime_async_deque_pop(&js_promise_unhandled_deque, record)) {
-        Item promise_item = record[0];
-        js_promise_unhandled_check(promise_item);
+    RuntimeJob job = {};
+    while (runtime_job_queue_pop(&js_promise_unhandled_queue, &job)) {
+        if (job.kind == RUNTIME_JOB_UNHANDLED_REJECTION) {
+            js_promise_unhandled_check(job.arguments);
+        }
     }
 }
 
@@ -31491,14 +31627,9 @@ static JsAsyncContext* js_async_frame_from_item(Item frame_item) {
 extern "C" void js_async_frame_map_gc_trace(Map* map, gc_heap_t* gc) {
     if (!map || !gc || map->map_kind != MAP_KIND_ASYNC_FRAME) return;
     JsAsyncContext* ctx = &((JsAsyncFrameCarrier*)map)->state;
-    if (ctx->env) gc_mark_object_ptr(gc, ctx->env);
+    js_suspended_activation_gc_trace(ctx, gc);
     gc_mark_item(gc, ctx->this_val.item);
     gc_mark_item(gc, ctx->promise.item);
-    gc_mark_item(gc, ctx->ast_function.item);
-    gc_mark_item(gc, ctx->ast_arguments.item);
-    gc_mark_item(gc, ctx->ast_await_values.item);
-    if (ctx->ast_function_env) gc_mark_object_ptr(gc, ctx->ast_function_env);
-    if (ctx->ast_body_env) gc_mark_object_ptr(gc, ctx->ast_body_env);
     js_interp_async_trace_continuations(ctx, gc);
 }
 
@@ -31702,10 +31833,10 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
     ctx->ast_body_env = NULL;
     ctx->ast_resume_statement = NULL;
     ctx->ast_loop_continuations = NULL;
-    ctx->ast_await_values = get_type_id(ast_function) == LMD_TYPE_FUNC
+    ctx->ast_replay_values = get_type_id(ast_function) == LMD_TYPE_FUNC
         ? js_array_new(0) : ItemNull;
-    if (item_is_error(ctx->ast_await_values)) return ctx->ast_await_values;
-    ctx->ast_await_skip = 0;
+    if (item_is_error(ctx->ast_replay_values)) return ctx->ast_replay_values;
+    ctx->ast_replay_skip = 0;
     ctx->ast_initialized = false;
 
     // Create a pending promise for this async function's result
@@ -33102,16 +33233,20 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     int vm_binding_count = js_vm_apply_context_bindings(sandbox, vm_bindings, 16);
     Item prev_this = js_get_current_this();
     Item prev_global = js_vm_swap_global_this(sandbox);
-    Item saved_with_stack[16];
-    int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
-    JsSavedWithScopeRoots saved_with_roots(saved_with_stack, saved_with_depth);
+    JsSavedWithScope saved_with_scope(true);
+    if (!saved_with_scope.ready) {
+        js_vm_swap_global_this(prev_global);
+        js_vm_restore_context_bindings(sandbox, vm_bindings, vm_binding_count);
+        js_set_prototype(sandbox, previous_proto);
+        return js_throw_range_error("Could not save with scope stack");
+    }
     js_with_push(sandbox);
     js_set_this(sandbox);
     Item result = js_builtin_eval_with_options(code, 1 | 8, eval_options.filename,
                                                eval_options.line_offset,
                                                eval_options.column_offset);
     js_set_this(prev_this);
-    js_with_set_stack(saved_with_stack, saved_with_depth);
+    js_with_set_stack(saved_with_scope.stack, saved_with_scope.depth);
     js_vm_swap_global_this(prev_global);
     js_vm_restore_context_bindings(sandbox, vm_bindings, vm_binding_count);
     js_set_prototype(sandbox, previous_proto);
@@ -33230,8 +33365,10 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
     Item previous_proto = ItemNull;
     Item prev_global = ItemNull;
     Item prev_this = ItemNull;
-    Item saved_with_stack[16];
-    int saved_with_depth = 0;
+    JsSavedWithScope saved_with_scope(use_parsing_context);
+    if (!saved_with_scope.ready) {
+        return js_throw_range_error("Could not save with scope stack");
+    }
     JsVmContextBinding vm_bindings[16];
     int vm_binding_count = 0;
     if (use_parsing_context) {
@@ -33240,14 +33377,13 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
         vm_binding_count = js_vm_apply_context_bindings(parsing_context, vm_bindings, 16);
         prev_this = js_get_current_this();
         prev_global = js_vm_swap_global_this(parsing_context);
-        saved_with_depth = js_with_save_stack(saved_with_stack, 16);
         js_with_push(parsing_context);
         js_set_this(parsing_context);
     }
     Item result = js_builtin_eval(eval_code, 1);
     if (use_parsing_context) {
         js_set_this(prev_this);
-        js_with_set_stack(saved_with_stack, saved_with_depth);
+        js_with_set_stack(saved_with_scope.stack, saved_with_scope.depth);
         js_vm_swap_global_this(prev_global);
         js_vm_restore_context_bindings(parsing_context, vm_bindings, vm_binding_count);
         js_set_prototype(parsing_context, previous_proto);
@@ -33371,7 +33507,6 @@ static Item js_dc_stores_key(void);
 
 extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
 
-#define JS_DC_CHANNEL_MAX JS_DIAGNOSTICS_CHANNEL_MAX
 static JsDiagnosticsChannelState* js_diagnostics_channel_state_current(bool attach) {
     if (attach) jube_modules_runtime_attach();
     void* session = jube_node_runtime_current_session();
@@ -33379,15 +33514,33 @@ static JsDiagnosticsChannelState* js_diagnostics_channel_state_current(bool atta
 }
 
 #define js_dc_state (*js_diagnostics_channel_state_current(true))
-#define js_dc_channel_names (js_dc_state.channel_names)
-#define js_dc_channels (js_dc_state.channels)
-#define js_dc_channel_count (js_dc_state.channel_count)
 #define js_dc_channel_proto (js_dc_state.channel_prototype)
 #define js_dc_tracing_channel_proto (js_dc_state.tracing_channel_prototype)
 #define js_dc_bounded_channel_proto (js_dc_state.bounded_channel_prototype)
 #define js_dc_channel_ctor (js_dc_state.channel_constructor)
 #define js_dc_tracing_channel_ctor (js_dc_state.tracing_channel_constructor)
 #define js_dc_bounded_channel_ctor (js_dc_state.bounded_channel_constructor)
+
+static Item js_dc_dynamic_array_ensure(Item* slot) {
+    if (slot && get_type_id(*slot) == LMD_TYPE_ARRAY) return *slot;
+    Item array = js_array_new(0);
+    if (slot) *slot = array;
+    return array;
+}
+
+static Item js_dc_channel_entries(void) {
+    return js_dc_dynamic_array_ensure(&js_dc_state.channel_entries);
+}
+
+static Item js_dc_deferred_error_entries(void) {
+    return js_dc_dynamic_array_ensure(&js_dc_state.deferred_errors);
+}
+
+static Item js_dc_channel_entry_part(Item entries, int64_t index, int64_t part) {
+    Item entry = js_elements_get_int(entries, index);
+    return get_type_id(entry) == LMD_TYPE_ARRAY && js_array_length(entry) > part
+        ? js_elements_get_int(entry, part) : ItemNull;
+}
 
 static bool js_dc_is_symbol(Item value) {
     return get_type_id(value) == LMD_TYPE_SYMBOL ||
@@ -33520,9 +33673,13 @@ static Item js_dc_channel_publish(Item message) {
 
 // Channel.hasSubscribers getter
 static Item js_dc_hasSubscribers(Item name) {
-    for (int i = 0; i < js_dc_channel_count; i++) {
-        if (js_dc_item_same(js_dc_channel_names[i], name)) {
-            return (Item){.item = b2it(js_dc_channel_has_active_subscribers(js_dc_channels[i]))};
+    Item entries = js_dc_channel_entries();
+    int64_t count = get_type_id(entries) == LMD_TYPE_ARRAY ? js_array_length(entries) : 0;
+    for (int64_t i = 0; i < count; i++) {
+        Item entry_name = js_dc_channel_entry_part(entries, i, 0);
+        if (js_dc_item_same(entry_name, name)) {
+            Item channel = js_dc_channel_entry_part(entries, i, 1);
+            return (Item){.item = b2it(js_dc_channel_has_active_subscribers(channel))};
         }
     }
     return (Item){.item = ITEM_FALSE};
@@ -33553,29 +33710,28 @@ static Item js_dc_stores_key(void) {
 static Item js_als_apply_context(Item context);
 static void js_als_restore_context(Item previous);
 
-#define JS_DC_DEFERRED_ERROR_MAX JS_DIAGNOSTICS_DEFERRED_ERROR_MAX
-#define js_dc_deferred_errors (js_dc_state.deferred_errors)
-#define js_dc_deferred_error_count (js_dc_state.deferred_error_count)
-
 static Item js_dc_emit_deferred_error(void) {
-    if (js_dc_deferred_error_count <= 0) return (Item){.item = ITEM_JS_UNDEFINED};
-    Item error = js_dc_deferred_errors[0];
-    for (int i = 1; i < js_dc_deferred_error_count; i++) {
-        js_dc_deferred_errors[i - 1] = js_dc_deferred_errors[i];
+    Item errors = js_dc_deferred_error_entries();
+    int64_t count = get_type_id(errors) == LMD_TYPE_ARRAY ? js_array_length(errors) : 0;
+    if (count <= 0) return (Item){.item = ITEM_JS_UNDEFINED};
+    RootFrame roots(2);
+    Rooted<Item> error_root(roots, js_elements_get_int(errors, 0));
+    Rooted<Item> remaining_root(roots, js_array_new(0));
+    for (int64_t i = 1; i < count; i++) {
+        js_array_push(remaining_root.get(), js_elements_get_int(errors, i));
     }
-    js_dc_deferred_error_count--;
-    js_dc_deferred_errors[js_dc_deferred_error_count] = (Item){0};
+    js_dc_state.deferred_errors = remaining_root.get();
+    Item error = error_root.get();
     js_process_emit(js_name_item("uncaughtException", 17), error);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 static void js_dc_defer_transform_error(Item error) {
     js_root_range_ensure_registered(&js_dc_state.roots);
-    if (js_dc_deferred_error_count >= JS_DC_DEFERRED_ERROR_MAX) {
-        js_process_emit(js_name_item("uncaughtException", 17), error);
-        return;
-    }
-    js_dc_deferred_errors[js_dc_deferred_error_count++] = error;
+    RootFrame roots(1);
+    Rooted<Item> error_root(roots, error);
+    Item errors = js_dc_deferred_error_entries();
+    js_array_push(errors, error_root.get());
     js_next_tick_enqueue(js_new_native_function(js_dc_emit_deferred_error));
 }
 
@@ -33728,14 +33884,17 @@ static Item js_dc_channel_withStoreScope(Item message) {
 // dc.channel(name) — create or return existing channel
 static Item js_dc_channel_factory(Item name) {
     js_root_range_ensure_registered(&js_dc_state.roots);
-    RootFrame roots(2);
+    RootFrame roots(4);
     Rooted<Item> name_root(roots, name);
     if (get_type_id(name) != LMD_TYPE_STRING && !js_dc_is_symbol(name)) {
         return js_dc_throw_invalid_arg_type("The \"name\" argument must be of type string or symbol.");
     }
-    for (int i = 0; i < js_dc_channel_count; i++) {
-        if (js_dc_item_same(js_dc_channel_names[i], name_root.get())) {
-            return js_dc_channels[i];
+    Rooted<Item> entries_root(roots, js_dc_channel_entries());
+    int64_t entry_count = get_type_id(entries_root.get()) == LMD_TYPE_ARRAY
+        ? js_array_length(entries_root.get()) : 0;
+    for (int64_t i = 0; i < entry_count; i++) {
+        if (js_dc_item_same(js_dc_channel_entry_part(entries_root.get(), i, 0), name_root.get())) {
+            return js_dc_channel_entry_part(entries_root.get(), i, 1);
         }
     }
 
@@ -33755,11 +33914,10 @@ static Item js_dc_channel_factory(Item name) {
     js_runtime_set_native_key(channel_root.get(), js_dc_key("unbindStore"), js_dc_channel_unbindStore);
     js_runtime_set_native_key(channel_root.get(), js_dc_key("runStores"), js_dc_channel_runStores);
     js_runtime_set_native_key(channel_root.get(), js_dc_key("withStoreScope"), js_dc_channel_withStoreScope);
-    if (js_dc_channel_count < JS_DC_CHANNEL_MAX) {
-        js_dc_channel_names[js_dc_channel_count] = name_root.get();
-        js_dc_channels[js_dc_channel_count] = channel_root.get();
-        js_dc_channel_count++;
-    }
+    Rooted<Item> entry_root(roots, js_array_new(0));
+    js_array_push(entry_root.get(), name_root.get());
+    js_array_push(entry_root.get(), channel_root.get());
+    js_array_push(entries_root.get(), entry_root.get());
     return channel_root.get();
 }
 
@@ -35093,28 +35251,32 @@ static Item js_internal_repl_create(Item env, Item opts, Item cb) {
     return repl;
 }
 
-#define js_als_instances (js_runtime_state.async_local_storage->instances)
-#define js_als_instance_count (js_runtime_state.async_local_storage->instance_count)
+#define js_als_instances (&js_runtime_state.async_local_storage->instances)
+#define js_als_instance_count root_vector_count(js_als_instances)
 
 static Item js_als_store_key(void) {
     return js_name_item("_store", 6);
 }
 
+static Item js_als_instance_at(int64_t index) {
+    Item* instance = root_vector_at(js_als_instances, index);
+    return instance ? *instance : ItemNull;
+}
+
 static void js_als_register_instance(Item instance) {
-    if (!js_root_range_ensure_registered(&js_runtime_state.async_local_storage->roots)) return;
-    for (int i = 0; i < js_als_instance_count; i++) {
-        if (js_als_instances[i].item == instance.item) return;
+    for (int64_t i = 0; i < js_als_instance_count; i++) {
+        if (js_als_instance_at(i).item == instance.item) return;
     }
-    if (js_als_instance_count < JS_MAX_ALS_INSTANCES) {
-        js_als_instances[js_als_instance_count++] = instance;
+    if (!root_vector_push(js_als_instances, instance)) {
+        log_error("js-als: failed to retain AsyncLocalStorage instance");
     }
 }
 
 extern "C" Item js_als_capture_context(void) {
     Item context = js_array_new(0);
     Item store_key = js_als_store_key();
-    for (int i = 0; i < js_als_instance_count; i++) {
-        Item instance = js_als_instances[i];
+    for (int64_t i = 0; i < js_als_instance_count; i++) {
+        Item instance = js_als_instance_at(i);
         if (instance.item == 0) continue;
         Item pair = js_array_new(0);
         js_array_push(pair, instance);
@@ -35277,16 +35439,11 @@ static Item js_als_withScope(Item store) {
     return scope;
 }
 
-#define JS_ASYNC_HOOK_MAX JS_ASYNC_HOOK_STATE_MAX
-#define JS_ASYNC_PENDING_DESTROY_MAX JS_ASYNC_PENDING_DESTROY_STATE_MAX
-#define js_async_hooks_enabled_count (js_runtime_state.async_hooks->enabled_count)
 #define js_async_hooks_root_resource (js_runtime_state.async_hooks->root_resource)
 #define js_async_hooks_current_resource (js_runtime_state.async_hooks->current_resource)
 #define js_async_hooks_next_id (js_runtime_state.async_hooks->next_id)
-#define js_async_hooks (js_runtime_state.async_hooks->hooks)
-#define js_async_hook_count (js_runtime_state.async_hooks->hook_count)
-#define js_async_pending_destroy_resources (js_runtime_state.async_hooks->pending_destroy_resources)
-#define js_async_pending_destroy_count (js_runtime_state.async_hooks->pending_destroy_count)
+#define js_async_hook_values (js_runtime_state.async_hooks->hooks)
+#define js_async_pending_destroy_values (js_runtime_state.async_hooks->pending_destroy_resources)
 
 static Item js_async_hooks_symbol_key(const char* name, int name_len) {
     return js_symbol_for(js_name_item(name, name_len));
@@ -35329,14 +35486,19 @@ extern "C" void js_async_hooks_restore_resource(Item previous) {
     js_async_hooks_current_resource = previous;
 }
 
-static void js_async_hooks_add_hook(Item hook) {
-    js_root_range_ensure_registered(&js_runtime_state.async_hooks->roots);
-    for (int i = 0; i < js_async_hook_count; i++) {
-        if (js_async_hooks[i].item == hook.item) return;
+static Item js_async_hook_at(int64_t index) {
+    Item* value = root_vector_at(&js_async_hook_values, index);
+    return value ? *value : ItemNull;
+}
+
+static bool js_async_hooks_add_hook(Item hook) {
+    RootFrame roots(1);
+    Rooted<Item> hook_root(roots, hook);
+    int64_t hook_count = root_vector_count(&js_async_hook_values);
+    for (int64_t i = 0; i < hook_count; i++) {
+        if (js_async_hook_at(i).item == hook_root.get().item) return true;
     }
-    if (js_async_hook_count < JS_ASYNC_HOOK_MAX) {
-        js_async_hooks[js_async_hook_count++] = hook;
-    }
+    return root_vector_push(&js_async_hook_values, hook_root.get());
 }
 
 static bool js_async_hook_is_enabled(Item hook) {
@@ -35346,11 +35508,11 @@ static bool js_async_hook_is_enabled(Item hook) {
 
 static void js_async_hooks_emit_event(const char* name, int name_len,
         Item* args, int argc) {
-    if (js_async_hooks_enabled_count <= 0) return;
     Item callback_key = js_async_hooks_key("__lambda_async_hook_callbacks__");
     Item event_key = js_name_item(name, name_len);
-    for (int i = 0; i < js_async_hook_count; i++) {
-        Item hook = js_async_hooks[i];
+    int64_t hook_count = root_vector_count(&js_async_hook_values);
+    for (int64_t i = 0; i < hook_count; i++) {
+        Item hook = js_async_hook_at(i);
         if (hook.item == 0 || !js_async_hook_is_enabled(hook)) continue;
         Item callbacks = js_get_key_default(hook, callback_key);
         Item callback = js_get_key_default(callbacks, event_key);
@@ -35443,9 +35605,9 @@ static void js_async_resource_emit_destroy(Item resource) {
 }
 
 static void js_async_hooks_queue_destroy(Item resource) {
-    js_root_range_ensure_registered(&js_runtime_state.async_hooks->roots);
-    if (js_async_pending_destroy_count >= JS_ASYNC_PENDING_DESTROY_MAX) return;
-    js_async_pending_destroy_resources[js_async_pending_destroy_count++] = resource;
+    RootFrame roots(1);
+    Rooted<Item> resource_root(roots, resource);
+    root_vector_push(&js_async_pending_destroy_values, resource_root.get());
 }
 
 static bool js_async_hooks_is_gc_tracker(Item resource) {
@@ -35461,12 +35623,24 @@ static bool js_async_hooks_is_gc_tracker(Item resource) {
 }
 
 extern "C" void js_async_hooks_after_gc(void) {
-    int count = js_async_pending_destroy_count;
-    js_async_pending_destroy_count = 0;
-    for (int i = 0; i < count; i++) {
-        Item resource = js_async_pending_destroy_resources[i];
-        js_async_pending_destroy_resources[i] = (Item){0};
-        js_async_resource_emit_destroy(resource);
+    // Capture the original queue length: a destroy callback may enqueue a new
+    // resource, which belongs to the next drain just as it did in the former
+    // fixed queue.
+    int64_t count = root_vector_count(&js_async_pending_destroy_values);
+    for (int64_t i = 0; i < count; i++) {
+        Item* first = root_vector_at(&js_async_pending_destroy_values, 0);
+        if (!first) return;
+        RootFrame roots(1);
+        Rooted<Item> resource_root(roots, *first);
+        int64_t remaining = root_vector_count(&js_async_pending_destroy_values);
+        for (int64_t source = 1; source < remaining; source++) {
+            Item* destination = root_vector_at(&js_async_pending_destroy_values,
+                source - 1);
+            Item* next = root_vector_at(&js_async_pending_destroy_values, source);
+            if (destination && next) *destination = *next;
+        }
+        root_vector_pop(&js_async_pending_destroy_values);
+        js_async_resource_emit_destroy(resource_root.get());
     }
 }
 
@@ -35670,7 +35844,6 @@ static Item js_ah_enable(void) {
     Item enabled = js_get_key_default(self, enabled_key);
     if (get_type_id(enabled) != LMD_TYPE_BOOL || !it2b(enabled)) {
         js_set_key_default(self, enabled_key, (Item){.item = b2it(true)});
-        js_async_hooks_enabled_count++;
     }
     return self;
 }
@@ -35681,7 +35854,6 @@ static Item js_ah_disable(void) {
     Item enabled = js_get_key_default(self, enabled_key);
     if (get_type_id(enabled) == LMD_TYPE_BOOL && it2b(enabled)) {
         js_set_key_default(self, enabled_key, (Item){.item = b2it(false)});
-        if (js_async_hooks_enabled_count > 0) js_async_hooks_enabled_count--;
     }
     return self;
 }
@@ -35707,13 +35879,14 @@ static Item js_ah_createHook(Item callbacks) {
             }
         }
     }
-    Item hook = js_new_object();
-    js_async_hooks_add_hook(hook);
-    js_set_key_default(hook, js_async_hooks_key("__lambda_async_hook_callbacks__"), callbacks);
-    js_set_key_default(hook, js_async_hooks_key("__lambda_async_hook_enabled__"), (Item){.item = b2it(false)});
-    js_runtime_set_native_key(hook, js_name_item("enable", 6), js_ah_enable);
-    js_runtime_set_native_key(hook, js_name_item("disable", 7), js_ah_disable);
-    return hook;
+    RootFrame roots(1);
+    Rooted<Item> hook_root(roots, js_new_object());
+    if (!js_async_hooks_add_hook(hook_root.get())) return ItemError;
+    js_set_key_default(hook_root.get(), js_async_hooks_key("__lambda_async_hook_callbacks__"), callbacks);
+    js_set_key_default(hook_root.get(), js_async_hooks_key("__lambda_async_hook_enabled__"), (Item){.item = b2it(false)});
+    js_runtime_set_native_key(hook_root.get(), js_name_item("enable", 6), js_ah_enable);
+    js_runtime_set_native_key(hook_root.get(), js_name_item("disable", 7), js_ah_disable);
+    return hook_root.get();
 }
 
 static Item js_ah_executionAsyncId(void) {
@@ -35728,7 +35901,13 @@ static Item js_ah_triggerAsyncId(void) {
 }
 
 static Item js_internal_async_enabledHooksExist(void) {
-    return (Item){.item = b2it(js_async_hooks_enabled_count > 0)};
+    int64_t hook_count = root_vector_count(&js_async_hook_values);
+    for (int64_t i = 0; i < hook_count; i++) {
+        if (js_async_hook_is_enabled(js_async_hook_at(i))) {
+            return (Item){.item = ITEM_TRUE};
+        }
+    }
+    return (Item){.item = ITEM_FALSE};
 }
 
 static Item js_async_context_frame_current(void) {
@@ -36727,6 +36906,14 @@ static JsCommonJsCompileCacheState* js_commonjs_compile_cache_state_current(bool
 #define g_js_cc_disabled (g_js_cc_state.disabled)
 #define g_js_cc_reported (g_js_cc_state.reported)
 
+static bool js_cc_set_dir(const char* directory) {
+    char* copy = directory ? mem_strdup(directory, MEM_CAT_SYSTEM) : NULL;
+    if (directory && !copy) return false;
+    mem_free(g_js_cc_dir);
+    g_js_cc_dir = copy;
+    return true;
+}
+
 static bool js_cc_write_allowed(const char* dir) {
     return js_permission_has_fs_write(dir) != 0;
 }
@@ -36780,7 +36967,8 @@ static bool js_cc_mkdir_recursive(const char* path) {
 }
 
 static void js_cc_emit_cache_report(void) {
-    if (!g_js_cc_enabled || g_js_cc_disabled || g_js_cc_reported || !g_js_cc_dir[0]) return;
+    if (!g_js_cc_enabled || g_js_cc_disabled || g_js_cc_reported ||
+            !g_js_cc_dir || !g_js_cc_dir[0]) return;
     g_js_cc_reported = true;
 
     char cache_subdir[4096];
@@ -36804,8 +36992,9 @@ static void js_cc_init_from_env(void) {
     }
     const char* env_dir = getenv("NODE_COMPILE_CACHE");
     if (env_dir && env_dir[0]) {
-        js_cc_make_absolute(env_dir, g_js_cc_dir, (int)sizeof(g_js_cc_dir));
-        g_js_cc_enabled = true;
+        char absolute_dir[4096];
+        js_cc_make_absolute(env_dir, absolute_dir, (int)sizeof(absolute_dir));
+        if (js_cc_set_dir(absolute_dir)) g_js_cc_enabled = true;
     }
 }
 
@@ -36863,7 +37052,9 @@ extern "C" Item js_module_enable_compile_cache(Item arg) {
         return js_cc_result(0, NULL, msg);
     }
 
-    snprintf(g_js_cc_dir, sizeof(g_js_cc_dir), "%s", abs_dir);
+    if (!js_cc_set_dir(abs_dir)) {
+        return js_cc_result(0, NULL, "Unable to allocate compile cache directory");
+    }
     g_js_cc_enabled = true;
     js_cc_emit_cache_report();
     return js_cc_result(1, g_js_cc_dir, NULL);
@@ -36871,7 +37062,9 @@ extern "C" Item js_module_enable_compile_cache(Item arg) {
 
 extern "C" Item js_module_get_compile_cache_dir(void) {
     js_cc_init_from_env();
-    if (!g_js_cc_enabled || g_js_cc_disabled || !g_js_cc_dir[0]) return make_js_undefined();
+    if (!g_js_cc_enabled || g_js_cc_disabled || !g_js_cc_dir || !g_js_cc_dir[0]) {
+        return make_js_undefined();
+    }
     return js_name_item(g_js_cc_dir, strlen(g_js_cc_dir));
 }
 
@@ -37663,16 +37856,12 @@ void js_deep_batch_reset() {
     js_domain_current = (Item){0};
     js_domain_namespace = (Item){0};
     js_item_stack_clear(&js_domain_stack_state);
-    memset(js_als_instances, 0, sizeof(js_als_instances));
-    js_als_instance_count = 0;
-    js_async_hooks_enabled_count = 0;
+    root_vector_clear(js_als_instances);
     js_async_hooks_root_resource = (Item){0};
     js_async_hooks_current_resource = (Item){0};
     js_async_hooks_next_id = 2;
-    memset(js_async_hooks, 0, sizeof(js_async_hooks));
-    js_async_hook_count = 0;
-    memset(js_async_pending_destroy_resources, 0, sizeof(js_async_pending_destroy_resources));
-    js_async_pending_destroy_count = 0;
+    root_vector_clear(&js_async_hook_values);
+    root_vector_clear(&js_async_pending_destroy_values);
     js_async_resolved_value = (Item){0};
     js_reset_transient_call_state();
     // generator proto caches point into old heap — must reset

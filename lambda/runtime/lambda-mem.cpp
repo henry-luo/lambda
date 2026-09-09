@@ -644,6 +644,11 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     return ptr;
 }
 
+extern "C" void* heap_calloc_js_accessor_cell(size_t size) {
+    if (!context || !context->heap || !context->heap->gc) return NULL;
+    return gc_heap_calloc(context->heap->gc, size, GC_TYPE_JS_ACCESSOR);
+}
+
 extern "C" int64_t lambda_restore_number_frame_top(uint64_t* top) {
     Context* runtime = (Context*)context;
     if (!runtime || !top || !runtime->side_number_base ||
@@ -667,7 +672,7 @@ extern "C" void* heap_calloc_closure_env(size_t size) {
     if (size > SIZE_MAX / 2) return NULL;
     // Closure slots own a parallel scalar tail so captured wide numbers never
     // retain pointers into a completed invocation's number frame.
-    return gc_heap_calloc(context->heap->gc, size * 2, GC_TYPE_JS_ENV);
+    return gc_heap_calloc(context->heap->gc, size * 2, GC_TYPE_ENVIRONMENT);
 }
 
 // Specialized allocator for JIT: uses bump-pointer fast path with pre-computed

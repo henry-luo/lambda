@@ -224,15 +224,11 @@ JsEvalOrigin* js_fn_eval_origin_ensure(JsFunction* fn);
 // JSCUO6 -- inventory of what actually depends on this layout, so a field can
 // be moved with the readers known rather than guessed at.
 //
-// (1) Cross-layout discrimination is the ONLY hard constraint. Three records
-//     share the LMD_TYPE_FUNC tag and the `Item::function` (`Function*`) slot:
-//     Lambda's `Function`, this `JsFunction`, and `JsAccessorPair`. Every
-//     consumer that receives one of them as an Item reads `type_id` at 0 and
-//     then `layout_magic` at 4 to decide which record it holds
-//     (js_function_gc_trace / js_function_gc_compact in
-//     js_runtime_function.cpp, js_function_get_target/get_arity there, and
-//     the call kernel at js_runtime.cpp). Those two offsets must not move,
-//     and must stay identical across JsFunction and JsAccessorPair.
+// (1) Cross-layout discrimination is the ONLY hard constraint. Lambda's
+//     `Function` and this `JsFunction` share the LMD_TYPE_FUNC tag. Accessor
+//     cells use GC_TYPE_JS_ACCESSOR and never enter this discriminator path.
+//     Consumers that receive a callable Item read `type_id` at 0 and then
+//     `layout_magic` at 4 to decide which callable record it holds.
 // (2) No generated code reads a JsFunction field. JS MIR lowers every call to
 //     a named C helper (js_call_function_into and friends) and dispatches
 //     through `fn->invoke` in C, so unlike Lambda's `Function` -- whose
@@ -254,8 +250,6 @@ static_assert(offsetof(JsFunction, type_id) == 0,
               "JsFunction type tag must sit where every Item consumer reads it");
 static_assert(offsetof(JsFunction, layout_magic) == 4,
               "JsFunction layout discriminator is read before any field access");
-static_assert(offsetof(JsAccessorPair, layout_magic) == offsetof(JsFunction, layout_magic),
-              "accessor pairs share the FUNC tag and must discriminate at the same offset");
 static_assert(offsetof(JsFunction, type_id) < offsetof(JsFunction, func_ptr),
               "the discrimination prefix must precede every other field");
 

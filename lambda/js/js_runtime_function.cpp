@@ -200,15 +200,7 @@ extern "C" void js_set_function_home_class(Item fn_item, Item home_class) {
 extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     JsFunction* fn = (JsFunction*)data;
     if (!fn) return 0;
-    if (fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) {
-        JsAccessorPair* pair = (JsAccessorPair*)data;
-        if (pair->layout_magic != JS_ACCESSOR_PAIR_LAYOUT_MAGIC) return 0;
-        // Accessor pairs share the FUNC tag for property-slot compatibility,
-        // but their getter and setter are the actual reachability edges.
-        gc_mark_item(gc, pair->getter.item);
-        gc_mark_item(gc, pair->setter.item);
-        return 1;
-    }
+    if (fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) return 0;
 
     // A GC-owned function is the reachability owner for its closure env and
     // bound argument vectors; tracing those edges replaces permanent root ranges.
@@ -363,12 +355,7 @@ extern "C" void js_function_gc_destroy(void* data) {
 extern "C" int js_function_gc_compact(void* data, gc_heap_t* gc) {
     JsFunction* fn = (JsFunction*)data;
     if (!fn) return 0;
-    if (fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) {
-        JsAccessorPair* pair = (JsAccessorPair*)data;
-        // Accessor pairs have no movable data-zone fields; skipping the legacy
-        // Function compactor prevents its field offsets from corrupting them.
-        return pair->layout_magic == JS_ACCESSOR_PAIR_LAYOUT_MAGIC;
-    }
+    if (fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) return 0;
     if (!fn->env || fn->env_size <= 0 ||
         !gc_data_zone_owns(gc->data_zone, fn->env)) return 1;
     // JsFunction is not the legacy Function layout. Its environment includes
@@ -1211,7 +1198,7 @@ extern "C" void js_env_rehome_scalars(Item* env) {
     if (!env || !context || !context->heap || !context->heap->gc ||
             !gc_is_managed(context->heap->gc, env)) return;
     gc_header_t* header = gc_get_header(env);
-    if (header->type_tag != GC_TYPE_JS_ENV || header->alloc_size == 0) return;
+    if (!gc_environment_is_item_slots(header) || header->alloc_size == 0) return;
     int64_t count = (int64_t)(header->alloc_size / (2 * sizeof(Item)));
     // Generator environments mix boxed Items with raw state/spill words. Only
     // tagged pointers into the active number stack are valid scalar Items;

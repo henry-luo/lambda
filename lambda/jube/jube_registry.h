@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jube.h"
+#include "../runtime/async.h"
 
 typedef struct NodeTraceState NodeTraceState;
 typedef struct JsCjsState JsCjsState;
@@ -30,7 +31,7 @@ typedef bool (*JubeSpecifierNameCallback)(const char* name, void* user);
 // Host transport/process services attach a close hook to the same
 // generation-checked slot that roots the Node-visible handle. The hook is
 // host-only: dynamic modules use the JubeHostNodeAPI service table instead.
-typedef void (*JubeNodeResourceCloseCallback)(void* user);
+typedef RuntimeResourceCloseCallback JubeNodeResourceCloseCallback;
 
 bool jube_specifier_catalog_contains(const char* name);
 bool jube_specifier_is_builtin(const char* name);
@@ -71,16 +72,19 @@ uint32_t jube_node_resource_add_with_close(void* session, Item value, const char
 uint32_t jube_node_resource_add_native(void* session, Item value, const char* kind,
                                        JubeNodeResourceCloseCallback close_callback,
                                        void* close_user);
-// Closes every live resource whose kind begins with `kind_prefix`.
+// Legacy host-ABI bridge. It maps the one published crypto prefix to a frozen
+// resource group; resource-table teardown itself never dispatches on text.
 void jube_node_resource_close_kind(void* session, const char* kind_prefix);
 void jube_node_resource_remove_for_session(void* session, uint32_t resource_id);
 void* jube_node_resource_user_data_for_session(void* session, uint32_t resource_id);
 void* jube_node_runtime_current_session(void);
 NodeTraceState* jube_node_trace_state(void* session);
+NodeTraceState* jube_node_trace_state_ensure(void* session);
 JsCjsState* jube_node_cjs_state(void* session);
 JsCommonJsCompileCacheState* jube_node_commonjs_compile_cache_state(void* session);
 JsDiagnosticsChannelState* jube_node_diagnostics_channel_state(void* session);
 JsPermissionPolicy* jube_node_permission_policy(void* session);
+JsPermissionPolicy* jube_node_permission_policy_ensure(void* session);
 JsCryptoNativeState* jube_node_crypto_native_state(void* session);
 int jube_static_module_count(void);
 const JubeModuleDef* jube_static_module_at(int index);
@@ -122,9 +126,9 @@ typedef enum JubeNodeModuleStateSlot {
     JUBE_NODE_MODULE_STATE_CORE,
 } JubeNodeModuleStateSlot;
 
-// Node compatibility modules keep private native records in fixed slots on
-// the current EvalContext-owned Jube session. Slot acquisition is a cold
-// runtime_attach operation; normal module calls only load the chosen slot.
+// Node compatibility modules register private native records under opaque
+// slots in the current context capsule directory. Slot acquisition is a cold
+// runtime_attach operation; normal module calls only resolve the chosen slot.
 void* jube_node_session_module_state_get(void* session, uint32_t slot, size_t size);
 void* jube_node_current_module_state(uint32_t slot);
 

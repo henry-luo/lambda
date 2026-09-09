@@ -1693,7 +1693,7 @@ static EvalContext* script_eval_context_prepare(Runtime* runtime) {
 static bool script_eval_context_activate(Runtime* runtime) {
     EvalContext* task_context = script_eval_context_prepare(runtime);
     if (!task_context || !eval_context_init(task_context)) return false;
-    return !task_context->js_state ||
+    return !js_runtime_state_for(task_context) ||
         js_runtime_state_init(task_context);
 }
 
@@ -2879,7 +2879,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
         return;
     }
     if (!runtime_context_bind_retained(runtime, handler_compile_ctx) ||
-            (handler_compile_ctx->js_state &&
+            (js_runtime_state_for(handler_compile_ctx) &&
              !js_runtime_state_init(handler_compile_ctx))) {
         strbuf_free(compile_buf);
         hashmap_free(handlers->element_map);

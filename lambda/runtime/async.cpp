@@ -2,31 +2,61 @@
 
 #include "transpiler.hpp"
 
-static Array* runtime_async_storage_array(const RuntimeAsyncDeque* deque) {
-    if (!deque || !deque->storage_owner) return NULL;
-    Item storage = *deque->storage_owner;
+enum { RUNTIME_JOB_ITEM_COUNT = 7 };
+
+enum RuntimeJobItemSlot {
+    RUNTIME_JOB_SLOT_CALLBACK = 0,
+    RUNTIME_JOB_SLOT_ARGUMENTS,
+    RUNTIME_JOB_SLOT_RESOURCE,
+    RUNTIME_JOB_SLOT_ALS_CONTEXT,
+    RUNTIME_JOB_SLOT_DOMAIN,
+    RUNTIME_JOB_SLOT_ID,
+    RUNTIME_JOB_SLOT_KIND,
+};
+
+static Array* runtime_job_queue_storage(const RuntimeJobQueue* queue) {
+    if (!queue || !queue->storage_owner) return NULL;
+    Item storage = *queue->storage_owner;
     return get_type_id(storage) == LMD_TYPE_ARRAY ? storage.array : NULL;
 }
 
-extern "C" void runtime_async_deque_init(RuntimeAsyncDeque* deque,
-        Item* storage_owner, int64_t width) {
-    if (!deque) return;
-    deque->storage_owner = storage_owner;
-    deque->head = 0;
-    deque->width = width > 0 ? width : 1;
+static void runtime_job_encode(Item* slots, const RuntimeJob* job) {
+    slots[RUNTIME_JOB_SLOT_CALLBACK] = job->callback;
+    slots[RUNTIME_JOB_SLOT_ARGUMENTS] = job->arguments;
+    slots[RUNTIME_JOB_SLOT_RESOURCE] = job->context.resource;
+    slots[RUNTIME_JOB_SLOT_ALS_CONTEXT] = job->context.als_context;
+    slots[RUNTIME_JOB_SLOT_DOMAIN] = job->context.domain;
+    slots[RUNTIME_JOB_SLOT_ID] = (Item){.item = i2it(job->id)};
+    slots[RUNTIME_JOB_SLOT_KIND] = (Item){.item = i2it((int64_t)job->kind)};
 }
 
-extern "C" int64_t runtime_async_deque_size(const RuntimeAsyncDeque* deque) {
-    Array* array = runtime_async_storage_array(deque);
-    if (!array || deque->head >= array->length) return 0;
-    int64_t live = (int64_t)array->length - deque->head;
-    return live / deque->width;
+static RuntimeJobKind runtime_job_decode(Item* slots, RuntimeJob* job) {
+    job->callback = slots[RUNTIME_JOB_SLOT_CALLBACK];
+    job->arguments = slots[RUNTIME_JOB_SLOT_ARGUMENTS];
+    job->context.resource = slots[RUNTIME_JOB_SLOT_RESOURCE];
+    job->context.als_context = slots[RUNTIME_JOB_SLOT_ALS_CONTEXT];
+    job->context.domain = slots[RUNTIME_JOB_SLOT_DOMAIN];
+    job->id = it2i(slots[RUNTIME_JOB_SLOT_ID]);
+    job->kind = (RuntimeJobKind)it2i(slots[RUNTIME_JOB_SLOT_KIND]);
+    return job->kind;
 }
 
-extern "C" bool runtime_async_deque_push(RuntimeAsyncDeque* deque,
-        const Item* record) {
-    if (!deque || !deque->storage_owner || !record || deque->width <= 0) return false;
-    Item* owner = deque->storage_owner;
+extern "C" void runtime_job_queue_init(RuntimeJobQueue* queue,
+        Item* storage_owner) {
+    if (!queue) return;
+    queue->storage_owner = storage_owner;
+    queue->head = 0;
+    queue->pending_count = 0;
+}
+
+extern "C" int64_t runtime_job_queue_size(const RuntimeJobQueue* queue) {
+    return queue ? queue->pending_count : 0;
+}
+
+extern "C" bool runtime_job_queue_push(RuntimeJobQueue* queue,
+        const RuntimeJob* job) {
+    if (!queue || !queue->storage_owner || !job || job->kind == RUNTIME_JOB_NONE) return false;
+    Item* owner = queue->storage_owner;
     if (get_type_id(*owner) != LMD_TYPE_ARRAY) {
         Item storage = {.array = array()};
         if (!storage.array) return false;
@@ -34,39 +64,272 @@ extern "C" bool runtime_async_deque_push(RuntimeAsyncDeque* deque,
     }
 
     Array* array_ptr = owner->array;
-    int64_t required = array_ptr->length + deque->width;
+    int64_t required = array_ptr->length + RUNTIME_JOB_ITEM_COUNT;
     while (required > array_ptr->capacity) {
         int64_t old_capacity = array_ptr->capacity;
         expand_list((List*)array_ptr, NULL);
         array_ptr = owner->array;
         if (!array_ptr || array_ptr->capacity <= old_capacity) return false;
     }
-    for (int64_t i = 0; i < deque->width; i++) {
-        array_set(array_ptr, array_ptr->length + i, record[i]);
-    }
-    array_ptr->length += (int)deque->width;
+    runtime_job_encode(array_ptr->items + array_ptr->length, job);
+    array_ptr->length += RUNTIME_JOB_ITEM_COUNT;
+    queue->pending_count++;
     return true;
 }
 
-extern "C" bool runtime_async_deque_pop(RuntimeAsyncDeque* deque,
-        Item* record) {
-    if (!deque || !deque->storage_owner || !record || deque->width <= 0) return false;
-    Array* array_ptr = runtime_async_storage_array(deque);
-    if (!array_ptr || deque->head + deque->width > array_ptr->length) return false;
-    for (int64_t i = 0; i < deque->width; i++) {
-        record[i] = array_get(array_ptr, deque->head + i);
-        array_ptr->items[deque->head + i] = ItemNull;
+extern "C" bool runtime_job_queue_pop(RuntimeJobQueue* queue,
+        RuntimeJob* job) {
+    if (!queue || !queue->storage_owner || !job) return false;
+    Array* array_ptr = runtime_job_queue_storage(queue);
+    while (array_ptr && queue->head + RUNTIME_JOB_ITEM_COUNT <= array_ptr->length) {
+        Item* slots = array_ptr->items + queue->head;
+        RuntimeJobKind kind = runtime_job_decode(slots, job);
+        for (int i = 0; i < RUNTIME_JOB_ITEM_COUNT; i++) slots[i] = ItemNull;
+        queue->head += RUNTIME_JOB_ITEM_COUNT;
+        if (kind != RUNTIME_JOB_NONE) {
+            if (queue->pending_count > 0) queue->pending_count--;
+            if (queue->head == array_ptr->length) {
+                *queue->storage_owner = ItemNull;
+                queue->head = 0;
+            }
+            return true;
+        }
+        if (queue->head == array_ptr->length) {
+            *queue->storage_owner = ItemNull;
+            queue->head = 0;
+            break;
+        }
     }
-    deque->head += deque->width;
-    if (deque->head >= array_ptr->length) {
-        *deque->storage_owner = ItemNull;
-        deque->head = 0;
-    }
-    return true;
+    return false;
 }
 
-extern "C" void runtime_async_deque_clear(RuntimeAsyncDeque* deque) {
-    if (!deque || !deque->storage_owner) return;
-    *deque->storage_owner = ItemNull;
-    deque->head = 0;
+extern "C" bool runtime_job_queue_cancel(RuntimeJobQueue* queue, int64_t id) {
+    if (!queue || !queue->storage_owner) return false;
+    Array* array_ptr = runtime_job_queue_storage(queue);
+    if (!array_ptr) return false;
+    for (int64_t offset = queue->head;
+            offset + RUNTIME_JOB_ITEM_COUNT <= array_ptr->length;
+            offset += RUNTIME_JOB_ITEM_COUNT) {
+        Item* slots = array_ptr->items + offset;
+        if (it2i(slots[RUNTIME_JOB_SLOT_KIND]) == RUNTIME_JOB_NONE ||
+                it2i(slots[RUNTIME_JOB_SLOT_ID]) != id) continue;
+        for (int i = 0; i < RUNTIME_JOB_ITEM_COUNT; i++) slots[i] = ItemNull;
+        if (queue->pending_count > 0) queue->pending_count--;
+        return true;
+    }
+    return false;
+}
+
+extern "C" void runtime_job_queue_clear(RuntimeJobQueue* queue) {
+    if (!queue || !queue->storage_owner) return;
+    *queue->storage_owner = ItemNull;
+    queue->head = 0;
+    queue->pending_count = 0;
+}
+
+enum {
+    RUNTIME_RESOURCE_INDEX_BITS = 16,
+    RUNTIME_RESOURCE_INDEX_MASK = (1u << RUNTIME_RESOURCE_INDEX_BITS) - 1u,
+};
+
+static const RuntimeResourceDescriptor runtime_resource_descriptors[] = {
+    {RUNTIME_RESOURCE_TIMER, RUNTIME_RESOURCE_GROUP_NONE, "timer"},
+    {RUNTIME_RESOURCE_TCP_SOCKET, RUNTIME_RESOURCE_GROUP_NETWORK, "TCPSocketWrap"},
+    {RUNTIME_RESOURCE_TCP_SERVER, RUNTIME_RESOURCE_GROUP_NETWORK, "TCPServerWrap"},
+    {RUNTIME_RESOURCE_CRYPTO_HMAC, RUNTIME_RESOURCE_GROUP_CRYPTO, "crypto.hmac"},
+    {RUNTIME_RESOURCE_CRYPTO_HASH, RUNTIME_RESOURCE_GROUP_CRYPTO, "crypto.hash"},
+    {RUNTIME_RESOURCE_CRYPTO_SIGN, RUNTIME_RESOURCE_GROUP_CRYPTO, "crypto.sign"},
+    {RUNTIME_RESOURCE_CRYPTO_CIPHER, RUNTIME_RESOURCE_GROUP_CRYPTO, "crypto.cipher"},
+};
+
+extern "C" const RuntimeResourceDescriptor*
+runtime_resource_descriptor_from_legacy_name(const char* name) {
+    if (!name) return NULL;
+    for (size_t i = 0;
+            i < sizeof(runtime_resource_descriptors) /
+                sizeof(runtime_resource_descriptors[0]);
+            i++) {
+        const RuntimeResourceDescriptor* descriptor = &runtime_resource_descriptors[i];
+        if (strcmp(descriptor->display_name, name) == 0) return descriptor;
+    }
+    return NULL;
+}
+
+extern "C" void runtime_resource_table_init(RuntimeResourceTable* table,
+        Context* owner, const char* name) {
+    if (!table) return;
+    memset(table, 0, sizeof(*table));
+    root_vector_init(&table->owner_values, owner, name);
+}
+
+static RuntimeResourceSlot* runtime_resource_table_slot(
+        RuntimeResourceTable* table, uint32_t id) {
+    if (!table || !table->slots || id == 0) return NULL;
+    uint32_t index = id & RUNTIME_RESOURCE_INDEX_MASK;
+    uint16_t generation = (uint16_t)(id >> RUNTIME_RESOURCE_INDEX_BITS);
+    if (index == 0 || generation == 0 || index > (uint32_t)table->slots->length) {
+        return NULL;
+    }
+    RuntimeResourceSlot* slot = (RuntimeResourceSlot*)
+        table->slots->data[index - 1];
+    return slot && slot->generation == generation && slot->entry &&
+        !slot->entry->closing ? slot : NULL;
+}
+
+extern "C" const RuntimeResourceEntry* runtime_resource_table_entry(
+        RuntimeResourceTable* table, uint32_t id) {
+    RuntimeResourceSlot* slot = runtime_resource_table_slot(table, id);
+    return slot ? slot->entry : NULL;
+}
+
+extern "C" int runtime_resource_table_slot_count(
+        const RuntimeResourceTable* table) {
+    return table && table->slots ? table->slots->length : 0;
+}
+
+extern "C" int runtime_resource_table_active_count(
+        const RuntimeResourceTable* table) {
+    return table ? table->active_count : 0;
+}
+
+extern "C" const RuntimeResourceEntry* runtime_resource_table_entry_at(
+        RuntimeResourceTable* table, int index) {
+    if (!table || !table->slots || index < 0 || index >= table->slots->length) {
+        return NULL;
+    }
+    RuntimeResourceSlot* slot = (RuntimeResourceSlot*)table->slots->data[index];
+    return slot && slot->entry && !slot->entry->closing ? slot->entry : NULL;
+}
+
+extern "C" Item runtime_resource_table_value(RuntimeResourceTable* table,
+        const RuntimeResourceEntry* entry) {
+    if (!table || !entry) return ItemNull;
+    Item* value = root_vector_at(&table->owner_values, entry->root_slot);
+    return value ? *value : ItemNull;
+}
+
+extern "C" void* runtime_resource_table_user_data(RuntimeResourceTable* table,
+        uint32_t id) {
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry(table, id);
+    return entry ? entry->close_user : NULL;
+}
+
+static void runtime_resource_table_release_entry(RuntimeResourceTable* table,
+        RuntimeResourceSlot* slot, bool close_native) {
+    if (!table || !slot || !slot->entry) return;
+    RuntimeResourceEntry* entry = slot->entry;
+    entry->closing = true;
+    // Invalidate the rid before protocol teardown: close callbacks can reenter
+    // the table, but must not acquire a newly closing native payload.
+    slot->entry = NULL;
+    if (table->active_count > 0) table->active_count--;
+    if (close_native && entry->close_callback) entry->close_callback(entry->close_user);
+    Item* value = root_vector_at(&table->owner_values, entry->root_slot);
+    if (value) *value = ItemNull;
+    mem_free(entry);
+}
+
+extern "C" void runtime_resource_table_remove(RuntimeResourceTable* table,
+        uint32_t id) {
+    RuntimeResourceSlot* slot = runtime_resource_table_slot(table, id);
+    runtime_resource_table_release_entry(table, slot, true);
+}
+
+extern "C" void runtime_resource_table_forget(RuntimeResourceTable* table,
+        uint32_t id) {
+    RuntimeResourceSlot* slot = runtime_resource_table_slot(table, id);
+    runtime_resource_table_release_entry(table, slot, false);
+}
+
+extern "C" void runtime_resource_table_clear(RuntimeResourceTable* table) {
+    if (!table) return;
+    if (table->slots) {
+        for (int i = 0; i < table->slots->length; i++) {
+            RuntimeResourceSlot* slot = (RuntimeResourceSlot*)table->slots->data[i];
+            runtime_resource_table_release_entry(table, slot, true);
+            if (slot) mem_free(slot);
+        }
+        arraylist_free(table->slots);
+        table->slots = NULL;
+    }
+    root_vector_clear(&table->owner_values);
+}
+
+extern "C" void runtime_resource_table_destroy(RuntimeResourceTable* table) {
+    if (!table) return;
+    runtime_resource_table_clear(table);
+    root_vector_destroy(&table->owner_values);
+}
+
+extern "C" uint32_t runtime_resource_table_add(RuntimeResourceTable* table,
+        Item value, const RuntimeResourceDescriptor* descriptor,
+        RuntimeResourceCloseCallback close_callback, void* close_user,
+        bool is_handle) {
+    if (!table || !value.item || !descriptor) return 0;
+    if (!table->slots) {
+        table->slots = arraylist_new(8);
+        if (!table->slots) return 0;
+    }
+    for (int i = 0; i < table->slots->length; i++) {
+        RuntimeResourceSlot* slot = (RuntimeResourceSlot*)table->slots->data[i];
+        RuntimeResourceEntry* entry = slot ? slot->entry : NULL;
+        if (entry && runtime_resource_table_value(table, entry).item == value.item) {
+            // A script owner has exactly one native close authority.
+            return close_callback ? 0 : entry->id;
+        }
+    }
+
+    RuntimeResourceSlot* slot = NULL;
+    int index = -1;
+    for (int i = 0; i < table->slots->length; i++) {
+        RuntimeResourceSlot* candidate = (RuntimeResourceSlot*)table->slots->data[i];
+        if (candidate && !candidate->entry) {
+            slot = candidate;
+            index = i;
+            break;
+        }
+    }
+    if (!slot) {
+        if (table->slots->length >= (int)RUNTIME_RESOURCE_INDEX_MASK) return 0;
+        slot = (RuntimeResourceSlot*)mem_calloc(1, sizeof(RuntimeResourceSlot),
+            MEM_CAT_SYSTEM);
+        if (!slot || !arraylist_append(table->slots, slot)) {
+            if (slot) mem_free(slot);
+            return 0;
+        }
+        index = table->slots->length - 1;
+    }
+    slot->generation++;
+    if (slot->generation == 0) slot->generation++;
+
+    RootFrame roots(1);
+    Rooted<Item> value_root(roots, value);
+    RuntimeResourceEntry* entry = (RuntimeResourceEntry*)mem_calloc(1,
+        sizeof(RuntimeResourceEntry), MEM_CAT_SYSTEM);
+    if (!entry) return 0;
+    entry->id = ((uint32_t)slot->generation << RUNTIME_RESOURCE_INDEX_BITS) |
+        (uint32_t)(index + 1);
+    entry->root_slot = root_vector_count(&table->owner_values);
+    entry->descriptor = descriptor;
+    entry->close_callback = close_callback;
+    entry->close_user = close_user;
+    entry->is_handle = is_handle;
+    if (!root_vector_push(&table->owner_values, value_root.get())) {
+        mem_free(entry);
+        return 0;
+    }
+    slot->entry = entry;
+    table->active_count++;
+    return entry->id;
+}
+
+extern "C" void runtime_resource_table_close_group(RuntimeResourceTable* table,
+        RuntimeResourceGroup group) {
+    if (!table || group == RUNTIME_RESOURCE_GROUP_NONE || !table->slots) return;
+    for (int i = 0; i < table->slots->length; i++) {
+        RuntimeResourceSlot* slot = (RuntimeResourceSlot*)table->slots->data[i];
+        RuntimeResourceEntry* entry = slot ? slot->entry : NULL;
+        if (!entry || !entry->descriptor || entry->descriptor->group != group) continue;
+        runtime_resource_table_release_entry(table, slot, true);
+    }
 }

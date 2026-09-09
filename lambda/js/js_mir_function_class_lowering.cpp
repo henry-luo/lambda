@@ -199,14 +199,13 @@ static MIR_reg_t jm_emit_keyed_scope_env_tdz(JsMirTranspiler* mt) {
 
 bool jm_class_or_ancestor_has_private_members(JsClassEntry* ce) {
     for (JsClassEntry* current = ce; current; current = current->superclass) {
-        for (int i = 0; i < current->method_count; i++) {
-            if (jm_is_private_name(current->methods[i].name)) return true;
-        }
-        for (int i = 0; i < current->static_field_count; i++) {
-            if (jm_is_private_name(current->static_fields[i].name)) return true;
-        }
-        for (int i = 0; i < current->instance_field_count; i++) {
-            if (jm_is_private_name(current->instance_fields[i].name)) return true;
+        for (int i = 0; i < current->member_count; i++) {
+            JsClassMember* member = &current->members[i];
+            String* name = member->kind == JS_CLASS_MEMBER_METHOD ? member->as.method.name
+                : member->kind == JS_CLASS_MEMBER_STATIC_FIELD ? member->as.static_field.name
+                : member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD ? member->as.instance_field.name
+                : NULL;
+            if (jm_is_private_name(name)) return true;
         }
     }
     return false;
@@ -309,15 +308,15 @@ void jm_emit_set_function_home_class(JsMirTranspiler* mt, MIR_reg_t fn_item,
     jm_callr_void_2(mt, "js_set_function_home_class", fn_item, cls_obj);
 }
 
-static bool jm_private_static_method_brand_seen(JsClassEntry* ce, int method_index) {
-    if (!ce || method_index < 0 || method_index >= ce->method_count) return false;
-    JsClassMethodEntry* method = &ce->methods[method_index];
-    if (!method->is_static || method->is_constructor || !method->name ||
+static bool jm_private_static_method_brand_seen(JsClassEntry* ce, int member_index) {
+    JsClassMethodEntry* method = jm_class_member_method(ce, member_index);
+    if (!method || !method->is_static || method->is_constructor || !method->name ||
         !jm_is_private_name(method->name)) {
         return false;
     }
-    for (int previous_index = 0; previous_index < method_index; previous_index++) {
-        JsClassMethodEntry* previous = &ce->methods[previous_index];
+    for (int previous_index = 0; previous_index < member_index; previous_index++) {
+        JsClassMethodEntry* previous = jm_class_member_method(ce, previous_index);
+        if (!previous) continue;
         if (!previous->is_static || previous->is_constructor || !previous->name ||
             !jm_is_private_name(previous->name)) {
             continue;
@@ -370,11 +369,13 @@ static MIR_reg_t jm_emit_computed_method_key(JsMirTranspiler* mt,
 bool jm_emit_class_method_install(JsMirTranspiler* mt,
         const JsMirClassMethodInstallPolicy* policy) {
     if (!mt || !policy || !policy->destination || !policy->home_class ||
-        !policy->owner_class || policy->method_index < 0 ||
-        policy->method_index >= policy->owner_class->method_count) {
+        !policy->owner_class || policy->member_index < 0 ||
+        policy->member_index >= policy->owner_class->member_count) {
         return false;
     }
-    JsClassMethodEntry* method = &policy->owner_class->methods[policy->method_index];
+    JsClassMethodEntry* method = jm_class_member_method(policy->owner_class,
+        policy->member_index);
+    if (!method) return false;
     bool needs_static = policy->mode != JS_MIR_CLASS_METHOD_OWN_INSTANCE;
     if (method->is_constructor || method->is_static != needs_static ||
         !method->fc || !method->fc->func_item ||
@@ -447,7 +448,7 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
     }
     if (policy->mode == JS_MIR_CLASS_METHOD_OWN_STATIC && method->name &&
         jm_is_private_name(method->name) &&
-        !jm_private_static_method_brand_seen(policy->owner_class, policy->method_index)) {
+        !jm_private_static_method_brand_seen(policy->owner_class, policy->member_index)) {
         jm_callr_3(mt, "js_private_brand_add", MIR_T_I64, policy->destination, method_key, policy->destination);
         jm_emit_error_lane_propagate_check(mt);
     }

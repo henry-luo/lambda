@@ -1,0 +1,3 @@
+static-key-a,static-key-b,instance-key,static-init-a,static-block,static-init-b
+3
+8

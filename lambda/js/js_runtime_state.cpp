@@ -114,6 +114,287 @@ static bool js_runtime_state_init_well_known_refs(JsRuntimeState* state) {
 static void js_root_range_set_storage(JsRootRange* range, Item* slots,
                                      int slot_count, const char* name);
 
+static bool js_execution_state_prepare(JsRuntimeState* state,
+                                       EvalContext* owner) {
+    if (!state || !owner) return false;
+    JsExecutionState* execution = &state->execution;
+    if (!execution->base_activation_items.name) {
+        root_vector_init(&execution->base_activation_items, (Context*)owner,
+            "JS base call activation");
+    }
+    if (!owner->heap || !owner->heap->gc) {
+        for (int i = 0; i < JS_CALL_ACTIVATION_ITEM_COUNT; i++) {
+            execution->base_activation.items[i] =
+                &execution->base_activation_fallback[i];
+        }
+        execution->base_activation.previous = NULL;
+        return true;
+    }
+    // A replaced heap clears RootVector contents by design. Base activation
+    // homes are recreated before this realm publishes another JS Item.
+    if (root_vector_count(&execution->base_activation_items) == 0) {
+        for (int i = 0; i < JS_CALL_ACTIVATION_ITEM_COUNT; i++) {
+            if (!root_vector_push(&execution->base_activation_items,
+                    execution->base_activation_fallback[i])) return false;
+        }
+    }
+    if (root_vector_count(&execution->base_activation_items) !=
+            JS_CALL_ACTIVATION_ITEM_COUNT) {
+        log_error("js-call-activation: invalid base root count=%d",
+            (int)root_vector_count(&execution->base_activation_items));
+        return false;
+    }
+    for (int i = 0; i < JS_CALL_ACTIVATION_ITEM_COUNT; i++) {
+        execution->base_activation.items[i] =
+            root_vector_at(&execution->base_activation_items, i);
+        if (!execution->base_activation.items[i]) return false;
+    }
+    execution->base_activation.previous = NULL;
+    if (!execution->current_activation) {
+        execution->base_activation.args = NULL;
+        execution->base_activation.arg_count = 0;
+        execution->base_activation.source = NULL;
+        execution->base_activation.source_len = 0;
+        execution->base_activation.args_is_strict = 0;
+        execution->base_activation.derived_constructor = false;
+        execution->base_activation.super_this_bound = false;
+    }
+    return true;
+}
+
+static bool js_global_environment_key_same(Item left, Item right) {
+    if (left.item == right.item) return true;
+    if (get_type_id(left) != LMD_TYPE_STRING ||
+            get_type_id(right) != LMD_TYPE_STRING) return false;
+    String* left_string = it2s(left);
+    String* right_string = it2s(right);
+    return left_string && right_string && left_string->len == right_string->len &&
+        memcmp(left_string->chars, right_string->chars, left_string->len) == 0;
+}
+
+static void js_global_environment_reset_metadata(
+        JsGlobalEnvironment* environment) {
+    environment->binding_count = 0;
+    environment->object_var_epoch = 0;
+    environment->lexical_epoch = 0;
+    environment->module_epoch = 0;
+}
+
+// RootVector clears itself when its owner replaces the heap. Binding metadata
+// cannot outlive those cleared Items, so rebuilding fixed slots also clears
+// the dynamic rows (D5.3.5; JSCU29).
+bool js_global_environment_ensure(JsGlobalEnvironment* environment) {
+    if (!environment) return false;
+    if (root_vector_count(&environment->roots) >= JS_GLOBAL_ENV_SLOT_COUNT) {
+        return true;
+    }
+    root_vector_clear(&environment->roots);
+    js_global_environment_reset_metadata(environment);
+    environment->window_event_intercept_enabled = false;
+    for (int i = 0; i < JS_GLOBAL_ENV_SLOT_COUNT; i++) {
+        // Global caches use raw zero as their unpublished sentinel; ItemNull
+        // is guest-visible JavaScript null and must never stand in for it.
+        if (!root_vector_push(&environment->roots, (Item){0})) return false;
+    }
+    return true;
+}
+
+bool js_global_environment_init(JsGlobalEnvironment* environment,
+        Context* owner) {
+    if (!environment) return false;
+    root_vector_init(&environment->roots, owner, "JS global environment");
+    // Runtime records are allocated before a JS heap exists. Publishing the
+    // fixed slots waits for the first global operation, when RootVector can
+    // register them with that heap (D5.4.2).
+    return true;
+}
+
+void js_global_environment_destroy(JsGlobalEnvironment* environment) {
+    if (!environment) return;
+    root_vector_destroy(&environment->roots);
+    if (environment->bindings) mem_free(environment->bindings);
+    environment->bindings = NULL;
+    environment->binding_capacity = 0;
+    js_global_environment_reset_metadata(environment);
+}
+
+Item& js_global_environment_slot(JsGlobalEnvironment* environment,
+        JsGlobalEnvironmentSlot slot) {
+    static Item unavailable_slot = ItemNull;
+    if (!js_global_environment_ensure(environment)) {
+        log_error("js-global-environment: cannot prepare realm slot %d", (int)slot);
+        return unavailable_slot;
+    }
+    Item* item = root_vector_at(&environment->roots, slot);
+    if (!item) {
+        log_error("js-global-environment: unavailable realm slot %d", (int)slot);
+        return unavailable_slot;
+    }
+    return *item;
+}
+
+JsGlobalBinding* js_global_environment_binding_at(
+        JsGlobalEnvironment* environment, int index) {
+    if (!js_global_environment_ensure(environment) || index < 0 ||
+            index >= environment->binding_count) return NULL;
+    return &environment->bindings[index];
+}
+
+Item js_global_environment_binding_key(JsGlobalEnvironment* environment,
+        const JsGlobalBinding* binding) {
+    if (!environment || !binding) return ItemNull;
+    Item* key = root_vector_at(&environment->roots, binding->root_slot);
+    return key ? *key : ItemNull;
+}
+
+Item js_global_environment_binding_value(JsGlobalEnvironment* environment,
+        const JsGlobalBinding* binding) {
+    if (!environment || !binding) return ItemNull;
+    Item* value = root_vector_at(&environment->roots, binding->root_slot + 1);
+    return value ? *value : ItemNull;
+}
+
+void js_global_environment_set_binding_value(JsGlobalEnvironment* environment,
+        JsGlobalBinding* binding, Item value) {
+    if (!environment || !binding) return;
+    Item* slot = root_vector_at(&environment->roots, binding->root_slot + 1);
+    if (slot) *slot = value;
+}
+
+int js_global_environment_find(JsGlobalEnvironment* environment,
+        JsGlobalBindingKind kind, Item key) {
+    if (!js_global_environment_ensure(environment)) return -1;
+    for (int i = environment->binding_count - 1; i >= 0; i--) {
+        JsGlobalBinding* binding = &environment->bindings[i];
+        if (binding->kind == kind && js_global_environment_key_same(
+                js_global_environment_binding_key(environment, binding), key)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static bool js_global_environment_grow_bindings(
+        JsGlobalEnvironment* environment) {
+    if (environment->binding_count < environment->binding_capacity) return true;
+    int capacity = environment->binding_capacity ?
+        environment->binding_capacity * 2 : 16;
+    JsGlobalBinding* bindings = (JsGlobalBinding*)mem_realloc(
+        environment->bindings, (size_t)capacity * sizeof(JsGlobalBinding),
+        MEM_CAT_JS_RUNTIME);
+    if (!bindings) {
+        log_error("js-global-environment: cannot grow to %d bindings", capacity);
+        return false;
+    }
+    environment->bindings = bindings;
+    environment->binding_capacity = capacity;
+    return true;
+}
+
+bool js_global_environment_upsert(JsGlobalEnvironment* environment,
+        JsGlobalBindingKind kind, Item key, Item value, bool immutable,
+        int module_index, uint32_t module_state_id) {
+    if (!js_global_environment_ensure(environment)) return false;
+    int existing = js_global_environment_find(environment, kind, key);
+    if (existing >= 0) {
+        JsGlobalBinding* binding = &environment->bindings[existing];
+        js_global_environment_set_binding_value(environment, binding, value);
+        binding->immutable = immutable;
+        binding->module_index = module_index;
+        binding->module_state_id = module_state_id;
+        return true;
+    }
+    RootFrame roots(2);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> value_root(roots, value);
+    if (!js_global_environment_grow_bindings(environment)) return false;
+    int64_t root_slot = root_vector_count(&environment->roots);
+    if (!root_vector_push(&environment->roots, key_root.get()) ||
+            !root_vector_push(&environment->roots, value_root.get())) {
+        root_vector_shrink(&environment->roots, root_slot);
+        return false;
+    }
+    JsGlobalBinding* binding = &environment->bindings[environment->binding_count++];
+    binding->root_slot = root_slot;
+    binding->module_index = module_index;
+    binding->module_state_id = module_state_id;
+    binding->kind = kind;
+    binding->immutable = immutable;
+    return true;
+}
+
+void js_global_environment_clear_bindings(JsGlobalEnvironment* environment) {
+    if (!js_global_environment_ensure(environment)) return;
+    root_vector_shrink(&environment->roots, JS_GLOBAL_ENV_SLOT_COUNT);
+    js_global_environment_reset_metadata(environment);
+}
+
+static bool js_global_environment_rebuild_bindings(
+        JsGlobalEnvironment* environment) {
+    RootVector replacement = {};
+    root_vector_init(&replacement, environment->roots.owner,
+        "JS global environment");
+    for (int i = 0; i < JS_GLOBAL_ENV_SLOT_COUNT; i++) {
+        if (!root_vector_push(&replacement,
+                js_global_environment_slot(environment, (JsGlobalEnvironmentSlot)i))) {
+            root_vector_destroy(&replacement);
+            return false;
+        }
+    }
+    for (int i = 0; i < environment->binding_count; i++) {
+        JsGlobalBinding* binding = &environment->bindings[i];
+        Item key = js_global_environment_binding_key(environment, binding);
+        Item value = js_global_environment_binding_value(environment, binding);
+        if (!root_vector_push(&replacement, key) ||
+                !root_vector_push(&replacement, value)) {
+            root_vector_destroy(&replacement);
+            return false;
+        }
+    }
+    RootVector old = environment->roots;
+    environment->roots = replacement;
+    for (int i = 0; i < environment->binding_count; i++) {
+        environment->bindings[i].root_slot = JS_GLOBAL_ENV_SLOT_COUNT + 2 * i;
+    }
+    root_vector_destroy(&old);
+    return true;
+}
+
+void js_global_environment_remove_kind(JsGlobalEnvironment* environment,
+        JsGlobalBindingKind kind) {
+    if (!js_global_environment_ensure(environment)) return;
+    int retained = 0;
+    for (int i = 0; i < environment->binding_count; i++) {
+        if (environment->bindings[i].kind != kind) {
+            environment->bindings[retained++] = environment->bindings[i];
+        }
+    }
+    if (retained == environment->binding_count) return;
+    environment->binding_count = retained;
+    if (!js_global_environment_rebuild_bindings(environment)) {
+        log_error("js-global-environment: cannot rebuild after removing kind %d",
+            (int)kind);
+    }
+}
+
+void js_global_environment_release_module_bindings(
+        JsGlobalEnvironment* environment, uint32_t first_module_state_id) {
+    if (!js_global_environment_ensure(environment) ||
+            first_module_state_id == UINT32_MAX) return;
+    int retained = 0;
+    for (int i = 0; i < environment->binding_count; i++) {
+        JsGlobalBinding* binding = &environment->bindings[i];
+        if (binding->kind == JS_GLOBAL_BINDING_MODULE_VAR &&
+                binding->module_state_id >= first_module_state_id) continue;
+        environment->bindings[retained++] = *binding;
+    }
+    if (retained == environment->binding_count) return;
+    environment->binding_count = retained;
+    if (!js_global_environment_rebuild_bindings(environment)) {
+        log_error("js-global-environment: cannot rebuild released module bindings");
+    }
+}
+
 static void js_runtime_state_free_records(JsRuntimeState* state) {
     // the wrapper cache tables are separate allocations now
     if (state) {
@@ -125,28 +406,50 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         state->function_cache_count = 0;
     }
     if (!state) return;
-    if (state->global_bindings) mem_free(state->global_bindings);
+    if (state->global_environment) {
+        js_global_environment_destroy(state->global_environment);
+        mem_free(state->global_environment);
+    }
     if (state->event_loop) mem_free(state->event_loop);
-    if (state->timers) mem_free(state->timers);
-    if (state->async_hooks) mem_free(state->async_hooks);
-    if (state->global_var_module_bindings) mem_free(state->global_var_module_bindings);
-    state->global_bindings = NULL;
+    if (state->timers) {
+        js_event_loop_timer_state_destroy(state->timers);
+        runtime_resource_table_destroy(&state->timers->resources);
+        mem_free(state->timers);
+    }
+    if (state->async_hooks) {
+        root_vector_destroy(&state->async_hooks->hooks);
+        root_vector_destroy(&state->async_hooks->pending_destroy_resources);
+        mem_free(state->async_hooks);
+    }
+    state->global_environment = NULL;
     state->event_loop = NULL;
     state->timers = NULL;
     state->async_hooks = NULL;
-    state->global_var_module_bindings = NULL;
-    if (state->readline) mem_free(state->readline);
+    if (state->readline) {
+        js_readline_state_destroy(state->readline);
+        mem_free(state->readline);
+    }
     if (state->builtin_cache) mem_free(state->builtin_cache);
     if (state->global_string_caches) mem_free(state->global_string_caches);
-    if (state->assert) mem_free(state->assert);
+    if (state->assert) {
+        root_vector_destroy(&state->assert->instances);
+        mem_free(state->assert);
+    }
     if (state->intrinsics) mem_free(state->intrinsics);
     if (state->string_concat) mem_free(state->string_concat);
-    if (state->async_local_storage) mem_free(state->async_local_storage);
+    if (state->async_local_storage) {
+        root_vector_destroy(&state->async_local_storage->instances);
+        mem_free(state->async_local_storage);
+    }
     if (state->constructors) mem_free(state->constructors);
-    if (state->test262_agent) mem_free(state->test262_agent);
+    if (state->test262_agent) {
+        js_test262_agent_state_destroy(state->test262_agent);
+        mem_free(state->test262_agent);
+    }
     if (state->process) mem_free(state->process);
     if (state->iterators) mem_free(state->iterators);
     if (state->namespaces) mem_free(state->namespaces);
+    if (state->root_range_registry) arraylist_free(state->root_range_registry);
     state->readline = NULL;
     state->builtin_cache = NULL;
     state->global_string_caches = NULL;
@@ -159,6 +462,7 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
     state->process = NULL;
     state->iterators = NULL;
     state->namespaces = NULL;
+    state->root_range_registry = NULL;
 }
 
 // JSCU16: the realm's large records are allocated beside JsRuntimeState
@@ -167,16 +471,14 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
 // precise root spans are published here, which is what lets their catalog
 // entries disappear.
 static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
-    state->global_bindings = (JsGlobalBindingState*)mem_calloc(1,
-        sizeof(JsGlobalBindingState), MEM_CAT_JS_RUNTIME);
+    state->global_environment = (JsGlobalEnvironment*)mem_calloc(1,
+        sizeof(JsGlobalEnvironment), MEM_CAT_JS_RUNTIME);
     state->event_loop = (JsEventLoopQueueState*)mem_calloc(1,
         sizeof(JsEventLoopQueueState), MEM_CAT_JS_RUNTIME);
     state->timers = (JsEventLoopTimerState*)mem_calloc(1,
         sizeof(JsEventLoopTimerState), MEM_CAT_JS_RUNTIME);
     state->async_hooks = (JsAsyncHooksState*)mem_calloc(1,
         sizeof(JsAsyncHooksState), MEM_CAT_JS_RUNTIME);
-    state->global_var_module_bindings = (JsGlobalVarModuleBindingState*)mem_calloc(1,
-        sizeof(JsGlobalVarModuleBindingState), MEM_CAT_JS_RUNTIME);
     state->readline = (JsReadlineState*)mem_calloc(1, sizeof(JsReadlineState), MEM_CAT_JS_RUNTIME);
     state->builtin_cache = (JsBuiltinCacheState*)mem_calloc(1, sizeof(JsBuiltinCacheState), MEM_CAT_JS_RUNTIME);
     state->global_string_caches = (JsGlobalStringCacheState*)mem_calloc(1, sizeof(JsGlobalStringCacheState), MEM_CAT_JS_RUNTIME);
@@ -189,8 +491,8 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
     state->process = (JsProcessState*)mem_calloc(1, sizeof(JsProcessState), MEM_CAT_JS_RUNTIME);
     state->iterators = (JsIteratorState*)mem_calloc(1, sizeof(JsIteratorState), MEM_CAT_JS_RUNTIME);
     state->namespaces = (JsRuntimeNamespaceState*)mem_calloc(1, sizeof(JsRuntimeNamespaceState), MEM_CAT_JS_RUNTIME);
-    if (!state->global_bindings || !state->event_loop || !state->timers ||
-            !state->async_hooks || !state->global_var_module_bindings ||
+    if (!state->global_environment || !state->event_loop || !state->timers ||
+            !state->async_hooks ||
             !state->readline ||
             !state->builtin_cache ||
             !state->global_string_caches ||
@@ -207,22 +509,32 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
         js_runtime_state_free_records(state);
         return false;
     }
-    js_root_range_set_storage(&state->global_bindings->roots,
-        &state->global_bindings->global_this,
-        1 + 64 + 1 + 1 + 1 + 2 * JS_GLOBAL_LEX_BIND_MAX,
-        "global object and lexical bindings");
+    if (!js_global_environment_init(state->global_environment, context)) {
+        log_error("js-runtime-state: failed to initialize global environment");
+        js_runtime_state_free_records(state);
+        return false;
+    }
+    runtime_resource_table_init(&state->timers->resources, context,
+        "JS timer resources");
+    root_vector_init(&state->async_local_storage->instances, (Context*)context,
+        "AsyncLocalStorage instances");
+    root_vector_init(&state->assert->instances, (Context*)context,
+        "assert instances");
+    root_vector_init(&state->readline->input_values, (Context*)context,
+        "readline input map");
+    root_vector_init(&state->async_hooks->hooks, (Context*)context,
+        "async hook instances");
+    root_vector_init(&state->async_hooks->pending_destroy_resources,
+        (Context*)context, "async hook destroy queue");
+    root_vector_init(&state->test262_agent->callbacks, (Context*)context,
+        "Test262 agent callbacks");
+    root_vector_init(&state->test262_agent->report_values, (Context*)context,
+        "Test262 agent reports");
     js_root_range_set_storage(&state->async_hooks->roots,
         &state->async_hooks->root_resource,
-        2 + JS_ASYNC_HOOK_STATE_MAX + JS_ASYNC_PENDING_DESTROY_STATE_MAX,
-        "async hooks state");
-    js_root_range_set_storage(&state->global_var_module_bindings->roots,
-        &state->global_var_module_bindings->global,
-        1 + JS_GLOBAL_VAR_MODULE_BINDING_CAP, "global var module bindings");
+        2, "async hooks current resources");
     js_root_range_set_storage(&state->event_loop_queue_roots,
-        state->event_loop->queue_storage, 2, "JS async queue storage");
-    js_root_range_set_storage(&state->event_loop_raf_roots,
-        state->event_loop->raf_callback, JS_EVENT_RAF_CAPACITY,
-        "JS animation frame callbacks");
+        state->event_loop->queue_storage, 3, "JS runtime job queue storage");
     return true;
 }
 
@@ -231,91 +543,97 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
         log_error("js-thread-init: EvalContext is not current owner");
         return false;
     }
-    if (!runtime_context->js_state) {
-        runtime_context->js_state = (JsRuntimeState*)mem_alloc(sizeof(JsRuntimeState),
-            MEM_CAT_JS_RUNTIME);
-        if (!runtime_context->js_state) {
+    static const ContextCapsuleOps js_runtime_state_capsule_ops = {
+        "js-runtime", CONTEXT_CAPSULE_LIFETIME_CONTEXT, sizeof(JsRuntimeState),
+        NULL, NULL, NULL
+    };
+    JsRuntimeState* state = js_runtime_state_for(runtime_context);
+    if (!state) {
+        state = (JsRuntimeState*)context_capsule_ensure(runtime_context,
+            CONTEXT_CAPSULE_JS_RUNTIME, &js_runtime_state_capsule_ops);
+        if (!state) {
             log_error("js-runtime-state: failed to allocate context state");
             return false;
         }
-        memset(runtime_context->js_state, 0, sizeof(JsRuntimeState));
-        if (!js_runtime_state_alloc_records(runtime_context->js_state)) {
-            mem_free(runtime_context->js_state);
-            runtime_context->js_state = NULL;
+        if (!js_runtime_state_alloc_records(state)) {
+            context_capsule_drop(runtime_context, CONTEXT_CAPSULE_JS_RUNTIME);
             return false;
         }
-        runtime_context->js_state->heap_epoch = 1;
-        js_item_stack_init(&runtime_context->js_state->super_this_values,
-            (Context*)runtime_context, "super-this values");
-        js_item_stack_init(&runtime_context->js_state->with_scope.stack,
+        state->heap_epoch = 1;
+        js_item_stack_init(&state->with_scope.stack,
             (Context*)runtime_context, "with-scope stack");
-        js_item_stack_init(&runtime_context->js_state->promises.domain_stack,
+        js_item_stack_init(&state->promises.domain_stack,
             (Context*)runtime_context, "domain stack");
-        js_eval_state_vectors_init(&runtime_context->js_state->eval,
+        js_eval_state_vectors_init(&state->eval,
             (Context*)runtime_context);
-        runtime_context->js_state->batch_test_module_state_id = UINT32_MAX;
-        runtime_context->js_state->batch_preamble_module_state_id = UINT32_MAX;
-        runtime_context->js_state->batch_preamble_var_count = 0;
+        state->batch_test_module_state_id = UINT32_MAX;
+        state->batch_preamble_module_state_id = UINT32_MAX;
+        state->batch_preamble_var_count = 0;
         // This capsule is raw-allocated for C-compatible runtime ownership,
         // so restore non-zero queue identities that C++ default initializers
         // would otherwise provide only for a constructed object.
-        runtime_context->js_state->event_loop->next_raf_id = 1;
-        runtime_async_deque_init(
-            &runtime_context->js_state->event_loop->next_tick_deque,
-            &runtime_context->js_state->event_loop->queue_storage[0], 4);
-        runtime_async_deque_init(
-            &runtime_context->js_state->event_loop->microtask_deque,
-            &runtime_context->js_state->event_loop->queue_storage[1], 4);
-        runtime_async_deque_init(&runtime_context->js_state->promises.unhandled_deque,
-            &runtime_context->js_state->promises.unhandled_storage, 1);
-        runtime_context->js_state->timers->next_id = 1;
-        runtime_context->js_state->call_stack_limit = js_initial_call_stack_limit();
-        runtime_context->js_state->test262_agent->current_slot = -1;
-        runtime_context->js_state->operations.next_symbol_id = 100;
-        if (!js_runtime_state_init_well_known_refs(runtime_context->js_state)) {
+        state->event_loop->next_raf_id = 1;
+        runtime_job_queue_init(&state->event_loop->next_tick_queue,
+            &state->event_loop->queue_storage[0]);
+        runtime_job_queue_init(&state->event_loop->microtask_queue,
+            &state->event_loop->queue_storage[1]);
+        runtime_job_queue_init(&state->event_loop->animation_frame_queue,
+            &state->event_loop->queue_storage[2]);
+        runtime_job_queue_init(&state->promises.unhandled_queue,
+            &state->promises.unhandled_storage);
+        state->timers->next_id = 1;
+        state->execution.call_stack_limit = js_initial_call_stack_limit();
+        state->test262_agent->current_slot = -1;
+        state->operations.next_symbol_id = 100;
+        if (!js_runtime_state_init_well_known_refs(state)) {
             // A missing generated record would make pointer identity silently
             // fall back to bytes, so fail before any realm executes code.
             log_error("js-runtime-state: incomplete generated well-known key table");
-            mem_free(runtime_context->js_state);
-            runtime_context->js_state = NULL;
+            context_capsule_drop(runtime_context, CONTEXT_CAPSULE_JS_RUNTIME);
             return false;
         }
-        runtime_context->js_state->global_string_caches->last_from_char_code_cp = -1;
-        runtime_context->js_state->global_string_caches->ascii_chars_epoch = ~0ULL;
-        runtime_context->js_state->stream.default_byte_hwm = 16 * 1024;
-        runtime_context->js_state->stream.default_object_hwm = 16;
-        runtime_context->js_state->clipboard.generation = 1;
-        runtime_context->js_state->intrinsics->mutation_serial = 1;
-        runtime_context->js_state->async_roots_registered_epoch = UINT64_MAX;
-        runtime_context->js_state->async_hooks->next_id = 2;
-        runtime_context->js_state->promises.unhandled_strict =
+        state->global_string_caches->last_from_char_code_cp = -1;
+        state->global_string_caches->ascii_chars_epoch = ~0ULL;
+        state->stream.default_byte_hwm = 16 * 1024;
+        state->stream.default_object_hwm = 16;
+        state->clipboard.generation = 1;
+        state->intrinsics->mutation_serial = 1;
+        state->async_roots_registered_epoch = UINT64_MAX;
+        state->async_hooks->next_id = 2;
+        state->promises.unhandled_strict =
             js_promise_initial_unhandled_rejections_strict();
-        runtime_context->js_state->cluster.next_worker_id = 1;
-        runtime_context->js_state->assert->node_test_next_id = 1;
-        runtime_context->js_state->performance.origin_epoch = UINT64_MAX;
+        state->cluster.next_worker_id = 1;
+        state->assert->node_test_next_id = 1;
+        state->performance.origin_epoch = UINT64_MAX;
     }
     if (js_active_runtime_state &&
-            js_active_runtime_state != runtime_context->js_state) {
+            js_active_runtime_state != state) {
         // A derived JS TLS cache may never conceal an EvalContext switch.
         log_error("js-thread-init: refusing runtime-state switch current=%p owner=%p",
-                  (void*)js_active_runtime_state, (void*)runtime_context->js_state);
+                  (void*)js_active_runtime_state, (void*)state);
         return false;
     }
-    js_active_runtime_state = runtime_context->js_state;
+    js_active_runtime_state = state;
+    if (!js_execution_state_prepare(state, runtime_context)) {
+        log_error("js-call-activation: failed to prepare base activation roots");
+        js_active_runtime_state = NULL;
+        return false;
+    }
     js_fetch_apply_bootstrap_base_path();
     return true;
 }
 
 bool js_runtime_state_thread_matches(const EvalContext* runtime_context) {
+    JsRuntimeState* state = js_runtime_state_for((EvalContext*)runtime_context);
     return runtime_context && eval_context_matches(runtime_context) &&
-        runtime_context->js_state &&
-        js_active_runtime_state == runtime_context->js_state;
+        state && js_active_runtime_state == state;
 }
 
 bool js_runtime_state_shutdown(EvalContext* runtime_context) {
+    JsRuntimeState* state = js_runtime_state_for(runtime_context);
     if (!runtime_context || !eval_context_matches(runtime_context) ||
             (js_active_runtime_state &&
-             js_active_runtime_state != runtime_context->js_state)) {
+             js_active_runtime_state != state)) {
         log_error("js-thread-shutdown: owner mismatch");
         return false;
     }
@@ -325,7 +643,8 @@ bool js_runtime_state_shutdown(EvalContext* runtime_context) {
 
 void js_runtime_state_release_heap_resources(void) {
     EvalContext* runtime_context = context;
-    if (!runtime_context || !runtime_context->js_state) return;
+    JsRuntimeState* state = js_runtime_state_for(runtime_context);
+    if (!runtime_context || !state) return;
     if (!js_runtime_state_thread_matches(runtime_context)) {
         // Heap-bound JS cleanup invokes ambient helpers and therefore must run
         // on the already-bound owner thread instead of rebinding its capsule.
@@ -345,47 +664,51 @@ void js_runtime_state_release_heap_resources(void) {
     dom_foreign_documents_release_context();
     js_fetch_reset();
     js_reset_template_registry();
-    js_runtime_regex_cache_destroy_context(runtime_context->js_state);
+    js_runtime_regex_cache_destroy_context(state);
     js_release_input_resources();
 }
 
 void js_runtime_state_destroy_context(void) {
     EvalContext* runtime_context = context;
-    if (!runtime_context || !runtime_context->js_state) return;
-    bool was_active = js_active_runtime_state == runtime_context->js_state;
+    JsRuntimeState* state = js_runtime_state_for(runtime_context);
+    if (!runtime_context || !state) return;
+    bool was_active = js_active_runtime_state == state;
+    if (was_active) js_event_loop_shutdown();
     // Final runtime cleanup does not pass through batch reset, so detach the
     // optional Node session while its heap-backed state is still valid.
     jube_modules_runtime_detach();
-    js_runtime_owned_cache_destroy_context(runtime_context->js_state);
+    state = (JsRuntimeState*)context_capsule_take(runtime_context,
+        CONTEXT_CAPSULE_JS_RUNTIME);
+    if (!state) return;
+    js_runtime_owned_cache_destroy_context(state);
     // JSCU18: the DOM/web capsules leave through the directory's own walk
     // instead of eight hand-maintained calls.
     context_capsule_destroy_all(runtime_context);
-    js_fs_pending_destroy_context(runtime_context->js_state);
-    js_tls_destroy_context(runtime_context->js_state);
-    js_net_destroy_context(runtime_context->js_state);
-    js_atomics_destroy_context(runtime_context->js_state);
-    js_dynfunc_cache_destroy_context(runtime_context->js_state);
-    jm_compile_recovery_state_destroy_context(runtime_context->js_state);
-    js_runtime_prototype_snapshot_destroy_context(runtime_context->js_state);
-    js_runtime_regex_cache_destroy_context(runtime_context->js_state);
+    js_fs_pending_destroy_context(state);
+    js_tls_destroy_context(state);
+    js_net_destroy_context(state);
+    js_atomics_destroy_context(state);
+    js_dynfunc_cache_destroy_context(state);
+    jm_compile_recovery_state_destroy_context(state);
+    js_runtime_prototype_snapshot_destroy_context(state);
+    js_runtime_regex_cache_destroy_context(state);
     // JSCU9: generators are GC-owned carriers; the heap finalizer releases
     // their continuations when the context heap is destroyed.
-    if (runtime_context->js_state->operations.symbol_registry) {
-        hashmap_free(runtime_context->js_state->operations.symbol_registry);
+    if (state->operations.symbol_registry) {
+        hashmap_free(state->operations.symbol_registry);
     }
-    if (runtime_context->js_state->operations.symbol_description_registry) {
-        hashmap_free(runtime_context->js_state->operations.symbol_description_registry);
+    if (state->operations.symbol_description_registry) {
+        hashmap_free(state->operations.symbol_description_registry);
     }
     // Promise carriers are GC-owned; context teardown only drops queue and
     // async owners before the heap itself is released.
-    js_item_stack_destroy(&runtime_context->js_state->super_this_values);
-    js_item_stack_destroy(&runtime_context->js_state->with_scope.stack);
-    js_item_stack_destroy(&runtime_context->js_state->promises.domain_stack);
-    js_eval_state_vectors_destroy(&runtime_context->js_state->eval);
-    js_code_store_destroy(&runtime_context->js_state->code_store);
-    js_runtime_state_free_records(runtime_context->js_state);
-    mem_free(runtime_context->js_state);
-    runtime_context->js_state = NULL;
+    root_vector_destroy(&state->execution.base_activation_items);
+    js_item_stack_destroy(&state->with_scope.stack);
+    js_item_stack_destroy(&state->promises.domain_stack);
+    js_eval_state_vectors_destroy(&state->eval);
+    js_code_store_destroy(&state->code_store);
+    js_runtime_state_free_records(state);
+    mem_free(state);
     if (was_active) js_active_runtime_state = NULL;
 }
 
@@ -411,7 +734,7 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
 #define JS_RUNTIME_ROOT_STORAGE(M) \
     M(&state->with_scope.last_binding_roots, state->with_scope.last_binding_slots, 2, "with binding cache") \
     M(&state->builtin_cache->roots, state->builtin_cache->entries, JS_INTRINSIC_BINDING_COUNT, "intrinsic binding function cache") \
-    M(&state->readline->roots, &state->readline->namespace_object, 3 + 2 * JS_READLINE_INPUT_MAP_MAX, "readline namespaces and input map") \
+    M(&state->readline->roots, &state->readline->namespace_object, 3, "readline namespaces") \
     M(&state->buffer.roots, &state->buffer.namespace_object, 2, "Buffer namespace and prototype") \
     M(&state->https.roots, &state->https.namespace_object, 2, "HTTPS namespace and Agent prototype") \
     M(&state->util.roots, &state->util.namespace_object, 1, "util namespace") \
@@ -430,11 +753,10 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     M(&state->global_string_caches->roots, &state->global_string_caches->uri_last_four_byte_string, 389, "global URI, ASCII, and Test262 string caches") \
     M(&state->constructors->roots, state->constructors->global_builtin_functions, JS_BUILTIN_GLOBAL_MAX + JS_CTOR_MAX + 2 + JS_TYPED_ARRAY_CACHE_TYPE_COUNT, "global builtin and constructor caches") \
     M(&state->namespaces->roots, &state->namespaces->math, 8, "core JS namespace objects") \
-    M(&state->test262_agent->roots, &state->test262_agent->object, 1 + JS_TEST262_AGENT_MAX + JS_TEST262_AGENT_REPORT_MAX, "Test262 agent state") \
-    M(&state->process->roots, &state->process->argv, 3 + 2 * JS_PROCESS_LISTENER_MAX + 2, "process realm state") \
+    M(&state->test262_agent->roots, &state->test262_agent->object, 1, "Test262 agent object") \
+    M(&state->process->roots, &state->process->argv, 5, "process realm state") \
     M(&state->iterators->roots, &state->iterators->generator_return_marker, 11, "generator and iterator prototype caches") \
-    M(&state->promises.roots, &state->promises.unhandled_storage, 3, "Promise unhandled queue and domain state") \
-    M(&state->async_local_storage->roots, state->async_local_storage->instances, JS_MAX_ALS_INSTANCES, "AsyncLocalStorage instances")
+    M(&state->promises.roots, &state->promises.unhandled_storage, 3, "Promise unhandled queue and domain state")
     JS_RUNTIME_ROOT_STORAGE(JS_SET_RUNTIME_ROOT)
 #undef JS_RUNTIME_ROOT_STORAGE
 #undef JS_SET_RUNTIME_ROOT
@@ -474,14 +796,17 @@ bool js_root_range_register_reset(JsRootRange* range, void* owner,
         }
         return true;
     }
-    if (js_runtime_state.root_range_registry_count >= JS_ROOT_RANGE_REGISTRY_MAX) {
-        log_error("js-root-range: reset registry overflow for %s",
+    if (!js_runtime_state.root_range_registry) {
+        js_runtime_state.root_range_registry = arraylist_new(16);
+    }
+    if (!js_runtime_state.root_range_registry ||
+            !arraylist_append(js_runtime_state.root_range_registry, range)) {
+        log_error("js-root-range: cannot register reset range for %s",
             range->name ? range->name : "unnamed range");
         return false;
     }
     range->reset_owner = owner;
     range->reset = reset;
-    js_runtime_state.root_range_registry[js_runtime_state.root_range_registry_count++] = range;
     range->reset_registered = true;
     return true;
 }
@@ -497,14 +822,37 @@ bool js_root_range_ensure_registered(JsRootRange* range) {
     return true;
 }
 
+void js_root_range_unregister(JsRootRange* range) {
+    if (!range) return;
+    // A session-owned range can outlive a batch but not its session. Remove
+    // both registrations before freeing its descriptor (D5.3.5).
+    if (range->roots_epoch != 0 && context && context->heap && context->heap->gc &&
+            range->roots_epoch == js_heap_epoch && range->slots) {
+        heap_unregister_gc_root_range((uint64_t*)range->slots);
+    }
+    if (js_active_runtime_state && range->reset_registered) {
+        ArrayList* registry = js_runtime_state.root_range_registry;
+        for (int i = 0; registry && i < registry->length; i++) {
+            if (registry->data[i] != range) continue;
+            arraylist_remove(registry, i);
+            break;
+        }
+    }
+    range->roots_epoch = 0;
+    range->reset_owner = NULL;
+    range->reset = NULL;
+    range->reset_registered = false;
+}
+
 void js_root_range_clear(JsRootRange* range) {
     if (!range || !range->slots || range->slot_count <= 0) return;
     memset(range->slots, 0, (size_t)range->slot_count * sizeof(Item));
 }
 
 void js_root_range_reset_all(void) {
-    for (int i = 0; i < js_runtime_state.root_range_registry_count; i++) {
-        JsRootRange* range = js_runtime_state.root_range_registry[i];
+    ArrayList* registry = js_runtime_state.root_range_registry;
+    for (int i = 0; registry && i < registry->length; i++) {
+        JsRootRange* range = (JsRootRange*)registry->data[i];
         if (!range) continue;
         // Catalog-backed intrinsic callables are realm identity anchors.  Their
         // cache is reset explicitly for a full teardown and must survive a
@@ -543,12 +891,17 @@ void js_item_stack_shrink(JsItemStack* stack, int depth) {
     if (stack) root_vector_shrink(&stack->vec, depth);
 }
 
-#define js_eval_source_filenames (js_runtime_state.eval.source.filenames)
-#define js_eval_source_codes (js_runtime_state.eval.source.codes)
-#define js_eval_source_line_offset_stack (js_runtime_state.eval.source.line_offset_slots)
-#define js_eval_source_column_offset_stack (js_runtime_state.eval.source.column_offset_slots)
-#define js_eval_source_compact_stack (js_runtime_state.eval.source.compact_slots)
-#define js_eval_source_stack_depth ((int)root_vector_count(&js_eval_source_filenames))
+#define js_eval_source_values (js_runtime_state.eval.source.values)
+#define js_eval_source_records (js_runtime_state.eval.source.records)
+
+static int js_eval_source_stack_depth(void) {
+    return js_eval_source_records ? js_eval_source_records->length : 0;
+}
+
+static JsEvalSourceRecord* js_eval_source_record_at(int index) {
+    return js_eval_source_records && index >= 0 && index < js_eval_source_records->length
+        ? (JsEvalSourceRecord*)arraylist_get(js_eval_source_records, index) : NULL;
+}
 
 #define JS_EVAL_VECTOR_INIT(vec, label) root_vector_init(vec, owner, label);
 #define JS_EVAL_VECTOR_DESTROY(vec, label) root_vector_destroy(vec);
@@ -595,6 +948,15 @@ void js_code_store_destroy(JsCodeStore* store) {
     store->capacity = 0;
 }
 
+static void js_eval_source_records_clear(JsEvalSourceState* source) {
+    if (!source || !source->records) return;
+    for (int i = 0; i < source->records->length; i++) {
+        mem_free(arraylist_get(source->records, i));
+    }
+    arraylist_free(source->records);
+    source->records = NULL;
+}
+
 void js_eval_state_vectors_init(JsEvalState* state, Context* owner) {
     if (!state) return;
     JS_EVAL_STATE_VECTORS(JS_EVAL_VECTOR_INIT, state)
@@ -602,6 +964,7 @@ void js_eval_state_vectors_init(JsEvalState* state, Context* owner) {
 
 void js_eval_state_vectors_destroy(JsEvalState* state) {
     if (!state) return;
+    js_eval_source_records_clear(&state->source);
     JS_EVAL_STATE_VECTORS(JS_EVAL_VECTOR_DESTROY, state)
 }
 
@@ -609,9 +972,7 @@ void js_eval_state_reset(JsEvalState* state) {
     if (!state) return;
     js_runtime_state_prepare_root_ranges(js_active_runtime_state);
     JS_EVAL_STATE_VECTORS(JS_EVAL_VECTOR_CLEAR, state)
-    memset(state->source.line_offset_slots, 0, sizeof(state->source.line_offset_slots));
-    memset(state->source.column_offset_slots, 0, sizeof(state->source.column_offset_slots));
-    memset(state->source.compact_slots, 0, sizeof(state->source.compact_slots));
+    js_eval_source_records_clear(&state->source);
 
     JsEvalBridgeState* bridge = &state->bridge;
     memset(bridge->env_had_own, 0, sizeof(bridge->env_had_own));
@@ -633,7 +994,7 @@ void js_eval_state_reset(JsEvalState* state) {
 void js_eval_state_assert_clear(JsEvalState* state, const char* reset_name) {
     if (!state) return;
     const char* name = reset_name ? reset_name : "reset";
-    int source_depth = (int)root_vector_count(&state->source.filenames);
+    int source_depth = state->source.records ? state->source.records->length : 0;
     if (source_depth != 0) {
         log_error("js-eval-state: %s left source depth=%d", name, source_depth);
     }
@@ -651,47 +1012,65 @@ void js_eval_state_assert_clear(JsEvalState* state, const char* reset_name) {
 static bool js_eval_source_push_mode(Item filename, Item source,
                                      int64_t line_offset, int64_t column_offset,
                                      bool compact_stack) {
-    int idx = js_eval_source_stack_depth;
-    // the POD lanes are fixed; the depth is an explicit nesting policy
-    if (idx >= JS_EVAL_SOURCE_STACK_MAX) return false;
-    if (!root_vector_push(&js_eval_source_filenames, filename)) return false;
-    if (!root_vector_push(&js_eval_source_codes, source)) {
-        root_vector_pop(&js_eval_source_filenames);
+    if (!js_eval_source_records) js_eval_source_records = arraylist_new(8);
+    JsEvalSourceRecord* record = (JsEvalSourceRecord*)mem_calloc(1,
+        sizeof(JsEvalSourceRecord), MEM_CAT_JS_RUNTIME);
+    if (!record || !js_eval_source_records) {
+        mem_free(record);
         return false;
     }
-    js_eval_source_line_offset_stack[idx] = line_offset;
-    js_eval_source_column_offset_stack[idx] = column_offset;
-    js_eval_source_compact_stack[idx] = compact_stack;
+    record->filename_slot = (int64_t)root_vector_count(&js_eval_source_values);
+    if (!root_vector_push(&js_eval_source_values, filename)) {
+        mem_free(record);
+        return false;
+    }
+    record->source_slot = (int64_t)root_vector_count(&js_eval_source_values);
+    if (!root_vector_push(&js_eval_source_values, source)) {
+        root_vector_shrink(&js_eval_source_values, (int)record->filename_slot);
+        mem_free(record);
+        return false;
+    }
+    record->line_offset = line_offset;
+    record->column_offset = column_offset;
+    record->compact_stack = compact_stack;
+    if (!arraylist_append(js_eval_source_records, record)) {
+        root_vector_shrink(&js_eval_source_values, (int)record->filename_slot);
+        mem_free(record);
+        return false;
+    }
     return true;
 }
 JS_FORWARD_EXPRESSION(int64_t, js_eval_source_push, (Item filename, Item source,                                          int64_t line_offset, int64_t column_offset), (js_eval_source_push_mode(filename, source, line_offset, column_offset, false) ? 1 : 0))
 JS_FORWARD_EXPRESSION(int64_t, js_eval_source_push_compact, (Item filename, Item source,                                                  int64_t line_offset, int64_t column_offset), (js_eval_source_push_mode(filename, source, line_offset, column_offset, true) ? 1 : 0))
 
 extern "C" void js_eval_source_pop(void) {
-    if (js_eval_source_stack_depth <= 0) return;
-    int idx = js_eval_source_stack_depth - 1;
-    root_vector_pop(&js_eval_source_filenames);
-    root_vector_pop(&js_eval_source_codes);
-    js_eval_source_line_offset_stack[idx] = 0;
-    js_eval_source_column_offset_stack[idx] = 0;
-    js_eval_source_compact_stack[idx] = false;
+    int depth = js_eval_source_stack_depth();
+    if (depth <= 0) return;
+    JsEvalSourceRecord* record = js_eval_source_record_at(depth - 1);
+    if (record) {
+        root_vector_shrink(&js_eval_source_values, (int)record->filename_slot);
+        mem_free(record);
+    }
+    arraylist_remove(js_eval_source_records, depth - 1);
 }
 
 static bool js_eval_source_current(Item* out_filename, Item* out_source,
                                    int64_t* out_line_offset, int64_t* out_column_offset,
                                    bool* out_compact_stack) {
-    if (js_eval_source_stack_depth <= 0) return false;
-    int idx = js_eval_source_stack_depth - 1;
-    Item filename = *root_vector_at(&js_eval_source_filenames, idx);
-    Item source = *root_vector_at(&js_eval_source_codes, idx);
+    int depth = js_eval_source_stack_depth();
+    if (depth <= 0) return false;
+    JsEvalSourceRecord* record = js_eval_source_record_at(depth - 1);
+    if (!record) return false;
+    Item filename = *root_vector_at(&js_eval_source_values, (int)record->filename_slot);
+    Item source = *root_vector_at(&js_eval_source_values, (int)record->source_slot);
     if (get_type_id(filename) != LMD_TYPE_STRING || get_type_id(source) != LMD_TYPE_STRING) {
         return false;
     }
     if (out_filename) *out_filename = filename;
     if (out_source) *out_source = source;
-    if (out_line_offset) *out_line_offset = js_eval_source_line_offset_stack[idx];
-    if (out_column_offset) *out_column_offset = js_eval_source_column_offset_stack[idx];
-    if (out_compact_stack) *out_compact_stack = js_eval_source_compact_stack[idx];
+    if (out_line_offset) *out_line_offset = record->line_offset;
+    if (out_column_offset) *out_column_offset = record->column_offset;
+    if (out_compact_stack) *out_compact_stack = record->compact_stack;
     return true;
 }
 
@@ -1670,11 +2049,10 @@ extern "C" Item js_error_captureStackTrace(Item target, Item ctor) {
 
 extern "C" void js_runtime_set_input(void* input) {
     js_input = (Input*)input;
-    // Register static Item variables as GC roots on the CURRENT heap so their
-    // referenced objects are not collected.  Must re-register on each new heap.
-    heap_register_gc_root(&js_current_this.item);
-    heap_register_gc_root(&js_new_target.item);
-    heap_register_gc_root(&js_pending_args_callee.item);
+    if (!js_execution_state_prepare(js_active_runtime_state,
+            (EvalContext*)context)) {
+        log_error("js-call-activation: failed to bind base roots to current heap");
+    }
 }
 
 extern "C" Item js_get_this() {
@@ -1734,8 +2112,11 @@ extern "C" void js_set_arguments_info(int64_t is_strict) {
 void js_reset_transient_call_state() {
     js_current_this = (Item){0};
     js_new_target = (Item){0};
-    memset(js_super_this_bound_stack, 0, sizeof(js_runtime_state.super_this_bound_stack));
-    js_item_stack_clear(&js_runtime_state.super_this_values);
+    js_generator_callee_proto = (Item){0};
+    js_current_private_home_class = (Item){0};
+    js_super_this_value = (Item){0};
+    js_call_activation_current()->derived_constructor = false;
+    js_call_activation_current()->super_this_bound = false;
     js_pending_call_args = NULL;
     js_pending_call_argc = 0;
     js_pending_call_source = NULL;
@@ -1781,9 +2162,9 @@ void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_he
         leak_count++;
         log_error("js-batch-state: %s left new.target item=%lld", name, (long long)js_new_target.item);
     }
-    if (js_super_this_bound_depth != 0) {
+    if (js_call_activation_current()->derived_constructor) {
         leak_count++;
-        log_error("js-batch-state: %s left super this binding depth=%d", name, js_super_this_bound_depth);
+        log_error("js-batch-state: %s left derived constructor activation", name);
     }
     js_eval_state_assert_clear(&js_runtime_state.eval, name);
     if (js_pending_call_args || js_pending_call_argc != 0) {

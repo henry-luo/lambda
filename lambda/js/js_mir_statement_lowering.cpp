@@ -1722,20 +1722,14 @@ void jm_emit_class_static_block(JsMirTranspiler* mt, MIR_reg_t cls_obj,
 static void jm_emit_class_static_source_order(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         JsClassEntry* ce) {
     if (!mt || !ce) return;
-    // Indexed collection already rejects a class entry without a block body.
-    JsBlockNode* body = (JsBlockNode*)ce->node->body;
-    int static_field_index = 0;
-    int static_block_index = 0;
-    for (JsAstNode* elem = body->statements; elem; elem = elem->next) {
-        if (elem->node_type == JS_AST_NODE_FIELD_DEFINITION) {
-            JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)elem;
-            if (!fd->is_static || static_field_index >= ce->static_field_count) continue;
+    for (int member_index = 0; member_index < ce->member_count; member_index++) {
+        JsClassMember* member = &ce->members[member_index];
+        if (member->kind == JS_CLASS_MEMBER_STATIC_FIELD) {
             jm_emit_class_static_field(mt, cls_obj, ce,
-                &ce->static_fields[static_field_index++]);
-        } else if (elem->node_type == JS_AST_NODE_STATIC_BLOCK) {
-            if (static_block_index >= ce->static_block_count) continue;
+                &member->as.static_field);
+        } else if (member->kind == JS_CLASS_MEMBER_STATIC_BLOCK) {
             jm_emit_class_static_block(mt, cls_obj, ce,
-                ce->static_blocks[static_block_index++]);
+                member->as.static_block);
         }
     }
 }
@@ -1883,18 +1877,18 @@ void jm_emit_class_static_methods(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         JsClassEntry* parent = static_chain[class_index];
         MIR_reg_t parent_class = jm_emit_class_object_for_entry(mt, parent);
         if (!parent_class) parent_class = cls_obj;
-        for (int method_index = 0; method_index < parent->method_count; method_index++) {
+        for (int member_index = 0; member_index < parent->member_count; member_index++) {
             JsMirClassMethodInstallPolicy policy = {
-                cls_obj, parent_class, class_proto_obj, parent, method_index,
+                cls_obj, parent_class, class_proto_obj, parent, member_index,
                 JS_MIR_CLASS_METHOD_INHERITED_STATIC,
                 JS_MIR_COMPUTED_KEY_AFTER_FUNCTION
             };
             jm_emit_class_method_install(mt, &policy);
         }
     }
-    for (int method_index = 0; method_index < ce->method_count; method_index++) {
+    for (int member_index = 0; member_index < ce->member_count; member_index++) {
         JsMirClassMethodInstallPolicy policy = {
-            cls_obj, cls_obj, class_proto_obj, ce, method_index,
+            cls_obj, cls_obj, class_proto_obj, ce, member_index,
             JS_MIR_CLASS_METHOD_OWN_STATIC, own_key_order
         };
         jm_emit_class_method_install(mt, &policy);
@@ -1904,9 +1898,9 @@ void jm_emit_class_static_methods(JsMirTranspiler* mt, MIR_reg_t cls_obj,
 void jm_emit_class_instance_methods(JsMirTranspiler* mt, MIR_reg_t proto_obj,
         MIR_reg_t cls_obj, JsClassEntry* ce) {
     if (!mt || !ce) return;
-    for (int method_index = 0; method_index < ce->method_count; method_index++) {
+    for (int member_index = 0; member_index < ce->member_count; member_index++) {
         JsMirClassMethodInstallPolicy policy = {
-            proto_obj, cls_obj, 0, ce, method_index,
+            proto_obj, cls_obj, 0, ce, member_index,
             JS_MIR_CLASS_METHOD_OWN_INSTANCE,
             JS_MIR_COMPUTED_KEY_AFTER_FUNCTION
         };

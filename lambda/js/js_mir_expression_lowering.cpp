@@ -523,14 +523,13 @@ static bool jm_private_name_suffix_eq(String* name, const char* suffix, int suff
 
 static bool jm_class_declares_private_name(JsClassEntry* ce, const char* suffix, int suffix_len) {
     if (!ce || !suffix || suffix_len <= 0) return false;
-    for (int i = 0; i < ce->method_count; i++) {
-        if (jm_private_name_suffix_eq(ce->methods[i].name, suffix, suffix_len)) return true;
-    }
-    for (int i = 0; i < ce->static_field_count; i++) {
-        if (jm_private_name_suffix_eq(ce->static_fields[i].name, suffix, suffix_len)) return true;
-    }
-    for (int i = 0; i < ce->instance_field_count; i++) {
-        if (jm_private_name_suffix_eq(ce->instance_fields[i].name, suffix, suffix_len)) return true;
+    for (int i = 0; i < ce->member_count; i++) {
+        JsClassMember* member = &ce->members[i];
+        String* name = member->kind == JS_CLASS_MEMBER_METHOD ? member->as.method.name
+            : member->kind == JS_CLASS_MEMBER_STATIC_FIELD ? member->as.static_field.name
+            : member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD ? member->as.instance_field.name
+            : NULL;
+        if (jm_private_name_suffix_eq(name, suffix, suffix_len)) return true;
     }
     return false;
 }
@@ -709,27 +708,36 @@ static void jm_append_class_metadata_name(JsMirTranspiler* mt,
     run->count++;
 }
 
+static bool jm_class_private_instance_method_seen(JsClassEntry* ce,
+        int member_index) {
+    JsClassMethodEntry* method = jm_class_member_method(ce, member_index);
+    if (!method || method->is_static || method->is_constructor || !method->name ||
+            !jm_is_private_name(method->name)) return false;
+    for (int previous_index = 0; previous_index < member_index; previous_index++) {
+        JsClassMethodEntry* previous = jm_class_member_method(ce, previous_index);
+        if (!previous || previous->is_static || previous->is_constructor ||
+                !previous->name || !jm_is_private_name(previous->name)) continue;
+        if (previous->name->len == method->name->len &&
+                memcmp(previous->name->chars, method->name->chars,
+                    (size_t)method->name->len) == 0) return true;
+    }
+    return false;
+}
+
 void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
     if (!mt || !ce) return;
     // Default derived constructors initialize from this runtime metadata. Keep
     // computed fields in declaration order too; their keys are published once
     // class evaluation has completed below.
-    int metadata_count = ce->instance_field_count;
-    for (int mi = 0; mi < ce->method_count; mi++) {
-        JsClassMethodEntry* me = &ce->methods[mi];
-        if (!me->is_static && !me->is_constructor && me->name && jm_is_private_name(me->name)) {
-            bool seen = false;
-            for (int pi = 0; pi < mi; pi++) {
-                JsClassMethodEntry* prev = &ce->methods[pi];
-                if (prev->is_static || prev->is_constructor || !prev->name || !jm_is_private_name(prev->name)) continue;
-                if (prev->name->len == me->name->len &&
-                    memcmp(prev->name->chars, me->name->chars, (size_t)me->name->len) == 0) {
-                    seen = true;
-                    break;
-                }
-            }
-            if (seen) continue;
-            metadata_count++;
+    int metadata_count = 0;
+    for (int member_index = 0; member_index < ce->member_count; member_index++) {
+        JsClassMember* member = &ce->members[member_index];
+        if (member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD) metadata_count++;
+        if (member->kind == JS_CLASS_MEMBER_METHOD &&
+                !jm_class_private_instance_method_seen(ce, member_index)) {
+            JsClassMethodEntry* method = &member->as.method;
+            if (!method->is_static && !method->is_constructor && method->name &&
+                    jm_is_private_name(method->name)) metadata_count++;
         }
     }
     if (metadata_count <= 0) return;
@@ -742,13 +750,15 @@ void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_ob
 
     int metadata_index = 0;
     JsClassMetadataNameRun name_run = {0, UINT32_MAX, 0, 0};
-    for (int fi = 0; fi < ce->instance_field_count; fi++) {
-        JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
+    for (int member_index = 0; member_index < ce->member_count; member_index++) {
+        JsClassMember* member = &ce->members[member_index];
+        if (member->kind != JS_CLASS_MEMBER_INSTANCE_FIELD) continue;
+        JsInstanceFieldEntry* inf = &member->as.instance_field;
         String* source_name = inf->computed
             ? name_pool_create_len(mt->tp->name_pool, "__computed_class_field__", 24)
             : jm_class_private_name(mt, ce, inf->name);
         if (!source_name) {
-            log_error("js-mir: instance metadata missing field name at index %d", fi);
+            log_error("js-mir: instance metadata missing field name at index %d", metadata_index);
             mt->collection_failed = true;
             return;
         }
@@ -784,20 +794,12 @@ void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_ob
         metadata_index++;
     }
 
-    for (int mi = 0; mi < ce->method_count; mi++) {
-        JsClassMethodEntry* me = &ce->methods[mi];
+    for (int member_index = 0; member_index < ce->member_count; member_index++) {
+        JsClassMember* member = &ce->members[member_index];
+        if (member->kind != JS_CLASS_MEMBER_METHOD) continue;
+        JsClassMethodEntry* me = &member->as.method;
         if (me->is_static || me->is_constructor || !me->name || !jm_is_private_name(me->name)) continue;
-        bool seen = false;
-        for (int pi = 0; pi < mi; pi++) {
-            JsClassMethodEntry* prev = &ce->methods[pi];
-            if (prev->is_static || prev->is_constructor || !prev->name || !jm_is_private_name(prev->name)) continue;
-            if (prev->name->len == me->name->len &&
-                memcmp(prev->name->chars, me->name->chars, (size_t)me->name->len) == 0) {
-                seen = true;
-                break;
-            }
-        }
-        if (seen) continue;
+        if (jm_class_private_instance_method_seen(ce, member_index)) continue;
         String* method_name = jm_class_private_name(mt, ce, me->name);
         uint32_t source_index = jm_module_name_append(mt, method_name->chars,
             method_name->len);
@@ -815,14 +817,19 @@ void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_ob
 void jm_emit_class_instance_computed_field_metadata_keys(JsMirTranspiler* mt,
     MIR_reg_t cls_obj, JsClassEntry* ce) {
     if (!mt || !ce) return;
-    for (int fi = 0; fi < ce->instance_field_count; fi++) {
-        JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
-        if (!inf->computed || inf->key_module_var_index < 0) continue;
-        MIR_reg_t key = jm_load_module_var(mt, (uint32_t)inf->key_module_var_index);
-        jm_call_void_3(mt, "js_set_class_instance_field_metadata_key",
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, fi),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+    int metadata_index = 0;
+    for (int member_index = 0; member_index < ce->member_count; member_index++) {
+        JsClassMember* member = &ce->members[member_index];
+        if (member->kind != JS_CLASS_MEMBER_INSTANCE_FIELD) continue;
+        JsInstanceFieldEntry* inf = &member->as.instance_field;
+        if (inf->computed && inf->key_module_var_index >= 0) {
+            MIR_reg_t key = jm_load_module_var(mt, (uint32_t)inf->key_module_var_index);
+            jm_call_void_3(mt, "js_set_class_instance_field_metadata_key",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, metadata_index),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+        }
+        metadata_index++;
     }
 }
 
@@ -866,26 +873,17 @@ static void jm_emit_class_computed_field_module_key(JsMirTranspiler* mt,
 
 void jm_emit_class_computed_field_module_keys(JsMirTranspiler* mt,
         MIR_reg_t cls_obj, JsClassEntry* ce) {
-    if (!mt || !ce || !ce->node || !ce->node->body ||
-            ce->node->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
-        return;
-    }
-    JsBlockNode* body = (JsBlockNode*)ce->node->body;
-    int static_field_index = 0;
-    int instance_field_index = 0;
-    for (JsAstNode* elem = body->statements; elem; elem = elem->next) {
-        if (elem->node_type != JS_AST_NODE_FIELD_DEFINITION) continue;
-        JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)elem;
-        if (fd->is_static) {
-            if (static_field_index >= ce->static_field_count) continue;
-            JsStaticFieldEntry* sf = &ce->static_fields[static_field_index++];
+    if (!mt || !ce) return;
+    for (int member_index = 0; member_index < ce->member_count; member_index++) {
+        JsClassMember* member = &ce->members[member_index];
+        if (member->kind == JS_CLASS_MEMBER_STATIC_FIELD) {
+            JsStaticFieldEntry* sf = &member->as.static_field;
             if (sf->computed && sf->key_expr && sf->key_module_var_index >= 0) {
                 jm_emit_class_computed_field_module_key(mt, cls_obj, sf->key_expr,
                     sf->key_module_var_index, true);
             }
-        } else {
-            if (instance_field_index >= ce->instance_field_count) continue;
-            JsInstanceFieldEntry* inf = &ce->instance_fields[instance_field_index++];
+        } else if (member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD) {
+            JsInstanceFieldEntry* inf = &member->as.instance_field;
             if (inf->computed && inf->key_expr && inf->key_module_var_index >= 0) {
                 jm_emit_class_computed_field_module_key(mt, cls_obj, inf->key_expr,
                     inf->key_module_var_index, false);
@@ -931,9 +929,11 @@ static MIR_reg_t jm_emit_current_new_target(JsMirTranspiler* mt) {
 
 static bool jm_class_has_instance_elements(JsClassEntry* ce) {
     if (!ce) return false;
-    if (ce->instance_field_count > 0) return true;
-    for (int method_index = 0; method_index < ce->method_count; method_index++) {
-        JsClassMethodEntry* method = &ce->methods[method_index];
+    for (int member_index = 0; member_index < ce->member_count; member_index++) {
+        JsClassMember* member = &ce->members[member_index];
+        if (member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD) return true;
+        if (member->kind != JS_CLASS_MEMBER_METHOD) continue;
+        JsClassMethodEntry* method = &member->as.method;
         if (!method->is_static && !method->is_constructor && method->name &&
             jm_is_private_name(method->name)) return true;
     }
@@ -1975,15 +1975,25 @@ static bool jm_emit_eval_private_env_push(JsMirTranspiler* mt) {
     if (!mt || !mt->current_class) return false;
     JsClassEntry* ce = mt->current_class;
     bool has_private = false;
-    for (int i = 0; i < ce->method_count && !has_private; i++) has_private = jm_is_private_name(ce->methods[i].name);
-    for (int i = 0; i < ce->static_field_count && !has_private; i++) has_private = jm_is_private_name(ce->static_fields[i].name);
-    for (int i = 0; i < ce->instance_field_count && !has_private; i++) has_private = jm_is_private_name(ce->instance_fields[i].name);
+    for (int i = 0; i < ce->member_count && !has_private; i++) {
+        JsClassMember* member = &ce->members[i];
+        String* name = member->kind == JS_CLASS_MEMBER_METHOD ? member->as.method.name
+            : member->kind == JS_CLASS_MEMBER_STATIC_FIELD ? member->as.static_field.name
+            : member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD ? member->as.instance_field.name
+            : NULL;
+        has_private = jm_is_private_name(name);
+    }
     if (!has_private) return false;
 
     jm_call_void_0(mt, "js_eval_private_push_frame");
-    for (int i = 0; i < ce->method_count; i++) jm_emit_eval_private_bind_name(mt, ce, ce->methods[i].name);
-    for (int i = 0; i < ce->static_field_count; i++) jm_emit_eval_private_bind_name(mt, ce, ce->static_fields[i].name);
-    for (int i = 0; i < ce->instance_field_count; i++) jm_emit_eval_private_bind_name(mt, ce, ce->instance_fields[i].name);
+    for (int i = 0; i < ce->member_count; i++) {
+        JsClassMember* member = &ce->members[i];
+        String* name = member->kind == JS_CLASS_MEMBER_METHOD ? member->as.method.name
+            : member->kind == JS_CLASS_MEMBER_STATIC_FIELD ? member->as.static_field.name
+            : member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD ? member->as.instance_field.name
+            : NULL;
+        jm_emit_eval_private_bind_name(mt, ce, name);
+    }
     return true;
 }
 
@@ -5347,8 +5357,9 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                     JsClassEntry* parent = mt->current_class->superclass;
                     JsClassMethodEntry* found_method = NULL;
                     while (parent && !found_method) {
-                        for (int i = 0; i < parent->method_count; i++) {
-                            JsClassMethodEntry* me = &parent->methods[i];
+                        for (int i = 0; i < parent->member_count; i++) {
+                            JsClassMethodEntry* me = jm_class_member_method(parent, i);
+                            if (!me) continue;
                             if (me->name && prop->name &&
                                 me->name->len == prop->name->len &&
                                 strncmp(me->name->chars, prop->name->chars, me->name->len) == 0 &&
@@ -5417,8 +5428,9 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                         // Search parent class chain for a computed method whose key_expr
                         // identifier has the same name as key_id_name
                         while (parent && !found_method) {
-                            for (int i = 0; i < parent->method_count; i++) {
-                                JsClassMethodEntry* me = &parent->methods[i];
+                            for (int i = 0; i < parent->member_count; i++) {
+                                JsClassMethodEntry* me = jm_class_member_method(parent, i);
+                                if (!me) continue;
                                 if (!me->computed || me->is_constructor || me->is_static) continue;
                                 if (!me->key_expr) continue;
                                 // Match by identifier name
@@ -6415,13 +6427,7 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
 
 // Conditional expression (ternary)
 struct JsMirBranchState {
-    MIR_item_t current_func_item;
-    MIR_func_t current_func;
-    JsFuncCollected* current_fc;
-    JsClassEntry* current_class;
-    MIR_reg_t scope_env_reg;
-    int scope_env_slot_count;
-    int scope_depth;
+    JsMirCursor cursor;
     JsMirLastClosureSnapshot last_closure;
     bool scopes_saved;
     ArrayList* original_var_scopes;
@@ -6448,13 +6454,7 @@ static void jm_free_branch_state(JsMirBranchState* state);
 
 static void jm_save_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
     memset(state, 0, sizeof(*state));
-    state->current_func_item = mt->func_em->em.func_item;
-    state->current_func = mt->func_em->em.func;
-    state->current_fc = mt->current_fc;
-    state->current_class = mt->current_class;
-    state->scope_env_reg = mt->scope_env_reg;
-    state->scope_env_slot_count = mt->scope_env_slot_count;
-    state->scope_depth = mt->scope_depth;
+    jm_cursor_capture(mt, &state->cursor);
     jm_save_last_closure_snapshot(mt, &state->last_closure);
     state->scopes_saved = true;
     state->original_var_scopes = mt->var_scopes;
@@ -6506,13 +6506,7 @@ static void jm_free_branch_state(JsMirBranchState* state) {
 static void jm_restore_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
     if (!state) return;
 
-    mt->func_em->em.func_item = state->current_func_item;
-    mt->func_em->em.func = state->current_func;
-    mt->current_fc = state->current_fc;
-    mt->current_class = state->current_class;
-    mt->scope_env_reg = state->scope_env_reg;
-    mt->scope_env_slot_count = state->scope_env_slot_count;
-    mt->scope_depth = state->scope_depth;
+    jm_cursor_restore(mt, &state->cursor);
     // Conditional-expression arms do not dominate one another. A closure env
     // allocated in one arm must not remain the writeback target in its sibling.
     jm_restore_last_closure_snapshot(mt, &state->last_closure);
@@ -6538,7 +6532,7 @@ static MirValue jm_emit_conditional_value(JsMirTranspiler* mt,
     jm_save_branch_state(mt, &branch_state);
     jm_push_scope(mt);
     MIR_reg_t cons = jm_transpile_box_item(mt, cond->consequent);
-    while (mt->scope_depth > branch_state.scope_depth) jm_pop_scope(mt);
+    while (mt->scope_depth > branch_state.cursor.scope_depth) jm_pop_scope(mt);
     jm_restore_branch_state(mt, &branch_state);
     jm_emit_mov(mt, result, cons);
     JsErrorLaneTrack cons_exit = jm_error_lane_state(mt);
@@ -6551,7 +6545,7 @@ static MirValue jm_emit_conditional_value(JsMirTranspiler* mt,
     jm_save_branch_state(mt, &branch_state);
     jm_push_scope(mt);
     MIR_reg_t alt = jm_transpile_box_item(mt, cond->alternate);
-    while (mt->scope_depth > branch_state.scope_depth) jm_pop_scope(mt);
+    while (mt->scope_depth > branch_state.cursor.scope_depth) jm_pop_scope(mt);
     jm_restore_branch_state(mt, &branch_state);
     jm_emit_mov(mt, result, alt);
     JsErrorLaneTrack alt_exit = jm_error_lane_state(mt);
@@ -6582,7 +6576,7 @@ MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
     jm_save_branch_state(mt, &branch_state);
     jm_push_scope(mt);
     MIR_reg_t cons = jm_transpile_as_native(mt, cond->consequent, target_type);
-    while (mt->scope_depth > branch_state.scope_depth) jm_pop_scope(mt);
+    while (mt->scope_depth > branch_state.cursor.scope_depth) jm_pop_scope(mt);
     jm_restore_branch_state(mt, &branch_state);
     jm_emit(mt, MIR_new_insn(mt->ctx, move_code,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, cons)));
@@ -6593,7 +6587,7 @@ MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
     jm_save_branch_state(mt, &branch_state);
     jm_push_scope(mt);
     MIR_reg_t alt = jm_transpile_as_native(mt, cond->alternate, target_type);
-    while (mt->scope_depth > branch_state.scope_depth) jm_pop_scope(mt);
+    while (mt->scope_depth > branch_state.cursor.scope_depth) jm_pop_scope(mt);
     jm_restore_branch_state(mt, &branch_state);
     jm_emit(mt, MIR_new_insn(mt->ctx, move_code,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, alt)));

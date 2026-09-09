@@ -37,7 +37,8 @@
 > a compatibility gate. All anchors were re-resolved against `master` on
 > 2026-09-07.
 >
-> **Phase 2 addendum status: PROPOSED for user ratification — 2026-09-09.**
+> **Phase 2 addendum status: RATIFIED by user — 2026-09-09; implementation in
+> progress.**
 > Section 8 re-measures the post-JSCU9–JSCU24 tree and extends this ledger with
 > **JSCU27–JSCU35**. The addendum changes no formal ruling: it continues the
 > implementation of **D1.2–D1.3**, **D2.4.1**, **D5.1.1v2**, **D5.1.3**,
@@ -1796,6 +1797,134 @@ JSCU34 adds resizable/detached ArrayBuffer, DataView, TypedArray and Node Buffer
 coverage. Queue/call/compiler performance is measured only with `make release`
 under rule 10. Each slice ends with the struct census, eager-allocation census
 and capsule-construction census recorded beside the old/new values.
+
+### 8.13 Implementation ledger (2026-09-09, in progress)
+
+The following slices are implemented and retained as one coherent migration;
+this ledger deliberately does not mark Phase 2 complete while its remaining
+carrier and compiler work is open.
+
+- **JSCU27:** `ContextCapsuleDirectory` now owns the prior direct
+  `EvalContext` rendering, template, Node-session and JS-state pointers, and
+  Node module state uses the capsule extension API. This is the context
+  ownership boundary required by D5.4.2–D5.4.4.
+- **JSCU28:** `JsCallActivation` owns a synchronous call's rooted ambient
+  values, arguments and source/strictness metadata. The former physical
+  pending-argument state fields are deleted; call nesting is activation
+  linking, as required by D5.1.1v2 and D6.2.2v2.
+- **JSCU29(B):** `JsGlobalEnvironment` is one dynamic table of typed rows for
+  lexical bindings, object-backed global `var` declarations and module-slot
+  bridges. Its one `RootVector` owns row key/value storage and fixed realm
+  globals; the former 1,024 lexical and 512 module binding capacities are
+  deleted. This applies D5.3.5 without merging the three binding semantics.
+- **JSCU30:** `RuntimeJob` and `RuntimeJobQueue` own nextTick, microtask,
+  unhandled-rejection and RAF payloads. Timers carry the same job envelope,
+  including an arbitrary Array argument pack, while their scheduling policy
+  remains distinct under D6.3.1.
+- **JSCU31 (staged):** `RuntimeResourceTable` now owns the generation-checked
+  rid, rooted script owner, typed immutable descriptor and native close
+  callback for Node/Jube socket and crypto resources and for JS timer handles.
+  The timer table replaces its private handle registry while leaving the
+  timer-only `RuntimeJob` and libuv scheduling tail distinct; the regression
+  crosses the retired 1,024-handle limit, clears an interval and runs under
+  forced GC. Mock-scheduler waits are likewise dynamic rooted records, with a
+  regression past their former 128-row cap. The dynamic-module compatibility
+  bridge translates its one legacy crypto prefix to a typed group before table
+  teardown; no resource-table operation dispatches by a string prefix. The
+  Node Blob-URL registry is likewise one dynamic `NodeBlobUrlEntry` table:
+  each stable row joins its native URL ID and persistent Blob root, so create,
+  resolve, revoke, reset and session detach share one ownership record instead
+  of parallel 1,024-entry ID/value arrays. Its focused regression creates
+  1,025 URLs, verifies lookup after explicit GC, verifies revoke, and runs in
+  two successive Jube batch realms. Other native owners remain to migrate.
+- **Root-storage capacity follow-up:** AsyncLocalStorage and assertion
+  instances use context-owned `RootVector`s; readline input/interface pairs
+  are dynamic `JsReadlineInput` rows with one rooted value store. Their former
+  capped registries and the readline input-map range registration are deleted.
+  `process` now has one dynamic event-listener map for lifecycle and ordinary
+  events; its former 32-entry `exit`/`uncaughtException` shadow lists and
+  duplicated root span are deleted. `async_hooks` likewise owns dynamic hook
+  and deferred-destroy RootVectors, deleting its separate 256-hook and
+  1,024-destroy capacities and count metadata; the regression crosses both
+  limits. Test262 agent callbacks and reports now use a dynamic callback store
+  and `JsTest262AgentReport` rows, rather than fixed callback/report/waiter
+  arrays; Atomics’ per-agent waiter metadata follows the same agent-slot
+  identity rather than a second 16-entry table, and each Atomics waiter row
+  owns its rooted promise slot rather than a 128-entry promise array. The
+  regression crosses every former agent/report/waiter bound under regular and
+  forced-GC execution. This applies D5.1.1v2 and D5.3.5 to each one
+  outliving-instance collection, without claiming the broader JSCU29(A)
+  realm-slot migration is complete. The `with` scope chain now uses its
+  existing dynamic `JsItemStack` without a 16-depth guard, and the call
+  boundary snapshots an arbitrary-depth chain in one temporary exact root
+  range rather than a fixed native array; a 17-deep closure call survives
+  forced GC. Eval source context likewise uses dynamic `JsEvalSourceRecord`
+  rows with paired RootVector slots for filename/source instead of separate
+  16-entry Item and metadata arrays; a 17-deep nested eval passes under
+  forced GC. DOM Web Storage entries are dynamic `JsDomStorageEntry` rows in
+  their lazy platform capsule rather than a 128-entry key/value table; the
+  regression writes, reads, removes and clears 129 entries. Media-query
+  wrappers use dynamic `JsDomMediaQueryState` records with one RootVector for
+  their wrapper objects instead of a 64-entry table and fixed root scan; the
+  regression creates 65 queries. The headless dialog FIFO uses dynamic
+  `DomPromptResponse` rows, keeping ordered text and Cancel records together
+  without a 32-slot ring. The Node CommonJS module chain now also
+  uses its existing dynamic `JsItemStack` without a second 128-depth policy
+  guard; allocation failure is reported rather than silently changing the
+  parent chain. A focused 161-module temporary fixture verifies every
+  `module.parent` link and deletes its files after the run.
+- **JSCU29(A) registry step:** the remaining `JsRootRange` reset catalog is a
+  growable native registry rather than a 64-entry runtime-state array. The
+  range mechanism itself remains pending replacement by the realm-slot
+  catalog; this step only removes its unrelated bookkeeping capacity.
+- **JSCU32:** `GC_TYPE_ENVIRONMENT` is the one environment allocation/tracer
+  family. Its header descriptor distinguishes raw closure Item slots from the
+  interpreter lexical payload while retaining the same scalar-tail and
+  precise-trace contract. `JsSuspendedActivation` now owns the common durable
+  generator/async activation edges and replay ledger; their state-machine
+  tails remain separate as D6.2.2v2 and D8.1.3v10 require.
+- **JSCU33(B) and JSCU34:** accessors use a dedicated traced
+  `JsAccessorCell`, not a fake function layout; `JsArrayBufferView` is the
+  shared typed-array/DataView buffer-view header. These restore D2.4.1's
+  single carrier authority.
+- **JSCU35(1):** property-Item and module-NameId lowering caches are now
+  instances of the one `JsMirNameCache` key/owner/count storage record. Their
+  result domains remain explicit, preserving D8.2.4's compiler semantic
+  boundary while removing a duplicated cache mechanism.
+- **JSCU35(2):** `JsMirCursor` is the checkpointable function/class/scope
+  lowering position. Conditional branch transactions now save and restore
+  that cursor once, then add only their lexical-map transaction and
+  closure-journal mark as D8.2.4 requires.
+- **JSCU35(3):** `JsClassMember` is the one source-ordered tagged compiler
+  record for methods, static fields, instance fields and static blocks.
+  Class lowering filters that table for its semantic pass rather than
+  reconstructing order from parallel arrays; the focused regression covers
+  computed keys, static initialization, private fields and inherited methods
+  under normal and forced-GC execution, per D8.2.4–D8.2.6.
+- **JSCU35(4a):** `JsMirBindingRef` is the shared source-binding fact record
+  inherited by module-constant and temporary name-set rows. It owns the
+  spelling, resolver identity, defining node and declaration kind once;
+  module-cell and analysis-range tails remain distinct. This is the first
+  safe reduction of the binding-fact duplication described by D8.2.4; emitted
+  artifact ownership remains open.
+- **JSCU35(4b):** Dynamic Function compiled-artifact lookup now owns one
+  growable collection of stable `JsDynFuncCacheEntry` rows. The code store
+  remains the source/MIR payload owner, while each cache row owns only its
+  lookup facts; the former 256-entry fixed array and overflow fallback are
+  deleted. The regression compiles and invokes 257 distinct functions, then
+  repeats under forced GC, per D8.2.4.
+- **JSCU35(4c):** MIR signal-recovery ownership now uses dynamic
+  `ActiveJsTranspileOwner` rows, rather than a second fixed 32-entry compiler
+  stack. The recovery capsule still owns only in-flight transpiler/source
+  cleanup; completed code remains owned by the code store. Deep CommonJS
+  compilation exercises the growable stack and batch teardown, as D8.2.4's
+  compiler ownership boundary requires.
+
+Open: JSCU29(A)'s full realm-slot catalog and deletion of the remaining root
+registry, JSCU31's remaining native-owner migration to the resource table,
+JSCU33(A)'s immutable callable-code owner, JSCU35's remaining emitted artifact
+consolidation, the lazy realm-capsule census and all final release performance
+gates.
 
 ---
 

@@ -332,15 +332,48 @@ static JsMirCompileRecoveryState* jm_compile_recovery_state_required(void) {
     return state;
 }
 
+static int jm_active_js_transpile_owner_count(const JsMirCompileRecoveryState* state) {
+    return state && state->stack ? state->stack->length : 0;
+}
+
+static ActiveJsTranspileOwner* jm_active_js_transpile_owner_at(
+        const JsMirCompileRecoveryState* state, int index) {
+    return state && state->stack && index >= 0 && index < state->stack->length
+        ? (ActiveJsTranspileOwner*)arraylist_get(state->stack, index) : NULL;
+}
+
+static ActiveJsTranspileOwner* jm_active_js_transpile_owner_push(
+        JsMirCompileRecoveryState* state) {
+    if (!state) return NULL;
+    if (!state->stack) state->stack = arraylist_new(4);
+    ActiveJsTranspileOwner* owner = (ActiveJsTranspileOwner*)mem_calloc(1,
+        sizeof(ActiveJsTranspileOwner), MEM_CAT_JS_RUNTIME);
+    if (!owner || !state->stack || !arraylist_append(state->stack, owner)) {
+        mem_free(owner);
+        return NULL;
+    }
+    return owner;
+}
+
+static void jm_active_js_transpile_owner_pop(JsMirCompileRecoveryState* state) {
+    int count = jm_active_js_transpile_owner_count(state);
+    if (count <= 0) return;
+    ActiveJsTranspileOwner* owner = jm_active_js_transpile_owner_at(state, count - 1);
+    arraylist_remove(state->stack, count - 1);
+    mem_free(owner);
+}
+
 static void jm_sync_active_js_transpile_top(JsMirCompileRecoveryState* state) {
     if (!state) return;
-    if (state->count <= 0) {
+    int count = jm_active_js_transpile_owner_count(state);
+    if (count <= 0) {
         g_active_js_transpiler = NULL;
         g_active_mir_transpiler = NULL;
         g_active_js_owned_source = NULL;
         return;
     }
-    ActiveJsTranspileOwner* top = &state->stack[state->count - 1];
+    ActiveJsTranspileOwner* top = jm_active_js_transpile_owner_at(state, count - 1);
+    if (!top) return;
     g_active_js_transpiler = top->tp;
     g_active_mir_transpiler = top->mt;
     g_active_js_owned_source = top->owned_source;
@@ -348,10 +381,12 @@ static void jm_sync_active_js_transpile_top(JsMirCompileRecoveryState* state) {
 
 static void jm_pop_empty_active_js_transpile_owners(JsMirCompileRecoveryState* state) {
     if (!state) return;
-    while (state->count > 0) {
-        ActiveJsTranspileOwner* top = &state->stack[state->count - 1];
+    while (jm_active_js_transpile_owner_count(state) > 0) {
+        int count = jm_active_js_transpile_owner_count(state);
+        ActiveJsTranspileOwner* top = jm_active_js_transpile_owner_at(state, count - 1);
+        if (!top) break;
         if (top->tp || top->mt || top->owned_source) break;
-        state->count--;
+        jm_active_js_transpile_owner_pop(state);
     }
     jm_sync_active_js_transpile_top(state);
 }
@@ -360,22 +395,27 @@ void jm_track_active_js_transpile(JsTranspiler* tp, JsMirTranspiler* mt, char* o
     if (!tp && !mt && !owned_source) return;
     JsMirCompileRecoveryState* state = jm_compile_recovery_state_required();
     if (!state) return;
-    if (state->count <= 0) {
-        memset(&state->stack[0], 0, sizeof(state->stack[0]));
-        state->count = 1;
+    ActiveJsTranspileOwner* top = NULL;
+    if (jm_active_js_transpile_owner_count(state) <= 0) {
+        top = jm_active_js_transpile_owner_push(state);
+    } else {
+        top = jm_active_js_transpile_owner_at(state,
+            jm_active_js_transpile_owner_count(state) - 1);
     }
-    ActiveJsTranspileOwner* top = &state->stack[state->count - 1];
+    if (!top) {
+        log_error("js-mir-recovery: could not grow active transpile owner stack");
+        return;
+    }
     bool starts_nested_owner =
         (tp && top->tp && top->tp != tp) ||
         (mt && top->mt && top->mt != mt) ||
         (owned_source && (top->tp || top->mt) && top->owned_source != owned_source);
     if (starts_nested_owner) {
-        if (state->count >= JS_ACTIVE_TRANSPILE_MAX) {
-            log_error("js-mir-recovery: active transpile owner stack overflow");
+        top = jm_active_js_transpile_owner_push(state);
+        if (!top) {
+            log_error("js-mir-recovery: could not grow active transpile owner stack");
             return;
         }
-        top = &state->stack[state->count++];
-        memset(top, 0, sizeof(*top));
     }
     if (tp) top->tp = tp;
     if (mt) top->mt = mt;
@@ -386,8 +426,9 @@ void jm_track_active_js_transpile(JsTranspiler* tp, JsMirTranspiler* mt, char* o
 void jm_clear_active_js_transpile(JsTranspiler* tp, JsMirTranspiler* mt, char* owned_source) {
     JsMirCompileRecoveryState* state = jm_compile_recovery_state_required();
     if (!state) return;
-    for (int i = state->count - 1; i >= 0; i--) {
-        ActiveJsTranspileOwner* owner = &state->stack[i];
+    for (int i = jm_active_js_transpile_owner_count(state) - 1; i >= 0; i--) {
+        ActiveJsTranspileOwner* owner = jm_active_js_transpile_owner_at(state, i);
+        if (!owner) continue;
         bool matched = false;
         if (tp && owner->tp == tp) {
             owner->tp = NULL;
@@ -759,8 +800,9 @@ static JsFunctionNode* jm_find_iife_function_expr(JsAstNode* expr) {
 static void jm_cleanup_active_mir_state(JsMirCompileRecoveryState* state,
         bool skip_mir_finish) {
     if (!state) return;
-    for (int i = state->count - 1; i >= 0; i--) {
-        ActiveJsTranspileOwner* owner = &state->stack[i];
+    for (int i = jm_active_js_transpile_owner_count(state) - 1; i >= 0; i--) {
+        ActiveJsTranspileOwner* owner = jm_active_js_transpile_owner_at(state, i);
+        if (!owner) continue;
         if (owner->mt) {
             jm_destroy_mir_transpiler(owner->mt);
             owner->mt = NULL;
@@ -770,14 +812,16 @@ static void jm_cleanup_active_mir_state(JsMirCompileRecoveryState* state,
         MIR_finish(state->active_mir_ctx);
     }
     state->active_mir_ctx = NULL;
-    while (state->count > 0) {
-        ActiveJsTranspileOwner* owner = &state->stack[state->count - 1];
+    while (jm_active_js_transpile_owner_count(state) > 0) {
+        int count = jm_active_js_transpile_owner_count(state);
+        ActiveJsTranspileOwner* owner = jm_active_js_transpile_owner_at(state, count - 1);
+        if (!owner) break;
         JsTranspiler* tp = owner->tp;
         char* owned_source = owner->owned_source;
         owner->mt = NULL;
         owner->tp = NULL;
         owner->owned_source = NULL;
-        jm_pop_empty_active_js_transpile_owners(state);
+        jm_active_js_transpile_owner_pop(state);
         if (tp) js_transpiler_destroy(tp);
         if (owned_source) mem_free(owned_source);
     }
@@ -800,6 +844,10 @@ void jm_compile_recovery_state_destroy_context(JsRuntimeState* runtime_state) {
     // Context teardown is a cold ownership boundary. Finish any interrupted
     // compilation before dropping the capsule so no MIR owner crosses realms.
     jm_cleanup_active_mir_state(state, false);
+    if (state->stack) {
+        arraylist_free(state->stack);
+        state->stack = NULL;
+    }
     mem_free(state);
     runtime_state->mir_compile_recovery_state = NULL;
 }
@@ -1765,8 +1813,10 @@ static int js_mir_analyze_and_plan(void* opaque) {
     // Assign module variable indexes for static class fields
     for (int ci = 0; ci < mt->class_count; ci++) {
         JsClassEntry* ce = &mt->class_entries[ci];
-        for (int fi = 0; fi < ce->static_field_count; fi++) {
-            JsStaticFieldEntry* sf = &ce->static_fields[fi];
+        for (int member_index = 0; member_index < ce->member_count; member_index++) {
+            JsClassMember* member = &ce->members[member_index];
+            if (member->kind != JS_CLASS_MEMBER_STATIC_FIELD) continue;
+            JsStaticFieldEntry* sf = &member->as.static_field;
             if (sf->name && ce->name && mt->module_var_count < JS_MAX_MODULE_VARS) {
                 sf->module_var_index = mt->module_var_count;
                 // Register as module const for ClassName.fieldName access pattern
@@ -1784,35 +1834,44 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     (int)mce.int_val);
             }
         }
-        for (int fi = 0; fi < ce->static_field_count; fi++) {
-            JsStaticFieldEntry* sf = &ce->static_fields[fi];
+        for (int member_index = 0; member_index < ce->member_count; member_index++) {
+            JsClassMember* member = &ce->members[member_index];
+            if (member->kind != JS_CLASS_MEMBER_STATIC_FIELD) continue;
+            JsStaticFieldEntry* sf = &member->as.static_field;
             if (sf->computed && sf->key_expr && mt->module_var_count < JS_MAX_MODULE_VARS) {
                 sf->key_module_var_index = mt->module_var_count++;
                 log_debug("js-mir: static field computed key slot class=%.*s field=%d module_var[%d]",
                     ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "",
-                    fi, sf->key_module_var_index);
+                    member_index, sf->key_module_var_index);
             }
         }
-        for (int fi = 0; fi < ce->instance_field_count; fi++) {
-            JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
+        for (int member_index = 0; member_index < ce->member_count; member_index++) {
+            JsClassMember* member = &ce->members[member_index];
+            if (member->kind != JS_CLASS_MEMBER_INSTANCE_FIELD) continue;
+            JsInstanceFieldEntry* inf = &member->as.instance_field;
             if (inf->computed && inf->key_expr && mt->module_var_count < JS_MAX_MODULE_VARS) {
                 inf->key_module_var_index = mt->module_var_count++;
                 log_debug("js-mir: instance field computed key slot class=%.*s field=%d module_var[%d]",
                     ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "",
-                    fi, inf->key_module_var_index);
+                    member_index, inf->key_module_var_index);
             }
         }
     }
 
     for (int i = 0; i < mt->class_count; i++) {
         JsClassEntry* ce = &mt->class_entries[i];
+        int method_count = 0;
+        for (int member_index = 0; member_index < ce->member_count; member_index++) {
+            if (ce->members[member_index].kind == JS_CLASS_MEMBER_METHOD) method_count++;
+        }
         log_debug("js-mir: class '%.*s' with %d methods, ctor=%p",
             ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "",
-            ce->method_count, (void*)ce->constructor);
-        for (int mi = 0; mi < ce->method_count; mi++) {
-            JsClassMethodEntry* me = &ce->methods[mi];
-            log_debug("js-mir:   method[%d]: '%.*s' static=%d ctor=%d",
-                mi, me->name ? (int)me->name->len : 0, me->name ? me->name->chars : "(null)",
+            method_count, (void*)ce->constructor);
+        for (int member_index = 0; member_index < ce->member_count; member_index++) {
+            JsClassMethodEntry* me = jm_class_member_method(ce, member_index);
+            if (!me) continue;
+            log_debug("js-mir:   member[%d]: '%.*s' static=%d ctor=%d",
+                member_index, me->name ? (int)me->name->len : 0, me->name ? me->name->chars : "(null)",
                 me->is_static, me->is_constructor);
         }
     }

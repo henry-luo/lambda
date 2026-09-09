@@ -71,25 +71,20 @@ extern "C" uint64_t js_get_heap_epoch(void);
 #define internal_assert_myers_diff_namespace (js_runtime_state.assert->internal_myers_diff_namespace)
 #define assert_options_key (js_runtime_state.assert->options_key)
 #define assert_diff_key (js_runtime_state.assert->diff_key)
-#define assert_instances (js_runtime_state.assert->instances)
-#define assert_instance_count (js_runtime_state.assert->instance_count)
+#define assert_instances (&js_runtime_state.assert->instances)
+#define assert_instance_count root_vector_count(assert_instances)
 #define assert_key_epoch (js_runtime_state.assert->key_epoch)
-#define assert_instances_roots_epoch (js_runtime_state.assert->instances_roots_epoch)
 
 static void js_assert_register_instance(Item instance) {
-    uint64_t epoch = js_get_heap_epoch();
-    if (assert_instances_roots_epoch != epoch) {
-        heap_register_gc_root_range((uint64_t*)assert_instances, 64);
-        assert_instances_roots_epoch = epoch;
-    }
-    if (assert_instance_count < 64) {
-        assert_instances[assert_instance_count++] = instance;
+    if (!root_vector_push(assert_instances, instance)) {
+        log_error("js-assert: failed to retain assertion instance");
     }
 }
 
 static bool js_assert_is_registered_instance(Item value) {
-    for (int i = 0; i < assert_instance_count; i++) {
-        if (assert_instances[i].item == value.item) return true;
+    for (int64_t i = 0; i < assert_instance_count; i++) {
+        Item* instance = root_vector_at(assert_instances, i);
+        if (instance && instance->item == value.item) return true;
     }
     return false;
 }
@@ -5101,10 +5096,8 @@ extern "C" void js_assert_reset(void) {
     assert_diff_key = (Item){0};
     // Batch reset drops a heap, so no cached assertion Item may survive into
     // the next realm even though this context capsule itself is retained.
-    memset(assert_instances, 0, sizeof(assert_instances));
-    assert_instance_count = 0;
+    root_vector_clear(assert_instances);
     assert_key_epoch = 0;
-    assert_instances_roots_epoch = 0;
 }
 
 // =============================================================================

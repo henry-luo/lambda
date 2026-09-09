@@ -2,12 +2,17 @@
 
 #include "../lambda-data.hpp"
 
+typedef struct JsPermissionPolicy JsPermissionPolicy;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 void js_permission_init_from_argv(int argc, const char** argv);
 void js_permission_reset(void);
+bool js_permission_policy_copy(JsPermissionPolicy* dst, const JsPermissionPolicy* src);
+void js_permission_policy_destroy(JsPermissionPolicy* policy);
+void js_permission_shutdown(void);
 int js_permission_enabled(void);
 int js_permission_has_net(void);
 

@@ -13,6 +13,7 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item obj);
 #include "js_state_guards.h"
 #include "../lambda.hpp"
 #include "../lambda-data.hpp"
+#include "../runtime/heap_api.h"
 #include "../core/name_pool.hpp"
 #include "../../lib/log.h"
 #include <string.h>
@@ -23,14 +24,13 @@ extern __thread EvalContext* context;
 String* heap_create_name(const char* name, size_t len);
 
 extern "C" JsAccessorPair* js_alloc_accessor_pair(Item getter, Item setter) {
-    // Allocate as LMD_TYPE_FUNC so the GC tracer (if any) treats it like a Function
-    // and so `Item.type_id()` returns FUNC for tag-safety. Callers must rely on
-    // ShapeEntry::flags JSPD_IS_ACCESSOR to disambiguate accessor pair from real
-    // Function before invoking it.
-    JsAccessorPair* p = (JsAccessorPair*)heap_calloc(sizeof(JsAccessorPair), LMD_TYPE_FUNC);
+    // A cell has a dedicated collector tag; property storage never borrows the
+    // function tracer or function-layout discriminator (JSCU33).
+    JsAccessorPair* p = (JsAccessorPair*)heap_calloc_js_accessor_cell(
+        sizeof(JsAccessorPair));
     if (!p) return nullptr;
-    p->type_id = LMD_TYPE_FUNC;
-    p->layout_magic = JS_ACCESSOR_PAIR_LAYOUT_MAGIC;
+    p->type_id = LMD_TYPE_UNDEFINED;
+    p->layout_magic = JS_ACCESSOR_CELL_LAYOUT_MAGIC;
     p->getter = getter;
     p->setter = setter;
     return p;
@@ -595,15 +595,29 @@ extern "C" void js_attr_set_configurable(Item obj, const char* name, int name_le
     else              js_attr_apply_shape_flags(obj, name, name_len, JSPD_NON_CONFIGURABLE, 0);
 }
 
+static Item js_accessor_cell_storage_item(Item cell_item) {
+    JsAccessorCell* cell = (JsAccessorCell*)cell_item.function;
+    if (!cell || cell->layout_magic != JS_ACCESSOR_CELL_LAYOUT_MAGIC) {
+        return js_throw_error_with_code("ERR_RUNTIME_FAILURE",
+            "invalid accessor cell storage");
+    }
+    // Map shapes need a pointer-width lane. FUNC supplies that physical lane,
+    // but this tagged word is confined to the store boundary: readers recover
+    // the raw cell only after ShapeEntry marks the slot as an accessor.
+    return (Item){.item = ((uint64_t)LMD_TYPE_FUNC << 56) |
+        (uint64_t)(uintptr_t)cell};
+}
+
 static Item js_store_accessor_pair_slot(Item obj, Item name, Item pair) {
+    JS_ASSIGN_OR_RETURN(storage_item, js_accessor_cell_storage_item(pair));
     if (get_type_id(obj) == LMD_TYPE_FUNC) {
         // Function name/length are non-writable but configurable. Descriptor
         // replacement is [[DefineOwnProperty]], so routing the pair through
         // ordinary [[Set]] leaves the old data value under an accessor shape.
-        js_func_init_property(obj, name, pair);
+        js_func_init_property(obj, name, storage_item);
         return js_status_ok();
     }
-    return js_define_own_key_storage(obj, name, pair);
+    return js_define_own_key_storage(obj, name, storage_item);
 }
 
 // =============================================================================

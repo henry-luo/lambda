@@ -265,41 +265,21 @@ JS_FORWARD_STATIC_EXPRESSION(bool, js_typed_array_is_bigint_element,
 JS_FORWARD_STATIC_EXPRESSION(bool, js_typed_array_is_number_element,
     (JsTypedArrayType type), (!js_typed_array_is_bigint_element(type)))
 
-static ArrayNumShape* js_typed_array_view_shape(JsTypedArray* ta) {
-    return (ta && ta->view) ? (ArrayNumShape*)(uintptr_t)ta->view->extra : NULL;
-}
-
 static int js_typed_array_stored_byte_offset(JsTypedArray* ta) {
-    if (!ta || !ta->view) return 0;
-    int elem_size = js_typed_array_element_size(ta->element_type);
-    ArrayNumShape* shape = js_typed_array_view_shape(ta);
-    if (shape) return (int)(shape->offset * elem_size);
-    return 0;
+    return ta ? ta->base.byte_offset : 0;
 }
 
 static int js_typed_array_stored_length(JsTypedArray* ta) {
-    if (!ta || !ta->view) return 0;
-    return (int)ta->view->length;
-}
-
-static int js_typed_array_stored_byte_length(JsTypedArray* ta) {
     if (!ta) return 0;
-    return js_typed_array_stored_length(ta) * js_typed_array_element_size(ta->element_type);
+    int elem_size = js_typed_array_element_size(ta->element_type);
+    return elem_size > 0 ? ta->base.byte_length / elem_size : 0;
 }
 
 static int js_typed_array_current_byte_length(JsTypedArray* ta) {
     if (!ta) return 0;
-    if (!ta->buffer) return js_typed_array_stored_byte_length(ta);
-    if (js_arraybuffer_detached(ta->buffer)) return 0;
-    int byte_offset = js_typed_array_stored_byte_offset(ta);
-    int available = js_arraybuffer_length(ta->buffer) - byte_offset;
-    if (available < 0) return 0;
-    if (ta->length_tracking) {
-        int elem_size = js_typed_array_element_size(ta->element_type);
-        return (available / elem_size) * elem_size;
-    }
-    int byte_length = js_typed_array_stored_byte_length(ta);
-    return available >= byte_length ? byte_length : 0;
+    int byte_length = js_arraybuffer_view_current_byte_length(&ta->base);
+    int elem_size = js_typed_array_element_size(ta->element_type);
+    return elem_size > 0 ? (byte_length / elem_size) * elem_size : 0;
 }
 
 static int js_typed_array_current_length(JsTypedArray* ta) {
@@ -312,10 +292,7 @@ static int js_typed_array_current_byte_offset(JsTypedArray* ta) {
     if (!ta) return 0;
     int byte_offset = js_typed_array_stored_byte_offset(ta);
     if (!ta->buffer) return byte_offset;
-    if (js_arraybuffer_detached(ta->buffer)) return 0;
-    if (ta->length_tracking) return js_arraybuffer_length(ta->buffer) >= byte_offset ? byte_offset : 0;
-    int byte_length = js_typed_array_stored_byte_length(ta);
-    return js_arraybuffer_length(ta->buffer) >= byte_offset + byte_length ? byte_offset : 0;
+    return js_arraybuffer_view_is_out_of_bounds(&ta->base) ? 0 : byte_offset;
 }
 
 static void* js_typed_array_current_data(JsTypedArray* ta) {
@@ -339,9 +316,8 @@ static void* js_typed_array_prepare_write(JsTypedArray* ta) {
 static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta) {
     if (!ta || !ta->view) return;
 
-    int byte_offset = js_typed_array_stored_byte_offset(ta);
-    int length = ta->length_tracking ? js_typed_array_current_length(ta) :
-        js_typed_array_stored_length(ta);
+    int byte_offset = ta->base.byte_offset;
+    int length = js_typed_array_current_length(ta);
     ta->view->length = length;
     ta->view->capacity = length;
 
@@ -350,8 +326,8 @@ static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta) {
 
     int elem_size = js_typed_array_element_size(ta->element_type);
     shape->offset = elem_size ? byte_offset / elem_size : 0;
-    if (ta->buffer_item) {
-        Item buffer_item;  buffer_item.item = ta->buffer_item;
+    if (ta->base.buffer_item) {
+        Item buffer_item;  buffer_item.item = ta->base.buffer_item;
         if (buffer_item.type_id() == LMD_TYPE_MAP) {
             shape->base = (void*)buffer_item.map;
         }
@@ -362,11 +338,7 @@ static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta) {
 }
 
 static bool js_typed_array_is_out_of_bounds(JsTypedArray* ta) {
-    if (!ta || !ta->buffer) return false;
-    if (js_arraybuffer_detached(ta->buffer)) return true;
-    int byte_offset = js_typed_array_stored_byte_offset(ta);
-    if (ta->length_tracking) return js_arraybuffer_length(ta->buffer) < byte_offset;
-    return js_arraybuffer_length(ta->buffer) < byte_offset + js_typed_array_stored_byte_length(ta);
+    return ta && js_arraybuffer_view_is_out_of_bounds(&ta->base);
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, js_typed_array_arraynum_view_matches, (JsTypedArray* ta, const char* data, int index), (ta && !ta->is_buffer && ta->view && ta->view->data == (void*)data && index >= 0 && index < ta->view->length))
 JS_FORWARD_STATIC_EXPRESSION(bool, js_typed_array_arraynum_range_matches, (JsTypedArray* ta, const char* data,                                                   int index, int count), (ta && !ta->is_buffer && ta->view && ta->view->data == (void*)data && index >= 0 && count >= 0 && index <= ta->view->length && count <= ta->view->length - index))
@@ -895,9 +867,6 @@ static bool js_atomics_host_can_suspend() {
     return true;
 }
 
-#define JS_ATOMICS_MAX_WAITERS 128
-#define JS_ATOMICS_MAX_AGENT_SLOTS 16
-
 typedef enum JsAtomicsWaiterStatus {
     JS_ATOMICS_WAITER_PENDING,
     JS_ATOMICS_WAITER_OK,
@@ -910,19 +879,24 @@ typedef struct JsAtomicsWaiter {
     int agent_slot;
     JsArrayBuffer* buffer;
     int index;
-    Item promise;
+    int64_t promise_root_slot;
     double deadline_ms;
     bool has_deadline;
     JsAtomicsWaiterStatus status;
 } JsAtomicsWaiter;
 
+struct JsAtomicsAgentWaiterState {
+    int agent_slot;
+    int last_waiter_id;
+    int blocking_waiter_id;
+};
+
 typedef struct JsAtomicsRuntimeState {
-    JsAtomicsWaiter waiters[JS_ATOMICS_MAX_WAITERS];
+    ArrayList* waiters;
+    RootVector promise_values;
     int next_waiter_id;
-    int last_waiter_by_agent[JS_ATOMICS_MAX_AGENT_SLOTS];
-    int blocking_waiter_by_agent[JS_ATOMICS_MAX_AGENT_SLOTS];
+    ArrayList* agent_waiters;
     double virtual_now_ms;
-    uint64_t waiter_roots_epoch;
 } JsAtomicsRuntimeState;
 
 static JsAtomicsRuntimeState* js_atomics_runtime_state(void) {
@@ -938,6 +912,8 @@ extern "C" bool js_atomics_runtime_state_ensure(void) {
         JsAtomicsRuntimeState* state = (JsAtomicsRuntimeState*)mem_calloc(1,
             sizeof(JsAtomicsRuntimeState), MEM_CAT_JS_RUNTIME);
         if (!state) return false;
+        root_vector_init(&state->promise_values, (Context*)context,
+            "Atomics waiter promises");
         state->next_waiter_id = 1;
         js_runtime_state.test262_agent->atomics_waiter_state = state;
     }
@@ -945,22 +921,73 @@ extern "C" bool js_atomics_runtime_state_ensure(void) {
 }
 
 #define js_atomics_state (*(JsAtomicsRuntimeState*)js_runtime_state.test262_agent->atomics_waiter_state)
-#define js_atomics_waiters (js_atomics_state.waiters)
+#define js_atomics_waiter_rows (js_atomics_state.waiters)
+#define js_atomics_waiter_values (js_atomics_state.promise_values)
 #define js_atomics_next_waiter_id (js_atomics_state.next_waiter_id)
-#define js_atomics_last_waiter_by_agent (js_atomics_state.last_waiter_by_agent)
-#define js_atomics_blocking_waiter_by_agent (js_atomics_state.blocking_waiter_by_agent)
 #define js_atomics_virtual_now_ms (js_atomics_state.virtual_now_ms)
-extern "C" uint64_t js_get_heap_epoch(void);
-#define js_atomics_waiter_roots_epoch (js_atomics_state.waiter_roots_epoch)
 
-static void js_atomics_register_waiter_roots(void) {
-    uint64_t epoch = js_get_heap_epoch();
-    if (js_atomics_waiter_roots_epoch == epoch) return;
-    for (int i = 0; i < JS_ATOMICS_MAX_WAITERS; i++) {
-        js_atomics_waiters[i].promise = ItemNull;
-        heap_register_gc_root(&js_atomics_waiters[i].promise.item);
+static void js_atomics_agent_waiters_clear(JsAtomicsRuntimeState* state) {
+    if (!state || !state->agent_waiters) return;
+    for (int i = state->agent_waiters->length - 1; i >= 0; i--) {
+        mem_free(state->agent_waiters->data[i]);
     }
-    js_atomics_waiter_roots_epoch = epoch;
+    arraylist_free(state->agent_waiters);
+    state->agent_waiters = NULL;
+}
+
+static JsAtomicsAgentWaiterState* js_atomics_agent_waiter_for(
+        int agent_slot, bool create) {
+    if (agent_slot < 0) return NULL;
+    JsAtomicsRuntimeState* state = js_atomics_runtime_state();
+    if (!state) return NULL;
+    for (int i = 0; state->agent_waiters && i < state->agent_waiters->length; i++) {
+        JsAtomicsAgentWaiterState* entry = (JsAtomicsAgentWaiterState*)
+            state->agent_waiters->data[i];
+        if (entry->agent_slot == agent_slot) return entry;
+    }
+    if (!create) return NULL;
+    JsAtomicsAgentWaiterState* entry = (JsAtomicsAgentWaiterState*)mem_calloc(
+        1, sizeof(JsAtomicsAgentWaiterState), MEM_CAT_JS_RUNTIME);
+    if (!entry) return NULL;
+    entry->agent_slot = agent_slot;
+    if (!state->agent_waiters) state->agent_waiters = arraylist_new(8);
+    if (!state->agent_waiters ||
+            !arraylist_append(state->agent_waiters, entry)) {
+        mem_free(entry);
+        return NULL;
+    }
+    return entry;
+}
+
+static void js_atomics_waiters_clear(JsAtomicsRuntimeState* state) {
+    if (!state) return;
+    if (state->waiters) {
+        for (int i = state->waiters->length - 1; i >= 0; i--) {
+            mem_free(state->waiters->data[i]);
+        }
+        arraylist_free(state->waiters);
+        state->waiters = NULL;
+    }
+    root_vector_clear(&state->promise_values);
+}
+
+static bool js_atomics_waiters_ensure(void) {
+    JsAtomicsRuntimeState* state = js_atomics_runtime_state();
+    if (!state) return false;
+    int row_count = state->waiters ? state->waiters->length : 0;
+    if (root_vector_count(&state->promise_values) != row_count) {
+        // A new heap invalidates each pending promise together with the
+        // native waiter that named it; discard both representations together.
+        js_atomics_waiters_clear(state);
+        js_atomics_agent_waiters_clear(state);
+    }
+    return true;
+}
+
+static Item js_atomics_waiter_promise(const JsAtomicsWaiter* waiter) {
+    Item* promise = waiter ? root_vector_at(&js_atomics_waiter_values,
+        waiter->promise_root_slot) : NULL;
+    return promise ? *promise : ItemNull;
 }
 
 static Item js_atomics_status_string(JsAtomicsWaiterStatus status) {
@@ -974,8 +1001,9 @@ static Item js_atomics_status_string(JsAtomicsWaiterStatus status) {
 static void js_atomics_set_waiter_status(JsAtomicsWaiter* waiter, JsAtomicsWaiterStatus status) {
     if (!waiter || waiter->status != JS_ATOMICS_WAITER_PENDING) return;
     waiter->status = status;
-    if (get_type_id(waiter->promise) == LMD_TYPE_MAP) {
-        js_promise_fulfill_existing(waiter->promise, js_atomics_status_string(status));
+    Item promise = js_atomics_waiter_promise(waiter);
+    if (get_type_id(promise) == LMD_TYPE_MAP) {
+        js_promise_fulfill_existing(promise, js_atomics_status_string(status));
     }
 }
 
@@ -987,25 +1015,27 @@ static Item js_atomics_wait_async_result(bool async, Item value) {
 }
 
 static JsAtomicsWaiter* js_atomics_find_waiter(int waiter_id) {
-    if (waiter_id <= 0) return NULL;
-    for (int i = 0; i < JS_ATOMICS_MAX_WAITERS; i++) {
-        if (js_atomics_waiters[i].used && js_atomics_waiters[i].id == waiter_id) return &js_atomics_waiters[i];
+    if (waiter_id <= 0 || !js_atomics_waiters_ensure()) return NULL;
+    for (int i = 0; js_atomics_waiter_rows && i < js_atomics_waiter_rows->length; i++) {
+        JsAtomicsWaiter* waiter = (JsAtomicsWaiter*)js_atomics_waiter_rows->data[i];
+        if (waiter->used && waiter->id == waiter_id) return waiter;
     }
     return NULL;
 }
 
 static bool js_atomics_has_pending_waiter_for_buffer(JsArrayBuffer* buffer) {
-    if (!buffer) return false;
-    for (int i = 0; i < JS_ATOMICS_MAX_WAITERS; i++) {
-        JsAtomicsWaiter* waiter = &js_atomics_waiters[i];
+    if (!buffer || !js_atomics_waiters_ensure()) return false;
+    for (int i = 0; js_atomics_waiter_rows && i < js_atomics_waiter_rows->length; i++) {
+        JsAtomicsWaiter* waiter = (JsAtomicsWaiter*)js_atomics_waiter_rows->data[i];
         if (waiter->used && waiter->status == JS_ATOMICS_WAITER_PENDING && waiter->buffer == buffer) return true;
     }
     return false;
 }
 
 static void js_atomics_resolve_due_waiters() {
-    for (int i = 0; i < JS_ATOMICS_MAX_WAITERS; i++) {
-        JsAtomicsWaiter* waiter = &js_atomics_waiters[i];
+    if (!js_atomics_waiters_ensure()) return;
+    for (int i = 0; js_atomics_waiter_rows && i < js_atomics_waiter_rows->length; i++) {
+        JsAtomicsWaiter* waiter = (JsAtomicsWaiter*)js_atomics_waiter_rows->data[i];
         if (!waiter->used || waiter->status != JS_ATOMICS_WAITER_PENDING || !waiter->has_deadline) continue;
         if (waiter->deadline_ms <= js_atomics_virtual_now_ms) js_atomics_set_waiter_status(waiter, JS_ATOMICS_WAITER_TIMED_OUT);
     }
@@ -1031,27 +1061,55 @@ static void js_atomics_schedule_timeout_waiter(int waiter_id, double timeout_ms)
 }
 
 static int js_atomics_record_waiter(JsArrayBuffer* buffer, int index, int agent_slot, double timeout_ms, bool has_timeout, Item promise) {
-    js_atomics_register_waiter_roots();
-    for (int i = 0; i < JS_ATOMICS_MAX_WAITERS; i++) {
-        JsAtomicsWaiter* waiter = &js_atomics_waiters[i];
-        if (waiter->used && waiter->status == JS_ATOMICS_WAITER_PENDING) continue;
-        waiter->used = true;
-        waiter->id = js_atomics_next_waiter_id++;
-        if (js_atomics_next_waiter_id <= 0) js_atomics_next_waiter_id = 1;
-        waiter->agent_slot = agent_slot;
-        waiter->buffer = buffer;
-        waiter->index = index;
-        waiter->promise = promise;
-        waiter->has_deadline = has_timeout;
-        waiter->deadline_ms = has_timeout ? js_atomics_virtual_now_ms + timeout_ms : 0.0;
-        waiter->status = JS_ATOMICS_WAITER_PENDING;
-        if (agent_slot >= 0 && agent_slot < JS_ATOMICS_MAX_AGENT_SLOTS) {
-            js_atomics_last_waiter_by_agent[agent_slot] = waiter->id;
-            js_atomics_blocking_waiter_by_agent[agent_slot] = waiter->id;
-        }
-        return waiter->id;
+    if (!js_atomics_waiters_ensure()) return 0;
+    RootFrame roots(1);
+    Rooted<Item> promise_root(roots, promise);
+    JsAtomicsWaiter* waiter = NULL;
+    for (int i = 0; js_atomics_waiter_rows && i < js_atomics_waiter_rows->length; i++) {
+        JsAtomicsWaiter* candidate = (JsAtomicsWaiter*)
+            js_atomics_waiter_rows->data[i];
+        if (candidate->used && candidate->status == JS_ATOMICS_WAITER_PENDING) continue;
+        waiter = candidate;
+        break;
     }
-    return 0;
+    if (!waiter) {
+        waiter = (JsAtomicsWaiter*)mem_calloc(1, sizeof(JsAtomicsWaiter),
+            MEM_CAT_JS_RUNTIME);
+        if (!waiter) return 0;
+        waiter->promise_root_slot = root_vector_count(&js_atomics_waiter_values);
+        if (!root_vector_push(&js_atomics_waiter_values, promise_root.get())) {
+            mem_free(waiter);
+            return 0;
+        }
+        if (!js_atomics_waiter_rows) js_atomics_waiter_rows = arraylist_new(8);
+        if (!js_atomics_waiter_rows ||
+                !arraylist_append(js_atomics_waiter_rows, waiter)) {
+            root_vector_pop(&js_atomics_waiter_values);
+            mem_free(waiter);
+            return 0;
+        }
+    } else {
+        Item* promise_slot = root_vector_at(&js_atomics_waiter_values,
+            waiter->promise_root_slot);
+        if (!promise_slot) return 0;
+        *promise_slot = promise_root.get();
+    }
+    waiter->used = true;
+    waiter->id = js_atomics_next_waiter_id++;
+    if (js_atomics_next_waiter_id <= 0) js_atomics_next_waiter_id = 1;
+    waiter->agent_slot = agent_slot;
+    waiter->buffer = buffer;
+    waiter->index = index;
+    waiter->has_deadline = has_timeout;
+    waiter->deadline_ms = has_timeout ? js_atomics_virtual_now_ms + timeout_ms : 0.0;
+    waiter->status = JS_ATOMICS_WAITER_PENDING;
+    JsAtomicsAgentWaiterState* agent =
+        js_atomics_agent_waiter_for(agent_slot, true);
+    if (agent) {
+        agent->last_waiter_id = waiter->id;
+        agent->blocking_waiter_id = waiter->id;
+    }
+    return waiter->id;
 }
 
 static bool js_atomics_report_has_wait_suffix(Item report_string) {
@@ -1086,29 +1144,35 @@ static Item js_atomics_replace_wait_suffix(Item report_string, const char* statu
 
 extern "C" void js_atomics_reset_waiters(void) {
     if (!js_atomics_runtime_state()) return;
-    js_atomics_register_waiter_roots();
-    memset(js_atomics_waiters, 0, sizeof(js_atomics_waiters));
-    for (int i = 0; i < JS_ATOMICS_MAX_WAITERS; i++) js_atomics_waiters[i].promise = ItemNull;
-    memset(js_atomics_last_waiter_by_agent, 0, sizeof(js_atomics_last_waiter_by_agent));
-    memset(js_atomics_blocking_waiter_by_agent, 0, sizeof(js_atomics_blocking_waiter_by_agent));
+    js_atomics_waiters_clear(&js_atomics_state);
+    js_atomics_agent_waiters_clear(&js_atomics_state);
     js_atomics_next_waiter_id = 1;
     js_atomics_virtual_now_ms = 0.0;
 }
 
 extern "C" void js_atomics_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->test262_agent->atomics_waiter_state) return;
-    mem_free(runtime_state->test262_agent->atomics_waiter_state);
+    JsAtomicsRuntimeState* state = (JsAtomicsRuntimeState*)
+        runtime_state->test262_agent->atomics_waiter_state;
+    js_atomics_waiters_clear(state);
+    js_atomics_agent_waiters_clear(state);
+    root_vector_destroy(&state->promise_values);
+    mem_free(state);
     runtime_state->test262_agent->atomics_waiter_state = NULL;
 }
 
 extern "C" int js_atomics_report_waiter_for_agent(int agent_slot, Item report_string) {
-    if (agent_slot < 0 || agent_slot >= JS_ATOMICS_MAX_AGENT_SLOTS) return 0;
-    int last_waiter_id = js_atomics_last_waiter_by_agent[agent_slot];
+    if (!js_atomics_waiters_ensure()) return 0;
+    JsAtomicsAgentWaiterState* agent =
+        js_atomics_agent_waiter_for(agent_slot, false);
+    if (!agent) return 0;
+    int last_waiter_id = agent->last_waiter_id;
     if (last_waiter_id > 0 && js_atomics_report_has_wait_suffix(report_string)) {
-        js_atomics_last_waiter_by_agent[agent_slot] = 0;
+        agent->last_waiter_id = 0;
         return last_waiter_id;
     }
-    JsAtomicsWaiter* blocking_waiter = js_atomics_find_waiter(js_atomics_blocking_waiter_by_agent[agent_slot]);
+    JsAtomicsWaiter* blocking_waiter = js_atomics_find_waiter(
+        agent->blocking_waiter_id);
     if (blocking_waiter && blocking_waiter->status == JS_ATOMICS_WAITER_PENDING) return blocking_waiter->id;
     return 0;
 }
@@ -1149,9 +1213,16 @@ extern "C" void js_atomics_agent_sleep(Item ms) {
 JS_FORWARD_EXPRESSION(Item, js_atomics_agent_monotonic_now, (void), ((Item){.item = i2it((int64_t)std::trunc(js_atomics_virtual_now_ms))}))
 
 extern "C" void js_atomics_agent_leaving(int agent_slot) {
-    if (agent_slot < 0 || agent_slot >= JS_ATOMICS_MAX_AGENT_SLOTS) return;
-    js_atomics_last_waiter_by_agent[agent_slot] = 0;
-    js_atomics_blocking_waiter_by_agent[agent_slot] = 0;
+    JsAtomicsRuntimeState* state = js_atomics_runtime_state();
+    if (!state || agent_slot < 0 || !js_atomics_waiters_ensure()) return;
+    for (int i = 0; state->agent_waiters && i < state->agent_waiters->length; i++) {
+        JsAtomicsAgentWaiterState* entry = (JsAtomicsAgentWaiterState*)
+            state->agent_waiters->data[i];
+        if (entry->agent_slot != agent_slot) continue;
+        mem_free(entry);
+        arraylist_remove(state->agent_waiters, i);
+        return;
+    }
 }
 
 #define JS_ATOMICS_APPLY_OPERATION(C_TYPE) do { \
@@ -1365,8 +1436,11 @@ extern "C" Item js_atomics_notify(Item typed_array, Item index_item, Item count)
     }
     js_atomics_resolve_due_waiters();
     int notified = 0;
-    for (int i = 0; i < JS_ATOMICS_MAX_WAITERS && notified < notify_count; i++) {
-        JsAtomicsWaiter* waiter = &js_atomics_waiters[i];
+    if (!js_atomics_waiters_ensure()) return (Item){.item = i2it(0)};
+    for (int i = 0; js_atomics_waiter_rows &&
+            i < js_atomics_waiter_rows->length && notified < notify_count; i++) {
+        JsAtomicsWaiter* waiter = (JsAtomicsWaiter*)
+            js_atomics_waiter_rows->data[i];
         if (!waiter->used || waiter->status != JS_ATOMICS_WAITER_PENDING) continue;
         if (waiter->buffer != ta->buffer || waiter->index != index) continue;
         js_atomics_set_waiter_status(waiter, JS_ATOMICS_WAITER_OK);
@@ -1990,6 +2064,8 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     JsTypedArray* ta = js_get_typed_array_ptr(carrier_root.get().map);
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     ta->buffer = ab;
+    ta->base.byte_offset = 0;
+    ta->base.byte_length = byte_length;
     ta->view = view_root.get().array_num;
     js_typed_array_refresh_arraynum_view(ta);
     ta->buffer_item = buffer_root.get().item;
@@ -2070,18 +2146,18 @@ extern "C" Item binary_from_typed_array(JsTypedArray* ta) {
 }
 
 extern "C" Item binary_from_dataview(JsDataView* dv) {
-    if (!dv || !dv->buffer || js_arraybuffer_detached(dv->buffer)) return ItemError;
-    int byte_length = dv->length_tracking ?
-        js_arraybuffer_length(dv->buffer) - dv->byte_offset : dv->byte_length;
-    if (byte_length < 0 || dv->byte_offset < 0 ||
-        dv->byte_offset + byte_length > js_arraybuffer_length(dv->buffer)) return ItemError;
+    if (!dv || !dv->base.buffer || js_arraybuffer_view_is_out_of_bounds(&dv->base)) {
+        return ItemError;
+    }
+    int byte_length = js_arraybuffer_view_current_byte_length(&dv->base);
     if (byte_length == 0) return ItemNull;
-    const char* data = (const char*)js_arraybuffer_data_const(dv->buffer) + dv->byte_offset;
-    ByteBufferHandle* handle = &dv->buffer->handle;
+    const char* data = (const char*)js_arraybuffer_data_const(dv->base.buffer) +
+        dv->base.byte_offset;
+    ByteBufferHandle* handle = &dv->base.buffer->handle;
     Binary* bin = NULL;
     if (!byte_buffer_is_shared(handle) && handle->storage) {
         bin = heap_binary_from_storage(handle->storage,
-            handle->storage_offset + (size_t)dv->byte_offset,
+            handle->storage_offset + (size_t)dv->base.byte_offset,
             (size_t)byte_length, str_is_ascii(data, (size_t)byte_length));
     } else {
         // DataView over SharedArrayBuffer must also snapshot mutable bytes.
@@ -2154,6 +2230,8 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
     JsTypedArray* ta = js_get_typed_array_ptr(carrier_root.get().map);
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     ta->buffer = ab;
+    ta->base.byte_offset = byte_offset;
+    ta->base.byte_length = byte_length;
     ta->view = view_root.get().array_num;
     js_typed_array_refresh_arraynum_view(ta);
     ta->buffer_item = buffer_root.get().item;
@@ -2993,11 +3071,11 @@ static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
     buffer = buffer_root.get();
     ab = js_get_arraybuffer_ptr(buffer.map);
     if (!ab) return ItemNull;
-    dv->buffer = ab;
-    dv->byte_offset = byte_offset;
-    dv->byte_length = byte_length;
-    dv->buffer_item = buffer.item;
-    dv->length_tracking = length_tracking;
+    dv->base.buffer = ab;
+    dv->base.byte_offset = byte_offset;
+    dv->base.byte_length = byte_length;
+    dv->base.buffer_item = buffer.item;
+    dv->base.length_tracking = length_tracking;
 
     Map* m = &carrier->base;
     m->type_id = LMD_TYPE_MAP;
@@ -3021,24 +3099,14 @@ JS_FORWARD_ITEM(js_dataview_construct, (Item buffer, Item offset_item,         I
 // buffers. For non-length-tracking views the stored byte_length is authoritative;
 // for length-tracking views we re-derive from the buffer's current size.
 static inline int dv_current_byte_length(JsDataView* dv) {
-    if (!dv || !dv->buffer) return 0;
-    if (dv->length_tracking) {
-        int avail = js_arraybuffer_length(dv->buffer) - dv->byte_offset;
-        return avail > 0 ? avail : 0;
-    }
-    return dv->byte_length;
+    return dv ? js_arraybuffer_view_current_byte_length(&dv->base) : 0;
 }
 
 // Js54 P2: a DataView is out-of-bounds when the buffer is detached, or when the
 // recorded view window no longer fits (resize shrank the buffer below
 // byte_offset + byte_length, or below byte_offset for length-tracking views).
 static inline bool dv_is_out_of_bounds(JsDataView* dv) {
-    if (!dv || !dv->buffer) return false;
-    if (js_arraybuffer_detached(dv->buffer)) return true;
-    if (dv->length_tracking) {
-        return js_arraybuffer_length(dv->buffer) < dv->byte_offset;
-    }
-    return js_arraybuffer_length(dv->buffer) < (int64_t)dv->byte_offset + (int64_t)dv->byte_length;
+    return dv && js_arraybuffer_view_is_out_of_bounds(&dv->base);
 }
 
 // Js54 P2: throws TypeError if the DataView is detached or out-of-bounds.

@@ -1198,6 +1198,76 @@ TEST(JavaScriptRegression, ArrayNumLoopResizeInvalidatesHoist) {
     ASSERT_EQ(status, 0) << output;
 }
 
+TEST(JavaScriptRegression, Jscu29DynamicGlobalEnvironmentAndJobs) {
+    test_js_script_against_file("test/js/jscu29_dynamic_global_environment.js",
+        "test/js/jscu29_dynamic_global_environment.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31TimerResourceTable) {
+    test_js_script_against_file("test/js/jscu31_timer_resource_table.js",
+        "test/js/jscu31_timer_resource_table.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31MockSchedulerWaits) {
+    test_js_script_against_file("test/js/jscu31_mock_scheduler_waits.js",
+        "test/js/jscu31_mock_scheduler_waits.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31BlobUrlRegistry) {
+    test_js_script_against_file("test/js/jscu31_blob_url_registry.js",
+        "test/js/jscu31_blob_url_registry.txt");
+}
+
+TEST(JavaScriptRegression, Jscu31CjsModuleStack) {
+    test_js_script_against_file("test/js/jscu31_cjs_module_stack.js",
+        "test/js/jscu31_cjs_module_stack.txt");
+}
+
+TEST(JavaScriptRegression, Jscu35DynamicFunctionCache) {
+    test_js_script_against_file("test/js/jscu35_dynamic_function_cache.js",
+        "test/js/jscu35_dynamic_function_cache.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29WithScopeStack) {
+    test_js_script_against_file("test/js/jscu29_with_scope_stack.js",
+        "test/js/jscu29_with_scope_stack.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29EvalSourceRecords) {
+    test_js_script_against_file("test/js/jscu29_eval_source_records.js",
+        "test/js/jscu29_eval_source_records.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29DomStorageEntries) {
+    test_js_script_against_file("test/js/jscu29_dom_storage_entries.js",
+        "test/js/jscu29_dom_storage_entries.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29MediaQueryRecords) {
+    test_js_script_against_file("test/js/jscu29_media_query_records.js",
+        "test/js/jscu29_media_query_records.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29ProcessListenerMap) {
+    test_js_script_against_file("test/js/jscu29_process_listener_map.js",
+        "test/js/jscu29_process_listener_map.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29AsyncHooksRootVectors) {
+    test_js_script_against_file("test/js/jscu29_async_hooks_root_vectors.js",
+        "test/js/jscu29_async_hooks_root_vectors.txt");
+}
+
+TEST(JavaScriptRegression, Jscu29Test262AgentState) {
+    test_js_script_against_file("test/js/jscu29_test262_agent_state.js",
+        "test/js/jscu29_test262_agent_state.txt");
+}
+
+TEST(JavaScriptRegression, Jscu35ClassMemberTable) {
+    test_js_script_against_file("test/js/jscu35_class_member_table.js",
+        "test/js/jscu35_class_member_table.txt");
+}
+
 // Js54 P4: TypedArray prototype methods over resizable buffers. The shared
 // shape: each method calls ValidateTypedArray at entry (throw TypeError on
 // detached or OOB). Several methods (slice, forEach, reduce, reduceRight,

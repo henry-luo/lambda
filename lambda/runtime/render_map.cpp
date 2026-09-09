@@ -30,19 +30,25 @@ typedef struct RenderMapState {
     bool roots_registered;
 } RenderMapState;
 
+static const ContextCapsuleOps render_map_capsule_ops = {
+    "render-map", CONTEXT_CAPSULE_LIFETIME_CONTEXT, sizeof(RenderMapState),
+    NULL, NULL, NULL
+};
+
 static RenderMapState* render_map_state(void) {
     if (!context) {
         log_error("render-map: no bound canonical EvalContext");
         abort();
     }
-    RenderMapState* state = (RenderMapState*)context->render_map_state;
+    RenderMapState* state = (RenderMapState*)context_capsule(
+        context, CONTEXT_CAPSULE_RENDER_MAP);
     if (state) return state;
-    state = (RenderMapState*)mem_calloc(1, sizeof(RenderMapState), MEM_CAT_EVAL);
+    state = (RenderMapState*)context_capsule_ensure(context,
+        CONTEXT_CAPSULE_RENDER_MAP, &render_map_capsule_ops);
     if (!state) {
         log_error("render-map: failed to create context state");
         abort();
     }
-    context->render_map_state = state;
     return state;
 }
 
@@ -210,8 +216,10 @@ void render_map_init(void) {
 }
 
 void render_map_destroy(void) {
-    if (!context || !context->render_map_state) return;
-    RenderMapState* state = (RenderMapState*)context->render_map_state;
+    if (!context) return;
+    RenderMapState* state = (RenderMapState*)context_capsule(
+        context, CONTEXT_CAPSULE_RENDER_MAP);
+    if (!state) return;
     if (state->render_map && state->owns_map) {
         hashmap_free(state->render_map);
     }
@@ -226,8 +234,7 @@ void render_map_destroy(void) {
         state->path_recorder_state_cleanup(state->path_recorder_state);
         state->path_recorder_state = NULL;
     }
-    context->render_map_state = NULL;
-    mem_free(state);
+    context_capsule_drop(context, CONTEXT_CAPSULE_RENDER_MAP);
 }
 
 void render_map_record(Item source_item, const char* template_ref,
@@ -262,7 +269,8 @@ void render_map_bind_fragment_parent(Item fragment_result, Item parent_result,
                                      int child_index, int child_count) {
     // Collection construction is also used outside a template evaluation.
     // Never create context-owned reconciliation state for those plain lists.
-    if (!context || !context->render_map_state || !fragment_result.item ||
+    if (!context || !context_capsule(context, CONTEXT_CAPSULE_RENDER_MAP) ||
+            !fragment_result.item ||
             child_index < 0 || child_count < 0) return;
     HashMap* map = s_render_map;
     if (!map) return;
@@ -763,8 +771,10 @@ void* render_map_get_path_recorder_state(void) {
     // Teardown may run after a document has intentionally detached TLS. A
     // lookup must not recreate or abort; the owning runtime destroys the
     // payload through render_map_destroy while its context is still bound.
-    if (!context || !context->render_map_state) return NULL;
-    return ((RenderMapState*)context->render_map_state)->path_recorder_state;
+    if (!context) return NULL;
+    RenderMapState* state = (RenderMapState*)context_capsule(
+        context, CONTEXT_CAPSULE_RENDER_MAP);
+    return state ? state->path_recorder_state : NULL;
 }
 
 void render_map_set_path_recorder_state(void* state) {

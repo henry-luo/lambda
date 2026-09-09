@@ -357,7 +357,7 @@ static void js_mir_destroy_unowned_eval_context(Runtime* runtime,
             log_error("js-mir-cleanup: failed context is not current");
             return;
         }
-        if (local_context->js_state &&
+        if (js_runtime_state_for(local_context) &&
                 !js_runtime_state_thread_matches(local_context)) {
             log_error("js-mir-cleanup: failed JS state is not current");
             return;
@@ -1852,10 +1852,8 @@ extern "C" Item js_cjs_enter(Item module, Item filename) {
         js_cjs_store_module(filename, module);
         js_cjs_update_cached_default(filename, module);
     }
-    if (js_cjs_module_stack_count < JS_CJS_STACK_MAX) {
-        js_item_stack_push(&js_cjs_module_stack_state, module);
-    } else {
-        log_error("cjs-metadata: module stack overflow (%d)", JS_CJS_STACK_MAX);
+    if (!js_item_stack_push(&js_cjs_module_stack_state, module)) {
+        log_error("cjs-metadata: could not grow module stack");
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }

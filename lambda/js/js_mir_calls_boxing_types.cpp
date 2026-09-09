@@ -525,26 +525,13 @@ bool jm_build_property_key_image(const PropertyKeySpec* inherited,
 
 MIR_reg_t jm_module_name_id_at_index(JsMirTranspiler* mt, uint32_t index) {
     if (!mt) return 0;
-    if (mt->func_em->em.func_item != mt->func_em->module_name_id_cache_func) {
-        mt->func_em->module_name_id_cache_func = mt->func_em->em.func_item;
-        mt->func_em->module_name_id_cache_count = 0;
-    }
-    for (int i = 0; i < mt->func_em->module_name_id_cache_count; i++) {
-        if (mt->func_em->module_name_id_cache[i].module_name_index == index &&
-                mt->func_em->module_name_id_cache[i].direct_name_id == NAME_ID_NONE) {
-            return mt->func_em->module_name_id_cache[i].reg;
-        }
-    }
+    JsMirNameCache* cache = &mt->func_em->module_name_id_cache;
+    jm_name_cache_begin(cache, mt->func_em->em.func_item);
+    MIR_reg_t cached = jm_name_cache_find(cache, index, NAME_ID_NONE);
+    if (cached) return cached;
     MIR_reg_t result = jm_call_1(mt, "lambda_active_module_name_id", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)index));
-    if (result && mt->func_em->module_name_id_cache_count <
-            (int)(sizeof(mt->func_em->module_name_id_cache) /
-                  sizeof(mt->func_em->module_name_id_cache[0]))) {
-        int slot = mt->func_em->module_name_id_cache_count++;
-        mt->func_em->module_name_id_cache[slot].module_name_index = index;
-        mt->func_em->module_name_id_cache[slot].direct_name_id = NAME_ID_NONE;
-        mt->func_em->module_name_id_cache[slot].reg = result;
-    }
+    jm_name_cache_store(cache, index, NAME_ID_NONE, result);
     return result;
 }
 
@@ -556,26 +543,13 @@ MIR_reg_t jm_module_name_id(JsMirTranspiler* mt,
     // table lookup (D4.6.1v2, D4.6.2v2).
     NameId generated_id = well_known_name_id({chars, length});
     if (generated_id != NAME_ID_NONE) {
-        if (mt->func_em->em.func_item != mt->func_em->module_name_id_cache_func) {
-            mt->func_em->module_name_id_cache_func = mt->func_em->em.func_item;
-            mt->func_em->module_name_id_cache_count = 0;
-        }
-        for (int i = 0; i < mt->func_em->module_name_id_cache_count; i++) {
-            if (mt->func_em->module_name_id_cache[i].module_name_index == UINT32_MAX &&
-                    mt->func_em->module_name_id_cache[i].direct_name_id == generated_id) {
-                return mt->func_em->module_name_id_cache[i].reg;
-            }
-        }
+        JsMirNameCache* cache = &mt->func_em->module_name_id_cache;
+        jm_name_cache_begin(cache, mt->func_em->em.func_item);
+        MIR_reg_t cached = jm_name_cache_find(cache, UINT32_MAX, generated_id);
+        if (cached) return cached;
         MIR_reg_t id = jm_new_reg(mt, "nameid", MIR_T_I64);
         jm_emit_reg_op(mt, MIR_MOV, id, MIR_new_int_op(mt->ctx, (int64_t)generated_id));
-        if (mt->func_em->module_name_id_cache_count <
-                (int)(sizeof(mt->func_em->module_name_id_cache) /
-                      sizeof(mt->func_em->module_name_id_cache[0]))) {
-            int slot = mt->func_em->module_name_id_cache_count++;
-            mt->func_em->module_name_id_cache[slot].module_name_index = UINT32_MAX;
-            mt->func_em->module_name_id_cache[slot].direct_name_id = generated_id;
-            mt->func_em->module_name_id_cache[slot].reg = id;
-        }
+        jm_name_cache_store(cache, UINT32_MAX, generated_id, id);
         return id;
     }
     uint32_t index = jm_module_name_index(mt, chars, length);
@@ -588,27 +562,15 @@ MIR_reg_t jm_box_property_name_literal(JsMirTranspiler* mt,
     NameId direct_name_id = well_known_name_id({chars, length});
     uint32_t module_name_index = direct_name_id == NAME_ID_NONE
         ? jm_module_name_index(mt, chars, length) : UINT32_MAX;
-    if (mt->func_em->em.func_item != mt->func_em->property_name_cache_func) {
-        mt->func_em->property_name_cache_func = mt->func_em->em.func_item;
-        mt->func_em->property_name_cache_count = 0;
-    }
-    for (int i = 0; i < mt->func_em->property_name_cache_count; i++) {
-        if (mt->func_em->property_name_cache[i].module_name_index == module_name_index &&
-                mt->func_em->property_name_cache[i].direct_name_id == direct_name_id) {
-            return mt->func_em->property_name_cache[i].reg;
-        }
-    }
+    JsMirNameCache* cache = &mt->func_em->property_name_cache;
+    jm_name_cache_begin(cache, mt->func_em->em.func_item);
+    MIR_reg_t cached = jm_name_cache_find(cache, module_name_index,
+        direct_name_id);
+    if (cached) return cached;
     MIR_reg_t result = jm_call_2(mt, "lambda_active_module_name_item", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)module_name_index),
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)direct_name_id));
-    if (result && mt->func_em->property_name_cache_count <
-            (int)(sizeof(mt->func_em->property_name_cache) /
-                  sizeof(mt->func_em->property_name_cache[0]))) {
-        int slot = mt->func_em->property_name_cache_count++;
-        mt->func_em->property_name_cache[slot].module_name_index = module_name_index;
-        mt->func_em->property_name_cache[slot].direct_name_id = direct_name_id;
-        mt->func_em->property_name_cache[slot].reg = result;
-    }
+    jm_name_cache_store(cache, module_name_index, direct_name_id, result);
     return result;
 }
 
