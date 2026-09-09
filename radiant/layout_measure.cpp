@@ -70,6 +70,8 @@ IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, Av
         // generic replaced-element fallback is considered.
         if (layout_canvas_natural_size(block, &natural_width, &natural_height) &&
             natural_width > 0.0f && natural_height > 0.0f) {
+            layout_apply_object_view_box_intrinsic_size(
+                lycon, block->as_element(), &natural_width, &natural_height);
             if (width <= 0.0f) {
                 width = height > 0.0f ? height * natural_width / natural_height
                                       : natural_width;

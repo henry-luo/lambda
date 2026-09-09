@@ -286,7 +286,7 @@ static HtmlVersion classify_html_doctype_identifiers(const char* name,
     int quirks_mode = html5_determine_quirks_mode(
         name, public_id, system_id, false);
     if (quirks_mode == 1) return HTML_QUIRKS;
-    if (quirks_mode == 2) return HTML4_01_STRICT;
+    if (quirks_mode == 2) return HTML_LIMITED_QUIRKS;
 
     if (strstr(public_id, "-//W3C//DTD HTML 4.01//EN") ||
         strstr(public_id, "-//W3C//DTD HTML 4.0//EN")) {
@@ -409,16 +409,16 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                                     return HTML4_01_STRICT;
                                 }
                                 if (strstr(content, "Transitional")) {
-                                    return HTML4_01_TRANSITIONAL;
+                                    return HTML_LIMITED_QUIRKS;
                                 }
                                 if (strstr(content, "Frameset")) {
-                                    return HTML4_01_FRAMESET;
+                                    return HTML_LIMITED_QUIRKS;
                                 }
-                                return HTML4_01_TRANSITIONAL; // Default XHTML 1.0
+                                return HTML4_01_STRICT;
                             }
 
                             if (strstr(content, "-//W3C//DTD XHTML 1.1//EN")) {
-                                return HTML4_01_TRANSITIONAL;
+                                return HTML4_01_STRICT;
                             }
 
                             // HTML5 DOCTYPE: "html" with no public/system identifiers

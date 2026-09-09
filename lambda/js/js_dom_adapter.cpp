@@ -55,6 +55,19 @@ extern "C" Item dom_realm_constructor_prototype(const char* ctor_name) {
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
 }
 
+extern "C" Item dom_realm_custom_element_prototype(const char* local_name) {
+    if (!dom_realm_active() || !local_name || !local_name[0]) return ItemNull;
+    Item global = js_get_global_this();
+    Item registry = js_get_key_default(global, js_name_item("customElements"));
+    if (get_type_id(registry) != LMD_TYPE_MAP) return ItemNull;
+    Item record = js_collection_method(registry, 1, js_name_item(local_name), ItemNull);
+    if (get_type_id(record) != LMD_TYPE_MAP) return ItemNull;
+    Item constructor = js_get_key_cstr(record, "constructor");
+    if (!js_is_callable(constructor)) return ItemNull;
+    Item prototype = js_get_key_cstr(constructor, "prototype");
+    return get_type_id(prototype) == LMD_TYPE_MAP ? prototype : ItemNull;
+}
+
 extern "C" void dom_realm_apply_prototype(Item value, const char* ctor_name) {
     if (!dom_realm_active()) return;
     Item proto = dom_realm_constructor_prototype(ctor_name);

@@ -998,27 +998,16 @@ static void multicol_set_spanner_inline_size(ViewBlock* spanner, float width) {
     }
 }
 
-static bool multicol_relayout_special_spanner_text(
+static bool multicol_relayout_auto_height_spanner_flow(
     LayoutContext* lycon, ViewBlock* spanner) {
-    if (!lycon || !spanner ||
-        (spanner->tag() != MARKUP_NAME_FIELDSET &&
-         spanner->tag() != MARKUP_NAME_DETAILS) || !spanner->bound) {
+    if (!lycon || !spanner || !spanner->bound || !spanner->blk ||
+        (spanner->display.inner != CSS_VALUE_FLOW &&
+         spanner->display.inner != CSS_VALUE_FLOW_ROOT) ||
+        layout_axis_has_given_size(spanner, false)) {
         return false;
     }
-
-    bool has_direct_text = false;
-    for (DomNode* child = spanner->first_child; child; child = child->next_sibling) {
-        if (child->is_element()) return false;
-        if (child->is_text() && layout_text_node_has_content(child)) {
-            has_direct_text = true;
-        }
-    }
-    if (!has_direct_text) return false;
     bool details_needs_default_summary =
         layout_details_needs_default_summary(spanner);
-    bool preserve_native_height = spanner->tag() == MARKUP_NAME_DETAILS &&
-        layout_axis_has_given_size(spanner, false);
-    float original_height = spanner->height;
 
     LayoutContextScope context_scope(lycon);
     BlockContext containing = lycon->block;
@@ -1028,39 +1017,27 @@ static bool multicol_relayout_special_spanner_text(
     lycon->block.parent = &containing;
     lycon->elmt = static_cast<DomNode*>(spanner);
     lycon->view = static_cast<View*>(spanner);
-    if (spanner->font) setup_font(lycon->ui_context, &lycon->font, spanner->font);
-    setup_line_height(lycon, spanner);
-    layout_setup_block_font_metrics(lycon);
 
     LayoutContentBox content = layout_content_box(spanner);
-    float content_start_y = spanner->y + content.offset_y;
     lycon->block.content_width = content.width;
     lycon->block.content_height = content.height;
     lycon->block.given_width = content.width;
     lycon->block.given_height = -1.0f;
+    // Re-enter the normal local formatting context: advance_y is content-local,
+    // not a document-space coordinate inherited from the column balancing pass.
+    setup_inline(lycon, spanner);
     float default_summary_line = details_needs_default_summary
         ? layout_list_item_marker_line_height(lycon) : 0.0f;
-    lycon->block.advance_y = content_start_y + default_summary_line;
-    lycon->block.max_width = 0.0f;
-    lycon->block.text_align = spanner->blk ? spanner->block()->text_align : CSS_VALUE_START;
-    lycon->block.direction = spanner->blk ? spanner->block()->direction : CSS_VALUE_LTR;
-    line_init(lycon, spanner->x + content.offset_x,
-              spanner->x + content.offset_x + content.width);
+    lycon->block.advance_y += default_summary_line;
     layout_block_inner_content(lycon, spanner);
 
-    float used_content_height = lycon->block.advance_y - content_start_y;
+    float used_content_height = lycon->block.advance_y;
     if (used_content_height < 0.0f) used_content_height = 0.0f;
-    // HTML §4.11.1 supplies a legend for summary-less details. Keep that
-    // generated line ahead of the direct-text line when multicol relays it out.
-    float direct_text_height = max(
-        used_content_height - default_summary_line, 0.0f);
-    layout_shift_view_children(static_cast<View*>(spanner), 0.0f,
-                               -direct_text_height);
     spanner->content_width = content.width;
     spanner->content_height = used_content_height;
     float relaid_height = layout_border_size_from_content_box(
         spanner, used_content_height, false);
-    spanner->height = preserve_native_height ? max(original_height, relaid_height) : relaid_height;
+    spanner->height = relaid_height;
     return true;
 }
 
@@ -3117,13 +3094,14 @@ static void multicol_allow_fragmentation_before_spanner(
     for (int index = group_start; index < group_end; index++) {
         ViewBlock* child = items[index].block;
         if (!child || !child->blk ||
+            block_context_establishes_bfc(child) ||
             child->block()->break_inside == CSS_VALUE_AVOID ||
             child->block()->contain_positioning ||
             (child->multicol_prop() && is_multicol_container(child))) {
             continue;
         }
-        // css-multicol: balancing before a spanner may fragment an otherwise
-        // monolithic block so the preceding column group reaches its target.
+        // CSS Multicol §6 balances ordinary flow before a spanner; an
+        // independent formatting context remains a monolithic fragment.
         items[index].can_fragment = true;
         item_can_fragment[index - group_start] = true;
     }
@@ -4075,6 +4053,9 @@ static int multicol_project_fragmented_descendants(
     float forced_break_origin = 0.0f;
     int forced_break_fragment = 0;
     int projected_fragment_count = 1;
+    int nested_spanner_parent_fragment = 0;
+    float nested_spanner_group_start = 0.0f;
+    bool nested_spanner_has_preceding_line = false;
     while (descendant) {
         View* next = descendant->next();
         if (ViewBlock* descendant_block = lam::view_as_block(descendant)) {
@@ -4413,13 +4394,31 @@ static int multicol_project_fragmented_descendants(
         }
         if (!handled_nested_horizontal && child_is_multicol) {
             if (nested_multicol_spanner_projection) {
-                // css multicol: a nested multicol's existing internal column
-                // union is projected into the ancestor's fragmentainer slots.
-                int parent_column_index = fragment_index % column_count;
-                int parent_row_index = fragment_index / column_count;
-                local_y = original_y - fragment_index * fragment_height;
+                bool direct_spanner = descendant_block &&
+                    multicol_is_spanner_block(descendant_block);
+                if (direct_spanner) {
+                    if (nested_spanner_has_preceding_line) {
+                        nested_spanner_parent_fragment++;
+                    }
+                    nested_spanner_group_start = original_y;
+                    nested_spanner_has_preceding_line = true;
+                } else if (descendant_block && descendant_block->height > 0.0f) {
+                    nested_spanner_has_preceding_line = true;
+                }
+                // CSS Multicol 2 §3: a direct spanner starts a new multicol
+                // line, so project that line through the next parent fragment.
+                fragment_index = nested_spanner_parent_fragment;
+                column_index = fragment_index % column_count;
+                row_index = fragment_index / column_count;
+                local_y = original_y - nested_spanner_group_start;
+                if (local_y < 0.0f) local_y = 0.0f;
+                if (fragment_index + 1 > projected_fragment_count) {
+                    projected_fragment_count = fragment_index + 1;
+                }
+                int parent_column_index = column_index;
+                int parent_row_index = row_index;
                 float descendant_x = descendant->x;
-                if (descendant_block && multicol_is_spanner_block(descendant_block)) {
+                if (direct_spanner) {
                     descendant_x = child->x + layout_axis_decoration_start(
                         child->bound ? child->boundary() : nullptr, LAYOUT_AXIS_X);
                 }
@@ -6200,7 +6199,11 @@ static float multicol_fragmented_child_union(
         !multicol_has_vertical_inline_axis(child)
             ? multicol_contained_monolithic_child_count(child) : 0;
     float contained_monolithic_max_height = 0.0f;
-    if (contained_monolithic_child_count > 0 && fragment_height > 0.0f) {
+    bool principal_box_fragments = item_height > fragment_capacity + 0.5f;
+    if (contained_monolithic_child_count > 0 && fragment_height > 0.0f &&
+        !principal_box_fragments) {
+        // a fragmented principal box owns its fragment sequence; a contained
+        // descendant's shorter monolithic flow cannot replace that sequence.
         MulticolMonolithicChildFlow flow = {};
         multicol_init_monolithic_child_flow(
             &flow,
@@ -7115,6 +7118,7 @@ static float multicol_split_child_around_spanners(
             multicol_set_spanner_inline_size(
                 spanner, container->width > 0 ? container->width :
                     column_count * column_width + (column_count - 1) * column_gap);
+            multicol_relayout_auto_height_spanner_flow(lycon, spanner);
 
             current_y += spanner->height + margin_bottom;
             spanner_extent += spanner->height + collapsed_margin + margin_bottom;
@@ -7464,7 +7468,6 @@ static float multicol_split_child_around_spanners(
     if (used_column_count > container->multicol_prop()->computed_used_column_count) {
         container->multicol_prop()->computed_used_column_count = used_column_count;
     }
-
     group_scratch.release(&lycon->scratch);
     flow_scratch.release(&lycon->scratch);
     return flow_height;
@@ -10527,7 +10530,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             // reapply its resolved alignment after phase-one column sizing.
             multicol_set_spanner_inline_size(
                 child_block, vertical_writing ? available_inline_extent : available_width);
-            multicol_relayout_special_spanner_text(lycon, child_block);
+            multicol_relayout_auto_height_spanner_flow(lycon, child_block);
             // css multicol: special principal boxes contribute their final
             // used block-size after their own direct text has been relaid out.
             float spanner_flow_extent = vertical_writing
@@ -10663,6 +10666,14 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             // group exhausts the fragmentainer, the next group starts at 1px.
             group_target = max(definite_fragmentainer_height -
                 max_column_height, 1.0f);
+        }
+        if (block->multicol_prop()->fill == COLUMN_FILL_AUTO &&
+            multicol_has_spanner_child(block) &&
+            multicol_has_definite_ancestor_fragmentainer(block) &&
+            group_balanced > 0.0f && group_balanced < group_target) {
+            // CSS Multicol 2 §3: a spanner splits a nested flow into lines;
+            // each line balances within the ancestor fragmentainer.
+            group_target = group_balanced;
         }
         // Distribute this group's blocks across columns
         ColumnGroup group;

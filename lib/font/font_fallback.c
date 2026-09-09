@@ -44,7 +44,12 @@ static const char* monospace_fonts[] = {
     "Nimbus Mono PS", "DejaVu Sans Mono", NULL
 };
 static const char* cursive_fonts[] = {
+#ifdef __APPLE__
+    // Chromium's macOS cursive generic uses Marker Felt rather than Comic Sans.
+    "Marker Felt", "Comic Sans MS", "Apple Chancery", NULL
+#else
     "Comic Sans MS", "Apple Chancery", NULL
+#endif
 };
 static const char* fantasy_fonts[] = {
     "Impact", "Papyrus", NULL

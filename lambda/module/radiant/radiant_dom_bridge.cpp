@@ -2076,6 +2076,21 @@ extern "C" bool dom_engine_set_image_source(DomElement* element,
     return true;
 }
 
+extern "C" bool dom_engine_image_natural_size(DomElement* element,
+                                                  int* width, int* height) {
+    if (width) *width = 0;
+    if (height) *height = 0;
+    if (!element || !radiant_dom_is_tag(element, "img") || !element->embed ||
+        !element->embed->img || !element->embed->img->has_intrinsic_size) {
+        return false;
+    }
+    ImageSurface* image = element->embed->img;
+    if (image->width <= 0 || image->height <= 0) return false;
+    if (width) *width = image->width;
+    if (height) *height = image->height;
+    return true;
+}
+
 RADIANT_C_API int radiant_dom_m4b_href_get(Item receiver, Item* out) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;

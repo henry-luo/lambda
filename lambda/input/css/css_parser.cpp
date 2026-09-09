@@ -2251,6 +2251,8 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     int paren_depth_val = 0;  // track ()-parens inside values
     bool bracket_mismatch = false;  // unmatched ] or ) detected
     bool has_bad_token = false;  // CSS §5.4.5: bad-string/bad-url in value → drop declaration
+    bool has_top_level_colon = false;
+    bool has_brace_block = false;
     int value_end_before_important = -1;  // track end of value before !important
 
     while (*pos < token_count) {
@@ -2275,6 +2277,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
         // Opening brace inside a value — track nested {}-blocks
         if (t == CSS_TOKEN_LEFT_BRACE) {
+            has_brace_block = true;
             brace_depth++;
             value_count++;
             (*pos)++;
@@ -2297,11 +2300,11 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             break;
         }
 
-        // Stop at unexpected colon (indicates malformed CSS like "width: 600px: height: 100px;")
-        // Colons should only appear after property names, not in values
+        // A colon in a nested simple block belongs to that block. Keep
+        // consuming the declaration so its closing brace cannot escape into
+        // the qualified-rule parser during malformed-CSS recovery.
         if (t == CSS_TOKEN_COLON) {
-            log_debug("[CSS Parser] Unexpected colon in value, stopping parse (malformed CSS)");
-            return NULL;
+            if (brace_depth == 0) has_top_level_colon = true;
         }
 
         // Handle function tokens - skip entire function as one value
@@ -2345,6 +2348,16 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
         return NULL;
     }
 
+    bool is_custom_prop = (property_name[0] == '-' && property_name[1] == '-');
+
+    // css syntax §5.5.6 consumes nested simple blocks before dropping an
+    // invalid declaration. Standard properties cannot use a {} block here;
+    // rejecting only after consumption preserves the enclosing rule boundary.
+    if (!is_custom_prop && (has_top_level_colon || has_brace_block)) {
+        log_debug("[CSS Parser] Dropping malformed declaration '%s' after consuming its value", property_name);
+        return NULL;
+    }
+
     // CSS §5.4.5: declarations containing bad-string or bad-url tokens must be dropped
     if (has_bad_token) {
         log_debug("[CSS Parser] Dropping declaration '%s': contains bad-string or bad-url token", property_name);
@@ -2353,7 +2366,6 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
     // For custom properties, validate bracket matching
     // Per CSS spec, <declaration-value> requires balanced (), [], {} pairs
-    bool is_custom_prop = (property_name[0] == '-' && property_name[1] == '-');
     if (is_custom_prop && bracket_mismatch) {
         log_debug("[CSS Parser] Custom property '%s' has mismatched brackets — invalid", property_name);
         return NULL;
@@ -3175,6 +3187,35 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
             if (peek >= token_count || tokens[peek].type != CSS_TOKEN_COLON) {
                 looks_like_nested_rule = true;
             }
+        }
+
+        if (looks_like_nested_rule) {
+            bool has_nested_block = false;
+            int probe = pos;
+            int probe_paren = 0;
+            int probe_bracket = 0;
+            while (probe < token_count) {
+                CssTokenType probe_type = tokens[probe].type;
+                if (probe_type == CSS_TOKEN_LEFT_PAREN) probe_paren++;
+                else if (probe_type == CSS_TOKEN_RIGHT_PAREN && probe_paren > 0) probe_paren--;
+                else if (probe_type == CSS_TOKEN_LEFT_BRACKET) probe_bracket++;
+                else if (probe_type == CSS_TOKEN_RIGHT_BRACKET && probe_bracket > 0) probe_bracket--;
+                else if (probe_type == CSS_TOKEN_LEFT_BRACE &&
+                         probe_paren == 0 && probe_bracket == 0) {
+                    has_nested_block = true;
+                    break;
+                }
+                if ((probe_type == CSS_TOKEN_SEMICOLON ||
+                     probe_type == CSS_TOKEN_RIGHT_BRACE) &&
+                    probe_paren == 0 && probe_bracket == 0) {
+                    break;
+                }
+                probe++;
+            }
+            // css syntax §5.4.5 drops an invalid declaration through its semicolon.
+            // Do not mistake legacy `*property` syntax for a nested rule and lose
+            // the valid declarations which follow it in the same declaration list.
+            if (!has_nested_block) looks_like_nested_rule = false;
         }
 
         if (looks_like_nested_rule) {

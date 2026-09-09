@@ -862,6 +862,7 @@ struct InlineProp {
     CssEnum vertical_align;
     CssEnum ruby_position;
     float vertical_align_offset;  // length/percentage vertical-align offset (px), positive = raise
+    bool content_strut_establishes_line;  // final box must use this explicit-line metric
     float opacity;  // CSS opacity value (0.0 to 1.0)
     int visibility;  // Visibility
     CssEnum mix_blend_mode;  // CSS mix-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
@@ -1940,6 +1941,8 @@ typedef struct BlockProp {
     // aspect-ratio auto height is definite for percentage bases and margin adjacency,
     // but final auto sizing may still grow to contain in-flow content.
     bool aspect_ratio_auto_height;
+    // A percent abspos height resolved after its auto-height containing block completed.
+    bool percentage_height_resolved_late;
     float given_width_percent;  // Raw percentage if width: X% (NaN if not percentage)
     float given_height_percent; // Raw percentage if height: X% (NaN if not percentage)
     float contain_intrinsic_width;
@@ -2571,6 +2574,7 @@ typedef enum HtmlVersion {
     HTML4_01_FRAMESET,      // HTML4.01 Frameset
     HTML_QUIRKS,            // Legacy HTML or missing DOCTYPE
     HTML1_0,                // HTML 1.0 (1991) - uses <HEADER> as head, <NEXTID> void element
+    HTML_LIMITED_QUIRKS,    // WHATWG limited-quirks documents (for example XHTML 1.0 Transitional)
 } HtmlVersion;
 
 // WHATWG Quirks Mode: https://quirks.spec.whatwg.org/
@@ -2579,6 +2583,10 @@ typedef enum HtmlVersion {
 inline bool is_quirks_mode(HtmlVersion v) {
     return v == HTML4_01_TRANSITIONAL || v == HTML4_01_FRAMESET ||
            v == HTML_QUIRKS || v == HTML1_0;
+}
+
+inline bool is_limited_quirks_mode(HtmlVersion v) {
+    return v == HTML_LIMITED_QUIRKS;
 }
 
 struct MeasurementCacheEntry;

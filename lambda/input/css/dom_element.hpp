@@ -468,6 +468,11 @@ struct CssCustomProp {
     CssCustomProp* next;    // Linked list for simple storage
 };
 
+// Custom-property names retain their authored spelling, while var() parsing
+// may omit the leading dashes from its lookup token.
+bool css_custom_property_name_matches(const char* stored_name,
+                                      const char* lookup_name);
+
 enum DomElementFlag : uint32_t {
     ELMT_FLAG_NEEDS_STYLE_RECOMPUTE = 1u << 0,
     ELMT_FLAG_STYLES_RESOLVED = 1u << 1,

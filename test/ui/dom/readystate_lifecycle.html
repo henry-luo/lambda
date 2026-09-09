@@ -16,5 +16,8 @@
     window.addEventListener('load', function () {
       recordLifecycle('load:' + document.readyState);
     });
+    window.addEventListener('pageshow', function (event) {
+      recordLifecycle('pageshow:' + (event.persisted === false));
+    });
   </script>
 </body></html>

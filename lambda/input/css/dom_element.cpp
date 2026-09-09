@@ -627,6 +627,10 @@ void dom_element_borrow_specified_style(DomElement* element, StyleTree* style) {
     element->specified_style = style;
     if (style) element->mark_specified_style_borrowed();
     else element->mark_specified_style_owned();
+    // Borrowing changes the cascade input. A retained generated box may have
+    // just inherited its host's font, so it must reapply its own declarations.
+    element->set_styles_resolved(false);
+    element->set_needs_style_recompute(true);
 }
 
 void dom_element_destroy(DomElement* element) {
@@ -1413,6 +1417,17 @@ bool dom_element_remove_inline_styles(DomElement* element) {
     }
 
     return removed_attr || removed_decl;
+}
+
+bool css_custom_property_name_matches(const char* stored_name,
+                                      const char* lookup_name) {
+    if (!stored_name || !lookup_name) return false;
+    if (strcmp(stored_name, lookup_name) == 0) return true;
+    const char* stored_body = strncmp(stored_name, "--", 2) == 0
+        ? stored_name + 2 : stored_name;
+    const char* lookup_body = strncmp(lookup_name, "--", 2) == 0
+        ? lookup_name + 2 : lookup_name;
+    return strcmp(stored_body, lookup_body) == 0;
 }
 
 // ============================================================================
@@ -3497,37 +3512,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         return nullptr;  // Skip XML declarations
     }
 
-    // Skip <script> elements during DOM tree building. Per HTML spec the UA
-    // stylesheet sets `script { display: none }`, so they don't participate
-    // in layout. Keeping them out of the DOM also prevents script_runner from
-    // re-executing inline scripts during pure layout passes.
-    //
-    // Exception: when the author explicitly overrides display via inline
-    // style="display: ..." (block, inline, etc.), the script's text content
-    // becomes part of the rendered/selectable text per WPT
-    // selection/script-and-style-elements.html. In that case we keep the
-    // element so DomRange.toString() can include its text.
-    if (str_ieq_const(tag_name, strlen(tag_name), "script")) {
-        const char* style_attr = extract_element_attribute(elem, "style", nullptr);
-        bool has_display_override = false;
-        if (style_attr) {
-            // Crude check: the inline style attribute mentions "display:" with
-            // a non-`none` value. css_parse will refine this further when the
-            // element is later checked for visibility.
-            const char* d = strstr(style_attr, "display");
-            if (d) {
-                const char* colon = strchr(d, ':');
-                if (colon) {
-                    const char* v = colon + 1;
-                    while (*v == ' ' || *v == '\t') v++;
-                    if (strncmp(v, "none", 4) != 0) has_display_override = true;
-                }
-            }
-        }
-        if (!has_display_override) {
-            return nullptr;  // Skip script elements during DOM tree building
-        }
-    }
+    // Script elements stay in the DOM even though the UA display default is
+    // `none`; page libraries query them for their loading URL and metadata.
 
     // UI-mode MarkBuilder values embed a DomElement, but HTML/XML fragment
     // parsers still produce plain Elements. Only reuse storage after proving it
@@ -3703,7 +3689,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             log_debug("  Building child element: <%s> for parent <%s> (parent_dom=%p)", child_tag_name, tag_name, (void*)dom_elem);
             DomElement* child_dom = build_dom_tree_from_element(child_elem, doc, dom_elem);
 
-            // skip if nullptr (e.g., script, XML declarations)
+            // skip if nullptr (e.g., XML declarations)
             if (!child_dom) {
                 log_debug("  Skipped child element: <%s>", child_tag_name);
                 continue;

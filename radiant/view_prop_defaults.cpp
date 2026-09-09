@@ -35,6 +35,7 @@ static BlockProp make_block_prop_default() {
     value.dominant_baseline = CSS_VALUE_AUTO;
     value.given_width = value.given_height = -1.0f;
     value.aspect_ratio_auto_height = false;
+    value.percentage_height_resolved_late = false;
     value.given_width_fit_content_limit = value.given_height_fit_content_limit = -1.0f;
     value.given_width_fit_content_percent = value.given_height_fit_content_percent = NAN;
     value.given_width_percent = value.given_height_percent = NAN;

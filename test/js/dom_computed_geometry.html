@@ -21,6 +21,8 @@ body { margin: 0; }
 #percentage-line-height-child { font-size: 10px; }
 #static-position-parent { width: 300px; text-align: center; }
 #static-position-child { position: absolute; left: 50%; width: 24px; margin-left: -12px; }
+/* The 1230px row extends 15px beyond the root scrolling area's right edge. */
+#root-scroll-overflow { width: 1230px; height: 1px; margin-left: -15px; }
 </style>
 <div id="container"><div id="row"><div id="item"><div id="tile"></div></div></div></div>
 <div id="cascade-target"></div>
@@ -29,3 +31,4 @@ body { margin: 0; }
 <div id="number-line-height-parent"><span id="number-line-height-child">x</span></div>
 <div id="percentage-line-height-parent"><span id="percentage-line-height-child">x</span></div>
 <div id="static-position-parent"><a id="static-position-anchor"><i id="static-position-child"></i></a></div>
+<div id="root-scroll-overflow"></div>

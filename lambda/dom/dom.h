@@ -463,6 +463,9 @@ Item dom_realm_constructor(const char* ctor_name);
 /** The realm's `<ctor_name>.prototype`, or ItemNull when absent. */
 Item dom_realm_constructor_prototype(const char* ctor_name);
 
+/** A registered autonomous custom element's prototype, or ItemNull. */
+Item dom_realm_custom_element_prototype(const char* local_name);
+
 /** Give `value` the realm prototype for `<ctor_name>`; no-op when absent. */
 void dom_realm_apply_prototype(Item value, const char* ctor_name);
 

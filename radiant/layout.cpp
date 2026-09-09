@@ -1464,6 +1464,54 @@ CssEnum layout_inherited_text_transform(DomNode* start) {
     return CSS_VALUE_NONE;
 }
 
+bool layout_text_combine_upright_applies(DomNode* text_node) {
+    if (!text_node) return false;
+    const CssValue* value = nullptr;
+    for (DomNode* node = text_node->parent; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* element = node->as_element();
+        CssDeclaration* declaration = element && element->specified_style
+            ? style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_TEXT_COMBINE_UPRIGHT)
+            : nullptr;
+        if (!declaration || !declaration->value) continue;
+        value = declaration->value;
+        break;
+    }
+    if (!value) return false;
+
+    const CssValue* mode = value;
+    const CssValue* digit_limit = nullptr;
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+        mode = value->data.list.values[0];
+        if (value->data.list.count > 1) digit_limit = value->data.list.values[1];
+    }
+    if (!mode || mode->type != CSS_VALUE_TYPE_KEYWORD) return false;
+    DomElement* parent = text_node->parent && text_node->parent->is_element()
+        ? text_node->parent->as_element() : nullptr;
+    if (!parent) return false;
+    CssEnum writing_mode = layout_element_css_writing_mode(parent);
+    // CSS Writing Modes 4 §9.1 only applies upright composition in vertical modes.
+    if (writing_mode != CSS_VALUE_VERTICAL_RL && writing_mode != CSS_VALUE_VERTICAL_LR) {
+        return false;
+    }
+    if (mode->data.keyword == CSS_VALUE_ALL) return true;
+    if (mode->data.keyword != CSS_VALUE_DIGITS) return false;
+
+    float limit = 2.0f;
+    if (digit_limit && digit_limit->type == CSS_VALUE_TYPE_NUMBER) {
+        limit = (float)digit_limit->data.number.value;
+    }
+    const unsigned char* text = text_node->text_data();
+    if (!text || limit < 2.0f) return false;
+    size_t count = 0;
+    for (const unsigned char* cursor = text; *cursor; cursor++) {
+        if (*cursor < '0' || *cursor > '9') return false;
+        count++;
+    }
+    return count > 0 && (float)count <= limit;
+}
+
 CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
     INHERIT:
     ViewElement* parent = block->parent_view();
@@ -1528,8 +1576,12 @@ static bool block_has_declared_line_height(ViewBlock* block) {
            style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_FONT) != nullptr;
 }
 
-void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
-    CssValue value;
+CssValue layout_cascaded_line_height(LayoutContext* lycon, ViewBlock* block) {
+    CssValue normal_value = {};
+    normal_value.type = CSS_VALUE_TYPE_KEYWORD;
+    normal_value.data.keyword = CSS_VALUE_NORMAL;
+    if (!block) return normal_value;
+
     bool has_declared_line_height = block_has_declared_line_height(block);
     if (block->blk && block->block_mut()->line_height) {
         bool button_ua_normal = block->tag() == MARKUP_NAME_BUTTON &&
@@ -1539,13 +1591,16 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         if ((!has_declared_line_height && !button_ua_normal) ||
             (block->block()->line_height->type == CSS_VALUE_TYPE_KEYWORD &&
              block->block()->line_height->data.keyword == CSS_VALUE_INHERIT)) {
-            value = inherit_line_height(lycon, block);
-        } else {
-            value = *block->block()->line_height;
+            return inherit_line_height(lycon, block);
         }
-    } else { // no explicit value → inherit from parent (line-height is an inherited property)
-        value = inherit_line_height(lycon, block);
+        return *block->block()->line_height;
     }
+    // CSS 2.1 §10.8.1: line-height is inherited when the element has no value.
+    return inherit_line_height(lycon, block);
+}
+
+void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
+    CssValue value = layout_cascaded_line_height(lycon, block);
     if (value.type == CSS_VALUE_TYPE_KEYWORD && value.data.keyword == CSS_VALUE_NORMAL) {
         float normal_line_height = calc_normal_line_height(font_box_handle(&lycon->font));
         if (block->tag() == MARKUP_NAME_BUTTON) {
@@ -1611,7 +1666,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 
     if (node && node->is_element()) {
         DomElement* dom_elem = node->as_element();
-
         if (dom_elem && dom_elem->specified_style) {
             // IMPORTANT: Skip this check during measurement mode (run_mode==ComputeSize)
             if (dom_elem->styles_resolved() && !dom_elem->needs_style_recompute() &&
@@ -1646,6 +1700,17 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             if (parent_elem && parent_elem->font) {
                 setup_font(lycon->ui_context, &lycon->font, parent_elem->font);
             }
+            ViewBlock* flex_parent = parent_elem
+                ? lam::view_as_block(parent_elem) : nullptr;
+            bool is_direct_flex_item = flex_parent &&
+                flex_parent->display.inner == CSS_VALUE_FLEX;
+            LayoutContainingBlock flex_item_cb = is_direct_flex_item
+                ? layout_containing_block_for_view(flex_parent) : LayoutContainingBlock{};
+            // A later intrinsic query can retain an outer block context after flex
+            // sizing. Percentages on a direct flex item still use its flex container.
+            LayoutContainingBlockScope flex_item_percentage_scope(
+                lycon, LAYOUT_AXIS_X, flex_item_cb.content_width,
+                is_direct_flex_item && flex_item_cb.content_width > 0.0f);
             apply_element_default_style(lycon, dom_elem);
             if (layout_element_css_all_reset_keyword(dom_elem) != CSS_VALUE__UNDEF) {
                 // CSS Cascade: HTML defaults remain available for control semantics,
@@ -1661,7 +1726,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             }
 
             resolve_css_styles(dom_elem, lycon);
-
             // HTML Rendering sizes native meter/progress widgets in em units;
             // apply the computed font after the author cascade has resolved.
             layout_refresh_html_em_replaced_size(lycon, dom_elem);
@@ -2588,8 +2652,9 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             // its line position; later-line alignment must not move it.
             return;
         }
-        if (!layout_inline_span_has_content_on_line(
-                static_cast<View*>(span), lycon->block.line_number)) {
+        bool has_content_on_line = layout_inline_span_has_content_on_line(
+            static_cast<View*>(span), lycon->block.line_number);
+        if (!has_content_on_line) {
             // CSS 2.1 §10.8.1: a split inline's previous-line fragment must
             // not be realigned against a later line box.
             return;
@@ -2675,7 +2740,14 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             materialized_empty_inline = true;
         }
         float span_asc = 0, span_desc = 0;
-        if (span->font) {
+        if (materialized_empty_inline && span_fh) {
+            // css 2.1 §10.8.1: empty inline boxes align to the loaded face baseline.
+            span_asc = font_get_rendering_ascender(span_fh);
+            span_desc = max(0.0f, font_get_cell_height(span_fh) - span_asc);
+        } else if (span->in_line && span->inl()->content_strut_establishes_line && span_fh) {
+            // Match the explicit-line strut that selected this line's baseline.
+            font_get_content_area_split(span_fh, &span_asc, &span_desc);
+        } else if (span->font) {
             span_asc = span->fontp()->ascender;
             span_desc = span->fontp()->descender;
         } else if (lycon->font.style) {
@@ -2703,6 +2775,16 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 inline_span_is_in_anonymous_table_cell(span) &&
                 inline_span_has_non_baseline_vertical_align(span) &&
                 !layout_inline_span_has_direct_visible_text_child(span);
+            bool has_direct_text = layout_inline_span_has_direct_visible_text_child(span);
+            bool preserve_inline_atomic_line_origin =
+                layout_inline_span_has_direct_inline_atomic_child(span) &&
+                !has_direct_text && span->tag() != MARKUP_NAME_RT &&
+                layout_inline_span_parent_has_different_font_metrics(span);
+            // CSSOM View: an atomic-only inline chain exposes its descendant fragment;
+            // inherited struts still contribute solely to the containing line box.
+            bool preserve_nested_atomic_fragment_geometry =
+                layout_inline_span_has_single_nested_inline_atomic_child_with_font_change(span) &&
+                !has_direct_text;
 
             if (materialized_empty_inline) {
                 // CSS 2.1 §10.8.1: an empty inline still has its own font box
@@ -2730,19 +2812,25 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             } else if (span->height < expected_height) {
                 // A shorter atomic child cannot shrink its non-replaced inline
                 // ancestor below the font content area defined by CSS 2.1 §10.6.1.
-                span->y = layout_inline_font_box_y(
-                    lycon, span, span->content_height,
-                    span_asc, span_desc, baseline_pos, bt, pt);
-                span->height = expected_height;
+                if (!preserve_nested_atomic_fragment_geometry) {
+                    span->y = layout_inline_font_box_y(
+                        lycon, span, span->content_height,
+                        span_asc, span_desc, baseline_pos, bt, pt);
+                    span->height = expected_height;
+                }
             } else if (!span_is_multi_line && span->height > expected_height) {
                 // CSS 2.1 §10.6.1: normalize a non-replaced inline's font box.
                 // Direct text keeps an anonymous table wrapper on its original line.
-                if (!preserve_anonymous_table_line_origin) {
+                if (!preserve_anonymous_table_line_origin &&
+                    !preserve_inline_atomic_line_origin &&
+                    !preserve_nested_atomic_fragment_geometry) {
                     span->y = layout_inline_font_box_y(
                         lycon, span, span->content_height,
                         span_asc, span_desc, baseline_pos, bt, pt);
                 }
-                span->height = expected_height;
+                if (!preserve_nested_atomic_fragment_geometry) {
+                    span->height = expected_height;
+                }
             }
         }
         if (span->tag() == MARKUP_NAME_RUBY &&
@@ -2841,7 +2929,7 @@ void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
 
 void view_line_align(LayoutContext* lycon, float offset, View* view);
 
-static void align_wrapped_continuation(LayoutContext* lycon, float offset, View* fragment) {
+static void align_inline_line_from_fragment(LayoutContext* lycon, float offset, View* fragment) {
     View* cursor = fragment;
     if (fragment->view_type == RDT_VIEW_TEXT) {
         shift_text_current_line_rects(
@@ -2891,6 +2979,11 @@ static bool view_is_wrapped_continuation(View* view, int line_number) {
     bool has_current = false;
     find_text_line_membership(view, line_number, &has_prior, &has_current);
     return has_prior && has_current;
+}
+
+static bool inline_fragment_has_inline_parent(const View* fragment) {
+    return fragment && fragment->parent && fragment->parent->is_element() &&
+        fragment->parent->as_element()->view_type == RDT_VIEW_INLINE;
 }
 
 static void shift_span_line_fragment_unions(ViewSpan* span, float offset) {
@@ -3189,7 +3282,6 @@ void line_align(LayoutContext* lycon) {
     } else if (text_align == CSS_VALUE_END) {
         text_align = is_rtl ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
     }
-
     if (lycon->line.has_phantom_inline_fragment && lycon->line.is_line_start &&
         lycon->line.has_float_intrusion && lycon->line.start_view) {
         normalize_phantom_left_float_spans(
@@ -3268,12 +3360,17 @@ void line_align(LayoutContext* lycon) {
             (offset > 0 || (is_rtl && offset < 0 && !vertical_out_of_flow_line))) {
             lycon->line.static_inline_alignment_offset_x = offset;
             if (is_wrapped_continuation) {
-                align_wrapped_continuation(lycon, offset, view);
+                align_inline_line_from_fragment(lycon, offset, view);
             } else {
-                // CSS 2.1 §16.2: Before aligning from start_view, check preceding siblings
+                // CSS 2.1 §16.2: A nested start fragment must carry alignment
+                // through its enclosing inlines to later sibling content.
                 layout_shift_preceding_inline_line_views(
                     lycon, view, offset);
-                view_line_align(lycon, offset, view);
+                if (inline_fragment_has_inline_parent(view)) {
+                    align_inline_line_from_fragment(lycon, offset, view);
+                } else {
+                    view_line_align(lycon, offset, view);
+                }
             }
             return;
         }
@@ -3288,12 +3385,17 @@ void line_align(LayoutContext* lycon) {
                         if (offset > 0) {
                             // CSS 2.1 §16.2: For wrapped text nodes, only shift rects
                             if (is_wrapped_continuation) {
-                                align_wrapped_continuation(lycon, offset, view);
+                                align_inline_line_from_fragment(lycon, offset, view);
                             } else {
-                                // CSS 2.1 §16.2: Also check preceding siblings for
+                                // CSS 2.1 §16.2: Align the full line after the
+                                // nested start fragment, not just that subtree.
                                 layout_shift_preceding_inline_line_views(
                                     lycon, view, offset);
-                                view_line_align(lycon, offset, view);
+                                if (inline_fragment_has_inline_parent(view)) {
+                                    align_inline_line_from_fragment(lycon, offset, view);
+                                } else {
+                                    view_line_align(lycon, offset, view);
+                                }
                             }
                         }
                     }

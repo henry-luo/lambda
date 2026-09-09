@@ -202,3 +202,19 @@ TEST_F(CssEngineParserTest, ParseNestedOfNestedRuleTerminates) {
     // regression is fixed.
     ASSERT_NE(stylesheet, nullptr) << "Stylesheet should parse without hanging";
 }
+
+// CSS Syntax §5.5.6 consumes simple blocks inside a declaration before it
+// drops an invalid value. Their closing braces must not terminate the rule.
+TEST_F(CssEngineParserTest, InvalidDeclarationBlockDoesNotEscapeContainingRule) {
+    const char* css =
+        ".overlay {"
+        "  background: article { display: block; }"
+        "  .escaped { padding: 100px; }"
+        "}"
+        ".valid { color: blue; }";
+    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(stylesheet, nullptr);
+    EXPECT_EQ(stylesheet->rule_count, 2u)
+        << "the declaration payload must not become a top-level rule";
+}

@@ -476,6 +476,9 @@ ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
                                                    ViewBlock* block,
                                                    DomElement* element);
 bool layout_canvas_natural_size(ViewBlock* block, float* out_width, float* out_height);
+bool layout_apply_object_view_box_intrinsic_size(LayoutContext* lycon, DomElement* element,
+                                                 float* intrinsic_width,
+                                                 float* intrinsic_height);
 namespace radiant {
 
 enum class RunMode : uint8_t {
@@ -865,21 +868,6 @@ static inline void layout_apply_positive_min_max_contribution(ViewBlock* block, 
     if (max_size && maximum > 0.0f && *max_size > maximum) *max_size = maximum;
 }
 
-static inline int css_quad_value_index(int count, int side) {
-    static const uint8_t indices[4][4] = {
-        {0, 0, 0, 0}, {0, 1, 0, 1},
-        {0, 1, 2, 1}, {0, 1, 2, 3}
-    };
-    return count >= 1 && count <= 4 && side >= 0 && side < 4
-        ? indices[count - 1][side] : -1;
-}
-
-static inline const CssValue* css_box_shorthand_side_value(const CssValue* value, int side) {
-    if (!value || value->type != CSS_VALUE_TYPE_LIST) return value;
-    int index = css_quad_value_index(value->data.list.count, side);
-    CssValue** values = value->data.list.values;
-    return index >= 0 && values ? values[index] : nullptr;
-}
 // CSS quad shorthands use the same clockwise expansion for borders, spacing, and insets.
 struct CssQuadValues {
     const CssValue* side[4];
@@ -1398,6 +1386,7 @@ inline bool white_space_preserves_space_advance(CssEnum white_space) {
         white_space == CSS_VALUE_BREAK_SPACES;
 }
 CssEnum layout_inherited_text_transform(DomNode* node);
+bool layout_text_combine_upright_applies(DomNode* text_node);
 float layout_inline_end_edge(ViewSpan* span);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
 // tier-3: layout-transient, valid within pass
@@ -1950,6 +1939,7 @@ typedef struct LineMetricsSnapshot {
     float clamped_baseline_tail;
     bool has_clamped_baseline_tail;
     bool has_different_inline_font;
+    bool has_inline_font_size_difference;
     float max_normal_line_height;
     bool has_c1_control_text;
     bool has_non_c1_text;
@@ -2012,6 +2002,7 @@ typedef struct Linebox {
     float clamped_baseline_tail;
     bool has_clamped_baseline_tail;
     bool has_different_inline_font; // true if any inline text uses a different font from the block's strut
+    bool has_inline_font_size_difference; // an inline text run uses a distinct em size from the line strut
     float max_normal_line_height;   // max normal line-height across all inline boxes on this line
     bool has_c1_control_text;       // true when line contains visible C1 control glyphs
     bool has_non_c1_text;           // true when line contains visible non-C1 text glyphs
@@ -3683,9 +3674,13 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
 float map_lambda_font_size_keyword(CssEnum keyword_enum);
 CssEnum map_font_weight(const CssValue* value);
 int16_t map_font_weight_numeric(const CssValue* value);
+FontProp* layout_resolve_pseudo_font(LayoutContext* lycon, StyleTree* style,
+                                     FontProp* base_font);
 FontProp* layout_resolve_first_line_font(LayoutContext* lycon,
                                           DomElement* element,
                                           FontProp* base_font);
+bool layout_font_shorthand_overrides_longhand(StyleTree* style,
+                                               CssDeclaration* longhand);
 
 struct LayoutFontSizeResult {
     float value;
@@ -3898,7 +3893,8 @@ void layout_parent_to_containing_block_offset(ViewBlock* block,
 void layout_float_element(LayoutContext* lycon, ViewBlock* block);
 void adjust_line_for_floats(LayoutContext* lycon);
 void layout_clear_element(LayoutContext* lycon, ViewBlock* block);
-void re_resolve_abs_children_vertical(ViewBlock* containing_block,
+void re_resolve_abs_children_vertical(LayoutContext* lycon,
+                                      ViewBlock* containing_block,
                                       bool resolve_inset_stretch = true);
 void re_resolve_abs_descendant_widths(View* root);
 void layout_finalize_static_positioned_abs_descendants(ViewBlock* root);
@@ -4378,8 +4374,13 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 CssEnum layout_element_css_all_reset_keyword(DomElement* element);
 
 CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block);
+// Returns the cascaded source value; callers resolve unitless values against
+// their own font size as required by CSS 2.1 §10.8.1.
+CssValue layout_cascaded_line_height(LayoutContext* lycon, ViewBlock* block);
 void setup_line_height(LayoutContext* lycon, ViewBlock* block);
 void layout_setup_block_font_metrics(LayoutContext* lycon);
+// Initializes the local inline formatting state for a block's content box.
+void setup_inline(LayoutContext* lycon, ViewBlock* block);
 // ViewSpan bounding box computation
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struct FontHandle* fallback_fh = nullptr);
 void recompute_span_bounding_box_after_line_layout(
@@ -4391,6 +4392,10 @@ bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
                                                 bool include_inline_table = false);
 bool layout_inline_span_starts_with_in_flow_block_fragment(ViewSpan* span);
 bool layout_inline_span_has_direct_visible_text_child(ViewSpan* span);
+bool layout_inline_span_has_direct_inline_atomic_child(ViewSpan* span);
+bool layout_inline_span_parent_has_different_font_metrics(ViewSpan* span);
+bool layout_inline_span_has_single_nested_inline_atomic_child_with_font_change(
+    ViewSpan* span);
 ViewBlock* layout_inline_span_anonymous_inline_table_child(ViewSpan* span);
 bool layout_inline_span_has_direct_text_on_both_sides_of_anonymous_table(ViewSpan* span);
 bool inline_span_float_continuation_x(
