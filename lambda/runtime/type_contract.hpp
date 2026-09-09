@@ -19,7 +19,9 @@ enum LambdaWideResultProof {
 };
 
 LambdaWideResultProof lambda_type_wide_result_proof(const Type* type);
-LambdaWideResultProof lambda_type_wide_result_proof(TypeId type_id);
+// This header is also included by guest AST shims inside an `extern "C"`
+// block, where C++ overloads are illegal.
+LambdaWideResultProof lambda_type_wide_result_proof_for_type_id(TypeId type_id);
 
 // Static half of an annotated boundary. PROVEN means the source type already
 // satisfies the target, so the runtime check is redundant; DEFERRED means only
@@ -37,6 +39,34 @@ enum MapContractRelation {
     MAP_CONTRACT_STORAGE_COMPATIBLE,
     MAP_CONTRACT_NEEDS_REIFICATION,
 };
+
+// One resolver for declared homogeneous arrays, inferred homogeneous arrays,
+// and their nested ranks. TypeArray with per-slot patterns is a tuple and is
+// deliberately excluded.
+struct LambdaArrayContractInfo {
+    Type* array_contract;
+    Type* immediate_element;
+    Type* leaf_element;
+    LaneStorageDesc leaf_lane;
+    uint8_t rank;
+    uint8_t has_leaf_lane;
+};
+
+bool lambda_array_contract_info(Type* contract, LambdaArrayContractInfo* out);
+// Return the resolver's canonical outer array node for an exact certificate
+// comparison, or NULL when the contract is not a homogeneous value array.
+Type* lambda_array_contract_canonical(Type* contract);
+bool lambda_array_contract_compatible(Type* candidate, Type* expected,
+    bool invariant);
+// Return ArrayNum's exact scalar lane for a non-nullable, rank-one element
+// contract. Pointer, nullable, abstract, and nested values have another
+// carrier, so they deliberately return false.
+bool lambda_array_num_elem_type_for_contract(Type* element,
+    ArrayNumElemType* out_type);
+ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract);
+bool lambda_array_rep_proves(Item value, Type* target_contract, bool invariant);
+void lambda_array_install_rep_cert(Item value, ArrayRepCert* cert);
+void lambda_array_clear_rep_cert(Item value);
 
 // resolve the canonical Lambda carrier from the complete semantic contract.
 // this is a representation decision, not a physical MIR register query;

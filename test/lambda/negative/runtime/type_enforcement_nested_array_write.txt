@@ -1,0 +1,1 @@
+error[E201]: type check at typed nested array assignment failed: expected Variable, got map; validator at .value: Required field 'value' is missing from object

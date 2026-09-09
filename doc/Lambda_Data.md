@@ -741,6 +741,29 @@ let arr = [0, 1, 2, 3, 4, 5];
 arr[1 to 4]      // [1, 2, 3, 4] — elements 1 to 4
 ```
 
+#### Typed Array Contracts
+
+Use `T[]` when an array boundary must admit every logical element as `T`.
+The contract applies to declarations, parameters, returns, and procedural
+updates; a rejected dynamic element leaves the typed destination unchanged.
+Nested `T[][]` keeps its inner `T[]` contract, while `T[n]` and `[T]` remain
+count/structural patterns rather than alternate spellings of `T[]`
+(**S11.1.1v2**, **S11.4.1v3**, **S7.10.6**).
+
+```lambda
+type Variable = {value: int}
+
+var values: Variable[] = [{value: 1}]
+values[0] = {value: 2}
+
+var bytes: u8[] = [1u8, 2u8]
+bytes[1] = 9u8
+```
+
+Typed numeric arrays may use compact native lanes internally. That carrier is
+an implementation detail: assigning a value still validates the full Lambda
+element contract before the lane is written (**D3.1.1v3**, **D3.3.3v3**).
+
 #### Array Operations
 
 ```lambda

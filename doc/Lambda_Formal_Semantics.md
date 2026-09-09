@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 23.0.0 (2026-09-08)
+**Spec version:** 24.0.1 (2026-09-09)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1216,11 +1216,15 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 
 ### S11.1 Types compose like values
 
-- **S11.1.1** A bracket type is a structural pattern whose positions mix
+- **S11.1.1v2** A bracket type is a structural pattern whose positions mix
   values and types freely: `[1, int, "str"]`; `[int]` is **exactly one int**
   (TypeScript's reading — forced by compositionality at n = 1) and enforced
-  with a teaching message; `int[]` is the homogeneous-array spelling, with a
-  lint on bare `[T]` in annotation position only.* [C7]
+  with a teaching message. `T[]` is the homogeneous-array contract: every
+  logical element satisfies `T`, and repeated postfixes preserve rank
+  (`T[][]` means an array of `T[]`, not a flattened leaf array). `T[n]` is an
+  occurrence/count pattern, never a spelling of `T[]`; a program must state
+  both obligations when it needs both. A lint applies to bare `[T]` in
+  annotation position only.* [C7]
 - **S11.1.2** String structural patterns are delimited islands: `\( ... )`
   denotes a string-domain pattern and `\symbol( ... )` denotes a
   symbol-domain pattern. Inside an island, quoted literals are strings, `d`,
@@ -1273,14 +1277,20 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 
 Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md) (TE-1–TE-18).
 
-- **S11.4.1** An annotation is a contract on the binding, not a hint.
+- **S11.4.1v3** An annotation is a contract on the binding, not a hint.
   **Three outcomes, never a fourth**: statically proven, statically
   rejected, or a deferred runtime check whose failure produces a rich error
   (boundary, expected type, actual value, location) — never null, never a
   wrong value, never silence. Failure never establishes the binding;
-  reassignment checks before commit and leaves the old value unchanged.
-  An annotation may drive representation only if its boundary is enforced.
-  [TE-1, TE-2, TE-4, TE-9]
+  reassignment checks before commit and leaves the old value unchanged. A
+  `T[]` boundary validates/adopts every logical element before publishing its
+  representation, and a typed array mutation validates its new element before
+  changing the owner. An annotation may drive representation only if its
+  boundary is enforced. An implementation may reuse an admitted array's
+  representation proof only while the actual carrier matches that proof;
+  otherwise it re-admits before optimized access. This internal choice never
+  changes the contract, values, or failure behavior. [S7.7.2, S7.10.6,
+  D3.3.3v3, TE-1, TE-2, TE-4, TE-9]
 - **S11.4.2** Signatures spell both failure dimensions: plain `T` excludes
   null *and* error; absence is `T?`, failure is `T | error` (soft) or `T^E`
   (enforcing). **Declared returns are effect firewalls**: a plain-`T`
@@ -2055,7 +2065,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | Exclusivity (S9.2 / CW §11.3) | **Two of four faces effectively hold.** Face 1 (two `var` args naming one variable) rejects via `E211`. Face 3 (path-prefix) rejects at the *conservative whole-base* granularity the design sanctions as its Stage-2 v1 — so `f(var t, var t.a)` is caught, and `f(var t.a, var t.b)` is caught too though the ruling would permit it. **Face 2 (receiver vs `var` arg) is unreachable**: a `pn` method with a `var` parameter cannot be dispatched at all (`E229`, "dynamic dispatch of a function with `var` parameters is deferred"), so the check would be dead code until that lands. The ratified path that lifts `E229` is CW33 (COW doc §11.10, 2026-08-29) — the `var`-param address ABI, under which this check becomes a slot-address compare in the callee prologue. **Face 4 closed at whole-base granularity (CW31, 2026-08-29; worktree branch `nm-impl-work`, pending merge)**: a `subview` binding records its ultimate base (`NameEntry::view_base`, chased through view-of-view), and the call-site check conflicts two `var` args sharing an effective root — overlapping subviews and view-vs-base both reject via `E211`; views of distinct bases pass. Disjoint tiles of one base also reject: the same sanctioned false positive as face 3, with the splitter ladder unchanged. Fixture: `test/lambda/negative/semantic/var_view_overlap.ls`. |
 | S9.3.1 | **UNCONDITIONAL since 2026-08-29** — the flip landed and the escape hatch was retired the same day after the baseline soaked; `LAMBDA_COW_CAPTURE` is no longer consulted. Originally implemented behind the flag 2026-08-28. With the flag set, insertion captures by value at every point the ruling names — array element store, array literal, map field store, map/object/element literal — on both tiers: all four probes return the ruled `1`, and the two-node cycle is no longer constructible, restoring the totality S9.1.5v2 assumes. Capture is a *compile-time* decision, and only a NAMED value (identifier, or member/index read) is marked: a freshly produced container has no second observer at the insertion point, and marking one would make the universal builder shape `rows[i] = <fresh>` detach on first write. **Why it is opt-in:** element/field reads still borrow (the open C4.1 half), so once a slot holds a captured value the get-modify idiom `c = owner[i]` … `c[j] = v` writes a detached copy. Exactly four corpus scripts depend on that idiom (`proc_fill_gc_nested`, `awfy/{cd2_orig,deltablue,deltablue2}`); `awfy/richards3` — the sanctioned rewrite — passes with capture on. The nested-mutation design (§9.5.2, COW Appendix B.2) is what lets the flag become the default. With the flag unset, behavior is exactly the aliasing recorded below. Full record: [LR12-9](../vibe/Lambda_Issue_Ledger.md#lr12-9). |
 | S10.2.2, S10.2.3 | `eq ne lt le gt ge` operators and the `vec_cmp` revert not landed; mask-consumption functions deferred. |
-| S11.1.1 | Array-pattern composition unbuilt; `is [T]` inline parse crash open. |
+| S11.1.1v2 | `T[]` and nested `T[][]` contracts are implemented at annotation and parameter boundaries, including scalar, sized-scalar, pointer, string, named-map, and nested lanes. General structural array-pattern composition and the `is [T]` inline parse crash remain open. |
 | S11.2.3 | Match exhaustiveness checking unverified in the implementation. |
 | S11.4.3 | `any \ error` has no working surface spelling (the `!` exclusion operator is broken for general types); it exists as the unwritten default only. |
 | S11.4.5 | Landed check implements the superseded type-directional reject: an ANY-held `3.0` into an `int` boundary errors instead of admitting as `3`. Round-2 deliverable #1. |

@@ -221,6 +221,41 @@ ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     return array_num_new_with_extra(elem_type, length, 0);
 }
 
+ArrayNum* array_num_reserve_capacity(ArrayNum* arr, int64_t minimum_capacity) {
+    if (!arr || minimum_capacity < 0) return NULL;
+    if (minimum_capacity <= arr->capacity) return arr;
+    if (arr->is_view || arr->is_ndim) return NULL;
+    uint8_t elem_size = ELEM_TYPE_SIZE[arr->get_elem_type() >> 4];
+    if (!elem_size) return NULL;
+
+    int64_t grown = arr->capacity > 0 ? arr->capacity : 8;
+    while (grown < minimum_capacity) {
+        if (grown > INT64_MAX / 2) {
+            grown = minimum_capacity;
+            break;
+        }
+        grown *= 2;
+    }
+    size_t bytes = 0;
+    if (!lam::checked_mul((size_t)grown, (size_t)elem_size, &bytes)) return NULL;
+
+    RootFrame roots(1);
+    Rooted<ArrayNum*> rooted_arr(roots, arr);
+    void* fresh_data = heap_data_alloc(bytes);
+    arr = rooted_arr.get();
+    if (!fresh_data) return NULL;
+    if (arr->data && arr->length > 0) {
+        size_t live_bytes = 0;
+        if (!lam::checked_mul((size_t)arr->length, (size_t)elem_size, &live_bytes)) {
+            return NULL;
+        }
+        memcpy(fresh_data, arr->data, live_bytes);
+    }
+    arr->data = fresh_data;
+    arr->capacity = grown;
+    return arr;
+}
+
 static ArrayNum* array_num_new_with_extra_init(ArrayNumElemType elem_type,
         int64_t length, int64_t extra, bool zeroed);
 
@@ -412,6 +447,9 @@ bool array_num_init_derived_view(ArrayNum* view, ArrayNumShape* shape,
         }
     }
     view->data = source_data ? source_data + relative_bytes : NULL;
+    // A derived view only changes indexing metadata. It retains the source's
+    // complete element/layout proof, including named-map array contracts.
+    view->rep_cert = source->rep_cert;
     // GC-owned bases are promoted during collection and every live view is
     // rebound to the promoted buffer; leaving nursery storage "pinned" would
     // make it dangle when the nursery is reset.
@@ -601,19 +639,21 @@ Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
     return array_num_read_item(arr, offset);
 }
 
-// Multi-dim write: arr[i, j, k] = value on N-D ArrayNum.
-// Rejected on views (read-only). Invalid coordinates are hard write errors.
-Item array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value) {
+// Resolve a coordinate write once for both raw and checked paths. Keeping the
+// rank/bounds walk shared prevents a typed N-D store from drifting from the
+// ordinary assignment semantics.
+static bool array_num_nd_write_offset(ArrayNum* arr, int ndim, int64_t* indices,
+        int64_t* offset_out) {
     if (!arr || !indices || ndim < 1) {
         set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
             "invalid multi-dimensional array write target");
-        return ItemError;
+        return false;
     }
     if (arr->is_view && !arr->is_mutable_view) {
         log_error("array_num_set_nd: cannot mutate a read-only view; copy() first");
         set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
             "cannot mutate a read-only numeric array view");
-        return ItemError;
+        return false;
     }
     // mutable view: the strided offset computed below lands in the base buffer
     // (data is pre-offset / strides span the base), so the write goes through.
@@ -621,23 +661,23 @@ Item array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value) {
         if (ndim != 1) {
             set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
                 "multi-dimensional index rank does not match the array");
-            return ItemError;
+            return false;
         }
         int64_t i = indices[0];
         // c15 forbids hidden tail-relative writes through negative indexes.
         if (i < 0 || i >= arr->length) {
             set_runtime_error_no_trace(ERR_INDEX_OUT_OF_BOUNDS,
                 "multi-dimensional array index is out of bounds");
-            return ItemError;
+            return false;
         }
-        array_num_set_item(arr, i, value);
-        return ItemNull;
+        *offset_out = i;
+        return true;
     }
     ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
     if (!shape || shape->ndim != ndim) {
         set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
             "multi-dimensional index rank does not match the array");
-        return ItemError;
+        return false;
     }
     int64_t* shp = array_num_shape_dims(shape);
     int64_t* str = array_num_shape_strides(shape);
@@ -648,11 +688,32 @@ Item array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value) {
         if (i < 0 || i >= shp[ax]) {
             set_runtime_error_no_trace(ERR_INDEX_OUT_OF_BOUNDS,
                 "multi-dimensional array index is out of bounds");
-            return ItemError;
+            return false;
         }
         offset += i * str[ax];
     }
+    *offset_out = offset;
+    return true;
+}
+
+// Multi-dim write: arr[i, j, k] = value on N-D ArrayNum.
+// Rejected on views (read-only). Invalid coordinates are hard write errors.
+Item array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value) {
+    int64_t offset = 0;
+    if (!array_num_nd_write_offset(arr, ndim, indices, &offset)) return ItemError;
     array_num_set_item(arr, offset, value);
+    return ItemNull;
+}
+
+Item array_num_set_nd_admitted(ArrayNum* arr, int ndim, int64_t* indices,
+        Item value) {
+    int64_t offset = 0;
+    if (!array_num_nd_write_offset(arr, ndim, indices, &offset)) return ItemError;
+    if (!array_num_store_admitted(arr, offset, value)) {
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "typed multi-dimensional array carrier rejected admitted value");
+        return ItemError;
+    }
     return ItemNull;
 }
 
@@ -1173,7 +1234,113 @@ bool array_num_copy_reversed_bytes(ArrayNum *dst, ArrayNum *src) {
     return true;
 }
 
-// Generic setter for all ArrayNum elem_types, dispatches on elem_type
+static bool array_num_elem_expected_sized_type(ArrayNumElemType elem_type,
+        NumSizedType* out_type) {
+    if (!out_type) return false;
+    switch (elem_type) {
+    case ELEM_INT8: *out_type = NUM_INT8; return true;
+    case ELEM_INT16: *out_type = NUM_INT16; return true;
+    case ELEM_INT32: *out_type = NUM_INT32; return true;
+    case ELEM_UINT8:
+    case ELEM_UINT8_CLAMPED: *out_type = NUM_UINT8; return true;
+    case ELEM_UINT16: *out_type = NUM_UINT16; return true;
+    case ELEM_UINT32: *out_type = NUM_UINT32; return true;
+    case ELEM_FLOAT16: *out_type = NUM_FLOAT16; return true;
+    case ELEM_FLOAT32: *out_type = NUM_FLOAT32; return true;
+    default: return false;
+    }
+}
+
+// Stores only values already admitted to this exact lane. Keeping this apart
+// from the legacy coercive writer prevents a typed narrow lane from silently
+// truncating, wrapping, or treating an arbitrary Item as false.
+bool array_num_store_admitted(ArrayNum *arr, int64_t index, Item value) {
+    if (!arr || index < 0 || index >= arr->capacity) return false;
+    if (arr->is_view && !arr->is_mutable_view) return false;
+    if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return false;
+
+    TypeId value_type = get_type_id(value);
+    ArrayNumElemType elem_type = arr->get_elem_type();
+    NumSizedType expected_sized = NUM_SIZED_COUNT;
+    if (array_num_elem_expected_sized_type(elem_type, &expected_sized)) {
+        if (value_type != LMD_TYPE_NUM_SIZED || value.get_num_type() != expected_sized) {
+            return false;
+        }
+    } else {
+        switch (elem_type) {
+        case ELEM_INT:
+            if (value_type != LMD_TYPE_INT && !lambda_item_is_merged_poison(value.item)) {
+                return false;
+            }
+            break;
+        case ELEM_INT64:
+            if (value_type != LMD_TYPE_INT64) return false;
+            break;
+        case ELEM_FLOAT64:
+            if (value_type != LMD_TYPE_FLOAT) return false;
+            break;
+        case ELEM_UINT64:
+            if (value_type != LMD_TYPE_UINT64) return false;
+            break;
+        case ELEM_BOOL:
+            if (value_type != LMD_TYPE_BOOL) return false;
+            break;
+        default:
+            return false;
+        }
+    }
+
+    switch (elem_type) {
+    case ELEM_INT:
+        arr->items[index] = lambda_int_item_to_lane(value.item);
+        break;
+    case ELEM_INT64:
+        arr->items[index] = value.get_int64();
+        break;
+    case ELEM_FLOAT64:
+        arr->float_items[index] = value.get_double();
+        break;
+    case ELEM_INT8:
+        ((int8_t*)arr->data)[index] = (int8_t)value.get_num_sized_as_int64();
+        break;
+    case ELEM_INT16:
+        ((int16_t*)arr->data)[index] = (int16_t)value.get_num_sized_as_int64();
+        break;
+    case ELEM_INT32:
+        ((int32_t*)arr->data)[index] = (int32_t)value.get_num_sized_as_int64();
+        break;
+    case ELEM_UINT8:
+    case ELEM_UINT8_CLAMPED:
+        ((uint8_t*)arr->data)[index] = (uint8_t)value.get_num_sized_as_int64();
+        break;
+    case ELEM_UINT16:
+        ((uint16_t*)arr->data)[index] = (uint16_t)value.get_num_sized_as_int64();
+        break;
+    case ELEM_UINT32:
+        ((uint32_t*)arr->data)[index] = (uint32_t)value.get_num_sized_as_int64();
+        break;
+    case ELEM_FLOAT16:
+        ((uint16_t*)arr->data)[index] = f32_to_f16_bits((float)value.get_num_sized_as_double());
+        break;
+    case ELEM_FLOAT32:
+        ((float*)arr->data)[index] = (float)value.get_num_sized_as_double();
+        break;
+    case ELEM_UINT64:
+        ((uint64_t*)arr->data)[index] = value.get_uint64();
+        break;
+    case ELEM_BOOL:
+        ((uint8_t*)arr->data)[index] = value.bool_val == BOOL_TRUE ? 1 : 0;
+        break;
+    default:
+        return false;
+    }
+    if (index >= arr->length) arr->length = index + 1;
+    return true;
+}
+
+// Generic setter for all ArrayNum elem_types, dispatches on elem_type.
+// This remains the explicit legacy coercion path for open arrays and internal
+// builders; typed source boundaries call array_num_store_admitted instead.
 void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) return;
     if (arr->is_view && !arr->is_mutable_view) {

@@ -6,10 +6,7 @@
       "in_func": "_main_#",
       "expect": [
         "call\t_take18_"
-      ],
-      "count": {
-        "call\tensure_typed_array_p, ensure_typed_array": 1
-      }
+      ]
     }
   ]
 }

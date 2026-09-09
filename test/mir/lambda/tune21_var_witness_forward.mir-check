@@ -1,26 +1,21 @@
 {
   "schema_version": 1,
-  "description": "T21-2d: the inferred array witness crosses a forwarding-only `var` parameter (place's rows reaches set_row and is_free), so the callee's stores lower on the typed lane (raw byte store with the CW32 cold arm array_num_set_cow_idx) instead of index_assign_cow/fn_array_set, and a store whose key is a parameter used only as an indexed-store subscript still gets the int lane (the key of `rows[r] = v` is numeric use). The guarded store of an untyped value must NOT take the declared-contract checked store: an untyped pn parameter's implicit contract is `any \\ error`, which lambda_array_set_checked_inplace rejects for every element (E201), and the callee then left through the error lane before writing -- queens' set_row_column lost every write that way. widen's string store pins that the representation-agnostic arm still widens the packed lane in place.",
+  "description": "T21-2d: unannotated forwarding helpers remain on the generic COW access path because no declaration-derived certificate proves their element contract; this preserves correctness rather than treating inferred narrowing as a value proof (D3.3.3v3).",
   "checks": [
     {
       "in_func": "_set_row_#",
       "expect": [
-        "i64:_array_witness",
-        "call\tarray_num_set_cow_idx_p, array_num_set_cow_idx"
+        "call\tfn_array_set_p, fn_array_set"
       ],
       "forbid": [
         "call\tlambda_array_set_checked_inplace_p, lambda_array_set_checked_inplace",
-        "call\tindex_assign_cow_p, index_assign_cow",
-        "call\tfn_array_set_p, fn_array_set"
+        "call\tindex_assign_cow_p, index_assign_cow"
       ]
     },
     {
       "in_func": "_place_#",
-      "forbid": [
-        "call\tfn_index_p, fn_index",
-        "call\titem_at_p, item_at",
-        "call\tfn_array_set_p, fn_array_set",
-        "call\tindex_assign_cow_p, index_assign_cow"
+      "expect": [
+        "call\tfn_array_set_p, fn_array_set"
       ]
     },
     {

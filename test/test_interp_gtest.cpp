@@ -367,6 +367,18 @@ TEST(InterpWalker, Uint64TypedArrayKeepsItsFullWidthLane) {
     EXPECT_EQ(jit.exit_code, interp.exit_code);
 }
 
+TEST(InterpWalker, ProperTypedArrayContractsKeepExactLanesAndRecordLayouts) {
+    // T[] admission must cover compact numeric lanes and named map elements in
+    // both tiers; the checked push path also rejects an out-of-range u8 value
+    // without publishing a partial append (D3.1.1v2, D3.3.3).
+    const char* script = "test/lambda/proc/proc_proper_typed_array.ls";
+    RunResult jit = run_script(script, "jit", /*procedural=*/true);
+    RunResult interp = run_script(script, "interp", /*procedural=*/true);
+    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
+    EXPECT_EQ(jit.exit_code, interp.exit_code);
+}
+
 TEST(InterpWalker, NullableNativeTypedArraysKeepTheirDestinationLane) {
     // Optional array elements are full contracts, so T0 must enter the same
     // nullable native carrier used by MIR before its checked COW write.

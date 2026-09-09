@@ -210,6 +210,9 @@ typedef enum Operator {
     OPERATOR_ONE_MORE,
     OPERATOR_ZERO_MORE,
     OPERATOR_REPEAT,
+    // `T[]` is a value-array contract, distinct from validator occurrence
+    // counts such as `T[3]` (D3.1.1v2).
+    OPERATOR_ARRAY,
 
     OPERATOR_ASSIGN,
 

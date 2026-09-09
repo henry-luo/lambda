@@ -1268,6 +1268,12 @@ TEST_F(NegativeScriptTest, TypeEnforcementRuntimeNegativeGoldensPinDiagnostics) 
         "error[E201]: computed map key must evaluate to string or symbol");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_array_write.ls",
         "error[E201]: type check at typed array element assignment failed: expected int, got string 'not an integer'");
+    ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_nested_array_write.ls",
+        "error[E201]: type check at typed nested array assignment failed: expected Variable, got map; validator at .value: Required field 'value' is missing from object");
+    ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_ndim_array_write.ls",
+        "error[E201]: type check at typed multi-dimensional array assignment failed: expected int, got string 'not an integer'");
+    ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_mask_array_write.ls",
+        "error[E201]: type check at typed array mask assignment failed: expected num_sized, got int 300");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_dynamic_arity.ls",
         "error[E206]: fn_call_into: function 'add' expects 2 arguments, got 1");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_dynamic_declaration.ls",

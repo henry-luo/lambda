@@ -939,7 +939,7 @@ typedef struct TypeUnary : Type {
     Type* operand;
     Operator op;  // operator
     int type_index;  // index of the type in the type list
-    int min_count;   // minimum occurrence count (for OPERATOR_REPEAT)
+    int min_count;   // occurrence bounds (for OPERATOR_REPEAT only)
     int max_count;   // maximum occurrence count (-1 for unbounded)
 } TypeUnary;
 

@@ -744,7 +744,12 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
              (ca->key->type->type_id == LMD_TYPE_INT ||
               ca->key->type->type_id == LMD_TYPE_INT64)) ||
             direct_untyped_binding_index || interp_range_loop_index_expr(ca->key);
-        indexed_key = indexed_key || direct_numeric_mask_assignment;
+        // A multi-coordinate scalar store has already proved each key is an
+        // integral coordinate; treating its linked key list as an unsupported
+        // dynamic index forced the whole T0 module to fall back despite the
+        // checked N-D runtime path being available.
+        indexed_key = indexed_key || direct_numeric_mask_assignment ||
+            direct_ndim_scalar_assignment;
         bool open_any_array = entry &&
             ast_declared_type_is_open_any_array(entry->declared_type);
         bool open_item_binding = entry &&
@@ -752,24 +757,11 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         bool typed_map_root = entry && ast_declared_type_is_map(entry->declared_type);
         Type* typed_array_element = entry
             ? ast_declared_array_element(entry->declared_type) : NULL;
-        LaneStorageDesc typed_array_lane = {};
-        bool nullable_native_typed_array = typed_array_element &&
-            lambda_type_lane_storage_desc(typed_array_element, &typed_array_lane) &&
-            typed_array_lane.nullable &&
-            (typed_array_lane.kind == LANE_STORAGE_POINTER ||
-             typed_array_lane.kind == LANE_STORAGE_INT ||
-             typed_array_lane.kind == LANE_STORAGE_BOOL ||
-             typed_array_lane.kind == LANE_STORAGE_FLOAT64 ||
-             typed_array_lane.kind == LANE_STORAGE_ITEM ||
-             typed_array_lane.kind == LANE_STORAGE_SIZED_I64);
-        bool direct_typed_array = path.count == 0 && typed_array_element &&
-            (typed_array_element->type_id == LMD_TYPE_NUM_SIZED ||
-             typed_array_element->type_id == LMD_TYPE_BOOL ||
-             typed_array_element->type_id == LMD_TYPE_INT ||
-             typed_array_element->type_id == LMD_TYPE_INT64 ||
-             typed_array_element->type_id == LMD_TYPE_UINT64 ||
-             typed_array_element->type_id == LMD_TYPE_FLOAT ||
-             nullable_native_typed_array);
+        // Every declared T[] root has a checked interpreter path. Earlier
+        // gating admitted only scalar direct lanes, which made named-map and
+        // nested T[][] stores fall back even though lambda_array_path_set_checked
+        // owns their full-contract validation and COW publication.
+        bool direct_typed_array = typed_array_element != NULL;
         // An open any[] declaration is generic in MIR, while the T0 literal
         // builder may initially produce an N-D ArrayNum. Keep its row store
         // pinned until that declaration boundary has a shared reifier; routing

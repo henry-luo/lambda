@@ -420,7 +420,9 @@ TEST_F(RuntimeShapeTransition, ArrayNumIntLaneRoundTripsAndWidensSafely) {
     EXPECT_EQ(lambda_int_item_to_i64(generic->items[0]), 77);
     EXPECT_EQ(get_type_id(generic->items[3]), LMD_TYPE_FLOAT);
     EXPECT_EQ(generic->items[1].get_int64(), out_of_band);
-    EXPECT_EQ(array->extra, 1);
+    // The widened owner keeps both the prior infinity and the new int64 in
+    // destination-owned tail homes; neither may borrow the retired lane.
+    EXPECT_EQ(array->extra, 2);
 
     ArrayNum* float_array = array_float_new(3);
     ASSERT_NE(float_array, nullptr);
@@ -447,6 +449,59 @@ TEST_F(RuntimeShapeTransition, ArrayNumIntLaneRoundTripsAndWidensSafely) {
     EXPECT_EQ(generic_float->items[0].get_double(), 13.0);
     EXPECT_EQ(generic_float->items[1].get_double(), 11.0);
     EXPECT_EQ(generic_float->items[2].item, b2it(BOOL_TRUE));
+}
+
+static Item array_num_exact_store_test_value(ArrayNumElemType elem_type,
+        int64_t seed) {
+    switch (elem_type) {
+    case ELEM_INT: return {.item = i2it(seed)};
+    case ELEM_FLOAT64: return push_d((double)seed + 0.25);
+    case ELEM_INT8: return {.item = i8_to_item(seed)};
+    case ELEM_INT16: return {.item = i16_to_item(seed)};
+    case ELEM_INT32: return {.item = i32_to_item(seed)};
+    case ELEM_INT64: return box_int64_value(seed * 1000000);
+    case ELEM_UINT8:
+    case ELEM_UINT8_CLAMPED: return {.item = u8_to_item(seed)};
+    case ELEM_UINT16: return {.item = u16_to_item(seed)};
+    case ELEM_UINT32: return {.item = u32_to_item(seed)};
+    case ELEM_UINT64: return box_uint64_value((uint64_t)seed * 1000000u);
+    case ELEM_FLOAT16: return {.item = f16_to_item((float)seed + 0.5f)};
+    case ELEM_FLOAT32: return {.item = f32_to_item((float)seed + 0.25f)};
+    case ELEM_BOOL: return {.item = b2it((seed & 1) ? BOOL_TRUE : BOOL_FALSE)};
+    default: return ItemError;
+    }
+}
+
+TEST_F(RuntimeShapeTransition, ArrayNumExactStoresKeepEveryCompactLaneIsolated) {
+    const ArrayNumElemType elem_types[] = {
+        ELEM_INT, ELEM_FLOAT64, ELEM_INT8, ELEM_INT16, ELEM_INT32,
+        ELEM_INT64, ELEM_UINT8, ELEM_UINT16, ELEM_UINT32, ELEM_UINT64,
+        ELEM_FLOAT16, ELEM_FLOAT32, ELEM_BOOL, ELEM_UINT8_CLAMPED,
+    };
+    for (ArrayNumElemType elem_type : elem_types) {
+        ArrayNum* array = array_num_new(elem_type, 3);
+        ASSERT_NE(array, nullptr) << "element type " << (int)elem_type;
+        Item first = array_num_exact_store_test_value(elem_type, 11);
+        Item middle = array_num_exact_store_test_value(elem_type, 22);
+        Item last = array_num_exact_store_test_value(elem_type, 33);
+        ASSERT_FALSE(item_is_error(first));
+        ASSERT_FALSE(item_is_error(middle));
+        ASSERT_FALSE(item_is_error(last));
+        ASSERT_TRUE(array_num_store_admitted(array, 0, first));
+        ASSERT_TRUE(array_num_store_admitted(array, 1, middle));
+        ASSERT_TRUE(array_num_store_admitted(array, 2, last));
+
+        EXPECT_EQ(fn_eq(array_num_read_item(array, 0), first), BOOL_TRUE);
+        EXPECT_EQ(fn_eq(array_num_read_item(array, 1), middle), BOOL_TRUE);
+        EXPECT_EQ(fn_eq(array_num_read_item(array, 2), last), BOOL_TRUE);
+
+        // A mismatched Item cannot corrupt the middle compact slot or one of
+        // its adjacent lanes; the typed boundary must reject before writing.
+        EXPECT_FALSE(array_num_store_admitted(array, 1, {.item = s2it(fixed_left)}));
+        EXPECT_EQ(fn_eq(array_num_read_item(array, 0), first), BOOL_TRUE);
+        EXPECT_EQ(fn_eq(array_num_read_item(array, 1), middle), BOOL_TRUE);
+        EXPECT_EQ(fn_eq(array_num_read_item(array, 2), last), BOOL_TRUE);
+    }
 }
 
 TEST_F(RuntimeShapeTransition, LabelStackAllocationFailureReturnsError) {

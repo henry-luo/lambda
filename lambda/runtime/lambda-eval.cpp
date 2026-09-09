@@ -1566,6 +1566,7 @@ static bool runtime_validate_value_against_type(Item item, Type* expected,
 }
 
 static bool runtime_type_admit_value(Item value, Type* expected, Item* converted);
+static bool runtime_type_admit_array(Item value, Type* expected, Item* converted);
 
 static bool literal_type_matches_item(Type* expected, Item item) {
     if (!expected || !expected->is_literal ||
@@ -7381,9 +7382,10 @@ static bool array_rebuild_native_lane(Item source, const LaneStorageDesc* desc,
         Item* rebuilt) {
     if (!rebuilt || !array_native_lane_supported(desc)) return false;
     TypeId source_type = get_type_id(source);
-    if (source_type != LMD_TYPE_ARRAY && source_type != LMD_TYPE_ARRAY_NUM) return false;
+    if (source_type != LMD_TYPE_ARRAY && source_type != LMD_TYPE_ARRAY_NUM &&
+            source_type != LMD_TYPE_ELEMENT) return false;
     Array* source_array = source.array;
-    if (!source_array || js_array_has_props(source_array) ||
+    if (!source_array || (source_type == LMD_TYPE_ARRAY && js_array_has_props(source_array)) ||
             (source_type == LMD_TYPE_ARRAY_NUM &&
              (source_array->is_view || source_array->is_ndim))) {
         // A view aliases its ArrayNum backing. Replacing it would silently
@@ -7420,6 +7422,9 @@ static bool array_rebuild_native_lane(Item source, const LaneStorageDesc* desc,
         result = rooted_result.get();
         if (!array_native_lane_store(result, index, value)) return false;
     }
+    // A lane rebuild preserves values and their semantic contract; only its
+    // carrier changed. Retain the certificate rather than forcing a rescan.
+    rooted_result.get()->rep_cert = source_array->rep_cert;
     *rebuilt = {.array = rooted_result.get()};
     return true;
 }
@@ -7432,7 +7437,10 @@ static void convert_specialized_to_generic(Array* arr) {
     int64_t new_capacity = len * 2 + 4;
     if (new_capacity < 8) new_capacity = 8;
 
+    RootFrame roots(1);
+    Rooted<Array*> rooted_arr(roots, arr);
     Item* new_items = (Item*)heap_data_calloc(new_capacity * sizeof(Item));
+    arr = rooted_arr.get();
     if (!new_items) {
         log_error("convert_specialized_to_generic: allocation failed");
         return;
@@ -7440,52 +7448,33 @@ static void convert_specialized_to_generic(Array* arr) {
 
     if (old_type == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* num_arr = (ArrayNum*)arr;
-        ArrayNumElemType etype = num_arr->get_elem_type();
-        if (etype == ELEM_FLOAT64) {
-            double* old_items = num_arr->float_items;
-            int64_t extra_count = 0;
-            for (int64_t i = 0; i < len; i++) {
+        int64_t extra_count = 0;
+        for (int64_t i = 0; i < len; i++) {
+            // array_num_read_item is the sole decoder for every compact lane.
+            // Reading ELEM_I8/U8/I16/F32 via `items` addressed the first byte
+            // as an i64 and corrupted both the conversion and adjacent data.
+            Item value = array_num_read_item(num_arr, i);
+            TypeId value_type = get_type_id(value);
+            if (value_type == LMD_TYPE_FLOAT) {
                 double* slot = (double*)(new_items + (new_capacity - extra_count - 1));
-                *slot = old_items[i];
+                *slot = value.get_double();
                 new_items[i] = lambda_float_ptr_to_item(slot);
                 extra_count++;
-            }
-            arr->extra = extra_count;
-        } else if (etype == ELEM_INT64) {
-            int64_t* old_items = num_arr->items;
-            int64_t extra_count = 0;
-            for (int64_t i = 0; i < len; i++) {
+            } else if (value_type == LMD_TYPE_INT64) {
                 int64_t* slot = (int64_t*)(new_items + (new_capacity - extra_count - 1));
-                *slot = old_items[i];
+                *slot = value.get_int64();
                 new_items[i] = {.item = l2it(slot)};
                 extra_count++;
-            }
-            arr->extra = extra_count;
-        } else if (etype == ELEM_UINT64) {
-            uint64_t* old_items = (uint64_t*)num_arr->data;
-            int64_t extra_count = 0;
-            for (int64_t i = 0; i < len; i++) {
+            } else if (value_type == LMD_TYPE_UINT64) {
                 uint64_t* slot = (uint64_t*)(new_items + (new_capacity - extra_count - 1));
-                *slot = old_items[i];
+                *slot = value.get_uint64();
                 new_items[i] = {.item = u2it(slot)};
                 extra_count++;
-            }
-            arr->extra = extra_count;
-        } else if (etype == ELEM_BOOL) {
-            // packed bools are one byte each; the i64-lane fallback below read
-            // eight of them per element and produced integers like 65537.
-            // Bools are inline-tagged, so no extra slot storage is needed.
-            uint8_t* old_items = (uint8_t*)num_arr->data;
-            for (int64_t i = 0; i < len; i++) {
-                new_items[i] = {.item = b2it(old_items[i] ? BOOL_TRUE : BOOL_FALSE)};
-            }
-        } else {
-            // v5: ELEM_INT is an i64 LANE array; box each lane through the encoder.
-            int64_t* old_items = num_arr->items;
-            for (int64_t i = 0; i < len; i++) {
-                new_items[i] = {.item = lambda_int_box_lane(old_items[i])};
+            } else {
+                new_items[i] = value;
             }
         }
+        arr->extra = extra_count;
     } else {
         // shouldn't happen — caller should only call for specialized types
         return;
@@ -7494,6 +7483,8 @@ static void convert_specialized_to_generic(Array* arr) {
     arr->items = new_items;
     arr->capacity = new_capacity;
     arr->type_id = LMD_TYPE_ARRAY;
+    // Widening through an open write abandons the exact declared-array proof.
+    arr->rep_cert = NULL;
     log_debug("convert_specialized_to_generic: converted type %d to generic Array, len=%lld", old_type, len);
 }
 
@@ -7531,6 +7522,10 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
         return ItemError;
     }
 
+    // Raw mutation has no destination contract. Invalidate the value-level
+    // proof before it can make an unchecked write look layout-safe (D3.3.3).
+    lambda_array_clear_rep_cert({.array = arr});
+
     switch (arr_type) {
     case LMD_TYPE_ARRAY: {
         // generic Array with Item* items — use internal array_set
@@ -7547,6 +7542,10 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
     }
     case LMD_TYPE_ARRAY_NUM: {
         ArrayNum* num_arr = (ArrayNum*)arr;
+        // A source-language typed boundary has already admitted this value.
+        // The exact-width store covers every ArrayNum element kind; falling
+        // through to the legacy int-only arm corrupts compact buffers.
+        if (array_num_store_admitted(num_arr, index, value)) break;
         if (num_arr->is_view) {
             if (!num_arr->is_mutable_view) {
                 log_error("fn_array_set: cannot mutate a read-only view; copy() first");
@@ -7560,6 +7559,14 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
         }
         TypeId val_type = get_type_id(value);
         ArrayNumElemType etype = num_arr->get_elem_type();
+        if (elem_type_is_compact(etype) && etype != ELEM_BOOL) {
+            // An open compact array may widen, but it may never route a value
+            // through the i64 `items` alias: that alias addresses only the
+            // first compact element and turns one store into buffer damage.
+            convert_specialized_to_generic(arr);
+            array_set(arr, index, value);
+            break;
+        }
         if (etype == ELEM_FLOAT64) {
             if (val_type == LMD_TYPE_FLOAT) {
                 num_arr->float_items[index] = value.get_double();
@@ -7907,6 +7914,7 @@ static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
     src = rooted_src.get();
     clone_mutable_container_flags((Container*)dst, (Container*)src);
     dst->type_id = LMD_TYPE_ARRAY;
+    dst->rep_cert = src->rep_cert;
     // Mutable values may contain cycles through arrays/maps; register the
     // destination before cloning children so back-edges keep object identity.
     mutable_clone_register(clone_ctx, src, {.array = rooted_dst.get()});
@@ -7958,6 +7966,7 @@ static Item clone_mutable_array_num(ArrayNum* src, MutableCloneContext* clone_ct
     dst->set_elem_type(elem_type);
     dst->is_view = 0;
     dst->is_mutable_view = 0;
+    dst->rep_cert = src->rep_cert;
     mutable_clone_register(clone_ctx, src, {.array_num = rooted_dst.get()});
 
     int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
@@ -8594,6 +8603,8 @@ Item cow_prepare_write(Item old) {
 static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr,
     size_t key_len);
 Item cow_path_set(Item owner, Item path, Item value);
+static MapContractRelation runtime_map_contract_relation_cached(
+    const TypeMap* candidate, const TypeMap* expected);
 
 static ShapeEntry* runtime_named_map_field(Type* expected, Item key) {
     expected = runtime_boundary_unwrap_type(expected);
@@ -8607,6 +8618,47 @@ static ShapeEntry* runtime_named_map_field(Type* expected, Item key) {
     }
     if (!chars) return NULL;
     return map_find_shape_entry((TypeMap*)expected, chars, length);
+}
+
+// Resolve a declared map/array path before its write. This is deliberately
+// contract-only: the caller separately proves the current root's physical
+// layout, then validates the selected leaf before the raw COW walk publishes
+// it (D3.2.4v3).
+static Type* runtime_map_path_leaf_contract(Type* root_contract, Item path) {
+    if (get_type_id(path) != LMD_TYPE_ARRAY || !path.array || path.array->length <= 0) {
+        return NULL;
+    }
+    Type* current = root_contract;
+    for (int64_t index = 0; index < path.array->length; index++) {
+        Item key = item_at(path, index);
+        current = runtime_boundary_unwrap_type(current);
+        if (!current) return NULL;
+        if (current->type_id == LMD_TYPE_MAP && current != &TYPE_MAP) {
+            ShapeEntry* field = runtime_named_map_field(current, key);
+            if (!field) return NULL;
+            current = field->type;
+            continue;
+        }
+        LambdaArrayContractInfo array_info = {};
+        int64_t array_index = 0;
+        if (!lambda_array_contract_info(current, &array_info) ||
+                !lambda_item_to_int64_exact(key, &array_index)) {
+            return NULL;
+        }
+        current = array_info.immediate_element;
+    }
+    return current;
+}
+
+static bool runtime_map_rep_proves_contract(Item value, Type* contract) {
+    Type* expected = runtime_boundary_nonnull_map_arm(contract);
+    if (get_type_id(value) != LMD_TYPE_MAP || !value.map || !expected) return false;
+    TypeMap* candidate = (TypeMap*)value.map->type;
+    if (!candidate || !typemap_ptr_is_plausible(candidate)) return false;
+    MapContractRelation relation = runtime_map_contract_relation_cached(candidate,
+        (TypeMap*)expected);
+    return relation == MAP_CONTRACT_EXACT_TRUSTED ||
+        relation == MAP_CONTRACT_STORAGE_COMPATIBLE;
 }
 
 static bool map_extend_open_shape(Item map_item, Item key, Item value) {
@@ -8847,6 +8899,23 @@ Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_path(roots, path);
     Rooted<Item> rooted_value(roots, value);
+    Type* leaf_contract = runtime_map_path_leaf_contract(contract, rooted_path.get());
+    LambdaArrayContractInfo leaf_array_info = {};
+    if (leaf_contract && !lambda_array_contract_info(leaf_contract, &leaf_array_info) &&
+            runtime_map_rep_proves_contract(rooted_owner.get(), contract)) {
+        // A storage-compatible root already proves every map offset on this
+        // path. Checking the target leaf before the COW walk gives rejected
+        // writes the same transactional guarantee without rescanning the
+        // whole World/Variable graph for every scalar assignment. Array
+        // leaves retain their own representation certificate, so they use
+        // the regular detached admission path below (D3.3.3v3).
+        rooted_value.set(lambda_type_check(rooted_value.get(), leaf_contract, boundary));
+        if (get_type_id(rooted_value.get()) == LMD_TYPE_ERROR) return rooted_value.get();
+        Item direct = cow_path_set_inplace(rooted_owner.get(), rooted_path.get(),
+            rooted_value.get());
+        if (get_type_id(direct) == LMD_TYPE_ERROR) return direct;
+        return rooted_owner.get();
+    }
     if (!lambda_type_matches(rooted_owner.get(), contract)) {
         return lambda_type_error(rooted_owner.get(), contract, boundary);
     }
@@ -8881,24 +8950,32 @@ Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
 }
 
 static Type* runtime_array_contract_element(Type* expected) {
-    expected = runtime_boundary_unwrap_type(expected);
-    if (!expected) return NULL;
-    if (expected->type_id == LMD_TYPE_ARRAY) {
-        // `list` is the compact open-sequence type, not a TypeArray payload;
-        // reading nested/item_patterns from it crosses the adjacent compact
-        // type globals and turns a valid list boundary into a bad Type*.
-        if (expected == &TYPE_LIST) return NULL;
-        TypeArray* array = (TypeArray*)expected;
-        if (array->item_patterns || !array->nested) return NULL;
-        return runtime_boundary_unwrap_type(array->nested);
-    }
-    if (expected->type_id == LMD_TYPE_TYPE && expected->kind == TYPE_KIND_UNARY) {
-        TypeUnary* occurrence = (TypeUnary*)expected;
-        if (occurrence->op == OPERATOR_REPEAT) {
-            return runtime_boundary_unwrap_type(occurrence->operand);
+    LambdaArrayContractInfo info = {};
+    return lambda_array_contract_info(expected, &info)
+        ? runtime_boundary_unwrap_type(info.immediate_element) : NULL;
+}
+
+static ArrayRepCert* runtime_array_rep_cert_intern(Type* contract) {
+    Pool* pool = eval_context_get_pool();
+    if (!pool || !contract) return NULL;
+    Heap* heap = context ? context->heap : NULL;
+    if (!heap) return lambda_array_rep_cert_create(pool, contract);
+
+    for (uint32_t i = 0; i < LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY; i++) {
+        LambdaArrayRepCertCacheEntry* entry = &heap->array_rep_cert_cache[i];
+        if (entry->cert && entry->contract &&
+                lambda_array_contract_compatible(entry->contract, contract, true)) {
+            return entry->cert;
         }
     }
-    return NULL;
+
+    ArrayRepCert* cert = lambda_array_rep_cert_create(pool, contract);
+    if (!cert) return NULL;
+    uint32_t slot = heap->array_rep_cert_cache_next++ %
+        LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY;
+    heap->array_rep_cert_cache[slot].contract = contract;
+    heap->array_rep_cert_cache[slot].cert = cert;
+    return cert;
 }
 
 static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value, Type* expected,
@@ -8914,6 +8991,19 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
     if (!element_type) return lambda_type_error(value, expected, boundary);
     Item checked_value = lambda_type_check(value, element_type, boundary);
     if (get_type_id(checked_value) == LMD_TYPE_ERROR) return checked_value;
+
+    // A lane tag proves neither rank nor a named record's field layout. Admit
+    // an erased source before the checked write; in-place pn stores cannot
+    // replace their ABI-owned object and must already carry this proof.
+    if (!lambda_array_rep_proves(owner, expected, true)) {
+        if (publish_in_place) return lambda_type_error(owner, expected, boundary);
+        Item admitted_owner = ItemNull;
+        if (!runtime_type_admit_array(owner, expected, &admitted_owner)) {
+            return lambda_type_error(owner, expected, boundary);
+        }
+        owner = admitted_owner;
+    }
+
     LaneStorageDesc lane_desc = {};
     bool has_lane_contract = false;
     if (lane_hint) {
@@ -8967,6 +9057,10 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
         rooted_candidate.set(rebuilt);
         candidate_type = LMD_TYPE_ARRAY;
     }
+    // fn_array_set deliberately clears a proof for raw callers. Retain the
+    // old exact certificate across this already-admitted write so hot typed
+    // loops do not allocate a replacement proof per element (D3.3.3).
+    ArrayRepCert* prior_cert = rooted_candidate.get().array->rep_cert;
     Item set_result = fn_array_set(rooted_candidate.get().array, index, rooted_value.get());
     if (get_type_id(set_result) == LMD_TYPE_ERROR) return set_result;
     bool post_store_proven = has_lane_contract &&
@@ -8983,6 +9077,11 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
         return lambda_type_error_with_validation(rooted_candidate.get(), expected, boundary,
             validation);
     }
+    ArrayRepCert* cert = prior_cert && prior_cert->array_contract &&
+            lambda_array_contract_compatible(prior_cert->array_contract, expected, true)
+        ? prior_cert : runtime_array_rep_cert_intern(expected);
+    if (!cert) return lambda_type_error(rooted_candidate.get(), expected, boundary);
+    lambda_array_install_rep_cert(rooted_candidate.get(), cert);
     return rooted_candidate.get();
 }
 
@@ -8993,6 +9092,11 @@ Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expec
 
 Item lambda_array_set_checked_item(Item owner, Item key, Item value, Type* expected,
         const char* boundary) {
+    if (get_type_id(key) == LMD_TYPE_ARRAY_NUM) {
+        // A dynamically carried bool mask reaches this generic-key boundary.
+        // Keep it contract-aware instead of coercing the mask Item to index 0.
+        return lambda_array_mask_assign_checked(owner, key, value, expected);
+    }
     int64_t index = 0;
     if (!lambda_item_to_int64_exact(key, &index)) {
         set_runtime_error(ERR_TYPE_MISMATCH,
@@ -9009,6 +9113,9 @@ Item lambda_array_set_checked_inplace(Item owner, int64_t index, Item value, Typ
 
 Item lambda_array_set_checked_inplace_item(Item owner, Item key, Item value, Type* expected,
         const char* boundary) {
+    if (get_type_id(key) == LMD_TYPE_ARRAY_NUM) {
+        return lambda_array_mask_assign_checked_inplace(owner, key, value, expected);
+    }
     int64_t index = 0;
     if (!lambda_item_to_int64_exact(key, &index)) {
         set_runtime_error(ERR_TYPE_MISMATCH,
@@ -9016,6 +9123,170 @@ Item lambda_array_set_checked_inplace_item(Item owner, Item key, Item value, Typ
         return ItemError;
     }
     return lambda_array_set_checked_inplace(owner, index, value, expected, boundary);
+}
+
+// A nested write must be checked against the declared root contract.  The
+// generic COW path only knows Item tags, so `rows[0][1] = value` previously
+// let an invalid leaf widen the inner carrier and silently falsify `T[][]`.
+static Item lambda_array_path_set_checked_impl(Item owner, Item path, Item value,
+        Type* expected, const char* boundary, bool publish_in_place) {
+    if (get_type_id(path) != LMD_TYPE_ARRAY || !path.array ||
+            path.array->length <= 0) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "typed nested array assignment requires a non-empty index path");
+        return ItemError;
+    }
+
+    RootFrame roots(6);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_path(roots, path);
+    Rooted<Item> rooted_value(roots, value);
+    Rooted<Item> rooted_admitted_root(roots, ItemNull);
+    Rooted<Item> rooted_current(roots, ItemNull);
+    Rooted<Item> rooted_checked_value(roots, ItemNull);
+
+    rooted_admitted_root.set(lambda_type_check(rooted_owner.get(), expected, boundary));
+    if (item_is_error(rooted_admitted_root.get())) return rooted_admitted_root.get();
+    if (publish_in_place &&
+            rooted_admitted_root.get().item != rooted_owner.get().item) {
+        // A var root has no replacement channel at this boundary. Its caller
+        // must already have admitted/detached the declared representation.
+        return lambda_type_error(rooted_owner.get(), expected, boundary);
+    }
+
+    // Validate every coordinate and the final element before mutating or
+    // relinking a child. This keeps a rejected nested write transactional.
+    Item probe = rooted_admitted_root.get();
+    Type* probe_contract = expected;
+    int64_t path_length = rooted_path.get().array->length;
+    for (int64_t depth = 0; depth < path_length; depth++) {
+        LambdaArrayContractInfo info = {};
+        int64_t index = 0;
+        if (!lambda_array_contract_info(probe_contract, &info) ||
+                !lambda_item_to_int64_exact(item_at(rooted_path.get(), depth), &index) ||
+                index < 0) {
+            return lambda_type_error(probe, probe_contract, boundary);
+        }
+        if (depth + 1 == path_length) {
+            rooted_checked_value.set(lambda_type_check(rooted_value.get(),
+                info.immediate_element, boundary));
+            if (item_is_error(rooted_checked_value.get())) return rooted_checked_value.get();
+            break;
+        }
+        Item child = item_at(probe, index);
+        if (get_type_id(child) == LMD_TYPE_NULL ||
+                !lambda_array_contract_canonical(info.immediate_element)) {
+            set_runtime_error(ERR_INDEX_OUT_OF_BOUNDS,
+                "typed nested array assignment index is out of bounds");
+            return ItemError;
+        }
+        probe = child;
+        probe_contract = info.immediate_element;
+    }
+
+    Item candidate = publish_in_place ? rooted_admitted_root.get() :
+        cow_prepare_write(rooted_admitted_root.get());
+    if (item_is_error(candidate)) return candidate;
+    rooted_current.set(candidate);
+    Type* current_contract = expected;
+
+    for (int64_t depth = 0; depth < path_length; depth++) {
+        LambdaArrayContractInfo info = {};
+        int64_t index = 0;
+        if (!lambda_array_contract_info(current_contract, &info) ||
+                !lambda_item_to_int64_exact(item_at(rooted_path.get(), depth), &index) ||
+                index < 0) {
+            return lambda_type_error(rooted_current.get(), current_contract, boundary);
+        }
+        if (depth + 1 == path_length) {
+            Item write_result = lambda_array_set_checked_inplace(rooted_current.get(),
+                index, rooted_checked_value.get(), current_contract, boundary);
+            return item_is_error(write_result) ? write_result : candidate;
+        }
+
+        Item child = item_at(rooted_current.get(), index);
+        Item admitted_child = lambda_type_check(child, info.immediate_element, boundary);
+        if (item_is_error(admitted_child)) return admitted_child;
+        Item private_child = cow_prepare_write(admitted_child);
+        if (item_is_error(private_child)) return private_child;
+        if (private_child.item != child.item) {
+            ArrayRepCert* parent_cert = rooted_current.get().array
+                ? rooted_current.get().array->rep_cert : NULL;
+            Item link_result = fn_array_set(rooted_current.get().array, index, private_child);
+            if (item_is_error(link_result)) return link_result;
+            // The child was admitted to the immediate contract before linking;
+            // raw relinking changes no parent element semantics.
+            lambda_array_install_rep_cert(rooted_current.get(), parent_cert);
+        }
+        rooted_current.set(private_child);
+        current_contract = info.immediate_element;
+    }
+    return ItemError;
+}
+
+Item lambda_array_path_set_checked(Item owner, Item path, Item value, Type* expected,
+        const char* boundary) {
+    return lambda_array_path_set_checked_impl(owner, path, value, expected,
+        boundary, false);
+}
+
+Item lambda_array_path_set_checked_inplace(Item owner, Item path, Item value,
+        Type* expected, const char* boundary) {
+    return lambda_array_path_set_checked_impl(owner, path, value, expected,
+        boundary, true);
+}
+
+static Item lambda_array_set_nd_checked_impl(Item owner, int ndim, int64_t* indices,
+        Item value, Type* expected, bool publish_in_place) {
+    Type* element_type = runtime_array_contract_element(expected);
+    if (!element_type || !indices || ndim < 1) {
+        return lambda_type_error(value, expected, "typed multi-dimensional array assignment");
+    }
+    RootFrame roots(4);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_value(roots, value);
+    Rooted<Item> rooted_admitted(roots, ItemNull);
+    Rooted<Item> rooted_candidate(roots, ItemNull);
+    rooted_value.set(lambda_type_check(rooted_value.get(), element_type,
+        "typed multi-dimensional array assignment"));
+    if (item_is_error(rooted_value.get())) return rooted_value.get();
+    rooted_admitted.set(lambda_type_check(rooted_owner.get(), expected,
+        "typed multi-dimensional array assignment"));
+    if (item_is_error(rooted_admitted.get())) return rooted_admitted.get();
+    if (publish_in_place && rooted_admitted.get().item != rooted_owner.get().item) {
+        return lambda_type_error(rooted_owner.get(), expected,
+            "typed multi-dimensional array assignment");
+    }
+    rooted_candidate.set(publish_in_place ? rooted_admitted.get() :
+        cow_prepare_write(rooted_admitted.get()));
+    if (item_is_error(rooted_candidate.get()) ||
+            get_type_id(rooted_candidate.get()) != LMD_TYPE_ARRAY_NUM) {
+        return lambda_type_error(rooted_candidate.get(), expected,
+            "typed multi-dimensional array assignment");
+    }
+    ArrayRepCert* prior_cert = rooted_candidate.get().array_num->rep_cert;
+    Item result = array_num_set_nd_admitted(rooted_candidate.get().array_num,
+        ndim, indices, rooted_value.get());
+    if (item_is_error(result)) return result;
+    if (prior_cert) {
+        lambda_array_install_rep_cert(rooted_candidate.get(), prior_cert);
+    } else {
+        ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
+        if (!cert) return lambda_type_error(rooted_candidate.get(), expected,
+            "typed multi-dimensional array assignment");
+        lambda_array_install_rep_cert(rooted_candidate.get(), cert);
+    }
+    return rooted_candidate.get();
+}
+
+Item lambda_array_set_nd_checked(Item owner, int ndim, int64_t* indices, Item value,
+        Type* expected) {
+    return lambda_array_set_nd_checked_impl(owner, ndim, indices, value, expected, false);
+}
+
+Item lambda_array_set_nd_checked_inplace(Item owner, int ndim, int64_t* indices,
+        Item value, Type* expected) {
+    return lambda_array_set_nd_checked_impl(owner, ndim, indices, value, expected, true);
 }
 
 static LaneStorageDesc lambda_array_lane_hint(Type* expected, uint8_t lane_kind,
@@ -9044,6 +9315,80 @@ Item lambda_array_set_checked_inplace_lane(Item owner, int64_t index, Item value
     LaneStorageDesc hint = lambda_array_lane_hint(expected, lane_kind, lane_nullable,
         lane_byte_size);
     return lambda_array_set_checked_impl(owner, index, value, expected, boundary, true, &hint);
+}
+
+static Item lambda_array_push_checked_impl(Item owner, Item value, Type* expected,
+        const char* boundary, bool publish_in_place) {
+    Type* element_type = runtime_array_contract_element(expected);
+    if (!element_type) return lambda_type_error(value, expected, boundary);
+
+    RootFrame roots(3);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_value(roots, value);
+    Rooted<Item> rooted_candidate(roots, ItemNull);
+    Item admitted_value = lambda_type_check(rooted_value.get(), element_type, boundary);
+    if (item_is_error(admitted_value)) return admitted_value;
+    rooted_value.set(admitted_value);
+
+    if (!lambda_array_rep_proves(rooted_owner.get(), expected, true)) {
+        if (publish_in_place) return lambda_type_error(rooted_owner.get(), expected, boundary);
+        Item admitted_owner = ItemNull;
+        if (!runtime_type_admit_array(rooted_owner.get(), expected, &admitted_owner)) {
+            return lambda_type_error(rooted_owner.get(), expected, boundary);
+        }
+        rooted_owner.set(admitted_owner);
+    }
+
+    rooted_candidate.set(publish_in_place ? rooted_owner.get() :
+        cow_prepare_write(rooted_owner.get()));
+    TypeId candidate_type = get_type_id(rooted_candidate.get());
+    if (candidate_type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* array = rooted_candidate.get().array_num;
+        if (array->is_view || array->is_ndim || array->length == INT64_MAX) {
+            return lambda_type_error(rooted_candidate.get(), expected, boundary);
+        }
+        ArrayNum* grown = array_num_reserve_capacity(array, array->length + 1);
+        if (!grown) return lambda_type_error(rooted_candidate.get(), expected, boundary);
+        rooted_candidate.set({.array_num = grown});
+        array = rooted_candidate.get().array_num;
+        if (!array_num_store_admitted(array, array->length, rooted_value.get())) {
+            return lambda_type_error(rooted_value.get(), element_type, boundary);
+        }
+    } else if (candidate_type == LMD_TYPE_ARRAY) {
+        Array* array = rooted_candidate.get().array;
+        if (!array || array->is_view || array->length == INT64_MAX ||
+                !array_reserve_append_slots(array, 1)) {
+            return lambda_type_error(rooted_candidate.get(), expected, boundary);
+        }
+        array = rooted_candidate.get().array;
+        if (array_has_native_lane(array)) {
+            if (!array_native_lane_store(array, array->length, rooted_value.get())) {
+                return lambda_type_error(rooted_value.get(), element_type, boundary);
+            }
+        } else {
+            array_set(array, array->length, rooted_value.get());
+        }
+        array->length++;
+    } else {
+        return lambda_type_error(rooted_candidate.get(), expected, boundary);
+    }
+
+    if (!lambda_array_rep_proves(rooted_candidate.get(), expected, true)) {
+        ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
+        if (!cert) return lambda_type_error(rooted_candidate.get(), expected, boundary);
+        lambda_array_install_rep_cert(rooted_candidate.get(), cert);
+    }
+    return rooted_candidate.get();
+}
+
+Item lambda_array_push_checked(Item owner, Item value, Type* expected,
+        const char* boundary) {
+    return lambda_array_push_checked_impl(owner, value, expected, boundary, false);
+}
+
+Item lambda_array_push_checked_inplace(Item owner, Item value, Type* expected,
+        const char* boundary) {
+    return lambda_array_push_checked_impl(owner, value, expected, boundary, true);
 }
 
 // CW32v2: numeric mask stores (`arr[mask] = v`) mutate the packed buffer in
@@ -9693,15 +10038,137 @@ static bool runtime_type_admit_map(Item value, Type* expected, Item* converted,
 static bool runtime_type_admit_array(Item value, Type* expected, Item* converted) {
     Type* element_type = runtime_array_contract_element(expected);
     TypeId source_type = get_type_id(value);
-    if (!element_type || (source_type != LMD_TYPE_ARRAY &&
-            source_type != LMD_TYPE_ARRAY_NUM && source_type != LMD_TYPE_ELEMENT)) {
+    if (!element_type) {
         return false;
     }
+    if (source_type == LMD_TYPE_RANGE) {
+        // A range is array-like at the language boundary but has no mutable
+        // element storage. Materialize it through the same recursive element
+        // admission used for an open Array, then let the normal lane rebuild
+        // establish the target representation/certificate (D3.1.1v2).
+        Range* range = value.range;
+        if (!range || range->length < 0) return false;
+        RootFrame roots(3);
+        Rooted<Range*> rooted_range(roots, range);
+        Rooted<Array*> rooted_materialized(roots, array());
+        Rooted<Item> rooted_element(roots, ItemNull);
+        if (!rooted_materialized.get() || !array_reserve_append_slots(
+                rooted_materialized.get(), rooted_range.get()->length)) {
+            return false;
+        }
+        for (int64_t index = 0; index < rooted_range.get()->length; index++) {
+            Range* live_range = rooted_range.get();
+            Item source_element = live_range->is_char
+                ? fn_chr({.item = i2it(live_range->start + index)})
+                : (Item){.item = i2it(live_range->start + index)};
+            rooted_element.set(source_element);
+            Item admitted = ItemNull;
+            if (!runtime_type_admit_value(rooted_element.get(), element_type, &admitted)) {
+                return false;
+            }
+            rooted_element.set(admitted);
+            Array* materialized = rooted_materialized.get();
+            array_set(materialized, materialized->length, rooted_element.get());
+            materialized->length++;
+        }
+        return runtime_type_admit_array({.array = rooted_materialized.get()},
+            expected, converted);
+    }
+    if (source_type != LMD_TYPE_ARRAY && source_type != LMD_TYPE_ARRAY_NUM &&
+            source_type != LMD_TYPE_ELEMENT) {
+        return false;
+    }
+    Type* semantic_element = type_field_unwrap_simple_decl(element_type);
+    if (semantic_element && semantic_element->type_id == LMD_TYPE_ANY &&
+            source_type == LMD_TYPE_ARRAY_NUM) {
+        // `any[]` needs a boxed outer sequence: an N-D ArrayNum's scalar
+        // `items` buffer would flatten its rows during a later open write.
+        // Re-enter through the normal Array path so the boxed result receives
+        // the same in-place boundary certificate a `var any[]` callee needs
+        // to make checked writes through its caller-owned header (D3.3.3v3,
+        // S9.2.2).
+        RootFrame roots(1);
+        Rooted<Item> rooted_value(roots, value);
+        void* boxed = ensure_typed_array(rooted_value.get(), LMD_TYPE_ANY);
+        if (!boxed) return false;
+        return runtime_type_admit_array({.array = (Array*)boxed}, expected, converted);
+    }
+    if (lambda_array_rep_proves(value, expected, true)) {
+        *converted = value;
+        return true;
+    }
 
-    RootFrame roots(3);
+    LambdaArrayContractInfo contract_info = {};
+    LaneStorageDesc target_lane = {};
+    bool target_has_native_lane = lambda_type_lane_storage_desc(element_type, &target_lane) &&
+        array_native_lane_supported(&target_lane);
+    if (semantic_element && semantic_element->type_id == LMD_TYPE_ANY &&
+            source_type == LMD_TYPE_ARRAY && value.array && !array_has_native_lane(value.array) &&
+            !target_has_native_lane) {
+        // An already boxed carrier needs no replacement merely to cache an
+        // exact boxed contract. This matters at a `var any[]` boundary: the
+        // caller owns the existing header, so returning a detached-but-byte
+        // identical copy would make the callee mutate an unpublished value.
+        // Any element conversion (including an inner T[] reification) falls
+        // through to the transactional copy path below (D3.3.3v3, S9.2.2).
+        RootFrame roots(2);
+        Rooted<Item> rooted_value(roots, value);
+        Rooted<Item> rooted_element(roots, ItemNull);
+        bool needs_copy = false;
+        for (int64_t index = 0; index < rooted_value.get().array->length; index++) {
+            rooted_element.set(item_at(rooted_value.get(), index));
+            Item admitted = ItemNull;
+            if (!runtime_type_admit_value(rooted_element.get(), element_type, &admitted)) {
+                return false;
+            }
+            if (admitted.item != rooted_element.get().item) {
+                needs_copy = true;
+                break;
+            }
+        }
+        if (!needs_copy) {
+            ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
+            if (!cert) return false;
+            lambda_array_install_rep_cert(rooted_value.get(), cert);
+            *converted = rooted_value.get();
+            return true;
+        }
+    }
+
+    ArrayNumElemType compact_type = ELEM_INT;
+    if (source_type == LMD_TYPE_ARRAY_NUM &&
+            lambda_array_contract_info(expected, &contract_info) &&
+            contract_info.rank == 1 &&
+            lambda_array_num_elem_type_for_contract(element_type, &compact_type) &&
+            value.array_num && value.array_num->get_elem_type() == compact_type) {
+        // An N-D ArrayNum still owns a flat, exact scalar lane. `item_at`
+        // exposes leading-axis views for normal indexing, so validating it as
+        // a generic Array would incorrectly present a row to an `int[]`
+        // contract. Validate the physical leaf lane directly and certify the
+        // same view without breaking its reshape/write-through semantics.
+        RootFrame roots(2);
+        Rooted<Item> rooted_value(roots, value);
+        Rooted<Item> rooted_element(roots, ItemNull);
+        for (int64_t index = 0; index < rooted_value.get().array_num->length; index++) {
+            rooted_element.set(array_num_read_item(rooted_value.get().array_num, index));
+            Item admitted = ItemNull;
+            if (!runtime_type_admit_value(rooted_element.get(), element_type, &admitted) ||
+                    get_type_id(admitted) != get_type_id(rooted_element.get())) {
+                return false;
+            }
+        }
+        ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
+        if (!cert) return false;
+        lambda_array_install_rep_cert(rooted_value.get(), cert);
+        *converted = rooted_value.get();
+        return true;
+    }
+
+    RootFrame roots(4);
     Rooted<Item> rooted_candidate(roots, fn_mutable_value(value));
     Rooted<Item> rooted_element(roots, ItemNull);
     Rooted<Item> rooted_converted(roots, ItemNull);
+    Rooted<ArrayNum*> rooted_packed(roots, (ArrayNum*)NULL);
     TypeId candidate_type = get_type_id(rooted_candidate.get());
     if ((candidate_type != LMD_TYPE_ARRAY && candidate_type != LMD_TYPE_ARRAY_NUM &&
             candidate_type != LMD_TYPE_ELEMENT) || rooted_candidate.get().item == value.item) {
@@ -9730,6 +10197,22 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
         }
     }
 
+    compact_type = ELEM_INT;
+    if (lambda_array_num_elem_type_for_contract(element_type, &compact_type) &&
+            (get_type_id(rooted_candidate.get()) != LMD_TYPE_ARRAY_NUM ||
+             rooted_candidate.get().array_num->get_elem_type() != compact_type)) {
+        ArrayNum* packed = array_num_new(compact_type, length);
+        if (!packed) return false;
+        rooted_packed.set(packed);
+        for (int64_t index = 0; index < length; index++) {
+            Item admitted = item_at(rooted_candidate.get(), index);
+            if (!array_num_store_admitted(rooted_packed.get(), index, admitted)) {
+                return false;
+            }
+        }
+        rooted_candidate.set({.array_num = rooted_packed.get()});
+    }
+
     LaneStorageDesc lane_desc = {};
     if (lambda_type_lane_storage_desc(element_type, &lane_desc) &&
             array_native_lane_supported(&lane_desc) &&
@@ -9741,6 +10224,9 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
         rooted_candidate.set(rebuilt);
     }
     if (!lambda_type_matches(rooted_candidate.get(), expected)) return false;
+    ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
+    if (!cert) return false;
+    lambda_array_install_rep_cert(rooted_candidate.get(), cert);
     *converted = rooted_candidate.get();
     return true;
 }
@@ -9751,13 +10237,33 @@ static MapContractRelation runtime_map_contract_relation_cached(
     Heap* heap = context ? context->heap : NULL;
     if (!heap) return lambda_map_contract_relation(candidate, expected);
 
-    for (uint32_t i = 0; i < LAMBDA_MAP_CONTRACT_CACHE_CAPACITY; i++) {
-        LambdaMapContractCacheEntry* entry = &heap->map_contract_cache[i];
+    // Map admission is a hot nested-store operation. A full table scan made a
+    // larger cache slower than a miss: a compact bounded probe keeps repeated
+    // typed record paths O(1) while a round-robin fallback preserves progress
+    // under adversarial shape churn (D3.2.4v3).
+    uintptr_t candidate_bits = (uintptr_t)candidate >> 4;
+    uintptr_t expected_bits = (uintptr_t)expected >> 4;
+    uint64_t hash = (uint64_t)candidate_bits ^ ((uint64_t)expected_bits << 1);
+    hash ^= hash >> 33;
+    hash *= UINT64_C(0xff51afd7ed558ccd);
+    hash ^= hash >> 33;
+    uint32_t base = (uint32_t)hash & (LAMBDA_MAP_CONTRACT_CACHE_CAPACITY - 1);
+    for (uint32_t probe = 0; probe < 8; probe++) {
+        LambdaMapContractCacheEntry* entry = &heap->map_contract_cache[
+            (base + probe) & (LAMBDA_MAP_CONTRACT_CACHE_CAPACITY - 1)];
         if (entry->candidate == candidate && entry->expected == expected) {
             if (cow_profile_enabled()) {
                 g_cow_profile.map_admit_relation_cache_hits++;
             }
             return (MapContractRelation)entry->relation;
+        }
+        if (!entry->candidate) {
+            if (cow_profile_enabled()) g_cow_profile.map_admit_relation_cache_misses++;
+            MapContractRelation relation = lambda_map_contract_relation(candidate, expected);
+            entry->candidate = candidate;
+            entry->expected = expected;
+            entry->relation = (uint8_t)relation;
+            return relation;
         }
     }
 
@@ -9788,17 +10294,12 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
         return lambda_numeric_boundary_admit(value, expected, converted);
     }
 
-    // A nullable concrete array needs its own carrier even when its current
-    // values also satisfy the narrower T[] contract. This is the covariant
-    // int[] -> int?[] boundary; do not lose the destination's nullability.
-    if ((get_type_id(value) == LMD_TYPE_ARRAY || get_type_id(value) == LMD_TYPE_ARRAY_NUM)) {
-        Type* element_type = runtime_array_contract_element(expected);
-        LaneStorageDesc lane_desc = {};
-        if (element_type && lambda_type_lane_storage_desc(element_type, &lane_desc) &&
-                array_native_lane_supported(&lane_desc) &&
-                !array_native_lane_matches_desc(value.array, &lane_desc)) {
-            return runtime_type_admit_array(value, expected, converted);
-        }
+    // An array annotation is a complete rank-and-element contract, not a
+    // TypeId comparison. Route it before generic membership can erase a named
+    // record layout or accept a matching leaf lane at the wrong rank.
+    LambdaArrayContractInfo array_info = {};
+    if (lambda_array_contract_info(expected, &array_info)) {
+        return runtime_type_admit_array(value, expected, converted);
     }
 
     // A trusted compiler-built map contract is an admission certificate only
@@ -9876,10 +10377,6 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
 
     if (expected->type_id == LMD_TYPE_MAP) {
         return runtime_type_admit_map(value, expected, converted);
-    }
-    if (expected->type_id == LMD_TYPE_TYPE && expected->kind == TYPE_KIND_UNARY &&
-            ((TypeUnary*)expected)->op == OPERATOR_REPEAT) {
-        return runtime_type_admit_array(value, expected, converted);
     }
     return false;
 }

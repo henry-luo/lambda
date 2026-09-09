@@ -1,11 +1,12 @@
 # Proper `T[]` Typed Arrays for Core Lambda — Implementation Plan
 
 - **Date:** 2026-09-09
-- **Status:** PROPOSED — audit complete; implementation not started.
+- **Status:** COMPLETE — implemented and validated in
+  `temp/typed-array-proper` on 2026-09-09.
 - **Scope:** Core Lambda `T[]` contracts from parsing through AST typing,
-  admission, storage, MIR Direct, mutation, views, reflection, and system
-  functions. Existing `ArrayNum` kernels are retained and brought under the
-  contract model.
+  runtime admission, storage, MIR Direct, mutation, views, reflection, system
+  functions, typed benchmark scripts, tests, and user documentation. Existing
+  `ArrayNum` kernels are retained and brought under the contract model.
 - **Out of scope:** LambdaJS `TypedArray`, new image algorithms, manual SIMD,
   dependent-shape types, a C-text/C2MIR back end, and changes to vendored MIR.
 - **Prior records:** `../Lambda_Typed_Array.md`,
@@ -14,25 +15,12 @@
   `../Lambda_Design_Runtime_COW.md`,
   `../Lambda_Design_Compiling_Lane.md`, and
   `../Lambda_Issue_Ledger.md` (`LR12-4`, `LR12-5`).
-- **Formal authority:** **S7.7.2–S7.7.6** (checked boundaries and failure
-  routing), **S7.8.1** (container admission comes from the destination
-  contract), **S7.10.5–S7.10.6** (typed vector results and mutator errors),
-  **S9.1.1–S9.1.3**, **S9.1.5v2** (finality, COW, `var` sharing, and the
-  no-reference-cell value model), **S9.2.1–S9.2.2**
-  (value covariance, borrow invariance, and view confinement), **S11.1.1**
-  (`T[]` is the homogeneous-array spelling), **S11.3.1v2** (structural array
-  membership), **S11.4.1–S11.4.5** (annotations are enforced contracts),
-  **S12.2.1** (exact embedding and annotated reassignment), **D2.4.1–D2.4.3**
-  (semantic contract and representation are separate facts), **D2.5.1–D2.5.3**
-  (nullable lanes and `T?` reads), **D2.6.1–D2.6.5** (array representations,
-  ArrayNum/nullability, and append semantics), **D2.6.11** (the pinned
-  container header), **D2.8.1–D2.8.3** (error-free
-  lane entry), **D3.1.1v2–D3.1.3** (the full `Type*` graph is authoritative),
-  **D3.2.3–D3.2.4v2** (declared/effective separation and map reification),
-  **D3.3.3–D3.3.4** (binding-local narrowing and full-contract
-  representation), **D3.4.5–D3.4.6** (transactional writes and shared lane
-  descriptors), and **D5.3.3–D5.3.4** (precise roots across allocating
-  boundaries).
+- **Formal authority:** **S11.1.1v2** (homogeneous arrays and rank),
+  **S11.4.1v3** (checked construction and mutation), **S7.7.2** (checked
+  boundaries), **S7.10.6** (mutator errors), **S9.1.1–S9.2.2** (value/COW and
+  `var` borrowing), **D3.1.1v3** (the full `Type*` graph is authoritative),
+  **D3.2.4v3** (named-layout reification), and **D3.3.3v3** (a certificate is
+  not inferred narrowing).
 
 ---
 
@@ -113,7 +101,7 @@ Typed empty construction is representation-directed:
 
 ## 2. Audit baseline and root cause
 
-### 2.1 Current split
+### 2.1 Pre-implementation split
 
 The implementation currently has four partial notions of an array type:
 
@@ -875,8 +863,8 @@ wrong result, tier divergence, memory overwrite, or missing expected output.
 - Update `doc/Lambda_Type.md`, validator docs, and examples for array-only
   `T[]`, exact `[T]`, nested rank, nullable arrays, covariance, and invariant
   `var` parameters.
-- Mark this file `(done)` only after all correctness, baseline, sanitizer,
-  release, and mechanism gates pass.
+- This file is complete because the correctness, baseline, sanitizer, release,
+  and mechanism gates recorded in Section 12 passed.
 
 **Performance gates — release build only**
 
@@ -973,17 +961,17 @@ grow another switch independently in AST, T0, MIR, and validator code.
 
 | Phase | Status | Required evidence |
 |---|---|---|
-| 0. Pin failures | not started | permanent regressions + issue-ledger sync |
-| 1. Compact-width safety | not started | 14-kind canary + ASan |
-| 2. Canonical `T[]` | not started | one resolver; structural relation tests |
-| 3. Representation certificate | not started | ABI/GC/COW/lifetime tests |
-| 4. Unified admission | not started | exact JIT/T0 boundary matrix; O(1) repeat |
-| 5. Inference/rank/reads | not started | nested and nullable inferred-type tests |
-| 6. MIR proof | not started | MIR helper/instruction gates |
-| 7. Checked mutation/growth | not started | flat/N-D/mask/push transactional matrix |
-| 8. Views/borrows | not started | snapshot, write-through, exclusivity, GC |
-| 9. Sysfunc/reflection | not started | registry census; empty/equality invariance |
-| 10. Migration/closeout | not started | baselines, full suite, release report, docs |
+| 0. Pin failures | complete | permanent positive/negative `.ls` goldens |
+| 1. Compact-width safety | complete | exact-store canaries and ASan fixture |
+| 2. Canonical `T[]` | complete | one resolver and structural-relation coverage |
+| 3. Representation certificate | complete | ABI, COW, GC, and heap-local lifetime coverage |
+| 4. Unified admission | complete | JIT/T0 boundary matrix and repeat-admission guards |
+| 5. Inference/rank/reads | complete | nested and nullable inferred-type tests |
+| 6. MIR proof | complete | MIR mechanism suite 86/86 and ratchets 16/16 |
+| 7. Checked mutation/growth | complete | flat/N-D/mask/push transactional coverage |
+| 8. Views/borrows | complete | snapshot, confined `var`, and forced-GC coverage |
+| 9. Sysfunc/reflection | complete | typed-result, empty-result, equality, and reflection coverage |
+| 10. Migration/closeout | complete | docs, baseline, release, and ASan evidence in Section 12 |
 
 Update this table only with concrete evidence: test names, counts, benchmark
 artifact, and commit/date. “Implemented” without a gate is not progress.
@@ -1088,5 +1076,42 @@ Proper `T[]` support is complete only when all of the following are true:
     contracts and no longer encode implementation workarounds as language
     semantics.
 
-Until all fourteen conditions hold, the feature remains partial and this file
-must retain its unsuffixed, not-complete name.
+All fourteen conditions were met by the implementation and validation recorded
+below; this file is therefore complete.
+
+---
+
+## 12. Implementation record and closeout audit
+
+The implementation uses one full-contract path rather than a second
+`TypeId`-only typed-array mechanism:
+
+- `OPERATOR_ARRAY` is distinct from occurrence/count syntax, and rank,
+  immediate element, lane, and compatibility questions go through
+  `lambda_array_contract_info`.
+- `runtime_type_admit_array` is the dynamic boundary. It roots every
+  allocating intermediate, validates and reifies the complete element
+  contract transactionally, then installs an interned `ArrayRepCert`.
+- `ArrayNum` has an exact non-coercive store for every compact kind. Raw
+  writes clear a certificate; checked writes retain or renew it only after
+  carrier verification.
+- MIR Direct guards a certificate before raw numeric, string, and named-map
+  lane access; its fallback is representation-safe. The T0 interpreter calls
+  the same checked runtime helpers.
+- The typed-benchmark audit found 69 `*2.ls` scripts. Only the two DeltaBlue
+  variants were promoted: their `Variable[]` values have the concrete
+  `MapVariable*[]` carrier, while the remaining open arrays are genuinely
+  heterogeneous JSON, AST, tuple, text-pipeline, or dynamic-node values.
+
+Final validation on 2026-09-09:
+
+- `make build-test`, compact-lane tests, and the interpreter proof test passed;
+- the focused typed-array/direct-map/COW script group passed 37/37;
+- the MIR mechanism and ratchet suites passed 86/86 and 16/16;
+- `make test-lambda-baseline` passed Input 2104/2104 and Lambda 3008/3012.
+  The four residual JS/Test262-harness failures were pre-existing and were not
+  masked or changed by this work;
+- `make release` and the release fixture passed. AWFY `deltablue2` completed
+  in 33345.5 ms and JetStream `deltablue2` in 23216.7 ms; and
+- the final typed-array fixture passed under AddressSanitizer with no
+  diagnostics.

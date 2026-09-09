@@ -2,6 +2,7 @@
 // Implements element-wise arithmetic between scalars, arrays, lists, and ranges
 
 #include "transpiler.hpp"
+#include "type_contract.hpp"
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
 #include "../../lib/log.h"
@@ -79,10 +80,10 @@ static Item vector_get(Item item, int64_t index) {
             return array_num_read_item(item.array_num, index);
         }
         case LMD_TYPE_ARRAY:
-            // Nullable native lanes are deliberately outside the first kernel
-            // slice: vector operators need an explicit null propagation policy.
-            if (array_has_native_lane(item.array)) return ItemError;
-            return item.array->items[index];
+            // Transforms and generic vector fallbacks consume semantic Items.
+            // `array_get` materializes a native lane correctly; specialized
+            // numeric kernels still read their raw ArrayNum payloads directly.
+            return array_get(item.array, index);
         case LMD_TYPE_RANGE:
             return item.range->is_char
                 ? fn_chr((Item){.item = i2it(item.range->start + index)})
@@ -91,6 +92,9 @@ static Item vector_get(Item item, int64_t index) {
             return ItemError;
     }
 }
+
+static void array_transform_copy_cert(Item source, Array* result);
+static void array_transform_copy_cert(Item source, ArrayNum* result);
 
 static Array* vector_to_plain_array(Item item, int64_t len) {
     RootFrame roots(2);
@@ -110,6 +114,7 @@ static Array* vector_to_plain_array(Item item, int64_t len) {
         result = rooted_result.get();
         result->items[i] = value;
     }
+    array_transform_copy_cert(rooted_source.get(), rooted_result.get());
     result->is_spreadable = false;
     return rooted_result.get();
 }
@@ -140,7 +145,47 @@ static inline Item item_from_array_num(ArrayNum* array_num) {
     return result;
 }
 
-static Item array_num_from_items(ArrayNumElemType elem_type, Array* items) {
+// Selection and ordering transforms do not admit new elements, so an exact
+// source certificate remains valid on their fresh result (D3.3.3).
+static ArrayRepCert* array_transform_source_cert(Item source) {
+    TypeId source_type = get_type_id(source);
+    if (source_type != LMD_TYPE_ARRAY &&
+            source_type != LMD_TYPE_ARRAY_NUM && source_type != LMD_TYPE_ELEMENT) {
+        return NULL;
+    }
+    return source.array->rep_cert;
+}
+
+static void array_transform_copy_cert(Item source, Array* result) {
+    if (!result) return;
+    // `list()`/`array()` produce boxed Item slots. A source certificate for a
+    // scalar or pointer native lane would make MIR reinterpret those Items as
+    // raw payload words after reverse/sort, so only a later typed boundary may
+    // rebuild and publish that lane (D3.3.3v3).
+    (void)source;
+    result->rep_cert = NULL;
+}
+
+static void array_transform_copy_cert(Item source, ArrayNum* result) {
+    if (result) result->rep_cert = array_transform_source_cert(source);
+}
+
+static ArrayRepCert* array_transform_common_cert(Item left, Item right) {
+    ArrayRepCert* left_cert = array_transform_source_cert(left);
+    ArrayRepCert* right_cert = array_transform_source_cert(right);
+    if (!left_cert || !right_cert ||
+            !(left_cert->flags & ARRAY_REP_CERT_EXACT) ||
+            !(right_cert->flags & ARRAY_REP_CERT_EXACT) ||
+            !left_cert->array_contract || !right_cert->array_contract) {
+        return NULL;
+    }
+    // A join preserves an exact proof only when both input contracts agree.
+    return lambda_array_contract_compatible(left_cert->array_contract,
+        right_cert->array_contract, true) ? left_cert : NULL;
+}
+
+static Item array_num_from_items(ArrayNumElemType elem_type, Array* items,
+        ArrayRepCert* rep_cert = NULL) {
     if (!items) return ItemError;
 
     RootFrame roots(2);
@@ -153,6 +198,7 @@ static Item array_num_from_items(ArrayNumElemType elem_type, Array* items) {
     for (int64_t i = 0; i < length; i++) {
         array_num_set_item(rooted_result.get(), i, rooted_items.get()->items[i]);
     }
+    rooted_result.get()->rep_cert = rep_cert;
     return { .array_num = rooted_result.get() };
 }
 
@@ -168,6 +214,7 @@ static Item array_num_slice_result(Item item, int64_t start, int64_t length) {
             rooted_source.get(), start, length)) {
         return ItemError;
     }
+    array_transform_copy_cert(item, rooted_result.get());
     return { .array_num = rooted_result.get() };
 }
 
@@ -182,6 +229,7 @@ static Item array_num_reverse_result(Item item) {
     if (!array_num_copy_reversed_bytes(rooted_result.get(), rooted_source.get())) {
         return ItemError;
     }
+    array_transform_copy_cert(item, rooted_result.get());
     return { .array_num = rooted_result.get() };
 }
 
@@ -194,7 +242,8 @@ static Item array_num_sort_result(Item item, int64_t length, bool descending) {
     stable_sort_items_by_total_order(rooted_sortable.get()->items, length, descending);
 
     ArrayNum* source = rooted_source.get().array_num;
-    return array_num_from_items(source->get_elem_type(), rooted_sortable.get());
+    return array_num_from_items(source->get_elem_type(), rooted_sortable.get(),
+        source->rep_cert);
 }
 
 // convert item to double for arithmetic (returns NAN on error)
@@ -2385,6 +2434,7 @@ Item fn_reverse(Item item) {
     if (len == 0) {
         List* result = list();
         result->is_content = 1;
+        array_transform_copy_cert(item, (Array*)result);
         return { .array = result };
     }
 
@@ -2394,6 +2444,7 @@ Item fn_reverse(Item item) {
         for (int64_t i = len - 1; i >= 0; i--) {
             array_push((Array*)result, vector_get(item, i));
         }
+        array_transform_copy_cert(item, (Array*)result);
         // sort() returns a plain non-spreadable array; reverse() must preserve that
         // container mode so method chains keep bracketed array output.
         if (preserve_array) result->is_spreadable = false;
@@ -2416,6 +2467,9 @@ Item fn_sort1(Item item) {
     if (len == 0) {
         List* result = list();
         result->is_content = 1;
+        // Sorting an empty certified array is still a value-preserving
+        // transform; retain its element/layout proof for the next boundary.
+        array_transform_copy_cert(item, (Array*)result);
         return { .array = result };
     }
 
@@ -2490,6 +2544,7 @@ Item fn_sort2(Item item, Item dir_item) {
     if (len == 0) {
         List* result = list();
         result->is_content = 1;
+        array_transform_copy_cert(item, (Array*)result);
         return { .array = result };
     }
 
@@ -2613,8 +2668,11 @@ Item fn_sort2(Item item, Item dir_item) {
         result->is_spreadable = false;
         if (type == LMD_TYPE_ARRAY_NUM) {
             return array_num_from_items(rooted_source.get().array_num->get_elem_type(),
-                rooted_result.get());
+                rooted_result.get(), rooted_source.get().array_num->rep_cert);
         }
+        // A key callback changes only order. Its result owns the same elements,
+        // so the source contract remains exact after the sort.
+        array_transform_copy_cert(rooted_source.get(), rooted_result.get());
         return { .array = rooted_result.get() };
     }
 
@@ -2684,10 +2742,11 @@ Item fn_unique(Item item) {
     if (len == 0) {
         if (type == LMD_TYPE_ARRAY_NUM) {
             ArrayNumElemType elem_type = item.array_num->get_elem_type();
-            return array_num_from_items(elem_type, array());
+            return array_num_from_items(elem_type, array(), item.array_num->rep_cert);
         }
         Array* result = array();
         result->is_spreadable = spreadable;
+        array_transform_copy_cert(item, result);
         return { .array = result };
     }
 
@@ -2713,7 +2772,7 @@ Item fn_unique(Item item) {
             }
         }
         return array_num_from_items(rooted_source.get().array_num->get_elem_type(),
-            rooted_result.get());
+            rooted_result.get(), rooted_source.get().array_num->rep_cert);
     }
 
     // generic path: use fn_eq for type-aware comparison (handles strings, symbols, etc.)
@@ -2733,6 +2792,7 @@ Item fn_unique(Item item) {
         }
     }
     result->is_spreadable = spreadable;
+    array_transform_copy_cert(item, result);
     return { .array = result };
 }
 
@@ -2770,6 +2830,7 @@ Item fn_take(Item vec, Item n_item) {
         List* result = list();
         for (int64_t i = 0; i < n; i++) array_push((Array*)result, vector_get(vec, i));
         result->is_content = 1;
+        array_transform_copy_cert(vec, (Array*)result);
         return { .array = result };
     }
 }
@@ -2833,6 +2894,7 @@ Item fn_drop(Item vec, Item n_item) {
         List* result = list();
         for (int64_t i = n; i < len; i++) array_push((Array*)result, vector_get(vec, i));
         result->is_content = 1;
+        array_transform_copy_cert(vec, (Array*)result);
         return { .array = result };
     }
 }
@@ -2884,6 +2946,7 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
             array_push(result, vector_get(vec, i));
         }
         result->is_content = 1;
+        array_transform_copy_cert(vec, result);
         return { .array = result };
     }
 }
@@ -3248,9 +3311,14 @@ Item fn_flatten(Item vec) {
     RootFrame roots(1);
     Rooted<ArrayNum*> rooted_base(roots, base);
     ArrayNum* result = array_num_new(et, length);
-    if (!result || length == 0) return { .array_num = result };
+    if (!result) return ItemError;
+    if (length == 0) {
+        result->rep_cert = rooted_base.get()->rep_cert;
+        return { .array_num = result };
+    }
     base = rooted_base.get();
     if (!arr_num_copy_into(base, result, 0)) return ItemError;
+    result->rep_cert = base->rep_cert;
     return { .array_num = result };
 }
 
@@ -3417,6 +3485,7 @@ Item fn_concat(Item a_item, Item b_item) {
     A = rooted_a.get();
     B = rooted_b.get();
     if (!arr_num_copy_into(A, R, 0) || !arr_num_copy_into(B, R, A->length)) return ItemError;
+    R->rep_cert = array_transform_common_cert({.array_num = A}, {.array_num = B});
     return { .array_num = R };
 }
 
@@ -3455,6 +3524,7 @@ Item fn_stack(Item a_item, Item b_item) {
     A = rooted_a.get();
     B = rooted_b.get();
     if (!arr_num_copy_into(A, R, 0) || !arr_num_copy_into(B, R, A->length)) return ItemError;
+    R->rep_cert = array_transform_common_cert({.array_num = A}, {.array_num = B});
     return { .array_num = R };
 }
 
@@ -3476,7 +3546,11 @@ static ArrayNum* arr_num_slice_axis(ArrayNum* src, int ndim, int64_t* shp, int64
     Rooted<ArrayNum*> rooted_src(roots, src);
     ArrayNum* result = (ndim >= 2) ? alloc_ndim_arraynum(et, ndim, out_shape)
                                    : array_num_new(et, out_shape[0]);
-    if (!result || total == 0) return result;
+    if (!result) return NULL;
+    if (total == 0) {
+        result->rep_cert = rooted_src.get()->rep_cert;
+        return result;
+    }
     src = rooted_src.get();
 
     int elem_size = ELEM_TYPE_SIZE[et >> 4];
@@ -3491,6 +3565,7 @@ static ArrayNum* arr_num_slice_axis(ArrayNum* src, int ndim, int64_t* shp, int64
             idx[d] = 0; src_off -= out_shape[d] * str[d];
         }
     }
+    result->rep_cert = src->rep_cert;
     return result;
 }
 
@@ -3924,6 +3999,8 @@ Item fn_mask_index(Item arr_item, Item mask_item) {
                 idx[d] = 0; a_off -= a_shape[d] * a_str[d]; mk_off -= m_shape[d] * m_str[d];
             }
           } }
+        // Selection changes shape, not the scalar contract of retained lanes.
+        result->rep_cert = arr->rep_cert;
         return { .array_num = result };
     }
 
@@ -3942,6 +4019,8 @@ Item fn_mask_index(Item arr_item, Item mask_item) {
             for (int64_t i = 0; i < a_shape[0]; i++)
                 if (array_num_read_double(mask, i * m_str[0]) != 0.0)
                     memcpy(dbase + (size_t)(w++) * esz, sbase + (size_t)(i * a_str[0]) * esz, esz);
+            // Leading-axis selection retains the source scalar contract.
+            result->rep_cert = arr->rep_cert;
             return { .array_num = result };
         }
         // N-D: result shape (k, arr.shape[1..]); copy each kept leading-axis slab
@@ -3966,6 +4045,8 @@ Item fn_mask_index(Item arr_item, Item mask_item) {
             }
             w++;
         }
+        // The N-D carrier has a new shape but every copied leaf remains exact.
+        result->rep_cert = arr->rep_cert;
         return { .array_num = result };
     }
 
@@ -4047,6 +4128,147 @@ Item fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
         }
     }
     return ItemNull;
+}
+
+// Typed mask assignment stages every selected RHS value before writing one
+// byte. The raw vector helper intentionally permits dynamic coercion, which
+// is unsuitable for a declared T[] root (S11.4.1v3, S7.10.6).
+static Item lambda_array_mask_assign_checked_impl(Item owner, Item mask, Item value,
+        Type* expected, bool publish_in_place) {
+    LambdaArrayContractInfo contract = {};
+    if (!lambda_array_contract_info(expected, &contract) ||
+            !contract.immediate_element) {
+        return lambda_type_error(owner, expected, "typed array mask assignment");
+    }
+
+    RootFrame roots(6);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_mask(roots, mask);
+    Rooted<Item> rooted_value(roots, value);
+    Rooted<Item> rooted_admitted(roots, ItemNull);
+    Rooted<Item> rooted_candidate(roots, ItemNull);
+    Rooted<Array*> rooted_staged(roots, (Array*)NULL);
+
+    rooted_admitted.set(lambda_type_check(rooted_owner.get(), expected,
+        "typed array mask assignment"));
+    if (item_is_error(rooted_admitted.get())) return rooted_admitted.get();
+    if (publish_in_place && rooted_admitted.get().item != rooted_owner.get().item) {
+        return lambda_type_error(rooted_owner.get(), expected,
+            "typed array mask assignment");
+    }
+    rooted_candidate.set(publish_in_place ? rooted_admitted.get() :
+        cow_prepare_write(rooted_admitted.get()));
+    if (item_is_error(rooted_candidate.get())) return rooted_candidate.get();
+
+    if (get_type_id(rooted_candidate.get()) != LMD_TYPE_ARRAY_NUM ||
+            get_type_id(rooted_mask.get()) != LMD_TYPE_ARRAY_NUM ||
+            rooted_mask.get().array_num->get_elem_type() != ELEM_BOOL) {
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "typed array mask assignment requires a boolean numeric mask");
+        return ItemError;
+    }
+    ArrayNum* array = rooted_candidate.get().array_num;
+    ArrayNum* mask_array = rooted_mask.get().array_num;
+    if (array->is_view && !array->is_mutable_view) {
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "cannot mutate a read-only numeric array view");
+        return ItemError;
+    }
+
+    int64_t array_shape[LAMBDA_ARRAY_NUM_MAX_NDIM] = {};
+    int64_t array_strides[LAMBDA_ARRAY_NUM_MAX_NDIM] = {};
+    int64_t mask_shape[LAMBDA_ARRAY_NUM_MAX_NDIM] = {};
+    int64_t mask_strides[LAMBDA_ARRAY_NUM_MAX_NDIM] = {};
+    int array_ndim = get_shape_strides(array, array_shape, array_strides);
+    int mask_ndim = get_shape_strides(mask_array, mask_shape, mask_strides);
+    if (array_ndim < 1 || mask_ndim != array_ndim) {
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "typed array mask shape must match the target shape");
+        return ItemError;
+    }
+    int64_t total = 1;
+    for (int dim = 0; dim < array_ndim; dim++) {
+        if (array_shape[dim] != mask_shape[dim]) {
+            set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+                "typed array mask shape must match the target shape");
+            return ItemError;
+        }
+        total *= array_shape[dim];
+    }
+
+    int64_t selected = 0;
+    int64_t shape_index[LAMBDA_ARRAY_NUM_MAX_NDIM] = {};
+    int64_t mask_offset = 0;
+    for (int64_t position = 0; position < total; position++) {
+        if (array_num_read_double(mask_array, mask_offset) != 0.0) selected++;
+        for (int dim = array_ndim - 1; dim >= 0; dim--) {
+            shape_index[dim]++;
+            mask_offset += mask_strides[dim];
+            if (shape_index[dim] < mask_shape[dim]) break;
+            shape_index[dim] = 0;
+            mask_offset -= mask_shape[dim] * mask_strides[dim];
+        }
+    }
+
+    TypeId rhs_type = get_type_id(rooted_value.get());
+    bool rhs_is_array = rhs_type == LMD_TYPE_ARRAY || rhs_type == LMD_TYPE_ARRAY_NUM;
+    if (rhs_is_array && vector_length(rooted_value.get()) != selected) {
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "typed array mask assignment value count must equal selected elements");
+        return ItemError;
+    }
+
+    Array* staged = array_plain();
+    if (!staged || !array_reserve_append_slots(staged, selected)) return ItemError;
+    rooted_staged.set(staged);
+    for (int64_t index = 0; index < selected; index++) {
+        Item source = rhs_is_array ? vector_get(rooted_value.get(), index) : rooted_value.get();
+        Item admitted = lambda_type_check(source, contract.immediate_element,
+            "typed array mask assignment");
+        if (item_is_error(admitted)) return admitted;
+        staged = rooted_staged.get();
+        array_set(staged, staged->length, admitted);
+        staged->length++;
+    }
+
+    memset(shape_index, 0, sizeof(shape_index));
+    int64_t array_offset = 0;
+    mask_offset = 0;
+    int64_t staged_index = 0;
+    for (int64_t position = 0; position < total; position++) {
+        if (array_num_read_double(mask_array, mask_offset) != 0.0) {
+            array = rooted_candidate.get().array_num;
+            staged = rooted_staged.get();
+            // Every staged Item passed the immediate contract. A failure here
+            // indicates a broken carrier invariant, never a dynamic coercion.
+            if (!array_num_store_admitted(array, array_offset,
+                    staged->items[staged_index++])) {
+                set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+                    "typed array mask assignment carrier rejected admitted value");
+                return ItemError;
+            }
+        }
+        for (int dim = array_ndim - 1; dim >= 0; dim--) {
+            shape_index[dim]++;
+            array_offset += array_strides[dim];
+            mask_offset += mask_strides[dim];
+            if (shape_index[dim] < array_shape[dim]) break;
+            shape_index[dim] = 0;
+            array_offset -= array_shape[dim] * array_strides[dim];
+            mask_offset -= mask_shape[dim] * mask_strides[dim];
+        }
+    }
+    return rooted_candidate.get();
+}
+
+Item lambda_array_mask_assign_checked(Item owner, Item mask, Item value,
+        Type* expected) {
+    return lambda_array_mask_assign_checked_impl(owner, mask, value, expected, false);
+}
+
+Item lambda_array_mask_assign_checked_inplace(Item owner, Item mask, Item value,
+        Type* expected) {
+    return lambda_array_mask_assign_checked_impl(owner, mask, value, expected, true);
 }
 
 Item fn_sum_axis(Item arr, Item axis)     { return array_num_reduce_axis(arr, axis, RED_SUM,  "sum");  }
