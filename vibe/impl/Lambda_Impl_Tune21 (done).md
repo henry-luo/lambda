@@ -1,9 +1,9 @@
 # Tune 21: Result36 — Regression Triage, the Untyped Lane, and the Auto Tier
 
 - **Date:** 2026-09-02
-- **Status:** PROPOSAL. Nothing in this round is implemented. §2 is measured
-  evidence (release binaries, quiet machine, `LAMBDA_TIER=jit`, workload-only
-  `__TIMING__`); §3 ranks the tracks; §4 lists what not to do; §5 sets targets.
+- **Status:** IMPLEMENTED WITH OPEN FOLLOW-UPS (reviewed 2026-09-09). The core
+  T21-1 through T21-5 slices landed, with later D8.1.1v6-v9 and CW34 follow-ups.
+  The §5 targets remain measured outcomes: some are met and some remain open.
 - **Input:** `test/benchmark/Overall_Result36.md` / `benchmark_results_v36.json`
   as of the 2026-09-02 re-measure (all 59 rows validate on every engine; the
   hyphen and queens rows were re-measured after their sources were fixed —
@@ -18,11 +18,36 @@
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S3 (truthiness), S9.1.3
   (plain-param snapshot), S11.4.2 (declared returns are enforced);
   `doc/Lambda_Formal_Design.md` D2.4.1–D2.4.3 (value representation
-  discipline), D3.3 (inference), D4 (memory), D5.2 (scalar homes), **D8.1.1v5**
-  (tiered execution: T0 + P2 satellite promotion; "P2 fails closed for
-  aggregate/structured signatures"), D8.4.1v2 (no inline caches), D8.6.1–D8.6.3
+  discipline), D3.3 (inference), D4 (memory), D5.2 (scalar homes), **D8.1.1v9**
+  (tiered execution, satellite write-back, aggregate admission, and direct-callee
+  clusters), D8.4.1v2 (no inline caches), D8.6.1–D8.6.3
   (emission ratchet, mir-check, forced-GC sweeps).
 - **ID series:** `T21-#`.
+
+---
+
+## 0. Implementation status (2026-09-09)
+
+The implementation work described by this proposal is present on HEAD
+`b36e07dc1`. This is an implementation record with explicit residuals, not a
+claim that every performance target or follow-up design item is closed.
+
+| Track | Status |
+|---|---|
+| T21-1 | Core regression reversals 1a/b/c/e landed. The CW34 read-modify-write handle borrow covers the later 1d(A) ruling; moved-argument elision 1d(B) remains open. |
+| T21-2 | 2a–2e landed; 2b was already covered. The implementation target is incomplete: 10 untyped rows remain above 2x their typed twin, versus the target of ≤4. |
+| T21-3 | Implemented through D8.1.1v6-v9, including boxed satellite admission, write-back, aggregate/typed-`var` support, and direct-callee clusters. Typed-`var` rebinding remains pinned under DO29. |
+| T21-4 | Partial: integral division, nursery pacing, and lazy zeroing landed. Map-field protocol, moved arguments, and tenured-zone reclamation remain follow-ups. |
+| T21-5 | All five benchmark/report hygiene items are closed. |
+
+The latest checked-in Result37 measurement meets the untyped MIR/Node target
+(`0.97x` ≤ `1.0x`) and the untyped auto-tier target (`1.52x` ≤ `2.5x`), but
+misses the untyped MIR/C2MIR target (`6.34x` vs `≤6.0x`), typed MIR/C2MIR
+target (`5.12x` vs `≤4.0x`), and the typed-row count target. See §5 and the
+Result37 analysis for the full attribution.
+
+Current HEAD gates are green: `make test-lambda-baseline` passed **5086/5086**
+and `make test262-baseline` passed **40261/40261** with **0 regressions**.
 
 ---
 
@@ -899,7 +924,7 @@ visible:
    210 vs 0.81), which is why part 2's typed/Node is 2.79x while part 1's is
    0.85x.
 
-Proposal (a ruling, then code): **D8.1.1v6** — a definition whose signature
+Landed ruling: **D8.1.1v6** — a definition whose signature
 fails the raw-carrier specialization test is still promotable to a satellite
 compiled with the **boxed dynamic ABI for every parameter** (the same entry
 `lambda_dynamic_call` already uses for multi-argument dynamic calls). The
