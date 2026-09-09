@@ -5,13 +5,21 @@
 #include <cstring>
 
 static const JubeHostAPI* node_timers_host = NULL;
-struct NodeTimersSessionState { void* session; bool rooted; bool classic_rooted; Item cached_namespace; Item classic_namespace; };
+enum NodeTimersCacheSlot {
+    NODE_TIMERS_CACHE_PROMISES_NAMESPACE,
+    NODE_TIMERS_CACHE_CLASSIC_NAMESPACE,
+    NODE_TIMERS_CACHE_COUNT,
+};
+struct NodeTimersSessionState {
+    JubePersistentValueSlots cache_values;
+    Item cache_items[NODE_TIMERS_CACHE_COUNT];
+};
 static NodeTimersSessionState* node_timers_state(void) { return (NodeTimersSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_TIMERS); }
-#define node_timers_session (node_timers_state()->session)
-#define node_timers_rooted (node_timers_state()->rooted)
-#define node_timers_classic_rooted (node_timers_state()->classic_rooted)
-#define node_timers_cached_namespace (node_timers_state()->cached_namespace)
-#define node_timers_classic_namespace (node_timers_state()->classic_namespace)
+#define node_timers_session (node_timers_state()->cache_values.session)
+#define node_timers_cached_namespace \
+    (node_timers_state()->cache_items[NODE_TIMERS_CACHE_PROMISES_NAMESPACE])
+#define node_timers_classic_namespace \
+    (node_timers_state()->cache_items[NODE_TIMERS_CACHE_CLASSIC_NAMESPACE])
 
 static Item node_timers_timeout(Item delay, Item value, Item options) {
     return node_timers_host->node->async_ops->timer_set_timeout_promise(delay, value, options);
@@ -204,35 +212,21 @@ void node_timers_shutdown(void) {
 void node_timers_runtime_attach(void* session) {
     if (!node_timers_host || !node_timers_host->node->runtime->session_is_live ||
             !node_timers_host->node->runtime->session_is_live(session)) return;
-    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_TIMERS,
-            sizeof(NodeTimersSessionState))) return;
-    node_timers_session = session;
-    if (node_timers_host->node->roots->persistent_root_register(session,
-            &node_timers_cached_namespace.item) == 0) node_timers_rooted = true;
-    if (node_timers_host->node->roots->persistent_root_register(session,
-            &node_timers_classic_namespace.item) == 0) node_timers_classic_rooted = true;
+    NodeTimersSessionState* state = (NodeTimersSessionState*)jube_node_session_module_state_get(
+        session, JUBE_NODE_MODULE_STATE_TIMERS, sizeof(NodeTimersSessionState));
+    if (!state) return;
+    jube_persistent_value_slots_attach(&state->cache_values, session,
+        node_timers_host->node->roots, state->cache_items, NODE_TIMERS_CACHE_COUNT);
 }
 
 void node_timers_runtime_reset(void* session) {
     if (session == node_timers_session) {
-        node_timers_cached_namespace = (Item){0};
-        node_timers_classic_namespace = (Item){0};
+        jube_persistent_value_slots_reset(&node_timers_state()->cache_values);
     }
 }
 
 void node_timers_runtime_detach(void* session) {
-    if (!node_timers_host || session != node_timers_session) return;
-    if (node_timers_rooted) {
-        node_timers_host->node->roots->persistent_root_unregister(session,
-            &node_timers_cached_namespace.item);
-        node_timers_rooted = false;
-    }
-    if (node_timers_classic_rooted) {
-        node_timers_host->node->roots->persistent_root_unregister(session,
-            &node_timers_classic_namespace.item);
-        node_timers_classic_rooted = false;
-    }
-    node_timers_cached_namespace = (Item){0};
-    node_timers_classic_namespace = (Item){0};
-    node_timers_session = NULL;
+    NodeTimersSessionState* state = node_timers_state();
+    if (!node_timers_host || !state || session != state->cache_values.session) return;
+    jube_persistent_value_slots_detach(&state->cache_values);
 }

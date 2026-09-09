@@ -29,13 +29,32 @@ extern "C" void js_stream_flush_data_now(Item self);
 extern "C" int64_t js_key_is_symbol_c(Item key);
 extern Item js_make_number(double d);
 
-#define readline_namespace (js_runtime_state.readline->namespace_object)
-#define readline_promises_namespace (js_runtime_state.readline->promises_namespace)
-#define readline_completion_rl (js_runtime_state.readline->completion_interface)
 #define readline_create_promises_mode (js_runtime_state.readline->create_promises_mode)
 #define readline_input_rows (js_runtime_state.readline->inputs)
 #define readline_input_values (js_runtime_state.readline->input_values)
-JS_FORWARD_STATIC_EXPRESSION(bool, readline_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.readline->roots)))
+
+struct ReadlineRealmItems {
+    Item* namespace_object = NULL;
+    Item* promises_namespace = NULL;
+    Item* completion_interface = NULL;
+};
+
+static bool readline_realm_items(ReadlineRealmItems* items, bool reserve) {
+    if (!items || !js_active_runtime_state) return false;
+    static const JsRealmSlotId slot_ids[] = {
+        JS_REALM_SLOT_READLINE_NAMESPACE,
+        JS_REALM_SLOT_READLINE_PROMISES_NAMESPACE,
+        JS_REALM_SLOT_READLINE_COMPLETION_INTERFACE,
+    };
+    Item* values[3] = {};
+    if (!js_realm_slots_lookup(&js_runtime_state.realm_slots, slot_ids, values,
+            3, reserve)) return false;
+    items->namespace_object = values[0];
+    items->promises_namespace = values[1];
+    items->completion_interface = values[2];
+    return true;
+}
+
 JS_FORWARD_STATIC_ITEM(readline_get, (Item obj, const char* name), js_get_key_default, (obj, make_string_item(name)))
 JS_FORWARD_STATIC_VOID( readline_set, (Item obj, const char* name, Item value), js_set_key_default, (obj, make_string_item(name), value))
 JS_FORWARD_STATIC_RETURN(bool, readline_has_own, (Item obj, const char* name), it2b, (js_has_own_property(obj, make_string_item(name))))
@@ -1072,9 +1091,12 @@ static Item readline_completion_callback_impl(Item rl, Item err_item, Item resul
 }
 
 extern "C" Item js_readline_completion_callback(Item err_item, Item result_item) {
-    Item tab_count_item = readline_get(readline_completion_rl, "__tab_count__");
+    ReadlineRealmItems items = {};
+    if (!readline_realm_items(&items, false)) return ItemError;
+    Item tab_count_item = readline_get(*items.completion_interface, "__tab_count__");
     int tab_count = get_type_id(tab_count_item) == LMD_TYPE_INT ? it2i(tab_count_item) : 0;
-    return readline_completion_callback_impl(readline_completion_rl, err_item, result_item, tab_count);
+    return readline_completion_callback_impl(*items.completion_interface, err_item,
+        result_item, tab_count);
 }
 
 extern "C" Item js_readline_completion_callback_bound(Item rl_item, Item tab_count_item, Item err_item, Item result_item) {
@@ -1092,7 +1114,9 @@ static Item js_readline_completion_direct(Item rl_item, Item err_item,
 }
 
 extern "C" Item js_readline_completion_fulfilled(Item rl_item, Item result_item) {
-    readline_completion_rl = rl_item;
+    ReadlineRealmItems items = {};
+    if (!readline_realm_items(&items, false)) return ItemError;
+    *items.completion_interface = rl_item;
     Item tab_count_item = readline_get(rl_item, "__tab_count__");
     int tab_count = get_type_id(tab_count_item) == LMD_TYPE_INT ? it2i(tab_count_item) : 0;
     return js_readline_completion_direct(rl_item,
@@ -1100,7 +1124,9 @@ extern "C" Item js_readline_completion_fulfilled(Item rl_item, Item result_item)
 }
 
 extern "C" Item js_readline_completion_rejected(Item rl_item, Item err_item) {
-    readline_completion_rl = rl_item;
+    ReadlineRealmItems items = {};
+    if (!readline_realm_items(&items, false)) return ItemError;
+    *items.completion_interface = rl_item;
     Item tab_count_item = readline_get(rl_item, "__tab_count__");
     int tab_count = get_type_id(tab_count_item) == LMD_TYPE_INT ? it2i(tab_count_item) : 0;
     return js_readline_completion_direct(rl_item, err_item,
@@ -1594,6 +1620,9 @@ extern "C" Item js_readline_on(Item event_item, Item callback_item) {
 // =============================================================================
 
 extern "C" Item js_readline_createInterface(Item options_item) {
+    ReadlineRealmItems items = {};
+    if (!readline_realm_items(&items, false)) return ItemError;
+    Item readline_namespace = *items.namespace_object;
     Item this_item = js_get_current_this();
     Item rl = js_new_object();
     if (get_type_id(this_item) == LMD_TYPE_MAP &&
@@ -1819,9 +1848,12 @@ extern "C" Item js_readline_promises_interface_constructor(Item input_item, Item
 // readline Module Namespace
 // =============================================================================
 
-static Item js_get_readline_namespace_impl(Item* namespace_slot,
+static Item js_get_readline_namespace_impl(JsRealmSlotId namespace_id,
         JsNativeP1 create_target, JsNativeP4 interface_target) {
-    if (!readline_ensure_roots()) return ItemError;
+    ReadlineRealmItems items = {};
+    if (!readline_realm_items(&items, true)) return ItemError;
+    Item* namespace_slot = namespace_id == JS_REALM_SLOT_READLINE_NAMESPACE ?
+        items.namespace_object : items.promises_namespace;
     if (namespace_slot->item != 0) return *namespace_slot;
 
     *namespace_slot = js_new_object();
@@ -1836,13 +1868,25 @@ static Item js_get_readline_namespace_impl(Item* namespace_slot,
 
     return ns;
 }
-JS_FORWARD_ITEM(js_get_readline_namespace, (void), js_get_readline_namespace_impl, (&readline_namespace, js_readline_createInterface, js_readline_interface_constructor))
-JS_FORWARD_ITEM(js_get_readline_promises_namespace, (void), js_get_readline_namespace_impl, (&readline_promises_namespace, js_readline_promises_createInterface, js_readline_promises_interface_constructor))
+extern "C" Item js_get_readline_namespace(void) {
+    return js_get_readline_namespace_impl(JS_REALM_SLOT_READLINE_NAMESPACE,
+        js_readline_createInterface, js_readline_interface_constructor);
+}
+
+extern "C" Item js_get_readline_promises_namespace(void) {
+    return js_get_readline_namespace_impl(JS_REALM_SLOT_READLINE_PROMISES_NAMESPACE,
+        js_readline_promises_createInterface,
+        js_readline_promises_interface_constructor);
+}
 
 extern "C" void js_readline_reset(void) {
     if (!js_active_runtime_state) return;
-    readline_namespace = (Item){0};
-    readline_promises_namespace = (Item){0};
+    ReadlineRealmItems items = {};
+    if (readline_realm_items(&items, false)) {
+        *items.namespace_object = (Item){0};
+        *items.promises_namespace = (Item){0};
+        *items.completion_interface = (Item){0};
+    }
     readline_input_rows_clear(js_runtime_state.readline);
     readline_create_promises_mode = false;
 }

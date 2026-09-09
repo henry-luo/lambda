@@ -1407,14 +1407,32 @@ JS_DNS_LOOKUP_SERVICE_WRAPPERS(JS_DNS_LOOKUP_SERVICE_WRAPPER)
 // =============================================================================
 
 extern "C" uint64_t js_get_heap_epoch(void);
-#define dns_namespace (js_runtime_state.dns.namespace_object)
-#define dns_promises_namespace (js_runtime_state.dns.promises_namespace)
-#define dns_resolver_prototype (js_runtime_state.dns.resolver_prototype)
-#define dns_promises_resolver_prototype (js_runtime_state.dns.promises_resolver_prototype)
-#define dns_default_servers (js_runtime_state.dns.default_servers)
+struct DnsRealmItems {
+    Item* namespace_object = NULL;
+    Item* promises_namespace = NULL;
+    Item* resolver_prototype = NULL;
+    Item* promises_resolver_prototype = NULL;
+    Item* default_servers = NULL;
+};
 
-static bool dns_ensure_roots(void) {
-    return js_root_range_ensure_registered(&js_runtime_state.dns.roots);
+static bool dns_realm_items(DnsRealmItems* items, bool reserve) {
+    if (!items || !js_active_runtime_state) return false;
+    static const JsRealmSlotId slot_ids[] = {
+        JS_REALM_SLOT_DNS_NAMESPACE,
+        JS_REALM_SLOT_DNS_PROMISES_NAMESPACE,
+        JS_REALM_SLOT_DNS_RESOLVER_PROTOTYPE,
+        JS_REALM_SLOT_DNS_PROMISES_RESOLVER_PROTOTYPE,
+        JS_REALM_SLOT_DNS_DEFAULT_SERVERS,
+    };
+    Item* values[5] = {};
+    if (!js_realm_slots_lookup(&js_runtime_state.realm_slots, slot_ids, values,
+            5, reserve)) return false;
+    items->namespace_object = values[0];
+    items->promises_namespace = values[1];
+    items->resolver_prototype = values[2];
+    items->promises_resolver_prototype = values[3];
+    items->default_servers = values[4];
+    return true;
 }
 
 static Item dns_array_copy(Item servers) {
@@ -1478,11 +1496,12 @@ static Item dns_load_system_servers(void) {
 }
 
 static Item dns_get_default_servers(void) {
-    if (!dns_ensure_roots()) return ItemError;
-    if (get_type_id(dns_default_servers) != LMD_TYPE_ARRAY) {
-        dns_default_servers = dns_load_system_servers();
+    DnsRealmItems items = {};
+    if (!dns_realm_items(&items, true)) return ItemError;
+    if (get_type_id(*items.default_servers) != LMD_TYPE_ARRAY) {
+        *items.default_servers = dns_load_system_servers();
     }
-    return dns_default_servers;
+    return *items.default_servers;
 }
 
 static Item dns_validated_servers_copy(Item servers_item) {
@@ -1537,20 +1556,25 @@ extern "C" Item js_dns_getServers(void) {
 
 extern "C" Item js_dns_setServers(Item servers_item) {
     JS_ASSIGN_OR_RETURN(copy, dns_validated_servers_copy(servers_item));
+    DnsRealmItems items = {};
+    if (!dns_realm_items(&items, false)) return ItemError;
+    JS_ROOTS(roots, copy_root, copy);
 
     Item receiver = js_get_this();
-    if (receiver.item == dns_namespace.item ||
-        receiver.item == dns_promises_namespace.item ||
+    if (receiver.item == items.namespace_object->item ||
+        receiver.item == items.promises_namespace->item ||
         !js_node_is_property_carrier(receiver)) {
-        dns_default_servers = copy;
-        if (dns_namespace.item != 0) {
-            js_set_key_cstr(dns_namespace, "__dns_servers__", copy);
+        *items.default_servers = copy_root.get();
+        if (items.namespace_object->item != 0) {
+            js_set_key_cstr(*items.namespace_object, "__dns_servers__",
+                copy_root.get());
         }
-        if (dns_promises_namespace.item != 0) {
-            js_set_key_cstr(dns_promises_namespace, "__dns_servers__", copy);
+        if (items.promises_namespace->item != 0) {
+            js_set_key_cstr(*items.promises_namespace, "__dns_servers__",
+                copy_root.get());
         }
     } else {
-        js_set_key_cstr(receiver, "__dns_servers__", copy);
+        js_set_key_cstr(receiver, "__dns_servers__", copy_root.get());
     }
     return make_js_undefined();
 }
@@ -1685,10 +1709,14 @@ static bool dns_called_as_constructor(void) {
 }
 
 static Item dns_get_resolver_prototype(bool promise_mode) {
-    Item* proto_ptr = promise_mode ? &dns_promises_resolver_prototype : &dns_resolver_prototype;
+    DnsRealmItems items = {};
+    if (!dns_realm_items(&items, false)) return ItemError;
+    Item* proto_ptr = promise_mode ? items.promises_resolver_prototype :
+        items.resolver_prototype;
     if (proto_ptr->item != 0) return *proto_ptr;
 
-    Item proto = js_new_object();
+    *proto_ptr = js_new_object();
+    Item& proto = *proto_ptr;
     for (size_t i = 0; i < sizeof(dns_resolver_methods) /
             sizeof(dns_resolver_methods[0]); i++) {
         JsNativeP1 target = promise_mode ? dns_resolver_methods[i].promise
@@ -1699,18 +1727,20 @@ static Item dns_get_resolver_prototype(bool promise_mode) {
     dns_set_method(proto, "setServers", js_dns_setServers, 1);
     dns_set_method(proto, "setLocalAddress", js_dns_setLocalAddress, 2);
 
-    *proto_ptr = proto;
     return proto;
 }
 
 static void dns_init_resolver_state(Item resolver) {
     if (!js_node_is_property_carrier(resolver)) return;
-    js_set_key_cstr(resolver, "__dns_servers__", dns_array_copy(dns_get_default_servers()));
-
-    Item handle = js_new_object();
-    js_set_key_cstr(handle, "__dns_owner__", resolver);
-    js_set_native_key(handle, make_string_item("getServers"), js_dns_resolver_handle_getServers);
-    js_set_key_cstr(resolver, "_handle", handle);
+    JS_ROOTS(roots,
+        resolver_root, resolver,
+        servers_root, dns_array_copy(dns_get_default_servers()),
+        handle_root, js_new_object());
+    js_set_key_cstr(resolver_root.get(), "__dns_servers__", servers_root.get());
+    js_set_key_cstr(handle_root.get(), "__dns_owner__", resolver_root.get());
+    js_set_native_key(handle_root.get(), make_string_item("getServers"),
+        js_dns_resolver_handle_getServers);
+    js_set_key_cstr(resolver_root.get(), "_handle", handle_root.get());
 }
 
 static Item dns_create_resolver(bool promise_mode) {
@@ -1722,10 +1752,10 @@ static Item dns_create_resolver(bool promise_mode) {
         return self;
     }
 
-    Item resolver = js_new_object();
-    js_set_prototype(resolver, proto);
-    dns_init_resolver_state(resolver);
-    return resolver;
+    JS_ROOTS(roots, resolver_root, js_new_object());
+    js_set_prototype(resolver_root.get(), proto);
+    dns_init_resolver_state(resolver_root.get());
+    return resolver_root.get();
 }
 
 #define JS_DNS_RESOLVER_CONSTRUCTOR(name, promise_mode) \
@@ -1739,17 +1769,17 @@ JS_DNS_RESOLVER_CONSTRUCTORS(JS_DNS_RESOLVER_CONSTRUCTOR)
 static Item dns_make_resolver_constructor(bool promise_mode) {
     JsNativeP0 target = promise_mode ? js_dns_promises_resolver_constructor :
         js_dns_resolver_constructor;
-    Item ctor = js_new_native_constructor(target);
+    JS_ROOTS(roots, ctor_root, js_new_native_constructor(target));
     Item proto = dns_get_resolver_prototype(promise_mode);
-    js_set_key_cstr(ctor, "prototype", proto);
-    js_set_key_cstr(proto, "constructor", ctor);
-    return ctor;
+    js_set_key_cstr(ctor_root.get(), "prototype", proto);
+    js_set_key_cstr(proto, "constructor", ctor_root.get());
+    return ctor_root.get();
 }
 
 extern "C" Item js_get_dns_promises_namespace(void) {
-    // The namespace is published only after its methods are installed; register
-    // the owner slot first so forced collection cannot reclaim this partial image.
-    if (!dns_ensure_roots()) return ItemError;
+    DnsRealmItems items = {};
+    if (!dns_realm_items(&items, true)) return ItemError;
+    Item& dns_promises_namespace = *items.promises_namespace;
     if (dns_promises_namespace.item != 0) return dns_promises_namespace;
 
     dns_ensure_cares_channelwrap();
@@ -1769,15 +1799,16 @@ extern "C" Item js_get_dns_promises_namespace(void) {
     dns_set_method(dns_promises_namespace, "setServers", js_dns_setServers, 1);
     dns_set_constants(dns_promises_namespace);
     js_set_key_cstr(dns_promises_namespace, "__dns_servers__", dns_get_default_servers());
-    js_set_key_cstr(dns_promises_namespace, "Resolver", dns_make_resolver_constructor(true));
+    JS_ROOTS(roots, ctor_root, dns_make_resolver_constructor(true));
+    js_set_key_cstr(dns_promises_namespace, "Resolver", ctor_root.get());
     js_set_key_cstr(dns_promises_namespace, "default", dns_promises_namespace);
     return dns_promises_namespace;
 }
 
 extern "C" Item js_get_dns_namespace(void) {
-    // The namespace is published only after its methods are installed; register
-    // the owner slot first so forced collection cannot reclaim this partial image.
-    if (!dns_ensure_roots()) return ItemError;
+    DnsRealmItems items = {};
+    if (!dns_realm_items(&items, true)) return ItemError;
+    Item& dns_namespace = *items.namespace_object;
     if (dns_namespace.item != 0) return dns_namespace;
 
     dns_ensure_cares_channelwrap();
@@ -1798,7 +1829,8 @@ extern "C" Item js_get_dns_namespace(void) {
     dns_set_method(dns_namespace, "setServers", js_dns_setServers, 1);
     dns_set_constants(dns_namespace);
     js_set_key_cstr(dns_namespace, "__dns_servers__", dns_get_default_servers());
-    js_set_key_cstr(dns_namespace, "Resolver", dns_make_resolver_constructor(false));
+    JS_ROOTS(roots, ctor_root, dns_make_resolver_constructor(false));
+    js_set_key_cstr(dns_namespace, "Resolver", ctor_root.get());
 
     Item promises = js_get_dns_promises_namespace();
     js_set_key_cstr(dns_namespace, "promises", promises);
@@ -1810,9 +1842,11 @@ extern "C" Item js_get_dns_namespace(void) {
 }
 
 extern "C" void js_dns_reset(void) {
-    dns_namespace = (Item){0};
-    dns_promises_namespace = (Item){0};
-    dns_resolver_prototype = (Item){0};
-    dns_promises_resolver_prototype = (Item){0};
-    dns_default_servers = (Item){0};
+    DnsRealmItems items = {};
+    if (!dns_realm_items(&items, false)) return;
+    *items.namespace_object = (Item){0};
+    *items.promises_namespace = (Item){0};
+    *items.resolver_prototype = (Item){0};
+    *items.promises_resolver_prototype = (Item){0};
+    *items.default_servers = (Item){0};
 }

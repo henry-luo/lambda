@@ -524,6 +524,7 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
     }
     runtime_resource_table_init(&state->resources, context,
         "JS runtime resources");
+    js_realm_slots_init(&state->realm_slots, (Context*)context);
     root_vector_init(&state->async_local_storage->instances, (Context*)context,
         "AsyncLocalStorage instances");
     root_vector_init(&state->assert->instances, (Context*)context,
@@ -723,6 +724,7 @@ void js_runtime_state_destroy_context(void) {
     // Promise carriers are GC-owned; context teardown only drops queue and
     // async owners before the heap itself is released.
     root_vector_destroy(&state->execution.base_activation_items);
+    js_realm_slots_destroy(&state->realm_slots);
     root_vector_destroy(&state->regexp_last_match.values);
     js_item_stack_destroy(&state->with_scope.stack);
     root_vector_destroy(&state->with_scope.last_binding_values);
@@ -750,30 +752,8 @@ typedef void (*JsRuntimeRootRangeVisitor)(JsRootRange* range, Item* slots,
 static void js_runtime_state_visit_root_ranges(JsRuntimeState* state,
         JsRuntimeRootRangeVisitor visit, void* data) {
     if (!state || !visit) return;
-    visit(&state->dns.roots, &state->dns.namespace_object, 5,
-        "DNS namespace and resolver caches", data);
-    visit(&state->readline->roots, &state->readline->namespace_object, 3,
-        "readline namespaces", data);
-    visit(&state->buffer.roots, &state->buffer.namespace_object, 2,
-        "Buffer namespace and prototype", data);
-    visit(&state->https.roots, &state->https.namespace_object, 2,
-        "HTTPS namespace and Agent prototype", data);
-    visit(&state->util.roots, &state->util.namespace_object, 1,
-        "util namespace", data);
-    visit(&state->crypto.roots, &state->crypto.namespace_object, 1,
-        "crypto namespace", data);
-    visit(&state->child_process.roots, &state->child_process.namespace_object, 1,
-        "child_process namespace", data);
-    visit(&state->tls.roots, &state->tls.namespace_object, 5,
-        "TLS namespace and certificate caches", data);
     visit(&state->stream.roots, &state->stream.namespace_object, 45,
         "stream keys, prototypes, and namespaces", data);
-    visit(&state->http.roots, &state->http.namespace_object, 5,
-        "HTTP namespace and prototypes", data);
-    visit(&state->net.roots, &state->net.namespace_object, 5,
-        "net namespace and prototypes", data);
-    visit(&state->fs.roots, &state->fs.namespace_object, 7,
-        "fs namespaces and prototypes", data);
     visit(&state->clipboard.roots, &state->clipboard.blob_prototype, 7,
         "clipboard prototypes and drag session", data);
     visit(&state->dom.roots, &state->dom.implementation, 4,
@@ -833,12 +813,6 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
                   #field, #last_field); \
     }
     JS_CHECK_NAMESPACE_ROOT_RANGE(stream, internal_add_abort_signal_namespace, 45)
-    JS_CHECK_NAMESPACE_ROOT_RANGE(http, outgoing_message_prototype, 5)
-    JS_CHECK_NAMESPACE_ROOT_RANGE(https, agent_prototype, 2)
-    JS_CHECK_NAMESPACE_ROOT_RANGE(net, stream_socket_constructor, 5)
-    JS_CHECK_NAMESPACE_ROOT_RANGE(fs, internal_promises_namespace, 7)
-    JS_CHECK_NAMESPACE_ROOT_RANGE(tls, ca_default, 5)
-    JS_CHECK_NAMESPACE_ROOT_RANGE(buffer, prototype, 2)
 #undef JS_CHECK_NAMESPACE_ROOT_RANGE
 
     if (&state->intrinsic_slots->proto_key +
@@ -873,6 +847,44 @@ void js_root_range_unregister(JsRootRange* range) {
         heap_unregister_gc_root_range((uint64_t*)range->slots);
     }
     range->roots_epoch = 0;
+}
+
+void js_realm_slots_init(JsRealmSlots* slots, Context* owner) {
+    if (slots) root_vector_init(&slots->values, owner, "JS realm slots");
+}
+
+void js_realm_slots_destroy(JsRealmSlots* slots) {
+    if (slots) root_vector_destroy(&slots->values);
+}
+
+void js_realm_slots_clear(JsRealmSlots* slots) {
+    if (slots) root_vector_clear(&slots->values);
+}
+
+Item* js_realm_slot(JsRealmSlots* slots, JsRealmSlotId slot) {
+    if (!slots || slot < 0 || slot >= JS_REALM_SLOT_COUNT) return NULL;
+    while (root_vector_count(&slots->values) <= slot) {
+        if (!root_vector_push(&slots->values, (Item){0})) return NULL;
+    }
+    return root_vector_at(&slots->values, slot);
+}
+
+Item* js_realm_slot_existing(JsRealmSlots* slots, JsRealmSlotId slot) {
+    if (!slots || slot < 0 || slot >= JS_REALM_SLOT_COUNT ||
+            root_vector_count(&slots->values) <= slot) return NULL;
+    return root_vector_at(&slots->values, slot);
+}
+
+bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
+        Item** values, int count, bool reserve) {
+    if (!slots || !slot_ids || !values || count < 0) return false;
+    for (int i = 0; i < count; i++) {
+        Item* value = reserve ? js_realm_slot(slots, slot_ids[i]) :
+            js_realm_slot_existing(slots, slot_ids[i]);
+        if (!value) return false;
+        values[i] = value;
+    }
+    return true;
 }
 
 static void js_root_range_clear(JsRootRange* range) {
@@ -1614,6 +1626,7 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     if (full_reset) js_array_runtime_items_cleanup_all();
     // Preamble reuse retains intrinsic callable identity and cluster setup;
     // a full realm reset clears every fixed range (D6.2.2v2).
+    js_realm_slots_clear(&js_runtime_state.realm_slots);
     js_root_range_reset_all(full_reset);
     // Stacks outside the fixed realm catalog keep the same named reset on both
     // the full and the checkpoint path (super-this and with are cleared by

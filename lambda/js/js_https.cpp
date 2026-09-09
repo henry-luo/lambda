@@ -37,10 +37,6 @@ extern "C" void js_microtask_flush(void);
 extern "C" Item js_http_Agent(Item);
 extern "C" Item js_http_agent_destroy(void);
 
-#define https_agent_prototype (js_runtime_state.https.agent_prototype)
-#define https_namespace (js_runtime_state.https.namespace_object)
-JS_FORWARD_STATIC_EXPRESSION(bool, https_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.https.roots)))
-
 static bool is_missing_value(Item value) {
     TypeId type = get_type_id(value);
     return type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED;
@@ -492,9 +488,12 @@ static Item https_normalize_options(Item url_or_options, Item maybe_options, Ite
 }
 
 extern "C" Item js_https_Agent(Item options) {
+    Item* agent_prototype_slot = js_active_runtime_state ? js_realm_slot(
+        &js_runtime_state.realm_slots, JS_REALM_SLOT_HTTPS_AGENT_PROTOTYPE) : NULL;
+    // reserve the root-vector entry before js_http_Agent can allocate or collect.
     Item agent = js_http_Agent(options);
-    if (get_type_id(https_agent_prototype) == LMD_TYPE_MAP) {
-        js_set_prototype(agent, https_agent_prototype);
+    if (agent_prototype_slot && get_type_id(*agent_prototype_slot) == LMD_TYPE_MAP) {
+        js_set_prototype(agent, *agent_prototype_slot);
     }
     js_set_native_key(agent, make_string_item("getName"), js_https_agent_getName);
     js_set_key_cstr(agent, "createConnection", js_new_native_rest_function(js_https_agent_createConnection));
@@ -604,7 +603,14 @@ extern "C" Item js_https_get(Item options_item, Item maybe_options, Item callbac
 // =============================================================================
 
 extern "C" Item js_get_https_namespace(void) {
-    if (!https_ensure_roots()) return ItemError;
+    if (!js_active_runtime_state) return ItemError;
+    Item* namespace_slot = js_realm_slot(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_HTTPS_NAMESPACE);
+    Item* agent_prototype_slot = js_realm_slot(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_HTTPS_AGENT_PROTOTYPE);
+    if (!namespace_slot || !agent_prototype_slot) return ItemError;
+    Item& https_namespace = *namespace_slot;
+    Item& https_agent_prototype = *agent_prototype_slot;
     if (https_namespace.item != 0) return https_namespace;
 
     https_namespace = js_new_object();
@@ -638,6 +644,10 @@ extern "C" Item js_get_https_namespace(void) {
 
 extern "C" void js_https_reset(void) {
     if (!js_active_runtime_state) return;
-    https_namespace = (Item){0};
-    https_agent_prototype = (Item){0};
+    Item* namespace_slot = js_realm_slot(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_HTTPS_NAMESPACE);
+    Item* agent_prototype_slot = js_realm_slot(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_HTTPS_AGENT_PROTOTYPE);
+    if (namespace_slot) *namespace_slot = (Item){0};
+    if (agent_prototype_slot) *agent_prototype_slot = (Item){0};
 }

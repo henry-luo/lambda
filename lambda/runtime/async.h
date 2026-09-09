@@ -53,6 +53,15 @@ typedef struct RuntimeCallbackSlots {
     RootVector values;
 } RuntimeCallbackSlots;
 
+// One native operation can retain a fixed set of durable JS values for its
+// whole lifecycle. Slots begin as the all-zero absent Item so migrated native
+// fields preserve their existing presence tests. Callback queues use
+// RuntimeCallbackSlots when completion order is part of their protocol
+// (D5.1.1v2; JSCU31).
+typedef struct RuntimeValueSlots {
+    RootVector values;
+} RuntimeValueSlots;
+
 // A context-owned native resource has one generation-checked identity and one
 // rooted script owner. Individual protocols retain only their native payload
 // behind this common lifecycle record (D7.4.1v2; JSCU31).
@@ -121,6 +130,12 @@ bool runtime_callback_slots_add(RuntimeCallbackSlots* slots, Item callback,
                                 int64_t* out_slot);
 Item runtime_callback_slots_take(RuntimeCallbackSlots* slots, int64_t slot);
 void runtime_callback_slots_destroy(RuntimeCallbackSlots* slots);
+
+bool runtime_value_slots_init(RuntimeValueSlots* slots, Context* owner,
+                              const char* name, int count);
+Item runtime_value_slots_get(RuntimeValueSlots* slots, int slot);
+void runtime_value_slots_set(RuntimeValueSlots* slots, int slot, Item value);
+void runtime_value_slots_destroy(RuntimeValueSlots* slots);
 
 const RuntimeResourceDescriptor* runtime_resource_descriptor_from_legacy_name(
     const char* name);

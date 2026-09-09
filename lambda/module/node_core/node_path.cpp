@@ -15,11 +15,13 @@
 #include <cstdio>
 
 static const JubeHostAPI* node_path_host = NULL;
-struct NodePathSessionState { void* session; bool rooted; Item namespace_cache; };
+struct NodePathSessionState {
+    JubePersistentValueSlots cache_values;
+    Item cache_items[1];
+};
 static NodePathSessionState* node_path_state(void) { return (NodePathSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_PATH); }
-#define node_path_session (node_path_state()->session)
-#define node_path_rooted (node_path_state()->rooted)
-#define path_namespace (node_path_state()->namespace_cache)
+#define node_path_session (node_path_state()->cache_values.session)
+#define path_namespace (node_path_state()->cache_items[0])
 
 static const char* js_type_name_for_error(Item value);
 
@@ -1022,7 +1024,8 @@ Item node_path_namespace(void) {
 }
 
 static void node_path_cache_reset(void) {
-    path_namespace = (Item){0};
+    NodePathSessionState* state = node_path_state();
+    if (state) jube_persistent_value_slots_reset(&state->cache_values);
 }
 
 Item node_path_win32_namespace(void) {
@@ -1048,13 +1051,11 @@ void node_path_runtime_attach(void* session) {
     if (!node_path_host || !node_path_host->node || !node_path_host->node->runtime ||
             !node_path_host->node->runtime->session_is_live ||
             !node_path_host->node->runtime->session_is_live(session)) return;
-    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_PATH,
-            sizeof(NodePathSessionState))) return;
-    node_path_session = session;
-    if (node_path_host->node->roots->persistent_root_register(session,
-            &path_namespace.item) == 0) {
-        node_path_rooted = true;
-    }
+    NodePathSessionState* state = (NodePathSessionState*)jube_node_session_module_state_get(
+        session, JUBE_NODE_MODULE_STATE_PATH, sizeof(NodePathSessionState));
+    if (!state) return;
+    jube_persistent_value_slots_attach(&state->cache_values, session,
+        node_path_host->node->roots, state->cache_items, 1);
 }
 
 void node_path_runtime_reset(void* session) {
@@ -1065,11 +1066,7 @@ void node_path_runtime_reset(void* session) {
 }
 
 void node_path_runtime_detach(void* session) {
-    if (session != node_path_session || !node_path_host) return;
-    node_path_cache_reset();
-    if (node_path_rooted) {
-        node_path_host->node->roots->persistent_root_unregister(session, &path_namespace.item);
-        node_path_rooted = false;
-    }
-    node_path_session = NULL;
+    NodePathSessionState* state = node_path_state();
+    if (!state || session != state->cache_values.session || !node_path_host) return;
+    jube_persistent_value_slots_detach(&state->cache_values);
 }

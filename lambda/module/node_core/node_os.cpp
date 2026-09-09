@@ -15,11 +15,15 @@
 #include <ctime>
 
 static const JubeHostAPI* node_os_host = NULL;
-struct NodeOsSessionState { void* session; bool rooted; Item namespace_cache; bool priority_override_set; int priority_override; };
+struct NodeOsSessionState {
+    JubePersistentValueSlots cache_values;
+    Item cache_items[1];
+    bool priority_override_set;
+    int priority_override;
+};
 static NodeOsSessionState* node_os_state(void) { return (NodeOsSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_OS); }
-#define node_os_session (node_os_state()->session)
-#define node_os_rooted (node_os_state()->rooted)
-#define os_namespace (node_os_state()->namespace_cache)
+#define node_os_session (node_os_state()->cache_values.session)
+#define os_namespace (node_os_state()->cache_items[0])
 #define node_os_priority_override_set (node_os_state()->priority_override_set)
 #define node_os_priority_override (node_os_state()->priority_override)
 
@@ -1007,7 +1011,8 @@ Item node_os_namespace(void) {
 }
 
 static void node_os_cache_reset(void) {
-    os_namespace = (Item){0};
+    NodeOsSessionState* state = node_os_state();
+    if (state) jube_persistent_value_slots_reset(&state->cache_values);
 }
 
 int node_os_init(const JubeHostAPI* host) {
@@ -1033,13 +1038,11 @@ void node_os_runtime_attach(void* session) {
     if (!node_os_host || !node_os_host->node || !node_os_host->node->runtime ||
             !node_os_host->node->runtime->session_is_live ||
             !node_os_host->node->runtime->session_is_live(session)) return;
-    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_OS,
-            sizeof(NodeOsSessionState))) return;
-    node_os_session = session;
-    if (node_os_host->node->roots->persistent_root_register(session,
-            &os_namespace.item) == 0) {
-        node_os_rooted = true;
-    }
+    NodeOsSessionState* state = (NodeOsSessionState*)jube_node_session_module_state_get(
+        session, JUBE_NODE_MODULE_STATE_OS, sizeof(NodeOsSessionState));
+    if (!state) return;
+    jube_persistent_value_slots_attach(&state->cache_values, session,
+        node_os_host->node->roots, state->cache_items, 1);
 }
 
 void node_os_runtime_reset(void* session) {
@@ -1047,11 +1050,7 @@ void node_os_runtime_reset(void* session) {
 }
 
 void node_os_runtime_detach(void* session) {
-    if (!node_os_host || session != node_os_session) return;
-    if (node_os_rooted) {
-        node_os_host->node->roots->persistent_root_unregister(session, &os_namespace.item);
-        node_os_rooted = false;
-    }
-    node_os_cache_reset();
-    node_os_session = NULL;
+    NodeOsSessionState* state = node_os_state();
+    if (!node_os_host || !state || session != state->cache_values.session) return;
+    jube_persistent_value_slots_detach(&state->cache_values);
 }

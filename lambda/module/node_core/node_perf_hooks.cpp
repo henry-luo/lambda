@@ -6,11 +6,13 @@
 #include <cstring>
 
 static const JubeHostAPI* node_perf_hooks_host = NULL;
-struct NodePerfHooksSessionState { void* session; bool rooted; Item cached_namespace; };
+struct NodePerfHooksSessionState {
+    JubePersistentValueSlots cache_values;
+    Item cache_items[1];
+};
 static NodePerfHooksSessionState* node_perf_hooks_state(void) { return (NodePerfHooksSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_PERF_HOOKS); }
-#define node_perf_hooks_session (node_perf_hooks_state()->session)
-#define node_perf_hooks_rooted (node_perf_hooks_state()->rooted)
-#define node_perf_hooks_cached_namespace (node_perf_hooks_state()->cached_namespace)
+#define node_perf_hooks_session (node_perf_hooks_state()->cache_values.session)
+#define node_perf_hooks_cached_namespace (node_perf_hooks_state()->cache_items[0])
 
 static Item node_perf_hooks_empty_object(Item unused) {
     (void)unused;
@@ -119,26 +121,22 @@ void node_perf_hooks_runtime_attach(void* session) {
     if (!node_perf_hooks_host || !node_perf_hooks_host->node->runtime ||
             !node_perf_hooks_host->node->runtime->session_is_live ||
             !node_perf_hooks_host->node->runtime->session_is_live(session)) return;
-    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_PERF_HOOKS,
-            sizeof(NodePerfHooksSessionState))) return;
-    node_perf_hooks_session = session;
-    if (node_perf_hooks_host->node->roots->persistent_root_register(
-            session, &node_perf_hooks_cached_namespace.item) == 0) {
-        node_perf_hooks_rooted = true;
-    }
+    NodePerfHooksSessionState* state = (NodePerfHooksSessionState*)
+        jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_PERF_HOOKS,
+            sizeof(NodePerfHooksSessionState));
+    if (!state) return;
+    jube_persistent_value_slots_attach(&state->cache_values, session,
+        node_perf_hooks_host->node->roots, state->cache_items, 1);
 }
 
 void node_perf_hooks_runtime_reset(void* session) {
-    if (session == node_perf_hooks_session) node_perf_hooks_cached_namespace = (Item){0};
+    if (session == node_perf_hooks_session) {
+        jube_persistent_value_slots_reset(&node_perf_hooks_state()->cache_values);
+    }
 }
 
 void node_perf_hooks_runtime_detach(void* session) {
-    if (!node_perf_hooks_host || session != node_perf_hooks_session) return;
-    if (node_perf_hooks_rooted) {
-        node_perf_hooks_host->node->roots->persistent_root_unregister(
-            session, &node_perf_hooks_cached_namespace.item);
-    }
-    node_perf_hooks_rooted = false;
-    node_perf_hooks_cached_namespace = (Item){0};
-    node_perf_hooks_session = NULL;
+    NodePerfHooksSessionState* state = node_perf_hooks_state();
+    if (!node_perf_hooks_host || !state || session != state->cache_values.session) return;
+    jube_persistent_value_slots_detach(&state->cache_values);
 }

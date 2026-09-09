@@ -6,16 +6,14 @@
 
 static const JubeHostAPI* node_tty_host = NULL;
 struct NodeTtySessionState {
-    void* session;
-    bool rooted;
-    Item cached_namespace;
+    JubePersistentValueSlots cache_values;
+    Item cache_items[1];
 };
 static NodeTtySessionState* node_tty_state(void) {
     return (NodeTtySessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_TTY);
 }
-#define node_tty_session (node_tty_state()->session)
-#define node_tty_rooted (node_tty_state()->rooted)
-#define node_tty_cached_namespace (node_tty_state()->cached_namespace)
+#define node_tty_session (node_tty_state()->cache_values.session)
+#define node_tty_cached_namespace (node_tty_state()->cache_items[0])
 
 static Item node_tty_undefined(Item unused) {
     (void)unused;
@@ -183,22 +181,22 @@ void node_tty_shutdown(void) {
 
 void node_tty_runtime_attach(void* session) {
     if (!node_tty_host || !node_tty_host->node->runtime->session_is_live(session)) return;
-    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_TTY,
-            sizeof(NodeTtySessionState))) return;
-    node_tty_session = session;
-    if (node_tty_host->node->roots->persistent_root_register(session,
-            &node_tty_cached_namespace.item) == 0) node_tty_rooted = true;
+    NodeTtySessionState* state = (NodeTtySessionState*)
+        jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_TTY,
+            sizeof(NodeTtySessionState));
+    if (!state) return;
+    jube_persistent_value_slots_attach(&state->cache_values, session,
+        node_tty_host->node->roots, state->cache_items, 1);
 }
 
 void node_tty_runtime_reset(void* session) {
-    if (session == node_tty_session) node_tty_cached_namespace = (Item){0};
+    if (session == node_tty_session) {
+        jube_persistent_value_slots_reset(&node_tty_state()->cache_values);
+    }
 }
 
 void node_tty_runtime_detach(void* session) {
-    if (!node_tty_host || session != node_tty_session) return;
-    if (node_tty_rooted) node_tty_host->node->roots->persistent_root_unregister(
-        session, &node_tty_cached_namespace.item);
-    node_tty_rooted = false;
-    node_tty_cached_namespace = (Item){0};
-    node_tty_session = NULL;
+    NodeTtySessionState* state = node_tty_state();
+    if (!node_tty_host || !state || session != state->cache_values.session) return;
+    jube_persistent_value_slots_detach(&state->cache_values);
 }

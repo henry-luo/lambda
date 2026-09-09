@@ -6,17 +6,15 @@
 
 static const JubeHostAPI* node_constants_host = NULL;
 struct NodeConstantsSessionState {
-    void* session;
-    bool rooted;
-    Item cached_namespace;
+    JubePersistentValueSlots cache_values;
+    Item cache_items[1];
 };
 static NodeConstantsSessionState* node_constants_state(void) {
     return (NodeConstantsSessionState*)jube_node_current_module_state(
         JUBE_NODE_MODULE_STATE_CONSTANTS);
 }
-#define node_constants_session (node_constants_state()->session)
-#define node_constants_rooted (node_constants_state()->rooted)
-#define node_constants_cached_namespace (node_constants_state()->cached_namespace)
+#define node_constants_session (node_constants_state()->cache_values.session)
+#define node_constants_cached_namespace (node_constants_state()->cache_items[0])
 
 static const char* const node_constants_fs_names[] = {
     "F_OK", "R_OK", "W_OK", "X_OK", "O_RDONLY", "O_WRONLY", "O_RDWR", "O_CREAT",
@@ -150,24 +148,22 @@ void node_constants_shutdown(void) {
 
 void node_constants_runtime_attach(void* session) {
     if (!node_constants_host || !node_constants_host->node->runtime->session_is_live(session)) return;
-    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_CONSTANTS,
-            sizeof(NodeConstantsSessionState))) return;
-    node_constants_session = session;
-    if (node_constants_host->node->roots->persistent_root_register(session,
-            &node_constants_cached_namespace.item) == 0) node_constants_rooted = true;
+    NodeConstantsSessionState* state = (NodeConstantsSessionState*)
+        jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_CONSTANTS,
+            sizeof(NodeConstantsSessionState));
+    if (!state) return;
+    jube_persistent_value_slots_attach(&state->cache_values, session,
+        node_constants_host->node->roots, state->cache_items, 1);
 }
 
 void node_constants_runtime_reset(void* session) {
-    if (session == node_constants_session) node_constants_cached_namespace = (Item){0};
+    if (session == node_constants_session) {
+        jube_persistent_value_slots_reset(&node_constants_state()->cache_values);
+    }
 }
 
 void node_constants_runtime_detach(void* session) {
-    if (!node_constants_host || session != node_constants_session) return;
-    if (node_constants_rooted) {
-        node_constants_host->node->roots->persistent_root_unregister(session,
-            &node_constants_cached_namespace.item);
-        node_constants_rooted = false;
-    }
-    node_constants_cached_namespace = (Item){0};
-    node_constants_session = NULL;
+    NodeConstantsSessionState* state = node_constants_state();
+    if (!node_constants_host || !state || session != state->cache_values.session) return;
+    jube_persistent_value_slots_detach(&state->cache_values);
 }
