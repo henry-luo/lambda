@@ -327,7 +327,7 @@ TEST_F(CompoundDescendantSelectorTest, SiblingCombinators_NextSibling) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
-    const char* css = "h2 + p { margin-top: 0; }";
+    const char* css = "h2+p { margin-top: 0; }";
 
     CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
 
@@ -342,6 +342,22 @@ TEST_F(CompoundDescendantSelectorTest, SiblingCombinators_NextSibling) {
 
     EXPECT_STREQ(selector->compound_selectors[0]->simple_selectors[0]->value, "h2");
     EXPECT_STREQ(selector->compound_selectors[1]->simple_selectors[0]->value, "p");
+}
+
+TEST_F(CompoundDescendantSelectorTest, AdjacentSiblingClassSelectorWithoutWhitespace) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = ".panel-group .panel+.panel { margin-top: 5px; }";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1);
+    CssSelector* selector = (CssSelector*)sheet->rules[0]->data.style_rule.selector;
+    ASSERT_NE(selector, nullptr);
+    ASSERT_EQ(selector->compound_selector_count, 3);
+    EXPECT_EQ(selector->combinators[0], CSS_COMBINATOR_DESCENDANT);
+    EXPECT_EQ(selector->combinators[1], CSS_COMBINATOR_NEXT_SIBLING);
 }
 
 TEST_F(CompoundDescendantSelectorTest, SiblingCombinators_SubsequentSibling) {

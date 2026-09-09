@@ -10,6 +10,12 @@ customElements.whenDefined("test-custom-element").then(function(value) {
 customElements.define("test-custom-element", TestCustomElement);
 
 console.log(customElements.get("test-custom-element") === TestCustomElement);
+const constructed = new TestCustomElement();
+const created = document.createElement("test-custom-element");
+console.log(constructed instanceof TestCustomElement);
+console.log(constructed instanceof HTMLElement);
+console.log(constructed.localName);
+console.log(created instanceof TestCustomElement);
 try {
   customElements.define("test-custom-element", TestCustomElement);
 } catch (error) {

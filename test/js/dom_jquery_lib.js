@@ -10797,6 +10797,19 @@ console.log(introHtml !== "");
 $("#empty").append("<span class='added'>New</span>");
 console.log($("#empty").children().length);
 
+// jQuery's HTML-fragment prepend must retain DOM source order on a live parent.
+$("#prepend-target").prepend("<i></i>");
+console.log($("#prepend-target").children()[0].tagName);
+console.log($("#prepend-target").children()[1].tagName);
+console.log($("#prepend-target").children()[2].tagName);
+var clonedPrepend = $("#prepend-target").clone().attr("id", "cloned-prepend-target");
+$("#empty").append(clonedPrepend);
+clonedPrepend.prepend("<b></b>");
+console.log(clonedPrepend.children()[0].tagName);
+console.log(clonedPrepend.children()[1].tagName);
+console.log(clonedPrepend.children()[2].tagName);
+console.log(clonedPrepend.children()[3].tagName);
+
 // .remove()
 $(".added").remove();
 console.log($("#empty").children().length);
@@ -10898,6 +10911,96 @@ $app.off("myevent");
 eventFired = false;
 $app.trigger("myevent");
 console.log(eventFired);
+
+var nativeEventFired = false;
+$app.on("nativeevent", function() {
+    nativeEventFired = true;
+});
+$app[0].dispatchEvent(new Event("nativeevent"));
+console.log(nativeEventFired);
+
+var nativeGcEventFired = false;
+$app.on("nativegcevent", function() {
+    nativeGcEventFired = true;
+});
+gc();
+$app[0].dispatchEvent(new Event("nativegcevent"));
+console.log(nativeGcEventFired);
+
+function dispatchCapturedNativeEvent() {
+    var capturedState = { count: 0 };
+    $app.on("nativecaptureevent", function() {
+        capturedState.count++;
+    });
+    gc();
+    $app[0].dispatchEvent(new Event("nativecaptureevent"));
+    return capturedState.count;
+}
+console.log(dispatchCapturedNativeEvent());
+
+function makeNestedSelector($) {
+    var options = { value: 2 };
+    return function() {
+        return $("body").length + options.value;
+    };
+}
+console.log(makeNestedSelector($)());
+
+function makeNestedSelectorMethod($) {
+    var methods = {
+        init: function() {
+            var options = { value: 2 };
+            return function() {
+                return $("body").length + options.value;
+            };
+        }
+    };
+    return methods.init();
+}
+console.log(makeNestedSelectorMethod($)());
+
+function makeNestedSelectorWithSiblings($) {
+    var methods = {
+        init: function() {
+            var next = 1;
+            var current = 2;
+            var step = 3;
+            var options = { value: 4 };
+            return function() {
+                return $("body").length + next + current + step + options.value;
+            };
+        }
+    };
+    return methods.init();
+}
+console.log(makeNestedSelectorWithSiblings($)());
+
+(function(e) {
+    function resizeProbe(node, options) {
+        return node + options.value;
+    }
+    function loadedProbe() {
+        return e("body").length;
+    }
+    var image = {};
+    var current = {};
+    var step = 0;
+    var methods = {
+        init: function() {
+            var options = { value: 4, load: function() {}, complete: function() {} };
+            var next = image;
+            return function() {
+                if (next !== current) {
+                    resizeProbe(next, options);
+                    loadedProbe();
+                    return e("body").length + options.value + step;
+                }
+                return 0;
+            };
+        }
+    };
+    console.log(methods.init()());
+})(jQuery);
 } catch(e) { console.log("events-error"); console.log("events-error"); }
 
 // --- .clone() ---

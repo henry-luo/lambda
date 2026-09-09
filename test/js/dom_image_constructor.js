@@ -10,3 +10,5 @@ console.log(Image.prototype === HTMLImageElement.prototype);
 console.log(bareImage.getAttribute("width") === null);
 console.log(sizedImage.getAttribute("width"));
 console.log(sizedImage.getAttribute("height"));
+console.log(bareImage.naturalWidth);
+console.log(bareImage.naturalHeight);

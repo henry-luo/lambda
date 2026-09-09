@@ -1820,6 +1820,12 @@ static const char LIFECYCLE_WINDOW_LOAD_SOURCE[] =
     // after registered listeners; calling it again here duplicated the handler
     // and placed the first invocation before addEventListener callbacks.
     "}\n";
+static const char LIFECYCLE_WINDOW_PAGE_SHOW_SOURCE[] =
+    "if (window && window.dispatchEvent && typeof Event === 'function') {\n"
+    // The initial document is not restored from the back-forward cache.
+    "  var event = new Event('pageshow'); event.persisted = false;\n"
+    "  window.dispatchEvent(event);\n"
+    "}\n";
 
 static const char LIFECYCLE_INTERACTIVE_FILENAME[] =
     "<document-readystatechange-interactive>";
@@ -1828,6 +1834,7 @@ static const char LIFECYCLE_DOM_CONTENT_LOADED_FILENAME[] =
 static const char LIFECYCLE_COMPLETE_FILENAME[] =
     "<document-readystatechange-complete>";
 static const char LIFECYCLE_WINDOW_LOAD_FILENAME[] = "<window-load>";
+static const char LIFECYCLE_WINDOW_PAGE_SHOW_FILENAME[] = "<window-pageshow>";
 
 static bool execute_lifecycle_snippet(Runtime* runtime, JsPreambleState* preamble,
                                       const char* source, const char* filename) {
@@ -2299,6 +2306,13 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         any_error = true;
     }
     if (timing) timing->window_load_us += time_now_us() - phase_start_us;
+
+    // HTML lifecycle: pageshow follows load for an initially displayed document.
+    if (!execute_lifecycle_snippet(
+        runtime, preamble, LIFECYCLE_WINDOW_PAGE_SHOW_SOURCE,
+        LIFECYCLE_WINDOW_PAGE_SHOW_FILENAME)) {
+        any_error = true;
+    }
 
     script_scheduler_queues_free(&queues);
     return any_error ? ItemError : result;

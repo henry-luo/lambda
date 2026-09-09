@@ -16,6 +16,16 @@ static CssUnit parse_css_unit(const char* unit_str, size_t length) {
 static inline bool css_starts_escape(const char* input, size_t length, size_t pos);
 static inline void css_consume_name(const char* input, size_t length, size_t* pos);
 
+static inline bool css_starts_number_after_sign(const char* input, size_t length,
+                                                size_t sign_pos) {
+    if (!input || sign_pos + 1 >= length) return false;
+    if (str_char_is_digit(input[sign_pos + 1])) return true;
+    // CSS Syntax: a sign followed by '.' starts a number only when a digit
+    // follows the dot; otherwise it remains a delimiter (for `.a+.b`).
+    return input[sign_pos + 1] == '.' && sign_pos + 2 < length &&
+        str_char_is_digit(input[sign_pos + 2]);
+}
+
 // Helper: tokenize a CSS numeric value (number, percentage, or dimension).
 // `start` is the beginning of the token (may include a sign or leading dot).
 // `pos` on entry points past any sign/dot prefix to the first digit position.
@@ -1150,7 +1160,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                 break;
             case '+':
                 // Check if this is a signed number
-                if (pos + 1 < length && (str_char_is_digit(input[pos + 1]) || input[pos + 1] == '.')) {
+                if (css_starts_number_after_sign(input, length, pos)) {
                     size_t start = pos;
                     pos++; // Skip sign
                     tokenize_number(input, length, start, &pos, token, tokenizer->pool);
@@ -1183,7 +1193,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                     // This will be set by css_token_set_value
                 }
                 // Check if this is a signed number
-                else if (pos + 1 < length && (str_char_is_digit(input[pos + 1]) || input[pos + 1] == '.')) {
+                else if (css_starts_number_after_sign(input, length, pos)) {
                     size_t start = pos;
                     pos++; // Skip sign
                     tokenize_number(input, length, start, &pos, token, tokenizer->pool);

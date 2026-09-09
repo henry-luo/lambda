@@ -414,7 +414,7 @@ true
 true
 true
 1
-1
+true
 1
 true
 true
@@ -423,7 +423,7 @@ true
 1
 2
 2
-2
+true
 2
 true
 true
@@ -482,6 +482,10 @@ html-insert
 2
 head
 tail
+I
+B
+A
+UL
 1
 ab
 true

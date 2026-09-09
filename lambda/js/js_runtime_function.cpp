@@ -248,6 +248,7 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
         gc_mark_item(gc, p->klass->constructor.item);
         gc_mark_item(gc, p->klass->instance_prototype.item);
         gc_mark_item(gc, p->klass->superclass.item);
+        gc_mark_item(gc, p->klass->custom_element_name.item);
     }
     if (p->ast) {
         gc_mark_item(gc, p->ast->lexical_this.item);

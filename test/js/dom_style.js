@@ -1,5 +1,12 @@
 // DOM Style Tests - inline style get/set, getComputedStyle
 
+// CSSOM resolves relative inherited font sizes to absolute pixels before layout.
+var percentFont = document.getElementById("percent-font");
+console.log(document.defaultView.getComputedStyle(percentFont).fontSize);
+var relativeFont = document.getElementById("relative-font");
+console.log(Math.round(parseFloat(
+  document.defaultView.getComputedStyle(relativeFont).fontSize)));
+
 // --- Read inline style (length values) ---
 var styled = document.getElementById("styled");
 console.log(styled.style.padding); // 5px
@@ -14,6 +21,12 @@ console.log(plain.style.fontSize); // 24px
 
 plain.style.marginTop = "10px";
 console.log(plain.style.marginTop); // 10px
+
+// Horizontal negative lengths exercise the slideshow image-centering path.
+plain.style.marginLeft = "-12.5px";
+console.log(plain.style.marginLeft); // -12.5px
+plain.style.marginRight = "-8px";
+console.log(plain.style.marginRight); // -8px
 
 // --- Set multiple styles ---
 plain.style.width = "200px";

@@ -109,6 +109,14 @@ typedef enum CssUnit {
     CSS_UNIT_UNKNOWN          // unknown or invalid unit
 } CssUnit;
 
+// CSS Values §5.4 absolute lengths use the reference-pixel conversion shared
+// by cascade consumers that cannot depend on a layout context.
+bool css_absolute_length_to_px(CssUnit unit, double value, double* pixels);
+
+// CSS Fonts §2.5 maps absolute font-size keywords before layout applies
+// inherited relative sizes such as larger and smaller.
+float css_font_size_keyword_px(CssEnum keyword);
+
 // CSS Color types
 typedef enum CssColorType {
     CSS_COLOR_KEYWORD,        // named colors (red, blue, etc.)
@@ -758,6 +766,25 @@ typedef struct CssValue {
         CssCalcNode* calc_expression;
     } data;
 } CssValue;
+
+// CSS shorthand expansion is part of the value model, not layout: one to
+// four components map clockwise to top, right, bottom, and left.
+static inline int css_quad_value_index(int count, int side) {
+    static const uint8_t indices[4][4] = {
+        {0, 0, 0, 0}, {0, 1, 0, 1},
+        {0, 1, 2, 1}, {0, 1, 2, 3}
+    };
+    return count >= 1 && count <= 4 && side >= 0 && side < 4
+        ? indices[count - 1][side] : -1;
+}
+
+static inline const CssValue* css_box_shorthand_side_value(const CssValue* value,
+                                                           int side) {
+    if (!value || value->type != CSS_VALUE_TYPE_LIST) return value;
+    int index = css_quad_value_index(value->data.list.count, side);
+    CssValue** values = value->data.list.values;
+    return index >= 0 && values ? values[index] : nullptr;
+}
 
 // ============================================================================
 // CSS Style Declaration and Cascade

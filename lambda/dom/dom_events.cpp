@@ -2134,22 +2134,19 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         Item live_signal = event_listener_root_item(live->signal_root);
         if (signal_is_aborted(live_signal)) { tombstone_listener(live); continue; }
 
-        // Resolve callback — function or {handleEvent}
-        // A prior listener may collect and move heap objects. Reload from the
-        // stable root instead of using the raw snapshot Item, or the remaining
-        // listeners disappear from the same dispatch.
-        Item callback = event_listener_root_item(live->callback_root);
-        Item this_for_call = wrap_path_key(key, key_is_dom);
-        if (!live->is_idl_handler && !dom_realm_is_callable(callback)) {
+        // Resolve callback — function or {handleEvent}. `wrap_path_key` can
+        // allocate a DOM wrapper, so root the stored listener before it can
+        // compact and invalidate a local callback Item.
+        callback_root.set(event_listener_root_item(live->callback_root));
+        this_root.set(wrap_path_key(key, key_is_dom));
+        if (!live->is_idl_handler && !dom_realm_is_callable(callback_root.get())) {
             // EventListener WebIDL: if value is an object, call handleEvent on it
-            Item he = dom_realm_get_name(callback, "handleEvent");
+            Item he = dom_realm_get_name(callback_root.get(), "handleEvent");
             if (!dom_realm_is_callable(he)) continue;
             // per spec, `this` is the EventListener object itself
-            this_for_call = callback;
-            callback = he;
+            this_root.set(callback_root.get());
+            callback_root.set(he);
         }
-        callback_root.set(callback);
-        this_root.set(this_for_call);
 
         // Set passive flag on the event so preventDefault no-ops within this
         // listener (per HTML spec, passive listeners cannot cancel).

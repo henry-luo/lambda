@@ -5210,9 +5210,8 @@ static void table_publish_vertical_geometry(LayoutContext* lycon, ViewTable* tab
     table_release_caption_collection(&captions);
 }
 
-static float table_measure_caption_width_contribution(LayoutContext* lycon,
-                                                      ViewTable* table,
-                                                      ViewBlock* caption) {
+static float table_caption_min_content_box_width(LayoutContext* lycon,
+                                                 ViewBlock* caption) {
     if (!caption) return 0.0f;
     float contribution = 0.0f;
     if (caption->blk && caption->block_mut()->given_width > 0.0f) {
@@ -5229,6 +5228,14 @@ static float table_measure_caption_width_contribution(LayoutContext* lycon,
             (caption_box.padding.left > 0.0f ? caption_box.padding.left : 0.0f) +
             (caption_box.padding.right > 0.0f ? caption_box.padding.right : 0.0f);
     }
+    return contribution;
+}
+
+static float table_measure_caption_width_contribution(LayoutContext* lycon,
+                                                      ViewTable* table,
+                                                      ViewBlock* caption) {
+    if (!caption) return 0.0f;
+    float contribution = table_caption_min_content_box_width(lycon, caption);
     BoxMetrics table_box = layout_box_metrics(table);
     contribution -= table_box.border_h +
         (table_box.padding.left > 0.0f ? table_box.padding.left : 0.0f) +
@@ -6633,33 +6640,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!meta) {
         // CSS 2.1 §17.4: A table with only a caption is valid; the caption
         if (caption) {
-            float table_width = caption->width;
-            if (caption->blk && caption->block_mut()->given_width > 0) {
-                table_width = caption->block()->given_width;
-                table_width += layout_box_metrics(caption).pad_border_h;
-            } else if (DomElement* caption_elem = caption->as_element()) {
-                IntrinsicSizes caption_sizes = layout_measure_intrinsic_widths(
-                    lycon, caption_elem);
-                float available_width = lycon->block.content_width;
-                if (available_width <= 0.0f) {
-                    available_width = lycon->line.right - lycon->line.left;
-                }
-                AvailableSize available = (available_width > 0.0f)
-                    ? AvailableSize::make_definite(available_width)
-                    : AvailableSize::make_indefinite();
-                table_width = ceilf(compute_shrink_to_fit_width(
-                    caption_sizes.min_content, caption_sizes.max_content, available));
-                table_width = layout_apply_min_max_axis(caption, table_width, true, false);
-            }
-            float caption_box_width = table_width;  // Caption's own box width (without margins)
+            // CSS Tables 3 §3.5: without a grid, an auto table takes its
+            // caption's min-content contribution rather than filling its CB.
+            float table_width = table_caption_min_content_box_width(lycon, caption);
             table_width += table_caption_positive_margin(caption, true, true) +
                 table_caption_positive_margin(caption, true, false);
-            float cap_y = 0;
-            for_each_table_caption(top_captions, [&](ViewBlock* cap, int ci) {
-                table_position_caption_with_margins(cap, cap_y);
-                cap->width = caption_box_width;
-                cap_y += table_caption_height_with_margins(cap);
-            });
+            top_caption_height = table_position_caption_stack(
+                lycon, table, top_captions, 0.0f, table_width, table_width,
+                TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER);
             float grid_height = 0;
             if (table->blk && table->block_mut()->given_height >= 0) {
                 grid_height = table->block()->given_height;
@@ -6668,13 +6656,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (table_box.padding.top > 0) grid_height += table_box.padding.top;
                 if (table_box.padding.bottom > 0) grid_height += table_box.padding.bottom;
             }
-            cap_y = grid_height;
-            for_each_table_caption(bottom_captions, [&](ViewBlock* cap, int ci) {
-                table_position_caption_with_margins(cap, cap_y);
-                cap->width = caption_box_width;
-                cap_y += table_caption_height_with_margins(cap);
-            });
-            float total_height = caption_height + grid_height;
+            float bottom_caption_height = table_position_caption_stack(
+                lycon, table, bottom_captions, grid_height, table_width, table_width,
+                TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER);
+            float total_height = top_caption_height + grid_height + bottom_caption_height;
             table->width = table_width;
             table->height = total_height;
             table->content_width = table_width;

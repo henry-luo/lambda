@@ -2,6 +2,10 @@ object
 true
 true
 true
+true
+true
+test-custom-element
+true
 NotSupportedError
 SyntaxError
 true

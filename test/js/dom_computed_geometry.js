@@ -30,3 +30,6 @@ var staticPositionParent = document.getElementById("static-position-parent");
 var staticPositionAnchor = document.getElementById("static-position-anchor");
 console.log(Math.round(staticPositionParent.getBoundingClientRect().width) + ":" +
     Math.round(staticPositionAnchor.getBoundingClientRect().x));
+
+// CSSOM View includes descendant scrollable overflow in the root scroll area.
+console.log(document.documentElement.scrollWidth + ":" + document.body.scrollWidth);

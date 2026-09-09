@@ -214,6 +214,11 @@ bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal) {
         ? layout_specified_physical_size_declaration(block->as_element(), horizontal) : nullptr;
     if (specified_size && specified_size->value) {
         if (!horizontal && specified_size->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+            if (block->block()->percentage_height_resolved_late) {
+                // A positioned percentage can become definite after its containing
+                // block finishes; retain that used-value definiteness for descendants.
+                return false;
+            }
             // A percentage block size is automatic while its containing block is auto;
             // treating a provisional intrinsic height as definite feeds aspect-ratio backward.
             ViewBlock* containing_block = layout_nearest_block_ancestor(block->parent_view());

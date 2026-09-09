@@ -152,6 +152,24 @@ TEST_F(DomNodeBaseTest, GetTagName) {
     EXPECT_STREQ(tag_name, "div");
 }
 
+TEST_F(DomNodeBaseTest, ScriptElementsRemainInDomTree) {
+    DomElement* root = parse_html_and_build_dom(
+        "<div><script src=\"library.js\">window.ready = true;</script><p>Content</p></div>");
+    ASSERT_NE(root, nullptr);
+
+    // HTML hides script by default at layout time; it must remain discoverable
+    // through the DOM because libraries commonly locate their loading script.
+    DomNode* script = root->first_child;
+    ASSERT_NE(script, nullptr);
+    ASSERT_TRUE(script->is_element());
+    EXPECT_STREQ(script->node_name(), "script");
+    EXPECT_EQ(script->parent, root);
+
+    DomNode* paragraph = script->next_sibling;
+    ASSERT_NE(paragraph, nullptr);
+    EXPECT_STREQ(paragraph->node_name(), "p");
+}
+
 TEST_F(DomNodeBaseTest, GetAttribute) {
     const char* html = "<div id=\"main\" class=\"container\">Content</div>";
 

@@ -82,6 +82,7 @@ void dom_engine_sync_pseudo_state(void* view, uint32_t pseudo_flag, bool set);
 // HTML image loading: the engine owns decoding and intrinsic-image state; the
 // DOM core owns the deferred `load` event and node lifetime around it.
 bool dom_engine_set_image_source(DomElement* element, const char* source);
+bool dom_engine_image_natural_size(DomElement* element, int* width, int* height);
 
 #ifdef __cplusplus
 }

@@ -70,6 +70,9 @@ struct JsClassData {
     Item constructor;
     Item instance_prototype;
     Item superclass;
+    // CustomElementRegistry owns this internal association; keeping it beside
+    // the class capability avoids exposing host bookkeeping as a JS property.
+    Item custom_element_name;
 };
 
 struct JsWithData {

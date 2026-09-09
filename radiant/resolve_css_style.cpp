@@ -896,14 +896,6 @@ static Color inherit_background_color(LayoutContext* lycon) {
     return color;
 }
 
-static bool css_custom_property_name_matches(const char* stored_name, const char* lookup_name) {
-    if (!stored_name || !lookup_name) return false;
-    if (strcmp(stored_name, lookup_name) == 0) return true;
-    const char* stored_body = strncmp(stored_name, "--", 2) == 0 ? stored_name + 2 : stored_name;
-    const char* lookup_body = strncmp(lookup_name, "--", 2) == 0 ? lookup_name + 2 : lookup_name;
-    return strcmp(stored_body, lookup_body) == 0;
-}
-
 const char* css_font_family_name_from_value(const CssValue* value) {
     if (!value) return NULL;
     if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
@@ -2955,18 +2947,7 @@ Color color_name_to_rgb(CssEnum color_name) {
 }
 
 float map_lambda_font_size_keyword(CssEnum keyword_enum) {
-    switch (keyword_enum) {
-        case CSS_VALUE_XX_SMALL: return 9.0f;
-        case CSS_VALUE_X_SMALL: return 10.0f;
-        case CSS_VALUE_SMALL: return 13.0f;
-        case CSS_VALUE_MEDIUM: return 16.0f;
-        case CSS_VALUE_LARGE: return 18.0f;
-        case CSS_VALUE_X_LARGE: return 24.0f;
-        case CSS_VALUE_XX_LARGE: return 32.0f;
-        case CSS_VALUE_SMALLER: return -1.0f;  // relative to parent
-        case CSS_VALUE_LARGER: return -1.0f;   // relative to parent
-        default: return 16.0f; // default medium size
-    }
+    return css_font_size_keyword_px(keyword_enum);
 }
 
 // map CSS font-weight keywords/numbers to PropValue enum
@@ -3582,16 +3563,6 @@ static float css_containing_inline_percentage_base(LayoutContext* lycon) {
     return lycon->block.parent->content_width;
 }
 
-static bool css_absolute_unit_scale(CssUnit unit, double* scale) {
-    static const double scales[] = {
-        1.0, 96.0 / 2.54, 96.0 / 25.4, 96.0, 4.0 / 3.0, 16.0,
-        96.0 / 2.54 / 40.0,
-    };
-    if (unit < CSS_UNIT_PX || unit > CSS_UNIT_Q || !scale) return false;
-    *scale = scales[unit - CSS_UNIT_PX];
-    return true;
-}
-
 // resolve a CSS length, percentage, or number to pixels.
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value) {
     if (!value) { log_debug("resolve_length_value: null value");  return 0.0f; }
@@ -3621,9 +3592,9 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     case CSS_VALUE_TYPE_LENGTH: {
         double num = value->data.length.value;
         CssUnit unit = value->data.length.unit;
-        double absolute_scale = 0.0;
-        if (css_absolute_unit_scale(unit, &absolute_scale)) {
-            result = num * absolute_scale;
+        double absolute_pixels = 0.0;
+        if (css_absolute_length_to_px(unit, num, &absolute_pixels)) {
+            result = absolute_pixels;
             break;
         }
         switch (unit) {
@@ -4590,52 +4561,50 @@ static void apply_pseudo_font_family(LayoutContext* lycon, FontProp* font,
     }
 }
 
-static bool pseudo_longhand_overridden_by_font(StyleTree* style,
-                                               CssDeclaration* longhand) {
+bool layout_font_shorthand_overrides_longhand(StyleTree* style,
+                                              CssDeclaration* longhand) {
     if (!style || !longhand) return false;
     CssDeclaration* shorthand = style_tree_get_declaration(style, CSS_PROPERTY_FONT);
     return shorthand && css_declaration_cascade_compare(shorthand, longhand) > 0;
 }
 
-FontProp* layout_resolve_first_line_font(LayoutContext* lycon,
-                                         DomElement* element,
-                                         FontProp* base_font) {
-    if (!lycon || !element || !base_font) return nullptr;
-    StyleTree* style = element->pseudo_style(PSEUDO_STYLE_FIRST_LINE);
+FontProp* layout_resolve_pseudo_font(LayoutContext* lycon, StyleTree* style,
+                                     FontProp* base_font) {
+    if (!lycon || !base_font) return nullptr;
     if (!style || !style->tree || !css_style_tree_has_font_property(style, false)) {
         return nullptr;
     }
 
-    FontProp* first_line_font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
-    font_prop_copy(first_line_font, base_font);
-    first_line_font->used_zoom = base_font->used_zoom;
+    FontProp* pseudo_font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+    font_prop_copy(pseudo_font, base_font);
+    pseudo_font->used_zoom = base_font->used_zoom;
 
     CssDeclaration* font_decl = style_tree_get_declaration(style, CSS_PROPERTY_FONT);
     if (font_decl && font_decl->value) {
         const CssValue* value = resolve_var_function(lycon, font_decl->value);
         LayoutFontShorthandParts parts;
         if (value && layout_parse_font_shorthand(value, &parts)) {
-            first_line_font->font_variant = parts.small_caps
+            pseudo_font->font_variant = parts.small_caps
                 ? CSS_VALUE_SMALL_CAPS : CSS_VALUE_NORMAL;
             if (parts.size) {
                 LayoutFontSizeResult resolved = layout_resolve_font_size_value(
                     lycon, parts.size, base_font, true);
                 if (!isnan(resolved.value) && resolved.value >= 0.0f) {
-                    first_line_font->font_size = resolved.value;
-                    first_line_font->font_size_from_medium = resolved.from_medium;
+                    pseudo_font->font_size = resolved.value;
+                    pseudo_font->font_size_from_medium = resolved.from_medium;
                 }
             }
             if (parts.weight) {
-                first_line_font->font_weight = map_font_weight(parts.weight);
-                first_line_font->font_weight_numeric = map_font_weight_numeric(parts.weight);
+                pseudo_font->font_weight = map_font_weight(parts.weight);
+                pseudo_font->font_weight_numeric = map_font_weight_numeric(parts.weight);
             }
             if (parts.style && parts.style->type == CSS_VALUE_TYPE_KEYWORD) {
-                first_line_font->font_style = parts.style->data.keyword;
+                pseudo_font->font_style = parts.style->data.keyword;
             }
             const char* family = css_select_font_shorthand_family(
                 lycon, value, parts.group, parts.family_start);
             if (family && *family) {
-                radiant_retain_font_family(first_line_font,
+                radiant_retain_font_family(pseudo_font,
                     lam::PoolPtr<char>((char*)family));
             }
         }
@@ -4643,38 +4612,46 @@ FontProp* layout_resolve_first_line_font(LayoutContext* lycon,
 
     CssDeclaration* font_size = style_tree_get_declaration(style, CSS_PROPERTY_FONT_SIZE);
     if (font_size && font_size->value &&
-        !pseudo_longhand_overridden_by_font(style, font_size)) {
+        !layout_font_shorthand_overrides_longhand(style, font_size)) {
         LayoutFontSizeResult resolved = layout_resolve_font_size_value(
             lycon, font_size->value, base_font, true);
         if (!isnan(resolved.value) && resolved.value >= 0.0f) {
-            first_line_font->font_size = resolved.value;
-            first_line_font->font_size_from_medium = resolved.from_medium;
+            pseudo_font->font_size = resolved.value;
+            pseudo_font->font_size_from_medium = resolved.from_medium;
         }
     }
     CssDeclaration* font_weight = style_tree_get_declaration(style, CSS_PROPERTY_FONT_WEIGHT);
     if (font_weight && font_weight->value &&
-        !pseudo_longhand_overridden_by_font(style, font_weight)) {
-        first_line_font->font_weight = map_font_weight(font_weight->value);
-        first_line_font->font_weight_numeric = map_font_weight_numeric(font_weight->value);
+        !layout_font_shorthand_overrides_longhand(style, font_weight)) {
+        pseudo_font->font_weight = map_font_weight(font_weight->value);
+        pseudo_font->font_weight_numeric = map_font_weight_numeric(font_weight->value);
     }
     CssDeclaration* font_style = style_tree_get_declaration(style, CSS_PROPERTY_FONT_STYLE);
     if (font_style && font_style->value &&
-        !pseudo_longhand_overridden_by_font(style, font_style) &&
+        !layout_font_shorthand_overrides_longhand(style, font_style) &&
         font_style->value->type == CSS_VALUE_TYPE_KEYWORD) {
-        first_line_font->font_style = font_style->value->data.keyword;
+        pseudo_font->font_style = font_style->value->data.keyword;
     }
     CssDeclaration* font_family = style_tree_get_declaration(style, CSS_PROPERTY_FONT_FAMILY);
     if (font_family && font_family->value &&
-        !pseudo_longhand_overridden_by_font(style, font_family)) {
-        apply_pseudo_font_family(lycon, first_line_font, font_family->value);
+        !layout_font_shorthand_overrides_longhand(style, font_family)) {
+        apply_pseudo_font_family(lycon, pseudo_font, font_family->value);
     }
     CssDeclaration* font_variant = style_tree_get_declaration(style, CSS_PROPERTY_FONT_VARIANT);
     if (font_variant && font_variant->value &&
-        !pseudo_longhand_overridden_by_font(style, font_variant) &&
+        !layout_font_shorthand_overrides_longhand(style, font_variant) &&
         font_variant->value->type == CSS_VALUE_TYPE_KEYWORD) {
-        first_line_font->font_variant = font_variant->value->data.keyword;
+        pseudo_font->font_variant = font_variant->value->data.keyword;
     }
-    return first_line_font;
+    return pseudo_font;
+}
+
+FontProp* layout_resolve_first_line_font(LayoutContext* lycon,
+                                         DomElement* element,
+                                         FontProp* base_font) {
+    if (!element) return nullptr;
+    return layout_resolve_pseudo_font(
+        lycon, element->pseudo_style(PSEUDO_STYLE_FIRST_LINE), base_font);
 }
 
 static FontProp* ensure_placeholder_font(LayoutContext* lycon,
@@ -5074,13 +5051,6 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // otherwise use the inherited value. E.g.:
             if (prop_id == CSS_PROPERTY_TEXT_ALIGN) {
                 DomElement* cur_elem = lam::dom_require_element(lycon->view);
-                // HTML's <center> presentation hint is a specified value, so
-                // an inherited author value must not replace it.
-                if (cur_elem && cur_elem->tag() == MARKUP_NAME_CENTER &&
-                    inheritance_span->blk &&
-                    inheritance_span->block()->text_align == CSS_VALUE_CENTER) {
-                    continue;
-                }
                 if (cur_elem && cur_elem->tag_name && strcmp(cur_elem->tag_name, "th") == 0) {
                     bool inherited_is_noninitial = false;
                     for (DomElement* p = dom_parent_element(dom_elem);
@@ -5106,6 +5076,13 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                     if (!inherited_is_noninitial) {
                         continue;
                     }
+                }
+                else if (inheritance_span->blk &&
+                         inheritance_span->block()->text_align != CSS_VALUE_START &&
+                         inheritance_span->block()->text_align != CSS_VALUE_INHERIT) {
+                    // HTML presentation hints, such as <center>, are specified
+                    // values and must survive inherited author declarations.
+                    continue;
                 }
             }
             // Special case: font shorthand sets font-family directly on span->font
@@ -5228,6 +5205,16 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                     inheritance_span->ensure_block(lycon);
                     inheritance_span->blk->direction = inherited_direction;
                 }
+                continue;
+            }
+            if (prop_id == CSS_PROPERTY_TEXT_ALIGN) {
+                // CSS 2.1 §6.2.1: inherit the parent's computed value, not an
+                // outer ancestor's winning declaration. This preserves legacy
+                // HTML presentation hints through otherwise unstyled children.
+                CssEnum inherited_align = find_inherited_block_keyword(
+                    dom_elem, CSS_PROPERTY_TEXT_ALIGN, false, false, CSS_VALUE_START);
+                inheritance_span->ensure_block(lycon);
+                inheritance_span->blk->text_align = inherited_align;
                 continue;
             }
             while (ancestor && !inherited_decl) {

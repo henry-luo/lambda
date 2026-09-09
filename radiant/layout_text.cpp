@@ -1986,6 +1986,27 @@ static void reset_line_parent_font(LayoutContext* lycon) {
     lycon->line.parent_font_style = lycon->font.style;
 }
 
+static float line_strut_font_size(const LayoutContext* lycon) {
+    ViewElement* line_parent = lycon->line.start_view
+        ? lycon->line.start_view->parent_view() : nullptr;
+    ViewBlock* line_block = layout_nearest_block_ancestor(line_parent);
+    FontProp* block_font = line_block ? line_block->font : nullptr;
+    if (block_font && block_font->font_size > 0.0f) {
+        return block_font->font_size;
+    }
+
+    block_font = lycon->block.block_container_font;
+    if (block_font && block_font->font_size > 0.0f) {
+        return block_font->font_size;
+    }
+    block_font = lycon->block.establishing_element
+        ? lycon->block.establishing_element->font : nullptr;
+    if (block_font && block_font->font_size > 0.0f) {
+        return block_font->font_size;
+    }
+    return lycon->line.parent_font_size;
+}
+
 static void apply_bfc_initial_letter_exclusions(LayoutContext* lycon, BlockContext* bfc) {
     if (!lycon || !bfc || !bfc->initial_letters) return;
 
@@ -2061,6 +2082,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.has_baseline_shift = false;
     lycon->line.max_inline_line_height = lycon->line.max_atomic_inline_height = 0;
     lycon->line.has_different_inline_font = false;
+    lycon->line.has_inline_font_size_difference = false;
     lycon->line.max_normal_line_height = 0;
     lycon->line.has_c1_control_text = lycon->line.has_non_c1_text =
         lycon->line.has_direct_block_text = false;
@@ -2379,9 +2401,9 @@ static void finalize_non_rendered_table_markers_for_line(LayoutContext* lycon) {
 
 static void contribute_block_root_strut(LayoutContext* lycon) {
     if (!lycon || lycon->line.has_expanded_inline_lh) return;
+    // a zero-height replaced inline has no ascent and cannot replace the root strut.
     if (lycon->block.line_height_is_normal &&
         (lycon->line.max_ascender > 0.0f ||
-         lycon->line.max_descender > 0.0f ||
          !lycon->line.has_replaced_content)) {
         return;
     }
@@ -2597,8 +2619,11 @@ void line_break(LayoutContext* lycon) {
             // CSS 2.1 §10.8.1: an inline box's line-height, not its glyph
             used_line_height = explicit_inline_height;
         } else if (lycon->line.has_replaced_content || lycon->block.line_height_is_normal ||
-            lycon->line.has_expanded_inline_lh ||
-            lycon->line.has_different_inline_font) {
+                   lycon->line.has_expanded_inline_lh ||
+                   lycon->line.has_inline_font_size_difference ||
+                   lycon->line.has_different_inline_font) {
+            // CSS 2.1 §10.8.1: equal line-heights can still have different
+            // leading splits when nested faces use different vertical metrics.
             used_line_height = max(css_line_height, font_line_height);
             // CSS 2.1 §10.8.1: For normal line-height with mixed fonts, each inline box
             if (lycon->block.line_height_is_normal && lycon->line.max_normal_line_height > used_line_height) {
@@ -2741,16 +2766,21 @@ void line_break(LayoutContext* lycon) {
         lycon->block.line_clamp_last_line_max_descender = trim_max_descender;
     }
 
-    FontProp* block_font = lycon->block.establishing_element ?
-        lycon->block.establishing_element->font : lycon->block.block_container_font;
+    ViewBlock* line_block = lycon->line.start_view
+        ? layout_nearest_block_ancestor(lycon->line.start_view->parent_view())
+        : nullptr;
+    // css 2.1 §10.8.1: flex item reflow can retain an ancestor BlockContext;
+    // the line's view ancestry identifies the block container that owns its strut.
+    FontProp* block_font = line_block && line_block->font
+        ? line_block->font : lycon->block.block_container_font;
     if (lycon->block.first_line_style_active && block_font) {
         setup_font(lycon->ui_context, &lycon->font, block_font);
         lycon->block.first_line_style_active = false;
     }
     line_reset(lycon);
     if (block_font) {
-        lycon->line.line_start_font.style = block_font;
-        lycon->line.line_start_font.current_font_size = block_font->font_size;
+        // css 2.1 §10.8.1: preserve a complete block strut for the next line.
+        setup_font(lycon->ui_context, &lycon->line.line_start_font, block_font);
         lycon->line.parent_font_size = block_font->font_size;
         lycon->line.parent_font_style = block_font;
     }
@@ -3197,6 +3227,13 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         log_error("output_text: text_length=%d, skipping (node=%s)", text_length, text->node_name());
         return;
     }
+    bool text_combine_upright = layout_text_combine_upright_applies(
+        static_cast<DomNode*>(text));
+    if (text_combine_upright) {
+        // CSS Writing Modes 4 §9.1: an upright combination occupies one em inline.
+        text_width = layout_font_em_size(lycon);
+    }
+
     rect->length = text_length;
     rect->width = text_width;
     rect->line_number = lycon->block.line_number;
@@ -3240,6 +3277,12 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         }
     }
     lycon->line.advance_x += text_width;
+    if (text_combine_upright) {
+        // The combined run is atomic, so text-autospace and kerning stop at its edge.
+        lycon->line.prev_text_autospace_codepoint = 0;
+        lycon->line.prev_codepoint = 0;
+        lycon->line.prev_kerning_font_style = nullptr;
+    }
     if (is_initial_letter && font_box_handle(&lycon->font)) {
         initial_letter_avoid_bfc_floats(lycon, rect, initial_insets);
     }
@@ -3379,6 +3422,12 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
             lycon->line.max_desc_before_last_text = lycon->line.max_descender;
             lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
             lycon->line.max_descender = max(lycon->line.max_descender, descender);
+            float inline_font_size = layout_font_em_size(lycon);
+            float strut_font_size = line_strut_font_size(lycon);
+            if (fabsf(inline_font_size - strut_font_size) > 0.01f) {
+                // Use the block strut rather than a transient nested FontBox.
+                lycon->line.has_inline_font_size_difference = true;
+            }
         }
         lycon->line.max_css_baseline_ascender =
             max(lycon->line.max_css_baseline_ascender, css_baseline_ascender);
@@ -3575,6 +3624,7 @@ static void copy_line_metrics(Target* target, const Source* source) {
     target->clamped_baseline_tail = source->clamped_baseline_tail;
     target->has_clamped_baseline_tail = source->has_clamped_baseline_tail;
     target->has_different_inline_font = source->has_different_inline_font;
+    target->has_inline_font_size_difference = source->has_inline_font_size_difference;
     target->max_normal_line_height = source->max_normal_line_height;
     target->has_c1_control_text = source->has_c1_control_text;
     target->has_non_c1_text = source->has_non_c1_text;
@@ -3837,7 +3887,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         line_consume_trailing_collapsible_space(lycon, true, true);
     }
     // CSS Sizing 3: In max-content mode, never wrap — measure full unwrapped width
-    bool wrap_lines = get_text_wrap_mode_value(text_node) != CSS_VALUE_NOWRAP &&
+    bool text_combine_upright = layout_text_combine_upright_applies(text_node);
+    bool wrap_lines = !text_combine_upright &&
+        get_text_wrap_mode_value(text_node) != CSS_VALUE_NOWRAP &&
         !lycon->available_space.width.is_max_content();
 
     CssEnum word_break = get_inherited_text_enum(

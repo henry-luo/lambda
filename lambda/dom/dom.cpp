@@ -1948,6 +1948,13 @@ extern "C" Item dom_get_prototype_value(Item obj) {
                     ? "HTMLElement" : "Element"));
         }
     }
+    if (node && node->is_element()) {
+        DomElement* elem = node->as_element();
+        if (elem && elem->tag_name && strchr(elem->tag_name, '-')) {
+            Item custom_proto = dom_realm_custom_element_prototype(elem->tag_name);
+            if (custom_proto.item != ItemNull.item) return custom_proto;
+        }
+    }
     // A realm that publishes Element but not HTMLElement still has to answer
     // for HTML elements, so the miss falls back one interface up.
     Item proto = dom_realm_constructor_prototype(ctor_name);
@@ -5167,6 +5174,58 @@ static int64_t dom_geometry_dimension(DomElement* elem, bool width_axis) {
     return dom_headless_dimension(elem, width_axis);
 }
 
+static int64_t dom_geometry_client_start_border(DomElement* elem, bool vertical) {
+    if (!elem) return 0;
+    dom_ensure_geometry_snapshot(elem->doc);
+    if (!elem->bound || !elem->boundary()->border) return 0;
+    float width = vertical ? elem->boundary()->border->width.top
+                           : elem->boundary()->border->width.left;
+    return (int64_t)llroundf(width);
+}
+
+static bool dom_scrollable_overflow_is_clipped(const DomElement* elem,
+                                               bool width_axis) {
+    if (!elem || !elem->scroller) return false;
+    CssEnum overflow = width_axis ? elem->scroll()->overflow_x
+                                  : elem->scroll()->overflow_y;
+    return overflow == CSS_VALUE_AUTO || overflow == CSS_VALUE_SCROLL ||
+           overflow == CSS_VALUE_HIDDEN || overflow == CSS_VALUE_CLIP;
+}
+
+static bool dom_scrollable_overflow_is_fixed(const DomElement* elem) {
+    return elem && elem->position &&
+        elem->positionp()->position == CSS_VALUE_FIXED;
+}
+
+static float dom_scrollable_descendant_extent(DomNode* node, bool width_axis,
+                                              float origin) {
+    if (!node || !node->is_element()) return 0.0f;
+    DomElement* elem = node->as_element();
+    if (!elem || dom_scrollable_overflow_is_fixed(elem)) return 0.0f;
+
+    float end = (width_axis ? elem->x + elem->width : elem->y + elem->height) -
+        origin;
+    if (dom_scrollable_overflow_is_clipped(elem, width_axis)) {
+        return max(end, 0.0f);
+    }
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        end = max(end, dom_scrollable_descendant_extent(child, width_axis, origin));
+    }
+    return max(end, 0.0f);
+}
+
+static float dom_scrollable_extent(DomElement* elem, bool width_axis) {
+    if (!elem) return 0.0f;
+    float extent = max(width_axis ? elem->content_width : elem->content_height,
+                       width_axis ? elem->width : elem->height);
+    float origin = width_axis ? elem->x : elem->y;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        extent = max(extent,
+                     dom_scrollable_descendant_extent(child, width_axis, origin));
+    }
+    return extent;
+}
+
 // ============================================================================
 // Helper: recursive innerHTML serialization
 // ============================================================================
@@ -6094,6 +6153,8 @@ static bool dom_form_named_getter_reserved_name(const char* prop);
     X(CLASS_LIST,                "classList") \
     X(CLASS_NAME,                "className") \
     X(CLIENT_HEIGHT,             "clientHeight") \
+    X(CLIENT_LEFT,               "clientLeft") \
+    X(CLIENT_TOP,                "clientTop") \
     X(CLIENT_WIDTH,              "clientWidth") \
     X(COLS,                      "cols") \
     X(COMPAT_MODE,               "compatMode") \
@@ -6154,6 +6215,8 @@ static bool dom_form_named_getter_reserved_name(const char* prop);
     X(MULTIPLE,                  "multiple") \
     X(NAME,                      "name") \
     X(NAMESPACE_URI,             "namespaceURI") \
+    X(NATURAL_HEIGHT,            "naturalHeight") \
+    X(NATURAL_WIDTH,             "naturalWidth") \
     X(NEXT_ELEMENT_SIBLING,      "nextElementSibling") \
     X(NEXT_SIBLING,              "nextSibling") \
     X(NO_VALIDATE,               "noValidate") \
@@ -9256,15 +9319,14 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return dom_live_child_collection_bridge(elem, true);
     }
 
-    // length (for NodeList / HTMLCollection-like results)
-    if (prop_id == JS_DOM_PROP_LENGTH) {
-        int count = 0;
-        DomNode* child = dom_first_script_visible_child(elem);
-        while (child) {
-            if (child->is_element()) count++;
-            child = dom_next_script_visible_sibling(child);
-        }
-        return (Item){.item = i2it((int64_t)count)};
+    if (_is_tag(elem, "img") &&
+        (prop_id == JS_DOM_PROP_NATURAL_WIDTH || prop_id == JS_DOM_PROP_NATURAL_HEIGHT)) {
+        int natural_width = 0;
+        int natural_height = 0;
+        // The decoder owns intrinsic image state; an unavailable image exposes zero.
+        dom_engine_image_natural_size(elem, &natural_width, &natural_height);
+        return (Item){.item = i2it(prop_id == JS_DOM_PROP_NATURAL_WIDTH
+            ? natural_width : natural_height)};
     }
 
     // =========================================================================
@@ -9298,6 +9360,13 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
             bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
         }
         return (Item){.item = i2it((int64_t)llroundf(elem->height - bh))};
+    }
+    // CSSOM View §6: clientTop/clientLeft expose the border's start width.
+    if (prop_id == JS_DOM_PROP_CLIENT_TOP) {
+        return (Item){.item = i2it(dom_geometry_client_start_border(elem, true))};
+    }
+    if (prop_id == JS_DOM_PROP_CLIENT_LEFT) {
+        return (Item){.item = i2it(dom_geometry_client_start_border(elem, false))};
     }
 
     // offsetTop / offsetLeft — position relative to offsetParent
@@ -9334,15 +9403,13 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // scrollWidth / scrollHeight — total scrollable content size
     if (prop_id == JS_DOM_PROP_SCROLL_WIDTH) {
         dom_ensure_geometry_snapshot(elem->doc);
-        float cw = elem->content_width;
-        float bw = elem->width;
-        return (Item){.item = i2it((int64_t)(cw > bw ? cw : bw))};
+        // CSSOM View §6 includes descendant scrollable overflow, not merely
+        // the element's in-flow content box (e.g. negative grid gutters).
+        return (Item){.item = i2it((int64_t)dom_scrollable_extent(elem, true))};
     }
     if (prop_id == JS_DOM_PROP_SCROLL_HEIGHT) {
         dom_ensure_geometry_snapshot(elem->doc);
-        float ch = elem->content_height;
-        float bh = elem->height;
-        return (Item){.item = i2it((int64_t)(ch > bh ? ch : bh))};
+        return (Item){.item = i2it((int64_t)dom_scrollable_extent(elem, false))};
     }
 
     // scrollTop / scrollLeft — current scroll position
@@ -9394,12 +9461,14 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = s2it(uppercase_tag_name(elem->tag_name))};
     }
 
-    // HTMLStyleElement.sheet — associated CSSStyleSheet (doesn't require native_element)
-    if (prop_id == JS_DOM_PROP_SHEET && elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
-        return dom_cssom_get_style_element_sheet(elem_item);
+    // LinkStyle.sheet — associated CSSStyleSheet for <style> and stylesheet <link>.
+    if (prop_id == JS_DOM_PROP_SHEET &&
+        (_is_tag(elem, "style") || _is_tag(elem, "link"))) {
+        return dom_cssom_get_element_sheet(elem_item);
     }
-    if (prop_id == JS_DOM_PROP_DISABLED && _is_tag(elem, "style")) {
-        Item sheet = dom_cssom_get_style_element_sheet(elem_item);
+    if (prop_id == JS_DOM_PROP_DISABLED &&
+        (_is_tag(elem, "style") || _is_tag(elem, "link"))) {
+        Item sheet = dom_cssom_get_element_sheet(elem_item);
         Item disabled = dom_cssom_stylesheet_get_disabled(sheet);
         return disabled.item == ITEM_NULL ? (Item){.item = ITEM_FALSE} : disabled;
     }
@@ -10106,9 +10175,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         return dom_document_proxy_set_property(prop_name, value);
     }
 
-    if (prop_id == JS_DOM_PROP_DISABLED && _is_tag(elem, "style")) {
-        // HTML §4.2.6: style.disabled toggles its associated sheet, not an attribute.
-        Item sheet = dom_cssom_get_style_element_sheet(elem_item);
+    if (prop_id == JS_DOM_PROP_DISABLED &&
+        (_is_tag(elem, "style") || _is_tag(elem, "link"))) {
+        // LinkStyle.disabled toggles its associated sheet, not an attribute.
+        Item sheet = dom_cssom_get_element_sheet(elem_item);
         dom_cssom_stylesheet_set_disabled(sheet, js_is_truthy(value));
         return value;
     }
@@ -13418,9 +13488,11 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
     return true;
 }
 
-static bool dom_append_fragment_children(DomElement* parent,
-                                             DomElement* fragment) {
-    if (!parent || !fragment) return false;
+static bool dom_insert_fragment_children_before(DomElement* parent,
+                                                DomElement* fragment,
+                                                DomNode* ref_child) {
+    if (!parent || !fragment ||
+        (ref_child && ref_child->parent != (DomNode*)parent)) return false;
     DomNode* child = fragment->first_child;
     while (child) {
         DomNode* next = child->next_sibling;
@@ -13428,16 +13500,19 @@ static bool dom_append_fragment_children(DomElement* parent,
             return false;
         }
         if (child->is_element()) {
-            // DOM Standard: appending a DocumentFragment splices its children;
-            // keep the backing Element order aligned with the live DOM chain.
-            if (!dom_append_backed_element(parent, child)) return false;
+            // Appending retains its backing-aware move path: inserting at the
+            // computed end index bypasses its existing sibling-order repair.
+            bool inserted = ref_child
+                ? dom_insert_backed_element(parent, child, ref_child)
+                : dom_append_backed_element(parent, child);
+            if (!inserted) return false;
         } else if (child->is_text()) {
             dom_pre_remove_if_attached(child);
-            if (!dom_insert_backed_text(parent, child->as_text(), nullptr)) {
+            if (!dom_insert_backed_text(parent, child->as_text(), ref_child)) {
                 return false;
             }
         } else if (!dom_detach_dom_node(child) ||
-                   !((DomNode*)parent)->append_child(child)) {
+                   !((DomNode*)parent)->insert_before(child, ref_child)) {
             return false;
         }
         dom_post_insert((DomNode*)parent, child);
@@ -13446,6 +13521,13 @@ static bool dom_append_fragment_children(DomElement* parent,
     dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
                            (DomNode*)parent, (DomNode*)parent);
     return true;
+}
+
+static bool dom_append_fragment_children(DomElement* parent,
+                                         DomElement* fragment) {
+    // DOM Standard pre-insertion splices fragment children; append is the
+    // no-reference specialization shared by appendChild() and append().
+    return dom_insert_fragment_children_before(parent, fragment, nullptr);
 }
 
 static bool dom_insert_before_child(DomElement* parent, DomNode* child,
@@ -13768,20 +13850,9 @@ extern "C" Item dom_insert_before_bridge(void* parent_ptr, Item new_child_arg,
     if (new_child->is_element()) {
         DomElement* new_elem = new_child->as_element();
         if (new_elem->tag_name && strcmp(new_elem->tag_name, "#document-fragment") == 0) {
-            bool mutated = false;
-            DomNode* frag_child = new_elem->first_child;
-            while (frag_child) {
-                DomNode* next = frag_child->next_sibling;
-                if (!dom_prepare_cross_document_insertion(frag_child, elem)) {
-                    return ItemNull;
-                }
-                if (parent_node->insert_before(frag_child, ref_child)) {
-                    dom_post_insert(parent_node, frag_child);
-                    mutated = true;
-                }
-                frag_child = next;
+            if (!dom_insert_fragment_children_before(elem, new_elem, ref_child)) {
+                return ItemNull;
             }
-            if (mutated) dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, (DomNode*)elem, (DomNode*)elem);
             return new_child_arg;
         }
     }
@@ -13961,15 +14032,17 @@ extern "C" Item dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has_de
             if (child->is_element()) {
                 Item child_clone = dom_clone_node_bridge(child->as_element(), deep_arg, has_deep);
                 DomNode* cloned_child = (DomNode*)dom_unwrap_element(child_clone);
-                if (cloned_child) {
-                    ((DomNode*)clone)->append_child(cloned_child);
+                if (cloned_child && !dom_append_backed_element(clone, cloned_child)) {
+                    return ItemNull;
                 }
             } else if (child->is_text()) {
                 DomText* text = child->as_text();
-                String* s = text->native_string;
-                DomText* text_clone = dom_text_create(s, clone);
-                if (text_clone) {
-                    ((DomNode*)clone)->append_child((DomNode*)text_clone);
+                DomText* text_clone = DomText::create_detached_copy(
+                    clone->doc, text->text, text->length);
+                // Deep clones need matching DOM and Mark child order so later
+                // insertBefore()/prepend() can locate their reference child.
+                if (!text_clone || !dom_insert_backed_text(clone, text_clone, nullptr)) {
+                    return ItemNull;
                 }
             }
             child = child->next_sibling;
@@ -13989,6 +14062,18 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
     if (new_child == old_child) {
         // self-replace is tree-stable, but live ranges still observe the remove step.
         dom_pre_remove(old_child);
+        return old_child_arg;
+    }
+    if (new_child->is_element() &&
+        dom_is_document_fragment_element(new_child->as_element())) {
+        // DOM Standard replace inserts a fragment's children at the old
+        // child's position, then empties the fragment rather than retaining it.
+        if (!dom_insert_fragment_children_before(elem, new_child->as_element(), old_child)) {
+            return ItemNull;
+        }
+        dom_pre_remove(old_child);
+        if (!dom_remove_backed_child(elem, old_child)) return ItemNull;
+        dom_mutation_notify();
         return old_child_arg;
     }
     if (!dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
@@ -14217,6 +14302,15 @@ static Item dom_child_node_insert_relative(DomNode* node, Item* args, int argc,
             continue;
         }
         DomDocument* source = dom_node_owner_document(insertion);
+        if (insertion->is_element() &&
+            dom_is_document_fragment_element(insertion->as_element())) {
+            if (!dom_insert_fragment_children_before(parent, insertion->as_element(),
+                                                     viable_next)) {
+                mem_free(insertion_args);
+                return (Item){.item = ITEM_JS_UNDEFINED};
+            }
+            continue;
+        }
         if (source && source != parent->doc &&
             !dom_prepare_cross_document_insertion(insertion, parent)) {
             mem_free(insertion_args);
@@ -14371,6 +14465,14 @@ extern "C" Item dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)dom_unwrap_element(args[i]);
         if (child_node) {
+            if (child_node->is_element() &&
+                dom_is_document_fragment_element(child_node->as_element())) {
+                if (!dom_insert_fragment_children_before(elem,
+                                                         child_node->as_element(), ref)) {
+                    return (Item){.item = ITEM_JS_UNDEFINED};
+                }
+                continue;
+            }
             if (!dom_prepare_cross_document_insertion(child_node, elem)) {
                 return (Item){.item = ITEM_JS_UNDEFINED};
             }
