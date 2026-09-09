@@ -1,9 +1,4 @@
-// Typed text benchmark: line-level and word-level three-way merge of related texts.
-//
-// The load-bearing annotations are `string` on the line parameters: they take the
-// line comparisons off generic `fn_eq` and onto the inline pointer-identity path.
-// The line/word arrays stay untyped -- `string[]` has no native carrier, so
-// annotating them would only add a validator crossing.
+// T22-0 typed source: only line parameters carry String contracts.
 
 let merge_rounds = 11000
 let line_count = 768
@@ -39,7 +34,7 @@ pn make_variant(base, side: string) {
     lines
 }
 
-fn word_at(words, index: int) => if (index < len(words)) words[index] else ""
+fn word_at(words, index) => if (index < len(words)) words[index] else ""
 
 pn merge_words(base_line: string, left_line: string, right_line: string) {
     if (left_line == right_line) { return left_line }

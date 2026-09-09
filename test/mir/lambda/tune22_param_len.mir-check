@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "T22-2b: an immutable admitted int[] parameter reuses its entry length cache, including from a loop, rather than emitting a guarded load or fn_len call (D2.2.2, D3.3.1, S12.2.1).",
+  "checks": [
+    {
+      "in_func": "_tune22_param_len_#",
+      "expect": ["i64:40("],
+      "forbid": ["mlen_kind", "call\tfn_len_p, fn_len", "call\tfn_len_a_p, fn_len_a"]
+    }
+  ]
+}

@@ -807,6 +807,18 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
             return arg0;
         }
         break;
+    case SYS_RESULT_TEXT_SPLIT:
+        // fn_split/fn_split3 build String parts on their text and null-source
+        // paths. ArrayNum and open sources retain the generic array contract.
+        if (arg0->type_id == LMD_TYPE_STRING || arg0->type_id == LMD_TYPE_SYMBOL ||
+                arg0->type_id == LMD_TYPE_NULL) {
+            TypeArray* out = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
+                sizeof(TypeArray));
+            out->nested = &TYPE_STRING;
+            out->type_index = -1;
+            return (Type*)out;
+        }
+        break;
     case SYS_RESULT_REAL_TO_FLOAT:
         // Complex and vector arguments keep the row's open type: these builtins
         // are polymorphic and return the argument's own shape for them.
@@ -872,9 +884,28 @@ static bool sys_conversion_has_error_free_numeric_input(Type* type) {
     }
 }
 
+static bool sys_split_text_call_cannot_return_error(AstNode* arguments) {
+    AstNode* source = arguments;
+    AstNode* separator = source ? source->next : NULL;
+    AstNode* keep = separator ? separator->next : NULL;
+    if (!source || !separator || !source->type || !separator->type ||
+            lambda_type_accepts_error(source->type) ||
+            lambda_type_accepts_error(separator->type) ||
+            (keep && (!keep->type || lambda_type_accepts_error(keep->type)))) {
+        return false;
+    }
+    // A null source returns an empty list before delimiter dispatch. Incoming
+    // ItemError operands were rejected above, so this call is total.
+    if (source->type->type_id == LMD_TYPE_NULL) return true;
+    if (!is_text_type_id(source->type->type_id)) return false;
+    return separator->type->type_id == LMD_TYPE_NULL ||
+        is_text_type_id(separator->type->type_id);
+}
+
 static bool sys_func_call_may_return_error(Transpiler* tp, SysFuncInfo* info,
-        AstNode* first_arg) {
+        AstNode* arguments) {
     if (!info || !info->may_return_error) return false;
+    AstNode* first_arg = arguments;
     if (!first_arg || !first_arg->type) return true;
     if (sys_conversion_literal_is_error_free(tp, info, first_arg)) return false;
 
@@ -896,6 +927,9 @@ static bool sys_func_call_may_return_error(Transpiler* tp, SysFuncInfo* info,
             first_arg->type->type_id != LMD_TYPE_NUM_SIZED;
     case SYSFUNC_BINARY:
         return first_arg->type->type_id != LMD_TYPE_BINARY;
+    case SYSFUNC_SPLIT:
+    case SYSFUNC_SPLIT3:
+        return !sys_split_text_call_cannot_return_error(arguments);
     default:
         return true;
     }

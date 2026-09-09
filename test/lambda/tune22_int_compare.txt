@@ -1,0 +1,6 @@
+{
+  compact: [true, false, true, true],
+  absent: [true, false, true, false, false, true],
+  saturated: [true, false, true, false],
+  poisoned: [false, true, false, false]
+}

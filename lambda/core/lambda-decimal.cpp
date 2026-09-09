@@ -709,15 +709,16 @@ mpd_t* decimal_item_to_mpd(Item item, mpd_context_t* ctx) {
     return result;
 }
 
-int64_t decimal_mpd_to_int64(mpd_t* dec, mpd_context_t* ctx) {
+bool decimal_mpd_try_to_int64(mpd_t* dec, mpd_context_t* ctx, int64_t* out) {
     (void)ctx;
-    if (!dec) return INT64_ERROR;
+    if (!dec || !out) return false;
 
     // mpd_get_ssize raises SIGFPE when a value exceeds the host-sized range.
-    // This boundary must report the legacy native error sentinel instead.
     uint32_t status = 0;
     mpd_ssize_t result = mpd_qget_ssize(dec, &status);
-    return (status & MPD_Invalid_operation) ? INT64_ERROR : (int64_t)result;
+    if (status & MPD_Invalid_operation) return false;
+    *out = (int64_t)result;
+    return true;
 }
 
 double decimal_mpd_to_double(mpd_t* dec, mpd_context_t* ctx) {
@@ -1226,23 +1227,22 @@ Item decimal_trunc(Item a) {
 #endif
 
 #ifndef LAMBDA_DECIMAL_RUNTIME_IMPLEMENTATION
-// Convert decimal Item to int64 (truncates toward zero)
-int64_t decimal_to_int64(Item item) {
-    if (!decimal_is_any(item)) return 0;
+// Convert decimal Item to int64 (truncates toward zero).
+bool decimal_try_to_int64(Item item, int64_t* out) {
+    if (!out || !decimal_is_any(item)) return false;
     Decimal* dec_ptr = item.get_decimal();
-    if (!dec_ptr || !dec_ptr->dec_val) return 0;
+    if (!dec_ptr || !dec_ptr->dec_val) return false;
     
     mpd_context_t* dec_ctx = dec_ptr->unlimited ?
         decimal_unlimited_context() : decimal_fixed_context();
     
     // truncate first, then convert
     mpd_t* truncated = mpd_new(dec_ctx);
-    if (!truncated) return 0;
+    if (!truncated) return false;
     mpd_trunc(truncated, dec_ptr->dec_val, dec_ctx);
-    
-    int64_t result = decimal_mpd_to_int64(truncated, dec_ctx);
+    bool converted = decimal_mpd_try_to_int64(truncated, dec_ctx, out);
     mpd_del(truncated);
-    return result;
+    return converted;
 }
 
 bool decimal_to_int64_exact(Item item, int64_t* out) {

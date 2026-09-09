@@ -1,10 +1,4 @@
-// Typed text benchmark: repeated naive, KMP, and Boyer-Moore substring searches.
-//
-// Annotations are on `pn` parameters only. A parameter contract pins the
-// int-array carrier once at entry, which is where the untyped port re-derives it
-// on every element access. Return contracts and typed int locals were measured
-// and are deliberately absent: both are re-admitted per crossing, and these
-// functions return from inside their hot loop.
+// T22-0 typed source: only search-function parameters carry int[] contracts.
 
 let search_rounds = 1536
 let modulus = 1000000007
@@ -27,7 +21,7 @@ let patterns = [
     "missing-marker", "record-2047 omega"
 ]
 
-pn to_codes(text: string) {
+pn to_codes(text) {
     var codes = []
     var index = 0
     while (index < len(text)) {

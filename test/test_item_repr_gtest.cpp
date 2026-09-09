@@ -638,7 +638,12 @@ TEST(ItemRepresentation, Int64AlwaysUsesPointerBackedPayload) {
         EXPECT_EQ((const int64_t*)(uintptr_t)item.int64_ptr, &value);
         EXPECT_EQ(item.get_int64(), value);
         EXPECT_EQ(it2l(item), value);
+        int64_t extracted = 0;
+        EXPECT_TRUE(item_try_to_int64(item, &extracted));
+        EXPECT_EQ(extracted, value);
     }
+    int64_t invalid = 0;
+    EXPECT_FALSE(item_try_to_int64(ItemNull, &invalid));
 }
 
 TEST(ItemRepresentation, Uint64AlwaysUsesPointerBackedPayload) {

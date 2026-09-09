@@ -42,8 +42,8 @@ The 2026-09-09 text additions follow the same rule. `text_search`,
 `prettier_ast.json` fixture as a string literal (the pattern `awfy/c2mir/json.c`
 already uses for its input) and parses it into typed `Node` structs once, then
 rebuilds the document IR on every one of the 256 iterations; its output is
-byte-identical to the Lambda port's, which is why its expected result is the
-shared `text/prettier_ast.txt` golden rather than a one-line marker. That
+byte-identical to the Lambda port's, and both sides are pinned by the same
+`prettier_ast: CHECKSUM:56483873` marker that the other text rows use. That
 one-off parse is the only accounting difference between the two: the Lambda
 port's measured region excludes its own `input()` call, while the C timer wraps
 the whole body. It is well under 1% of the run.

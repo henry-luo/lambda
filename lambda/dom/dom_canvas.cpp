@@ -10,6 +10,8 @@
  */
 
 #include "../js/js_runtime.h"
+#include "dom.h"
+#include "dom_canvas.h"
 #include "realm/dom_realm.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_class.h"
@@ -55,6 +57,137 @@ static JsCanvasRuntimeState* canvas_runtime_state_ensure(void) {
     // directly and never contends with another JS realm.
     return (JsCanvasRuntimeState*)context_capsule_ensure(
         context, CONTEXT_CAPSULE_DOM_CANVAS, &js_canvas_capsule_ops);
+}
+
+static bool js_canvas_is_2d_context(Item item) {
+    return get_type_id(item) == LMD_TYPE_MAP &&
+        js_class_id(item) == JS_CLASS_CANVAS_RENDERING_CONTEXT_2D;
+}
+
+static Item js_canvas_context_noop(Item callee, Item this_value,
+                                   Item* args, int argc, uint64_t* result_home) {
+    (void)callee;
+    (void)this_value;
+    (void)args;
+    (void)argc;
+    (void)result_home;
+    return make_js_undefined();
+}
+
+static Item js_canvas_measure_text(Item callee, Item this_value,
+                                   Item* args, int argc, uint64_t* result_home) {
+    (void)callee;
+    (void)result_home;
+    RootFrame roots(3);
+    Rooted<Item> context_root(roots, this_value);
+    Rooted<Item> text_root(roots, argc > 0 && args
+        ? js_to_string(args[0]) : js_name_item("undefined"));
+    Rooted<Item> metrics_root(roots, js_new_object());
+    if (item_is_error(text_root.get())) return text_root.get();
+
+    String* text = get_type_id(text_root.get()) == LMD_TYPE_STRING
+        ? it2s(text_root.get()) : nullptr;
+    float width = 0.0f;
+    Item handle_id = dom_realm_get_name(context_root.get(), "__font_handle_id");
+    JsCanvasRuntimeState* state = canvas_runtime_state();
+    if (text && get_type_id(handle_id) == LMD_TYPE_INT && state) {
+        int id = (int)it2i(handle_id); // INT_CAST_OK: FontHandle pool index
+        if (id >= 0 && id < state->font_handle_count && state->font_handles[id]) {
+            width = font_measure_text(state->font_handles[id], text->chars,
+                text->len).width;
+        }
+    }
+    if (text && width <= 0.0f) {
+        width = (float)text->len * 8.0f;
+    }
+    dom_realm_set_name(metrics_root.get(), "width", flt2it(width));
+    return metrics_root.get();
+}
+
+static void js_canvas_install_context_methods(Item context) {
+    struct CanvasMethodSpec {
+        const char* name;
+        JsNativeCallBody body;
+        int formal_length;
+    };
+    static const CanvasMethodSpec methods[] = {
+        {"scale", js_canvas_context_noop, 2},
+        {"translate", js_canvas_context_noop, 2},
+        {"rotate", js_canvas_context_noop, 1},
+        {"beginPath", js_canvas_context_noop, 0},
+        {"arc", js_canvas_context_noop, 6},
+        {"stroke", js_canvas_context_noop, 0},
+        {"save", js_canvas_context_noop, 0},
+        {"fillRect", js_canvas_context_noop, 4},
+        {"restore", js_canvas_context_noop, 0},
+        {"clearRect", js_canvas_context_noop, 4},
+        {"measureText", js_canvas_measure_text, 1},
+    };
+    RootFrame roots(2);
+    Rooted<Item> context_root(roots, context);
+    Rooted<Item> method_root(roots, ItemNull);
+    for (int i = 0; i < (int)(sizeof(methods) / sizeof(methods[0])); i++) {
+        method_root.set(js_new_native_payload_function(methods[i].body, 0,
+            methods[i].formal_length));
+        dom_realm_set_name(context_root.get(), methods[i].name, method_root.get());
+    }
+}
+
+extern "C" void js_canvas_ctx_set_font(Item ctx_obj, Item font_val);
+
+static Item js_canvas_2d_context_for(Item canvas) {
+    RootFrame roots(7);
+    Rooted<Item> canvas_root(roots, canvas);
+    Rooted<Item> cached_root(roots,
+        dom_realm_get_name(canvas_root.get(), "__lambda_canvas_2d_context"));
+    Rooted<Item> context_root(roots, ItemNull);
+    Rooted<Item> font_root(roots, js_name_item("10px sans-serif"));
+    Rooted<Item> global_root(roots, js_get_global_this());
+    Rooted<Item> constructor_root(roots, ItemNull);
+    Rooted<Item> prototype_root(roots, ItemNull);
+    if (js_canvas_is_2d_context(cached_root.get())) return cached_root.get();
+
+    context_root.set(dom_realm_new_object_of_class(
+        JS_CLASS_CANVAS_RENDERING_CONTEXT_2D));
+    if (!js_canvas_is_2d_context(context_root.get())) return ItemNull;
+    constructor_root.set(dom_realm_get_name(global_root.get(),
+        "CanvasRenderingContext2D"));
+    prototype_root.set(dom_realm_get_name(constructor_root.get(), "prototype"));
+    if (get_type_id(prototype_root.get()) == LMD_TYPE_MAP) {
+        // The branded native context still needs its realm-owned WebIDL prototype.
+        js_set_prototype(context_root.get(), prototype_root.get());
+    }
+    dom_realm_set_name(context_root.get(), "canvas", canvas_root.get());
+    js_canvas_ctx_set_font(context_root.get(), font_root.get());
+    // Canvas commands do not affect DOM geometry; retain this narrow context
+    // so chart libraries can finish their structural DOM updates.
+    js_canvas_install_context_methods(context_root.get());
+    dom_realm_set_name(canvas_root.get(), "__lambda_canvas_2d_context",
+        context_root.get());
+    return context_root.get();
+}
+
+static Item js_canvas_get_context(Item callee, Item this_value,
+                                  Item* args, int argc, uint64_t* result_home) {
+    (void)callee;
+    (void)result_home;
+    RootFrame roots(2);
+    Rooted<Item> canvas_root(roots, this_value);
+    Rooted<Item> identifier_root(roots, argc > 0 && args
+        ? js_to_string(args[0]) : js_name_item("undefined"));
+    if (!dom_is_html_canvas_element(canvas_root.get()) &&
+        !(get_type_id(canvas_root.get()) == LMD_TYPE_MAP &&
+          js_class_id(canvas_root.get()) == JS_CLASS_OFFSCREEN_CANVAS)) {
+        return dom_realm_throw_type_error("Illegal invocation");
+    }
+    if (item_is_error(identifier_root.get())) return identifier_root.get();
+    String* identifier = get_type_id(identifier_root.get()) == LMD_TYPE_STRING
+        ? it2s(identifier_root.get()) : nullptr;
+    if (!identifier || identifier->len != 2 ||
+        memcmp(identifier->chars, "2d", 2) != 0) {
+        return ItemNull;
+    }
+    return js_canvas_2d_context_for(canvas_root.get());
 }
 
 static FontContext* canvas_get_font_context() {
@@ -231,17 +364,43 @@ static FontHandle* parse_css_font_shorthand(const char* font_str, int len) {
 // ============================================================================
 
 extern "C" Item js_offscreen_canvas_new(Item width_arg, Item height_arg) {
-    Item obj = dom_realm_new_object_of_class(JS_CLASS_OFFSCREEN_CANVAS);
+    RootFrame roots(2);
+    Rooted<Item> obj_root(roots,
+        dom_realm_new_object_of_class(JS_CLASS_OFFSCREEN_CANVAS));
+    Rooted<Item> method_root(roots, js_new_native_payload_function(
+        js_canvas_get_context, 0, 1));
 
     // store width/height
     int64_t w = (get_type_id(width_arg) == LMD_TYPE_INT) ? it2i(width_arg) : 300;
     int64_t h = (get_type_id(height_arg) == LMD_TYPE_INT) ? it2i(height_arg) : 150;
     Item wk = js_name_item("width");
     Item hk = js_name_item("height");
-    dom_realm_set(obj, wk, (Item){.item = i2it(w)});
-    dom_realm_set(obj, hk, (Item){.item = i2it(h)});
+    dom_realm_set(obj_root.get(), wk, (Item){.item = i2it(w)});
+    dom_realm_set(obj_root.get(), hk, (Item){.item = i2it(h)});
+    dom_realm_set_name(obj_root.get(), "getContext", method_root.get());
 
-    return obj;
+    return obj_root.get();
+}
+
+extern "C" void dom_canvas_install_html_interface(Item html_canvas_prototype) {
+    if (get_type_id(html_canvas_prototype) != LMD_TYPE_MAP) return;
+    RootFrame roots(2);
+    Rooted<Item> prototype_root(roots, html_canvas_prototype);
+    Rooted<Item> method_root(roots, js_new_native_payload_function(
+        js_canvas_get_context, 0, 1));
+    dom_realm_set_name(prototype_root.get(), "getContext", method_root.get());
+}
+
+extern "C" void js_canvas_install_offscreen_canvas_interface(Item constructor) {
+    if (!js_is_callable(constructor)) return;
+    RootFrame roots(2);
+    Rooted<Item> constructor_root(roots, constructor);
+    Rooted<Item> prototype_root(roots,
+        dom_realm_get_name(constructor_root.get(), "prototype"));
+    if (get_type_id(prototype_root.get()) != LMD_TYPE_MAP) return;
+    Rooted<Item> method_root(roots, js_new_native_payload_function(
+        js_canvas_get_context, 0, 1));
+    dom_realm_set_name(prototype_root.get(), "getContext", method_root.get());
 }
 
 // ============================================================================

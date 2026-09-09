@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "S9.2.2/D8.4.1v2: a member-plus-literal-index var PLACE borrow uses the bounded three-key descriptor, avoiding the temporary Lambda path array while preserving COW isolation.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "expect": [
+        "call\tcow_path_borrow_fixed"
+      ],
+      "forbid": [
+        "call\tcow_path_borrow_p, cow_path_borrow,"
+      ]
+    }
+  ]
+}

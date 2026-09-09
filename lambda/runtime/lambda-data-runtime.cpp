@@ -2965,6 +2965,26 @@ extern "C" Item fn_string_ascii_at(Item str_item, int64_t index) {
     if (str->is_ascii) return string_ascii_at(str, index);
     return item_at(str_item, index);
 }
+
+extern "C" uint8_t fn_string_char_eq_ascii(Item str_item, int64_t index,
+        uint8_t expected) {
+    String* str = str_item.get_safe_string();
+    if (!str || index < 0) return 0;
+    if (str->is_ascii) {
+        return (uint64_t)index < str->len &&
+            (uint8_t)str->chars[index] == expected;
+    }
+
+    // Match item_at's UTF-8 indexing without constructing an intermediate
+    // one-character String solely to compare it with an ASCII literal.
+    size_t byte_offset = str_utf8_char_to_byte(str->chars, str->len,
+        (size_t)index);
+    if (byte_offset == STR_NPOS) return 0;
+    size_t char_len = str_utf8_char_len((unsigned char)str->chars[byte_offset]);
+    if (char_len == 0) char_len = 1;
+    return byte_offset + char_len <= str->len && char_len == 1 &&
+        (uint8_t)str->chars[byte_offset] == expected;
+}
 // Get attribute by name from an Item (for map/element attribute access)
 Item item_attr(Item data, const char* key) {
     if (!data.item || !key) { return ItemNull; }

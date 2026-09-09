@@ -1001,11 +1001,9 @@ static Item eval_native_sys_item_call(const SysFuncInfo* info, const Item* args,
     case SYSFUNC_BNOT:
         return int_result ? int2it_i64(fn_bnot(_barg(args[0]))) : fn_bnot_item(args[0]);
     case SYSFUNC_SHL:
-        return int_result ? int2it_i64_or_error(fn_shl(_barg(args[0]), _barg(args[1])))
-            : fn_shl_item(args[0], args[1]);
+        return fn_shl_item(args[0], args[1]);
     case SYSFUNC_SHR:
-        return int_result ? int2it_i64_or_error(fn_shr(_barg(args[0]), _barg(args[1])))
-            : fn_shr_item(args[0], args[1]);
+        return fn_shr_item(args[0], args[1]);
     default:
         return ItemError;
     }
@@ -1064,12 +1062,6 @@ static Item eval_sys_call(InterpFrame* f, SysFuncInfo* info, const Item* args,
         return (Item){.item = i2it(SYS_DISPATCH(int64_t))};
     }
     case LMD_TYPE_INT64:
-        // int64() returns a raw int64_t even when its semantic type is
-        // int64 | error; INT64_ERROR is its out-of-band failure signal, so the
-        // boundary boxing must be the error-aware one lowering uses.
-        if (info->fn == SYSFUNC_INT64) {
-            return box_int64_result_or_error(SYS_DISPATCH(int64_t));
-        }
         return box_int64_value(SYS_DISPATCH(int64_t));
     case LMD_TYPE_BOOL: {
         // Bool-returning helpers use BOOL_ERROR as their third state. Treating

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "T22-6: a String character equality against one ASCII byte calls the allocation-free character comparator, while Unicode and absence retain their source semantics (S5.1.1/2, D8.4.1v2).",
+  "checks": [
+    {
+      "in_func": "_char_is_zero_#",
+      "expect": ["call\tfn_string_char_eq_ascii_p, fn_string_char_eq_ascii"],
+      "forbid": ["call\tfn_string_ascii_at_p, fn_string_ascii_at", "call\tfn_eq_p, fn_eq", "call\tfn_str_eq_ptr_p, fn_str_eq_ptr"]
+    }
+  ]
+}

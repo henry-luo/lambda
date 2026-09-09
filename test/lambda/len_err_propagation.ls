@@ -11,8 +11,8 @@
 // code. Answering 0 would have put a failed computation on the same branch as
 // an empty collection.
 //
-// Regression guard for the retired INT64_ERROR sentinel: len(err) once returned
-// INT64_MAX, which a double lane cannot reject, so a piped error took it as an
+// Regression guard for the retired numeric error marker: len(err) once returned
+// a large value, which a double lane cannot reject, so a piped error took it as an
 // iteration bound and attempted repeated 2 GB allocations.
 
 fn fail() int^ { raise error("boom") }

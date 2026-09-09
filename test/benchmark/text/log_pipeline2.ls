@@ -1,41 +1,35 @@
-// Typed text benchmark: parse, filter, group, and aggregate mixed log records.
-//
-// `key: string` on set_field is the load-bearing annotation: its eight-arm
-// `key == "literal"` dispatch is the whole cost of field assignment, and a string
-// parameter takes each arm off generic `fn_eq`. The record and group maps stay
-// untyped -- they are handed to `var` parameters, where a named contract would
-// reify the packed layout on every construction.
+// T22-0 typed source: only text-token and line parameters carry String contracts.
 
 let log_rounds = 180
 let log_count = 12000
 let modulus = 1000000007
 
-fn pad2(value: int) {
+fn pad2(value) {
     if (value < 10) { "0" ++ string(value) }
     else { string(value) }
 }
 
-fn log_level(index: int) {
+fn log_level(index) {
     if (index % 13 == 0) { "ERROR" }
     else if (index % 5 == 0) { "WARN" }
     else { "INFO" }
 }
 
-fn log_status(index: int) {
+fn log_status(index) {
     if (index % 19 == 0) { 503 }
     else if (index % 7 == 0) { 404 }
     else { 200 }
 }
 
-fn log_route(index: int) {
+fn log_route(index) {
     if (index % 2 == 0) { "/v1/items" } else { "/v1/search" }
 }
 
-fn log_message(index: int) {
+fn log_message(index) {
     if (index % 11 == 0) { "retry-scheduled" } else { "request-complete" }
 }
 
-fn make_log_line(index: int) {
+fn make_log_line(index) {
     let hour = pad2(index % 24)
     let minute = pad2(index % 60)
     let second = pad2((index * 7) % 60)

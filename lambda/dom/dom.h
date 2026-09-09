@@ -138,6 +138,9 @@ bool dom_activate_popover(void* popover, int action);
  */
 Item dom_wrap_element(void* dom_elem);
 
+/** Return whether an item is a wrapped HTML canvas element. */
+bool dom_is_html_canvas_element(Item item);
+
 // Insert through the Mark-aware DOM mutation path. Native clients that create
 // detached DOM nodes must use these bridges so the view tree and the backing
 // Lambda Element stay in lockstep (D5.3.3).

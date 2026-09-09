@@ -5411,28 +5411,22 @@ static void apply_border_side_shorthand(LayoutContext* lycon, ViewSpan* span, Cs
     }
     MultiValue parts = {0};
     set_multi_value(lycon, &parts, value);
-    // Physical and logical aliases must share cascade and none/hidden width semantics.
-    bool style_applied = parts.style && specificity >= *refs.style_specificity;
-    bool hidden_style = false;
+    // CSS Backgrounds & Borders 3 §3.4: omitted shorthand components reset to
+    // their initial values, so a width-only `border: 0` clears a UA border style.
+    bool style_applied = specificity >= *refs.style_specificity;
     if (style_applied) {
-        *refs.style = parts.style->data.keyword;
+        *refs.style = parts.style ? parts.style->data.keyword : CSS_VALUE_NONE;
         *refs.style_specificity = specificity;
-        hidden_style = *refs.style == CSS_VALUE_NONE || *refs.style == CSS_VALUE_HIDDEN;
-        if (specificity >= *refs.width_specificity && (hidden_style || !parts.length)) {
-            *refs.width = hidden_style ? 0.0f : 3.0f;
-            *refs.width_specificity = specificity;
-        }
     }
-    if (parts.length && !hidden_style && specificity >= *refs.width_specificity) {
-        *refs.width = resolve_length_value(lycon, radiant_border_width_property(side), parts.length);
+    if (specificity >= *refs.width_specificity) {
+        *refs.width = parts.length
+            ? resolve_length_value(lycon, radiant_border_width_property(side), parts.length)
+            : 3.0f;
         *refs.width_specificity = specificity;
     }
-    if (parts.color && specificity >= *refs.color_specificity) {
-        *refs.color = resolve_color_value(lycon, parts.color);
-        *refs.color_specificity = specificity;
-    } else if (style_applied && *refs.style != CSS_VALUE_NONE &&
-               *refs.style != CSS_VALUE_HIDDEN && specificity >= *refs.color_specificity) {
-        *refs.color = get_current_color(lycon);
+    if (specificity >= *refs.color_specificity) {
+        *refs.color = parts.color ? resolve_color_value(lycon, parts.color)
+            : get_current_color(lycon);
         *refs.color_specificity = specificity;
     }
 }
@@ -7719,13 +7713,17 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             if (value->type == CSS_VALUE_TYPE_LIST) {
                 resolve_origin_list(lycon, CSS_PROPERTY_PERSPECTIVE_ORIGIN, value,
                                     true, false,
-                                    &span->transform->perspective_origin_x, nullptr,
-                                    &span->transform->perspective_origin_y, nullptr,
+                                    &span->transform->perspective_origin_x,
+                                    &span->transform->perspective_origin_x_percent,
+                                    &span->transform->perspective_origin_y,
+                                    &span->transform->perspective_origin_y_percent,
                                     nullptr);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 span->transform->perspective_origin_x = (float)value->data.percentage.value;
+                span->transform->perspective_origin_x_percent = true;
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_CENTER) {
                 span->transform->perspective_origin_x = 50.0f;
+                span->transform->perspective_origin_x_percent = true;
             }
             break;
         }

@@ -1322,21 +1322,30 @@ static bool view_chain_has_3d_transform(View* view) {
 static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
                                          float* width, float* height) {
     RdtMatrix4 accumulated = rdt_matrix4_identity();
-    View* chain[256];
-    int count = 0;
-    for (View* current = view; current && count < 256;
-         current = current->parent_view()) {
-        chain[count++] = current;
-    }
+    int depth = 0;
+    for (View* current = view; current && depth < 256;
+         current = current->parent_view(), depth++) {
+        if (!current->is_block()) continue;
+        ViewBlock* block = lam::view_require_block(current);
+        const TransformProp* transform = block->transform;
 
-    for (int i = 0; i < count; i++) {
-        View* current = chain[i];
-        if (current->is_block() && i > 0) {
-            ViewBlock* parent = lam::view_require_block(current);
-            if (!parent->transform ||
-                parent->transformp()->transform_style != CSS_VALUE_PRESERVE_3D) {
-                // CSS Transforms 2 §4.1.3: a flat ancestor projects descendant
-                // depth into its plane before the ancestor transform is applied.
+        if (depth > 0) {
+            if (transform && transform->perspective > 0.0f) {
+                float parent_x = 0.0f;
+                float parent_y = 0.0f;
+                calculate_absolute_position(
+                    static_cast<View*>(block), nullptr, &parent_x, &parent_y);
+                float origin_x = parent_x + radiant::transform_perspective_origin_offset(
+                    transform, block->width, true);
+                float origin_y = parent_y + radiant::transform_perspective_origin_offset(
+                    transform, block->height, false);
+                RdtMatrix4 perspective = radiant::compute_parent_perspective_matrix_3d(
+                    transform->perspective, origin_x, origin_y);
+                accumulated = rdt_matrix4_multiply(&perspective, &accumulated);
+            }
+            if (!transform || transform->transform_style != CSS_VALUE_PRESERVE_3D) {
+                // CSS Transforms 2 §4.1.3: project descendant depth after the
+                // parent's perspective and before the parent's own transform.
                 RdtMatrix4 flatten = rdt_matrix4_identity();
                 flatten.values[8] = 0.0f;
                 flatten.values[9] = 0.0f;
@@ -1346,34 +1355,26 @@ static void apply_3d_transform_to_bounds(View* view, float* x, float* y,
             }
         }
 
-        RdtMatrix4 local = rdt_matrix4_identity();
-        if (current->is_block()) {
-            ViewBlock* block = lam::view_require_block(current);
-            if (block->transform && block->transformp()->functions) {
-                const TransformProp* transform = block->transformp();
-                float origin_x = transform->origin_x_percent
-                    ? block->width * transform->origin_x / 100.0f
-                    : transform->origin_x;
-                float origin_y = transform->origin_y_percent
-                    ? block->height * transform->origin_y / 100.0f
-                    : transform->origin_y;
-                local = radiant::compute_transform_matrix_3d(
-                    transform->functions, block->width, block->height,
-                    origin_x, origin_y, transform->origin_z);
-            }
+        if (transform && transform->functions) {
+            float block_x = 0.0f;
+            float block_y = 0.0f;
+            calculate_absolute_position(
+                static_cast<View*>(block), nullptr, &block_x, &block_y);
+            float origin_x = block_x + (transform->origin_x_percent
+                ? block->width * transform->origin_x / 100.0f
+                : transform->origin_x);
+            float origin_y = block_y + (transform->origin_y_percent
+                ? block->height * transform->origin_y / 100.0f
+                : transform->origin_y);
+            RdtMatrix4 local = radiant::compute_transform_matrix_3d(
+                transform->functions, block->width, block->height,
+                origin_x, origin_y, transform->origin_z);
+            accumulated = rdt_matrix4_multiply(&local, &accumulated);
         }
-        // Inline fragments position their own CSSOM box but do not establish a
-        // coordinate space for descendants. Match calculate_absolute_position:
-        // retain the target's local offset, then accumulate block ancestors only.
-        RdtMatrix4 offset = (i == 0 || current->is_block())
-            ? rdt_matrix4_translate(current->x, current->y, 0.0f)
-            : rdt_matrix4_identity();
-        RdtMatrix4 local_to_parent = rdt_matrix4_multiply(&offset, &local);
-        accumulated = rdt_matrix4_multiply(&local_to_parent, &accumulated);
     }
 
-    float local_x[4] = {0.0f, *width, *width, 0.0f};
-    float local_y[4] = {0.0f, 0.0f, *height, *height};
+    float local_x[4] = {*x, *x + *width, *x + *width, *x};
+    float local_y[4] = {*y, *y, *y + *height, *y + *height};
     float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;
     for (int i = 0; i < 4; i++) {
         float point_x = 0.0f, point_y = 0.0f, point_z = 0.0f, point_w = 1.0f;

@@ -1376,6 +1376,8 @@ typedef struct TransformProp {
     float perspective;               // perspective distance (from parent)
     float perspective_origin_x;      // perspective-origin X (default: 50%)
     float perspective_origin_y;      // perspective-origin Y (default: 50%)
+    bool perspective_origin_x_percent;
+    bool perspective_origin_y_percent;
     CssEnum transform_style;         // flat or preserve-3d
     CssEnum backface_visibility;     // visible or hidden
 } TransformProp;
@@ -3645,6 +3647,18 @@ extern RdtMatrix4 compute_transform_matrix_3d(TransformFunction* functions,
                                               float width, float height,
                                               float origin_x, float origin_y,
                                               float origin_z = 0.0f);
+extern RdtMatrix4 compute_parent_perspective_matrix_3d(float distance,
+                                                        float origin_x, float origin_y);
+
+inline float transform_perspective_origin_offset(const TransformProp* transform,
+                                                 float extent, bool horizontal) {
+    if (!transform) return 0.0f;
+    float origin = horizontal ? transform->perspective_origin_x
+                              : transform->perspective_origin_y;
+    bool is_percent = horizontal ? transform->perspective_origin_x_percent
+                                 : transform->perspective_origin_y_percent;
+    return is_percent ? extent * origin / 100.0f : origin;
+}
 extern bool has_transform(DomElement* elem);
 extern void transform_point(float& x, float& y, const RdtMatrix& m);
 

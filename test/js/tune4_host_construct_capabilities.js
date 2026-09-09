@@ -9,6 +9,8 @@ function constructable(fn, args) {
 
 const xhr = XMLHttpRequest;
 xhr.name = "RenamedXHR";
+const offscreen_canvas = new OffscreenCanvas(1, 1);
+const offscreen_context = offscreen_canvas.getContext("2d");
 
 const results = [
     constructable(xhr),
@@ -22,6 +24,8 @@ const results = [
     constructable(File, [["x"], "x.txt"]),
     constructable(AbortController),
     constructable(AbortSignal),
-    constructable(matchMedia, ["screen"])
+    constructable(matchMedia, ["screen"]),
+    offscreen_context.canvas === offscreen_canvas,
+    typeof offscreen_context.measureText === "function"
 ];
 console.log(results.join(" "));

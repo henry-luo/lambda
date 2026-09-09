@@ -5226,8 +5226,8 @@ int64_t fn_len(Item item) {
             // result is now cached in path_val->result
             if (resolved.item == ItemError.item) {
                 // 7.6: `len` is total -- an unresolvable path iterates zero
-                // times. Returning INT64_ERROR here leaked the sentinel out of
-                // the one function the spec guarantees never fails.
+                // times. Returning an error here would violate the one function
+                // the spec guarantees never fails.
                 size = 0;
                 break;
             }
@@ -5247,9 +5247,8 @@ int64_t fn_len(Item item) {
         // is what distinguishes it from `len(null)` = 0. The parameter is
         // `any \ error` (7.7), so an error is rejected at the call boundary and
         // never reaches this body; the arm is a defensive floor. It answers 0
-        // rather than the retired INT64_ERROR sentinel, which a double lane
-        // cannot reject (INT64_MAX is an ordinary int under C16) and which once
-        // reached callers as a real length -- `err |> ~` took it as an
+        // rather than a numeric error marker, which a double lane cannot reject
+        // and which once reached callers as a real length -- `err |> ~` took it as an
         // iteration bound and attempted repeated 2 GB allocations.
         size = 0;
         break;
@@ -6050,17 +6049,79 @@ Item fn_url_resolve(Item base_item, Item relative_item) {
     return {.item = s2it(result)};
 }
 
-static String* split_heap_string_slice(Rooted<Item>& rooted_source, size_t offset, size_t len) {
+static bool text_item_is_ascii(Item item) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_STRING) {
+        String* string = item.get_safe_string();
+        return string && string->is_ascii;
+    }
+    if (type == LMD_TYPE_SYMBOL) {
+        const char* chars = item.get_chars();
+        uint32_t len = item.get_len();
+        return len == 0 || (chars && str_is_ascii(chars, len));
+    }
+    return false;
+}
+
+static String* split_heap_string_slice(Rooted<Item>& rooted_source, size_t offset,
+        size_t len, bool source_is_ascii) {
     String* part = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
     // The allocation can compact the source string, so reload its interior
     // character address from the exact root before examining or copying it.
     const char* chars = rooted_source.get().get_chars() + offset;
     part->len = (uint32_t)len;
     part->flags = 0;
-    part->is_ascii = str_is_ascii(chars, len) ? 1 : 0;
+    // A source's false bit is conservative, but its true bit proves every
+    // substring ASCII. This avoids re-scanning each copied split segment.
+    part->is_ascii = source_is_ascii ? 1 : 0;
     memcpy(part->chars, chars, len);
     part->chars[len] = '\0';
     return part;
+}
+
+static int64_t split_literal_match_count(const char* chars, size_t chars_len,
+        const char* separator, size_t separator_len) {
+    if (!chars || !separator || separator_len == 0) return 0;
+    int64_t count = 0;
+    size_t pos = 0;
+    while (pos + separator_len <= chars_len) {
+        if (memcmp(chars + pos, separator, separator_len) == 0) {
+            count++;
+            pos += separator_len;
+        } else {
+            pos++;
+        }
+    }
+    return count;
+}
+
+static int64_t split_whitespace_part_count(const char* chars, size_t chars_len) {
+    int64_t count = 0;
+    size_t pos = 0;
+    while (pos < chars_len) {
+        while (pos < chars_len && (chars[pos] == ' ' || chars[pos] == '\t' ||
+                chars[pos] == '\n' || chars[pos] == '\r' || chars[pos] == '\f' ||
+                chars[pos] == '\v')) {
+            pos++;
+        }
+        if (pos == chars_len) break;
+        count++;
+        while (pos < chars_len && chars[pos] != ' ' && chars[pos] != '\t' &&
+                chars[pos] != '\n' && chars[pos] != '\r' && chars[pos] != '\f' &&
+                chars[pos] != '\v') {
+            pos++;
+        }
+    }
+    return count;
+}
+
+static int64_t split_utf8_part_count(const char* chars, size_t chars_len) {
+    int64_t count = 0;
+    for (size_t pos = 0; pos < chars_len; count++) {
+        int char_len = (int)str_utf8_char_len((unsigned char)chars[pos]);
+        pos += char_len > 0 ? (size_t)char_len : 1;
+    }
+    return count;
 }
 
 static bool literal_type_pattern_item(Item type_item, Item* literal_item);
@@ -6134,6 +6195,7 @@ Item fn_split(Item str_item, Item sep_item) {
     List* result = list();
     rooted_result.set(result);
     result->is_content = 1;
+    bool source_is_ascii = text_item_is_ascii(rooted_str.get());
 
     if (!rooted_str.get().get_chars() || str_len == 0) {
         // S17.1.1 (ECMAScript rule): an empty subject yields [] when the
@@ -6141,7 +6203,8 @@ Item fn_split(Item str_item, Item sep_item) {
         // Python-shaped whitespace form which has no JS analogue — and [""]
         // otherwise, matching "".split(",") === [""].
         if (!null_sep && sep_len != 0) {
-            String* only = split_heap_string_slice(rooted_str, 0, 0);
+            (void)array_reserve_append_slots((Array*)rooted_result.get(), 1);
+            String* only = split_heap_string_slice(rooted_str, 0, 0, source_is_ascii);
             array_push((Array*)rooted_result.get(), {.item = s2it(only)});
         }
         return {.array = rooted_result.get()};
@@ -6150,6 +6213,9 @@ Item fn_split(Item str_item, Item sep_item) {
     if (null_sep) {
         // null separator: split on whitespace (like Python str.split(None))
         // strips leading/trailing whitespace, splits on runs of whitespace
+        const char* source_chars = rooted_str.get().get_chars();
+        int64_t part_count = split_whitespace_part_count(source_chars, str_len);
+        (void)array_reserve_append_slots((Array*)rooted_result.get(), part_count);
         size_t p = 0;
         while (p < str_len) {
             const char* str_chars = rooted_str.get().get_chars();
@@ -6165,7 +6231,8 @@ Item fn_split(Item str_item, Item sep_item) {
                     str_chars[p] != '\r' && str_chars[p] != '\f' && str_chars[p] != '\v') {
                 p++;
             }
-            String* part = split_heap_string_slice(rooted_str, word_start, p - word_start);
+            String* part = split_heap_string_slice(rooted_str, word_start, p - word_start,
+                source_is_ascii);
             array_push((Array*)rooted_result.get(), {.item = s2it(part)});
         }
         return {.array = rooted_result.get()};
@@ -6173,12 +6240,16 @@ Item fn_split(Item str_item, Item sep_item) {
 
     if (!rooted_sep.get().get_chars() || sep_len == 0) {
         // empty string separator: split into individual characters
+        const char* source_chars = rooted_str.get().get_chars();
+        int64_t part_count = split_utf8_part_count(source_chars, str_len);
+        (void)array_reserve_append_slots((Array*)rooted_result.get(), part_count);
         size_t p = 0;
         while (p < str_len) {
             const char* str_chars = rooted_str.get().get_chars();
             int char_len = (int)str_utf8_char_len((unsigned char)str_chars[p]);
             if (char_len <= 0) char_len = 1;  // fallback for invalid UTF-8
-            String* part = split_heap_string_slice(rooted_str, p, (size_t)char_len);
+            String* part = split_heap_string_slice(rooted_str, p, (size_t)char_len,
+                source_is_ascii);
             array_push((Array*)rooted_result.get(), {.item = s2it(part)});
             p += char_len;
         }
@@ -6186,6 +6257,11 @@ Item fn_split(Item str_item, Item sep_item) {
     }
 
     // split by separator
+    const char* source_chars = rooted_str.get().get_chars();
+    const char* separator_chars = rooted_sep.get().get_chars();
+    int64_t part_count = split_literal_match_count(source_chars, str_len,
+        separator_chars, sep_len) + 1;
+    (void)array_reserve_append_slots((Array*)rooted_result.get(), part_count);
     size_t start = 0;
     size_t p = 0;
 
@@ -6195,7 +6271,8 @@ Item fn_split(Item str_item, Item sep_item) {
         if (memcmp(str_chars + p, sep_chars, sep_len) == 0) {
             // found separator
             size_t part_len = p - start;
-            String* part = split_heap_string_slice(rooted_str, start, part_len);
+            String* part = split_heap_string_slice(rooted_str, start, part_len,
+                source_is_ascii);
             array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
             p += sep_len;
@@ -6206,7 +6283,8 @@ Item fn_split(Item str_item, Item sep_item) {
     }
 
     // add the last part
-    String* part = split_heap_string_slice(rooted_str, start, str_len - start);
+    String* part = split_heap_string_slice(rooted_str, start, str_len - start,
+        source_is_ascii);
     array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
     return {.array = rooted_result.get()};
@@ -6290,6 +6368,12 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
         return {.array = rooted_result.get()};
     }
 
+    bool source_is_ascii = text_item_is_ascii(rooted_str.get());
+    bool separator_is_ascii = text_item_is_ascii(rooted_sep.get());
+    int64_t match_count = split_literal_match_count(rooted_str.get().get_chars(), str_len,
+        rooted_sep.get().get_chars(), sep_len);
+    (void)array_reserve_append_slots((Array*)rooted_result.get(),
+        match_count * 2 + 1);
     size_t start = 0;
     size_t p = 0;
 
@@ -6299,11 +6383,13 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
         if (memcmp(str_chars + p, sep_chars, sep_len) == 0) {
             // push part before separator
             size_t part_len = p - start;
-            String* part = split_heap_string_slice(rooted_str, start, part_len);
+            String* part = split_heap_string_slice(rooted_str, start, part_len,
+                source_is_ascii);
             array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
             // push the delimiter
-            String* delim = split_heap_string_slice(rooted_sep, 0, sep_len);
+            String* delim = split_heap_string_slice(rooted_sep, 0, sep_len,
+                separator_is_ascii);
             array_push((Array*)rooted_result.get(), {.item = s2it(delim)});
 
             p += sep_len;
@@ -6314,7 +6400,8 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     }
 
     // add the last part
-    String* part = split_heap_string_slice(rooted_str, start, str_len - start);
+    String* part = split_heap_string_slice(rooted_str, start, str_len - start,
+        source_is_ascii);
     array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
     return {.array = rooted_result.get()};
@@ -6426,29 +6513,18 @@ Item fn_join2(Item list_item, Item sep_item) {
     Rooted<Item> rooted_list(roots, list_item);
     Rooted<Item> rooted_sep(roots, sep_item);
 
-    // calculate total length
+    // calculate total length and carry the conservative ASCII proof through
+    // the existing pass so joined ASCII strings retain O(1) indexing.
     size_t total_len = 0;
-    int64_t count = 0;
-
-    if (list_type == LMD_TYPE_ARRAY) {
-        List* lst = list_item.array;
-        count = lst->length;
-        for (int64_t i = 0; i < count; i++) {
-            Item item = lst->items[i];
-            TypeId item_type = get_type_id(item);
-            if (is_text_type_id(item_type)) {
-                total_len += item.get_len();
-            }
-        }
-    } else {
-        Array* arr = list_item.array;
-        count = arr->length;
-        for (int64_t i = 0; i < count; i++) {
-            Item item = arr->items[i];
-            TypeId item_type = get_type_id(item);
-            if (is_text_type_id(item_type)) {
-                total_len += item.get_len();
-            }
+    List* source = list_item.array;
+    int64_t count = source->length;
+    bool is_ascii = sep_type == LMD_TYPE_NULL || text_item_is_ascii(sep_item);
+    for (int64_t i = 0; i < count; i++) {
+        Item item = source->items[i];
+        TypeId item_type = get_type_id(item);
+        if (is_text_type_id(item_type)) {
+            total_len += item.get_len();
+            is_ascii = is_ascii && text_item_is_ascii(item);
         }
     }
 
@@ -6465,45 +6541,25 @@ Item fn_join2(Item list_item, Item sep_item) {
     sep_chars = is_text_type_id(sep_type) ? sep_item.get_chars() : nullptr;
     result->len = total_len;
     result->flags = 0;
-    result->is_ascii = 0;  // safe default for join
+    result->is_ascii = is_ascii ? 1 : 0;
 
     // build result
     char* p = result->chars;
 
-    if (list_type == LMD_TYPE_ARRAY) {
-        List* lst = list_item.array;
-        for (int64_t i = 0; i < count; i++) {
-            if (i > 0 && sep_len > 0) {
-                memcpy(p, sep_chars, sep_len);
-                p += sep_len;
-            }
-            Item item = lst->items[i];
-            TypeId item_type = get_type_id(item);
-            if (is_text_type_id(item_type)) {
-                const char* s_chars = item.get_chars();
-                uint32_t s_len = item.get_len();
-                if (s_chars && s_len > 0) {
-                    memcpy(p, s_chars, s_len);
-                    p += s_len;
-                }
-            }
+    source = list_item.array;
+    for (int64_t i = 0; i < count; i++) {
+        if (i > 0 && sep_len > 0) {
+            memcpy(p, sep_chars, sep_len);
+            p += sep_len;
         }
-    } else {
-        Array* arr = list_item.array;
-        for (int64_t i = 0; i < count; i++) {
-            if (i > 0 && sep_len > 0) {
-                memcpy(p, sep_chars, sep_len);
-                p += sep_len;
-            }
-            Item item = arr->items[i];
-            TypeId item_type = get_type_id(item);
-            if (is_text_type_id(item_type)) {
-                const char* s_chars = item.get_chars();
-                uint32_t s_len = item.get_len();
-                if (s_chars && s_len > 0) {
-                    memcpy(p, s_chars, s_len);
-                    p += s_len;
-                }
+        Item item = source->items[i];
+        TypeId item_type = get_type_id(item);
+        if (is_text_type_id(item_type)) {
+            const char* item_chars = item.get_chars();
+            uint32_t item_len = item.get_len();
+            if (item_chars && item_len > 0) {
+                memcpy(p, item_chars, item_len);
+                p += item_len;
             }
         }
     }
@@ -7841,9 +7897,10 @@ static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
     if (!src) return ItemNull;
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
-    RootFrame roots(2);
+    RootFrame roots(3);
     Rooted<Array*> rooted_src(roots, src);
     Rooted<Array*> rooted_dst(roots, (Array*)NULL);
+    Rooted<Item> rooted_child(roots, ItemNull);
     Array* dst = array_plain();
     if (!dst) return ItemNull;
     rooted_dst.set(dst);
@@ -7872,8 +7929,9 @@ static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
     }
     for (int64_t i = 0; i < src->length; i++) {
         src = rooted_src.get();
-        Item child = clone_mutable_item(src->items[i], clone_ctx);
-        array_push(rooted_dst.get(), child);
+        rooted_child.set(clone_mutable_item(src->items[i], clone_ctx));
+        // array_push can collect while relocating the destination backing.
+        array_push(rooted_dst.get(), rooted_child.get());
     }
     return {.array = rooted_dst.get()};
 }
@@ -7968,9 +8026,10 @@ static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx)
     TypeMap* source_type = mutable_shape_type(LMD_TYPE_ELEMENT, (Type*)src->type);
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
-    RootFrame roots(2);
+    RootFrame roots(3);
     Rooted<Element*> rooted_src(roots, src);
     Rooted<Element*> rooted_dst(roots, (Element*)NULL);
+    Rooted<Item> rooted_child(roots, ItemNull);
     Element* dst = (Element*)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
     if (!dst) return ItemNull;
     rooted_dst.set(dst);
@@ -7983,8 +8042,9 @@ static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx)
 
     for (int64_t i = 0; i < src->length; i++) {
         src = rooted_src.get();
-        Item child = clone_mutable_item(src->items[i], clone_ctx);
-        array_push((Array*)rooted_dst.get(), child);
+        rooted_child.set(clone_mutable_item(src->items[i], clone_ctx));
+        // array_push can collect while relocating the destination backing.
+        array_push((Array*)rooted_dst.get(), rooted_child.get());
     }
 
     int data_cap = src->data_cap > 0 ? src->data_cap :
@@ -9114,21 +9174,43 @@ Item cow_path_set_raw(Item owner, Item key, Item value) {
 // the detached leaf. It is already installed where it belongs, so the callee's
 // in-place writes land in the caller's container and no writeback is required.
 //
-// `owner` must already be the caller's detached root.
-Item cow_path_borrow(Item owner, Item path) {
-    if (get_type_id(path) != LMD_TYPE_ARRAY || !path.array || path.array->length <= 0) {
+// `owner` must already be the caller's detached root.  `path` selects the
+// dynamic descriptor form; otherwise the three rooted fixed operands carry a
+// compiler-proven descriptor.  Keeping one walker makes both ABI shapes obey
+// the same S9.2.2 ownership and shape checks.
+static Item cow_path_borrow_impl(Item owner, Item path, int64_t fixed_count,
+        Item key0, Item key1, Item key2) {
+    bool dynamic_path = get_type_id(path) != LMD_TYPE_NULL;
+    if (dynamic_path && (get_type_id(path) != LMD_TYPE_ARRAY || !path.array ||
+            path.array->length <= 0)) {
         log_error("cow path borrow requires a non-empty array path");
         return ItemError;
     }
-    RootFrame roots(5);
+    if (!dynamic_path && (fixed_count < 1 || fixed_count > 3)) {
+        log_error("cow fixed path borrow requires one to three keys");
+        return ItemError;
+    }
+    RootFrame roots(8);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_path(roots, path);
     Rooted<Item> rooted_current(roots, owner);
     Rooted<Item> rooted_child(roots, ItemNull);
     Rooted<Item> rooted_key(roots, ItemNull);
+    Rooted<Item> rooted_key0(roots, key0);
+    Rooted<Item> rooted_key1(roots, key1);
+    Rooted<Item> rooted_key2(roots, key2);
+    int64_t count = dynamic_path ? rooted_path.get().array->length : fixed_count;
 
-    for (int64_t i = 0; i < rooted_path.get().array->length; i++) {
-        rooted_key.set(item_at(rooted_path.get(), i));
+    for (int64_t i = 0; i < count; i++) {
+        if (dynamic_path) {
+            rooted_key.set(item_at(rooted_path.get(), i));
+        } else if (i == 0) {
+            rooted_key.set(rooted_key0.get());
+        } else if (i == 1) {
+            rooted_key.set(rooted_key1.get());
+        } else {
+            rooted_key.set(rooted_key2.get());
+        }
         if (get_type_id(rooted_key.get()) == LMD_TYPE_NULL) return ItemError;
         rooted_child.set(fn_index(rooted_current.get(), rooted_key.get()));
         if (!cow_item_is_container(rooted_child.get())) {
@@ -9146,6 +9228,15 @@ Item cow_path_borrow(Item owner, Item path) {
         rooted_current.set(rooted_child.get());
     }
     return rooted_current.get();
+}
+
+Item cow_path_borrow(Item owner, Item path) {
+    return cow_path_borrow_impl(owner, path, 0, ItemNull, ItemNull, ItemNull);
+}
+
+Item cow_path_borrow_fixed(Item owner, int64_t count, Item key0, Item key1,
+        Item key2) {
+    return cow_path_borrow_impl(owner, ItemNull, count, key0, key1, key2);
 }
 
 // NM-O8: `publish_in_place` skips the ROOT detach. A `var` parameter's root was

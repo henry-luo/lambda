@@ -80,10 +80,11 @@ static struct hashmap* ensure_advance_cache(FontHandle* handle) {
 
 static uint64_t bitmap_cache_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const BitmapCacheEntry* entry = (const BitmapCacheEntry*)item;
-    // hash on codepoint + mode + handle pointer for uniqueness
-    uint64_t data[2];
+    // FontHandle addresses are recycled after release, so include its lifetime identity.
+    uint64_t data[3];
     data[0] = ((uint64_t)entry->codepoint << 8) | (uint64_t)entry->mode;
     data[1] = (uint64_t)(uintptr_t)entry->handle;
+    data[2] = entry->handle_identity;
     return hashmap_xxhash3(data, sizeof(data), seed0, seed1);
 }
 
@@ -92,6 +93,9 @@ static int bitmap_cache_compare(const void* a, const void* b, void* udata) {
     const BitmapCacheEntry* ea = (const BitmapCacheEntry*)a;
     const BitmapCacheEntry* eb = (const BitmapCacheEntry*)b;
     if (ea->handle != eb->handle) return ea->handle < eb->handle ? -1 : 1;
+    if (ea->handle_identity != eb->handle_identity) {
+        return ea->handle_identity < eb->handle_identity ? -1 : 1;
+    }
     if (ea->codepoint != eb->codepoint) return ea->codepoint < eb->codepoint ? -1 : 1;
     if (ea->mode != eb->mode) return ea->mode < eb->mode ? -1 : 1;
     return 0;
@@ -115,9 +119,10 @@ static LoadedGlyph s_loaded_glyph;
 
 static uint64_t loaded_glyph_cache_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const LoadedGlyphCacheEntry* entry = (const LoadedGlyphCacheEntry*)item;
-    uint64_t data[2];
+    uint64_t data[3];
     data[0] = (uint64_t)(uintptr_t)entry->caller_handle;
-    data[1] = ((uint64_t)entry->codepoint << 2) |
+    data[1] = entry->handle_identity;
+    data[2] = ((uint64_t)entry->codepoint << 2) |
               ((uint64_t)(entry->for_rendering ? 1 : 0) << 1) |
               (uint64_t)(entry->emoji_presentation ? 1 : 0);
     return hashmap_xxhash3(data, sizeof(data), seed0, seed1);
@@ -128,6 +133,9 @@ static int loaded_glyph_cache_compare(const void* a, const void* b, void* udata)
     const LoadedGlyphCacheEntry* ea = (const LoadedGlyphCacheEntry*)a;
     const LoadedGlyphCacheEntry* eb = (const LoadedGlyphCacheEntry*)b;
     if (ea->caller_handle != eb->caller_handle) return ea->caller_handle < eb->caller_handle ? -1 : 1;
+    if (ea->handle_identity != eb->handle_identity) {
+        return ea->handle_identity < eb->handle_identity ? -1 : 1;
+    }
     if (ea->codepoint != eb->codepoint) return ea->codepoint < eb->codepoint ? -1 : 1;
     if (ea->for_rendering != eb->for_rendering) return ea->for_rendering ? 1 : -1;
     if (ea->emoji_presentation != eb->emoji_presentation) return ea->emoji_presentation ? 1 : -1;
@@ -158,6 +166,7 @@ static void cache_loaded_glyph(FontContext* ctx, FontHandle* caller_handle,
 
     LoadedGlyphCacheEntry entry;
     entry.caller_handle = caller_handle;
+    entry.handle_identity = caller_handle->cache_identity;
     entry.codepoint = codepoint;
     entry.for_rendering = for_rendering;
     entry.emoji_presentation = emoji_presentation;
@@ -539,7 +548,9 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
     // check bitmap cache first
     struct hashmap* bmp_cache = ensure_bitmap_cache(ctx);
     if (bmp_cache) {
-        BitmapCacheEntry search = {.codepoint = codepoint, .mode = mode, .handle = handle};
+        BitmapCacheEntry search = {.codepoint = codepoint, .mode = mode,
+                                   .handle = handle,
+                                   .handle_identity = handle->cache_identity};
         BitmapCacheEntry* cached = (BitmapCacheEntry*)hashmap_get(bmp_cache, &search);
         if (cached && cached->bitmap.buffer) {
             return &cached->bitmap;
@@ -557,6 +568,7 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
                 .codepoint = codepoint,
                 .mode      = mode,
                 .handle    = handle,
+                .handle_identity = handle->cache_identity,
                 .bitmap    = *backend_bmp,
             };
             hashmap_set(bmp_cache, &entry);
@@ -582,6 +594,7 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
                     .codepoint = codepoint,
                     .mode      = mode,
                     .handle    = handle,
+                    .handle_identity = handle->cache_identity,
                     .bitmap    = *bmp,
                 };
                 hashmap_set(bmp_cache, &entry);
@@ -623,6 +636,7 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
                     .codepoint = codepoint,
                     .mode      = mode,
                     .handle    = handle,
+                    .handle_identity = handle->cache_identity,
                     .bitmap    = *bmp,
                 };
                 hashmap_set(bmp_cache, &entry);
@@ -808,6 +822,7 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
         if (lgcache) {
             LoadedGlyphCacheEntry search;
             search.caller_handle = handle;
+            search.handle_identity = handle->cache_identity;
             search.codepoint = codepoint;
             search.for_rendering = for_rendering;
             search.emoji_presentation = false;
@@ -922,6 +937,7 @@ LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* styl
     if (lgcache) {
         LoadedGlyphCacheEntry search;
         search.caller_handle = handle;
+        search.handle_identity = handle->cache_identity;
         search.codepoint = codepoint;
         search.for_rendering = for_rendering;
         search.emoji_presentation = true;
