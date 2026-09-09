@@ -5226,8 +5226,8 @@ int64_t fn_len(Item item) {
             // result is now cached in path_val->result
             if (resolved.item == ItemError.item) {
                 // 7.6: `len` is total -- an unresolvable path iterates zero
-                // times. Returning INT64_ERROR here leaked the sentinel out of
-                // the one function the spec guarantees never fails.
+                // times. Returning an error here would violate the one function
+                // the spec guarantees never fails.
                 size = 0;
                 break;
             }
@@ -5247,9 +5247,8 @@ int64_t fn_len(Item item) {
         // is what distinguishes it from `len(null)` = 0. The parameter is
         // `any \ error` (7.7), so an error is rejected at the call boundary and
         // never reaches this body; the arm is a defensive floor. It answers 0
-        // rather than the retired INT64_ERROR sentinel, which a double lane
-        // cannot reject (INT64_MAX is an ordinary int under C16) and which once
-        // reached callers as a real length -- `err |> ~` took it as an
+        // rather than a numeric error marker, which a double lane cannot reject
+        // and which once reached callers as a real length -- `err |> ~` took it as an
         // iteration bound and attempted repeated 2 GB allocations.
         size = 0;
         break;

@@ -1643,8 +1643,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
                     intrinsic_margin_top, intrinsic_margin_bottom,
                     LAYOUT_AXIS_Y, nullptr);
         }
-        // CSS Sizing 3 resolves cyclic percentages in margins and padding to
-        // the size that would otherwise provide that percentage basis.
+        // Descendant percentage contributions are cyclic while this auto-sized
+        // abspos box is measured, even when its own containing block is definite.
         LayoutContainingBlockScope intrinsic_width_scope(
             lycon, LAYOUT_AXIS_X, -1.0f);
         if (intrinsic_height_basis >= 0.0f) {
@@ -1655,6 +1655,18 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         } else {
             intrinsic = layout_measure_intrinsic_widths(
                 lycon, lam::dom_require<DOM_NODE_ELEMENT>(block));
+        }
+        if (cb.has_definite_width) {
+            // CSS Position 3 §4.1: this box's percentage padding resolves
+            // against the definite abspos containing block, unlike descendants.
+            DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(block);
+            float cyclic_edges = layout_intrinsic_padding_border_axis(
+                lycon, element, true, -1.0f);
+            float resolved_edges = layout_intrinsic_padding_border_axis(
+                lycon, element, true, cb_width, true);
+            float edge_delta = resolved_edges - cyclic_edges;
+            intrinsic.min_content += edge_delta;
+            intrinsic.max_content += edge_delta;
         }
         float preferred_minimum = intrinsic.min_content;  // min-content width (border-box)
         float preferred = intrinsic.max_content;          // max-content width (border-box)

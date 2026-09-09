@@ -841,7 +841,8 @@ static bool intrinsic_percentage_width_is_indefinite(LayoutContext* lycon) {
 }
 
 float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* element,
-                                           bool horizontal, float inline_base) {
+                                           bool horizontal, float inline_base,
+                                           bool inline_base_is_definite) {
     if (!element) return 0.0f;
     if (resolve_display_value(element).outer == CSS_VALUE_CONTENTS) {
         // CSS Display 3: box edges belong to generated boxes, not the boxless
@@ -856,16 +857,17 @@ float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* ele
         // has an indefinite inline size, so do not reuse the prior definite
         // layout value from the bound view.
         float metric = horizontal ? metrics.pad_border_h : metrics.pad_border_v;
+        bool percentage_is_cyclic = intrinsic_percentage_width_is_indefinite(lycon) &&
+            !inline_base_is_definite;
         bool use_bound_metric = horizontal
-            ? (!intrinsic_percentage_width_is_indefinite(lycon) || !element->specified_style)
+            ? (!percentage_is_cyclic || !element->specified_style)
             : metric > 0.0f;
         if (use_bound_metric) {
             return metric;
         }
         float padding_start = horizontal ? metrics.padding.left : metrics.padding.top;
         float padding_end = horizontal ? metrics.padding.right : metrics.padding.bottom;
-        float effective_inline_base = intrinsic_percentage_width_is_indefinite(lycon)
-            ? -1.0f : inline_base;
+        float effective_inline_base = percentage_is_cyclic ? -1.0f : inline_base;
         get_intrinsic_box_side_widths_from_css(
             lycon, element, horizontal, false, effective_inline_base,
             &padding_start, &padding_end);

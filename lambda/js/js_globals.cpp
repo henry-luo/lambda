@@ -20,6 +20,7 @@
 #include "js_object_meta.h"
 #include "js_coerce.h"
 #include "js_runtime_state.hpp"
+#include "../dom/dom_canvas.h"
 #include "js_runtime_internal.hpp"
 #include "js_exec_profile.h"
 
@@ -14303,6 +14304,8 @@ extern "C" Item js_get_global_this() {
         // constructor supplies the legacy text-measurement compatibility path.
         js_install_native_constructor(js_global_this_obj, "OffscreenCanvas",
             js_offscreen_canvas_new);
+        js_canvas_install_offscreen_canvas_interface(js_get_key_cstr(
+            js_global_this_obj, "OffscreenCanvas"));
 
         // Web Clipboard / Blob / File / ClipboardItem / ClipboardEvent /
         // navigator.clipboard / navigator.permissions

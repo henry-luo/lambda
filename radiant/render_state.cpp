@@ -16,9 +16,13 @@ RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock
     if (block->transform && block->transformp()->perspective > 0.0f) {
         float elem_x = parent_block->x + block->x;
         float elem_y = parent_block->y + block->y;
+        float origin_x = radiant::transform_perspective_origin_offset(
+            block->transformp(), block->width, true);
+        float origin_y = radiant::transform_perspective_origin_offset(
+            block->transformp(), block->height, false);
         rdcon->perspective_distance = block->transformp()->perspective;
-        rdcon->perspective_origin_x = elem_x + block->transformp()->perspective_origin_x;
-        rdcon->perspective_origin_y = elem_y + block->transformp()->perspective_origin_y;
+        rdcon->perspective_origin_x = elem_x + origin_x;
+        rdcon->perspective_origin_y = elem_y + origin_y;
         scope.active = true;
         log_debug("[TRANSFORM] Element %s: perspective active, distance=%.1f",
             block->node_name(), rdcon->perspective_distance);

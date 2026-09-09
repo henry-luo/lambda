@@ -71,7 +71,13 @@ TEST(LambdaDecimal, QuietInt64ExtractionRejectsOverflowAndInvalidComparison) {
     ASSERT_EQ(status, 0u);
 
     // The quiet extractor must not enter libmpdec's SIGFPE path on overflow.
-    EXPECT_EQ(decimal_mpd_to_int64(large, context), INT64_ERROR);
+    int64_t extracted = 0;
+    EXPECT_FALSE(decimal_mpd_try_to_int64(large, context, &extracted));
+
+    mpd_qset_string(large, "9223372036854775807", context, &status);
+    ASSERT_EQ(status, 0u);
+    EXPECT_TRUE(decimal_mpd_try_to_int64(large, context, &extracted));
+    EXPECT_EQ(extracted, INT64_MAX);
 
     Decimal valid_decimal = {0, large};
     Decimal invalid_decimal = {};

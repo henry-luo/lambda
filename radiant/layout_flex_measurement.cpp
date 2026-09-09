@@ -582,16 +582,14 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             measured_width = content_width;
             measured_height = layout_border_size_from_content_box(
                 lam::view_as_block(item), content_height, false);
-            if (item->form->control_type == FORM_CONTROL_BUTTON && item->first_child) {
-                LayoutFontScope font_scope(lycon);
-                if (item->font && lycon->ui_context) {
-                    setup_font(lycon->ui_context, &lycon->font, item->font);
-                }
-                float text_width = measure_direct_text_children_intrinsic_width(
-                    lycon, item, false, layout_inherited_text_transform(item));
-                if (text_width > 0.0f) {
-                    item->form->intrinsic_width = text_width;
-                    content_width = measured_width = text_width;
+            if (item->form->control_type == FORM_CONTROL_BUTTON) {
+                // Preserve the button's flow-label contribution for flex main
+                // sizing; cross-axis sizing applies it separately in §9.4.
+                float flow_content_width = form_button_flow_content_intrinsic_width(
+                    lycon, lam::view_as_block(item));
+                if (flow_content_width > 0.0f) {
+                    item->form->intrinsic_width = flow_content_width;
+                    content_width = measured_width = flow_content_width;
                 }
             }
             if (item->form->control_type == FORM_CONTROL_SELECT &&

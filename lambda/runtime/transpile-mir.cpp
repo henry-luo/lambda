@@ -3969,18 +3969,7 @@ static MirValue lambda_convert_rep(void* owner, MirValue value,
         // consumers do not reconstruct it from a node kind (D2.4.1–D2.4.3,
         // D5.3.4).
         AstNode* source = (AstNode*)value.provenance_node;
-        AstNode* callee = source && source->node_type == AST_NODE_CALL_EXPR
-            ? ast_unwrap_primary(((AstCallNode*)source)->function) : NULL;
-        SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC
-            ? ((AstSysFuncNode*)callee)->fn_info : NULL;
-        if (conversion_type == LMD_TYPE_INT64 && sys &&
-                sys->fn == SYSFUNC_INT64) {
-            // int64() returns a raw result-or-error pair collapsed into its
-            // raw ABI lane; its first Item consumer owns the discriminating
-            // conversion rather than a call-site node-kind ladder.
-            reg = emit_call_1(mt, "box_int64_result_or_error", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, value.reg));
-        } else if (conversion_type == LMD_TYPE_BOOL &&
+        if (conversion_type == LMD_TYPE_BOOL &&
                 value.rep == VALUE_REP_I64 && source &&
                 mir_expr_may_be_null(mt, source)) {
             // T21-1c: a native bool that the nullability oracle marks as
@@ -7408,12 +7397,6 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
         AstNode* direct_callee = ast_unwrap_primary(call->function);
         if (direct_callee && direct_callee->node_type == AST_NODE_SYS_FUNC) {
             SysFuncInfo* info = ((AstSysFuncNode*)direct_callee)->fn_info;
-            if (info && info->fn == SYSFUNC_INT64) {
-                // The conversion's ABI publishes a raw i64 result; an Item
-                // demand routes its error-capable encoding through the shared
-                // conversion owner below (D2.4.1–D2.4.3, D5.3.4).
-                return LMD_TYPE_INT64;
-            }
             if (info && info->can_raise) {
                 // A T^ system result may resume as its original error Item.
                 // Keep it boxed until propagation or a handler handles that channel.
@@ -18887,10 +18870,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 // in range: do the shift
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
 
-                // A negative count is an error Item directly. It must not reach the
-                // range check below: the old sentinel was INT64_ERROR == INT64_MAX,
-                // which that check would have promoted to 9.2e18 as a float instead
-                // of reporting the error.
+                // A negative count is an error Item directly and never reaches
+                // the raw shift path.
                 emit_label(mt, l_err);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
                     MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)LMD_TYPE_ERROR << 56))));
@@ -18997,7 +18978,12 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                  info->fn == SYSFUNC_ORD) && c_ret_tid == LMD_TYPE_ANY) { \
                 emit_return_if_item_error(mt, result); \
             } \
-            if (!call_node->propagate && !mt->emitting_async_call && c_ret_tid == LMD_TYPE_ANY && \
+            if (info->fn == SYSFUNC_INT64) { \
+                /* i64() carries either a finite machine value or ItemError. */ \
+                returned_boxed_item = true; \
+            } \
+            if (info->fn != SYSFUNC_INT64 && !call_node->propagate && \
+                !mt->emitting_async_call && c_ret_tid == LMD_TYPE_ANY && \
                 (mir_is_native_scalar_value_type(call_expr_tid) || \
                  is_text_type_id(call_expr_tid))) { \
                 result = emit_unbox(mt, result, call_expr_tid); \
@@ -28193,10 +28179,14 @@ static TypeId mir_callsite_arg_type_at(MirTranspiler* mt, AstNode* arg, int dept
                 TypeId success = mir_decl_type_id(info->success_type);
                 if (success == LMD_TYPE_INT || success == LMD_TYPE_FLOAT) return success;
             }
-            // A row whose C return is a raw int64 (`shr`, `band`, `len`)
-            // publishes the int lane whatever its declared success type says;
-            // `half = shr(n, 1)` typed ANY made `rcount[half]` a dynamic key.
+            // A row whose C return is a raw int64 (`band`, `len`) publishes
+            // the int lane whatever its declared success type says. `shr` now
+            // has an Item ABI for its error result, except an in-range literal
+            // count which its native lowering proves cannot take that arm.
             if (info && info->c_ret_type == C_RET_INT64) return LMD_TYPE_INT;
+            AstNode* count = call->argument ? call->argument->next : NULL;
+            if (info && mir_shr_native_literal_count(mt,
+                    (AstSysFuncNode*)callee, count)) return LMD_TYPE_INT;
         }
     }
     if (unwrapped && unwrapped->node_type == AST_NODE_INDEX_EXPR) {
