@@ -1941,11 +1941,12 @@ carrier and compiler work is open.
   `RootVector` owns callable `Item`s, while each libuv request retains only a
   stable POD slot; completion takes its slot and shrinks only completed tail
   slots, never moving a live request's index. `JsProcessState` uses that
-  carrier for `process.send`, each `JsHttpClientReq` for streamed
-  `ClientRequest.write`, and each `JsSocket` for its pre-connect byte queue,
-  submitted writes and delayed `end()` shutdown completion. The socket's
-  byte-list is still its transport-specific FIFO tail; no second callback
-  owner parallels it. Parent/child IPC, two-write HTTP client, and two-write
+  carrier for `process.send`, each `JsSpawnProcess` for `ChildProcess.send`,
+  each `JsHttpClientReq` for streamed `ClientRequest.write`, and each
+  `JsSocket` for its pre-connect byte queue, submitted writes and delayed
+  `end()` shutdown completion. The socket's byte-list is still its
+  transport-specific FIFO tail; no second callback owner parallels it.
+  Parent/child IPC, child-process IPC, two-write HTTP client, and two-write
   pre-connect socket-plus-end regressions pass in the compiled suite normally
   and with forced GC, per D5.1.1v2 and D5.4.2. This deliberately remains
   distinct from TLS's FIFO pre-handshake queue: completion order is part of

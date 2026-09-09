@@ -1328,6 +1328,11 @@ TEST(JavaScriptRegression, Jscu31HttpResponseWriteTail) {
         "test/js/jscu31_http_response_write_tail.txt");
 }
 
+TEST(JavaScriptRegression, Jscu31ChildProcessIpcCallbackSlots) {
+    test_js_script_against_file("test/js/jscu31_child_process_ipc_callback_slots.js",
+        "test/js/jscu31_child_process_ipc_callback_slots.txt");
+}
+
 TEST(JavaScriptRegression, Jscu35DynamicFunctionCache) {
     test_js_script_against_file("test/js/jscu35_dynamic_function_cache.js",
         "test/js/jscu35_dynamic_function_cache.txt");
