@@ -886,7 +886,6 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
         grid_item->blk->first_line_baseline = lycon->block.first_line_ascender;
         grid_item->blk->last_line_baseline = lycon->block.last_line_ascender;
     }
-
     log_info("Grid item content layout complete: %s, content=%dx%d",
              grid_item->node_name(), grid_item->content_width, grid_item->content_height);
     log_leave();

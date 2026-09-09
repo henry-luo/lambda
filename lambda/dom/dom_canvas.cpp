@@ -74,6 +74,24 @@ static Item js_canvas_context_noop(Item callee, Item this_value,
     return make_js_undefined();
 }
 
+static Item js_canvas_create_linear_gradient(Item callee, Item this_value,
+                                             Item* args, int argc,
+                                             uint64_t* result_home) {
+    (void)callee;
+    (void)this_value;
+    (void)args;
+    (void)argc;
+    (void)result_home;
+    RootFrame roots(2);
+    Rooted<Item> gradient_root(roots, js_new_object());
+    Rooted<Item> stop_root(roots, js_new_native_payload_function(
+        js_canvas_context_noop, 0, 2));
+    // Retain the standard CanvasGradient mutator so procedural canvas users
+    // can complete DOM work even when Radiant does not rasterize the canvas.
+    dom_realm_set_name(gradient_root.get(), "addColorStop", stop_root.get());
+    return gradient_root.get();
+}
+
 static Item js_canvas_measure_text(Item callee, Item this_value,
                                    Item* args, int argc, uint64_t* result_home) {
     (void)callee;
@@ -115,12 +133,18 @@ static void js_canvas_install_context_methods(Item context) {
         {"translate", js_canvas_context_noop, 2},
         {"rotate", js_canvas_context_noop, 1},
         {"beginPath", js_canvas_context_noop, 0},
+        {"closePath", js_canvas_context_noop, 0},
+        {"moveTo", js_canvas_context_noop, 2},
+        {"lineTo", js_canvas_context_noop, 2},
+        {"bezierCurveTo", js_canvas_context_noop, 6},
         {"arc", js_canvas_context_noop, 6},
+        {"fill", js_canvas_context_noop, 0},
         {"stroke", js_canvas_context_noop, 0},
         {"save", js_canvas_context_noop, 0},
         {"fillRect", js_canvas_context_noop, 4},
         {"restore", js_canvas_context_noop, 0},
         {"clearRect", js_canvas_context_noop, 4},
+        {"createLinearGradient", js_canvas_create_linear_gradient, 4},
         {"measureText", js_canvas_measure_text, 1},
     };
     RootFrame roots(2);

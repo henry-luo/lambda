@@ -108,8 +108,6 @@ extern "C" void js_eval_preamble_cache_reset(void) {
     js_eval_preamble_entries_free();
 }
 
-#define JS_DYNFUNC_CACHE_CAP 256
-
 typedef Item (*JsDynFuncMainFunc)(Context*);
 
 typedef struct JsDynFuncDependency {
@@ -130,9 +128,9 @@ struct JsDynFuncCacheEntry {
 };
 
 struct JsDynFuncCacheState {
-    JsDynFuncCacheEntry entries[JS_DYNFUNC_CACHE_CAP];
-    int count;
-    int overflow;
+    // Each compiled dynamic source owns one stable cache row. The code-store
+    // owns the MIR/source payload; this table owns only lookup metadata.
+    ArrayList* entries;
 };
 
 static JsDynFuncCacheState* js_dynfunc_cache_state_ensure(void) {
@@ -151,9 +149,26 @@ JS_FORWARD_STATIC_EXPRESSION(JsDynFuncCacheState*, js_dynfunc_cache_state_curren
         (JsDynFuncCacheState*)js_runtime_state.dynamic_function_cache_state : NULL)
 
 #define js_dynfunc_cache_state (*js_dynfunc_cache_state_current())
-#define js_dynfunc_cache (js_dynfunc_cache_state.entries)
-#define js_dynfunc_cache_count (js_dynfunc_cache_state.count)
-#define js_dynfunc_cache_overflow (js_dynfunc_cache_state.overflow)
+#define js_dynfunc_cache_entries (js_dynfunc_cache_state.entries)
+
+static int js_dynfunc_cache_entry_count(void) {
+    return js_dynfunc_cache_entries ? js_dynfunc_cache_entries->length : 0;
+}
+
+static JsDynFuncCacheEntry* js_dynfunc_cache_entry_at(int index) {
+    return js_dynfunc_cache_entries && index >= 0 &&
+            index < js_dynfunc_cache_entries->length
+        ? (JsDynFuncCacheEntry*)arraylist_get(js_dynfunc_cache_entries, index) : NULL;
+}
+
+static void js_dynfunc_cache_entries_clear(JsDynFuncCacheState* state) {
+    if (!state || !state->entries) return;
+    for (int i = 0; i < state->entries->length; i++) {
+        mem_free(arraylist_get(state->entries, i));
+    }
+    arraylist_free(state->entries);
+    state->entries = NULL;
+}
 
 static int js_dynfunc_kind_from_prefix(const char* parse_prefix);
 static bool js_dynfunc_extract_return_identifier(String* body,
@@ -509,8 +524,9 @@ static bool js_dynfunc_dependency_is_independent(const JsDynFuncDependency* dep)
 static JsDynFuncCacheEntry* js_dynfunc_cache_lookup(uint64_t hash, const char* source, size_t source_len,
         int argc, int kind) {
     if (!source) return NULL;
-    for (int i = 0; i < js_dynfunc_cache_count; i++) {
-        JsDynFuncCacheEntry* entry = &js_dynfunc_cache[i];
+    for (int i = 0; i < js_dynfunc_cache_entry_count(); i++) {
+        JsDynFuncCacheEntry* entry = js_dynfunc_cache_entry_at(i);
+        if (!entry) continue;
         if (entry->hash != hash || entry->source_len != source_len ||
             entry->argc != argc || entry->kind != kind || !entry->source ||
             !entry->js_main_fn) {
@@ -525,12 +541,16 @@ static void js_dynfunc_cache_insert(uint64_t hash, char* source, size_t source_l
         MIR_context_t ctx, JsDynFuncMainFunc js_main_fn) {
     if (!source || !ctx || !js_main_fn) return;
     if (js_dynfunc_cache_lookup(hash, source, source_len, argc, kind)) return;
-    if (js_dynfunc_cache_count >= JS_DYNFUNC_CACHE_CAP) {
-        js_dynfunc_cache_overflow++;
+    if (!js_dynfunc_cache_entries) {
+        js_dynfunc_cache_entries = arraylist_new(16);
+    }
+    JsDynFuncCacheEntry* entry = (JsDynFuncCacheEntry*)mem_calloc(1,
+        sizeof(JsDynFuncCacheEntry), MEM_CAT_JS_RUNTIME);
+    if (!entry || !js_dynfunc_cache_entries ||
+            !arraylist_append(js_dynfunc_cache_entries, entry)) {
+        mem_free(entry);
         return;
     }
-    JsDynFuncCacheEntry* entry = &js_dynfunc_cache[js_dynfunc_cache_count++];
-    memset(entry, 0, sizeof(*entry));
     entry->hash = hash;
     entry->source_len = source_len;
     entry->argc = argc;
@@ -543,9 +563,7 @@ static void js_dynfunc_cache_insert(uint64_t hash, char* source, size_t source_l
 extern "C" void js_dynfunc_cache_reset(void) {
     JsDynFuncCacheState* state = js_dynfunc_cache_state_ensure();
     if (!state) return;
-    memset(js_dynfunc_cache, 0, sizeof(js_dynfunc_cache));
-    js_dynfunc_cache_count = 0;
-    js_dynfunc_cache_overflow = 0;
+    js_dynfunc_cache_entries_clear(state);
 }
 
 static void js_dynfunc_apply_function_metadata(Item fn_item, Item* args, int argc, const char* source_prefix) {
@@ -914,13 +932,13 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     return fn_item;
 }
 
-#undef js_dynfunc_cache_overflow
-#undef js_dynfunc_cache_count
-#undef js_dynfunc_cache
+#undef js_dynfunc_cache_entries
 #undef js_dynfunc_cache_state
 
 extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->dynamic_function_cache_state) return;
+    js_dynfunc_cache_entries_clear((JsDynFuncCacheState*)
+        runtime_state->dynamic_function_cache_state);
     mem_free(runtime_state->dynamic_function_cache_state);
     runtime_state->dynamic_function_cache_state = NULL;
 }

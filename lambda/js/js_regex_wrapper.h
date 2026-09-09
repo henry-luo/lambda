@@ -24,10 +24,6 @@
 // on the match path. Above this a match allocates once and frees at scope exit.
 #define JS_REGEX_INLINE_GROUPS 32
 
-// Pattern-analysis passes walk group indices rather than match slots; this is
-// how deep their bookkeeping goes before they stop tracking ancestry.
-#define JS_REGEX_ANALYSIS_GROUPS 256
-
 #ifdef __cplusplus
 // Match scratch sized from a pattern's group count, with inline storage so an
 // ordinary match still allocates nothing. `count` is the number of slots the
@@ -58,10 +54,6 @@ struct JsRegexScratch {
 extern "C" {
 #endif
 
-// Maximum number of post-filters per compiled regex
-#define JS_REGEX_MAX_FILTERS 16
-
-
 // Post-filter types for runtime match verification
 enum JsRegexFilterType {
     JS_PF_TRIM_GROUP,        // trim captured group from match end (trailing lookahead absorbed)
@@ -85,10 +77,17 @@ struct JsRegexFilter {
     bool lb_negative;              // for JS_PF_LOOKBEHIND: true = (?<!...), false = (?<=...)
 };
 
+// The compiled wrapper owns one growable sequence of post-filter facts. Its
+// rows may own nested regex objects, so teardown follows this one carrier.
+struct JsRegexFilterList {
+    JsRegexFilter* rows;
+    int count;
+    int capacity;
+};
+
 struct JsRegexCompiled {
     re2::RE2* re2;                 // compiled RE2 pattern
-    JsRegexFilter filters[JS_REGEX_MAX_FILTERS];
-    int filter_count;              // number of active post-filters
+    JsRegexFilterList filters;     // active post-filters
     bool has_filters;              // fast path: skip post-processing if false
     int original_group_count;      // capture groups in the original JS pattern
     int* group_remap;              // original group index -> rewritten group index (NULL if no remap)

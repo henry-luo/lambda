@@ -1,0 +1,4 @@
+SyntaxError
+true
+a
+i l

@@ -91,6 +91,11 @@ static bool flex_container_height_is_fixed(FlexContainerLayout* flex,
                                            bool row_axis) {
     if (!flex || !container) return false;
     bool fixed = !layout_block_has_automatic_height(container);
+    if (!row_axis && flex->main_axis_available_size_is_definite) {
+        // CSS Flexbox §9.2: a definite column main axis, including one
+        // resolved from opposing absolute insets, must not become content-sized.
+        fixed = true;
+    }
     if (row_axis) {
         fixed = fixed || layout_block_has_size_containment_in_axis(container, false) ||
             flex->has_definite_cross_size;

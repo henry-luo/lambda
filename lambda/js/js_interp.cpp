@@ -176,7 +176,6 @@ struct JsInterpGeneratorLoopContinuation {
     int64_t body_start_ledger;
     uint8_t resume_phase;
     bool is_for_of;
-    bool async_roots_registered;
     struct JsInterpGeneratorLoopContinuation* next;
 };
 
@@ -507,11 +506,6 @@ static void js_interp_generator_remove_loop(JsInterpFrame* frame,
         if ((*link)->loop == loop) {
             JsInterpGeneratorLoopContinuation* removed = *link;
             *link = removed->next;
-            if (removed->async_roots_registered) {
-                heap_unregister_gc_root(&removed->iterator.item);
-                heap_unregister_gc_root(&removed->for_in_object.item);
-                heap_unregister_gc_object_root(removed->env);
-            }
             mem_free(removed);
             return;
         }
@@ -559,17 +553,9 @@ static bool js_interp_async_suspend_loop(JsInterpFrame* frame,
     continuation->is_for_of = is_for_of;
     continuation->body_start_ledger = body_start_ledger;
     continuation->resume_phase = resume_phase;
-    bool iterator_rooted = heap_try_register_gc_root(&continuation->iterator.item);
-    bool for_in_rooted = heap_try_register_gc_root(&continuation->for_in_object.item);
-    bool env_rooted = heap_try_register_gc_object_root(continuation->env);
-    if (!iterator_rooted || !for_in_rooted || !env_rooted) {
-        if (iterator_rooted) heap_unregister_gc_root(&continuation->iterator.item);
-        if (for_in_rooted) heap_unregister_gc_root(&continuation->for_in_object.item);
-        if (env_rooted) heap_unregister_gc_object_root(continuation->env);
-        mem_free(continuation);
-        return false;
-    }
-    continuation->async_roots_registered = true;
+    // The owning JsAsyncContextStateRecord traces every continuation edge in
+    // js_interp_async_trace_continuations. Do not add a second direct-root
+    // protocol for these same values.
     continuation->next = *frame->async_loop_continuations;
     *frame->async_loop_continuations = continuation;
     return true;
@@ -628,11 +614,6 @@ static void js_interp_async_clear_loops(
     JsInterpGeneratorLoopContinuation* current = *continuations;
     while (current) {
         JsInterpGeneratorLoopContinuation* next = current->next;
-        if (current->async_roots_registered) {
-            heap_unregister_gc_root(&current->iterator.item);
-            heap_unregister_gc_root(&current->for_in_object.item);
-            heap_unregister_gc_object_root(current->env);
-        }
         mem_free(current);
         current = next;
     }
@@ -948,8 +929,9 @@ static JsInterpEnv* js_interp_env_create(NameScope* scope, JsInterpEnv* outer) {
     size_t words = count > 0 ? (size_t)count * 2 : 1;
     size_t size = offsetof(JsInterpEnv, slots) + words * sizeof(uint64_t);
     JsInterpEnv* env = (JsInterpEnv*)gc_heap_calloc(context->heap->gc, size,
-        GC_TYPE_JS_INTERP_ENV);
+        GC_TYPE_ENVIRONMENT);
     if (!env) return NULL;
+    gc_environment_set_interpreter(env);
     env->outer = outer;
     env->scope = scope;
     env->slot_count = (uint32_t)count;
@@ -4129,7 +4111,7 @@ static bool js_interp_terminal_yield_expr(JsAstNode* node) {
         JsYieldNode* yielded = (JsYieldNode*)node;
         // A fresh `yield*` leaves the ledger untouched; the shared generator
         // runtime credits its slot only once the delegate is exhausted
-        // (`gen->ast_yield_skip++`). The node must therefore be replayed to
+        // (`gen->ast_replay_skip++`). The node must therefore be replayed to
         // consume that slot, or the next yield consumes it instead.
         if (yielded->delegate) return false;
         // A nested yield suspends before this yield owns the completion, so
@@ -5748,7 +5730,7 @@ extern "C" Item js_interp_resume_generator(Item generator,
     Rooted<Item> input_root(roots, input);
     Rooted<Item> pending_root(roots, state->ast_pending_resume_input);
     Rooted<Item> home_class_root(roots, ItemNull);
-    Rooted<Item> yield_values_root(roots, state->ast_yield_values);
+    Rooted<Item> yield_values_root(roots, state->ast_replay_values);
     if (get_type_id(function_root.get()) != LMD_TYPE_FUNC) return ItemError;
     JsFunction* function = (JsFunction*)function_root.get().function;
     if (!function || !js_fn_ast(function)->function ||
@@ -5759,13 +5741,13 @@ extern "C" Item js_interp_resume_generator(Item generator,
         ? (JsBlockNode*)js_fn_ast(function)->function->body : NULL;
     if (!body) return js_throw_type_error("interpreted generator requires a block body");
 
-    if (state->ast_yield_skip > 0) {
+    if (state->ast_replay_skip > 0) {
         if (get_type_id(yield_values_root.get()) != LMD_TYPE_ARRAY) {
             yield_values_root.set(js_array_new(0));
             if (item_is_error(yield_values_root.get())) return yield_values_root.get();
-            state->ast_yield_values = yield_values_root.get();
+            state->ast_replay_values = yield_values_root.get();
         }
-        int64_t resume_index = state->ast_yield_skip - 1;
+        int64_t resume_index = state->ast_replay_skip - 1;
         while (js_array_length(yield_values_root.get()) < resume_index) {
             Item padded = js_array_push(yield_values_root.get(), make_js_undefined());
             if (item_is_error(padded)) return padded;
@@ -5820,13 +5802,13 @@ extern "C" Item js_interp_resume_generator(Item generator,
         // replaying through it would repeat that clause's finished statements.
         js_interp_generator_clear_nested_list_continuations(state);
     }
-    if (!resuming_list && state->ast_yield_skip > 0 &&
+    if (!resuming_list && state->ast_replay_skip > 0 &&
             (js_gen_is_throw_signal(input_root.get()) ||
              js_gen_is_return_signal(input_root.get()))) {
         // A yield in finally suspends before the injected completion escapes.
         // Retain the original signal and re-inject it on every replay until a
         // later resume completes the finally chain.
-        state->ast_pending_resume_yield = state->ast_yield_skip;
+        state->ast_pending_resume_yield = state->ast_replay_skip;
         state->ast_pending_resume_input = input_root.get();
         pending_root.set(input_root.get());
     }
@@ -5843,7 +5825,7 @@ extern "C" Item js_interp_resume_generator(Item generator,
     // A terminal-yield cursor starts after its observed yield. A nested yield
     // instead re-enters the suspended statement and consumes its replay ledger.
     frame.generator_yield_skip = resuming_list && !replaying_suspended_statement
-        ? 0 : state->ast_yield_skip;
+        ? 0 : state->ast_replay_skip;
     frame.generator_resume_input = input_root.get();
     frame.generator_yield_values = yield_values_root.get();
     frame.generator_abrupt_resume_yield = state->ast_pending_resume_yield;
@@ -5861,7 +5843,7 @@ extern "C" Item js_interp_resume_generator(Item generator,
             state->delegate = result.value;
             return ItemNull;
         }
-        state->ast_yield_skip++;
+        state->ast_replay_skip++;
         return js_make_iter_result(result.value, false);
     }
     state->done = true;
@@ -5901,22 +5883,22 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
     Rooted<Item> input_root(roots, input);
     Rooted<Item> home_class_root(roots,
         js_fn_home_class((JsFunction*)function_root.get().function));
-    Rooted<Item> await_values_root(roots, state->ast_await_values);
+    Rooted<Item> await_values_root(roots, state->ast_replay_values);
     JsFunction* function = (JsFunction*)function_root.get().function;
     if (!function || !js_fn_ast(function)->function ||
             get_type_id(arguments_root.get()) != LMD_TYPE_ARRAY) return ItemError;
     JsBlockNode* body = js_fn_ast(function)->function->body &&
             js_fn_ast(function)->function->body->node_type == AST_NODE_BLOCK
         ? (JsBlockNode*)js_fn_ast(function)->function->body : NULL;
-    if (state->ast_await_skip > 0) {
+    if (state->ast_replay_skip > 0) {
         if (get_type_id(await_values_root.get()) != LMD_TYPE_ARRAY) {
             await_values_root.set(js_array_new(0));
             if (item_is_error(await_values_root.get())) {
                 return js_interp_async_state_result(await_values_root.get(), -2);
             }
-            state->ast_await_values = await_values_root.get();
+            state->ast_replay_values = await_values_root.get();
         }
-        int64_t resume_index = state->ast_await_skip - 1;
+        int64_t resume_index = state->ast_replay_skip - 1;
         while (js_array_length(await_values_root.get()) < resume_index) {
             Item padded = js_array_push(await_values_root.get(), make_js_undefined());
             if (item_is_error(padded)) return js_interp_async_state_result(padded, -2);
@@ -5943,7 +5925,7 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
     frame.strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
     frame.active_function = function;
     frame.async_await_seen = &awaited;
-    frame.async_await_skip = state->ast_await_skip;
+    frame.async_await_skip = state->ast_replay_skip;
     frame.async_resume_input = input_root.get();
     frame.async_await_values = await_values_root.get();
     frame.async_list_continuations = &state->ast_list_continuation;
@@ -5956,8 +5938,8 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
         ? js_interp_exec_list(&frame, (JsAstNode*)body->statements)
         : js_interp_eval(&frame, (JsAstNode*)js_fn_ast(function)->function->body);
     if (result.kind == JS_INTERP_AWAIT) {
-        state->ast_await_skip++;
-        return js_interp_async_state_result(result.value, state->ast_await_skip);
+        state->ast_replay_skip++;
+        return js_interp_async_state_result(result.value, state->ast_replay_skip);
     }
     js_interp_async_clear_loops(&state->ast_loop_continuations);
     js_interp_list_clear(&state->ast_list_continuation);

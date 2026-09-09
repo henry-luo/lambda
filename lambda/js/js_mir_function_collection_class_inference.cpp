@@ -439,28 +439,18 @@ static bool jm_prepare_indexed_class(JsMirTranspiler* mt, JsClassEntry* entry) {
     for (JsAstNode* member = body->statements; member; member = member->next) {
         if (member->node_type == JS_AST_NODE_METHOD_DEFINITION &&
                 ((JsMethodDefinitionNode*)member)->body) {
-            entry->method_capacity++;
+            entry->member_capacity++;
         } else if (member->node_type == JS_AST_NODE_FIELD_DEFINITION) {
             JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)member;
-            if (field->key && field->is_static) entry->static_field_capacity++;
-            else if (field->key) entry->instance_field_capacity++;
+            if (field->key) entry->member_capacity++;
         } else if (member->node_type == JS_AST_NODE_STATIC_BLOCK &&
                 ((JsStaticBlockNode*)member)->body) {
-            entry->static_block_capacity++;
+            entry->member_capacity++;
         }
     }
-    entry->methods = (JsClassMethodEntry*)pool_calloc(mt->tp->pool,
-        (size_t)entry->method_capacity * sizeof(JsClassMethodEntry));
-    entry->static_fields = (JsStaticFieldEntry*)pool_calloc(mt->tp->pool,
-        (size_t)entry->static_field_capacity * sizeof(JsStaticFieldEntry));
-    entry->instance_fields = (JsInstanceFieldEntry*)pool_calloc(mt->tp->pool,
-        (size_t)entry->instance_field_capacity * sizeof(JsInstanceFieldEntry));
-    entry->static_blocks = (JsAstNode**)pool_calloc(mt->tp->pool,
-        (size_t)entry->static_block_capacity * sizeof(JsAstNode*));
-    if ((entry->method_capacity && !entry->methods) ||
-            (entry->static_field_capacity && !entry->static_fields) ||
-            (entry->instance_field_capacity && !entry->instance_fields) ||
-            (entry->static_block_capacity && !entry->static_blocks)) {
+    entry->members = (JsClassMember*)pool_calloc(mt->tp->pool,
+        (size_t)entry->member_capacity * sizeof(JsClassMember));
+    if (entry->member_capacity && !entry->members) {
         log_error("js-mir: failed to allocate class member metadata");
         return false;
     }
@@ -475,9 +465,11 @@ static bool jm_collect_indexed_class_members(JsMirTranspiler* mt,
         if (member->node_type == JS_AST_NODE_FIELD_DEFINITION) {
             JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)member;
             if (field->is_static && field->key) {
-                if (entry->static_field_count >= entry->static_field_capacity) return false;
+                if (entry->member_count >= entry->member_capacity) return false;
+                JsClassMember* class_member = &entry->members[entry->member_count++];
+                class_member->kind = JS_CLASS_MEMBER_STATIC_FIELD;
                 JsStaticFieldEntry* static_field =
-                    &entry->static_fields[entry->static_field_count++];
+                    &class_member->as.static_field;
                 static_field->computed = field->computed;
                 static_field->key_expr = field->key;
                 // D6.2.2v2: retain literal member spellings for initialization.
@@ -493,9 +485,11 @@ static bool jm_collect_indexed_class_members(JsMirTranspiler* mt,
                     static_field->name ? (int)static_field->name->len : 0,
                     static_field->name ? static_field->name->chars : "");
             } else if (!field->is_static && field->key) {
-                if (entry->instance_field_count >= entry->instance_field_capacity) return false;
+                if (entry->member_count >= entry->member_capacity) return false;
+                JsClassMember* class_member = &entry->members[entry->member_count++];
+                class_member->kind = JS_CLASS_MEMBER_INSTANCE_FIELD;
                 JsInstanceFieldEntry* instance_field =
-                    &entry->instance_fields[entry->instance_field_count++];
+                    &class_member->as.instance_field;
                 instance_field->computed = field->computed;
                 instance_field->key_expr = field->key;
                 instance_field->name = !field->computed
@@ -515,18 +509,22 @@ static bool jm_collect_indexed_class_members(JsMirTranspiler* mt,
         }
         if (member->node_type == JS_AST_NODE_STATIC_BLOCK) {
             JsStaticBlockNode* block = (JsStaticBlockNode*)member;
-            if (block->body && entry->static_block_count < entry->static_block_capacity) {
-                entry->static_blocks[entry->static_block_count++] = block->body;
+            if (block->body) {
+                if (entry->member_count >= entry->member_capacity) return false;
+                JsClassMember* class_member = &entry->members[entry->member_count++];
+                class_member->kind = JS_CLASS_MEMBER_STATIC_BLOCK;
+                class_member->as.static_block = block->body;
                 log_debug("js-mir: class '%.*s' static block #%d",
                     class_node->name ? (int)class_node->name->len : 5,
                     class_node->name ? class_node->name->chars : "anon?",
-                    entry->static_block_count);
+                    entry->member_count);
             }
             continue;
         }
         if (member->node_type != JS_AST_NODE_METHOD_DEFINITION) continue;
         JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)member;
-        if (!method->body || entry->method_count >= entry->method_capacity) continue;
+        if (!method->body) continue;
+        if (entry->member_count >= entry->member_capacity) return false;
         JsFuncCollected* collected = jm_find_collected_func(mt,
             (JsFunctionNode*)method);
         if (!collected) {
@@ -539,7 +537,9 @@ static bool jm_collect_indexed_class_members(JsMirTranspiler* mt,
             method_name, function_index);
         JM_JS_FACT(collected, is_class_method) = true;
 
-        JsClassMethodEntry* method_entry = &entry->methods[entry->method_count++];
+        JsClassMember* class_member = &entry->members[entry->member_count++];
+        class_member->kind = JS_CLASS_MEMBER_METHOD;
+        JsClassMethodEntry* method_entry = &class_member->as.method;
         method_entry->name = method_name;
         method_entry->fc = collected;
         method_entry->param_count = ast_linked_node_count(

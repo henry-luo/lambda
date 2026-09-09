@@ -415,8 +415,8 @@ MIR_label_t jm_new_label(JsMirTranspiler* mt) {
 
 static void jm_clear_block_caches(JsMirTranspiler* mt) {
     if (!mt) return;
-    mt->func_em->property_name_cache_count = 0;
-    mt->func_em->module_name_id_cache_count = 0;
+    mt->func_em->property_name_cache.count = 0;
+    mt->func_em->module_name_id_cache.count = 0;
 }
 
 static void jm_note_gc_candidate(JsMirTranspiler* mt, MIR_reg_t reg,

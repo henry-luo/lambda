@@ -71,7 +71,7 @@ static bool js_doc_runtime_enter_if_needed(DomDocument* doc) {
     EvalContext* runtime_ctx = runtime_get_eval_context(runtime);
     if (!runtime_ctx || !runtime_heap(runtime) || !runtime_name_pool(runtime)) return false;
     if (!runtime_context_bind_retained(runtime, runtime_ctx)) return false;
-    if (runtime_ctx->js_state && !js_runtime_state_init(runtime_ctx)) return false;
+    if (js_runtime_state_for(runtime_ctx) && !js_runtime_state_init(runtime_ctx)) return false;
     dom_set_document(doc);
     return true;
 }

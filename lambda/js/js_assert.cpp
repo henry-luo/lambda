@@ -8,6 +8,7 @@
  */
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
+#include "js_function.hpp"
 #include "js_event_loop.h"
 #include "js_class.h"
 #include "js_error_codes.h"
@@ -64,52 +65,45 @@ static Item assert_make_string_n(const char* str, size_t len) {
 template <typename Target>
 JS_FORWARD_STATIC_VOID( js_assert_set_native, (Item object, const char* name, Target target), js_set_native_key, (object, assert_make_string(name), target))
 
-extern "C" uint64_t js_get_heap_epoch(void);
-
 #define assert_namespace (js_runtime_state.assert->namespace_object)
 #define internal_errors_namespace (js_runtime_state.assert->internal_errors_namespace)
 #define internal_assert_myers_diff_namespace (js_runtime_state.assert->internal_myers_diff_namespace)
 #define assert_options_key (js_runtime_state.assert->options_key)
 #define assert_diff_key (js_runtime_state.assert->diff_key)
-#define assert_instances (js_runtime_state.assert->instances)
-#define assert_instance_count (js_runtime_state.assert->instance_count)
-#define assert_key_epoch (js_runtime_state.assert->key_epoch)
-#define assert_instances_roots_epoch (js_runtime_state.assert->instances_roots_epoch)
+#define assert_instances (&js_runtime_state.assert->instances)
+#define assert_instance_count root_vector_count(assert_instances)
+
+static bool js_assert_ensure_roots(void) {
+    return js_active_runtime_state && js_runtime_state.assert &&
+        js_root_range_ensure_registered(&js_runtime_state.assert->roots);
+}
 
 static void js_assert_register_instance(Item instance) {
-    uint64_t epoch = js_get_heap_epoch();
-    if (assert_instances_roots_epoch != epoch) {
-        heap_register_gc_root_range((uint64_t*)assert_instances, 64);
-        assert_instances_roots_epoch = epoch;
-    }
-    if (assert_instance_count < 64) {
-        assert_instances[assert_instance_count++] = instance;
+    if (!root_vector_push(assert_instances, instance)) {
+        log_error("js-assert: failed to retain assertion instance");
     }
 }
 
 static bool js_assert_is_registered_instance(Item value) {
-    for (int i = 0; i < assert_instance_count; i++) {
-        if (assert_instances[i].item == value.item) return true;
+    for (int64_t i = 0; i < assert_instance_count; i++) {
+        Item* instance = root_vector_at(assert_instances, i);
+        if (instance && instance->item == value.item) return true;
     }
     return false;
 }
 
 static Item js_assert_options_key(void) {
-    uint64_t epoch = js_get_heap_epoch();
-    if (assert_options_key.item == 0 || assert_key_epoch != epoch) {
+    if (assert_options_key.item == 0) {
+        if (!js_assert_ensure_roots()) return ItemError;
         assert_options_key = assert_make_string("_options");
-        heap_register_gc_root(&assert_options_key.item);
         assert_diff_key = assert_make_string("diff");
-        heap_register_gc_root(&assert_diff_key.item);
-        // Cached keys survive in static storage, but their objects and root
-        // registrations belong to one batch heap only.
-        assert_key_epoch = epoch;
     }
     return assert_options_key;
 }
 
 static Item js_assert_diff_key(void) {
-    (void)js_assert_options_key();
+    Item options_key = js_assert_options_key();
+    if (item_is_error(options_key)) return options_key;
     return assert_diff_key;
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, js_assert_item_is_date, (Item value), (get_type_id(value) == LMD_TYPE_MAP && js_class_id(value) == JS_CLASS_DATE))
@@ -350,14 +344,15 @@ static void js_internal_errors_set_code(Item codes, const char* name,
 
 extern "C" Item js_get_internal_errors_namespace(void) {
     if (internal_errors_namespace.item != 0) return internal_errors_namespace;
+    if (!js_assert_ensure_roots()) return ItemError;
 
     internal_errors_namespace = js_new_object();
-    heap_register_gc_root(&internal_errors_namespace.item);
-
-    Item codes = js_new_object();
-    js_internal_errors_set_code(codes, JS_ERR_OUT_OF_RANGE,
+    RootFrame roots(1);
+    Rooted<Item> codes_root(roots, js_new_object());
+    if (!roots.valid()) return ItemError;
+    js_internal_errors_set_code(codes_root.get(), JS_ERR_OUT_OF_RANGE,
         js_internal_errors_ERR_OUT_OF_RANGE_ctor);
-    js_set_key_cstr(internal_errors_namespace, "codes", codes);
+    js_set_key_cstr(internal_errors_namespace, "codes", codes_root.get());
 
     js_assert_set_native(internal_errors_namespace, "hideStackFrames", js_internal_errors_identity);
     js_assert_set_native(internal_errors_namespace, "hideInternalStackFrames", js_internal_errors_identity);
@@ -450,9 +445,9 @@ extern "C" Item js_internal_assert_printMyersDiff(Item diff, Item operator_item)
 
 extern "C" Item js_get_internal_assert_myers_diff_namespace(void) {
     if (internal_assert_myers_diff_namespace.item != 0) return internal_assert_myers_diff_namespace;
+    if (!js_assert_ensure_roots()) return ItemError;
 
     internal_assert_myers_diff_namespace = js_new_object();
-    heap_register_gc_root(&internal_assert_myers_diff_namespace.item);
     js_set_native_key(internal_assert_myers_diff_namespace, assert_make_string("myersDiff"), js_internal_assert_myersDiff);
     js_set_native_key(internal_assert_myers_diff_namespace, assert_make_string("printMyersDiff"), js_internal_assert_printMyersDiff);
     js_set_native_key(internal_assert_myers_diff_namespace, assert_make_string("printSimpleMyersDiff"), js_internal_assert_printSimpleMyersDiff);
@@ -3088,38 +3083,102 @@ static int js_assert_compare_key_names(Item a, Item b) {
     return as->len < bs->len ? -1 : 1;
 }
 
-static bool js_assert_key_list_contains(Item* keys, int count, const char* text) {
-    for (int i = 0; i < count; i++) {
-        if (js_assert_string_equals(keys[i], text)) return true;
+// Error-pattern keys survive value inspection and diagnostic construction, so
+// one rooted list replaces the two fixed 128-key scratch arrays.
+struct JsAssertPatternKeyList {
+    RootVector values = {};
+
+    JsAssertPatternKeyList() {
+        root_vector_init(&values, NULL, "assert expected pattern keys");
+    }
+
+    ~JsAssertPatternKeyList() {
+        root_vector_destroy(&values);
+    }
+
+    int count() const {
+        return (int)root_vector_count((RootVector*)&values);
+    }
+
+    Item at(int index) const {
+        Item* value = root_vector_at((RootVector*)&values, index);
+        return value ? *value : ItemNull;
+    }
+
+    bool append(Item value) {
+        return root_vector_push(&values, value);
+    }
+};
+
+struct JsAssertPatternMatchFlags {
+    bool* matches = NULL;
+    bool* actual_has = NULL;
+
+    explicit JsAssertPatternMatchFlags(int count) {
+        if (count <= 0) return;
+        matches = (bool*)mem_calloc((size_t)count, sizeof(bool), MEM_CAT_JS_RUNTIME);
+        actual_has = (bool*)mem_calloc((size_t)count, sizeof(bool), MEM_CAT_JS_RUNTIME);
+        if (!matches || !actual_has) {
+            if (matches) mem_free(matches);
+            if (actual_has) mem_free(actual_has);
+            matches = NULL;
+            actual_has = NULL;
+        }
+    }
+
+    ~JsAssertPatternMatchFlags() {
+        if (matches) mem_free(matches);
+        if (actual_has) mem_free(actual_has);
+    }
+
+    bool valid() const {
+        return matches && actual_has;
+    }
+};
+
+static bool js_assert_key_list_contains(const JsAssertPatternKeyList& keys,
+        const char* text) {
+    for (int i = 0; i < keys.count(); i++) {
+        if (js_assert_string_equals(keys.at(i), text)) return true;
     }
     return false;
 }
 
-static int js_assert_collect_expected_pattern_keys(Item expected, Item* out, int max_count) {
-    int count = 0;
-    Item keys = js_object_keys(expected);
-    int64_t key_count = js_array_length(keys);
-    for (int64_t i = 0; i < key_count && count < max_count; i++) {
-        out[count++] = js_elements_get_int(keys, i);
+static bool js_assert_collect_expected_pattern_keys(Item expected,
+        JsAssertPatternKeyList* out) {
+    if (!out) return false;
+    RootFrame roots(3);
+    Rooted<Item> expected_root(roots, expected);
+    Rooted<Item> keys_root(roots, js_object_keys(expected_root.get()));
+    Rooted<Item> extra_key_root(roots, ItemNull);
+    int64_t key_count = js_array_length(keys_root.get());
+    for (int64_t i = 0; i < key_count; i++) {
+        Item key = js_elements_get_int(keys_root.get(), i);
+        if (!out->append(key)) return false;
     }
-    if (get_type_id(expected) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(expected))) {
-        if (count < max_count && !js_assert_key_list_contains(out, count, "message")) {
-            out[count++] = assert_make_string("message");
+    if (get_type_id(expected_root.get()) == LMD_TYPE_MAP &&
+            js_class_is_error_like(js_class_id(expected_root.get()))) {
+        if (!js_assert_key_list_contains(*out, "message")) {
+            extra_key_root.set(assert_make_string("message"));
+            if (!out->append(extra_key_root.get())) return false;
         }
-        if (count < max_count && !js_assert_key_list_contains(out, count, "name")) {
-            out[count++] = assert_make_string("name");
+        if (!js_assert_key_list_contains(*out, "name")) {
+            extra_key_root.set(assert_make_string("name"));
+            if (!out->append(extra_key_root.get())) return false;
         }
     }
-    for (int i = 0; i < count; i++) {
-        for (int j = i + 1; j < count; j++) {
-            if (js_assert_compare_key_names(out[j], out[i]) < 0) {
-                Item tmp = out[i];
-                out[i] = out[j];
-                out[j] = tmp;
+    for (int i = 0; i < out->count(); i++) {
+        for (int j = i + 1; j < out->count(); j++) {
+            Item* left = root_vector_at(&out->values, i);
+            Item* right = root_vector_at(&out->values, j);
+            if (left && right && js_assert_compare_key_names(*right, *left) < 0) {
+                Item tmp = *left;
+                *left = *right;
+                *right = tmp;
             }
         }
     }
-    return count;
+    return true;
 }
 
 static bool js_assert_expected_pattern_is_empty(Item expected) {
@@ -3165,20 +3224,21 @@ static Item js_assert_throw_object_pattern_mismatch(Item thrown, Item expected) 
         // renders them against the expected pattern object directly.
         return js_assert_throw_throws_assertion(plain_msg, thrown, expected, true);
     }
-    Item keys[128];
-    int count = js_assert_collect_expected_pattern_keys(expected, keys, 128);
-    bool matches_key[128];
-    bool actual_has_key[128];
-    for (int i = 0; i < count; i++) {
-        matches_key[i] = false;
-        actual_has_key[i] = false;
+    JsAssertPatternKeyList keys;
+    if (!js_assert_collect_expected_pattern_keys(expected, &keys)) {
+        return js_throw_range_error("Cannot retain assert.throws expected pattern");
+    }
+    int count = keys.count();
+    JsAssertPatternMatchFlags flags(count);
+    if (count > 0 && !flags.valid()) {
+        return js_throw_range_error("Cannot retain assert.throws comparison state");
     }
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, "Expected values to be strictly deep-equal:\n");
     strbuf_append_str(sb, "+ actual - expected\n\n");
     strbuf_append_str(sb, "  Comparison {\n");
     for (int i = 0; i < count; i++) {
-        Item key = keys[i];
+        Item key = keys.at(i);
         if (get_type_id(key) != LMD_TYPE_STRING) continue;
         Item actual_val = js_assert_pattern_property_value(thrown, key);
         Item expected_val = js_assert_pattern_property_value(expected, key);
@@ -3186,7 +3246,7 @@ static Item js_assert_throw_object_pattern_mismatch(Item thrown, Item expected) 
             (js_assert_string_equals(key, "name") &&
              get_type_id(thrown) == LMD_TYPE_MAP &&
              js_class_is_error_like(js_class_id(thrown)));
-        actual_has_key[i] = actual_has;
+        flags.actual_has[i] = actual_has;
         bool matches = actual_has && js_assert_expected_property_matches(actual_val, expected_val);
         if (!matches && actual_has && get_type_id(expected_val) == LMD_TYPE_MAP &&
                 js_assert_is_real_regexp(expected_val)) {
@@ -3195,16 +3255,16 @@ static Item js_assert_throw_object_pattern_mismatch(Item thrown, Item expected) 
             Item test_result = js_regex_test(expected_val, actual_str);
             matches = get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result);
         }
-        matches_key[i] = matches;
+        flags.matches[i] = matches;
     }
     for (int i = 0; i < count;) {
-        if (actual_has_key[i] && !matches_key[i]) {
+        if (flags.actual_has[i] && !flags.matches[i]) {
             int start = i;
-            while (i < count && actual_has_key[i] && !matches_key[i]) i++;
+            while (i < count && flags.actual_has[i] && !flags.matches[i]) i++;
             // Consecutive replacement keys are grouped as all additions then
             // removals; matched or missing keys still keep sorted key order.
             for (int j = start; j < i; j++) {
-                Item key = keys[j];
+                Item key = keys.at(j);
                 if (get_type_id(key) != LMD_TYPE_STRING) continue;
                 String* ks = it2s(key);
                 if (!ks) continue;
@@ -3217,7 +3277,7 @@ static Item js_assert_throw_object_pattern_mismatch(Item thrown, Item expected) 
                 strbuf_append_char(sb, '\n');
             }
             for (int j = start; j < i; j++) {
-                Item key = keys[j];
+                Item key = keys.at(j);
                 if (get_type_id(key) != LMD_TYPE_STRING) continue;
                 String* ks = it2s(key);
                 if (!ks) continue;
@@ -3230,7 +3290,7 @@ static Item js_assert_throw_object_pattern_mismatch(Item thrown, Item expected) 
             }
             continue;
         }
-        Item key = keys[i];
+        Item key = keys.at(i);
         if (get_type_id(key) != LMD_TYPE_STRING) {
             i++;
             continue;
@@ -3240,7 +3300,7 @@ static Item js_assert_throw_object_pattern_mismatch(Item thrown, Item expected) 
             i++;
             continue;
         }
-        if (matches_key[i]) {
+        if (flags.matches[i]) {
             Item actual_val = js_assert_pattern_property_value(thrown, key);
             strbuf_append_str(sb, "    ");
             strbuf_append_str_n(sb, ks->chars, ks->len);
@@ -3391,11 +3451,12 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
 
         // Object pattern: validate each property of expected against thrown
         // e.g. { message: "hello", code: "ERR_ASSERTION" }
-        Item pattern_keys[128];
-        int pattern_key_count = js_assert_collect_expected_pattern_keys(error_expected, pattern_keys, 128);
-        if (pattern_key_count >= 0) {
-            for (int i = 0; i < pattern_key_count; i++) {
-                Item key = pattern_keys[i];
+        JsAssertPatternKeyList pattern_keys;
+        if (!js_assert_collect_expected_pattern_keys(error_expected, &pattern_keys)) {
+            return js_throw_range_error("Cannot retain assert.throws expected pattern");
+        }
+        for (int i = 0; i < pattern_keys.count(); i++) {
+                Item key = pattern_keys.at(i);
                 Item expected_val = js_assert_pattern_property_value(error_expected, key);
                 Item actual_val = js_assert_pattern_property_value(thrown, key);
                 bool actual_has = js_assert_has_own_property_key(thrown, key) ||
@@ -3434,9 +3495,8 @@ extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item messa
                     }
                     return js_assert_throw_object_pattern_mismatch(thrown, error_expected);
                 }
-            }
-            return make_js_undefined();
         }
+        return make_js_undefined();
     }
 
     // unknown expected type — just pass if something was thrown
@@ -5041,10 +5101,10 @@ extern "C" Item js_assert_constructor(Item options) {
 
 extern "C" Item js_get_assert_namespace(void) {
     if (assert_namespace.item != 0) return assert_namespace;
+    if (!js_assert_ensure_roots()) return ItemError;
 
     // namespace doubles as the assert() function itself
     assert_namespace = js_new_native_function(js_assert_ok);
-    heap_register_gc_root(&assert_namespace.item);
 
 #define JS_ASSERT_INSTALL(name, target, arity) \
     assert_set_method(assert_namespace, name, target, arity);
@@ -5101,31 +5161,50 @@ extern "C" void js_assert_reset(void) {
     assert_diff_key = (Item){0};
     // Batch reset drops a heap, so no cached assertion Item may survive into
     // the next realm even though this context capsule itself is retained.
-    memset(assert_instances, 0, sizeof(assert_instances));
-    assert_instance_count = 0;
-    assert_key_epoch = 0;
-    assert_instances_roots_epoch = 0;
+    root_vector_clear(assert_instances);
 }
 
 // =============================================================================
 // node:test module — basic test runner with mock support
 // =============================================================================
 
-#define node_test_namespace (js_runtime_state.assert->node_test_namespace)
-#define g_node_before_each_store (js_runtime_state.assert->before_each_store)
-#define g_node_after_each_store (js_runtime_state.assert->after_each_store)
-#define g_node_test_event_queue (js_runtime_state.assert->event_queue)
+enum JsNodeTestValueSlot {
+    JS_NODE_TEST_NAMESPACE_SLOT = 0,
+    JS_NODE_TEST_EVENT_QUEUE_SLOT = 1,
+    JS_NODE_TEST_VALUE_SLOT_COUNT = 2,
+};
+
+static bool node_test_values_ensure(void) {
+    RootVector* values = &js_runtime_state.assert->node_test_values;
+    if (root_vector_count(values) == JS_NODE_TEST_VALUE_SLOT_COUNT) return true;
+    root_vector_clear(values);
+    for (int i = 0; i < JS_NODE_TEST_VALUE_SLOT_COUNT; i++) {
+        if (!root_vector_push(values, (Item){0})) return false;
+    }
+    return true;
+}
+
+static Item& node_test_value(int slot) {
+    static Item unavailable = {};
+    if (!node_test_values_ensure()) {
+        log_error("node-test-values: cannot publish rooted runtime slots");
+        return unavailable;
+    }
+    Item* value = root_vector_at(&js_runtime_state.assert->node_test_values, slot);
+    if (!value) {
+        log_error("node-test-values: unavailable slot %d", slot);
+        return unavailable;
+    }
+    return *value;
+}
+
+#define node_test_namespace (node_test_value(JS_NODE_TEST_NAMESPACE_SLOT))
+#define g_node_test_event_queue (node_test_value(JS_NODE_TEST_EVENT_QUEUE_SLOT))
 #define g_node_test_total_count (js_runtime_state.assert->node_test_total_count)
 #define g_node_test_pass_count (js_runtime_state.assert->node_test_pass_count)
 #define g_node_test_fail_count (js_runtime_state.assert->node_test_fail_count)
 #define g_node_test_next_id (js_runtime_state.assert->node_test_next_id)
-#define g_node_test_roots_epoch (js_runtime_state.assert->node_test_roots_epoch)
-
-#define MAX_NODE_TEST_HOOKS 64
-#define g_node_before_each_hooks (js_runtime_state.assert->before_each_hooks)
-#define g_node_after_each_hooks (js_runtime_state.assert->after_each_hooks)
-#define g_node_before_each_count (js_runtime_state.assert->before_each_count)
-#define g_node_after_each_count (js_runtime_state.assert->after_each_count)
+#define g_node_test_hooks (&js_runtime_state.assert->node_test_hooks)
 
 // forward decls used throughout
 static Item js_mock_fn_impl(Item original_fn);
@@ -5139,118 +5218,138 @@ static Item js_mock_timers_reset_impl(void);
 static Item js_mock_timers_tick_impl(Item delay);
 
 // ---------------------------------------------------------------------------
-// mock.fn(original?) — creates a mock function that records calls.
-// Fixed wrappers use the active context's slots, so concurrent test realms do
-// not share a registry or need a hot-path lock.
+// mock.fn(original?) — creates a mock function that records calls. Each
+// wrapper carries a stable registry-row pointer as its native payload, so the
+// per-realm registry grows without generated per-slot wrappers.
 // ---------------------------------------------------------------------------
-#define MAX_MOCK_SLOTS 64
-#define g_mock_slots (js_runtime_state.assert->mock_slots)
-#define g_mock_slot_count (js_runtime_state.assert->mock_slot_count)
+#define g_mock_registry (&js_runtime_state.assert->mocks)
 
-static int mock_alloc_slot(void) {
-    // first try to reuse
-    for (int i = 0; i < g_mock_slot_count; i++) {
-        if (!g_mock_slots[i].in_use) {
-            g_mock_slots[i].in_use = true;
-            return i;
+static Item* mock_slot_value(JsAssertMockSlot* slot, int value_offset) {
+    if (!slot || !slot->in_use || slot->root_slot < 0) return NULL;
+    return root_vector_at(&g_mock_registry->values, slot->root_slot + value_offset);
+}
+
+static JsAssertMockSlot* mock_slot_from_id(int64_t slot_id) {
+    if (!g_mock_registry->slots || slot_id < 0 ||
+            slot_id >= g_mock_registry->slots->length) return NULL;
+    JsAssertMockSlot* slot = (JsAssertMockSlot*)arraylist_get(
+        g_mock_registry->slots, (int)slot_id);
+    return slot && slot->in_use ? slot : NULL;
+}
+
+static JsAssertMockSlot* mock_slot_from_wrapper(Item wrapper) {
+    if (get_type_id(wrapper) != LMD_TYPE_FUNC) return NULL;
+    JsFunction* function = (JsFunction*)wrapper.function;
+    if (!function) return NULL;
+    return (JsAssertMockSlot*)(uintptr_t)js_fn_native(function)->target.bits;
+}
+
+static void mock_slot_discard(JsAssertMockSlot* slot) {
+    if (!slot || !g_mock_registry->slots) return;
+    int last_index = g_mock_registry->slots->length - 1;
+    if (last_index < 0 || arraylist_get(g_mock_registry->slots, last_index) != slot) return;
+    root_vector_shrink(&g_mock_registry->values, slot->root_slot);
+    arraylist_remove(g_mock_registry->slots, last_index);
+    mem_free(slot);
+}
+
+static JsAssertMockSlot* mock_slot_alloc(Item calls, Item original) {
+    RootFrame roots(2);
+    Rooted<Item> calls_root(roots, calls);
+    Rooted<Item> original_root(roots, original);
+    JsAssertMockSlot* slot = (JsAssertMockSlot*)mem_calloc(1,
+        sizeof(JsAssertMockSlot), MEM_CAT_JS_RUNTIME);
+    if (!slot) return NULL;
+    slot->root_slot = root_vector_count(&g_mock_registry->values);
+    if (!root_vector_push(&g_mock_registry->values, calls_root.get()) ||
+            !root_vector_push(&g_mock_registry->values, original_root.get())) {
+        root_vector_shrink(&g_mock_registry->values, slot->root_slot);
+        mem_free(slot);
+        return NULL;
+    }
+    if (!g_mock_registry->slots) g_mock_registry->slots = arraylist_new(8);
+    if (!g_mock_registry->slots || !arraylist_append(g_mock_registry->slots, slot)) {
+        root_vector_shrink(&g_mock_registry->values, slot->root_slot);
+        mem_free(slot);
+        return NULL;
+    }
+    slot->in_use = true;
+    return slot;
+}
+
+void js_assert_mock_registry_clear(JsAssertMockRegistry* registry) {
+    if (!registry) return;
+    if (registry->slots) {
+        for (int i = 0; i < registry->slots->length; i++) {
+            mem_free(arraylist_get(registry->slots, i));
         }
+        arraylist_free(registry->slots);
+        registry->slots = NULL;
     }
-    if (g_mock_slot_count < MAX_MOCK_SLOTS) {
-        int idx = g_mock_slot_count++;
-        g_mock_slots[idx].in_use = true;
-        return idx;
-    }
-    return -1;
+    root_vector_clear(&registry->values);
 }
 
-// Each mock wrapper is generated per-slot. We use a trampolining scheme:
-// the first argument of the wrapper encodes the slot index via a JS property
-// on the wrapper function. But since we can't access the function object...
-// Alternative: create separate C wrappers for the first N slots.
-
-// Helper: generic mock wrapper that gets slot index from a hidden property
-// We'll store the slot index as the mock's _slot property on the .mock object,
-// and find it by iterating slots to match the calls array. But that's O(n).
-// Better: use `js_get_callee()` if available, or create per-slot wrappers.
-// Simplest approach: create a fixed number of static wrapper functions.
-
-#define MOCK_WRAPPER_BODY(SLOT_IDX) \
-static Item js_mock_wrapper_##SLOT_IDX(Item a0, Item a1, Item a2) { \
-    int idx = SLOT_IDX; \
-    if (idx >= MAX_MOCK_SLOTS || !g_mock_slots[idx].in_use) return make_js_undefined(); \
-    Item call_record = js_new_object(); \
-    Item args_array = js_array_new(0); \
-    js_array_push(args_array, a0); \
-    js_array_push(args_array, a1); \
-    js_array_push(args_array, a2); \
-    js_set_key_cstr(call_record, "arguments", args_array); \
-    js_set_key_cstr(call_record, "this", make_js_undefined()); \
-    Item result = make_js_undefined(); \
-    if (js_is_callable(g_mock_slots[idx].original)) { \
-        Item call_args[3] = {a0, a1, a2}; \
-        result = js_call_function(g_mock_slots[idx].original, make_js_undefined(), call_args, 3); \
-    } \
-    js_set_key_cstr(call_record, "result", result); \
-    js_array_push(g_mock_slots[idx].calls, call_record); \
-    g_mock_slots[idx].call_count++; \
-    return result; \
+void js_assert_mock_registry_destroy(JsAssertMockRegistry* registry) {
+    if (!registry) return;
+    js_assert_mock_registry_clear(registry);
+    root_vector_destroy(&registry->values);
 }
 
-MOCK_WRAPPER_BODY(0)  MOCK_WRAPPER_BODY(1)  MOCK_WRAPPER_BODY(2)  MOCK_WRAPPER_BODY(3)
-MOCK_WRAPPER_BODY(4)  MOCK_WRAPPER_BODY(5)  MOCK_WRAPPER_BODY(6)  MOCK_WRAPPER_BODY(7)
-MOCK_WRAPPER_BODY(8)  MOCK_WRAPPER_BODY(9)  MOCK_WRAPPER_BODY(10) MOCK_WRAPPER_BODY(11)
-MOCK_WRAPPER_BODY(12) MOCK_WRAPPER_BODY(13) MOCK_WRAPPER_BODY(14) MOCK_WRAPPER_BODY(15)
-MOCK_WRAPPER_BODY(16) MOCK_WRAPPER_BODY(17) MOCK_WRAPPER_BODY(18) MOCK_WRAPPER_BODY(19)
-MOCK_WRAPPER_BODY(20) MOCK_WRAPPER_BODY(21) MOCK_WRAPPER_BODY(22) MOCK_WRAPPER_BODY(23)
-MOCK_WRAPPER_BODY(24) MOCK_WRAPPER_BODY(25) MOCK_WRAPPER_BODY(26) MOCK_WRAPPER_BODY(27)
-MOCK_WRAPPER_BODY(28) MOCK_WRAPPER_BODY(29) MOCK_WRAPPER_BODY(30) MOCK_WRAPPER_BODY(31)
-
-typedef Item (*MockWrapperFn)(Item, Item, Item);
-static const MockWrapperFn g_mock_wrappers[32] = {
-    js_mock_wrapper_0,  js_mock_wrapper_1,  js_mock_wrapper_2,  js_mock_wrapper_3,
-    js_mock_wrapper_4,  js_mock_wrapper_5,  js_mock_wrapper_6,  js_mock_wrapper_7,
-    js_mock_wrapper_8,  js_mock_wrapper_9,  js_mock_wrapper_10, js_mock_wrapper_11,
-    js_mock_wrapper_12, js_mock_wrapper_13, js_mock_wrapper_14, js_mock_wrapper_15,
-    js_mock_wrapper_16, js_mock_wrapper_17, js_mock_wrapper_18, js_mock_wrapper_19,
-    js_mock_wrapper_20, js_mock_wrapper_21, js_mock_wrapper_22, js_mock_wrapper_23,
-    js_mock_wrapper_24, js_mock_wrapper_25, js_mock_wrapper_26, js_mock_wrapper_27,
-    js_mock_wrapper_28, js_mock_wrapper_29, js_mock_wrapper_30, js_mock_wrapper_31,
-};
-
-// A mock_prop object that reads from the slot on access
-// We create a regular object and set a getter-like mechanism,
-// but since we don't have getters, we'll update it lazily.
-// Simplest: store slot index in the mock object, and provide
-// a "calls" array that IS the slot's calls array (shared reference).
+static Item js_mock_wrapper_body(Item wrapper, Item this_value, Item* args,
+        int argc, uint64_t* result_home) {
+    (void)this_value;
+    (void)result_home;
+    JsAssertMockSlot* slot = mock_slot_from_wrapper(wrapper);
+    Item* calls = mock_slot_value(slot, 0);
+    Item* original = mock_slot_value(slot, 1);
+    if (!slot || !calls || !original) return make_js_undefined();
+    RootFrame roots(5);
+    Rooted<Item> calls_root(roots, *calls);
+    Rooted<Item> original_root(roots, *original);
+    Rooted<Item> record_root(roots, js_new_object());
+    Rooted<Item> args_root(roots, js_array_new(0));
+    for (int i = 0; i < argc; i++) js_array_push(args_root.get(), args[i]);
+    js_set_key_cstr(record_root.get(), "arguments", args_root.get());
+    js_set_key_cstr(record_root.get(), "this", make_js_undefined());
+    Rooted<Item> result_root(roots, make_js_undefined());
+    if (js_is_callable(original_root.get())) {
+        result_root.set(js_call_function(original_root.get(), make_js_undefined(), args, argc));
+    }
+    js_set_key_cstr(record_root.get(), "result", result_root.get());
+    js_array_push(calls_root.get(), record_root.get());
+    slot->call_count++;
+    return result_root.get();
+}
 
 // mock.fn([original]) — create a new mock function
 static Item js_mock_fn_impl(Item original_fn) {
-    int slot = mock_alloc_slot();
-    if (slot < 0 || slot >= 32) {
-        // fallback: return a simple function without tracking
-        if (js_is_callable(original_fn)) return original_fn;
-        return js_new_native_function(js_mock_reset_impl);
+    RootFrame roots(4);
+    Rooted<Item> calls_root(roots, js_array_new(0));
+    Rooted<Item> original_root(roots, original_fn);
+    JsAssertMockSlot* slot = mock_slot_alloc(calls_root.get(), original_root.get());
+    if (!slot) return js_throw_range_error("Cannot retain node:test mock");
+
+    Rooted<Item> wrapper_root(roots, js_new_native_payload_function(
+        js_mock_wrapper_body, (uint64_t)(uintptr_t)slot, 0));
+    if (item_is_error(wrapper_root.get())) {
+        mock_slot_discard(slot);
+        return wrapper_root.get();
     }
 
-    g_mock_slots[slot].calls = js_array_new(0);
-    g_mock_slots[slot].call_count = 0;
-    g_mock_slots[slot].original = original_fn;
-
-    Item wrapper = js_new_native_function(g_mock_wrappers[slot]);
-
     // create .mock property pointing to the live calls array
-    Item mock_prop = js_new_object();
-    js_set_key_cstr(mock_prop, "calls", g_mock_slots[slot].calls);
-    js_assert_set_native(mock_prop, "callCount", js_mock_call_count_impl);
-    js_set_key_cstr(mock_prop, "_slot", (Item){.item = i2it(slot)});
+    Rooted<Item> mock_root(roots, js_new_object());
+    js_set_key_cstr(mock_root.get(), "calls", calls_root.get());
+    js_assert_set_native(mock_root.get(), "callCount", js_mock_call_count_impl);
+    int64_t slot_id = g_mock_registry->slots->length - 1;
+    js_set_key_cstr(mock_root.get(), "_slot", (Item){.item = i2it(slot_id)});
 
     // mock.restore() — no-op for fn mocks
-    js_assert_set_native(mock_prop, "restore", js_mock_reset_impl);
+    js_assert_set_native(mock_root.get(), "restore", js_mock_reset_impl);
     // mock.resetCalls()
-    js_assert_set_native(mock_prop, "resetCalls", js_mock_reset_impl);
+    js_assert_set_native(mock_root.get(), "resetCalls", js_mock_reset_impl);
 
-    js_set_key_cstr(wrapper, "mock", mock_prop);
-    return wrapper;
+    js_set_key_cstr(wrapper_root.get(), "mock", mock_root.get());
+    return wrapper_root.get();
 }
 
 // mock.method(object, methodName[, implementation]) — replace a method with a mock
@@ -5280,11 +5379,8 @@ static Item js_mock_call_count_impl(void) {
     Item self = js_get_this();
     Item slot_item = js_get_key_cstr(self, "_slot");
     if (get_type_id(slot_item) != LMD_TYPE_INT) return (Item){.item = i2it(0)};
-    int slot = (int)it2i(slot_item);
-    if (slot < 0 || slot >= MAX_MOCK_SLOTS || !g_mock_slots[slot].in_use) {
-        return (Item){.item = i2it(0)};
-    }
-    return (Item){.item = i2it(g_mock_slots[slot].call_count)};
+    JsAssertMockSlot* slot = mock_slot_from_id(it2i(slot_item));
+    return (Item){.item = i2it(slot ? slot->call_count : 0)};
 }
 
 extern "C" void js_mock_scheduler_enable(void);
@@ -5317,20 +5413,21 @@ JS_FORWARD_STATIC_ITEM(js_mock_setter_impl, (Item object, Item property), js_moc
 
 // Create a mock context object with fn/method/getter/setter/reset/restoreAll
 static Item js_mock_create_context(void) {
-    Item mock_obj = js_new_object();
-    js_assert_set_native(mock_obj, "fn", js_mock_fn_impl);
-    js_assert_set_native(mock_obj, "method", js_mock_method_impl);
-    js_assert_set_native(mock_obj, "getter", js_mock_getter_impl);
-    js_assert_set_native(mock_obj, "setter", js_mock_setter_impl);
-    js_assert_set_native(mock_obj, "reset", js_mock_reset_impl);
-    js_assert_set_native(mock_obj, "restoreAll", js_mock_restore_all_impl);
+    RootFrame roots(2);
+    Rooted<Item> mock_root(roots, js_new_object());
+    js_assert_set_native(mock_root.get(), "fn", js_mock_fn_impl);
+    js_assert_set_native(mock_root.get(), "method", js_mock_method_impl);
+    js_assert_set_native(mock_root.get(), "getter", js_mock_getter_impl);
+    js_assert_set_native(mock_root.get(), "setter", js_mock_setter_impl);
+    js_assert_set_native(mock_root.get(), "reset", js_mock_reset_impl);
+    js_assert_set_native(mock_root.get(), "restoreAll", js_mock_restore_all_impl);
     // timers sub-object
-    Item timers_obj = js_new_object();
-    js_assert_set_native(timers_obj, "enable", js_mock_timers_enable_impl);
-    js_assert_set_native(timers_obj, "reset", js_mock_timers_reset_impl);
-    js_assert_set_native(timers_obj, "tick", js_mock_timers_tick_impl);
-    js_set_key_cstr(mock_obj, "timers", timers_obj);
-    return mock_obj;
+    Rooted<Item> timers_root(roots, js_new_object());
+    js_assert_set_native(timers_root.get(), "enable", js_mock_timers_enable_impl);
+    js_assert_set_native(timers_root.get(), "reset", js_mock_timers_reset_impl);
+    js_assert_set_native(timers_root.get(), "tick", js_mock_timers_tick_impl);
+    js_set_key_cstr(mock_root.get(), "timers", timers_root.get());
+    return mock_root.get();
 }
 
 // t.skip() — no-op skip
@@ -5349,31 +5446,21 @@ JS_FORWARD_STATIC_ITEM(js_test_context_plan, (Item count), make_js_undefined, ()
 extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn);
 JS_FORWARD_STATIC_ITEM(js_test_context_subtest, (Item name, Item options_or_fn, Item fn), js_node_test_run, (name, options_or_fn, fn))
 
-static void node_test_ensure_hook_stores(void) {
-    if (g_node_before_each_store.item == 0) {
-        g_node_before_each_store = js_array_new(0);
+static bool node_test_store_hook(RootVector* hooks, Item fn) {
+    if (!js_is_callable(fn)) return true;
+    if (!root_vector_push(hooks, fn)) {
+        log_error("node-test-hooks: failed to retain hook");
+        return false;
     }
-    if (g_node_after_each_store.item == 0) {
-        g_node_after_each_store = js_array_new(0);
-    }
-    if (node_test_namespace.item != 0) {
-        js_set_key_cstr(node_test_namespace, "__beforeEachHooks__", g_node_before_each_store);
-        js_set_key_cstr(node_test_namespace, "__afterEachHooks__", g_node_after_each_store);
-    }
+    return true;
 }
 
-static void node_test_store_hook(Item* hooks, int* count, Item fn) {
-    if (!js_is_callable(fn)) return;
-    node_test_ensure_hook_stores();
-    if (*count >= MAX_NODE_TEST_HOOKS) return;
-    hooks[*count] = fn;
-    (*count)++;
-}
-
-static Item node_test_run_hooks(Item* hooks, int count) {
-    for (int i = 0; i < count; i++) {
-        if (!js_is_callable(hooks[i])) continue;
-        JS_ASSIGN_OR_RETURN(hook_result, js_call_function(hooks[i], make_js_undefined(), NULL, 0));
+static Item node_test_run_hooks(RootVector* hooks) {
+    int64_t count = root_vector_count(hooks);
+    for (int64_t i = 0; i < count; i++) {
+        Item* hook = root_vector_at(hooks, i);
+        if (!hook || !js_is_callable(*hook)) continue;
+        JS_ASSIGN_OR_RETURN(hook_result, js_call_function(*hook, make_js_undefined(), NULL, 0));
         js_microtask_flush();
     }
     return ItemNull;
@@ -5391,12 +5478,6 @@ static void node_test_note_failure(void) {
     js_process_set_exitCode((Item){.item = i2it(1)});
 }
 
-static void node_test_register_roots(void) {
-    uint64_t epoch = js_get_heap_epoch();
-    if (g_node_test_roots_epoch == epoch) return;
-    heap_register_gc_root(&g_node_test_event_queue.item);
-    g_node_test_roots_epoch = epoch;
-}
 JS_FORWARD_STATIC_EXPRESSION(bool, node_test_event_queue_active, (void), (get_type_id(g_node_test_event_queue) == LMD_TYPE_ARRAY))
 
 static void node_test_emit_event(const char* type, Item name, int64_t test_id, Item error) {
@@ -5604,7 +5685,7 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     Item diagnostics_previous = js_diagnostics_channel_apply_store_context(
         "tracing:node.test:start", diagnostics_message);
 
-    Item before_hooks_result = node_test_run_hooks(g_node_before_each_hooks, g_node_before_each_count);
+    Item before_hooks_result = node_test_run_hooks(&g_node_test_hooks->before_each);
     if (item_is_error(before_hooks_result)) {
         Item err = js_error_lane_payload(before_hooks_result);
         node_test_emit_event("test:fail", name, test_id, err);
@@ -5635,7 +5716,7 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     }
 
     if (!callback_is_async) {
-        Item after_hooks_result = node_test_run_hooks(g_node_after_each_hooks, g_node_after_each_count);
+        Item after_hooks_result = node_test_run_hooks(&g_node_test_hooks->after_each);
         if (item_is_error(after_hooks_result)) {
             if (!callback_threw) {
                 Item err = js_error_lane_payload(after_hooks_result);
@@ -5673,15 +5754,15 @@ extern "C" Item js_node_test_describe(Item name, Item options_or_fn, Item fn) {
     }
     if (!js_is_callable(callback)) return make_js_undefined();
 
-    int before_each_mark = g_node_before_each_count;
-    int after_each_mark = g_node_after_each_count;
+    int64_t before_each_mark = root_vector_count(&g_node_test_hooks->before_each);
+    int64_t after_each_mark = root_vector_count(&g_node_test_hooks->after_each);
     Item diagnostics_message = node_test_diagnostics_message(name, "suite");
     Item diagnostics_previous = js_diagnostics_channel_apply_store_context(
         "tracing:node.test:start", diagnostics_message);
     Item callback_result = js_call_function(callback, make_js_undefined(), NULL, 0);
     js_microtask_flush();
-    g_node_before_each_count = before_each_mark;
-    g_node_after_each_count = after_each_mark;
+    root_vector_shrink(&g_node_test_hooks->before_each, before_each_mark);
+    root_vector_shrink(&g_node_test_hooks->after_each, after_each_mark);
     if (item_is_error(callback_result)) {
         Item err = js_error_lane_payload(callback_result);
         node_test_diagnostics_error(diagnostics_message, err);
@@ -5692,8 +5773,7 @@ extern "C" Item js_node_test_describe(Item name, Item options_or_fn, Item fn) {
     return make_js_undefined();
 }
 
-// hook registration stubs. beforeEach is run by the lightweight test wrapper;
-// afterEach is retained and touched once until a full async runner lands.
+// hook registration stubs. The lightweight runner applies each stored phase.
 extern "C" Item js_node_test_hook(Item fn, Item options) {
     (void)fn;
     (void)options;
@@ -5702,29 +5782,26 @@ extern "C" Item js_node_test_hook(Item fn, Item options) {
 
 extern "C" Item js_node_test_before_each(Item fn, Item options) {
     (void)options;
-    node_test_ensure_hook_stores();
-    if (js_is_callable(fn)) js_array_push(g_node_before_each_store, fn);
-    node_test_store_hook(g_node_before_each_hooks, &g_node_before_each_count, fn);
+    if (!node_test_store_hook(&g_node_test_hooks->before_each, fn)) {
+        return js_throw_range_error("Cannot retain node:test beforeEach hook");
+    }
     return make_js_undefined();
 }
 
 extern "C" Item js_node_test_after_each(Item fn, Item options) {
     (void)options;
-    node_test_ensure_hook_stores();
-    if (js_is_callable(fn)) {
-        js_array_push(g_node_after_each_store, fn);
-        js_call_function(fn, make_js_undefined(), NULL, 0);
-        js_microtask_flush();
+    if (!node_test_store_hook(&g_node_test_hooks->after_each, fn)) {
+        return js_throw_range_error("Cannot retain node:test afterEach hook");
     }
     return make_js_undefined();
 }
 
 static Item js_node_test_run_files(Item options) {
 
-    node_test_register_roots();
-    Item previous_queue = g_node_test_event_queue;
-    int before_each_mark = g_node_before_each_count;
-    int after_each_mark = g_node_after_each_count;
+    RootFrame roots(2);
+    Rooted<Item> previous_queue_root(roots, g_node_test_event_queue);
+    int64_t before_each_mark = root_vector_count(&g_node_test_hooks->before_each);
+    int64_t after_each_mark = root_vector_count(&g_node_test_hooks->after_each);
     int64_t previous_next_id = g_node_test_next_id;
 
     g_node_test_event_queue = js_array_new(0);
@@ -5752,43 +5829,43 @@ static Item js_node_test_run_files(Item options) {
         }
     }
 
-    Item events = g_node_test_event_queue;
-    g_node_test_event_queue = previous_queue;
+    Rooted<Item> events_root(roots, g_node_test_event_queue);
+    g_node_test_event_queue = previous_queue_root.get();
     g_node_test_next_id = previous_next_id;
-    g_node_before_each_count = before_each_mark;
-    g_node_after_each_count = after_each_mark;
-    return node_test_make_event_stream(events);
+    root_vector_shrink(&g_node_test_hooks->before_each, before_each_mark);
+    root_vector_shrink(&g_node_test_hooks->after_each, after_each_mark);
+    return node_test_make_event_stream(events_root.get());
 }
 
 extern "C" Item js_get_node_test_namespace(void) {
     if (node_test_namespace.item != 0) return node_test_namespace;
 
-    Item test_fn = js_new_native_function(js_node_test_run);
-    node_test_namespace = test_fn;
-    node_test_ensure_hook_stores();
+    RootFrame roots(6);
+    Rooted<Item> test_root(roots, js_new_native_function(js_node_test_run));
+    node_test_namespace = test_root.get();
 
     // test is both the default export and a named export
-    js_set_key_cstr(node_test_namespace, "test", test_fn);
-    js_set_key_cstr(node_test_namespace, "default", test_fn);
+    js_set_key_cstr(node_test_namespace, "test", test_root.get());
+    js_set_key_cstr(node_test_namespace, "default", test_root.get());
 
-    Item describe_fn = js_new_native_function(js_node_test_describe);
-    js_set_key_cstr(node_test_namespace, "describe", describe_fn);
-    js_set_key_cstr(node_test_namespace, "suite", describe_fn);
-    js_set_key_cstr(node_test_namespace, "it", test_fn);
-    Item hook_fn = js_new_native_function(js_node_test_hook);
-    Item before_each_fn = js_new_native_function(js_node_test_before_each);
-    Item after_each_fn = js_new_native_function(js_node_test_after_each);
-    js_set_key_cstr(node_test_namespace, "before", hook_fn);
-    js_set_key_cstr(node_test_namespace, "after", hook_fn);
-    js_set_key_cstr(node_test_namespace, "beforeEach", before_each_fn);
-    js_set_key_cstr(node_test_namespace, "afterEach", after_each_fn);
+    Rooted<Item> describe_root(roots, js_new_native_function(js_node_test_describe));
+    js_set_key_cstr(node_test_namespace, "describe", describe_root.get());
+    js_set_key_cstr(node_test_namespace, "suite", describe_root.get());
+    js_set_key_cstr(node_test_namespace, "it", test_root.get());
+    Rooted<Item> hook_root(roots, js_new_native_function(js_node_test_hook));
+    Rooted<Item> before_each_root(roots, js_new_native_function(js_node_test_before_each));
+    Rooted<Item> after_each_root(roots, js_new_native_function(js_node_test_after_each));
+    js_set_key_cstr(node_test_namespace, "before", hook_root.get());
+    js_set_key_cstr(node_test_namespace, "after", hook_root.get());
+    js_set_key_cstr(node_test_namespace, "beforeEach", before_each_root.get());
+    js_set_key_cstr(node_test_namespace, "afterEach", after_each_root.get());
 
     // mock — global mock object
-    Item mock_obj = js_mock_create_context();
-    js_set_key_cstr(node_test_namespace, "mock", mock_obj);
+    Rooted<Item> mock_root(roots, js_mock_create_context());
+    js_set_key_cstr(node_test_namespace, "mock", mock_root.get());
 
     // MockTracker class — same as mock
-    js_set_key_cstr(node_test_namespace, "MockTracker", mock_obj);
+    js_set_key_cstr(node_test_namespace, "MockTracker", mock_root.get());
 
     // run — in-process file runner that returns a test event iterable
     js_set_native_key(node_test_namespace, assert_make_string("run"), js_node_test_run_files);
@@ -5805,19 +5882,10 @@ extern "C" void js_node_test_reset(void) {
     if (!js_active_runtime_state) return;
     extern void js_mock_scheduler_reset(void);
     js_mock_scheduler_reset();
-    node_test_namespace = (Item){0};
-    g_node_before_each_store = (Item){0};
-    g_node_after_each_store = (Item){0};
-    g_node_test_event_queue = (Item){0};
-    memset(g_node_before_each_hooks, 0, sizeof(g_node_before_each_hooks));
-    memset(g_node_after_each_hooks, 0, sizeof(g_node_after_each_hooks));
-    // Mock wrappers use fixed C entrypoints, but their records are heap Items;
-    // clear the context-local slots before a replacement heap reuses them.
-    memset(g_mock_slots, 0, sizeof(g_mock_slots));
-    g_mock_slot_count = 0;
-    g_node_before_each_count = 0;
-    g_node_after_each_count = 0;
+    root_vector_clear(&js_runtime_state.assert->node_test_values);
+    root_vector_clear(&g_node_test_hooks->before_each);
+    root_vector_clear(&g_node_test_hooks->after_each);
+    js_assert_mock_registry_clear(g_mock_registry);
     g_node_test_next_id = 1;
-    g_node_test_roots_epoch = 0;
     js_node_test_reset_counts();
 }

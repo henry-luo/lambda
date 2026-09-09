@@ -2,19 +2,16 @@
 
 #include "../../jube/jube.h"
 
-#define NODE_TRACE_MAX_CATEGORIES 64
-#define NODE_TRACE_MAX_EVENTS 2048
-
 struct NodeTraceCategory {
-    char name[64];
+    char* name;
     int refs;
     bool from_exec_argv;
 };
 
 struct NodeTraceEvent {
     char ph;
-    char cat[128];
-    char name[96];
+    char* cat;
+    char* name;
     uint64_t ts;
     int64_t id;
     bool has_id;
@@ -23,10 +20,8 @@ struct NodeTraceEvent {
 // Node trace data belongs to the optional NodeRuntimeSession. Keeping it out
 // of JsRuntimeState avoids paying for the fixed event buffer in non-Node JS realms.
 struct NodeTraceState {
-    NodeTraceCategory categories[NODE_TRACE_MAX_CATEGORIES];
-    int category_count;
-    NodeTraceEvent events[NODE_TRACE_MAX_EVENTS];
-    int event_count;
+    ArrayList* categories;
+    ArrayList* events;
     bool initialized;
     bool file_written;
     uint64_t namespace_item;

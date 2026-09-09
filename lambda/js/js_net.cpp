@@ -108,7 +108,6 @@ typedef struct JsSocket {
     bool      handle_exposed;
     bool      timeout_timer_active;
     bool      end_after_connect;
-    bool      end_callback_set;
     bool      remote_ended;
     bool      close_after_write_drain;
     bool      need_drain;
@@ -143,13 +142,14 @@ typedef struct JsSocket {
     char      auto_addrs[8][INET6_ADDRSTRLEN];
     int       auto_families[8];
     Item      timeout_timer;
-    Item      end_callback;
+    int64_t   end_callback_slot;
     Item      abort_signal;
     Item      abort_handler;
     Item      onread_buffer_source;
     Item      onread_buffer;
     Item      onread_callback;
     Item      tls_socket;
+    RuntimeCallbackSlots write_callbacks;
     PendingSocketWrite* pending_writes_head;
     PendingSocketWrite* pending_writes_tail;
     SocketAutoAttemptTimerReq* auto_attempt_timer;
@@ -172,13 +172,13 @@ struct JsBoundSocket {
 typedef struct SocketWriteReq {
     size_t     len;
     JsSocket*  sock;
-    Item       callback;
+    int64_t    callback_slot;
 } SocketWriteReq;
 
 typedef struct SocketShutdownReq {
     uv_shutdown_t req;
     JsSocket*     sock;
-    Item          callback;
+    int64_t       callback_slot;
 } SocketShutdownReq;
 
 typedef struct SocketBlockedErrorReq {
@@ -190,9 +190,33 @@ typedef struct SocketBlockedErrorReq {
 struct PendingSocketWrite {
     char* data;
     size_t len;
-    Item callback;
+    int64_t callback_slot;
     PendingSocketWrite* next;
 };
+
+// Native write records carry only a stable slot; one vector owns every JS
+// callback until its queued, submitted, or shutdown completion consumes it.
+static JsSocket* socket_alloc(void) {
+    JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
+    if (!sock) return NULL;
+    runtime_callback_slots_init(&sock->write_callbacks, (Context*)context,
+        "net.Socket write callbacks");
+    sock->end_callback_slot = -1;
+    return sock;
+}
+
+static void socket_free(JsSocket* sock) {
+    if (!sock) return;
+    PendingSocketWrite* pending = sock->pending_writes_head;
+    while (pending) {
+        PendingSocketWrite* next = pending->next;
+        if (pending->data) mem_free(pending->data);
+        mem_free(pending);
+        pending = next;
+    }
+    runtime_callback_slots_destroy(&sock->write_callbacks);
+    mem_free(sock);
+}
 
 static JsSocket* socket_from_object(Item self) {
     TypeId type = get_type_id(self);
@@ -276,7 +300,7 @@ static void socket_remove_abort_listener(JsSocket* sock);
 static void socket_release_after_pending_connect(JsSocket* sock);
 static void socket_configure_onread(JsSocket* sock, Item onread);
 static bool socket_schedule_auto_retry(JsSocket* sock);
-static void socket_shutdown_writes(JsSocket* sock, Item callback);
+static void socket_shutdown_writes(JsSocket* sock, int64_t callback_slot);
 static void socket_update_writable(JsSocket* sock, bool writable);
 static void socket_update_readable(JsSocket* sock, bool readable);
 static Item make_uv_error(int status, const char* syscall, const char* host, int port);
@@ -514,7 +538,7 @@ static void socket_finish_on_remote_end(JsSocket* sock) {
     }
     // Non-half-open sockets must send their own FIN after peer EOF; emitting
     // finish alone leaves a live TCP handle until the test harness drain timeout.
-    socket_shutdown_writes(sock, make_undefined_item());
+    socket_shutdown_writes(sock, -1);
 }
 
 
@@ -711,11 +735,15 @@ static Item socket_make_error(const char* code, const char* message) {
 }
 
 static void socket_report_write_error(JsSocket* sock, Item callback, Item err) {
-    if (is_callable(callback)) {
-        js_call_function(callback, make_undefined_item(), &err, 1);
+    RootFrame roots(2);
+    Rooted<Item> callback_root(roots, callback);
+    Rooted<Item> error_root(roots, err);
+    if (is_callable(callback_root.get())) {
+        js_call_function(callback_root.get(), make_undefined_item(),
+            (Item*)error_root.home(), 1);
         js_microtask_flush();
     } else if (sock && sock->js_object.item) {
-        socket_emit(sock->js_object, "error", &err, 1);
+        socket_emit(sock->js_object, "error", (Item*)error_root.home(), 1);
     }
 }
 
@@ -850,6 +878,11 @@ static void socket_write_settled(void* ud, int status, const char* data, size_t 
     SocketWriteReq* wreq = (SocketWriteReq*)ud;
     if (!wreq) return;
     JsSocket* sock = wreq->sock;
+    RootFrame roots(2);
+    Rooted<Item> callback_root(roots, sock
+        ? runtime_callback_slots_take(&sock->write_callbacks, wreq->callback_slot)
+        : ItemNull);
+    Rooted<Item> error_root(roots, ItemNull);
     if (sock) {
         sock->buffer_size -= (int64_t)wreq->len;
         if (sock->buffer_size < 0) sock->buffer_size = 0;
@@ -859,12 +892,13 @@ static void socket_write_settled(void* ud, int status, const char* data, size_t 
         }
         socket_update_io_counters(sock);
     }
-    if (is_callable(wreq->callback)) {
+    if (is_callable(callback_root.get())) {
         if (status == 0) {
-            js_call_function(wreq->callback, make_undefined_item(), NULL, 0);
+            js_call_function(callback_root.get(), make_undefined_item(), NULL, 0);
         } else {
-            Item err = make_uv_error(status, "write", NULL, -1);
-            js_call_function(wreq->callback, make_undefined_item(), &err, 1);
+            error_root.set(make_uv_error(status, "write", NULL, -1));
+            js_call_function(callback_root.get(), make_undefined_item(),
+                (Item*)error_root.home(), 1);
         }
         js_microtask_flush();
     }
@@ -875,13 +909,25 @@ static void socket_write_settled(void* ud, int status, const char* data, size_t 
     mem_free(wreq);
 }
 
+static bool socket_capture_write_callback(JsSocket* sock, Item callback,
+                                          int64_t* callback_slot) {
+    if (!callback_slot) return false;
+    *callback_slot = -1;
+    if (!is_callable(callback)) return true;
+    return runtime_callback_slots_add(&sock->write_callbacks, callback, callback_slot);
+}
+
 static Item socket_submit_write(JsSocket* sock, char* copy, size_t data_len,
-                                Item callback, bool counted_before) {
+                                int64_t callback_slot, bool counted_before) {
     SocketWriteReq* wreq = (SocketWriteReq*)mem_calloc(1, sizeof(SocketWriteReq), MEM_CAT_JS_RUNTIME);
-    if (!wreq) { mem_free(copy); return (Item){.item = b2it(false)}; }
+    if (!wreq) {
+        (void)runtime_callback_slots_take(&sock->write_callbacks, callback_slot);
+        mem_free(copy);
+        return (Item){.item = b2it(false)};
+    }
     wreq->len = data_len;
     wreq->sock = sock;
-    wreq->callback = callback;
+    wreq->callback_slot = callback_slot;
 
     if (!counted_before) {
         sock->bytes_written += (int64_t)data_len;
@@ -905,12 +951,18 @@ static Item socket_submit_write(JsSocket* sock, char* copy, size_t data_len,
     return (Item){.item = b2it(below_hwm)};
 }
 
-static void socket_queue_write(JsSocket* sock, char* copy, size_t data_len, Item callback) {
+static bool socket_queue_write(JsSocket* sock, char* copy, size_t data_len,
+        int64_t callback_slot) {
     PendingSocketWrite* pending =
         (PendingSocketWrite*)mem_calloc(1, sizeof(PendingSocketWrite), MEM_CAT_JS_RUNTIME);
+    if (!pending) {
+        (void)runtime_callback_slots_take(&sock->write_callbacks, callback_slot);
+        mem_free(copy);
+        return false;
+    }
     pending->data = copy;
     pending->len = data_len;
-    pending->callback = callback;
+    pending->callback_slot = callback_slot;
     if (sock->pending_writes_tail) {
         sock->pending_writes_tail->next = pending;
     } else {
@@ -921,10 +973,13 @@ static void socket_queue_write(JsSocket* sock, char* copy, size_t data_len, Item
     sock->buffer_size += (int64_t)data_len;
     if (sock->buffer_size > sock->high_water_mark) sock->need_drain = true;
     socket_update_io_counters(sock);
+    return true;
 }
 
 static void socket_fail_pending_writes(JsSocket* sock, Item err) {
     if (!sock) return;
+    RootFrame error_roots(1);
+    Rooted<Item> error_root(error_roots, err);
     PendingSocketWrite* pending = sock->pending_writes_head;
     sock->pending_writes_head = NULL;
     sock->pending_writes_tail = NULL;
@@ -932,8 +987,12 @@ static void socket_fail_pending_writes(JsSocket* sock, Item err) {
         PendingSocketWrite* next = pending->next;
         sock->buffer_size -= (int64_t)pending->len;
         if (sock->buffer_size < 0) sock->buffer_size = 0;
-        if (is_callable(pending->callback)) {
-            js_call_function(pending->callback, make_undefined_item(), &err, 1);
+        RootFrame roots(1);
+        Rooted<Item> callback_root(roots,
+            runtime_callback_slots_take(&sock->write_callbacks, pending->callback_slot));
+        if (is_callable(callback_root.get())) {
+            js_call_function(callback_root.get(), make_undefined_item(),
+                (Item*)error_root.home(), 1);
             js_microtask_flush();
         }
         if (pending->data) mem_free(pending->data);
@@ -1014,7 +1073,7 @@ static void socket_remove_abort_listener(JsSocket* sock) {
 
 static void socket_release_after_pending_connect(JsSocket* sock) {
     if (!sock || !sock->free_after_connect_pending || sock->connect_pending) return;
-    mem_free(sock);
+    socket_free(sock);
 }
 
 static bool socket_configure_abort_signal(JsSocket* sock, Item signal) {
@@ -1066,7 +1125,8 @@ static void socket_flush_pending_writes(JsSocket* sock) {
     sock->pending_writes_tail = NULL;
     while (pending) {
         PendingSocketWrite* next = pending->next;
-        socket_submit_write(sock, pending->data, pending->len, pending->callback, true);
+        socket_submit_write(sock, pending->data, pending->len,
+            pending->callback_slot, true);
         mem_free(pending);
         pending = next;
     }
@@ -1124,12 +1184,19 @@ static Item socket_write_data(Item self, JsSocket* sock, Item data_item, Item ca
 
     char* copy = (char*)mem_alloc(data_len, MEM_CAT_JS_RUNTIME);
     memcpy(copy, data, data_len);
+    int64_t callback_slot = -1;
+    if (!socket_capture_write_callback(sock, callback, &callback_slot)) {
+        mem_free(copy);
+        return (Item){.item = b2it(false)};
+    }
     if (sock->connect_pending && !sock->connected) {
-        socket_queue_write(sock, copy, data_len, callback);
+        if (!socket_queue_write(sock, copy, data_len, callback_slot)) {
+            return (Item){.item = b2it(false)};
+        }
         return (Item){.item = b2it(sock->buffer_size <= sock->high_water_mark)};
     }
 
-    return socket_submit_write(sock, copy, data_len, callback, false);
+    return socket_submit_write(sock, copy, data_len, callback_slot, false);
 }
 
 // write(data[, encoding][, callback]) — write to socket
@@ -1150,23 +1217,31 @@ extern "C" Item js_socket_write(Item rest_args) {
     return socket_write_data(self, sock, data_item, callback);
 }
 
-static void socket_shutdown_writes(JsSocket* sock, Item callback) {
+static void socket_shutdown_writes(JsSocket* sock, int64_t callback_slot) {
     if (!sock || sock->destroyed || !sock->connected) return;
     // Borrowed raw socket end() may intentionally write non-TLS bytes; only
     // close/destroy ownership is delegated to TLSSocket after adoption.
     SocketShutdownReq* sreq =
         (SocketShutdownReq*)mem_calloc(1, sizeof(SocketShutdownReq), MEM_CAT_JS_RUNTIME);
+    if (!sreq) {
+        (void)runtime_callback_slots_take(&sock->write_callbacks, callback_slot);
+        return;
+    }
     sreq->sock = sock;
-    sreq->callback = callback;
+    sreq->callback_slot = callback_slot;
     sreq->req.data = sreq;
     int r = uv_shutdown(&sreq->req, (uv_stream_t*)&sock->tcp,
         [](uv_shutdown_t* req, int status) {
             SocketShutdownReq* sreq = (SocketShutdownReq*)req->data;
             JsSocket* sock = sreq ? sreq->sock : NULL;
+            RootFrame roots(1);
+            Rooted<Item> callback_root(roots, sock && sreq
+                ? runtime_callback_slots_take(&sock->write_callbacks,
+                    sreq->callback_slot) : ItemNull);
             if (sock && !sock->destroyed) {
                 socket_emit_finish_once(sock);
-                if (is_callable(sreq->callback)) {
-                    js_call_function(sreq->callback, make_undefined_item(), NULL, 0);
+                if (is_callable(callback_root.get())) {
+                    js_call_function(callback_root.get(), make_undefined_item(), NULL, 0);
                     js_microtask_flush();
                 }
                 if (sock->remote_ended) {
@@ -1176,9 +1251,12 @@ static void socket_shutdown_writes(JsSocket* sock, Item callback) {
             if (sreq) mem_free(sreq);
         });
     if (r != 0) {
+        RootFrame roots(1);
+        Rooted<Item> callback_root(roots,
+            runtime_callback_slots_take(&sock->write_callbacks, callback_slot));
         socket_emit_finish_once(sock);
-        if (is_callable(callback)) {
-            js_call_function(callback, make_undefined_item(), NULL, 0);
+        if (is_callable(callback_root.get())) {
+            js_call_function(callback_root.get(), make_undefined_item(), NULL, 0);
             js_microtask_flush();
         }
         mem_free(sreq);
@@ -1215,8 +1293,11 @@ extern "C" Item js_socket_end(Item rest_args) {
 
     if (sock->connect_pending && !sock->connected) {
         sock->end_after_connect = true;
-        sock->end_callback = callback;
-        sock->end_callback_set = is_callable(callback);
+        (void)runtime_callback_slots_take(&sock->write_callbacks,
+            sock->end_callback_slot);
+        if (!socket_capture_write_callback(sock, callback, &sock->end_callback_slot)) {
+            return self;
+        }
         return self;
     }
 
@@ -1229,7 +1310,9 @@ extern "C" Item js_socket_end(Item rest_args) {
         return self;
     }
 
-    socket_shutdown_writes(sock, callback);
+    int64_t callback_slot = -1;
+    if (!socket_capture_write_callback(sock, callback, &callback_slot)) return self;
+    socket_shutdown_writes(sock, callback_slot);
 
     return self;
 }
@@ -1286,7 +1369,7 @@ static void socket_close_handle_cb(uv_handle_t* handle) {
     if (s->connect_pending) {
         s->free_after_connect_pending = true;
     } else {
-        mem_free(s);
+        socket_free(s);
     }
 }
 
@@ -1357,7 +1440,7 @@ extern "C" void js_net_socket_tls_closed(Item socket_obj, bool had_error) {
     net_active_remove(&sock->active_resource_id);
     socket_emit_close(sock->js_object, had_error);
     socket_note_closed(sock);
-    mem_free(sock);
+    socket_free(sock);
 }
 
 static Item js_socket_timeout_fire(Item env_item) {
@@ -1808,20 +1891,15 @@ typedef struct NetBlockListEntry {
     unsigned char addr6[16];
 } NetBlockListEntry;
 
-#define NET_BLOCK_LIST_MAX 128
-#define NET_BLOCK_LIST_INSTANCE_MAX 256
-
 typedef struct NetBlockList {
-    int count;
-    NetBlockListEntry entries[NET_BLOCK_LIST_MAX];
+    ArrayList* entries;
 } NetBlockList;
 
 typedef struct JsNetRuntimeState {
     bool default_auto_select_family;
     int auto_select_family_timeout;
     bool cli_options_applied;
-    NetBlockList* block_list_instances[NET_BLOCK_LIST_INSTANCE_MAX];
-    int block_list_instance_count;
+    ArrayList* block_list_instances;
 } JsNetRuntimeState;
 
 static bool net_ensure_roots(void) {
@@ -1842,12 +1920,48 @@ static bool net_ensure_roots(void) {
 #define net_auto_select_family_timeout (net_runtime_state.auto_select_family_timeout)
 #define net_cli_options_applied (net_runtime_state.cli_options_applied)
 
+static int net_block_list_entry_count(const NetBlockList* list) {
+    return list && list->entries ? list->entries->length : 0;
+}
+
+static NetBlockListEntry* net_block_list_entry_at(const NetBlockList* list, int index) {
+    return list && list->entries && index >= 0 && index < list->entries->length
+        ? (NetBlockListEntry*)arraylist_get(list->entries, index) : NULL;
+}
+
+static void net_block_list_destroy(NetBlockList* list) {
+    if (!list) return;
+    if (list->entries) {
+        for (int i = 0; i < list->entries->length; i++) {
+            mem_free(arraylist_get(list->entries, i));
+        }
+        arraylist_free(list->entries);
+    }
+    mem_free(list);
+}
+
+static void net_block_list_instances_clear(JsNetRuntimeState* state) {
+    if (!state || !state->block_list_instances) return;
+    for (int i = 0; i < state->block_list_instances->length; i++) {
+        net_block_list_destroy((NetBlockList*)arraylist_get(state->block_list_instances, i));
+    }
+    arraylist_free(state->block_list_instances);
+    state->block_list_instances = NULL;
+}
+
 static NetBlockList* net_block_list_alloc(void) {
     if (!net_ensure_roots()) return NULL;
-    if (net_runtime_state.block_list_instance_count >= NET_BLOCK_LIST_INSTANCE_MAX) return NULL;
     NetBlockList* list = (NetBlockList*)mem_calloc(1, sizeof(NetBlockList), MEM_CAT_JS_RUNTIME);
     if (!list) return NULL;
-    net_runtime_state.block_list_instances[net_runtime_state.block_list_instance_count++] = list;
+    if (!net_runtime_state.block_list_instances) {
+        net_runtime_state.block_list_instances = arraylist_new(8);
+    }
+    list->entries = arraylist_new(8);
+    if (!list->entries || !net_runtime_state.block_list_instances ||
+            !arraylist_append(net_runtime_state.block_list_instances, list)) {
+        net_block_list_destroy(list);
+        return NULL;
+    }
     return list;
 }
 
@@ -1996,7 +2110,7 @@ extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
         return make_server_object_from_fd(loop, fd);
     }
 
-    JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
+    JsSocket* sock = socket_alloc();
     if (!sock) {
 #ifndef _WIN32
         close(fd);
@@ -2012,7 +2126,7 @@ extern "C" Item js_net_accept_ipc_tcp_handle(uv_pipe_t* pipe) {
 #endif
         uv_close((uv_handle_t*)&sock->tcp, [](uv_handle_t* h) {
             JsSocket* s = h ? (JsSocket*)h->data : NULL;
-            if (s) mem_free(s);
+            socket_free(s);
         });
         return make_undefined_item();
     }
@@ -2563,8 +2677,9 @@ static bool net_block_list_match_ipv6(const unsigned char* addr, const unsigned 
 
 static bool net_block_list_check_parsed(NetBlockList* list, const NetBlockListEntry* address) {
     if (!list || !address) return false;
-    for (int i = 0; i < list->count; i++) {
-        NetBlockListEntry* rule = &list->entries[i];
+    for (int i = 0; i < net_block_list_entry_count(list); i++) {
+        NetBlockListEntry* rule = net_block_list_entry_at(list, i);
+        if (!rule) continue;
         if (rule->family != address->family) continue;
         if (address->family == 4 &&
             net_block_list_match_ipv4(address->addr4, rule->addr4, rule->prefix)) {
@@ -3643,10 +3758,9 @@ static void client_connect_cb(uv_connect_t* req, int status) {
     socket_emit(sock->js_object, "connect", NULL, 0);
     socket_emit(sock->js_object, "ready", NULL, 0);
     if (sock->end_after_connect) {
-        Item callback = sock->end_callback_set ? sock->end_callback : make_undefined_item();
-        sock->end_callback_set = false;
-        sock->end_callback = make_undefined_item();
-        socket_shutdown_writes(sock, callback);
+        int64_t callback_slot = sock->end_callback_slot;
+        sock->end_callback_slot = -1;
+        socket_shutdown_writes(sock, callback_slot);
     }
 
     if (!sock->paused) {
@@ -3661,7 +3775,8 @@ static Item create_socket_for_connect(const NetConnectOptions* options) {
         return ItemNull;
     }
 
-    JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
+    JsSocket* sock = socket_alloc();
+    if (!sock) return ItemNull;
     sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
     uv_tcp_init(loop, &sock->tcp);
     sock->tcp.data = sock;
@@ -3708,7 +3823,8 @@ static JsSocket* socket_reattach_for_connect(Item self) {
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return NULL;
 
-    JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
+    JsSocket* sock = socket_alloc();
+    if (!sock) return NULL;
     sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
     sock->js_object = self;
     uv_tcp_init(loop, &sock->tcp);
@@ -3787,16 +3903,24 @@ extern "C" Item js_net_createConnection(Item rest_args) {
     }
 
     Item socket = js_net_Socket(make_undefined_item());
-
     int64_t argc64 = js_array_length(rest_args);
-    int argc = argc64 > 16 ? 16 : (int)argc64;
-    Item args[16];
-    for (int i = 0; i < argc; i++) {
-        args[i] = js_elements_get_int(rest_args, i);
+    if (argc64 > INT_MAX) {
+        return js_throw_range_error("Too many arguments for net.createConnection");
     }
-    js_call_function(connect_fn, socket, args, argc);
+    RootFrame roots(3);
+    Rooted<Item> connect_root(roots, connect_fn);
+    Rooted<Item> socket_root(roots, socket);
+    Rooted<Item> rest_root(roots, rest_args);
+    RootSpan args((size_t)argc64);
+    if (!roots.valid() || (argc64 > 0 && !args.valid())) {
+        return js_throw_range_error("Cannot retain net.createConnection arguments");
+    }
+    for (int i = 0; i < (int)argc64; i++) {
+        args.items()[i] = js_elements_get_int(rest_root.get(), i);
+    }
+    js_call_function(connect_root.get(), socket_root.get(), args.items(), (int)argc64);
     js_microtask_flush();
-    return socket;
+    return socket_root.get();
 }
 
 // =============================================================================
@@ -4216,7 +4340,8 @@ static void server_connection_cb(uv_stream_t* server, int status) {
 
     uv_loop_t* loop = server->loop;
 
-    JsSocket* client = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
+    JsSocket* client = socket_alloc();
+    if (!client) return;
     client->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
     uv_tcp_init(loop, &client->tcp);
     client->tcp.data = client;
@@ -4224,7 +4349,7 @@ static void server_connection_cb(uv_stream_t* server, int status) {
     if (uv_accept(server, (uv_stream_t*)&client->tcp) == 0) {
         if (!context || !context->heap) {
             uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
-                mem_free(h->data);
+                socket_free((JsSocket*)h->data);
             });
             return;
         }
@@ -4246,7 +4371,7 @@ static void server_connection_cb(uv_stream_t* server, int status) {
             }
             if (peer_ip[0] && net_block_list_blocks_item(srv->block_list, peer_ip, peer_family)) {
                 uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
-                    mem_free(h->data);
+                    socket_free((JsSocket*)h->data);
                 });
                 return;
             }
@@ -4256,7 +4381,7 @@ static void server_connection_cb(uv_stream_t* server, int status) {
         if (max_connections >= 0 && srv->connection_count >= max_connections) {
             server_emit_drop(srv, client);
             uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
-                mem_free(h->data);
+                socket_free((JsSocket*)h->data);
             });
             return;
         }
@@ -4273,7 +4398,7 @@ static void server_connection_cb(uv_stream_t* server, int status) {
         }
     } else {
         uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
-            mem_free(h->data);
+            socket_free((JsSocket*)h->data);
         });
     }
 }
@@ -4894,7 +5019,8 @@ extern "C" Item js_net_Socket(Item options) {
         }
     }
 
-    JsSocket* sock = (JsSocket*)mem_calloc(1, sizeof(JsSocket), MEM_CAT_JS_RUNTIME);
+    JsSocket* sock = socket_alloc();
+    if (!sock) return ItemNull;
     sock->high_water_mark = NET_SOCKET_DEFAULT_HIGH_WATER_MARK;
     if (get_type_id(options) == LMD_TYPE_MAP ||
         get_type_id(options) == LMD_TYPE_VMAP) {
@@ -4916,7 +5042,7 @@ extern "C" Item js_net_Socket(Item options) {
         bool jube_bound = bound_socket_is_jube_object(bound_handle);
         if (bound || jube_bound) {
             if (jube_bound && bound_socket_jube_is_adopted(bound_handle)) {
-                mem_free(sock);
+                socket_free(sock);
                 return bound_socket_throw_adopted();
             }
             int fd = bound_socket_item_dup_fd(bound_handle);
@@ -4924,7 +5050,7 @@ extern "C" Item js_net_Socket(Item options) {
 #ifndef _WIN32
                 if (fd >= 0) close(fd);
 #endif
-                mem_free(sock);
+                socket_free(sock);
                 return js_throw_type_error_code("ERR_INVALID_ARG_VALUE",
                                                 "The property 'options.handle' is invalid");
             }
@@ -4979,7 +5105,6 @@ static Item js_block_list_add(Item address, Item prefix, Item type, bool subnet)
     Item self = js_get_this();
     NetBlockList* list = net_block_list_from_item(self);
     if (!list) return self;
-    if (list->count >= NET_BLOCK_LIST_MAX) return self;
 
     NetBlockListEntry entry;
     if (!net_block_list_parse_address(address, type, &entry)) {
@@ -4989,7 +5114,14 @@ static Item js_block_list_add(Item address, Item prefix, Item type, bool subnet)
         return js_throw_out_of_range("prefix",
             entry.family == 6 ? ">= 0 && <= 128" : ">= 0 && <= 32", prefix);
     }
-    list->entries[list->count++] = entry;
+    NetBlockListEntry* stored = (NetBlockListEntry*)mem_calloc(1,
+        sizeof(NetBlockListEntry), MEM_CAT_JS_RUNTIME);
+    if (!stored) return js_throw_range_error("Cannot grow BlockList");
+    *stored = entry;
+    if (!arraylist_append(list->entries, stored)) {
+        mem_free(stored);
+        return js_throw_range_error("Cannot grow BlockList");
+    }
     return self;
 }
 JS_FORWARD_STATIC_ITEM(js_block_list_addAddress, (Item address, Item type), js_block_list_add, (address, make_undefined_item(), type, false))
@@ -5289,9 +5421,7 @@ extern "C" void js_net_reset(void) {
     net_socket_connect_fn = (Item){0};
     JsNetRuntimeState* state = (JsNetRuntimeState*)js_runtime_state.net.native_state;
     if (!state) return;
-    for (int i = 0; i < state->block_list_instance_count; i++) {
-        mem_free(state->block_list_instances[i]);
-    }
+    net_block_list_instances_clear(state);
     memset(state, 0, sizeof(JsNetRuntimeState));
     state->auto_select_family_timeout = 500;
 }
@@ -5304,9 +5434,7 @@ extern "C" void js_net_reset(void) {
 extern "C" void js_net_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->net.native_state) return;
     JsNetRuntimeState* state = (JsNetRuntimeState*)runtime_state->net.native_state;
-    for (int i = 0; i < state->block_list_instance_count; i++) {
-        mem_free(state->block_list_instances[i]);
-    }
+    net_block_list_instances_clear(state);
     mem_free(state);
     runtime_state->net.native_state = NULL;
 }

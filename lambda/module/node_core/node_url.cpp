@@ -10,6 +10,7 @@
 #include "../../../lib/mem.h"
 #include "../../../lib/hex.h"
 #include "../../../lib/log.h"
+#include "../../../lib/arraylist.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -18,12 +19,18 @@
 
 static const JubeHostAPI* node_url_host = NULL;
 
-#define JS_BLOB_URL_MAX 1024
+// A Blob URL's native identifier and its script-visible Blob have exactly the
+// same lifetime. Keeping them in one stable row lets the persistent root use
+// the row's address while the registry itself grows without a fixed ceiling.
+struct NodeBlobUrlEntry {
+    char* id;
+    Item blob;
+};
+
 struct NodeUrlSessionState {
     void* session;
     bool namespace_rooted;
-    Item blob_url_values[JS_BLOB_URL_MAX];
-    char blob_url_ids[JS_BLOB_URL_MAX][64];
+    ArrayList* blob_urls;
     int64_t blob_url_next_id;
     Item module_namespace;
 };
@@ -32,8 +39,7 @@ static NodeUrlSessionState* node_url_state(void) {
 }
 #define node_url_session (node_url_state()->session)
 #define node_url_namespace_rooted (node_url_state()->namespace_rooted)
-#define js_blob_url_values (node_url_state()->blob_url_values)
-#define js_blob_url_ids (node_url_state()->blob_url_ids)
+#define js_blob_url_entries (node_url_state()->blob_urls)
 #define js_blob_url_next_id (node_url_state()->blob_url_next_id)
 #define url_module_namespace (node_url_state()->module_namespace)
 
@@ -105,6 +111,53 @@ static bool node_url_roots_begin(JubeRootFrame* frame, size_t count) {
 
 static Item node_url_root_value(const uint64_t* slot) {
     return (Item){.item = slot ? *slot : 0};
+}
+
+static NodeBlobUrlEntry* node_url_blob_url_entry_at(int index) {
+    return js_blob_url_entries && index >= 0 && index < js_blob_url_entries->length
+        ? (NodeBlobUrlEntry*)arraylist_get(js_blob_url_entries, index) : NULL;
+}
+
+static int node_url_blob_url_entry_count(void) {
+    return js_blob_url_entries ? js_blob_url_entries->length : 0;
+}
+
+static NodeBlobUrlEntry* node_url_blob_url_entry_find(const char* id) {
+    if (!id) return NULL;
+    for (int i = 0; i < node_url_blob_url_entry_count(); i++) {
+        NodeBlobUrlEntry* entry = node_url_blob_url_entry_at(i);
+        if (entry && entry->id && strcmp(id, entry->id) == 0) return entry;
+    }
+    return NULL;
+}
+
+static bool node_url_blob_url_entry_root(NodeBlobUrlEntry* entry) {
+    return entry && node_url_session && node_url_namespace_rooted && node_url_host &&
+        node_url_host->node && node_url_host->node->roots &&
+        node_url_host->node->roots->persistent_root_register &&
+        node_url_host->node->roots->persistent_root_register(node_url_session,
+            &entry->blob.item) == 0;
+}
+
+static void node_url_blob_url_entry_destroy(NodeBlobUrlEntry* entry, bool unregister_root) {
+    if (!entry) return;
+    if (unregister_root && node_url_session && node_url_namespace_rooted &&
+            node_url_host && node_url_host->node && node_url_host->node->roots &&
+            node_url_host->node->roots->persistent_root_unregister) {
+        node_url_host->node->roots->persistent_root_unregister(node_url_session,
+            &entry->blob.item);
+    }
+    mem_free(entry->id);
+    mem_free(entry);
+}
+
+static void node_url_blob_url_entries_reset(void) {
+    if (!js_blob_url_entries) return;
+    for (int i = 0; i < js_blob_url_entries->length; i++) {
+        node_url_blob_url_entry_destroy(node_url_blob_url_entry_at(i), true);
+    }
+    arraylist_free(js_blob_url_entries);
+    js_blob_url_entries = NULL;
 }
 
 static Item node_url_throw_type_error(const char* message) {
@@ -219,55 +272,84 @@ static Item node_url_set_item_property(Item object, const char* name, Item value
 // Helper: create string Item
 extern "C" Item js_blob_url_resolve(Item id_item) {
     if (get_type_id(id_item) != LMD_TYPE_STRING) return make_js_undefined();
-    char id[64] = {};
-    if (!item_to_cstr(id_item, id, sizeof(id)) || !id[0]) return make_js_undefined();
-    for (int i = 0; i < JS_BLOB_URL_MAX; i++) {
-        if (js_blob_url_values[i].item == 0) continue;
-        if (strcmp(id, js_blob_url_ids[i]) == 0) {
-            return js_blob_url_values[i];
-        }
+    char* id = node_url_string_dup(id_item, NULL);
+    if (!id || !id[0]) {
+        mem_free(id);
+        return make_js_undefined();
     }
-    return make_js_undefined();
+    NodeBlobUrlEntry* entry = node_url_blob_url_entry_find(id);
+    mem_free(id);
+    return entry ? entry->blob : make_js_undefined();
 }
 
 static Item js_url_createObjectURL(Item blob) {
     if (!node_url_host->script->class_is(blob, JUBE_SCRIPT_CLASS_BLOB)) {
         return node_url_throw_type_error("The \"obj\" argument must be a Blob");
     }
-    for (int i = 0; i < JS_BLOB_URL_MAX; i++) {
-        if (js_blob_url_values[i].item != 0) continue;
-        int id_len = snprintf(js_blob_url_ids[i], sizeof(js_blob_url_ids[i]),
-                              "blob:nodedata:%lld", (long long)js_blob_url_next_id++);
-        if (id_len < 0) id_len = 0;
-        if (id_len >= (int)sizeof(js_blob_url_ids[i])) id_len = (int)sizeof(js_blob_url_ids[i]) - 1;
-        js_blob_url_values[i] = blob;
-        // Blob URLs are process-local handles; the registry is the owning root
-        // until revokeObjectURL clears the slot.
-        return make_string_item(js_blob_url_ids[i], id_len);
+    if (!node_url_session || !node_url_namespace_rooted ||
+            js_blob_url_next_id == INT64_MAX) {
+        return node_url_throw_type_error("Blob URL registry is unavailable");
     }
-    return node_url_throw_type_error("Blob URL registry is full");
+    JubeRootFrame frame = {};
+    if (!node_url_roots_begin(&frame, 1)) return ItemNull;
+    uint64_t* blob_root = node_url_host->node->roots->root_frame_take_slot(&frame);
+    if (!blob_root) {
+        node_url_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    *blob_root = blob.item;
+    NodeBlobUrlEntry* entry = (NodeBlobUrlEntry*)mem_calloc(1,
+        sizeof(NodeBlobUrlEntry), MEM_CAT_SYSTEM);
+    char id[64] = {};
+    int id_length = snprintf(id, sizeof(id), "blob:nodedata:%lld",
+        (long long)js_blob_url_next_id);
+    if (!entry || id_length < 0 || id_length >= (int)sizeof(id)) {
+        mem_free(entry);
+        node_url_host->node->roots->root_frame_end(&frame);
+        return node_url_throw_type_error("Blob URL registry is exhausted");
+    }
+    entry->id = (char*)mem_alloc((size_t)id_length + 1, MEM_CAT_SYSTEM);
+    if (!entry->id) {
+        mem_free(entry);
+        node_url_host->node->roots->root_frame_end(&frame);
+        return node_url_throw_type_error("Blob URL registry is exhausted");
+    }
+    memcpy(entry->id, id, (size_t)id_length + 1);
+    entry->blob = node_url_root_value(blob_root);
+    if (!node_url_blob_url_entry_root(entry)) {
+        node_url_blob_url_entry_destroy(entry, false);
+        node_url_host->node->roots->root_frame_end(&frame);
+        return node_url_throw_type_error("Blob URL registry is unavailable");
+    }
+    if (!js_blob_url_entries) js_blob_url_entries = arraylist_new(16);
+    if (!js_blob_url_entries || !arraylist_append(js_blob_url_entries, entry)) {
+        node_url_blob_url_entry_destroy(entry, true);
+        node_url_host->node->roots->root_frame_end(&frame);
+        return node_url_throw_type_error("Blob URL registry is exhausted");
+    }
+    js_blob_url_next_id++;
+    node_url_host->node->roots->root_frame_end(&frame);
+    return node_url_string(entry->id, id_length);
 }
 
 static Item js_url_revokeObjectURL(Item id_item) {
     if (get_type_id(id_item) != LMD_TYPE_STRING) return make_js_undefined();
-    char id[64] = {};
-    if (!item_to_cstr(id_item, id, sizeof(id))) return make_js_undefined();
-    for (int i = 0; i < JS_BLOB_URL_MAX; i++) {
-        if (js_blob_url_values[i].item == 0) continue;
-        if (strcmp(id, js_blob_url_ids[i]) == 0) {
-            js_blob_url_values[i] = (Item){0};
-            js_blob_url_ids[i][0] = '\0';
-            return make_js_undefined();
+    char* id = node_url_string_dup(id_item, NULL);
+    if (!id) return make_js_undefined();
+    for (int i = 0; i < node_url_blob_url_entry_count(); i++) {
+        NodeBlobUrlEntry* entry = node_url_blob_url_entry_at(i);
+        if (entry && entry->id && strcmp(id, entry->id) == 0) {
+            node_url_blob_url_entry_destroy(entry, true);
+            arraylist_remove(js_blob_url_entries, i);
+            break;
         }
     }
+    mem_free(id);
     return make_js_undefined();
 }
 
 extern "C" void js_blob_url_reset(void) {
-    for (int i = 0; i < JS_BLOB_URL_MAX; i++) {
-        js_blob_url_values[i] = (Item){0};
-        js_blob_url_ids[i][0] = '\0';
-    }
+    node_url_blob_url_entries_reset();
     js_blob_url_next_id = 1;
 }
 
@@ -1525,6 +1607,8 @@ static void node_url_cache_reset(void) {
 
 int node_url_init(const JubeHostAPI* host) {
     if (!host || !host->node || !host->node->runtime || !host->node->roots ||
+            !host->node->roots->persistent_root_register ||
+            !host->node->roots->persistent_root_unregister ||
             !host->value || !host->script || !host->value->kind ||
             !host->value->new_object || !host->value->array_new ||
             !host->value->array_push || !host->value->array_get ||
@@ -1559,22 +1643,11 @@ void node_url_runtime_attach(void* session) {
     // counter between contexts.
     if (state->blob_url_next_id == 0) state->blob_url_next_id = 1;
     node_url_session = session;
+    if (node_url_namespace_rooted) return;
     if (node_url_host->node->roots->persistent_root_register(session,
-            &url_module_namespace.item) != 0) return;
-    for (int i = 0; i < JS_BLOB_URL_MAX; i++) {
-        if (node_url_host->node->roots->persistent_root_register(session,
-                &js_blob_url_values[i].item) != 0) {
-            // A partially registered root set would survive detach without the
-            // ownership flag, retaining stale Blob values across sessions.
-            for (int registered = 0; registered < i; registered++) {
-                node_url_host->node->roots->persistent_root_unregister(session,
-                    &js_blob_url_values[registered].item);
-            }
-            node_url_host->node->roots->persistent_root_unregister(session,
-                &url_module_namespace.item);
-            node_url_session = NULL;
-            return;
-        }
+            &url_module_namespace.item) != 0) {
+        node_url_session = NULL;
+        return;
     }
     node_url_namespace_rooted = true;
 }
@@ -1585,15 +1658,14 @@ void node_url_runtime_reset(void* session) {
 
 void node_url_runtime_detach(void* session) {
     if (!node_url_host || session != node_url_session) return;
+    // Each entry unregisters its own Blob root before the shared namespace
+    // root is released. The session-state capsule can then be dropped without
+    // either a fixed root range or stale native rows.
+    node_url_cache_reset();
     if (node_url_namespace_rooted) {
         node_url_host->node->roots->persistent_root_unregister(session,
             &url_module_namespace.item);
-        for (int i = 0; i < JS_BLOB_URL_MAX; i++) {
-            node_url_host->node->roots->persistent_root_unregister(session,
-                &js_blob_url_values[i].item);
-        }
         node_url_namespace_rooted = false;
     }
-    node_url_cache_reset();
     node_url_session = NULL;
 }

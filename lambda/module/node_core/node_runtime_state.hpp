@@ -7,11 +7,6 @@
 #define PATH_MAX 4096
 #endif
 
-#define JS_PERMISSION_MAX_GRANTS 128
-#define JS_CJS_STACK_MAX 128
-#define JS_DIAGNOSTICS_CHANNEL_MAX 512
-#define JS_DIAGNOSTICS_DEFERRED_ERROR_MAX 64
-
 // CommonJS metadata is semantic Node module state. A nested require observes
 // its own parent stack, but unrelated JS realms must never share the stack.
 struct JsCjsState {
@@ -20,38 +15,41 @@ struct JsCjsState {
 
 struct JsDiagnosticsChannelState : JsRootedState {
     Item namespace_object = {};
-    Item channel_names[JS_DIAGNOSTICS_CHANNEL_MAX] = {};
-    Item channels[JS_DIAGNOSTICS_CHANNEL_MAX] = {};
+    // Each entry is a GC-owned [name, channel] pair. Keeping the pair in one
+    // record prevents independently sized name/channel root arrays.
+    Item channel_entries = {};
     Item channel_prototype = {};
     Item tracing_channel_prototype = {};
     Item bounded_channel_prototype = {};
     Item channel_constructor = {};
     Item tracing_channel_constructor = {};
     Item bounded_channel_constructor = {};
-    Item deferred_errors[JS_DIAGNOSTICS_DEFERRED_ERROR_MAX] = {};
+    Item deferred_errors = {};
     uint64_t namespace_epoch = UINT64_MAX;
-    int channel_count = 0;
-    int deferred_error_count = 0;
 };
 
 struct JsCommonJsCompileCacheState {
-    char directory[4096] = {};
+    char* directory = NULL;
     bool enabled = false;
     bool disabled = false;
     bool reported = false;
 };
 
+enum JsPermissionGrantFlags : uint8_t {
+    JS_PERMISSION_GRANT_READ = 1 << 0,
+    JS_PERMISSION_GRANT_WRITE = 1 << 1,
+    JS_PERMISSION_GRANT_WILDCARD_ALL = 1 << 2,
+    JS_PERMISSION_GRANT_WILDCARD_PREFIX = 1 << 3,
+    JS_PERMISSION_GRANT_DIRECTORY = 1 << 4,
+};
+
 typedef struct JsPermissionGrant {
-    char path[PATH_MAX];
-    bool wildcard_all;
-    bool wildcard_prefix;
-    bool directory;
-    bool active;
+    char* path;
+    uint8_t flags;
 } JsPermissionGrant;
 
-// Permission flags and grant tables are Node launch-policy state. Keeping the
-// policy in NodeRuntimeSession avoids embedding two PATH_MAX-sized slabs in
-// every JavaScript realm.
+// Permission flags and grants are Node launch-policy state. One dynamic row
+// may grant read and write access, so policy does not duplicate each path.
 struct JsPermissionPolicy {
     bool initialized = false;
     bool enabled = false;
@@ -60,8 +58,7 @@ struct JsPermissionPolicy {
     bool inspector = false;
     bool addon = false;
     bool wasi = false;
-    JsPermissionGrant fs_read_grants[JS_PERMISSION_MAX_GRANTS] = {};
-    JsPermissionGrant fs_write_grants[JS_PERMISSION_MAX_GRANTS] = {};
+    ArrayList* grants = NULL;
 };
 
 // Native crypto handles are Node module resources, not JavaScript realm

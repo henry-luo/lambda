@@ -1,0 +1,3 @@
+child process callback: true
+child process reply: 42
+child process close: 0

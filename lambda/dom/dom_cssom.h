@@ -137,16 +137,16 @@ Item dom_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value
 Item dom_cssom_get_document_stylesheets(void);
 
 // =============================================================================
-// HTMLStyleElement .sheet Access
+// LinkStyle .sheet Access
 // =============================================================================
 
 /**
- * Get the .sheet property of a <style> element.
+ * Get the .sheet property of a <style> or stylesheet <link> element.
  * Searches document's stylesheet list for the one parsed from this element.
- * @param elem  Wrapped DOM element Item (must be a <style> element)
+ * @param elem  Wrapped LinkStyle DOM element Item
  * @return Wrapped CSSStyleSheet Item, or ITEM_NULL
  */
-Item dom_cssom_get_style_element_sheet(Item elem);
+Item dom_cssom_get_element_sheet(Item elem);
 
 /** Reparse a connected inline <style> after a DOM text-tree mutation. */
 bool dom_cssom_sync_inline_style_element(void* elem);

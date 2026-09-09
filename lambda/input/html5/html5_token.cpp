@@ -93,6 +93,16 @@ void html5_token_add_attribute(Html5Token* token, String* name, Item value, Inpu
         token->attributes = map_pooled(token->pool);
     }
 
+    TypeMap* attribute_type = (TypeMap*)token->attributes->type;
+    for (ShapeEntry* entry = attribute_type ? attribute_type->shape : nullptr;
+            entry; entry = entry->next) {
+        if (shape_field_name_equals(entry, name->chars, name->len)) {
+            // HTML LS tokenization: a duplicate attribute is a parse error and
+            // the later attribute is ignored, preserving the first value.
+            return;
+        }
+    }
+
     // Add attribute to map - value is already a tagged Item (ITEM_NULL for empty attrs)
     map_put(token->attributes, name, value, input);
 #ifdef LAMBDA_TRACE_HTML5_TOKEN_ATTRIBUTES

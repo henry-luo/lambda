@@ -30688,7 +30688,7 @@ static void* interp_worker_entry(void* opaque) {
     // The large-stack worker has independent JS TLS; bind the shared capsule
     // before an async bridge (for example toPromise) can allocate GC-owned JS
     // values, preserving the owner/thread invariant (D5.3.3).
-    bool js_state_initialized = !eval->js_state ||
+    bool js_state_initialized = !js_runtime_state_for(eval) ||
         js_runtime_state_init(eval);
     if (!js_state_initialized) {
         log_error("interp-worker: failed to bind JavaScript runtime state");
@@ -30705,7 +30705,7 @@ static void* interp_worker_entry(void* opaque) {
     } else {
         args->result = interp_run_script(args->runner, args->run_main);
     }
-    if (js_state_initialized && eval->js_state &&
+    if (js_state_initialized && js_runtime_state_for(eval) &&
             !js_runtime_state_shutdown(eval)) {
         log_error("interp-worker: failed to release JavaScript runtime state");
     }

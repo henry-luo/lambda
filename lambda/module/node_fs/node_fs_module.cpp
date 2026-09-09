@@ -39,17 +39,14 @@ typedef enum NodeFsMode {
 } NodeFsMode;
 
 typedef struct NodeFsRequest {
-    Item callback;
-    Item domain;
-    Item initial_error;
     char* path;
     char* bytes;
     size_t byte_count;
     int error_number;
     NodeFsMode mode;
     bool detached;
-    bool roots_registered;
-    uint32_t work_request_id;
+    bool skip_work;
+    uint32_t resource_id;
     JubeNodeFilesystemReadWrite operation;
     struct NodeFsRequest* next;
 } NodeFsRequest;
@@ -109,44 +106,10 @@ static void node_fs_pending_remove(NodeFsRequest* request) {
     }
 }
 
-static bool node_fs_register_roots(NodeFsRequest* request) {
-    if (!request || !node_fs_host || !node_fs_session || !node_fs_host->node ||
-            !node_fs_host->node->roots || !node_fs_host->node->roots->persistent_root_register) {
-        return false;
-    }
-    const JubeHostRootAPI* roots = node_fs_host->node->roots;
-    if (roots->persistent_root_register(node_fs_session, &request->callback.item) != 0) {
-        return false;
-    }
-    if (roots->persistent_root_register(node_fs_session, &request->domain.item) != 0) {
-        roots->persistent_root_unregister(node_fs_session, &request->callback.item);
-        return false;
-    }
-    if (roots->persistent_root_register(node_fs_session, &request->initial_error.item) != 0) {
-        roots->persistent_root_unregister(node_fs_session, &request->domain.item);
-        roots->persistent_root_unregister(node_fs_session, &request->callback.item);
-        return false;
-    }
-    request->roots_registered = true;
-    return true;
-}
-
-static void node_fs_unregister_roots(NodeFsRequest* request) {
-    if (!request || !request->roots_registered || !node_fs_host || !node_fs_host->node ||
-            !node_fs_host->node->roots || !node_fs_host->node->roots->persistent_root_unregister ||
-            !node_fs_session) return;
-    const JubeHostRootAPI* roots = node_fs_host->node->roots;
-    roots->persistent_root_unregister(node_fs_session, &request->callback.item);
-    roots->persistent_root_unregister(node_fs_session, &request->domain.item);
-    roots->persistent_root_unregister(node_fs_session, &request->initial_error.item);
-    request->roots_registered = false;
-}
-
 static void node_fs_request_destroy(void* user) {
     NodeFsRequest* request = (NodeFsRequest*)user;
     if (!request) return;
     node_fs_pending_remove(request);
-    node_fs_unregister_roots(request);
     free(request->path);
     free(request->bytes);
     if (node_fs_host && node_fs_host->node && node_fs_host->node->filesystem &&
@@ -168,13 +131,11 @@ static Item node_fs_root_value(const uint64_t* slot) {
     return (Item){.item = slot ? *slot : 0};
 }
 
-static void node_fs_call(NodeFsRequest* request, Item* args, int arg_count) {
+static void node_fs_call(NodeFsRequest* request, Item domain, Item callback,
+                         Item* args, int arg_count) {
     if (!request || request->detached || !node_fs_host || !node_fs_host->node ||
             !node_fs_host->node->events || !node_fs_host->node->events->domain_call) return;
-    // The request keeps callback and domain persistently rooted until this
-    // call because work completion may compact before entering user code.
-    node_fs_host->node->events->domain_call(request->domain, request->callback,
-                                            ItemNull, args, arg_count);
+    node_fs_host->node->events->domain_call(domain, callback, ItemNull, args, arg_count);
 }
 
 static Item node_fs_system_error(const char* syscall, int error_number) {
@@ -186,7 +147,7 @@ static Item node_fs_system_error(const char* syscall, int error_number) {
 
 static void node_fs_work(void* user) {
     NodeFsRequest* request = (NodeFsRequest*)user;
-    if (!request || request->initial_error.item != 0) return;
+    if (!request || request->skip_work) return;
     if (!node_fs_host || !node_fs_host->node || !node_fs_host->node->filesystem ||
             !node_fs_host->node->filesystem->read_write) {
         request->error_number = EIO;
@@ -208,16 +169,21 @@ static void node_fs_complete(void* user, int status) {
     NodeFsRequest* request = (NodeFsRequest*)user;
     if (!request || request->detached) return;
     JubeRootFrame frame = {};
-    if (!node_fs_roots_begin(&frame, 3)) return;
+    if (!node_fs_roots_begin(&frame, 4)) return;
     uint64_t* error_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* data_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* callback_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
-    if (!error_root || !data_root || !callback_root) {
+    uint64_t* domain_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    if (!error_root || !data_root || !callback_root || !domain_root) {
         node_fs_host->node->roots->root_frame_end(&frame);
         return;
     }
-    *callback_root = request->callback.item;
-    Item error = request->initial_error;
+    *callback_root = node_fs_host->node->async_ops->work_resource_value(
+        node_fs_session, request->resource_id, 0).item;
+    *domain_root = node_fs_host->node->async_ops->work_resource_value(
+        node_fs_session, request->resource_id, 1).item;
+    Item error = node_fs_host->node->async_ops->work_resource_value(
+        node_fs_session, request->resource_id, 2);
     if (error.item == 0 && (status < 0 || request->error_number != 0)) {
         error = node_fs_system_error(request->operation.error_syscall,
                                      request->error_number != 0 ? request->error_number : EIO);
@@ -225,16 +191,19 @@ static void node_fs_complete(void* user, int status) {
     *error_root = error.item;
     if (request->mode != NODE_FS_MODE_READ) {
         Item args[1] = {node_fs_root_value(error_root)};
-        node_fs_call(request, args, 1);
+        node_fs_call(request, node_fs_root_value(domain_root),
+                     node_fs_root_value(callback_root), args, 1);
     } else if (error.item != 0) {
         Item args[2] = {node_fs_root_value(error_root), ItemNull};
-        node_fs_call(request, args, 2);
+        node_fs_call(request, node_fs_root_value(domain_root),
+                     node_fs_root_value(callback_root), args, 2);
     } else {
         Item data = node_fs_host->value->string_from_utf8_n((const char*)request->operation.output,
                                                             request->operation.output_length);
         *data_root = data.item;
         Item args[2] = {ItemNull, node_fs_root_value(data_root)};
-        node_fs_call(request, args, 2);
+        node_fs_call(request, node_fs_root_value(domain_root),
+                     node_fs_root_value(callback_root), args, 2);
     }
     node_fs_host->node->roots->root_frame_end(&frame);
 }
@@ -872,7 +841,9 @@ static Item node_fs_symlink_sync(Item target_item, Item path_item) {
 static Item node_fs_schedule(Item path_item, Item data_item, Item callback, NodeFsMode mode) {
     if (!node_fs_host || !node_fs_session || !node_fs_host->value || !node_fs_host->script ||
             !node_fs_host->node || !node_fs_host->node->async_ops ||
-            !node_fs_host->node->async_ops->work_submit || !node_fs_host->node->filesystem ||
+            !node_fs_host->node->async_ops->work_submit_root_span ||
+            !node_fs_host->node->async_ops->work_resource_value ||
+            !node_fs_host->node->filesystem ||
             !node_fs_host->node->filesystem->read_write ||
             !node_fs_host->node->filesystem->read_write_release || !node_fs_host->node->events ||
             !node_fs_host->node->events->domain_current || !node_fs_host->node->permission ||
@@ -884,11 +855,13 @@ static Item node_fs_schedule(Item path_item, Item data_item, Item callback, Node
                                                             "callback must be a function");
     }
     JubeRootFrame frame = {};
-    if (!node_fs_roots_begin(&frame, 3)) return ItemNull;
+    if (!node_fs_roots_begin(&frame, 5)) return ItemNull;
     uint64_t* path_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* data_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* callback_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
-    if (!path_root || !data_root || !callback_root) {
+    uint64_t* domain_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* error_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    if (!path_root || !data_root || !callback_root || !domain_root || !error_root) {
         node_fs_host->node->roots->root_frame_end(&frame);
         return ItemNull;
     }
@@ -911,8 +884,7 @@ static Item node_fs_schedule(Item path_item, Item data_item, Item callback, Node
     }
     request->byte_count = 0;
     request->mode = mode;
-    request->callback = node_fs_root_value(callback_root);
-    request->domain = node_fs_host->node->events->domain_current();
+    *domain_root = node_fs_host->node->events->domain_current().item;
     if (mode != NODE_FS_MODE_READ) {
         Item data_string = node_fs_host->script->to_string(node_fs_root_value(data_root));
         *data_root = data_string.item;
@@ -927,23 +899,23 @@ static Item node_fs_schedule(Item path_item, Item data_item, Item callback, Node
             return ItemNull;
         }
     }
-    if (!node_fs_register_roots(request)) {
-        node_fs_request_destroy(request);
-        node_fs_host->node->roots->root_frame_end(&frame);
-        return ItemNull;
-    }
     bool permitted = mode != NODE_FS_MODE_READ ? node_fs_host->node->permission->has_fs_write(request->path) :
                              node_fs_host->node->permission->has_fs_read(request->path);
     if (!permitted) {
-        request->initial_error = mode != NODE_FS_MODE_READ ?
+        Item error = mode != NODE_FS_MODE_READ ?
             node_fs_host->node->permission->check_fs_write(request->path) :
             node_fs_host->node->permission->check_fs_read(request->path);
+        *error_root = error.item;
+        request->skip_work = true;
     }
     node_fs_pending_add(request);
-    int submit = node_fs_host->node->async_ops->work_submit(node_fs_session, node_fs_work,
-                                                             node_fs_complete,
-                                                             node_fs_request_destroy, request,
-                                                             &request->work_request_id);
+    Item root_values[3] = {
+        node_fs_root_value(callback_root), node_fs_root_value(domain_root),
+        node_fs_root_value(error_root),
+    };
+    int submit = node_fs_host->node->async_ops->work_submit_root_span(node_fs_session,
+        JUBE_ASYNC_RESOURCE_FILESYSTEM_REQUEST, root_values, 3, node_fs_work,
+        node_fs_complete, node_fs_request_destroy, request, &request->resource_id);
     node_fs_host->node->roots->root_frame_end(&frame);
     if (submit != 0) {
         node_fs_request_destroy(request);
@@ -982,9 +954,22 @@ static Item node_fs_promise_read_callback(Item env_item, Item error, Item data) 
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env || !node_fs_host || !node_fs_host->script ||
             !node_fs_host->script->call_function) return node_fs_undefined();
-    Item args[1] = {node_fs_nullish(error) ? data : error};
-    Item target = node_fs_nullish(error) ? env[0] : env[1];
-    node_fs_host->script->call_function(target, node_fs_undefined(), args, 1);
+    JubeRootFrame frame = {};
+    if (!node_fs_roots_begin(&frame, 3)) return node_fs_undefined();
+    uint64_t* target_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* error_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* data_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    if (!target_root || !error_root || !data_root) {
+        node_fs_host->node->roots->root_frame_end(&frame);
+        return node_fs_undefined();
+    }
+    *error_root = error.item;
+    *data_root = data.item;
+    bool rejected = !node_fs_nullish(node_fs_root_value(error_root));
+    *target_root = rejected ? env[1].item : env[0].item;
+    Item args[1] = {rejected ? node_fs_root_value(error_root) : node_fs_root_value(data_root)};
+    node_fs_host->script->call_function(node_fs_root_value(target_root), node_fs_undefined(), args, 1);
+    node_fs_host->node->roots->root_frame_end(&frame);
     return node_fs_undefined();
 }
 
@@ -992,9 +977,20 @@ static Item node_fs_promise_write_callback(Item env_item, Item error) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env || !node_fs_host || !node_fs_host->script ||
             !node_fs_host->script->call_function) return node_fs_undefined();
-    Item args[1] = {node_fs_nullish(error) ? node_fs_undefined() : error};
-    Item target = node_fs_nullish(error) ? env[0] : env[1];
-    node_fs_host->script->call_function(target, node_fs_undefined(), args, 1);
+    JubeRootFrame frame = {};
+    if (!node_fs_roots_begin(&frame, 2)) return node_fs_undefined();
+    uint64_t* target_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* error_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    if (!target_root || !error_root) {
+        node_fs_host->node->roots->root_frame_end(&frame);
+        return node_fs_undefined();
+    }
+    *error_root = error.item;
+    bool rejected = !node_fs_nullish(node_fs_root_value(error_root));
+    *target_root = rejected ? env[1].item : env[0].item;
+    Item args[1] = {rejected ? node_fs_root_value(error_root) : node_fs_undefined()};
+    node_fs_host->script->call_function(node_fs_root_value(target_root), node_fs_undefined(), args, 1);
+    node_fs_host->node->roots->root_frame_end(&frame);
     return node_fs_undefined();
 }
 
@@ -1003,26 +999,39 @@ static Item node_fs_promise_capability(NodeFsMode mode, Item path, Item data, It
             !node_fs_host->script->new_closure || !node_fs_host->script->closure_env_new ||
             !node_fs_host->value || !node_fs_host->value->property_get) return ItemNull;
     JubeRootFrame frame = {};
-    if (!node_fs_roots_begin(&frame, 5)) return ItemNull;
+    if (!node_fs_roots_begin(&frame, 10)) return ItemNull;
+    uint64_t* path_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* data_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* capability_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* promise_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* resolve_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* reject_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* callback_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
-    if (!capability_root || !promise_root || !resolve_root || !reject_root || !callback_root) {
+    uint64_t* promise_key_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* resolve_key_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* reject_key_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    if (!path_root || !data_root || !capability_root || !promise_root || !resolve_root ||
+            !reject_root || !callback_root || !promise_key_root || !resolve_key_root ||
+            !reject_key_root) {
         node_fs_host->node->roots->root_frame_end(&frame);
         return ItemNull;
     }
+    // Promise capability and closure allocation may collect before schedule owns these inputs.
+    *path_root = path.item;
+    *data_root = data.item;
     Item capability = node_fs_host->script->promise_with_resolvers();
     *capability_root = capability.item;
-    Item promise_key = node_fs_host->value->string_from_utf8_n("promise", 7);
-    Item resolve_key = node_fs_host->value->string_from_utf8_n("resolve", 7);
-    Item reject_key = node_fs_host->value->string_from_utf8_n("reject", 6);
-    Item promise = node_fs_host->value->property_get(node_fs_root_value(capability_root), promise_key);
+    *promise_key_root = node_fs_host->value->string_from_utf8_n("promise", 7).item;
+    *resolve_key_root = node_fs_host->value->string_from_utf8_n("resolve", 7).item;
+    *reject_key_root = node_fs_host->value->string_from_utf8_n("reject", 6).item;
+    Item promise = node_fs_host->value->property_get(node_fs_root_value(capability_root),
+                                                      node_fs_root_value(promise_key_root));
     *promise_root = promise.item;
-    Item resolve = node_fs_host->value->property_get(node_fs_root_value(capability_root), resolve_key);
+    Item resolve = node_fs_host->value->property_get(node_fs_root_value(capability_root),
+                                                      node_fs_root_value(resolve_key_root));
     *resolve_root = resolve.item;
-    Item reject = node_fs_host->value->property_get(node_fs_root_value(capability_root), reject_key);
+    Item reject = node_fs_host->value->property_get(node_fs_root_value(capability_root),
+                                                     node_fs_root_value(reject_key_root));
     *reject_root = reject.item;
     Item* environment = node_fs_host->script->closure_env_new(2);
     if (!environment) {
@@ -1037,7 +1046,8 @@ static Item node_fs_promise_capability(NodeFsMode mode, Item path, Item data, It
         : jube_new_closure(node_fs_host->script,
             node_fs_promise_read_callback, 2, environment, 2);
     *callback_root = callback.item;
-    Item scheduled = node_fs_schedule(path, data, node_fs_root_value(callback_root), mode);
+    Item scheduled = node_fs_schedule(node_fs_root_value(path_root), node_fs_root_value(data_root),
+                                      node_fs_root_value(callback_root), mode);
     if (scheduled.item == 0 || item_is_error(scheduled)) {
         Item error = item_is_error(scheduled) ?
             node_fs_host->script->error_lane_payload(scheduled) : ItemNull;
@@ -1067,24 +1077,29 @@ static Item node_fs_promise_settled(Item value, bool rejected) {
             !node_fs_host->script->promise_with_resolvers || !node_fs_host->script->call_function ||
             !node_fs_host->value->property_get) return ItemNull;
     JubeRootFrame frame = {};
-    if (!node_fs_roots_begin(&frame, 4)) return ItemNull;
+    if (!node_fs_roots_begin(&frame, 6)) return ItemNull;
     uint64_t* capability_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* promise_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* settle_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* value_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
-    if (!capability_root || !promise_root || !settle_root || !value_root) {
+    uint64_t* promise_key_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* settle_key_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    if (!capability_root || !promise_root || !settle_root || !value_root || !promise_key_root ||
+            !settle_key_root) {
         node_fs_host->node->roots->root_frame_end(&frame);
         return ItemNull;
     }
     *value_root = value.item;
     Item capability = node_fs_host->script->promise_with_resolvers();
     *capability_root = capability.item;
-    Item promise_key = node_fs_host->value->string_from_utf8_n("promise", 7);
+    *promise_key_root = node_fs_host->value->string_from_utf8_n("promise", 7).item;
     const char* settle_name = rejected ? "reject" : "resolve";
-    Item settle_key = node_fs_host->value->string_from_utf8_n(settle_name, strlen(settle_name));
-    Item promise = node_fs_host->value->property_get(node_fs_root_value(capability_root), promise_key);
+    *settle_key_root = node_fs_host->value->string_from_utf8_n(settle_name, strlen(settle_name)).item;
+    Item promise = node_fs_host->value->property_get(node_fs_root_value(capability_root),
+                                                      node_fs_root_value(promise_key_root));
     *promise_root = promise.item;
-    Item settle = node_fs_host->value->property_get(node_fs_root_value(capability_root), settle_key);
+    Item settle = node_fs_host->value->property_get(node_fs_root_value(capability_root),
+                                                     node_fs_root_value(settle_key_root));
     *settle_root = settle.item;
     Item args[1] = {node_fs_root_value(value_root)};
     node_fs_host->script->call_function(node_fs_root_value(settle_root), node_fs_undefined(), args, 1);
@@ -2967,9 +2982,11 @@ static bool node_fs_set_property(Item object, const char* name, Item property_va
         return false;
     }
     *object_root = object.item;
+    // `property_value` can be a freshly created BigInt. Root it before the
+    // key allocation so forced collection cannot retag that raw return value.
+    *value_root = property_value.item;
     Item key = node_fs_host->value->string_from_utf8_n(name, strlen(name));
     *key_root = key.item;
-    *value_root = property_value.item;
     node_fs_host->value->property_set(node_fs_root_value(object_root), node_fs_root_value(key_root),
                                       node_fs_root_value(value_root));
     node_fs_host->node->roots->root_frame_end(&frame);
@@ -3032,26 +3049,38 @@ static void node_fs_install_constants(Item namespace_item) {
 }
 
 static Item node_fs_statfs_sync(Item path_item, Item options) {
+    JubeRootFrame frame = {};
+    if (!node_fs_roots_begin(&frame, 3)) return ItemNull;
+    uint64_t* path_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* options_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    uint64_t* result_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
+    if (!path_root || !options_root || !result_root) {
+        node_fs_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
+    *path_root = path_item.item;
+    *options_root = options.item;
     char* path = NULL;
-    if (!node_fs_copy_path(path_item, &path, false)) return ItemNull;
+    if (!node_fs_copy_path(node_fs_root_value(path_root), &path, false)) {
+        node_fs_host->node->roots->root_frame_end(&frame);
+        return ItemNull;
+    }
     const JubeHostFilesystemAPI* filesystem = node_fs_host && node_fs_host->node ?
         node_fs_host->node->filesystem : NULL;
     JubeNodeFilesystemStatfsOperation operation = {};
     operation.path = path;
     bool loaded = filesystem && filesystem->statfs_operation && filesystem->statfs_operation(&operation);
     free(path);
-    if (!loaded) return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "statfs",
-                                           operation.error_number ? operation.error_number : EIO);
-    JubeRootFrame frame = {};
-    if (!node_fs_roots_begin(&frame, 1)) return ItemNull;
-    uint64_t* result_root = node_fs_host->node->roots->root_frame_take_slot(&frame);
-    if (!result_root) {
+    if (!loaded) {
         node_fs_host->node->roots->root_frame_end(&frame);
-        return ItemNull;
+        return node_fs_sync_error(operation.error_syscall ? operation.error_syscall : "statfs",
+                                  operation.error_number ? operation.error_number : EIO);
     }
     Item result = node_fs_host->script->object_create(ItemNull);
     *result_root = result.item;
-    bool bigint = node_fs_options_bigint(options);
+    // `object_create` may collect before we read the user option. Keep the
+    // input rooted until the bigint policy has been captured.
+    bool bigint = node_fs_options_bigint(node_fs_root_value(options_root));
     bool populated = node_fs_set_unsigned_property(node_fs_root_value(result_root), "type", operation.type, bigint) &&
                      node_fs_set_unsigned_property(node_fs_root_value(result_root), "bsize", operation.bsize, bigint) &&
                      node_fs_set_unsigned_property(node_fs_root_value(result_root), "frsize", operation.frsize, bigint) &&
@@ -3267,7 +3296,9 @@ static int node_fs_init(const JubeHostAPI* host) {
             !host->node->permission->check_fs_read || !host->node->permission->check_fs_write ||
             host->node->filesystem->struct_size < sizeof(JubeHostFilesystemAPI) ||
             !host->node->filesystem->read_write || !host->node->filesystem->read_write_release ||
-            !host->node->async_ops->work_submit || !host->value->kind ||
+            host->node->async_ops->struct_size < sizeof(JubeHostAsyncAPI) ||
+            !host->node->async_ops->work_submit_root_span ||
+            !host->node->async_ops->work_resource_value || !host->value->kind ||
             !host->node->async_ops->function_install_promisify_custom ||
             !host->node->async_ops->function_install_promisify_args ||
             !host->value->array_new || !host->value->array_push || !host->value->array_length ||
@@ -3303,10 +3334,9 @@ static void node_fs_runtime_detach(void* session) {
     if (session != node_fs_session) return;
     for (NodeFsRequest* request = node_fs_pending; request; request = request->next) {
         request->detached = true;
-        node_fs_unregister_roots(request);
         if (node_fs_host && node_fs_host->node && node_fs_host->node->async_ops &&
                 node_fs_host->node->async_ops->work_cancel) {
-            node_fs_host->node->async_ops->work_cancel(session, request->work_request_id);
+            node_fs_host->node->async_ops->work_cancel(session, request->resource_id);
         }
     }
     node_fs_session = NULL;

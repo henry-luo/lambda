@@ -11,6 +11,30 @@ extern "C" {
 #include "css_value.hpp"
 #include "css_style.hpp"
 
+bool css_absolute_length_to_px(CssUnit unit, double value, double* pixels) {
+    static const double scales[] = {
+        1.0, 96.0 / 2.54, 96.0 / 25.4, 96.0, 4.0 / 3.0, 16.0,
+        96.0 / 2.54 / 40.0,
+    };
+    if (!pixels || unit < CSS_UNIT_PX || unit > CSS_UNIT_Q) return false;
+    *pixels = value * scales[unit - CSS_UNIT_PX];
+    return true;
+}
+
+float css_font_size_keyword_px(CssEnum keyword) {
+    switch (keyword) {
+        case CSS_VALUE_XX_SMALL: return 9.0f;
+        case CSS_VALUE_X_SMALL: return 10.0f;
+        case CSS_VALUE_SMALL: return 13.0f;
+        case CSS_VALUE_MEDIUM: return 16.0f;
+        case CSS_VALUE_LARGE: return 18.0f;
+        case CSS_VALUE_X_LARGE: return 24.0f;
+        case CSS_VALUE_XX_LARGE: return 32.0f;
+        case CSS_VALUE_XXX_LARGE: return 48.0f;
+        default: return 16.0f;
+    }
+}
+
 static const CssEnumInfo css_value_definitions[] = {
     {"_undef", 6, CSS_VALUE__UNDEF, CSS_VALUE_GROUP__UNDEF},
     {"_length", 7, CSS_VALUE__LENGTH, CSS_VALUE_GROUP_SPECIAL_TYPE},

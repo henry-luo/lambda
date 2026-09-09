@@ -51,12 +51,21 @@ enum JsModuleConstType {
     MCONST_MODVAR,  // runtime module variable: int_val = index into js_module_vars[]
 };
 
-struct JsModuleConstEntry {
+// Source binding facts are shared by compiler lookup rows. Each owner keeps
+// only its mechanism-specific tail (module cell or temporary set state).
+struct JsMirBindingRef {
     const char* name;   // NamePool-owned semantic binding name
     // Source bindings use this edge at lowering time. The hashmap remains
     // name-keyed only for generated module locals and runtime ABI names.
-    NameEntry* binding;
-    AstNode* binding_node;
+    union {
+        NameEntry* binding;
+        NameEntry* entry; // temporary analysis-set spelling
+    };
+    JsAstNode* binding_node; // defining node retained for source-keyed cells
+    int var_kind;       // 0=var, 1=let, 2=const (mirrors JsVarKind)
+};
+
+struct JsModuleConstEntry : JsMirBindingRef {
     // A retained preamble was resolved in a different AST. Its globals cross
     // that compilation boundary by public name, then link once to this unit's
     // NameEntry before ordinary identity-based lowering resumes.
@@ -65,7 +74,6 @@ struct JsModuleConstEntry {
     int64_t int_val;    // module variable index
     bool is_iife_var;   // true if promoted from IIFE scope (write-through always)
     TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type
-    int var_kind;       // v20 TDZ: 0=var, 1=let, 2=const (for MCONST_MODVAR)
     bool is_nested_func_hoist; // true if from nested function decl name (Annex B candidate, not a real var)
     bool is_iife_func_decl; // true if direct sync-IIFE function decl promoted to module var for escaping closures
     // Js57 P3 (Track B2): live binding for self-imported default. When set,
@@ -78,14 +86,10 @@ struct JsModuleConstEntry {
     const char* live_binding_specifier; // resolved module path, NamePool-owned
 };
 
-struct JsNameSetEntry {
-    const char* name;   // NamePool-owned semantic binding name
-    int var_kind;  // v20 TDZ: 0=var, 1=let, 2=const (mirrors JsVarKind)
+struct JsNameSetEntry : JsMirBindingRef {
     bool from_func_decl;  // true if this name came from a nested function declaration
     uint32_t binding_start; // source range of the resolved defining binding, if known
     uint32_t binding_end;
-    NameEntry* entry; // AST binding identity, when this record came from an identifier
-    JsAstNode* binding_node; // defining node retained for source-keyed scope cells
 };
 
 // Resumable bodies assign stable environment slots before lowering their
@@ -339,29 +343,47 @@ struct JsInstanceFieldEntry {
     bool computed;                  // whether this is a computed property name
 };
 
+// Every class body member has one stable, source-ordered compiler record.
+// Lowering selects the applicable kind instead of reconstructing order from
+// four parallel arrays.
+enum JsClassMemberKind {
+    JS_CLASS_MEMBER_METHOD,
+    JS_CLASS_MEMBER_STATIC_FIELD,
+    JS_CLASS_MEMBER_INSTANCE_FIELD,
+    JS_CLASS_MEMBER_STATIC_BLOCK,
+};
+
+struct JsClassMember {
+    JsClassMemberKind kind;
+    union {
+        JsClassMethodEntry method;
+        JsStaticFieldEntry static_field;
+        JsInstanceFieldEntry instance_field;
+        JsAstNode* static_block;
+    } as;
+};
+
 // Class info for transpiler
 struct JsClassEntry {
     JsClassNode* node;
     String* name;
     String* alias_name;                  // variable name for class expressions (var X = class Y {})
-    JsClassMethodEntry* methods;          // exact-sized, stable for the compile lifetime
-    int method_capacity;
-    int method_count;
-    JsClassMethodEntry* constructor;     // points into methods[] or NULL
+    JsClassMember* members;              // exact-sized, source-ordered compile-lifetime table
+    int member_capacity;
+    int member_count;
+    JsClassMethodEntry* constructor;     // points into members[].as.method or NULL
     JsClassEntry* superclass;            // resolved parent class entry or NULL
     bool has_self_extends;               // class x extends x {} — TDZ violation
     bool is_declaration;                 // true for class declarations, false for class expressions
     int inner_module_var_index;          // immutable class-name binding inside class scope
-    JsStaticFieldEntry* static_fields;    // exact-sized, stable for the compile lifetime
-    int static_field_capacity;
-    int static_field_count;
-    JsInstanceFieldEntry* instance_fields; // exact-sized, stable for the compile lifetime
-    int instance_field_capacity;
-    int instance_field_count;
-    JsAstNode** static_blocks;               // exact-sized, stable for the compile lifetime
-    int static_block_capacity;
-    int static_block_count;
 };
+
+static inline JsClassMethodEntry* jm_class_member_method(JsClassEntry* entry,
+        int member_index) {
+    if (!entry || member_index < 0 || member_index >= entry->member_count ||
+            entry->members[member_index].kind != JS_CLASS_MEMBER_METHOD) return NULL;
+    return &entry->members[member_index].as.method;
+}
 
 // Try/catch context for handling return-in-try and exception flow
 struct JsTryContext {
@@ -404,6 +426,57 @@ struct JsMirArgStackScope {
     MIR_reg_t args_reg;
 };
 
+enum JsMirNameCacheDomain : uint8_t {
+    JS_MIR_NAME_CACHE_PROPERTY_ITEM,
+    JS_MIR_NAME_CACHE_MODULE_ID,
+};
+
+enum { JS_MIR_NAME_CACHE_CAPACITY = 32 };
+
+// Property Items and module NameIds have different generated result domains,
+// but their function-local lookup cache has one key/owner/storage mechanism
+// (D8.2.4; JSCU35).
+struct JsMirNameCacheEntry {
+    uint32_t module_name_index;
+    NameId direct_name_id;
+    MIR_reg_t reg;
+};
+
+struct JsMirNameCache {
+    JsMirNameCacheEntry entries[JS_MIR_NAME_CACHE_CAPACITY];
+    int count;
+    MIR_item_t function_item;
+    JsMirNameCacheDomain domain;
+};
+
+static inline void jm_name_cache_begin(JsMirNameCache* cache,
+        MIR_item_t function_item) {
+    if (cache && cache->function_item != function_item) {
+        cache->function_item = function_item;
+        cache->count = 0;
+    }
+}
+
+static inline MIR_reg_t jm_name_cache_find(const JsMirNameCache* cache,
+        uint32_t module_name_index, NameId direct_name_id) {
+    if (!cache) return 0;
+    for (int i = 0; i < cache->count; i++) {
+        const JsMirNameCacheEntry* entry = &cache->entries[i];
+        if (entry->module_name_index == module_name_index &&
+                entry->direct_name_id == direct_name_id) return entry->reg;
+    }
+    return 0;
+}
+
+static inline void jm_name_cache_store(JsMirNameCache* cache,
+        uint32_t module_name_index, NameId direct_name_id, MIR_reg_t reg) {
+    if (!cache || !reg || cache->count >= JS_MIR_NAME_CACHE_CAPACITY) return;
+    JsMirNameCacheEntry* entry = &cache->entries[cache->count++];
+    entry->module_name_index = module_name_index;
+    entry->direct_name_id = direct_name_id;
+    entry->reg = reg;
+}
+
 // §9.2: per-function lowering state, split out of the module coordinator.
 // Its lifetime is one function body — `jm_begin_function_frame` opens it and
 // the two name caches invalidate themselves against the function item they
@@ -417,20 +490,23 @@ struct JsMirFunctionEmitter {
     // This remains a full descriptor because branch restoration and GC rooting
     // must not turn the error carrier back into an untyped MIR register.
     MirValue last_call_result;
-    struct {
-        uint32_t module_name_index;
-        NameId direct_name_id;
-        MIR_reg_t reg;
-    } property_name_cache[32];
-    int property_name_cache_count;
-    MIR_item_t property_name_cache_func;
-    struct {
-        uint32_t module_name_index;
-        NameId direct_name_id;
-        MIR_reg_t reg;
-    } module_name_id_cache[32];
-    int module_name_id_cache_count;
-    MIR_item_t module_name_id_cache_func;
+    JsMirNameCache property_name_cache = {
+        {}, 0, NULL, JS_MIR_NAME_CACHE_PROPERTY_ITEM};
+    JsMirNameCache module_name_id_cache = {
+        {}, 0, NULL, JS_MIR_NAME_CACHE_MODULE_ID};
+};
+
+// One checkpointable lowering cursor owns the mutable function/class/scope
+// position. Branch transactions add lexical-map and closure-journal state on
+// top instead of duplicating this cursor shape (D8.2.4; JSCU35).
+struct JsMirCursor {
+    MIR_item_t function_item;
+    MIR_func_t function;
+    JsFuncCollected* function_collected;
+    JsClassEntry* class_entry;
+    MIR_reg_t scope_environment;
+    int scope_environment_slots;
+    int scope_depth;
 };
 
 struct JsMirTranspiler {
@@ -633,6 +709,29 @@ struct JsMirTranspiler {
     // excluded so per-iteration semantics still works.
     JsFuncCollected module_fc;
 };
+
+static inline void jm_cursor_capture(JsMirTranspiler* mt, JsMirCursor* cursor) {
+    if (!mt || !cursor) return;
+    cursor->function_item = mt->func_em->em.func_item;
+    cursor->function = mt->func_em->em.func;
+    cursor->function_collected = mt->current_fc;
+    cursor->class_entry = mt->current_class;
+    cursor->scope_environment = mt->scope_env_reg;
+    cursor->scope_environment_slots = mt->scope_env_slot_count;
+    cursor->scope_depth = mt->scope_depth;
+}
+
+static inline void jm_cursor_restore(JsMirTranspiler* mt,
+        const JsMirCursor* cursor) {
+    if (!mt || !cursor) return;
+    mt->func_em->em.func_item = cursor->function_item;
+    mt->func_em->em.func = cursor->function;
+    mt->current_fc = cursor->function_collected;
+    mt->current_class = cursor->class_entry;
+    mt->scope_env_reg = cursor->scope_environment;
+    mt->scope_env_slot_count = cursor->scope_environment_slots;
+    mt->scope_depth = cursor->scope_depth;
+}
 
 static inline JsFuncCollected* jm_collected_func_by_id(JsMirTranspiler* mt,
         AstFunctionId function_id) {

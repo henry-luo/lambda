@@ -1184,12 +1184,13 @@ extern "C" void dom_cssom_sync_mutated_inline_stylesheets(void* dom_doc) {
     dom_cssom_reorder_owned_document_stylesheets(doc);
 }
 
-extern "C" Item dom_cssom_get_style_element_sheet(Item elem_item) {
+extern "C" Item dom_cssom_get_element_sheet(Item elem_item) {
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
 
-    // must be a <style> element
-    if (!elem->tag_name || strcasecmp(elem->tag_name, "style") != 0) {
+    bool is_inline_style = elem->tag_name && strcasecmp(elem->tag_name, "style") == 0;
+    bool is_stylesheet_link = elem->tag_name && strcasecmp(elem->tag_name, "link") == 0;
+    if (!is_inline_style && !is_stylesheet_link) {
         return ItemNull;
     }
 
@@ -1203,7 +1204,9 @@ extern "C" Item dom_cssom_get_style_element_sheet(Item elem_item) {
         }
     }
 
-    if (!dom_cssom_sync_inline_style_element(elem)) return ItemNull;
+    // Linked sheets are parsed before script execution; only a <style> can
+    // need a lazy synchronization after its text-tree mutation.
+    if (!is_inline_style || !dom_cssom_sync_inline_style_element(elem)) return ItemNull;
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* sheet = doc->stylesheets[i];
         if (sheet && sheet->owner_element == elem) {

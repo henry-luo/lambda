@@ -33,10 +33,8 @@ extern Item js_make_number(double d);
 #define readline_promises_namespace (js_runtime_state.readline->promises_namespace)
 #define readline_completion_rl (js_runtime_state.readline->completion_interface)
 #define readline_create_promises_mode (js_runtime_state.readline->create_promises_mode)
-#define READLINE_INPUT_MAP_MAX JS_READLINE_INPUT_MAP_MAX
-#define readline_inputs (js_runtime_state.readline->inputs)
-#define readline_interfaces (js_runtime_state.readline->interfaces)
-#define readline_input_count (js_runtime_state.readline->input_count)
+#define readline_input_rows (js_runtime_state.readline->inputs)
+#define readline_input_values (js_runtime_state.readline->input_values)
 JS_FORWARD_STATIC_EXPRESSION(bool, readline_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.readline->roots)))
 JS_FORWARD_STATIC_ITEM(readline_get, (Item obj, const char* name), js_get_key_default, (obj, make_string_item(name)))
 JS_FORWARD_STATIC_VOID( readline_set, (Item obj, const char* name, Item value), js_set_key_default, (obj, make_string_item(name), value))
@@ -56,24 +54,82 @@ static bool readline_is_stream_like(Item input) {
     return get_type_id(buffer) == LMD_TYPE_ARRAY;
 }
 
+static void readline_input_rows_clear(JsReadlineState* state) {
+    if (!state) return;
+    if (state->inputs) {
+        for (int i = state->inputs->length - 1; i >= 0; i--) {
+            mem_free(state->inputs->data[i]);
+        }
+        arraylist_free(state->inputs);
+        state->inputs = NULL;
+    }
+    root_vector_clear(&state->input_values);
+}
+
+void js_readline_state_destroy(JsReadlineState* state) {
+    if (!state) return;
+    readline_input_rows_clear(state);
+    root_vector_destroy(&state->input_values);
+}
+
+static bool readline_input_rows_ensure(void) {
+    JsReadlineState* state = js_active_runtime_state ? js_runtime_state.readline : NULL;
+    if (!state) return false;
+    int row_count = state->inputs ? state->inputs->length : 0;
+    if (root_vector_count(&state->input_values) != row_count * 2) {
+        // A replaced heap clears RootVector contents; native rows must not
+        // retain identities from that former heap.
+        readline_input_rows_clear(state);
+    }
+    return true;
+}
+
+static Item readline_input_at(const JsReadlineInput* row, int offset) {
+    Item* value = row ? root_vector_at(&readline_input_values,
+        row->root_slot + offset) : NULL;
+    return value ? *value : ItemNull;
+}
+
 static void readline_map_input(Item input, Item rl) {
-    if (input.item == 0 || input.item == ITEM_NULL) return;
-    for (int i = 0; i < readline_input_count; i++) {
-        if (readline_item_eq(readline_inputs[i], input)) {
-            readline_interfaces[i] = rl;
+    if (input.item == 0 || input.item == ITEM_NULL || !readline_input_rows_ensure()) return;
+    int row_count = readline_input_rows ? readline_input_rows->length : 0;
+    for (int i = 0; i < row_count; i++) {
+        JsReadlineInput* row = (JsReadlineInput*)readline_input_rows->data[i];
+        if (readline_item_eq(readline_input_at(row, 0), input)) {
+            Item* interface = root_vector_at(&readline_input_values,
+                row->root_slot + 1);
+            if (interface) *interface = rl;
             return;
         }
     }
-    if (readline_input_count < READLINE_INPUT_MAP_MAX) {
-        readline_inputs[readline_input_count] = input;
-        readline_interfaces[readline_input_count] = rl;
-        readline_input_count++;
+    RootFrame roots(2);
+    Rooted<Item> input_root(roots, input);
+    Rooted<Item> interface_root(roots, rl);
+    JsReadlineInput* row = (JsReadlineInput*)mem_calloc(1,
+        sizeof(JsReadlineInput), MEM_CAT_JS_RUNTIME);
+    if (!row) return;
+    row->root_slot = root_vector_count(&readline_input_values);
+    if (!root_vector_push(&readline_input_values, input_root.get()) ||
+            !root_vector_push(&readline_input_values, interface_root.get())) {
+        root_vector_shrink(&readline_input_values, row->root_slot);
+        mem_free(row);
+        return;
+    }
+    if (!readline_input_rows) readline_input_rows = arraylist_new(8);
+    if (!readline_input_rows || !arraylist_append(readline_input_rows, row)) {
+        root_vector_shrink(&readline_input_values, row->root_slot);
+        mem_free(row);
     }
 }
 
 static Item readline_find_by_input(Item input) {
-    for (int i = readline_input_count - 1; i >= 0; i--) {
-        if (readline_item_eq(readline_inputs[i], input)) return readline_interfaces[i];
+    if (!readline_input_rows_ensure()) return ItemNull;
+    for (int i = readline_input_rows ? readline_input_rows->length - 1 : -1;
+            i >= 0; i--) {
+        JsReadlineInput* row = (JsReadlineInput*)readline_input_rows->data[i];
+        if (readline_item_eq(readline_input_at(row, 0), input)) {
+            return readline_input_at(row, 1);
+        }
     }
     return ItemNull;
 }
@@ -1787,6 +1843,6 @@ extern "C" void js_readline_reset(void) {
     if (!js_active_runtime_state) return;
     readline_namespace = (Item){0};
     readline_promises_namespace = (Item){0};
-    readline_input_count = 0;
+    readline_input_rows_clear(js_runtime_state.readline);
     readline_create_promises_mode = false;
 }

@@ -170,11 +170,25 @@ static bool form_control_has_specified_font(const ViewBlock* block) {
         style_tree_get_declaration(style, CSS_PROPERTY_FONT_VARIANT));
 }
 
-static bool form_control_has_specified_line_height(const ViewBlock* block) {
+static bool form_control_declares_line_height(const ViewBlock* block) {
     StyleTree* style = block ? block->specified_style : nullptr;
     return style && (
         style_tree_get_declaration(style, CSS_PROPERTY_LINE_HEIGHT) ||
         style_tree_get_declaration(style, CSS_PROPERTY_FONT));
+}
+
+static float form_control_author_non_normal_line_height(LayoutContext* lycon,
+                                                        ViewBlock* block,
+                                                        FontProp* font) {
+    if (!lycon || !block || !font || font->font_size <= 0.0f) return 0.0f;
+    // Native controls keep the UA `line-height: normal` unless an author
+    // font or line-height declaration participates in their own cascade.
+    if (!form_control_declares_line_height(block)) return 0.0f;
+    CssValue value = layout_cascaded_line_height(lycon, block);
+    if (value.type == CSS_VALUE_TYPE_KEYWORD && value.data.keyword == CSS_VALUE_NORMAL) {
+        return 0.0f;
+    }
+    return layout_resolve_line_height_value(lycon, &value, block, font->font_size);
 }
 
 static float form_control_normal_line_height(LayoutContext* lycon, FontProp* font,
@@ -195,17 +209,7 @@ static float textarea_used_line_height(LayoutContext* lycon, ViewBlock* block,
     if (!font || font->font_size <= 0.0f) return 0.0f;
 
     float line_height = 0.0f;
-    if (form_control_has_specified_line_height(block) && block && block->blk &&
-        block->block_mut()->line_height) {
-        const CssValue* value = block->block()->line_height;
-        if (value->type == CSS_VALUE_TYPE_NUMBER) {
-            line_height = value->data.number.value * font->font_size;
-        } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
-            line_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
-        } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-            line_height = (value->data.number.value / 100.0f) * font->font_size;
-        }
-    }
+    line_height = form_control_author_non_normal_line_height(lycon, block, font);
     if (line_height > 0.0f) return line_height;
     // `normal` is a font metric, including when an author font shorthand resets it.
     return form_control_normal_line_height(
@@ -365,19 +369,14 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
             (font && font->font_size > 0 && font->font_size != ua_font_size);
         float line_h = form_control_normal_line_height(
             lycon, font, has_css_font && font ? font->font_size * 1.15f : default_content_h);
-        bool has_used_line_height = false;
-        if (form_control_has_specified_line_height(block) && block->blk &&
-            block->block_mut()->line_height && font) {
-            float resolved_line_h = layout_resolve_line_height_value(
-                lycon, block->block()->line_height, block, font->font_size);
-            // Native inputs reset inherited line-height, while an author line-height
-            // sets the auto-height content box; glyph bounds alone are too short.
-            if (resolved_line_h > 0.0f) {
-                line_h = resolved_line_h;
-                has_used_line_height = true;
-            }
+        float used_line_height = form_control_author_non_normal_line_height(
+            lycon, block, font);
+        if (used_line_height > 0.0f) {
+            // Bootstrap's `font: inherit` carries the body's non-normal line-height
+            // into controls, so intrinsic height must use the cascaded value.
+            line_h = used_line_height;
         }
-        form->intrinsic_height = (has_css_font || has_used_line_height)
+        form->intrinsic_height = (has_css_font || used_line_height > 0.0f)
             ? line_h : max(line_h, default_content_h);
     }
 }
@@ -507,7 +506,12 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
     {
         float def_bp_v = 2 * (FormDefaults::BUTTON_PADDING_V + FormDefaults::BUTTON_BORDER) * zoom;
         float content_height = FormDefaults::TEXT_HEIGHT * zoom - def_bp_v;
-        if (form_button_has_authored_vertical_box(block) &&
+        float used_line_height = form_control_author_non_normal_line_height(
+            lycon, block, font);
+        if (used_line_height > 0.0f) {
+            // CSS 2.1 §10.8.1: inherited non-normal line-height sets the label box.
+            content_height = used_line_height;
+        } else if (form_button_has_authored_vertical_box(block) &&
             font && font->font_size > 0 && lycon->ui_context) {
             FontBox temp_font;
             setup_font(lycon->ui_context, &temp_font, font);

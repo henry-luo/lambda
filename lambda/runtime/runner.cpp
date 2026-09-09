@@ -1449,7 +1449,7 @@ void runner_setup_context(Runner* runner) {
     }
     // SCU15: cross-language JS imports compile on this same canonical context
     // (load_js_module binds runtime_get_eval_context), so their JS capsule is
-    // already ctx->js_state; there is no separate bootstrap context to adopt.
+    // already in ctx's JS capsule; there is no separate bootstrap context to adopt.
     // Radiant/Jube Lambda calls reuse JS DOM primitives even without importing
     // JavaScript. Initialize the derived capsule once for this eval-thread
     // lifetime so those native helpers can read their paired TLS state.
@@ -1828,7 +1828,7 @@ void runtime_reset_heap(Runtime* runtime) {
         if (!runtime_context_bind_retained(runtime, cleanup_context)) return;
         cleanup_context->result = ItemNull;
         cleanup_context->scheduler = runtime_scheduler(runtime);
-        if (cleanup_context->js_state &&
+        if (js_runtime_state_for(cleanup_context) &&
                 !js_runtime_state_init(cleanup_context)) return;
         if (cleanup_context->last_error) {
             // Diagnostics can own allocations from the retiring heap. Clear
@@ -1913,7 +1913,7 @@ void runtime_cleanup(Runtime* runtime) {
     EvalContext* cleanup_owner = runtime->eval_context;
     if (cleanup_owner) {
         if (!eval_context_init(cleanup_owner)) return;
-        if (cleanup_owner->js_state &&
+        if (js_runtime_state_for(cleanup_owner) &&
                 !js_runtime_state_init(cleanup_owner)) return;
         if (cleanup_owner->cwd) {
             // A session can end before its first execution; unlike the JIT
@@ -1944,7 +1944,7 @@ void runtime_cleanup(Runtime* runtime) {
         if (!cleanup_context) return;
         if (!runtime_context_bind_retained(runtime, cleanup_context)) return;
         cleanup_context->result = ItemNull;
-        if (cleanup_context->js_state &&
+        if (js_runtime_state_for(cleanup_context) &&
                 !js_runtime_state_init(cleanup_context)) return;
 
         // Destruction follows the same owner-bound path as heap replacement.
@@ -1958,7 +1958,7 @@ void runtime_cleanup(Runtime* runtime) {
             runtime_set_scheduler(runtime, NULL);
         }
 
-        if (cleanup_context->js_state) js_event_loop_shutdown();
+        if (js_runtime_state_for(cleanup_context)) js_event_loop_shutdown();
         lambda_uv_cleanup();
         event_loop_cleaned = true;
 
@@ -1971,7 +1971,7 @@ void runtime_cleanup(Runtime* runtime) {
 
         // Intrinsic cache entries own native precise-root slots outside the GC
         // pool; release them while their heap is current and before leak accounting.
-        if (cleanup_context->js_state) js_intrinsic_state_teardown();
+        if (js_runtime_state_for(cleanup_context)) js_intrinsic_state_teardown();
 
         // Jube modules may cache heap-owned callbacks across repeated page
         // interactions; release those roots before this heap disappears.
@@ -1989,7 +1989,7 @@ void runtime_cleanup(Runtime* runtime) {
         }
 
         js_runtime_state_release_heap_resources();
-        if (cleanup_context->js_state) {
+        if (js_runtime_state_for(cleanup_context)) {
             // Full JS capsule destruction can release function-owned module
             // bindings, so keep both the JS realm and its slabs alive until it
             // has completed while the owning heap is still valid.
@@ -2023,7 +2023,7 @@ void runtime_cleanup(Runtime* runtime) {
         runtime->dom_ui_context = NULL;
     }
     if (!event_loop_cleaned) {
-        if (runtime->eval_context && runtime->eval_context->js_state) {
+        if (runtime->eval_context && js_runtime_state_for(runtime->eval_context)) {
             if (!js_runtime_state_init(runtime->eval_context)) return;
             js_event_loop_shutdown();
         }

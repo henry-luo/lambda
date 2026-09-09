@@ -994,16 +994,15 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* declaration = nodes[reduction->child_count - 1];
         if (!declaration) return js_c_unsupported(sink);
         declaration->source_span.start_byte = reduction->span.start_byte;
-        JsAstNode* decorators[16];
         uint32_t decorator_count = reduction->child_count - 1;
-        if (decorator_count > 16) return js_c_unsupported(sink);
         for (uint32_t i = 0; i + 1 < reduction->child_count; i++) {
             if (!nodes[i]) {
                 return js_c_unsupported(sink);
             }
-            decorators[i] = nodes[i];
         }
-        JsAstNode* lowered = js_c_lower_decorated_class(sink, decorators,
+        // The reduction-owned child list is the decorator sequence; do not
+        // copy it through a fixed parser scratch array before lowering.
+        JsAstNode* lowered = js_c_lower_decorated_class(sink, nodes,
             decorator_count, declaration);
         return js_c_push_result(sink, lowered, reduction->span);
     }

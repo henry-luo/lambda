@@ -1093,7 +1093,7 @@ static Item js_util_promisify_executor(Item env_item, Item resolve, Item reject)
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
 
-    RootFrame roots(9);
+    RootFrame roots(10);
     Rooted<Item> original_root(roots, env[0]);
     Rooted<Item> this_root(roots, env[1]);
     Rooted<Item> call_args_root(roots, env[2]);
@@ -1102,6 +1102,7 @@ static Item js_util_promisify_executor(Item env_item, Item resolve, Item reject)
     Rooted<Item> reject_root(roots, reject);
     Rooted<Item> callback_root(roots, ItemNull);
     Rooted<Item> error_root(roots, ItemNull);
+    Rooted<Item> call_result_root(roots, ItemNull);
     int64_t argc64 = js_array_length(call_args_root.get());
     if (argc64 < 0) argc64 = 0;
 
@@ -1118,12 +1119,12 @@ static Item js_util_promisify_executor(Item env_item, Item resolve, Item reject)
     }
     call_args[argc - 1] = callback_root.get();
 
-    Item call_result = js_call_function(original_root.get(), this_root.get(), call_args, argc);
-    if (item_is_error(call_result)) {
-        error_root.set(js_error_lane_payload(call_result));
+    call_result_root.set(js_call_function(original_root.get(), this_root.get(), call_args, argc));
+    if (item_is_error(call_result_root.get())) {
+        error_root.set(js_error_lane_payload(call_result_root.get()));
         Item reject_args[1] = {error_root.get()};
         (void)js_call_function(reject_root.get(), make_js_undefined(), reject_args, 1);
-    } else if (js_util_is_promise_like(call_result)) {
+    } else if (js_util_is_promise_like(call_result_root.get())) {
         js_util_emit_promisify_promise_warning();
     }
     return make_js_undefined();
@@ -1168,11 +1169,16 @@ static bool js_util_is_promise_like(Item value) {
 }
 
 static void js_util_emit_promisify_promise_warning(void) {
-    Item warning = js_new_object();
-    js_set_key_cstr(warning, "name", make_string_item("DeprecationWarning"));
-    js_set_key_cstr(warning, "message", make_string_item("Calling promisify on a function that returns a Promise is likely a mistake."));
-    js_set_key_cstr(warning, "code", make_string_item("DEP0174"));
-    (void)js_process_emit(make_string_item("warning"), warning);
+    JS_ROOTS(roots,
+        warning_root, js_new_object(),
+        name_root, make_string_item("DeprecationWarning"),
+        message_root, make_string_item("Calling promisify on a function that returns a Promise is likely a mistake."),
+        code_root, make_string_item("DEP0174"),
+        event_root, make_string_item("warning"));
+    js_set_key_cstr(warning_root.get(), "name", name_root.get());
+    js_set_key_cstr(warning_root.get(), "message", message_root.get());
+    js_set_key_cstr(warning_root.get(), "code", code_root.get());
+    (void)js_process_emit(event_root.get(), warning_root.get());
 }
 
 static Item js_util_promisify_result_from_args(Item custom_args, Item rest_args) {
@@ -1182,16 +1188,22 @@ static Item js_util_promisify_result_from_args(Item custom_args, Item rest_args)
     if (get_type_id(custom_args) == LMD_TYPE_ARRAY) {
         int64_t names_len = js_array_length(custom_args);
         if (names_len > 0) {
-            Item obj = js_new_object();
+            JS_ROOTS(roots,
+                custom_args_root, custom_args,
+                rest_args_root, rest_args,
+                obj_root, js_new_object(),
+                name_root, ItemNull,
+                value_root, ItemNull);
             int64_t value_count = argc - 1;
             int64_t count = names_len < value_count ? names_len : value_count;
             for (int64_t i = 0; i < count; i++) {
-                Item name = js_elements_get_int(custom_args, i);
-                if (get_type_id(name) == LMD_TYPE_STRING) {
-                    js_set_key_default(obj, name, js_elements_get_int(rest_args, i + 1));
+                name_root.set(js_elements_get_int(custom_args_root.get(), i));
+                if (get_type_id(name_root.get()) == LMD_TYPE_STRING) {
+                    value_root.set(js_elements_get_int(rest_args_root.get(), i + 1));
+                    js_set_key_default(obj_root.get(), name_root.get(), value_root.get());
                 }
             }
-            return obj;
+            return obj_root.get();
         }
     }
 
@@ -1203,25 +1215,36 @@ extern "C" Item js_util_promisify(Item fn_item) {
         return js_throw_invalid_arg_type("original", "function", fn_item);
     }
 
-    Item custom_key = js_util_promisify_custom_symbol();
-    JS_ASSIGN_OR_RETURN(custom, js_get_key_default(fn_item, custom_key));
-    if (custom.item != ITEM_NULL && custom.item != ITEM_JS_UNDEFINED &&
-        get_type_id(custom) != LMD_TYPE_UNDEFINED) {
-        if (!js_is_callable(custom)) {
-            return js_throw_invalid_arg_type("util.promisify.custom", "function", custom);
+    RootFrame roots(6);
+    Rooted<Item> fn_root(roots, fn_item);
+    Rooted<Item> custom_key_root(roots, js_util_promisify_custom_symbol());
+    Rooted<Item> custom_root(roots,
+        js_get_key_default(fn_root.get(), custom_key_root.get()));
+    Rooted<Item> custom_args_root(roots, ItemNull);
+    Rooted<Item> wrapper_root(roots, ItemNull);
+    Rooted<Item> name_root(roots, ItemNull);
+    if (item_is_error(custom_root.get())) return custom_root.get();
+    if (custom_root.get().item != ITEM_NULL && custom_root.get().item != ITEM_JS_UNDEFINED &&
+        get_type_id(custom_root.get()) != LMD_TYPE_UNDEFINED) {
+        if (!js_is_callable(custom_root.get())) {
+            return js_throw_invalid_arg_type("util.promisify.custom", "function", custom_root.get());
         }
-        return custom;
+        return custom_root.get();
     }
 
-    JS_ASSIGN_OR_RETURN(custom_args, js_get_key_default(fn_item, js_util_custom_promisify_args_symbol()));
+    custom_args_root.set(js_get_key_default(fn_root.get(), js_util_custom_promisify_args_symbol()));
+    if (item_is_error(custom_args_root.get())) return custom_args_root.get();
 
     Item* env = js_alloc_env(2);
-    env[0] = fn_item;
-    env[1] = custom_args;
-    Item wrapper = js_new_native_closure(js_util_promisified_function, -1, env, 2);
-    js_set_key_default(wrapper, custom_key, wrapper);
-    js_set_function_name(wrapper, make_string_item("promisified"));
-    return wrapper;
+    if (!env) return ItemError;
+    env[0] = fn_root.get();
+    env[1] = custom_args_root.get();
+    wrapper_root.set(js_new_native_closure(js_util_promisified_function, -1, env, 2));
+    if (item_is_error(wrapper_root.get())) return wrapper_root.get();
+    js_set_key_default(wrapper_root.get(), custom_key_root.get(), wrapper_root.get());
+    name_root.set(make_string_item("promisified"));
+    js_set_function_name(wrapper_root.get(), name_root.get());
+    return wrapper_root.get();
 }
 
 // =============================================================================
@@ -1682,25 +1705,86 @@ static bool js_util_compare_enumerable_properties(Item a, Item b, JsObjectPairTr
     return true;
 }
 
-static bool js_util_compare_unordered_collection(Item a, Item b,
+// Each unordered-comparison candidate can be consumed only once. This is
+// native metadata, not a JS value graph, so tracked storage owns the
+// activation-local membership ledger.
+struct JsUtilMatchLedger {
+    bool* matches = NULL;
+    int64_t count = 0;
+
+    explicit JsUtilMatchLedger(int64_t requested) : count(requested) {
+        if (requested <= 0) return;
+        if ((uint64_t)requested > (uint64_t)(size_t)-1 / sizeof(bool)) {
+            count = 0;
+            return;
+        }
+        matches = (bool*)mem_calloc((size_t)requested, sizeof(bool), MEM_CAT_JS_RUNTIME);
+        if (!matches) count = 0;
+    }
+
+    ~JsUtilMatchLedger() {
+        if (matches) mem_free(matches);
+    }
+
+    bool valid_for(int64_t requested) const {
+        return requested == 0 || (matches && count == requested);
+    }
+
+    bool claimed(int64_t index) const {
+        return index >= 0 && index < count && matches[index];
+    }
+
+    void claim(int64_t index) {
+        if (index >= 0 && index < count) matches[index] = true;
+    }
+};
+
+static Item js_util_compare_unordered_collection(Item a, Item b,
         JsObjectPairTraversal* ctx, bool strict, bool is_map) {
     Item size_a = js_collection_method(a, 9, ItemNull, ItemNull);
     Item size_b = js_collection_method(b, 9, ItemNull, ItemNull);
-    if (it2i(size_a) != it2i(size_b)) return false;
+    if (it2i(size_a) != it2i(size_b)) return (Item){.item = b2it(false)};
+
+    // Pair traversal roots the source collections on the side stack. Reserve
+    // this exact root carrier before either derived array returns, so storing
+    // the result cannot allocate between its return and publication.
+    RootVector retained = {};
+    root_vector_init(&retained, NULL, "unordered collection comparison");
+    if (!root_vector_push(&retained, ItemNull) ||
+            !root_vector_push(&retained, ItemNull)) {
+        root_vector_destroy(&retained);
+        return js_throw_range_error("Cannot retain unordered collection comparison values");
+    }
     Item items_a = js_iterable_to_array(a);
+    Item* items_a_root = root_vector_at(&retained, 0);
+    if (!items_a_root) {
+        root_vector_destroy(&retained);
+        return js_throw_range_error("Cannot retain unordered collection comparison values");
+    }
+    *items_a_root = items_a;
     Item items_b = js_iterable_to_array(b);
-    int64_t len_a = js_array_length(items_a);
-    int64_t len_b = js_array_length(items_b);
-    bool matched[1024];
-    for (int64_t i = 0; i < len_b && i < 1024; i++) matched[i] = false;
+    Item* items_b_root = root_vector_at(&retained, 1);
+    if (!items_b_root) {
+        root_vector_destroy(&retained);
+        return js_throw_range_error("Cannot retain unordered collection comparison values");
+    }
+    *items_b_root = items_b;
+    int64_t len_a = js_array_length(*items_a_root);
+    int64_t len_b = js_array_length(*items_b_root);
+    JsUtilMatchLedger matched(len_b);
+    if (!matched.valid_for(len_b)) {
+        root_vector_destroy(&retained);
+        return js_throw_range_error("Cannot retain unordered collection comparison state");
+    }
+    bool equal = true;
     for (int64_t i = 0; i < len_a; i++) {
-        Item left = js_elements_get_int(items_a, i);
+        Item left = js_elements_get_int(*items_a_root, i);
         Item left_key = is_map ? js_elements_get_int(left, 0) : left;
         Item left_value = is_map ? js_elements_get_int(left, 1) : ItemNull;
         bool found = false;
         for (int64_t j = 0; j < len_b; j++) {
-            if (j < 1024 && matched[j]) continue;
-            Item right = js_elements_get_int(items_b, j);
+            if (matched.claimed(j)) continue;
+            Item right = js_elements_get_int(*items_b_root, j);
             Item right_key = is_map ? js_elements_get_int(right, 0) : right;
             Item key_result = js_util_isDeepEqual_impl(left_key, right_key, ctx, strict);
             if (!js_is_truthy(key_result)) continue;
@@ -1709,13 +1793,17 @@ static bool js_util_compare_unordered_collection(Item a, Item b,
                     js_elements_get_int(right, 1), ctx, strict);
                 if (!js_is_truthy(value_result)) continue;
             }
-            if (j < 1024) matched[j] = true;
+            matched.claim(j);
             found = true;
             break;
         }
-        if (!found) return false;
+        if (!found) {
+            equal = false;
+            break;
+        }
     }
-    return true;
+    root_vector_destroy(&retained);
+    return (Item){.item = b2it(equal)};
 }
 
 static bool js_util_date_time_equal(Item a, Item b) {
@@ -2039,13 +2127,23 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsObjectPairTraversal* ctx,
         bool a_set = js_is_set_instance(a), b_set = js_is_set_instance(b);
         bool a_map = js_is_map_instance(a), b_map = js_is_map_instance(b);
         if (a_set && b_set) {
-            bool equal = js_util_compare_unordered_collection(a, b, ctx, strict, false) &&
+            Item collection_equal = js_util_compare_unordered_collection(a, b, ctx, strict, false);
+            if (item_is_error(collection_equal)) {
+                ctx->leave();
+                return collection_equal;
+            }
+            bool equal = js_is_truthy(collection_equal) &&
                 js_util_compare_enumerable_properties(a, b, ctx, strict);
             ctx->leave();
             return (Item){.item = b2it(equal)};
         }
         if (a_map && b_map) {
-            bool equal = js_util_compare_unordered_collection(a, b, ctx, strict, true) &&
+            Item collection_equal = js_util_compare_unordered_collection(a, b, ctx, strict, true);
+            if (item_is_error(collection_equal)) {
+                ctx->leave();
+                return collection_equal;
+            }
+            bool equal = js_is_truthy(collection_equal) &&
                 js_util_compare_enumerable_properties(a, b, ctx, strict);
             ctx->leave();
             return (Item){.item = b2it(equal)};

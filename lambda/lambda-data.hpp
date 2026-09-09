@@ -128,10 +128,6 @@ typedef struct EvalContext : Context {
     // after heap so MIR's hot allocation offsets remain stable.
     Runtime* runtime;
     TemplateRegistry* template_registry; // view/edit registry for this isolate
-    void* render_map_state;       // context-owned render reconciliation capsule
-    void* template_state_store;   // context-owned view/edit state map
-    void* jube_node_session;      // context-owned Jube Node service session
-    JsRuntimeState* js_state;  // context-owned JS semantic state capsule
     // Every language selects its context-owned module slab here. Generated
     // Lambda and JS MIR receive this Context directly and load the same selector.
     LambdaModuleState* active_module_state;
@@ -143,11 +139,9 @@ typedef struct EvalContext : Context {
     // Keep new shell bookkeeping at the tail: generated and native callers
     // depend on the established module-state offsets (D8.1.3v10).
     uint32_t execution_depth;
-    // JSCU15: one directory for context-owned subsystem state. Reading a
-    // capsule is an indexed load; the ops pointer is published with the slot
-    // at construction so the lifecycle walks need no central table.
-    void* capsules[CONTEXT_CAPSULE_COUNT];
-    const struct ContextCapsuleOps* capsule_ops[CONTEXT_CAPSULE_COUNT];
+    // JSCU27: one directory for context-owned subsystem state. Reading a
+    // capsule is an indexed load; the lifecycle contract travels with it.
+    ContextCapsuleDirectory capsule_directory;
 } EvalContext;
 
 // Unicode-enhanced comparison functions are declared in utf_string.h
@@ -292,26 +286,25 @@ typedef TypeArray TypeList;
 #define JSPD_NON_WRITABLE     0x01u  // 1 = property is read-only
 #define JSPD_NON_ENUMERABLE   0x02u  // 1 = property hidden from for-in / Object.keys
 #define JSPD_NON_CONFIGURABLE 0x04u  // 1 = property cannot be deleted/redefined
-#define JSPD_IS_ACCESSOR      0x08u  // 1 = slot holds JsAccessorPair*, not data value
+#define JSPD_IS_ACCESSOR      0x08u  // 1 = slot holds JsAccessorCell*, not data value
 #define JSPD_DELETED          0x10u  // 1 = property logically deleted (tombstone bit;
                                      //     A2-T8 successor to JS_DELETED_SENTINEL_VAL).
 
-// First-class accessor pair stored in the map data slot when ShapeEntry::flags has
-// JSPD_IS_ACCESSOR set. Replaces the legacy `__get_X`/`__set_X` magic-key scheme.
-//
-// Layout starts with type_id = LMD_TYPE_FUNC so that `Item.type_id()` returns
-// LMD_TYPE_FUNC for slot values pointing here (Option 2 storage scheme). This is
-// safe ONLY because consumers consult `ShapeEntry::flags & JSPD_IS_ACCESSOR` BEFORE
-// invoking any function operation. Any code path that calls `.function->ptr` on
-// an Item from a property slot without first checking IS_ACCESSOR will misbehave.
-#define JS_ACCESSOR_PAIR_LAYOUT_MAGIC 0x4A534150u
-typedef struct JsAccessorPair {
-    uint8_t type_id;   // = LMD_TYPE_FUNC (matches Function layout for tag compat)
+// A stored accessor is property storage, never a callable value. Its GC
+// allocation uses GC_TYPE_JS_ACCESSOR; the in-band tag is deliberately
+// undefined so an unchecked generic Item path cannot mistake it for Function.
+#define JS_ACCESSOR_CELL_LAYOUT_MAGIC 0x4A534143u
+typedef struct JsAccessorCell {
+    uint8_t type_id;   // = LMD_TYPE_UNDEFINED; ShapeEntry owns interpretation
     uint8_t _pad[3];
-    uint32_t layout_magic;  // = JS_ACCESSOR_PAIR_LAYOUT_MAGIC for the GC tracer
+    uint32_t layout_magic;  // = JS_ACCESSOR_CELL_LAYOUT_MAGIC
     Item getter;       // ItemNull or LMD_TYPE_FUNC
     Item setter;       // ItemNull or LMD_TYPE_FUNC
-} JsAccessorPair;
+} JsAccessorCell;
+
+// Compatibility spelling for property-layer APIs while callers migrate. This
+// is an alias only: there is one cell allocation and no FUNC-layout carrier.
+typedef JsAccessorCell JsAccessorPair;
 
 typedef struct ShapeEntry {
     StrView* name;

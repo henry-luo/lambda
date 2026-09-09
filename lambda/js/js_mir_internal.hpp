@@ -51,7 +51,6 @@ static inline Runtime* js_current_runtime(void) {
 }
 #define js_dynamic_func_counter (js_runtime_state.dynamic_func_counter)
 
-#define JS_ACTIVE_TRANSPILE_MAX 32
 typedef struct ActiveJsTranspileOwner {
     JsTranspiler* tp;
     JsMirTranspiler* mt;
@@ -66,8 +65,7 @@ typedef struct JsMirCompileRecoveryState {
     JsTranspiler* active_js_transpiler;
     JsMirTranspiler* active_mir_transpiler;
     char* active_js_owned_source;
-    ActiveJsTranspileOwner stack[JS_ACTIVE_TRANSPILE_MAX];
-    int count;
+    ArrayList* stack;
 } JsMirCompileRecoveryState;
 
 JsMirCompileRecoveryState* jm_compile_recovery_state_ensure(void);
@@ -79,7 +77,7 @@ void jm_compile_recovery_state_destroy_context(JsRuntimeState* runtime_state);
 #define g_active_mir_transpiler (jm_compile_recovery_state_ensure()->active_mir_transpiler)
 #define g_active_js_owned_source (jm_compile_recovery_state_ensure()->active_js_owned_source)
 #define js_module_code_store (&js_runtime_state.code_store)
-#define module_mir_context_count (js_runtime_state.code_store.count)
+#define module_mir_context_count js_code_store_count(js_module_code_store)
 void* jm_build_js_debug_info(JsMirTranspiler* mt, const char* filename);
 
 typedef enum JsMirReferenceKind {
@@ -147,8 +145,7 @@ typedef enum JsMirCompletionKind {
 } JsMirCompletionKind;
 
 typedef enum JsMirClassMethodInstallMode {
-    JS_MIR_CLASS_METHOD_INHERITED_STATIC = 0,
-    JS_MIR_CLASS_METHOD_OWN_STATIC,
+    JS_MIR_CLASS_METHOD_OWN_STATIC = 0,
     JS_MIR_CLASS_METHOD_OWN_INSTANCE
 } JsMirClassMethodInstallMode;
 
@@ -162,7 +159,7 @@ typedef struct JsMirClassMethodInstallPolicy {
     MIR_reg_t home_class;
     MIR_reg_t preserve_reg;
     JsClassEntry* owner_class;
-    int method_index;
+    int member_index;
     JsMirClassMethodInstallMode mode;
     JsMirComputedKeyOrder computed_key_order;
 } JsMirClassMethodInstallPolicy;
@@ -588,7 +585,7 @@ MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
 void jm_emit_class_length_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     JsClassEntry* ce);
 void jm_emit_class_static_methods(JsMirTranspiler* mt, MIR_reg_t cls_obj,
-    MIR_reg_t class_proto_obj, JsClassEntry* ce, JsClassEntry* static_superclass,
+    MIR_reg_t class_proto_obj, JsClassEntry* ce,
     JsMirComputedKeyOrder own_key_order);
 void jm_emit_class_instance_methods(JsMirTranspiler* mt, MIR_reg_t proto_obj,
     MIR_reg_t cls_obj, JsClassEntry* ce);

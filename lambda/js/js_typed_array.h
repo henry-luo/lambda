@@ -64,22 +64,60 @@ static inline bool js_arraybuffer_resizable(const JsArrayBuffer* ab) {
     return ab && byte_buffer_is_resizable(&ab->handle);
 }
 
-// DataView: structured access into an ArrayBuffer
+// The one authority for every ArrayBuffer view. DataView and TypedArray keep
+// distinct public operations, but detachment, .buffer identity, byte offset,
+// explicit length, and length-tracking are one mechanism (D2.4.1; JSCU34).
+typedef struct JsArrayBufferView {
+    JsArrayBuffer* buffer;
+    uint64_t buffer_item;
+    int byte_offset;
+    int byte_length;
+    bool length_tracking;
+} JsArrayBufferView;
+
+static inline int js_arraybuffer_view_current_byte_length(const JsArrayBufferView* view) {
+    if (!view || !view->buffer || js_arraybuffer_detached(view->buffer)) return 0;
+    int available = js_arraybuffer_length(view->buffer) - view->byte_offset;
+    if (available < 0) return 0;
+    if (view->length_tracking) return available;
+    return available >= view->byte_length ? view->byte_length : 0;
+}
+
+static inline bool js_arraybuffer_view_is_out_of_bounds(const JsArrayBufferView* view) {
+    if (!view || !view->buffer) return false;
+    if (js_arraybuffer_detached(view->buffer)) return true;
+    int available = js_arraybuffer_length(view->buffer) - view->byte_offset;
+    if (available < 0) return true;
+    return !view->length_tracking && available < view->byte_length;
+}
+
+// Legacy member spellings are an overlay, not a second stored record. They
+// keep host modules source-compatible while their reads move to `base`.
 typedef struct JsDataView {
-    JsArrayBuffer* buffer;  // backing ArrayBuffer
-    int byte_offset;         // offset into buffer
-    int byte_length;         // view byte length (ignored when length_tracking)
-    uint64_t buffer_item;    // original ArrayBuffer Item for identity-preserving .buffer access
-    bool length_tracking;    // Js54 P2: true when constructed without explicit byteLength —
-                             // current byte_length re-derives from the handle length - byte_offset
-                             // on every access so resizable-buffer views see live length.
+    union {
+        JsArrayBufferView base;
+        struct {
+            JsArrayBuffer* buffer;
+            uint64_t buffer_item;
+            int byte_offset;
+            int byte_length;
+            bool length_tracking;
+        };
+    };
 } JsDataView;
 
 typedef struct JsTypedArray {
+    union {
+        JsArrayBufferView base;
+        struct {
+            JsArrayBuffer* buffer;
+            uint64_t buffer_item;
+            int byte_offset;
+            int byte_length;
+            bool length_tracking;
+        };
+    };
     JsTypedArrayType element_type;   // typed-array element kind
-    JsArrayBuffer* buffer;           // backing ArrayBuffer
-    uint64_t buffer_item;            // original ArrayBuffer Item for identity-preserving .buffer access
-    bool length_tracking;            // true when constructed from buffer without explicit length
     bool is_buffer;                  // true only for Node Buffer instances backed by Uint8Array storage
     ArrayNum* view;                  // ArrayNum descriptor over the same non-moving byte storage
 } JsTypedArray;

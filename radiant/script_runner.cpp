@@ -1693,7 +1693,7 @@ static EvalContext* script_eval_context_prepare(Runtime* runtime) {
 static bool script_eval_context_activate(Runtime* runtime) {
     EvalContext* task_context = script_eval_context_prepare(runtime);
     if (!task_context || !eval_context_init(task_context)) return false;
-    return !task_context->js_state ||
+    return !js_runtime_state_for(task_context) ||
         js_runtime_state_init(task_context);
 }
 
@@ -1820,6 +1820,12 @@ static const char LIFECYCLE_WINDOW_LOAD_SOURCE[] =
     // after registered listeners; calling it again here duplicated the handler
     // and placed the first invocation before addEventListener callbacks.
     "}\n";
+static const char LIFECYCLE_WINDOW_PAGE_SHOW_SOURCE[] =
+    "if (window && window.dispatchEvent && typeof Event === 'function') {\n"
+    // The initial document is not restored from the back-forward cache.
+    "  var event = new Event('pageshow'); event.persisted = false;\n"
+    "  window.dispatchEvent(event);\n"
+    "}\n";
 
 static const char LIFECYCLE_INTERACTIVE_FILENAME[] =
     "<document-readystatechange-interactive>";
@@ -1828,6 +1834,7 @@ static const char LIFECYCLE_DOM_CONTENT_LOADED_FILENAME[] =
 static const char LIFECYCLE_COMPLETE_FILENAME[] =
     "<document-readystatechange-complete>";
 static const char LIFECYCLE_WINDOW_LOAD_FILENAME[] = "<window-load>";
+static const char LIFECYCLE_WINDOW_PAGE_SHOW_FILENAME[] = "<window-pageshow>";
 
 static bool execute_lifecycle_snippet(Runtime* runtime, JsPreambleState* preamble,
                                       const char* source, const char* filename) {
@@ -2299,6 +2306,13 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         any_error = true;
     }
     if (timing) timing->window_load_us += time_now_us() - phase_start_us;
+
+    // HTML lifecycle: pageshow follows load for an initially displayed document.
+    if (!execute_lifecycle_snippet(
+        runtime, preamble, LIFECYCLE_WINDOW_PAGE_SHOW_SOURCE,
+        LIFECYCLE_WINDOW_PAGE_SHOW_FILENAME)) {
+        any_error = true;
+    }
 
     script_scheduler_queues_free(&queues);
     return any_error ? ItemError : result;
@@ -2879,7 +2893,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
         return;
     }
     if (!runtime_context_bind_retained(runtime, handler_compile_ctx) ||
-            (handler_compile_ctx->js_state &&
+            (js_runtime_state_for(handler_compile_ctx) &&
              !js_runtime_state_init(handler_compile_ctx))) {
         strbuf_free(compile_buf);
         hashmap_free(handlers->element_map);

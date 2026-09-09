@@ -1,0 +1,14 @@
+const host = document.getElementById("host");
+const fragment = document.createDocumentFragment();
+const first = document.createElement("b");
+const second = document.createElement("em");
+first.textContent = "first";
+second.textContent = "second";
+fragment.appendChild(first);
+fragment.appendChild(second);
+host.replaceChild(fragment, host.firstChild);
+console.log(host.childNodes.length);
+console.log(host.firstChild.tagName);
+console.log(host.lastChild.tagName);
+console.log(fragment.childNodes.length);
+console.log(host.textContent);

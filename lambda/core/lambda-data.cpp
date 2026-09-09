@@ -1080,6 +1080,12 @@ Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
         Map* nested = map_shape_field_to_map(map_data, field);
         return nested ? (Item){.map = nested} : ItemNull;
     }
+    if (field->flags & JSPD_IS_ACCESSOR) {
+        // Accessor cells occupy the FUNC-sized pointer lane, but are not
+        // callable values. Property kernels use the shape flag to decode the
+        // raw cell; generic map readers see its undefined identity instead.
+        return (Item){.item = *(uint64_t*)field_ptr};
+    }
     LaneStorageDesc lane = {};
     if (shape_entry_uses_native_lane(field, &lane)) {
         if (lane.kind == LANE_STORAGE_INT) {

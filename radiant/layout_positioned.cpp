@@ -1805,8 +1805,69 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     block->height = content_height + block_box.pad_border_v;
 
 }
+static void layout_abs_block_internal(LayoutContext* lycon, DomNode* elmt,
+                                      ViewBlock* block, BlockContext* pa_block,
+                                      Linebox* pa_line,
+                                      bool register_with_containing_block);
+
+static void layout_reflow_abs_child_content_after_height_change(
+        LayoutContext* lycon, ViewBlock* child) {
+    if (!lycon || !child || !child->is_element() || !child->blk) return;
+
+    float used_x = child->x;
+    float used_y = child->y;
+    float used_border_width = child->width;
+    float used_border_height = child->height;
+    float used_width = child->block()->given_width;
+    float used_height = child->block()->given_height;
+    CssEnum used_width_type = child->block()->given_width_type;
+    CssEnum used_height_type = child->block()->given_height_type;
+    bool used_height_resolved_late = child->block()->percentage_height_resolved_late;
+    BlockContext parent_block = lycon->block;
+    Linebox parent_line = lycon->line;
+
+    // css 2.1 §10.5: normal-flow descendants used the provisional height;
+    // reflow their contents without recomputing the established abspos origin.
+    LayoutContextScope child_scope(lycon);
+    lycon->block.parent = &parent_block;
+    lycon->elmt = static_cast<DomNode*>(child);
+    lycon->view = static_cast<View*>(child);
+    lycon->block.content_width = 0.0f;
+    lycon->block.content_height = 0.0f;
+    lycon->block.given_width = -1.0f;
+    lycon->block.given_height = -1.0f;
+    lycon->block.saved_clear_y = -1.0f;
+    lycon->font.current_font_size = -1.0f;
+    dom_node_resolve_style(static_cast<DomNode*>(child), lycon);
+
+    // The child style retains the authored percentage, while these are its
+    // already-resolved used sizes from the completed containing block.
+    lycon->block.given_width = used_width;
+    lycon->block.given_height = used_height;
+    child->blk->given_width = used_width;
+    child->blk->given_height = used_height;
+    child->blk->given_width_type = used_width_type;
+    child->blk->given_height_type = used_height_type;
+    child->blk->percentage_height_resolved_late = used_height_resolved_late;
+    lycon->block.content_width = layout_content_size_from_border_box(
+        child, used_border_width, true);
+    lycon->block.content_height = layout_content_size_from_border_box(
+        child, used_border_height, false);
+    lycon->block.is_bfc_root = true;
+    lycon->block.establishing_element = child;
+    block_context_reset_floats(&lycon->block);
+    setup_inline(lycon, child);
+    layout_block_inner_content(lycon, child);
+
+    child->x = used_x;
+    child->y = used_y;
+    child->width = used_border_width;
+    child->height = used_border_height;
+}
+
 // CSS 2.1 §10.5: For absolutely positioned elements, percentage heights resolve
-void re_resolve_abs_children_vertical(ViewBlock* containing_block,
+void re_resolve_abs_children_vertical(LayoutContext* lycon,
+                                      ViewBlock* containing_block,
                                       bool resolve_inset_stretch) {
     if (!containing_block->position || !containing_block->positionp()->first_abs_child) return;
     // Compute containing block's padding box height (CSS 2.1 §10.1)
@@ -1816,10 +1877,15 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block,
 
     ViewBlock* child = containing_block->positionp()->first_abs_child;
     while (child) {
+        float old_height = child->height;
         if (child->blk && !isnan(child->block()->given_height_percent)) {
             float new_given_height = child->block()->given_height_percent * cb_height / 100.0f;
             new_given_height = layout_apply_min_max_axis(child, new_given_height, false, false);
             child->blk->given_height = new_given_height;
+            // This late abspos resolution is a used definite size even though
+            // the declaration remains a percentage for future containing-block updates.
+            child->blk->given_height_type = CSS_VALUE__UNDEF;
+            child->blk->percentage_height_resolved_late = true;
 
             float content_height = new_given_height;
             bool is_border_box = layout_uses_border_box(child);
@@ -1876,6 +1942,8 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block,
             child->y = cb.padding_y + child->positionp()->top + margin_top;
             if (child->blk) child->blk->given_height = css_height;
         }
+
+        bool used_height_changed = fabsf(child->height - old_height) > 0.01f;
         // If bottom is specified but not top, recompute y from bottom edge.
         // This must be unconditional: this function runs after an auto-height
         // not just those with percentage values.
@@ -1884,8 +1952,12 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block,
                 - (child->bound ? child->boundary()->margin.bottom : 0) - child->height;
         }
 
+        if (used_height_changed) {
+            layout_reflow_abs_child_content_after_height_change(lycon, child);
+        }
+
         if (child->position && child->positionp()->first_abs_child) {
-            re_resolve_abs_children_vertical(child, resolve_inset_stretch);
+            re_resolve_abs_children_vertical(lycon, child, resolve_inset_stretch);
         }
 
         child = child->position ? child->positionp()->next_abs_sibling : nullptr;
@@ -1943,7 +2015,10 @@ void re_resolve_abs_descendant_widths(View* root) {
     }
 }
 
-void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line) {
+static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
+                                      ViewBlock* block, BlockContext *pa_block,
+                                      Linebox *pa_line,
+                                      bool register_with_containing_block) {
     log_enter();
     // guard against deeply nested positioned elements (e.g., 200 nested position:fixed flex divs)
     lycon->depth++;
@@ -1956,7 +2031,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
     ViewBlock* cb = find_containing_block(block, block->positionp()->position);
     if (!cb) { log_error("Missing containing block");  lycon->depth--;  log_leave();  return; }
-    if (cb->position) {
+    if (register_with_containing_block && cb->position) {
         if (!cb->positionp()->first_abs_child) {
             cb->position->last_abs_child = cb->position->first_abs_child = block;
         } else {
@@ -2547,7 +2622,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     if (block->position && block->positionp()->first_abs_child) {
         // CSS 2.1 §10.5: resolve descendant percentages after this auto-sized
         // absolute containing block has its used height from in-flow content.
-        re_resolve_abs_children_vertical(block, false);
+        re_resolve_abs_children_vertical(lycon, block, false);
     }
     LayoutContainingBlock final_cb = layout_absolute_containing_block(lycon, cb);
     float final_offset_x = 0.0f;
@@ -2577,6 +2652,11 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     }
     lycon->depth--;
     log_leave();
+}
+
+void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
+                      BlockContext *pa_block, Linebox *pa_line) {
+    layout_abs_block_internal(lycon, elmt, block, pa_block, pa_line, true);
 }
 
 static void finalize_static_positioned_abs_descendant(ViewBlock* block) {

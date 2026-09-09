@@ -1899,6 +1899,13 @@ static TextIntrinsicWidths intrinsic_measure_pseudo_text_widths(LayoutContext* l
                                                                 StyleTree* pseudo_style,
                                                                 const char* content) {
     TextIntrinsicWidths widths = {0, 0};
+    LayoutFontScope font_scope(lycon);
+    FontProp* pseudo_font = layout_resolve_pseudo_font(
+        lycon, pseudo_style, lycon ? lycon->font.style : nullptr);
+    if (pseudo_font) {
+        // Generated content uses its pseudo-element's computed font, not its host's.
+        setup_font(lycon->ui_context, &lycon->font, pseudo_font);
+    }
     if (content && *content) {
         widths = measure_text_intrinsic_widths(lycon, content, strlen(content));
     }
@@ -2348,6 +2355,11 @@ static bool intrinsic_has_inline_boundary_content_in_direction(DomNode* node, bo
         DomNode* parent = current->parent;
         if (!parent || !parent->is_element()) break;
         if (!is_inline_level_element(parent->as_element())) break;
+        if (intrinsic_element_is_atomic_inline(parent->as_element())) {
+            // css display 3: an atomic inline owns its formatting context, so
+            // edge whitespace cannot collapse with siblings outside that box.
+            break;
+        }
         current = parent;
     }
     return false;
@@ -3395,7 +3407,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
            intrinsic_parent->block()->given_width_type == CSS_VALUE__UNDEF) &&
           isnan(intrinsic_parent->block()->given_width_percent))) &&
         (intrinsic_display_is_atomic_inline(intrinsic_parent->display.outer) ||
-         layout_element_is_floated(intrinsic_parent->as_element()));
+         layout_element_is_floated(intrinsic_parent->as_element()) ||
+         // CSS 2.1 §10.3.7: an auto-width absolute box is shrink-to-fit, so
+         // a descendant percentage remains indefinite during its measurement.
+         layout_is_shrink_to_fit_width(intrinsic_parent));
     // Percentage widths resolve as auto during intrinsic sizing; their temporary
     // zero base must not become a definite width in the measurement cache. An
     // auto-sized inline-level or shrink-to-fit parent is also an indefinite
@@ -5113,14 +5128,16 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             }
                         }
                     }
+                    // css 2.1 §9.7 blockifies floats, isolating their line-edge trimming.
                     bool propagates_inline_edge_space =
                         is_inline_level_element(element) &&
                         !intrinsic_element_is_atomic_inline(element) &&
-                        ws == CSS_VALUE_NOWRAP;
+                        !layout_element_is_floated(element) &&
+                        !white_space_preserves_space_advance(ws);
                     bool has_preceding_boundary = propagates_inline_edge_space &&
                         intrinsic_has_inline_boundary_content_in_direction(element, false);
-                    // nowrap keeps this collapsed separator in the unwrapped intrinsic
-                    // run when a sibling boundary exists outside this recursive query.
+                    // css text 3 §4.1.1: max-content retains one collapsed separator
+                    // between inline boxes, even though it remains a min-content break.
                     bool in_whitespace = !has_inline_before &&
                         !has_preceding_boundary && !explicit_box_decoration_inline;
                     for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {

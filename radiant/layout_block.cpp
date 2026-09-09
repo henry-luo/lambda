@@ -499,46 +499,13 @@ static void apply_canvas_last_remembered_size(LayoutContext* lycon, ViewBlock* b
         natural_width <= 0.0f || natural_height <= 0.0f) {
         return;
     }
+    layout_apply_object_view_box_intrinsic_size(
+        lycon, block->as_element(), &natural_width, &natural_height);
     // visibility skipped the box; the normal replaced fallback otherwise stretches
     LayoutAxisPair<float> natural = {natural_width, natural_height};
     for (LayoutAxis axis : layout_axes()) {
         if (use[axis]) {
             layout_store_given_axis(lycon, block, natural[axis], axis == LAYOUT_AXIS_X, true);
-        }
-    }
-}
-
-static void apply_canvas_object_view_box_auto_size(LayoutContext* lycon, ViewBlock* block) {
-    if (!lycon || !block || block->tag() != MARKUP_NAME_CANVAS ||
-        lycon->block.given_width <= 0.0f || lycon->block.given_height <= 0.0f) {
-        return;
-    }
-    bool width_is_auto = !block->blk || block->block()->given_width < 0.0f ||
-                         block->block()->given_width_type == CSS_VALUE_AUTO;
-    bool height_is_auto = !block->blk || block->block()->given_height < 0.0f ||
-                          block->block()->given_height_type == CSS_VALUE_AUTO;
-    if (!width_is_auto && !height_is_auto) return;
-    ObjectViewBoxUsedRect object_view_box = resolve_object_view_box_rect(
-        lycon, block->as_element(), lycon->block.given_width, lycon->block.given_height);
-    if (!object_view_box.valid) return;
-    LayoutAxisPair<bool> automatic = {width_is_auto, height_is_auto};
-    LayoutAxisPair<float> used = {
-        lycon->block.given_width, lycon->block.given_height
-    };
-    LayoutAxisPair<float> view_box = {object_view_box.width, object_view_box.height};
-    if (automatic.x && automatic.y) {
-        used = view_box;
-    } else {
-        LayoutAxis target = automatic.x ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y;
-        LayoutAxis source = target == LAYOUT_AXIS_X ? LAYOUT_AXIS_Y : LAYOUT_AXIS_X;
-        if (view_box[source] > 0.0f) {
-            used[target] = used[source] * view_box[target] / view_box[source];
-        }
-    }
-    for (LayoutAxis axis : layout_axes()) {
-        if (automatic[axis]) {
-            LayoutAxisRefs refs(&lycon->block, axis);
-            if (refs.given) *refs.given = used[axis];
         }
     }
 }
@@ -736,7 +703,10 @@ static float layout_definite_abspos_content_height(ViewBlock* block) {
 static void layout_block_prepare_canvas_auto_size(
     LayoutContext* lycon, ViewBlock* block,
     ContainIntrinsicUsedAxes contain_intrinsic_used_axes) {
-    if (!lycon || !block || block->tag() != MARKUP_NAME_CANVAS || !block->blk) return;
+    if (!lycon || !block || block->tag() != MARKUP_NAME_CANVAS) return;
+    // Margins alone do not allocate BlockProp, but automatic canvas sizing still
+    // needs its intrinsic dimensions before the generic replaced fallback runs.
+    block->ensure_block(lycon);
     // CSS Sizing 4 treats stretch as auto when its containing block axis is
     bool stretch_height_has_definite_parent = lycon->block.parent &&
         lycon->block.parent->given_height >= 0.0f;
@@ -745,6 +715,8 @@ static void layout_block_prepare_canvas_auto_size(
          stretch_height_has_definite_parent)) {
         return;
     }
+    // Preserve a percentage's specifiedness until the intrinsic-height branch below
+    // determines whether it resolves as auto in this formatting context.
     bool width_is_automatic = layout_css_size_is_automatic(block, true);
     bool height_is_automatic = layout_css_size_is_automatic(block, false);
     ViewBlock* containing_block = layout_nearest_block_ancestor(block->parent_view());
@@ -806,12 +778,15 @@ static void layout_block_prepare_canvas_auto_size(
     if (!width_is_automatic && !height_is_automatic) return;
     float natural_width = 0.0f;
     float natural_height = 0.0f;
-    if (!layout_canvas_natural_size(block, &natural_width, &natural_height) ||
+    bool has_natural_size = layout_canvas_natural_size(block, &natural_width, &natural_height);
+    if (!has_natural_size ||
         natural_width <= 0.0f || natural_height <= 0.0f) {
         return;
     }
-    bool canvas_has_css_preferred_ratio =
-        layout_preferred_aspect_ratio(block) > 0.0f;
+    bool object_view_box_changes_intrinsic_size = layout_apply_object_view_box_intrinsic_size(
+        lycon, block->as_element(), &natural_width, &natural_height);
+    float css_preferred_aspect_ratio = layout_preferred_aspect_ratio(block);
+    bool canvas_has_css_preferred_ratio = css_preferred_aspect_ratio > 0.0f;
     if (block->tag() == MARKUP_NAME_CANVAS &&
         !block->block()->content_visibility_hidden &&
         !canvas_has_css_preferred_ratio) {
@@ -828,7 +803,11 @@ static void layout_block_prepare_canvas_auto_size(
             block->block_mut()->given_max_height_type = CSS_VALUE__UNDEF;
         }
     }
-    float aspect_ratio = layout_used_preferred_aspect_ratio(block);
+    bool object_view_box_controls_ratio = object_view_box_changes_intrinsic_size &&
+        (css_preferred_aspect_ratio <= 0.0f || layout_aspect_ratio_uses_content_box(block));
+    // CSS Images 4 §2.1: the cropped source ratio replaces a canvas's native ratio.
+    float aspect_ratio = object_view_box_controls_ratio
+        ? natural_width / natural_height : layout_used_preferred_aspect_ratio(block);
     bool ratio_uses_content_box = layout_aspect_ratio_uses_content_box(block);
     if (aspect_ratio <= 0.0f) {
         aspect_ratio = natural_width / natural_height;
@@ -1028,6 +1007,20 @@ static ObjectViewBoxUsedRect resolve_object_view_box_rect(LayoutContext* lycon,
     if (rect.width <= 0.0f || rect.height <= 0.0f) return {false, 0.0f, 0.0f, intrinsic_width, intrinsic_height};
     rect.valid = true;
     return rect;
+}
+
+bool layout_apply_object_view_box_intrinsic_size(LayoutContext* lycon,
+                                                  DomElement* element,
+                                                  float* intrinsic_width,
+                                                  float* intrinsic_height) {
+    if (!intrinsic_width || !intrinsic_height) return false;
+    ObjectViewBoxUsedRect view_box = resolve_object_view_box_rect(
+        lycon, element, *intrinsic_width, *intrinsic_height);
+    if (!view_box.valid) return false;
+    // CSS Images 4 §2.1: object-view-box replaces the source object's intrinsic size.
+    *intrinsic_width = view_box.width;
+    *intrinsic_height = view_box.height;
+    return true;
 }
 
 static const char* pseudo_resolve_quote_char(DomElement* element, bool is_open_quote, int depth) {
@@ -1828,6 +1821,11 @@ static View* margin_collapse_effective_last_child(View* child) {
     while (child) {
         if (child->is_block()) {
             ViewBlock* block = lam::view_require_block(child);
+            // CSS 2.1 §8.3.1: an inline atomic sibling separates adjoining margins.
+            if (block->view_type == RDT_VIEW_INLINE_BLOCK ||
+                block->display.outer == CSS_VALUE_INLINE) {
+                return nullptr;
+            }
             float margin_bottom = block->bound ? block->boundary()->margin.bottom : 0.0f;
             bool has_chain = block->bound && has_margin_chain(block->bound);
             if (margin_bottom == 0.0f && !has_chain &&
@@ -2657,7 +2655,17 @@ struct DeferredInlineLineRun {
     float y;
     float min_x;
     float max_x;
+    float min_y;
+    float max_y;
     bool used;
+};
+
+struct DeferredInlineFloatExclusion {
+    CssEnum side;
+    float left;
+    float right;
+    float top;
+    float bottom;
 };
 
 static bool deferred_line_run_matches(const DeferredInlineLineRun* run,
@@ -2683,6 +2691,8 @@ static int find_deferred_line_run(DeferredInlineLineRun* runs, int* run_count,
     runs[index].y = y;
     runs[index].min_x = FLT_MAX;
     runs[index].max_x = -FLT_MAX;
+    runs[index].min_y = FLT_MAX;
+    runs[index].max_y = -FLT_MAX;
     runs[index].used = true;
     (*run_count)++;
     return index;
@@ -2690,12 +2700,15 @@ static int find_deferred_line_run(DeferredInlineLineRun* runs, int* run_count,
 
 static void add_deferred_line_extent(DeferredInlineLineRun* runs, int* run_count,
                                      int line_number, float y,
-                                     float min_x, float max_x) {
+                                     float min_x, float max_x, float height) {
     if (max_x <= min_x) return;
     int index = find_deferred_line_run(runs, run_count, line_number, y);
     if (index < 0) return;
     if (min_x < runs[index].min_x) runs[index].min_x = min_x;
     if (max_x > runs[index].max_x) runs[index].max_x = max_x;
+    if (y < runs[index].min_y) runs[index].min_y = y;
+    float bottom = y + max(height, 0.0f);
+    if (bottom > runs[index].max_y) runs[index].max_y = bottom;
 }
 
 static int first_deferred_inline_line_number(View* child) {
@@ -2741,7 +2754,7 @@ static void collect_deferred_inline_line_runs(View* child, DeferredInlineLineRun
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
                 add_deferred_line_extent(runs, run_count, rect->line_number,
                                          rect->y, rect->x,
-                                         rect->x + rect->width);
+                                         rect->x + rect->width, rect->height);
             }
         } else if (child->view_type == RDT_VIEW_INLINE) {
             ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(child);
@@ -2749,7 +2762,7 @@ static void collect_deferred_inline_line_runs(View* child, DeferredInlineLineRun
                 // otherwise trailing padding is treated as free space and centered into.
                 int line_number = first_deferred_inline_line_number(span->first_child);
                 add_deferred_line_extent(runs, run_count, line_number, span->y, span->x,
-                                         span->x + span->width);
+                                         span->x + span->width, span->height);
             }
             if (span->first_child) {
                 collect_deferred_inline_line_runs(span->first_child, runs, run_count);
@@ -2761,10 +2774,57 @@ static void collect_deferred_inline_line_runs(View* child, DeferredInlineLineRun
                 continue;
             }
             add_deferred_line_extent(runs, run_count, line_number, child->y, child->x,
-                                     child->x + child->width);
+                                     child->x + child->width, child->height);
         }
         child = child->next();
     }
+}
+
+static void collect_deferred_inline_float_exclusions(
+    View* child, DeferredInlineFloatExclusion* exclusions, int* exclusion_count) {
+    const int max_exclusions = 256;
+    while (child) {
+        ViewBlock* block = lam::view_as_block(child);
+        bool is_float = block && block->position &&
+            layout_position_is_floated(block->position);
+        if (is_float) {
+            if (*exclusion_count < max_exclusions) {
+                BoxEdges margin = layout_boundary_margin_edges(block->bound);
+                DeferredInlineFloatExclusion* exclusion =
+                    &exclusions[(*exclusion_count)++];
+                exclusion->side = block->positionp()->float_prop;
+                exclusion->left = block->x - margin.left;
+                exclusion->right = block->x + block->width + margin.right;
+                exclusion->top = block->y - margin.top;
+                exclusion->bottom = block->y + block->height + margin.bottom;
+            }
+        } else if (!layout_view_is_out_of_flow(child) &&
+                   child->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(child);
+            collect_deferred_inline_float_exclusions(
+                span->first_child, exclusions, exclusion_count);
+        }
+        child = child->next();
+    }
+}
+
+static void deferred_inline_float_line_edges(
+    const DeferredInlineLineRun* run,
+    const DeferredInlineFloatExclusion* exclusions, int exclusion_count,
+    float* left, float* right) {
+    if (!run || !left || !right) return;
+    for (int i = 0; i < exclusion_count; i++) {
+        const DeferredInlineFloatExclusion* exclusion = &exclusions[i];
+        bool intersects = exclusion->top < run->max_y &&
+            exclusion->bottom > run->min_y;
+        if (!intersects) continue;
+        if (exclusion->side == CSS_VALUE_LEFT) {
+            *left = max(*left, exclusion->right);
+        } else if (exclusion->side == CSS_VALUE_RIGHT) {
+            *right = min(*right, exclusion->left);
+        }
+    }
+    if (*right < *left) *right = *left;
 }
 
 static bool view_has_deferred_line_content(View* child,
@@ -2845,15 +2905,27 @@ void layout_align_deferred_inline_line_runs(ViewElement* parent, float final_con
     DeferredInlineLineRun runs[256] = {};
     int run_count = 0;
     collect_deferred_inline_line_runs(parent->first_placed_child(), runs, &run_count);
-    float padding_left = layout_box_metrics(lam::view_as_block(parent)).padding.left;
+    DeferredInlineFloatExclusion exclusions[256] = {};
+    int exclusion_count = 0;
+    // CSS 2.1 §9.5.1: deferred alignment uses the float-shortened line box.
+    collect_deferred_inline_float_exclusions(
+        parent->first_placed_child(), exclusions, &exclusion_count);
+    float decoration_start = layout_axis_decoration_start(
+        parent->boundary(), LAYOUT_AXIS_X);
     for (int i = 0; i < run_count; i++) {
         if (!runs[i].used || runs[i].max_x <= runs[i].min_x) continue;
-        float line_width = runs[i].max_x - runs[i].min_x;
-        float target_x = padding_left;
+        float line_left = decoration_start;
+        float line_right = decoration_start + final_content_width;
+        deferred_inline_float_line_edges(
+            &runs[i], exclusions, exclusion_count, &line_left, &line_right);
+        // CSS Text 3 §6.1: align the run's own advance so repeat grid passes
+        // preserve an already-aligned line.
+        float line_width = max(runs[i].max_x - runs[i].min_x, 0.0f);
+        float target_x = line_left;
         if (text_align == CSS_VALUE_CENTER) {
-            target_x += (final_content_width - line_width) / 2.0f;
+            target_x += (line_right - line_left - line_width) / 2.0f;
         } else {
-            target_x += final_content_width - line_width;
+            target_x += line_right - line_left - line_width;
         }
         float shift = target_x - runs[i].min_x;
         if (fabsf(shift) > 0.5f) {
@@ -6270,6 +6342,9 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
             lycon->block.direction = layout_resolve_plaintext_direction(
                 lam::dom_require<DOM_NODE_ELEMENT>(block), lycon->block.direction);
         }
+        // CSS Text 3 §8.3: each new line starts in the block container's
+        // resolved base direction, which may differ from the parent context.
+        lycon->line.inline_base_direction = lycon->block.direction;
     }
     lycon->line.vertical_align = CSS_VALUE_BASELINE;
 
@@ -7451,7 +7526,6 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     ContainIntrinsicUsedAxes contain_intrinsic_used_axes =
         apply_contain_intrinsic_used_size(lycon, block);
     apply_canvas_last_remembered_size(lycon, block);
-    apply_canvas_object_view_box_auto_size(lycon, block);
     // CSS 2.1 §10.3.2/§10.6.2: For replaced elements with 'width: auto' or
     bool is_open_popover_object = elmt_name == MARKUP_NAME_OBJECT &&
         block->is_element() && block->as_element()->is_popover_open() &&
@@ -7624,6 +7698,17 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             (layout_block_has_automatic_size(containing_view, false) &&
              !layout_percentage_height_basis_is_algorithmically_definite(containing_view) &&
              !parent_context_has_definite_height);
+        bool containing_height_resolved_late = containing_view && containing_view->blk &&
+            containing_view->block()->percentage_height_resolved_late;
+        if (containing_height_resolved_late && pa_block &&
+            pa_block->content_height >= 0.0f) {
+            // CSS 2.1 §10.5: a normal-flow percentage height uses the completed
+            // containing block content box, including an abspos box resolved late.
+            float used_height = pa_block->content_height *
+                block->block()->given_height_percent / 100.0f;
+            layout_store_given_axis(lycon, block, used_height, false, false);
+            layout_clear_auto_axis_type(block, false);
+        }
         bool iframe_intrinsic_fallback = block->tag() == MARKUP_NAME_IFRAME &&
             lycon->block.given_height >= 0.0f;
         bool canvas_abspos_percentage_has_basis = block->tag() == MARKUP_NAME_CANVAS &&
@@ -7726,13 +7811,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 block->embedp()->content_image_resolution : 1.0f;
             w /= image_resolution;
             h /= image_resolution;
-            ObjectViewBoxUsedRect object_view_box = img->has_intrinsic_size
-                ? resolve_object_view_box_rect(lycon, block->as_element(), w, h)
-                : ObjectViewBoxUsedRect{false, 0.0f, 0.0f, w, h};
-            if (object_view_box.valid) {
-                // CSS Images 4 §2.1: object-view-box changes the source object
-                w = object_view_box.width;
-                h = object_view_box.height;
+            if (img->has_intrinsic_size) {
+                layout_apply_object_view_box_intrinsic_size(
+                    lycon, block->as_element(), &w, &h);
             }
             if (block->blk && pa_block) {
                 bool percentage_width_cyclic = layout_percentage_width_basis_is_cyclic(pa_block);
@@ -9228,7 +9309,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         bool had_auto_height = !layout_axis_has_given_size(block, false);
         bool had_percent_height = block->blk && !isnan(block->block()->given_height_percent);
         if (had_auto_height || had_percent_height) {
-            re_resolve_abs_children_vertical(block);
+            re_resolve_abs_children_vertical(lycon, block);
         }
     }
     // IMPORTANT: Floats must be added to the BFC root, not just the immediate parent
@@ -9346,6 +9427,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         elmt));
     block->display = display;
     dom_node_resolve_style(elmt, lycon);
+    if (block->blk) block->block_mut()->percentage_height_resolved_late = false;
     bool preserve_routed_display = is_float || is_out_of_flow_positioned;
     if (elmt->is_element()) {
         DomElement* element = elmt->as_element();

@@ -126,7 +126,7 @@ static inline bool js_map_own_flag(Map* m, const char* key_str, int key_len, boo
 Item js_check_array_sym_iterator();
 extern "C" void js_intrinsic_note_property_mutation(Item object, Item key);
 void js_regex_cache_reset();
-void js_module_cache_reset();
+void js_module_cache_reset(bool reset_provider_namespaces);
 void js_reset_transient_call_state();
 void js_reset_heap_bound_runtime_state(bool full_reset);
 void js_decimal_number_egress_warning_reset();
@@ -142,6 +142,9 @@ void js_reset_proto_key();
 void js_func_cache_reset();
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 void js_builtin_cache_reset();
+// All realm intrinsic slots share this one root-range owner.  Cache builders
+// must register it before publishing an Item into any of its slots.
+bool js_realm_intrinsic_slots_ensure_roots(void);
 void js_deep_batch_reset();
 
 double js_get_number(Item value);

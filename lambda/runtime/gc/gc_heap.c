@@ -363,7 +363,7 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define LMD_TYPE_VELMT_       LMD_TYPE_VELMT
 #define LMD_TYPE_TYPE_        LMD_TYPE_TYPE
 #define LMD_TYPE_FUNC_        LMD_TYPE_FUNC
-#define GC_TYPE_JS_ENV_       GC_TYPE_JS_ENV
+#define GC_TYPE_ENVIRONMENT_  GC_TYPE_ENVIRONMENT
 #define LMD_TYPE_ANY_         LMD_TYPE_ANY
 #define LMD_TYPE_ERROR_       LMD_TYPE_ERROR
 #define LMD_TYPE_UNDEFINED_   LMD_TYPE_UNDEFINED
@@ -1364,6 +1364,13 @@ static void* item_to_ptr(gc_heap_t* gc, uint64_t item) {
         return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
     }
 
+    // Accessor cells use the otherwise-unused FUNC tag to distinguish their
+    // raw pointer from a callable value in a shaped property slot.  They have
+    // a dedicated GC header and must remain traceable through that slot.
+    if (tag == LMD_TYPE_FUNC_) {
+        return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
+    }
+
     // Raw container pointers have a zero high byte; unknown high tags are
     // sentinels or invalid Items, not recoverable pointer encodings.
     if (tag >= LMD_TYPE_RANGE_) return NULL;
@@ -1676,10 +1683,22 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     uint16_t tag = header->type_tag;
 
     switch (tag) {
-    case GC_TYPE_JS_ENV_: {
-        // JS environments are raw Item arrays. The GC header owns their exact
-        // byte length, so parent links and captured values can be traced
-        // without embedding a user-visible container header in slot zero.
+    case GC_TYPE_ENVIRONMENT_: {
+        if (gc_environment_is_interpreter(header)) {
+            JsInterpEnv* env = (JsInterpEnv*)obj;
+            if (env->outer) gc_mark_object_ptr(gc, env->outer);
+            gc_mark_item(gc, env->arguments_object);
+            gc_mark_item(gc, env->private_home_class);
+            gc_mark_item(gc, env->private_bindings);
+            gc_mark_item(gc, env->eval_bindings);
+            gc_mark_item(gc, env->lexical_this);
+            for (uint32_t i = 0; i < env->slot_count; i++) {
+                gc_mark_item(gc, env->slots[i]);
+            }
+            break;
+        }
+        // Closure environments are raw Item arrays. The GC header owns their
+        // exact byte length, so captured values need no user-visible header.
         uint64_t* items = (uint64_t*)obj;
         // The second half is raw scalar-tail storage owned by the first-half
         // Item slots; tracing it as Items would retain arbitrary bit patterns.
@@ -1687,17 +1706,13 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         for (size_t i = 0; i < count; i++) gc_mark_item(gc, items[i]);
         break;
     }
-    case GC_TYPE_JS_INTERP_ENV: {
-        JsInterpEnv* env = (JsInterpEnv*)obj;
-        if (env->outer) gc_mark_object_ptr(gc, env->outer);
-        gc_mark_item(gc, env->arguments_object);
-        gc_mark_item(gc, env->private_home_class);
-        gc_mark_item(gc, env->private_bindings);
-        gc_mark_item(gc, env->eval_bindings);
-        gc_mark_item(gc, env->lexical_this);
-        for (uint32_t i = 0; i < env->slot_count; i++) {
-            gc_mark_item(gc, env->slots[i]);
-        }
+    case GC_TYPE_JS_ACCESSOR: {
+        // JsAccessorCell has a fixed eight-byte non-Item prefix followed by
+        // getter/setter. It has its own tag so the Function tracer never
+        // interprets property storage as an executable value (JSCU33).
+        uint64_t* edges = (uint64_t*)((uint8_t*)obj + sizeof(uint64_t));
+        gc_mark_item(gc, edges[0]);
+        gc_mark_item(gc, edges[1]);
         break;
     }
     // types with no outgoing Item pointers — nothing to trace

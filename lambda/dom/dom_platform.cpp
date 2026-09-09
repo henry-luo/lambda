@@ -12,8 +12,6 @@
 
 #include <string.h>
 
-#define JS_STORAGE_ENTRY_CAP JS_DOM_STORAGE_ENTRY_CAP
-#define JS_MEDIA_QUERY_CAP JS_DOM_MEDIA_QUERY_CAP
 typedef JsDomStorageEntry JsStorageEntry;
 typedef JsDomStorageState JsStorageState;
 typedef JsDomMediaQueryState JsMediaQueryState;
@@ -33,6 +31,28 @@ static const ContextCapsuleOps dom_platform_capsule_ops = {
     NULL, NULL, dom_platform_capsule_destroy
 };
 
+static int storage_entry_count(const JsStorageState* storage) {
+    return storage && storage->entries ? storage->entries->length : 0;
+}
+
+static JsStorageEntry* storage_entry_at(const JsStorageState* storage, int index) {
+    return storage && storage->entries && index >= 0 && index < storage->entries->length
+        ? (JsStorageEntry*)arraylist_get(storage->entries, index) : nullptr;
+}
+
+static void storage_entries_clear(JsStorageState* storage) {
+    if (!storage || !storage->entries) return;
+    for (int i = 0; i < storage->entries->length; i++) {
+        JsStorageEntry* entry = storage_entry_at(storage, i);
+        if (!entry) continue;
+        mem_free(entry->key);
+        mem_free(entry->value);
+        mem_free(entry);
+    }
+    arraylist_free(storage->entries);
+    storage->entries = nullptr;
+}
+
 // Read paths must not materialise the capsule: a batch reset or a receiver
 // lookup in a realm that never touched storage would otherwise allocate one
 // just to clear or scan it, which is exactly the eager cost this move removes.
@@ -43,14 +63,20 @@ static JsDomPlatformState* dom_platform_state_if_present(void) {
 
 static JsDomPlatformState* dom_platform_state(void) {
     if (!js_active_runtime_state || !context) return nullptr;
-    return (JsDomPlatformState*)context_capsule_ensure(
+    JsDomPlatformState* state = (JsDomPlatformState*)context_capsule_ensure(
         context, CONTEXT_CAPSULE_DOM_PLATFORM, &dom_platform_capsule_ops);
+    if (state && !state->media_query_roots_initialized) {
+        root_vector_init(&state->media_query_objects, (Context*)context,
+            "DOM media-query objects");
+        state->media_query_roots_initialized = true;
+    }
+    return state;
 }
 
 #define dom_local_storage (dom_platform_state()->local_storage)
 #define dom_session_storage (dom_platform_state()->session_storage)
-#define dom_media_queries (dom_platform_state()->media_queries)
-#define dom_media_query_count (dom_platform_state()->media_query_count)
+#define dom_media_query_records (dom_platform_state()->media_queries)
+#define dom_media_query_objects (dom_platform_state()->media_query_objects)
 
 static bool dom_platform_ensure_roots(void) {
     JsDomPlatformState* state = dom_platform_state();
@@ -61,13 +87,41 @@ static bool dom_platform_ensure_roots(void) {
         !heap_try_register_gc_root(&state->session_storage.object.item)) {
         return false;
     }
-    for (int i = 0; i < JS_MEDIA_QUERY_CAP; i++) {
-        if (!heap_try_register_gc_root(&state->media_queries[i].object.item)) {
-            return false;
-        }
-    }
     state->roots_epoch = epoch;
     return true;
+}
+
+static int media_query_count(const JsDomPlatformState* state) {
+    return state && state->media_queries ? state->media_queries->length : 0;
+}
+
+static JsMediaQueryState* media_query_at(const JsDomPlatformState* state, int index) {
+    return state && state->media_queries && index >= 0 && index < state->media_queries->length
+        ? (JsMediaQueryState*)arraylist_get(state->media_queries, index) : nullptr;
+}
+
+static Item media_query_object(JsDomPlatformState* state,
+                               const JsMediaQueryState* query) {
+    return state && query && query->object_slot >= 0
+        ? *root_vector_at(&state->media_query_objects,
+            (int)query->object_slot) : ItemNull;
+}
+
+static void media_queries_clear(JsDomPlatformState* state) {
+    if (!state) return;
+    if (state->media_queries) {
+        for (int i = 0; i < state->media_queries->length; i++) {
+            JsMediaQueryState* query = media_query_at(state, i);
+            if (!query) continue;
+            mem_free(query->query);
+            mem_free(query);
+        }
+        arraylist_free(state->media_queries);
+        state->media_queries = nullptr;
+    }
+    if (state->media_query_roots_initialized) {
+        root_vector_clear(&state->media_query_objects);
+    }
 }
 
 static char* platform_strdup(const char* value) {
@@ -96,29 +150,31 @@ static JsStorageState* storage_from_this(void) {
 
 static int storage_find(JsStorageState* storage, const char* key) {
     if (!storage || !key) return -1;
-    for (int i = 0; i < storage->count; i++) {
-        if (strcmp(storage->entries[i].key, key) == 0) return i;
+    for (int i = 0; i < storage_entry_count(storage); i++) {
+        JsStorageEntry* entry = storage_entry_at(storage, i);
+        if (entry && entry->key && strcmp(entry->key, key) == 0) return i;
     }
     return -1;
 }
 
 static Item js_storage_length(void) {
     JsStorageState* storage = storage_from_this();
-    return (Item){.item = i2it(storage ? storage->count : 0)};
+    return (Item){.item = i2it(storage_entry_count(storage))};
 }
 
 static Item js_storage_key(Item index_item) {
     JsStorageState* storage = storage_from_this();
     int index = (int)it2d(js_to_number(index_item));
-    if (!storage || index < 0 || index >= storage->count) return ItemNull;
-    return js_make_string(storage->entries[index].key);
+    JsStorageEntry* entry = storage_entry_at(storage, index);
+    return entry && entry->key ? js_make_string(entry->key) : ItemNull;
 }
 
 static Item js_storage_get_item(Item key_item) {
     JsStorageState* storage = storage_from_this();
     const char* key = platform_string(key_item);
     int index = storage_find(storage, key);
-    return index >= 0 ? js_make_string(storage->entries[index].value) : ItemNull;
+    JsStorageEntry* entry = storage_entry_at(storage, index);
+    return entry && entry->value ? js_make_string(entry->value) : ItemNull;
 }
 
 static Item js_storage_set_item(Item key_item, Item value_item) {
@@ -135,19 +191,25 @@ static Item js_storage_set_item(Item key_item, Item value_item) {
     }
     int index = storage_find(storage, stable_key);
     if (index >= 0) {
-        mem_free(storage->entries[index].value);
-        storage->entries[index].value = stable_value;
+        JsStorageEntry* entry = storage_entry_at(storage, index);
+        mem_free(entry->value);
+        entry->value = stable_value;
         mem_free(stable_key);
-    } else if (storage->count < JS_STORAGE_ENTRY_CAP) {
-        storage->entries[storage->count].key = stable_key;
-        storage->entries[storage->count].value = stable_value;
-        storage->count++;
     } else {
-        // The bounded host store must fail loudly instead of silently dropping
-        // a successful-looking write once its implementation capacity is hit.
-        log_error("dom-storage: entry capacity %d exhausted", JS_STORAGE_ENTRY_CAP);
-        mem_free(stable_key);
-        mem_free(stable_value);
+        if (!storage->entries) storage->entries = arraylist_new(16);
+        JsStorageEntry* entry = (JsStorageEntry*)mem_calloc(1,
+            sizeof(JsStorageEntry), MEM_CAT_JS_RUNTIME);
+        if (entry && storage->entries && arraylist_append(storage->entries, entry)) {
+            entry->key = stable_key;
+            entry->value = stable_value;
+        } else {
+            mem_free(entry);
+            // A failed native allocation is observable only as an unavailable
+            // host-store update; never report a successful-looking write.
+            log_error("dom-storage: could not grow entry table");
+            mem_free(stable_key);
+            mem_free(stable_value);
+        }
     }
     return make_js_undefined();
 }
@@ -156,25 +218,18 @@ static Item js_storage_remove_item(Item key_item) {
     JsStorageState* storage = storage_from_this();
     int index = storage_find(storage, platform_string(key_item));
     if (!storage || index < 0) return make_js_undefined();
-    mem_free(storage->entries[index].key);
-    mem_free(storage->entries[index].value);
-    for (int i = index; i + 1 < storage->count; i++) {
-        storage->entries[i] = storage->entries[i + 1];
-    }
-    storage->count--;
-    memset(&storage->entries[storage->count], 0, sizeof(JsStorageEntry));
+    JsStorageEntry* entry = storage_entry_at(storage, index);
+    mem_free(entry->key);
+    mem_free(entry->value);
+    mem_free(entry);
+    arraylist_remove(storage->entries, index);
     return make_js_undefined();
 }
 
 static Item js_storage_clear(void) {
     JsStorageState* storage = storage_from_this();
     if (!storage) return make_js_undefined();
-    for (int i = 0; i < storage->count; i++) {
-        mem_free(storage->entries[i].key);
-        mem_free(storage->entries[i].value);
-    }
-    memset(storage->entries, 0, sizeof(storage->entries));
-    storage->count = 0;
+    storage_entries_clear(storage);
     return make_js_undefined();
 }
 
@@ -210,11 +265,9 @@ JS_FORWARD_ITEM(dom_storage_local_object, (void), storage_object, (&dom_local_st
 JS_FORWARD_ITEM(dom_storage_session_object, (void), storage_object, (&dom_session_storage))
 
 static void reset_storage(JsStorageState* storage) {
-    for (int i = 0; i < storage->count; i++) {
-        mem_free(storage->entries[i].key);
-        mem_free(storage->entries[i].value);
-    }
-    memset(storage, 0, sizeof(*storage));
+    if (!storage) return;
+    storage_entries_clear(storage);
+    storage->object = ItemNull;
 }
 
 extern "C" void dom_storage_reset(void) {
@@ -228,9 +281,10 @@ static JsMediaQueryState* media_query_from_this(void) {
     JsDomPlatformState* state = dom_platform_state_if_present();
     if (!state) return nullptr;
     Item receiver = dom_realm_receiver();
-    for (int i = 0; i < state->media_query_count; i++) {
-        if (state->media_queries[i].object.item == receiver.item) {
-            return &state->media_queries[i];
+    for (int i = 0; i < media_query_count(state); i++) {
+        JsMediaQueryState* query = media_query_at(state, i);
+        if (query && media_query_object(state, query).item == receiver.item) {
+            return query;
         }
     }
     return nullptr;
@@ -246,12 +300,13 @@ static Item js_media_query_matches(void) {
 static Item js_media_query_set_listener(Item callback, bool add) {
     JsMediaQueryState* state = media_query_from_this();
     if (state) {
+        JsDomPlatformState* platform = dom_platform_state_if_present();
         Item type = js_make_string("change");
         if (add) {
-            dom_add_event_listener(state->object, type, callback,
+            dom_add_event_listener(media_query_object(platform, state), type, callback,
                 (Item){.item = ITEM_FALSE});
         } else {
-            dom_remove_event_listener(state->object, type, callback,
+            dom_remove_event_listener(media_query_object(platform, state), type, callback,
                 (Item){.item = ITEM_FALSE});
         }
     }
@@ -261,26 +316,50 @@ JS_FORWARD_STATIC_ITEM(js_media_query_add_listener, (Item callback), js_media_qu
 JS_FORWARD_STATIC_ITEM(js_media_query_remove_listener, (Item callback), js_media_query_set_listener, (callback, false))
 
 extern "C" Item dom_match_media(Item query_item) {
-    if (dom_media_query_count >= JS_MEDIA_QUERY_CAP) {
-        log_error("match-media: query capacity %d exhausted", JS_MEDIA_QUERY_CAP);
+    JsDomPlatformState* platform = dom_platform_state();
+    if (!platform) return ItemNull;
+    if (!dom_media_query_records) dom_media_query_records = arraylist_new(8);
+    JsMediaQueryState* state = (JsMediaQueryState*)mem_calloc(1,
+        sizeof(JsMediaQueryState), MEM_CAT_JS_RUNTIME);
+    if (!state || !dom_media_query_records ||
+            !arraylist_append(dom_media_query_records, state)) {
+        mem_free(state);
         return ItemNull;
     }
-    JsMediaQueryState* state = &dom_media_queries[dom_media_query_count++];
     state->query = platform_strdup(platform_string(query_item));
+    if (!state->query) {
+        arraylist_remove(dom_media_query_records, media_query_count(platform) - 1);
+        mem_free(state);
+        return ItemNull;
+    }
     state->matches = dom_evaluate_media_query(state->query);
     // Media-query records are persistent native owners, so register their
     // stable object homes before the first allocating construction call.
-    if (!dom_platform_ensure_roots()) return ItemError;
-    state->object = js_create_event_target();
+    if (!dom_platform_ensure_roots()) {
+        arraylist_remove(dom_media_query_records, media_query_count(platform) - 1);
+        mem_free(state->query);
+        mem_free(state);
+        return ItemError;
+    }
 
     RootFrame roots(1);
+    Rooted<Item> object_root(roots, js_create_event_target());
+    state->object_slot = (int64_t)root_vector_count(&dom_media_query_objects);
+    if (!root_vector_push(&dom_media_query_objects, object_root.get())) {
+        arraylist_remove(dom_media_query_records, media_query_count(platform) - 1);
+        mem_free(state->query);
+        mem_free(state);
+        return ItemError;
+    }
+    Item object = media_query_object(platform, state);
+
     Rooted<Item> descriptor_root(roots, ItemNull);
-    dom_realm_set(state->object, js_make_string("media"),
+    dom_realm_set(object, js_make_string("media"),
         js_make_string(state->query));
-    dom_realm_set(state->object, js_make_string("onchange"), ItemNull);
-    dom_realm_set(state->object, js_make_string("addListener"),
+    dom_realm_set(object, js_make_string("onchange"), ItemNull);
+    dom_realm_set(object, js_make_string("addListener"),
         dom_realm_new_function(js_media_query_add_listener));
-    dom_realm_set(state->object, js_make_string("removeListener"),
+    dom_realm_set(object, js_make_string("removeListener"),
         dom_realm_new_function(js_media_query_remove_listener));
 
     Item descriptor = js_new_object();
@@ -291,13 +370,15 @@ extern "C" Item dom_match_media(Item query_item) {
         (Item){.item = ITEM_TRUE});
     dom_realm_set(descriptor, js_make_string("configurable"),
         (Item){.item = ITEM_TRUE});
-    dom_realm_define_property(state->object, js_make_string("matches"), descriptor);
-    return state->object;
+    dom_realm_define_property(object, js_make_string("matches"), descriptor);
+    return object;
 }
 
 extern "C" void dom_match_media_notify_resize(void) {
-    for (int i = 0; i < dom_media_query_count; i++) {
-        JsMediaQueryState* state = &dom_media_queries[i];
+    JsDomPlatformState* platform = dom_platform_state_if_present();
+    for (int i = 0; i < media_query_count(platform); i++) {
+        JsMediaQueryState* state = media_query_at(platform, i);
+        if (!state) continue;
         bool next = dom_evaluate_media_query(state->query);
         if (next == state->matches) continue;
         state->matches = next;
@@ -306,34 +387,27 @@ extern "C" void dom_match_media_notify_resize(void) {
             (Item){.item = b2it(next)});
         dom_realm_set(event, js_make_string("media"),
             js_make_string(state->query));
-        dom_dispatch_event(state->object, event);
-        Item onchange = dom_realm_get(state->object, js_make_string("onchange"));
-        if (dom_realm_is_callable(onchange)) dom_realm_call(onchange, state->object, &event, 1);
+        Item object = media_query_object(platform, state);
+        dom_dispatch_event(object, event);
+        Item onchange = dom_realm_get(object, js_make_string("onchange"));
+        if (dom_realm_is_callable(onchange)) dom_realm_call(onchange, object, &event, 1);
     }
 }
 
 extern "C" void dom_match_media_reset(void) {
-    for (int i = 0; i < dom_media_query_count; i++) {
-        if (dom_media_queries[i].query) mem_free(dom_media_queries[i].query);
-    }
-    memset(dom_media_queries, 0, sizeof(dom_media_queries));
-    dom_media_query_count = 0;
+    media_queries_clear(dom_platform_state_if_present());
 }
 
 // The capsule directory owns the block; this releases what the entries own.
 static void dom_platform_capsule_destroy(void* capsule) {
     JsDomPlatformState* state = (JsDomPlatformState*)capsule;
     if (!state) return;
-    for (int i = 0; i < state->local_storage.count; i++) {
-        mem_free(state->local_storage.entries[i].key);
-        mem_free(state->local_storage.entries[i].value);
-    }
-    for (int i = 0; i < state->session_storage.count; i++) {
-        mem_free(state->session_storage.entries[i].key);
-        mem_free(state->session_storage.entries[i].value);
-    }
-    for (int i = 0; i < state->media_query_count; i++) {
-        if (state->media_queries[i].query) mem_free(state->media_queries[i].query);
+    reset_storage(&state->local_storage);
+    reset_storage(&state->session_storage);
+    media_queries_clear(state);
+    if (state->media_query_roots_initialized) {
+        root_vector_destroy(&state->media_query_objects);
+        state->media_query_roots_initialized = false;
     }
     mem_free(state);
 }

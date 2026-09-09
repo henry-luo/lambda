@@ -43,8 +43,40 @@ typedef enum ContextCapsuleId {
     CONTEXT_CAPSULE_DOM_FETCH,
     CONTEXT_CAPSULE_DOM_CANVAS,
     CONTEXT_CAPSULE_DOM_PLATFORM,
+    // Context-wide core services which formerly lived as direct EvalContext
+    // pointers. They share the same directory/lifecycle as DOM capsules.
+    CONTEXT_CAPSULE_RENDER_MAP,
+    CONTEXT_CAPSULE_TEMPLATE_STATE,
+    CONTEXT_CAPSULE_NODE_RUNTIME,
+    CONTEXT_CAPSULE_JS_RUNTIME,
     CONTEXT_CAPSULE_COUNT
 } ContextCapsuleId;
+
+struct ContextCapsuleOps;
+
+// Optional subsystems can register their own state keys without reserving a
+// permanent EvalContext slot. The owner key keeps independently versioned
+// module families from colliding in the shared directory.
+typedef struct ContextCapsuleExtension {
+    uint32_t owner_key;
+    uint32_t slot_key;
+    void* capsule;
+    const struct ContextCapsuleOps* ops;
+    struct ContextCapsuleExtension* next;
+} ContextCapsuleExtension;
+
+// A capsule slot and its lifecycle contract are one directory entry. Keeping
+// the two facts in one record prevents a context owner from publishing state
+// without its teardown authority (D5.4.2, D5.4.4).
+typedef struct ContextCapsuleSlot {
+    void* capsule;
+    const struct ContextCapsuleOps* ops;
+} ContextCapsuleSlot;
+
+typedef struct ContextCapsuleDirectory {
+    ContextCapsuleSlot slots[CONTEXT_CAPSULE_COUNT];
+    ContextCapsuleExtension* extensions;
+} ContextCapsuleDirectory;
 
 typedef struct ContextCapsuleOps {
     const char* name;
@@ -65,12 +97,27 @@ void* context_capsule(EvalContext* owner, ContextCapsuleId id);
 // Cold path: construct on first use. Returns NULL only on allocation failure.
 void* context_capsule_ensure(EvalContext* owner, ContextCapsuleId id,
                              const ContextCapsuleOps* ops);
+// Publishes storage constructed by a subsystem that needs a non-default
+// allocator. A slot may be installed exactly once before it is dropped.
+bool context_capsule_install(EvalContext* owner, ContextCapsuleId id,
+                             void* capsule, const ContextCapsuleOps* ops);
+// Removes a slot without destroying it. Teardown code uses this when the
+// capsule itself must remain available through a multi-subsystem shutdown.
+void* context_capsule_take(EvalContext* owner, ContextCapsuleId id);
 // Drops one capsule (subsystem teardown, then the slot).
 void context_capsule_drop(EvalContext* owner, ContextCapsuleId id);
 // Walks realm-lifetime capsules before their heap goes away.
 void context_capsule_release_heap(EvalContext* owner);
 // Walks every capsule at context teardown, in reverse registration order.
 void context_capsule_destroy_all(EvalContext* owner);
+
+// Dynamic directory entries for externally registered subsystem slots.
+void* context_capsule_extension(EvalContext* owner, uint32_t owner_key,
+                                uint32_t slot_key);
+bool context_capsule_extension_install(EvalContext* owner, uint32_t owner_key,
+                                       uint32_t slot_key, void* capsule,
+                                       const ContextCapsuleOps* ops);
+void context_capsule_extensions_drop_owner(EvalContext* owner, uint32_t owner_key);
 
 #ifdef __cplusplus
 }

@@ -1,5 +1,4 @@
 #include "view.hpp"
-#include "layout.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lib/log.h"
 
@@ -305,6 +304,162 @@ static bool cssom_font_size_px(DomElement* element, int pseudo_type,
     return true;
 }
 
+static const CssValue* cssom_font_size_decl_value(DomElement* element,
+                                                   int pseudo_type) {
+    if (!element) return nullptr;
+    CssDeclaration* longhand = computed_decl(
+        element, CSS_PROPERTY_FONT_SIZE, pseudo_type);
+    CssDeclaration* shorthand = computed_decl(element, CSS_PROPERTY_FONT,
+                                               pseudo_type);
+    if (shorthand && shorthand->value && pseudo_type == 0 &&
+        (!longhand || css_declaration_cascade_compare(shorthand, longhand) > 0)) {
+        CssFontShorthandParts parts = {};
+        if (css_parse_font_shorthand(shorthand->value, &parts)) return parts.size;
+    }
+    return longhand ? longhand->value : nullptr;
+}
+
+static const CssValue* cssom_lookup_custom_property(DomElement* element,
+                                                    const char* name) {
+    for (DomElement* current = element; current; current = parent_element(current)) {
+        for (CssCustomProp* prop = current->css_variables; prop; prop = prop->next) {
+            if (css_custom_property_name_matches(prop->name, name)) return prop->value;
+        }
+    }
+    return nullptr;
+}
+
+static const char* cssom_identifier_name(const CssValue* value) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM) return value->data.custom_property.name;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    return nullptr;
+}
+
+static const CssValue* cssom_resolve_font_size_var(DomElement* element,
+                                                    const CssValue* value,
+                                                    int depth) {
+    if (!value || depth > 64) return nullptr;
+    const char* name = nullptr;
+    const CssValue* fallback = nullptr;
+    if (value->type == CSS_VALUE_TYPE_VAR && value->data.var_ref) {
+        name = value->data.var_ref->name;
+        fallback = value->data.var_ref->fallback;
+    } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+               value->data.function->name &&
+               strcmp(value->data.function->name, "var") == 0) {
+        CssFunction* function = value->data.function;
+        if (function->arg_count > 0 && function->args) {
+            name = cssom_identifier_name(function->args[0]);
+        }
+        if (function->arg_count > 1 && function->args) fallback = function->args[1];
+    } else {
+        return value;
+    }
+    const CssValue* resolved = cssom_lookup_custom_property(element, name);
+    if (!resolved) resolved = fallback;
+    return resolved ? cssom_resolve_font_size_var(element, resolved, depth + 1) : nullptr;
+}
+
+static bool cssom_resolve_font_size_value(DomElement* element,
+                                          const CssValue* raw_value,
+                                          float parent_font_size,
+                                          float root_font_size,
+                                          float* font_size) {
+    if (!element || !raw_value || !font_size) return false;
+    const CssValue* value = cssom_resolve_font_size_var(element, raw_value, 0);
+    if (!value) return false;
+    float resolved = -1.0f;
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        double absolute_pixels = 0.0;
+        if (css_absolute_length_to_px(value->data.length.unit,
+                                      value->data.length.value, &absolute_pixels)) {
+            resolved = (float)absolute_pixels;
+        } else {
+            float viewport_width = element->doc ? element->doc->viewport.width : 0.0f;
+            float viewport_height = element->doc ? element->doc->viewport.height : 0.0f;
+            double factor = value->data.length.value / 100.0;
+            switch (value->data.length.unit) {
+                case CSS_UNIT_EM: resolved = (float)value->data.length.value * parent_font_size; break;
+                case CSS_UNIT_REM: resolved = (float)value->data.length.value * root_font_size; break;
+                case CSS_UNIT_VW:
+                case CSS_UNIT_VI:
+                case CSS_UNIT_SVW:
+                case CSS_UNIT_LVW:
+                case CSS_UNIT_DVW: resolved = (float)(factor * viewport_width); break;
+                case CSS_UNIT_VH:
+                case CSS_UNIT_VB:
+                case CSS_UNIT_SVH:
+                case CSS_UNIT_LVH:
+                case CSS_UNIT_DVH: resolved = (float)(factor * viewport_height); break;
+                case CSS_UNIT_VMIN: resolved = (float)(factor * fmin(viewport_width, viewport_height)); break;
+                case CSS_UNIT_VMAX: resolved = (float)(factor * fmax(viewport_width, viewport_height)); break;
+                default: return false;
+            }
+        }
+    } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        resolved = (float)(value->data.percentage.value * parent_font_size / 100.0);
+    } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        if (value->data.number.value == 0.0) resolved = 0.0f;
+    } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) {
+            resolved = parent_font_size;
+        } else if (keyword == CSS_VALUE_LARGER) {
+            resolved = parent_font_size * 1.2f;
+        } else if (keyword == CSS_VALUE_SMALLER) {
+            resolved = parent_font_size / 1.2f;
+        } else if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_REVERT) {
+            resolved = css_font_size_keyword_px(CSS_VALUE_MEDIUM);
+        } else {
+            resolved = css_font_size_keyword_px(keyword);
+        }
+    }
+    if (!isfinite(resolved) || resolved < 0.0f) return false;
+    *font_size = resolved;
+    return true;
+}
+
+static bool cssom_resolve_font_size_recursive(DomElement* element,
+                                              int pseudo_type, int depth,
+                                              float* root_font_size,
+                                              float* font_size) {
+    if (!element || !root_font_size || !font_size || depth > 64) return false;
+    DomElement* parent = parent_element(element);
+    float parent_font_size = 16.0f;
+    if (parent && !cssom_resolve_font_size_recursive(
+            parent, 0, depth + 1, root_font_size, &parent_font_size)) {
+        return false;
+    }
+    // Resolve this element before using its font as the next inherited basis;
+    // CSSOM reads run before layout creates a ViewTree or LayoutContext.
+    radiant_cascade_styles_for_element(element);
+    const CssValue* value = cssom_font_size_decl_value(element, pseudo_type);
+    if (!value) {
+        *font_size = parent_font_size;
+        return true;
+    }
+    if (!cssom_resolve_font_size_value(element, value, parent_font_size,
+                                       *root_font_size, font_size)) return false;
+    if (!parent) *root_font_size = *font_size;
+    return true;
+}
+
+static bool serialize_cssom_font_size(DomElement* element, int pseudo_type,
+                                      char* out, size_t out_size) {
+    float root_font_size = 16.0f;
+    float font_size = 0.0f;
+    if (!cssom_resolve_font_size_recursive(element, pseudo_type, 0,
+                                           &root_font_size, &font_size)) {
+        return false;
+    }
+    return format_number(out, out_size, font_size, "px");
+}
+
 static bool serialize_line_height(const CssPropAccessor* accessor, DomElement* element,
                                   int pseudo_type, char* out, size_t out_size) {
     if (!accessor || !element) return false;
@@ -496,7 +651,10 @@ static bool serialize_border_width(const CssPropAccessor* accessor,
                                    char* out, size_t out_size) {
     if (!accessor || !element || pseudo_type != 0) return false;
     const BoundaryProp* boundary = element->boundary();
-    if (!boundary || !boundary->border) return false;
+    if (!boundary || !boundary->border) {
+        // CSS 2.1 §8.5.1: none/hidden borders have a zero computed edge width.
+        return copy_text(out, out_size, "0px");
+    }
     RadiantBorderSide side = radiant_border_side(
         boundary->border, radiant_css_box_side(accessor->id));
     if (!side.width) return false;
@@ -509,7 +667,7 @@ static bool serialize_border_style(const CssPropAccessor* accessor,
                                    char* out, size_t out_size) {
     if (!accessor || !element || pseudo_type != 0) return false;
     const BoundaryProp* boundary = element->boundary();
-    if (!boundary || !boundary->border) return false;
+    if (!boundary || !boundary->border) return copy_text(out, out_size, "none");
     RadiantBorderSide side = radiant_border_side(
         boundary->border, radiant_css_box_side(accessor->id));
     if (!side.style) return false;
@@ -690,6 +848,8 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_PADDING_BOTTOM, serialize_edge, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_PADDING_LEFT, serialize_edge, CSS_PROP_ACCESSOR_USED_VALUE),
     DIRECT_ROW(CSS_PROPERTY_FONT_FAMILY, PROP_GROUP_FONT, FontProp, family, CSS_PROP_VALUE_STRING, 0),
+    // CSSOM resolves relative font sizes before layout; loader scripts use this
+    // value to construct replacement DOM with the correct intrinsic metrics.
     DIRECT_ROW(CSS_PROPERTY_FONT_SIZE, PROP_GROUP_FONT, FontProp, font_size, CSS_PROP_VALUE_PX, 0),
     DERIVED_ROW(CSS_PROPERTY_FONT_WEIGHT, serialize_font_weight, 0),
     DIRECT_ROW(CSS_PROPERTY_FONT_STYLE, PROP_GROUP_FONT, FontProp, font_style, CSS_PROP_VALUE_ENUM, 0),
@@ -823,6 +983,11 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
             (void)property;
         }
         return false;
+    }
+    if (id == CSS_PROPERTY_FONT_SIZE && element->doc) {
+        // CSSOM font-size is an absolute length even when a preliminary view
+        // tree exists but has not yet propagated inherited font properties.
+        return serialize_cssom_font_size(element, pseudo_type, out, out_size);
     }
     if (!dom_ensure_computed(element,
             (accessor->flags & CSS_PROP_ACCESSOR_USED_VALUE) != 0)) {

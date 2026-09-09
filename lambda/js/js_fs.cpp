@@ -1749,19 +1749,29 @@ static Item make_fs_error(int uv_err, const char* syscall, const char* path);
 
 typedef struct JsFsReq {
     uv_fs_t req;
-    Item callback;        // JS callback: (err, data) => ...
-    Item domain;
     char* buffer;         // read buffer (for readFile)
     size_t buffer_size;
     int fd;               // file descriptor
     char path[1024];      // file path (for multi-step operations)
-    void* jube_session;   // opaque owner for precise persistent roots
-    uint32_t work_request_id;
-    bool uses_jube_work;
-    bool roots_registered;
+    void* jube_session;   // opaque owner for table lookup and cancellation
+    uint32_t resource_id;
     bool detached;
     struct JsFsReq* next_pending;
 } JsFsReq;
+
+enum JsFsReqValueSlot {
+    JS_FS_REQ_VALUE_CALLBACK,
+    JS_FS_REQ_VALUE_DOMAIN,
+    JS_FS_REQ_VALUE_COUNT,
+};
+
+static Item fs_req_value(JsFsReq* fsreq, JsFsReqValueSlot slot) {
+    const JubeHostAPI* host = jube_internal_host_api();
+    if (!fsreq || !fsreq->jube_session || fsreq->resource_id == 0 || !host || !host->node ||
+            !host->node->async_ops || !host->node->async_ops->work_resource_value) return ItemNull;
+    return host->node->async_ops->work_resource_value(fsreq->jube_session,
+        fsreq->resource_id, (int)slot);
+}
 
 // The async request list is realm-local. Jube's completion boundary re-enters
 // the owning context, so list operations remain ordinary pointer updates.
@@ -1789,56 +1799,29 @@ static void fs_req_remove_pending(JsFsReq* fsreq) {
     }
 }
 
-static bool fs_req_register_roots(JsFsReq* fsreq) {
-    if (!fsreq || fsreq->roots_registered) return fsreq != NULL;
+static bool fs_req_attach_session(JsFsReq* fsreq) {
+    if (!fsreq) return false;
     const JubeHostAPI* host = jube_internal_host_api();
-    if (!host || !host->node || !host->node->runtime || !host->node->roots ||
-            !host->node->runtime->current_session ||
-            !host->node->roots->persistent_root_register ||
-            !host->node->roots->persistent_root_unregister) return false;
+    if (!host || !host->node || !host->node->runtime ||
+            !host->node->runtime->current_session) return false;
     fsreq->jube_session = host->node->runtime->current_session();
-    if (!fsreq->jube_session || host->node->roots->persistent_root_register(
-            fsreq->jube_session, &fsreq->callback.item) != 0) {
-        fsreq->jube_session = NULL;
-        return false;
-    }
-    if (host->node->roots->persistent_root_register(fsreq->jube_session,
-            &fsreq->domain.item) != 0) {
-        host->node->roots->persistent_root_unregister(fsreq->jube_session,
-            &fsreq->callback.item);
-        fsreq->jube_session = NULL;
-        return false;
-    }
-    fsreq->roots_registered = true;
-    return true;
-}
-
-static void fs_req_unregister_roots(JsFsReq* fsreq) {
-    if (!fsreq || !fsreq->roots_registered) return;
-    const JubeHostAPI* host = jube_internal_host_api();
-    if (host && host->node && host->node->roots &&
-            host->node->roots->persistent_root_unregister && fsreq->jube_session) {
-        host->node->roots->persistent_root_unregister(fsreq->jube_session,
-            &fsreq->callback.item);
-        host->node->roots->persistent_root_unregister(fsreq->jube_session,
-            &fsreq->domain.item);
-    }
-    fsreq->roots_registered = false;
-    fsreq->jube_session = NULL;
+    return fsreq->jube_session != NULL;
 }
 
 static void fs_req_free(JsFsReq* fsreq) {
     if (!fsreq) return;
     fs_req_remove_pending(fsreq);
-    fs_req_unregister_roots(fsreq);
+    fsreq->jube_session = NULL;
     mem_free(fsreq);
 }
 
 static Item fs_req_call_callback(JsFsReq* fsreq, Item* args, int arg_count) {
-    if (!fsreq || fsreq->detached || !js_is_callable(fsreq->callback)) {
+    Item callback = fs_req_value(fsreq, JS_FS_REQ_VALUE_CALLBACK);
+    if (!fsreq || fsreq->detached || !js_is_callable(callback)) {
         return make_js_undefined();
     }
-    return js_domain_call_function(fsreq->domain, fsreq->callback, ItemNull, args, arg_count);
+    return js_domain_call_function(fs_req_value(fsreq, JS_FS_REQ_VALUE_DOMAIN),
+        callback, ItemNull, args, arg_count);
 }
 
 static void fs_req_destroy(JsFsReq* fsreq) {
@@ -1849,17 +1832,27 @@ static void fs_req_destroy(JsFsReq* fsreq) {
 }
 
 static bool fs_req_submit_work(JsFsReq* fsreq, JubeAsyncWorkCallback work,
-        JubeAsyncCompletionCallback complete, JubeAsyncDestroyCallback destroy) {
-    if (!fsreq || !fs_req_register_roots(fsreq)) return false;
-    fs_req_add_pending(fsreq);
+        JubeAsyncCompletionCallback complete, JubeAsyncDestroyCallback destroy, Item callback) {
+    if (!fsreq || !fs_req_attach_session(fsreq)) return false;
     const JubeHostAPI* host = jube_internal_host_api();
     if (!host || !host->node || !host->node->async_ops ||
-            !host->node->async_ops->work_submit ||
-            host->node->async_ops->work_submit(fsreq->jube_session, work,
-                complete, destroy, fsreq, &fsreq->work_request_id) != 0) {
+            !host->node->async_ops->work_submit_root_span ||
+            !host->node->async_ops->work_resource_value) {
         return false;
     }
-    fsreq->uses_jube_work = true;
+    JS_ROOTS(roots,
+        callback_root, callback,
+        domain_root, js_domain_get_current());
+    Item root_values[JS_FS_REQ_VALUE_COUNT] = {
+        callback_root.get(), domain_root.get(),
+    };
+    fs_req_add_pending(fsreq);
+    if (host->node->async_ops->work_submit_root_span(fsreq->jube_session,
+            JUBE_ASYNC_RESOURCE_FILESYSTEM_REQUEST, root_values, JS_FS_REQ_VALUE_COUNT,
+            work, complete, destroy, fsreq, &fsreq->resource_id) != 0) {
+        fs_req_remove_pending(fsreq);
+        return false;
+    }
     return true;
 }
 
@@ -1917,28 +1910,29 @@ JS_FORWARD_STATIC_VOID( fs_read_file_destroy, (void* user), fs_req_destroy, ((Js
 
 // fs.readFile(path[, options], callback)
 extern "C" Item js_fs_readFile(Item path_item, Item options_or_cb, Item callback_item) {
-    Item callback = callback_item;
-    if (js_is_callable(options_or_cb)) {
-        callback = options_or_cb;
+    JS_ROOTS(roots,
+        callback_root, callback_item,
+        options_root, options_or_cb,
+        path_root, path_item);
+    if (js_is_callable(options_root.get())) {
+        callback_root.set(options_root.get());
     } else {
-        JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_or_cb));
+        JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_root.get()));
     }
 
     char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
+    FS_PATH_OR_RETURN(path, path_root.get(), "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
     if (!js_permission_has_fs_read(path)) {
-        return fs_permission_callback_error(callback, "FileSystemRead", path, NULL);
+        return fs_permission_callback_error(callback_root.get(), "FileSystemRead", path, NULL);
     }
 
     JsFsReq* fsreq = (JsFsReq*)mem_calloc(1, sizeof(JsFsReq), MEM_CAT_JS_RUNTIME);
     if (!fsreq) return ItemNull;
 
-    fsreq->callback = callback;
-    fsreq->domain = js_domain_get_current();
     snprintf(fsreq->path, sizeof(fsreq->path), "%s", path);
     if (!fs_req_submit_work(fsreq, fs_read_file_work, fs_read_file_complete,
-            fs_read_file_destroy)) {
+            fs_read_file_destroy, callback_root.get())) {
         fs_req_destroy(fsreq);
         return ItemNull;
     }
@@ -1952,12 +1946,11 @@ extern "C" void js_fs_runtime_detach(void) {
         // retain roots into a destroyed heap or invoke user JS in that runtime.
         fsreq->detached = true;
         void* session = fsreq->jube_session;
-        fs_req_unregister_roots(fsreq);
         const JubeHostAPI* host = jube_internal_host_api();
-        if (fsreq->uses_jube_work && host && host->node && host->node->async_ops &&
+        if (fsreq->resource_id != 0 && host && host->node && host->node->async_ops &&
                 host->node->async_ops->work_cancel) {
             (void)host->node->async_ops->work_cancel(session,
-                fsreq->work_request_id);
+                fsreq->resource_id);
         } else {
             (void)uv_cancel((uv_req_t*)&fsreq->req);
         }
@@ -1999,23 +1992,28 @@ JS_FORWARD_STATIC_VOID( fs_write_file_destroy, (void* user), fs_req_destroy, ((J
 
 // fs.writeFile(path, data[, options], callback)
 extern "C" Item js_fs_writeFile(Item path_item, Item data_item, Item options_or_cb, Item callback_item) {
-    Item callback = callback_item;
-    if (js_is_callable(options_or_cb)) {
-        callback = options_or_cb;
+    JS_ROOTS(roots,
+        callback_root, callback_item,
+        options_root, options_or_cb,
+        path_root, path_item,
+        data_root, data_item,
+        string_root, ItemNull);
+    if (js_is_callable(options_root.get())) {
+        callback_root.set(options_root.get());
     } else {
-        JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_or_cb));
+        JS_ASSIGN_OR_RETURN(validation, fs_validate_encoding_options(options_root.get()));
     }
 
     char path_buf[1024];
-    FS_PATH_OR_RETURN(path, path_item, "path", path_buf, sizeof(path_buf));
+    FS_PATH_OR_RETURN(path, path_root.get(), "path", path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
     if (!js_permission_has_fs_write(path)) {
-        return fs_permission_callback_error(callback, "FileSystemWrite", path, NULL);
+        return fs_permission_callback_error(callback_root.get(), "FileSystemWrite", path, NULL);
     }
 
-    Item str_item = js_to_string(data_item);
-    if (get_type_id(str_item) != LMD_TYPE_STRING) return ItemNull;
-    String* str = it2s(str_item);
+    string_root.set(js_to_string(data_root.get()));
+    if (get_type_id(string_root.get()) != LMD_TYPE_STRING) return ItemNull;
+    String* str = it2s(string_root.get());
 
     JsFsReq* fsreq = (JsFsReq*)mem_calloc(1, sizeof(JsFsReq), MEM_CAT_JS_RUNTIME);
     if (!fsreq) return ItemNull;
@@ -2025,11 +2023,9 @@ extern "C" Item js_fs_writeFile(Item path_item, Item data_item, Item options_or_
     if (!fsreq->buffer) { mem_free(fsreq); return ItemNull; }
     memcpy(fsreq->buffer, str->chars, str->len);
     fsreq->buffer_size = str->len;
-    fsreq->callback = callback;
-    fsreq->domain = js_domain_get_current();
     snprintf(fsreq->path, sizeof(fsreq->path), "%s", path);
     if (!fs_req_submit_work(fsreq, fs_write_file_work, fs_write_file_complete,
-            fs_write_file_destroy)) {
+            fs_write_file_destroy, callback_root.get())) {
         fs_req_destroy(fsreq);
         return ItemNull;
     }

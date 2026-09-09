@@ -26,6 +26,7 @@
 #include "../dom/dom_realm_hooks.h"
 #include "../dom/realm/dom_realm.h"
 #include "js_runtime.h"
+#include "js_function.hpp"
 #include "js_props.h"
 #include "../dom/dom_ops.h"
 #include "js_runtime_state.hpp"
@@ -40,6 +41,34 @@ extern "C" const void* radiant_dom_selection_host_type(void);
 #include <cstring>
 
 JS_FORWARD_STATIC_ITEM(_coll_illegal_constructor, (Item /*first*/), js_throw_type_error, ("Illegal constructor"))
+
+static Item _html_element_constructor(Item /*first*/) {
+    RootFrame roots(5);
+    Rooted<Item> target_root(roots, js_get_new_target());
+    Rooted<Item> name_root(roots, ItemNull);
+    Rooted<Item> instance_root(roots, ItemNull);
+    Rooted<Item> prototype_root(roots, ItemNull);
+    if (get_type_id(target_root.get()) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("Illegal constructor");
+    }
+    JsFunction* target = (JsFunction*)target_root.get().function;
+    const JsClassData* class_data = js_fn_class(target);
+    name_root.set(class_data->custom_element_name);
+    if (get_type_id(name_root.get()) != LMD_TYPE_STRING) {
+        return js_throw_type_error("Illegal constructor");
+    }
+    String* name = it2s(name_root.get());
+    void* document = dom_get_document();
+    if (!name || !document) return js_throw_type_error("Illegal constructor");
+    void* element = dom_create_backed_element_bridge(document, name->chars);
+    instance_root.set(element ? dom_wrap_element(element) : ItemNull);
+    if (!js_is_object_value(instance_root.get())) return ItemError;
+    prototype_root.set(js_get_key_cstr(target_root.get(), "prototype"));
+    if (get_type_id(prototype_root.get()) == LMD_TYPE_MAP) {
+        js_set_prototype(instance_root.get(), prototype_root.get());
+    }
+    return instance_root.get();
+}
 
 static void _set_iface_to_string_tag(Item proto, const char* name) {
     if (get_type_id(proto) != LMD_TYPE_MAP || !name) return;
@@ -65,7 +94,7 @@ static void _install_iface(Item global, const char* name) {
     // WebIDL illegal constructors still have [[Construct]]; their body, rather
     // than a missing capability, supplies the required TypeError (D6.2.2v2).
     ctor_root.set(js_new_distinct_native_constructor(
-        _coll_illegal_constructor));
+        strcmp(name, "HTMLElement") == 0 ? _html_element_constructor : _coll_illegal_constructor));
     js_set_function_name(ctor_root.get(), key_root.get());
     proto_root.set(js_new_object());
     _set_iface_to_string_tag(proto_root.get(), name);
@@ -246,8 +275,25 @@ static Item _custom_elements_define(Item /*callee*/, Item registry, Item* args,
         return _custom_elements_dom_exception("NotSupportedError",
             "Custom element name is already defined");
     }
+    JsClassData* class_data = nullptr;
+    if (get_type_id(constructor_root.get()) == LMD_TYPE_FUNC) {
+        JsFunction* function = (JsFunction*)constructor_root.get().function;
+        class_data = js_fn_class_ensure(function);
+        if (!class_data) return ItemError;
+        if (get_type_id(class_data->custom_element_name) == LMD_TYPE_STRING) {
+            return _custom_elements_dom_exception("NotSupportedError",
+                "Custom element constructor is already registered");
+        }
+    }
     js_set_key_default(record_root.get(), js_name_item("constructor"),
         constructor_root.get());
+    if (class_data) {
+        // The HTMLElement constructor resolves its local name from this
+        // internal class association during derived `super()` construction.
+        class_data->custom_element_name = name_root.get();
+        JsFunction* function = (JsFunction*)constructor_root.get().function;
+        js_function_root_item_if_needed(function, &class_data->custom_element_name);
+    }
     waiters_root.set(js_get_key_default(record_root.get(), js_name_item("waiters")));
     if (get_type_id(waiters_root.get()) == LMD_TYPE_ARRAY) {
         int64_t count = js_array_length(waiters_root.get());
