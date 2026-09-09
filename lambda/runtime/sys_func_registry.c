@@ -289,7 +289,7 @@ SysFuncInfo sys_func_defs[] = {
     // to LMD_TYPE_INT64 rather than the NUM_SIZED family that makes the
     // others callable, so it needs this explicit row.
     {SYSFUNC_INT64, "i64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_ITEM, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0,
+     C_RET_ITEM, C_ARG_ITEM, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0,
      false, &TYPE_INT64, true},
 
     {SYSFUNC_FLOAT, "float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
@@ -1061,10 +1061,10 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_INT64, C_ARG_NATIVE, "fn_bnot", FPTR(fn_bnot), NULL, NULL, false, 0},
 
     {SYSFUNC_SHL, "shl", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_NATIVE, "fn_shl", FPTR(fn_shl), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_shl_item", FPTR(fn_shl_item), NULL, NULL, false, 0},
 
     {SYSFUNC_SHR, "shr", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_NATIVE, "fn_shr", FPTR(fn_shr), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_shr_item", FPTR(fn_shr_item), NULL, NULL, false, 0},
 
     {SYSFUNC_USHR, "ushr", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_ushr_item", FPTR(fn_ushr_item), NULL, NULL, false, 0},
@@ -1568,12 +1568,6 @@ JitImport jit_runtime_imports[] = {
     {"int2it_i64", FPTR(int2it_i64),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
-    {"int2it_i64_or_error", FPTR(int2it_i64_or_error),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
-    {"box_int64_result_or_error", FPTR(box_int64_result_or_error),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"box_uint64_value", FPTR(box_uint64_value),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -1774,8 +1768,6 @@ JitImport jit_runtime_imports[] = {
     {"fn_abs_f", FPTR(fn_abs_f)},
     {"fn_neg_i", FPTR(fn_neg_i)},
     {"fn_neg_f", FPTR(fn_neg_f)},
-    {"fn_mod_i", FPTR(fn_mod_i)},
-    {"fn_idiv_i", FPTR(fn_idiv_i)},
     {"fn_not_u", FPTR(fn_not_u)},
     {"fn_sign_i", FPTR(fn_sign_i)},
     {"fn_sign_f", FPTR(fn_sign_f)},

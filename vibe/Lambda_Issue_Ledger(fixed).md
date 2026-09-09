@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **78 historical records**: 77 RESOLVED entries and one
+This archive contains **79 historical records**: 78 RESOLVED entries and one
 CLOSED design decision. Duplicate and split records remain separate so their
 provenance is not lost. The first sections contain the 34 records formerly
 interleaved with live entries; §15 preserves the 44 records from the former
@@ -930,6 +930,17 @@ changing the runtime member lane that valid `pn` calls need. Regression:
 positive member-value fixture passes on both JIT and T0.
 
 ### A.3 Value & type model (LR_03)
+
+<a id="lr03-r4"></a><a id="lr10-5"></a>**LR03-R4 · `INT64_ERROR == INT64_MAX` collision · RESOLVED 2026-09-09**
+`INT64_ERROR` is removed. `item_try_to_int64` and decimal `*_try_to_int64`
+report success separately, so `9223372036854775807i64` remains a finite `i64`
+while failed conversion returns `ItemError`. `fn_int64` now has a boxed `Item`
+ABI, and MIR preserves that result until the existing error boundary; `it2l`
+remains a legacy `IntLane` accessor and never represents a conversion failure.
+This follows **S7.10.3**, **D2.4.3**, and the private-lane rule in **D2.2.2**.
+Regression coverage: `test/lambda/int64.ls`, `ItemRepresentation.Int64AlwaysUsesPointerBackedPayload`,
+`LambdaDecimal.QuietInt64ExtractionRejectsOverflowAndInvalidComparison`, and
+`scalar_home_donation.mir-check`; `make test-lambda-baseline` passes 5087/5087.
 
 <a id="lr03-r1"></a>**LR03-R1 · Two parallel type vocabularies · RESOLVED**
 The `TypeSchema`/`SchemaTypeId` vocabulary in `schema_ast.hpp` was dead code and

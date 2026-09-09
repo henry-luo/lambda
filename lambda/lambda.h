@@ -1555,7 +1555,6 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 }
 #endif
 
-#define INT64_ERROR           INT64_MAX
 #define LAMBDA_INT64_MAX    (INT64_MAX - 1)
 
 // DateTime error sentinel — all bits set = clearly invalid
@@ -2445,12 +2444,8 @@ extern "C" {
     int64_t lambda_int_lane_mul_slow(int64_t a, int64_t b);
     int64_t lambda_int_lane_divmod_slow(int64_t a, int64_t b, int64_t is_mod);
     Item int2it_i64(int64_t value); // same encoder, native-int64 caller
-    Item int2it_i64_or_error(int64_t value); // + legacy INT64_ERROR boundary
     Item push_d(double dval);
     Item box_int64_value(int64_t lval);
-    // Compatibility boundary for legacy native helpers whose raw int64 result
-    // uses INT64_ERROR as an out-of-band failure signal.
-    Item box_int64_result_or_error(int64_t lval);
     Item box_uint64_value(uint64_t uval);
     Item push_d_safe(double val);   // safe boxing: detects already-boxed FLOAT Items
     Item push_k(DateTime dtval);
@@ -2473,6 +2468,7 @@ extern "C" {
     #define const_k(index)      (*(DateTime*)_const_pool[index])
 
     // item unboxing
+    bool item_try_to_int64(Item item, int64_t* out);
     int64_t it2l(Item item);
     uint64_t it2u(Item item);
     double it2d(Item item);
@@ -2512,7 +2508,7 @@ extern "C" {
     Item fn_content(Item item);   // read-only array view over an element's content
     int64_t fn_seq_count(Item item);  // positions a positional traversal visits
     Item fn_int(Item a);
-    int64_t fn_int64(Item a);
+    Item fn_int64(Item a);
     Item fn_float(Item a);
     Item fn_decimal(Item a);
     Item fn_binary(Item a);
@@ -2697,8 +2693,6 @@ extern "C" {
     double fn_abs_f(double x);
     int64_t fn_neg_i(int64_t x);
     double fn_neg_f(double x);
-    int64_t fn_mod_i(int64_t a, int64_t b);    // handles div-by-zero (returns INT64_ERROR)
-    int64_t fn_idiv_i(int64_t a, int64_t b);   // handles div-by-zero (returns INT64_ERROR)
 
     // Collection length — type-specialized native variants
     // G0: these return a Lambda `int`, so they return int's one native

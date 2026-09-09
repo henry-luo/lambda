@@ -23,7 +23,6 @@ String* fn_strcat(String* left, String* right);
 // push_decimal, convert_to_decimal, cleanup_temp_decimal are now centralized in lambda-decimal.cpp
 
 Item push_c(int64_t cval) {
-    if (cval == INT64_ERROR) { return ItemError; }
     return decimal_from_int64(cval);
 }
 // Use decimal_add/sub/mul/div/mod/pow from lambda-decimal.hpp instead.
@@ -1533,8 +1532,8 @@ Item fn_int(Item item) {
     }
     else if (get_type_id(item) == LMD_TYPE_DECIMAL) {
         // truncate fractional part and convert to int64
-        int64_t result = decimal_to_int64(item);
-        if (result == INT64_ERROR) return ItemError;
+        int64_t result = 0;
+        if (!decimal_try_to_int64(item, &result)) return ItemError;
         if (result > INT32_MAX || result < INT32_MIN) {
             return box_int64_value(result);
         }
@@ -1567,59 +1566,63 @@ Item fn_int(Item item) {
     }
 }
 
-int64_t fn_int64(Item item) {
-    // convert item to int64
+Item fn_int64(Item item) {
+    // box every successful full-width value so INT64_MAX remains a value.
+    GUARD_ERROR1(item);
     if (get_type_id(item) == LMD_TYPE_INT) {
-        return lambda_int_item_to_i64(item);
+        return box_int64_value(lambda_int_item_to_i64(item));
     }
     else if (get_type_id(item) == LMD_TYPE_INT64) {
-        return item.get_int64();
+        return box_int64_value(item.get_int64());
     }
     else if (get_type_id(item) == LMD_TYPE_FLOAT) {
         double dval = item.get_double();
-        double truncated = (double)(int64_t)dval;
-        if (truncated > LAMBDA_INT64_MAX || truncated < INT64_MIN) {
+        if (!isfinite(dval) || dval < (double)INT64_MIN || dval >= 0x1p63) {
             log_debug("float value %g out of int64 range", dval);
-            return INT64_ERROR;
+            return ItemError;
         }
-        return truncated;
+        return box_int64_value((int64_t)dval);
     }
     else if (get_type_id(item) == LMD_TYPE_NUM_SIZED) {
         NumSizedType st = item.get_num_type();
         if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
             double dval = item.get_num_sized_as_double();
-            return (int64_t)dval;
+            if (!isfinite(dval) || dval < (double)INT64_MIN || dval >= 0x1p63) {
+                log_debug("sized float value %g out of int64 range", dval);
+                return ItemError;
+            }
+            return box_int64_value((int64_t)dval);
         }
-        return item.get_num_sized_as_int64();
+        return box_int64_value(item.get_num_sized_as_int64());
     }
     else if (get_type_id(item) == LMD_TYPE_UINT64) {
-        return (int64_t)item.get_uint64();
+        return box_int64_value((int64_t)item.get_uint64());
     }
     else if (get_type_id(item) == LMD_TYPE_DECIMAL) {
-        // Convert decimal to int64 using centralized function
-        return decimal_to_int64(item);
+        int64_t value = 0;
+        return decimal_try_to_int64(item, &value) ? box_int64_value(value) : ItemError;
     }
     else if (is_text_type_id(get_type_id(item))) {
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
         if (!chars || len == 0) {
-            return 0;
+            return ItemError;
         }
         char* endptr;
         errno = 0;  // clear errno before calling strtoll
         int64_t val = strtoll(chars, &endptr, 10);
         if (endptr == chars) {
             log_debug("Cannot convert string '%s' to int64", chars);
-            return INT64_ERROR;
+            return ItemError;
         }
         if (errno == ERANGE) {
             log_debug("String value '%s' out of int64 range", chars);
-            return INT64_ERROR;
+            return ItemError;
         }
-        return val;
+        return box_int64_value(val);
     }
     log_debug("Cannot convert type %d to int64", get_type_id(item));
-    return INT64_ERROR;
+    return ItemError;
 }
 
 // Constructor functions for type conversion
@@ -1978,26 +1981,6 @@ extern "C" double fn_neg_f(double x) {
     return -x;
 }
 
-// Integer modulo (handles div-by-zero: returns INT64_ERROR)
-extern "C" int64_t fn_mod_i(int64_t a, int64_t b) {
-    if (b == 0) {
-        log_error("modulo by zero error");
-        return INT64_ERROR;
-    }
-    if (a == INT64_MIN && b == -1) return 0;
-    return a % b;
-}
-
-// Integer division (handles div-by-zero: returns INT64_ERROR)
-extern "C" int64_t fn_idiv_i(int64_t a, int64_t b) {
-    if (b == 0) {
-        log_error("integer division by zero error");
-        return INT64_ERROR;
-    }
-    if (a == INT64_MIN && b == -1) return INT64_MIN;
-    return a / b;
-}
-
 // --- Boolean operations ---
 
 // Logical not (native bool version)
@@ -2227,10 +2210,7 @@ extern "C" Item fn_bnot_item(Item a) {
 }
 
 extern "C" int64_t fn_shl(int64_t a, int64_t b) {
-    if (b < 0) {
-        log_error("integer negative shift count");
-        return INT64_ERROR;
-    }
+    // callers check the negative-count error before taking this raw fast path.
     if (b >= 64) return 0;
     return a << b;
 }
@@ -2246,10 +2226,7 @@ extern "C" Item fn_shl_item(Item a, Item b) {
 }
 
 extern "C" int64_t fn_shr(int64_t a, int64_t b) {
-    if (b < 0) {
-        log_error("integer negative shift count");
-        return INT64_ERROR;
-    }
+    // callers check the negative-count error before taking this raw fast path.
     if (b >= 64) return 0;
     return a >> b;  // arithmetic right shift (sign-extending)
 }
