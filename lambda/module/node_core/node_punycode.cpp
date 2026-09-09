@@ -11,11 +11,13 @@
 #include <cstring>
 
 static const JubeHostAPI* node_punycode_host = NULL;
-struct NodePunycodeSessionState { void* session; bool rooted; Item cached_namespace; };
+struct NodePunycodeSessionState {
+    JubePersistentValueSlots cache_values;
+    Item cache_items[1];
+};
 static NodePunycodeSessionState* node_punycode_state(void) { return (NodePunycodeSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_PUNYCODE); }
-#define node_punycode_session (node_punycode_state()->session)
-#define node_punycode_rooted (node_punycode_state()->rooted)
-#define node_punycode_cached_namespace (node_punycode_state()->cached_namespace)
+#define node_punycode_session (node_punycode_state()->cache_values.session)
+#define node_punycode_cached_namespace (node_punycode_state()->cache_items[0])
 
 static Item node_punycode_undefined(void) {
     return (Item){.item = ITEM_JS_UNDEFINED};
@@ -103,7 +105,8 @@ Item node_punycode_namespace(void) {
 }
 
 static void node_punycode_cache_reset(void) {
-    node_punycode_cached_namespace = (Item){0};
+    NodePunycodeSessionState* state = node_punycode_state();
+    if (state) jube_persistent_value_slots_reset(&state->cache_values);
 }
 
 int node_punycode_init(const JubeHostAPI* host) {
@@ -121,13 +124,12 @@ void node_punycode_shutdown(void) {
 void node_punycode_runtime_attach(void* session) {
     if (!node_punycode_host || !node_punycode_host->node->runtime->session_is_live ||
             !node_punycode_host->node->runtime->session_is_live(session)) return;
-    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_PUNYCODE,
-            sizeof(NodePunycodeSessionState))) return;
-    node_punycode_session = session;
-    if (node_punycode_host->node->roots->persistent_root_register(session,
-            &node_punycode_cached_namespace.item) == 0) {
-        node_punycode_rooted = true;
-    }
+    NodePunycodeSessionState* state = (NodePunycodeSessionState*)
+        jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_PUNYCODE,
+            sizeof(NodePunycodeSessionState));
+    if (!state) return;
+    jube_persistent_value_slots_attach(&state->cache_values, session,
+        node_punycode_host->node->roots, state->cache_items, 1);
 }
 
 void node_punycode_runtime_reset(void* session) {
@@ -135,12 +137,7 @@ void node_punycode_runtime_reset(void* session) {
 }
 
 void node_punycode_runtime_detach(void* session) {
-    if (!node_punycode_host || session != node_punycode_session) return;
-    if (node_punycode_rooted) {
-        node_punycode_host->node->roots->persistent_root_unregister(session,
-            &node_punycode_cached_namespace.item);
-        node_punycode_rooted = false;
-    }
-    node_punycode_cache_reset();
-    node_punycode_session = NULL;
+    NodePunycodeSessionState* state = node_punycode_state();
+    if (!node_punycode_host || !state || session != state->cache_values.session) return;
+    jube_persistent_value_slots_detach(&state->cache_values);
 }

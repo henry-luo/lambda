@@ -169,6 +169,37 @@ extern "C" void runtime_callback_slots_destroy(RuntimeCallbackSlots* slots) {
     root_vector_destroy(&slots->values);
 }
 
+extern "C" bool runtime_value_slots_init(RuntimeValueSlots* slots,
+        Context* owner, const char* name, int count) {
+    if (!slots || count < 0) return false;
+    root_vector_init(&slots->values, owner, name);
+    for (int i = 0; i < count; i++) {
+        // Fixed native fields historically use the all-zero Item as their
+        // absent sentinel; preserve that contract across the shared carrier.
+        if (!root_vector_push(&slots->values, (Item){0})) {
+            root_vector_destroy(&slots->values);
+            return false;
+        }
+    }
+    return true;
+}
+
+extern "C" Item runtime_value_slots_get(RuntimeValueSlots* slots, int slot) {
+    Item* value = slots && slot >= 0 ? root_vector_at(&slots->values, slot) : NULL;
+    return value ? *value : (Item){0};
+}
+
+extern "C" void runtime_value_slots_set(RuntimeValueSlots* slots, int slot,
+        Item value) {
+    Item* target = slots && slot >= 0 ? root_vector_at(&slots->values, slot) : NULL;
+    if (target) *target = value;
+}
+
+extern "C" void runtime_value_slots_destroy(RuntimeValueSlots* slots) {
+    if (!slots) return;
+    root_vector_destroy(&slots->values);
+}
+
 enum {
     RUNTIME_RESOURCE_INDEX_BITS = 16,
     RUNTIME_RESOURCE_INDEX_MASK = (1u << RUNTIME_RESOURCE_INDEX_BITS) - 1u,

@@ -129,6 +129,61 @@ struct JsNamespaceState : JsRootedState {
     Item namespace_object = {};
 };
 
+// Fixed realm singleton/cache values converge here. Callers reserve the
+// stable slot before an allocation can publish its Item (D5.3.5; JSCU29).
+enum JsRealmSlotId {
+    JS_REALM_SLOT_UTIL_NAMESPACE,
+    JS_REALM_SLOT_CHILD_PROCESS_NAMESPACE,
+    JS_REALM_SLOT_CRYPTO_NAMESPACE,
+    JS_REALM_SLOT_BUFFER_NAMESPACE,
+    JS_REALM_SLOT_BUFFER_PROTOTYPE,
+    JS_REALM_SLOT_DNS_NAMESPACE,
+    JS_REALM_SLOT_DNS_PROMISES_NAMESPACE,
+    JS_REALM_SLOT_DNS_RESOLVER_PROTOTYPE,
+    JS_REALM_SLOT_DNS_PROMISES_RESOLVER_PROTOTYPE,
+    JS_REALM_SLOT_DNS_DEFAULT_SERVERS,
+    JS_REALM_SLOT_TLS_NAMESPACE,
+    JS_REALM_SLOT_TLS_CA_BUNDLED,
+    JS_REALM_SLOT_TLS_CA_EXTRA,
+    JS_REALM_SLOT_TLS_CA_SYSTEM,
+    JS_REALM_SLOT_TLS_CA_DEFAULT,
+    JS_REALM_SLOT_READLINE_NAMESPACE,
+    JS_REALM_SLOT_READLINE_PROMISES_NAMESPACE,
+    JS_REALM_SLOT_READLINE_COMPLETION_INTERFACE,
+    JS_REALM_SLOT_HTTP_NAMESPACE,
+    JS_REALM_SLOT_HTTP_SERVER_PROTOTYPE,
+    JS_REALM_SLOT_HTTP_INCOMING_MESSAGE_PROTOTYPE,
+    JS_REALM_SLOT_HTTP_SERVER_RESPONSE_PROTOTYPE,
+    JS_REALM_SLOT_HTTP_OUTGOING_MESSAGE_PROTOTYPE,
+    JS_REALM_SLOT_NET_NAMESPACE,
+    JS_REALM_SLOT_NET_SOCKET_PROTOTYPE,
+    JS_REALM_SLOT_NET_SERVER_PROTOTYPE,
+    JS_REALM_SLOT_NET_SOCKET_CONNECT_FUNCTION,
+    JS_REALM_SLOT_NET_STREAM_SOCKET_CONSTRUCTOR,
+    JS_REALM_SLOT_FS_NAMESPACE,
+    JS_REALM_SLOT_FS_INTERNAL_BINDING_NAMESPACE,
+    JS_REALM_SLOT_FS_INTERNAL_DEFAULT_FSTAT,
+    JS_REALM_SLOT_FS_STATS_PROTOTYPE,
+    JS_REALM_SLOT_FS_FILEHANDLE_CONSTRUCTOR,
+    JS_REALM_SLOT_FS_FILEHANDLE_PROTOTYPE,
+    JS_REALM_SLOT_FS_INTERNAL_PROMISES_NAMESPACE,
+    JS_REALM_SLOT_HTTPS_NAMESPACE,
+    JS_REALM_SLOT_HTTPS_AGENT_PROTOTYPE,
+    JS_REALM_SLOT_COUNT,
+};
+
+struct JsRealmSlots {
+    RootVector values = {};
+};
+
+void js_realm_slots_init(JsRealmSlots* slots, Context* owner);
+void js_realm_slots_destroy(JsRealmSlots* slots);
+void js_realm_slots_clear(JsRealmSlots* slots);
+Item* js_realm_slot(JsRealmSlots* slots, JsRealmSlotId slot);
+Item* js_realm_slot_existing(JsRealmSlots* slots, JsRealmSlotId slot);
+bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
+    Item** values, int count, bool reserve);
+
 // Use this only for actual single-Item LIFO storage.  Clients with replacement,
 // replay, or multi-field records retain those semantic operations themselves.
 // JSCU14(b): backed by the one runtime RootVector — no fixed slot array, no
@@ -178,50 +233,17 @@ JsCompiledArtifact* js_code_store_artifact_at(JsCodeStore* store, int index);
 void js_code_store_clear_rows(JsCodeStore* store);
 void js_code_store_destroy(JsCodeStore* store);
 
-// Node DNS exports are per-realm objects and must not retain values from a
-// different heap through file-static cache slots.
-struct JsDnsState : JsRootedState {
-    Item namespace_object = {};
-    Item promises_namespace = {};
-    Item resolver_prototype = {};
-    Item promises_resolver_prototype = {};
-    Item default_servers = {};
-};
-
 struct JsReadlineInput {
     int64_t root_slot = -1;
 };
 
-struct JsReadlineState : JsNamespaceState {
-    Item promises_namespace = {};
-    Item completion_interface = {};
+struct JsReadlineState {
     RootVector input_values = {};
     ArrayList* inputs = NULL;
     bool create_promises_mode = false;
 };
 
-struct JsBufferState : JsNamespaceState {
-    Item prototype = {};
-};
-
-struct JsHttpsState : JsNamespaceState {
-    Item agent_prototype = {};
-};
-
-struct JsUtilState : JsNamespaceState {
-};
-
-struct JsCryptoState : JsNamespaceState {
-};
-
-struct JsChildProcessState : JsNamespaceState {
-};
-
-struct JsTlsState : JsNamespaceState {
-    Item ca_bundled = {};
-    Item ca_extra = {};
-    Item ca_system = {};
-    Item ca_default = {};
+struct JsTlsNativeState {
     void* client_ticket_states = NULL;
     void* secure_context_owners = NULL;
 };
@@ -246,13 +268,6 @@ struct JsStreamState : JsNamespaceState {
     bool keys_initialized = false;
     int64_t default_byte_hwm = 16 * 1024;
     int64_t default_object_hwm = 16;
-};
-
-struct JsHttpState : JsNamespaceState {
-    Item server_prototype = {};
-    Item incoming_message_prototype = {};
-    Item server_response_prototype = {};
-    Item outgoing_message_prototype = {};
 };
 
 struct JsAssertMockSlot {
@@ -301,11 +316,7 @@ struct JsAssertState : JsRootedState {
     int64_t node_test_next_id = 1;
 };
 
-struct JsNetState : JsNamespaceState {
-    Item socket_prototype = {};
-    Item server_prototype = {};
-    Item socket_connect_function = {};
-    Item stream_socket_constructor = {};
+struct JsNetNativeState {
     // Native network defaults and BlockList objects are realm-local. The
     // capsule stays lazy so contexts that never load net pay no allocation.
     void* native_state = NULL;
@@ -322,16 +333,7 @@ struct JsHostHooksState {
     bool redirect_stdout_to_stderr = false;
 };
 
-// fs owns several lazily assembled namespace and prototype objects. They are
-// all realm values, so one exact context range replaces the old per-slot
-// process-global registrations.
-struct JsFsState : JsNamespaceState {
-    Item internal_binding_namespace = {};
-    Item internal_default_fstat = {};
-    Item stats_prototype = {};
-    Item filehandle_constructor = {};
-    Item filehandle_prototype = {};
-    Item internal_promises_namespace = {};
+struct JsFsNativeState {
     // Outstanding callback-style requests are owned by the context that
     // registered their precise roots; teardown detaches this list before the
     // heap disappears.
@@ -955,20 +957,14 @@ struct JsAsyncAwaitState : JsRootedState {
 };
 
 struct JsRuntimeState {
-    JsDnsState dns = {};
     JsReadlineState* readline = NULL;
-    JsBufferState buffer = {};
-    JsHttpsState https = {};
-    JsUtilState util = {};
-    JsCryptoState crypto = {};
-    JsChildProcessState child_process = {};
-    JsTlsState tls = {};
+    JsRealmSlots realm_slots = {};
+    JsTlsNativeState tls_native = {};
     JsStreamState stream = {};
-    JsHttpState http = {};
     JsAssertState* assert = NULL;
-    JsNetState net = {};
+    JsNetNativeState net_native = {};
     JsHostHooksState host_hooks = {};
-    JsFsState fs = {};
+    JsFsNativeState fs_native = {};
     JsClipboardState clipboard = {};
     JsDomState dom = {};
     // Listener records contain native precise-root slots and DOM pins. Keep

@@ -1,0 +1,1 @@
+jube persistent value slots ok

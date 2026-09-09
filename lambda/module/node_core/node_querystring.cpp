@@ -14,11 +14,13 @@
 #include <math.h>
 
 static const JubeHostAPI* node_querystring_host = NULL;
-struct NodeQuerystringSessionState { void* session; bool rooted; Item namespace_cache; };
+struct NodeQuerystringSessionState {
+    JubePersistentValueSlots cache_values;
+    Item cache_items[1];
+};
 static NodeQuerystringSessionState* node_querystring_state(void) { return (NodeQuerystringSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_QUERYSTRING); }
-#define node_querystring_session (node_querystring_state()->session)
-#define node_querystring_rooted (node_querystring_state()->rooted)
-#define qs_namespace (node_querystring_state()->namespace_cache)
+#define node_querystring_session (node_querystring_state()->cache_values.session)
+#define qs_namespace (node_querystring_state()->cache_items[0])
 
 static int node_querystring_kind(Item value) {
     return node_querystring_host && node_querystring_host->value &&
@@ -941,7 +943,8 @@ Item node_querystring_namespace(void) {
 }
 
 static void node_querystring_cache_reset(void) {
-    qs_namespace = (Item){0};
+    NodeQuerystringSessionState* state = node_querystring_state();
+    if (state) jube_persistent_value_slots_reset(&state->cache_values);
 }
 
 int node_querystring_init(const JubeHostAPI* host) {
@@ -974,13 +977,12 @@ void node_querystring_runtime_attach(void* session) {
             !node_querystring_host->node->runtime ||
             !node_querystring_host->node->runtime->session_is_live ||
             !node_querystring_host->node->runtime->session_is_live(session)) return;
-    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_QUERYSTRING,
-            sizeof(NodeQuerystringSessionState))) return;
-    node_querystring_session = session;
-    if (node_querystring_host->node->roots->persistent_root_register(session,
-            &qs_namespace.item) == 0) {
-        node_querystring_rooted = true;
-    }
+    NodeQuerystringSessionState* state = (NodeQuerystringSessionState*)
+        jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_QUERYSTRING,
+            sizeof(NodeQuerystringSessionState));
+    if (!state) return;
+    jube_persistent_value_slots_attach(&state->cache_values, session,
+        node_querystring_host->node->roots, state->cache_items, 1);
 }
 
 void node_querystring_runtime_reset(void* session) {
@@ -990,11 +992,7 @@ void node_querystring_runtime_reset(void* session) {
 }
 
 void node_querystring_runtime_detach(void* session) {
-    if (session != node_querystring_session || !node_querystring_host) return;
-    node_querystring_cache_reset();
-    if (node_querystring_rooted) {
-        node_querystring_host->node->roots->persistent_root_unregister(session, &qs_namespace.item);
-        node_querystring_rooted = false;
-    }
-    node_querystring_session = NULL;
+    NodeQuerystringSessionState* state = node_querystring_state();
+    if (!state || session != state->cache_values.session || !node_querystring_host) return;
+    jube_persistent_value_slots_detach(&state->cache_values);
 }

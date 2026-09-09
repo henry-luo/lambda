@@ -5,11 +5,13 @@
 #include <cstring>
 
 static const JubeHostAPI* node_v8_host = NULL;
-struct NodeV8SessionState { void* session; bool rooted; Item cached_namespace; };
+struct NodeV8SessionState {
+    JubePersistentValueSlots cache_values;
+    Item cache_items[1];
+};
 static NodeV8SessionState* node_v8_state(void) { return (NodeV8SessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_V8); }
-#define node_v8_session (node_v8_state()->session)
-#define node_v8_rooted (node_v8_state()->rooted)
-#define node_v8_cached_namespace (node_v8_state()->cached_namespace)
+#define node_v8_session (node_v8_state()->cache_values.session)
+#define node_v8_cached_namespace (node_v8_state()->cache_items[0])
 
 static Item node_v8_undefined(Item value) {
     (void)value;
@@ -119,26 +121,21 @@ void node_v8_shutdown(void) {
 
 void node_v8_runtime_attach(void* session) {
     if (!node_v8_host || !node_v8_host->node->runtime->session_is_live(session)) return;
-    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_V8,
-            sizeof(NodeV8SessionState))) return;
-    node_v8_session = session;
-    if (node_v8_host->node->roots->persistent_root_register(
-            session, &node_v8_cached_namespace.item) == 0) {
-        node_v8_rooted = true;
-    }
+    NodeV8SessionState* state = (NodeV8SessionState*)jube_node_session_module_state_get(
+        session, JUBE_NODE_MODULE_STATE_V8, sizeof(NodeV8SessionState));
+    if (!state) return;
+    jube_persistent_value_slots_attach(&state->cache_values, session,
+        node_v8_host->node->roots, state->cache_items, 1);
 }
 
 void node_v8_runtime_reset(void* session) {
-    if (session == node_v8_session) node_v8_cached_namespace = (Item){0};
+    if (session == node_v8_session) {
+        jube_persistent_value_slots_reset(&node_v8_state()->cache_values);
+    }
 }
 
 void node_v8_runtime_detach(void* session) {
-    if (!node_v8_host || session != node_v8_session) return;
-    if (node_v8_rooted) {
-        node_v8_host->node->roots->persistent_root_unregister(
-            session, &node_v8_cached_namespace.item);
-    }
-    node_v8_rooted = false;
-    node_v8_cached_namespace = (Item){0};
-    node_v8_session = NULL;
+    NodeV8SessionState* state = node_v8_state();
+    if (!node_v8_host || !state || session != state->cache_values.session) return;
+    jube_persistent_value_slots_detach(&state->cache_values);
 }

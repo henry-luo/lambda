@@ -346,7 +346,6 @@ extern "C" int js_animation_frame_drain(int max_frames) {
 typedef struct JsTimerHandle {
     uv_timer_t timer;
     RuntimeJob job;
-    Item       object;
     uint32_t   resource_id;
     bool       is_interval;
     Heap*      runtime_heap;
@@ -390,11 +389,18 @@ static void timer_resource_close(void* user) {
     timer_close_native_handle((JsTimerHandle*)user);
 }
 
-static bool timer_registry_append(JsTimerHandle* handle) {
+static Item timer_resource_owner(JsTimerHandle* handle) {
+    if (!handle || handle->resource_id == 0) return ItemNull;
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
+        &timer_resources, js_runtime_state.timers, handle->resource_id);
+    return runtime_resource_table_value(&timer_resources, entry);
+}
+
+static bool timer_registry_append(JsTimerHandle* handle, Item owner) {
     if (!handle) return false;
     JS_ROOTS(roots,
         owner_root,
-        handle->object.item ? handle->object : handle->job.callback);
+        owner.item ? owner : handle->job.callback);
     Rooted<Item> callback_root(roots, handle->job.callback);
     Rooted<Item> arguments_root(roots, handle->job.arguments);
     Rooted<Item> resource_root(roots, handle->job.context.resource);
@@ -423,10 +429,9 @@ typedef struct JsTimerRuntimeScope {
 
 static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, int resource_len) {
     if (!th) return;
-    RootFrame roots(6);
+    RootFrame roots(5);
     Rooted<Item> callback_root(roots, th->job.callback);
     Rooted<Item> arguments_root(roots, th->job.arguments);
-    Rooted<Item> object_root(roots, th->object);
     Rooted<Item> resource_root(roots, th->job.context.resource);
     Rooted<Item> als_root(roots, th->job.context.als_context);
     Rooted<Item> domain_root(roots, th->job.context.domain);
@@ -439,7 +444,6 @@ static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, 
     domain_root.set(js_domain_capture_async_stack());
     th->job.callback = callback_root.get();
     th->job.arguments = arguments_root.get();
-    th->object = object_root.get();
     th->job.context.resource = resource_root.get();
     th->job.context.als_context = als_root.get();
     th->job.context.domain = domain_root.get();
@@ -512,10 +516,11 @@ static void timer_close_handle(JsTimerHandle *th) {
 }
 
 static void timer_mark_object_destroyed(JsTimerHandle* th) {
-    if (!th || !th->object.item) return;
+    Item owner = timer_resource_owner(th);
+    if (!owner.item) return;
     // The JS Timeout object is separate from the libuv handle; update it on
     // observable clear/fire paths, not during process-exit cleanup of unref'd intervals.
-    js_set_key_cstr(th->object, "_destroyed", (Item){.item = b2it(true)});
+    js_set_key_cstr(owner, "_destroyed", (Item){.item = b2it(true)});
 }
 
 static void timer_forget_unsafe_handle(JsTimerHandle* th) {
@@ -526,7 +531,6 @@ static void timer_forget_unsafe_handle(JsTimerHandle* th) {
     th->runtime_pool = nullptr;
     th->job.callback = ItemNull;
     th->job.arguments = ItemNull;
-    th->object = ItemNull;
     th->job.context.resource = ItemNull;
     th->job.context.als_context = ItemNull;
     th->job.context.domain = ItemNull;
@@ -936,21 +940,21 @@ static Item js_timer_finish_create(uv_loop_t* loop, JsTimerHandle* th,
         arguments_root, th->job.arguments,
         resource_root, th->job.context.resource,
         als_root, th->job.context.als_context,
-        domain_root, th->job.context.domain);
+        domain_root, th->job.context.domain,
+        timer_root, ItemNull);
     uv_timer_init(loop, &th->timer);
     timer_start(loop, th, delay, repeat);
-    Item timer_obj = make_timer_object(th->job.id, timer_class);
-    th->object = timer_obj;
+    timer_root.set(make_timer_object(th->job.id, timer_class));
     th->job.callback = callback_root.get();
     th->job.arguments = arguments_root.get();
     th->job.context.resource = resource_root.get();
     th->job.context.als_context = als_root.get();
     th->job.context.domain = domain_root.get();
-    if (!timer_registry_append(th)) {
+    if (!timer_registry_append(th, timer_root.get())) {
         timer_close_handle(th);
         return ItemNull;
     }
-    return timer_obj;
+    return timer_root.get();
 }
 
 static Item js_timer_run_string_handler(Item env_item) {
@@ -1358,7 +1362,7 @@ static Item js_set_promise_timer(Item delay, Item value, Item options,
     uv_timer_init(loop, &th->timer);
     timer_start(loop, th, ms, 0);
 
-    if (!timer_registry_append(th)) {
+    if (!timer_registry_append(th, promise_root.get())) {
         timer_close_handle(th);
         return promise_root.get();
     }

@@ -2615,9 +2615,6 @@ static Item js_util_extend(Item target, Item source) {
 // util Module Namespace Object
 // =============================================================================
 
-#define util_namespace (js_runtime_state.util.namespace_object)
-JS_FORWARD_STATIC_EXPRESSION(bool, util_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.util.roots)))
-
 template <typename Target>
 JS_FORWARD_STATIC_VOID( js_util_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
@@ -2664,7 +2661,10 @@ static const JsUtilTypeMethodSpec js_util_extended_type_methods[] = {
 };
 
 extern "C" Item js_get_util_namespace(void) {
-    if (!util_ensure_roots()) return ItemError;
+    Item* namespace_slot = js_active_runtime_state ? js_realm_slot(
+        &js_runtime_state.realm_slots, JS_REALM_SLOT_UTIL_NAMESPACE) : NULL;
+    if (!namespace_slot) return ItemError;
+    Item& util_namespace = *namespace_slot;
     // The console hook is valid for the process lifetime and has no Item
     // ownership; node-core activates this namespace at session attach so the
     // Node profile retains util.format before the first console call.
@@ -2748,6 +2748,8 @@ extern "C" Item js_get_util_namespace(void) {
 
 extern "C" void js_util_reset(void) {
     if (!js_active_runtime_state) return;
-    util_namespace = (Item){0};
+    Item* namespace_slot = js_realm_slot(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_UTIL_NAMESPACE);
+    if (namespace_slot) *namespace_slot = (Item){0};
     js_host_hooks_set_console_format_hook(NULL);
 }

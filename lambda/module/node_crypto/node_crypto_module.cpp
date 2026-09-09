@@ -60,7 +60,18 @@ extern __thread EvalContext* context;
 // ============================================================================
 
 static const uint8_t crypto_empty_bytes[1] = {0};
-#define crypto_namespace (js_runtime_state.crypto.namespace_object)
+
+static Item* crypto_namespace_slot_existing(void) {
+    if (!js_active_runtime_state) return NULL;
+    return js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_CRYPTO_NAMESPACE);
+}
+
+static Item* crypto_namespace_slot_ensure(void) {
+    if (!js_active_runtime_state) return NULL;
+    return js_realm_slot(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_CRYPTO_NAMESPACE);
+}
 
 template <typename Target>
 JS_FORWARD_STATIC_VOID( crypto_set_native, (Item object, Item key, Target target), js_set_native_key, (object, key, target))
@@ -104,7 +115,10 @@ static void crypto_resource_close(uint32_t rid) {
 
 #define crypto_native_state (*crypto_native_state_current())
 #define crypto_pseudo_random_warning_emitted (crypto_native_state.pseudo_random_warning_emitted)
-JS_FORWARD_STATIC_RETURN(bool, crypto_ensure_roots, (void), crypto_native_state_ensure, () && js_root_range_ensure_registered(&js_runtime_state.crypto.roots))
+
+static bool crypto_ensure_roots(void) {
+    return crypto_native_state_ensure() && crypto_namespace_slot_ensure();
+}
 
 static int crypto_digest_bits_for_name_ext(const char* digest, bool allow_md5, bool allow_sha1, bool allow_sha224) {
     if (!digest) return 0;
@@ -1371,8 +1385,11 @@ static Item crypto_append_stream_input(Item value, Item encoding_item,
 }
 
 static void crypto_link_instance_to_constructor(Item obj, const char* constructor_name) {
-    if (get_type_id(obj) != LMD_TYPE_MAP || get_type_id(crypto_namespace) != LMD_TYPE_MAP) return;
-    Item ctor = js_get_key_default(crypto_namespace, make_string_item_crypto(constructor_name));
+    Item* namespace_slot = crypto_namespace_slot_existing();
+    if (get_type_id(obj) != LMD_TYPE_MAP || !namespace_slot ||
+            get_type_id(*namespace_slot) != LMD_TYPE_MAP) return;
+    Item ctor = js_get_key_default(*namespace_slot,
+        make_string_item_crypto(constructor_name));
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return;
     Item proto = js_get_key_cstr(ctor, "prototype");
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(obj, proto);
@@ -7630,10 +7647,12 @@ static void crypto_set_method(Item ns, const char* name, Target target,
 
 extern "C" Item js_get_crypto_namespace(void) {
     if (!crypto_ensure_roots()) return ItemError;
+    Item* namespace_slot = crypto_namespace_slot_existing();
+    if (!namespace_slot) return ItemError;
+    Item& crypto_namespace = *namespace_slot;
     if (crypto_namespace.item != 0) return crypto_namespace;
 
-    // crypto's rooted realm range is registered before this lazy constructor
-    // starts, so its namespace slot is safe to publish across allocations.
+    // reserve the shared realm slot before lazy namespace construction allocates.
     crypto_namespace = js_new_object();
 
     JS_ROOTS(roots,
@@ -7762,13 +7781,14 @@ static void crypto_destroy_live_contexts(JsCryptoNativeState* state) {
 
 extern "C" void js_crypto_reset(void) {
     if (!js_active_runtime_state) return;
+    Item* namespace_slot = crypto_namespace_slot_existing();
     if (!crypto_native_state_current()) {
-        crypto_namespace = (Item){0};
+        if (namespace_slot) *namespace_slot = (Item){0};
         return;
     }
     crypto_reset_live_contexts();
     crypto_pseudo_random_warning_emitted = false;
-    crypto_namespace = (Item){0};
+    if (namespace_slot) *namespace_slot = (Item){0};
 }
 
 extern "C" void js_crypto_node_runtime_detach(void* session) {

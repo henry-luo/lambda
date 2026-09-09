@@ -28,20 +28,20 @@ struct NodeBlobUrlEntry {
 };
 
 struct NodeUrlSessionState {
-    void* session;
-    bool namespace_rooted;
+    JubePersistentValueSlots cache_values;
+    Item cache_items[1];
     ArrayList* blob_urls;
     int64_t blob_url_next_id;
-    Item module_namespace;
 };
 static NodeUrlSessionState* node_url_state(void) {
     return (NodeUrlSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_URL);
 }
-#define node_url_session (node_url_state()->session)
-#define node_url_namespace_rooted (node_url_state()->namespace_rooted)
+#define node_url_session (node_url_state()->cache_values.session)
+#define node_url_namespace_rooted \
+    jube_persistent_value_slots_attached(&node_url_state()->cache_values)
 #define js_blob_url_entries (node_url_state()->blob_urls)
 #define js_blob_url_next_id (node_url_state()->blob_url_next_id)
-#define url_module_namespace (node_url_state()->module_namespace)
+#define url_module_namespace (node_url_state()->cache_items[0])
 
 static bool node_url_ensure_host(void) {
     if (node_url_host && node_url_state()) return true;
@@ -1601,7 +1601,8 @@ Item node_url_namespace(void) {
 }
 
 static void node_url_cache_reset(void) {
-    url_module_namespace = (Item){0};
+    NodeUrlSessionState* state = node_url_state();
+    if (state) jube_persistent_value_slots_reset(&state->cache_values);
     js_blob_url_reset();
 }
 
@@ -1642,14 +1643,8 @@ void node_url_runtime_attach(void* session) {
     // A zeroed session starts blob identifiers at one without sharing a
     // counter between contexts.
     if (state->blob_url_next_id == 0) state->blob_url_next_id = 1;
-    node_url_session = session;
-    if (node_url_namespace_rooted) return;
-    if (node_url_host->node->roots->persistent_root_register(session,
-            &url_module_namespace.item) != 0) {
-        node_url_session = NULL;
-        return;
-    }
-    node_url_namespace_rooted = true;
+    jube_persistent_value_slots_attach(&state->cache_values, session,
+        node_url_host->node->roots, state->cache_items, 1);
 }
 
 void node_url_runtime_reset(void* session) {
@@ -1657,15 +1652,11 @@ void node_url_runtime_reset(void* session) {
 }
 
 void node_url_runtime_detach(void* session) {
-    if (!node_url_host || session != node_url_session) return;
+    NodeUrlSessionState* state = node_url_state();
+    if (!node_url_host || !state || session != state->cache_values.session) return;
     // Each entry unregisters its own Blob root before the shared namespace
     // root is released. The session-state capsule can then be dropped without
     // either a fixed root range or stale native rows.
     node_url_cache_reset();
-    if (node_url_namespace_rooted) {
-        node_url_host->node->roots->persistent_root_unregister(session,
-            &url_module_namespace.item);
-        node_url_namespace_rooted = false;
-    }
-    node_url_session = NULL;
+    jube_persistent_value_slots_detach(&state->cache_values);
 }

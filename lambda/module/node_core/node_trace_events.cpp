@@ -348,7 +348,7 @@ static NodeTraceState* node_trace_ensure_state(void) {
 }
 
 static Item node_trace_namespace_item(NodeTraceState* state) {
-    return state ? (Item){.item = state->namespace_item} : ItemNull;
+    return state ? state->namespace_items[0] : ItemNull;
 }
 
 Item node_trace_events_namespace(void) {
@@ -356,18 +356,15 @@ Item node_trace_events_namespace(void) {
     NodeTraceState* state = node_trace_ensure_state();
     if (!state || !node_trace_host || !node_trace_host->value ||
             !node_trace_host->value->new_object || !node_trace_host->node ||
-            !node_trace_host->node->roots ||
-            !node_trace_host->node->roots->persistent_root_register) return ItemNull;
-    if (state->namespace_item == 0) {
-        Item namespace_item = node_trace_host->value->new_object();
-        state->namespace_item = namespace_item.item;
+            !node_trace_host->node->roots) return ItemNull;
+    if (node_trace_namespace_item(state).item == 0) {
         void* session = jube_node_runtime_current_session();
-        if (!session || node_trace_host->node->roots->persistent_root_register(
-                session, &state->namespace_item) != 0) {
-            state->namespace_item = 0;
+        if (!session || jube_persistent_value_slots_attach(&state->namespace_values,
+                session, node_trace_host->node->roots, state->namespace_items, 1) != 0) {
             return ItemNull;
         }
-        state->namespace_rooted = true;
+        Item namespace_item = node_trace_host->value->new_object();
+        state->namespace_items[0] = namespace_item;
         Item create_tracing = jube_new_function(node_trace_host->script,
             node_trace_create_tracing, 1);
         Item get_enabled = jube_new_function(node_trace_host->script,
@@ -685,6 +682,7 @@ void node_trace_events_runtime_reset(void* session) {
     if (!state) return;
     node_trace_release_categories(state);
     node_trace_release_events(state);
+    jube_persistent_value_slots_reset(&state->namespace_values);
     state->initialized = false;
     state->file_written = false;
 }
@@ -692,11 +690,10 @@ void node_trace_events_runtime_reset(void* session) {
 void node_trace_events_runtime_detach(void* session) {
     NodeTraceState* state = jube_node_trace_state(session);
     if (!state) return;
-    if (state->namespace_rooted && node_trace_host && node_trace_host->node &&
-            node_trace_host->node->roots &&
-            node_trace_host->node->roots->persistent_root_unregister) {
-        node_trace_host->node->roots->persistent_root_unregister(session,
-                                                                  &state->namespace_item);
+    if (node_trace_host) {
+        jube_persistent_value_slots_detach(&state->namespace_values);
+    } else {
+        jube_persistent_value_slots_forget(&state->namespace_values);
     }
     node_trace_release_categories(state);
     node_trace_release_events(state);

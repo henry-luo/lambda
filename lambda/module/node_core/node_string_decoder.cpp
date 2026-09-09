@@ -11,17 +11,15 @@
 
 static const JubeHostAPI* node_string_decoder_host = NULL;
 struct NodeStringDecoderSessionState {
-    void* session;
-    bool rooted;
-    Item namespace_cache;
+    JubePersistentValueSlots cache_values;
+    Item cache_items[1];
 };
 static NodeStringDecoderSessionState* node_string_decoder_state(void) {
     return (NodeStringDecoderSessionState*)jube_node_current_module_state(
         JUBE_NODE_MODULE_STATE_STRING_DECODER);
 }
-#define node_string_decoder_session (node_string_decoder_state()->session)
-#define node_string_decoder_rooted (node_string_decoder_state()->rooted)
-#define node_string_decoder_namespace_cache (node_string_decoder_state()->namespace_cache)
+#define node_string_decoder_session (node_string_decoder_state()->cache_values.session)
+#define node_string_decoder_namespace_cache (node_string_decoder_state()->cache_items[0])
 
 extern "C" Item node_string_decoder_write(Item buffer);
 extern "C" Item node_string_decoder_end(Item buffer);
@@ -215,7 +213,8 @@ Item node_string_decoder_namespace(void) {
 }
 
 static void node_string_decoder_cache_reset(void) {
-    node_string_decoder_namespace_cache = (Item){0};
+    NodeStringDecoderSessionState* state = node_string_decoder_state();
+    if (state) jube_persistent_value_slots_reset(&state->cache_values);
 }
 
 int node_string_decoder_init(const JubeHostAPI* host) {
@@ -236,13 +235,12 @@ void node_string_decoder_runtime_attach(void* session) {
             !node_string_decoder_host->node->runtime || !node_string_decoder_host->node->roots ||
             !node_string_decoder_host->node->runtime->session_is_live ||
             !node_string_decoder_host->node->runtime->session_is_live(session)) return;
-    if (!jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_STRING_DECODER,
-            sizeof(NodeStringDecoderSessionState))) return;
-    node_string_decoder_session = session;
-    if (node_string_decoder_host->node->roots->persistent_root_register(session,
-            &node_string_decoder_namespace_cache.item) == 0) {
-        node_string_decoder_rooted = true;
-    }
+    NodeStringDecoderSessionState* state = (NodeStringDecoderSessionState*)
+        jube_node_session_module_state_get(session, JUBE_NODE_MODULE_STATE_STRING_DECODER,
+            sizeof(NodeStringDecoderSessionState));
+    if (!state) return;
+    jube_persistent_value_slots_attach(&state->cache_values, session,
+        node_string_decoder_host->node->roots, state->cache_items, 1);
 }
 
 void node_string_decoder_runtime_reset(void* session) {
@@ -252,12 +250,7 @@ void node_string_decoder_runtime_reset(void* session) {
 }
 
 void node_string_decoder_runtime_detach(void* session) {
-    if (session != node_string_decoder_session || !node_string_decoder_host) return;
-    node_string_decoder_cache_reset();
-    if (node_string_decoder_rooted) {
-        node_string_decoder_host->node->roots->persistent_root_unregister(session,
-            &node_string_decoder_namespace_cache.item);
-        node_string_decoder_rooted = false;
-    }
-    node_string_decoder_session = NULL;
+    NodeStringDecoderSessionState* state = node_string_decoder_state();
+    if (!state || session != state->cache_values.session || !node_string_decoder_host) return;
+    jube_persistent_value_slots_detach(&state->cache_values);
 }
