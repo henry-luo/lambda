@@ -8,8 +8,9 @@
 // be independent copies drifting apart, so each constraint would mark and
 // recalculate its own private variable and the plan would never converge.
 //
-// This port applies the handle-store idiom (C4.2e; doc/Lambda_Procedural.md
-// "Sharing Mutable State"): every record has exactly one owner, and every field
+// This port applies the handle-store idiom (S9.1.5v2; C4.2e in
+// doc/Lambda_Procedural.md "Sharing Mutable State"): every record has exactly
+// one owner, and every field
 // that used to hold a pointer holds an id into that owner instead.
 //
 //   w.vars[vid]  owns every Variable    — `out`, `v1`, `v2`, `sc`, `off` are vids
@@ -42,46 +43,53 @@ let K_SCALE = 4
 let NO_CON = 0    // handle-store spelling of a null constraint
 let NO_VAR = -1   // handle-store spelling of a null variable
 
-type Vec = any    // a growable array (built-in []/push/len/splice)
+// Growable stores remain open `array` carriers while their record values and
+// every scalar handle carry explicit contracts (D2.4.1, D3.2.4v2).
+type Vec = array
+type Variable = {val: int, constraints: array, determinedBy: int,
+    walkStrength: int, stay: int, mark: int}
+type Constraint = {cid: int, kind: int, strength: int, out: int,
+    satisfied: int, v1: int, v2: int, direction: int, sc: int, off: int}
+type World = {vars: array, cons: array, currentMark: int, nextCid: int}
 
 // --- Vector ---
 
-pn vec_new() any {
+pn vec_new() Vec {
     return []
 }
 
-pn vec_add(var v: Vec, item) any {
+pn vec_add(var v: Vec, item: int) any {
     push(v, item)
 }
 
-pn vec_at(var v: Vec, idx) any {
+pn vec_at(var v: Vec, idx: int) int {
     return v[idx]
 }
 
-pn vec_size(v: Vec) any {
+pn vec_size(v: Vec) int {
     return len(v)
 }
 
-pn vec_is_empty(v: Vec) any {
+pn vec_is_empty(v: Vec) int {
     if (len(v) == 0) { return 1 }
     return 0
 }
 
-pn vec_remove_first(var v: Vec) any {
+pn vec_remove_first(var v: Vec) int {
     if (len(v) == 0) { return NO_CON }
     var first = v[0]
     splice(v, 0, 1)
     return first
 }
 
-pn vec_with(item) any {
+pn vec_with(item: int) Vec {
     var v = vec_new()
     vec_add(v, item)
     return v
 }
 
 // Remove a cid from a vector of cids (elements are plain ints now).
-pn vec_remove_cid(var v: Vec, cid) any {
+pn vec_remove_cid(var v: Vec, cid: int) int {
     var sz = len(v)
     var found: int = -1
     var i: int = 0
@@ -100,52 +108,55 @@ pn vec_remove_cid(var v: Vec, cid) any {
 }
 
 // --- Strength helpers ---
-pn s_stronger(a, b) any {
+pn s_stronger(a: int, b: int) int {
     if (a < b) { return 1 }
     return 0
 }
 
-pn s_weaker(a, b) any {
+pn s_weaker(a: int, b: int) int {
     if (a > b) { return 1 }
     return 0
 }
 
-pn s_weakest(a, b) any {
+pn s_weakest(a: int, b: int) int {
     if (a > b) { return a }
     return b
 }
 
 // --- World ---
-pn world_new() any {
+pn world_new() World {
     // cons[0] is the NO_CON placeholder so a cid indexes its own slot.
-    var w = { vars: [], cons: [null], currentMark: 1, nextCid: 1 }
+    var w: World = { vars: [], cons: [null], currentMark: 1, nextCid: 1 }
     return w
 }
 
 // --- Variable: owned by w.vars, addressed by slot id ---
 
-pn var_new(var w) any {
+pn var_new(var w: World) int {
     var vid = len(w.vars)
-    push(w.vars, { val: 0, constraints: [], determinedBy: NO_CON,
-                   walkStrength: 10000, stay: 1, mark: 0 })
+    var variable: Variable = {
+        val: 0, constraints: [], determinedBy: NO_CON,
+        walkStrength: 10000, stay: 1, mark: 0
+    }
+    push(w.vars, variable)
     return vid
 }
 
-pn var_value(var w, aValue) any {
+pn var_value(var w: World, aValue: int) int {
     var vid = var_new(w)
     w.vars[vid].val = aValue
     return vid
 }
 
-// The constraint list is read, mutated and stored back (C4.2e): binding
-// `w.vars[vid].constraints` binds a copy under S9.1.2.
-pn var_add_constraint(var w, vid, ccid) any {
+// The constraint list is read, mutated and stored back: binding
+// `w.vars[vid].constraints` binds a copy under S9.1.2 (C4.2e).
+pn var_add_constraint(var w: World, vid: int, ccid: int) any {
     var cs: Vec = w.vars[vid].constraints
     vec_add(cs, ccid)
     w.vars[vid].constraints = cs
 }
 
-pn var_remove_constraint(var w, vid, ccid) any {
+pn var_remove_constraint(var w: World, vid: int, ccid: int) any {
     var cs: Vec = w.vars[vid].constraints
     vec_remove_cid(cs, ccid)
     w.vars[vid].constraints = cs
@@ -160,13 +171,13 @@ pn var_remove_constraint(var w, vid, ccid) any {
 //   { cid, kind, strength, out, satisfied, v1, v2, direction, sc, off }
 // out/v1/v2/sc/off are variable ids (NO_VAR when unused).
 
-pn c_is_input(var w, cid) any {
+pn c_is_input(var w: World, cid: int) int {
     var k = w.cons[cid].kind
     if (k == K_EDIT) { return 1 }
     return 0
 }
 
-pn c_is_satisfied(var w, cid) any {
+pn c_is_satisfied(var w: World, cid: int) int {
     var k = w.cons[cid].kind
     if (k == K_EDIT) {
         return w.cons[cid].satisfied
@@ -180,7 +191,7 @@ pn c_is_satisfied(var w, cid) any {
     return 0
 }
 
-pn c_add_to_graph(var w, cid) any {
+pn c_add_to_graph(var w: World, cid: int) any {
     var k = w.cons[cid].kind
     if (k == K_EDIT) {
         var_add_constraint(w, w.cons[cid].out, cid)
@@ -204,7 +215,7 @@ pn c_add_to_graph(var w, cid) any {
     }
 }
 
-pn c_remove_from_graph(var w, cid) any {
+pn c_remove_from_graph(var w: World, cid: int) any {
     var k = w.cons[cid].kind
     if (k == K_EDIT) {
         var o = w.cons[cid].out
@@ -236,7 +247,7 @@ pn c_remove_from_graph(var w, cid) any {
     }
 }
 
-pn c_choose_method(var w, cid, mark) any {
+pn c_choose_method(var w: World, cid: int, mark: int) int {
     var k = w.cons[cid].kind
     if (k == K_EDIT) {
         var o = w.cons[cid].out
@@ -319,7 +330,7 @@ pn c_choose_method(var w, cid, mark) any {
     return 0
 }
 
-pn c_mark_unsatisfied(var w, cid) any {
+pn c_mark_unsatisfied(var w: World, cid: int) any {
     var k = w.cons[cid].kind
     if (k == K_EDIT) { w.cons[cid].satisfied = 0 }
     if (k == K_STAY) { w.cons[cid].satisfied = 0 }
@@ -327,7 +338,7 @@ pn c_mark_unsatisfied(var w, cid) any {
     if (k == K_SCALE) { w.cons[cid].direction = 0 }
 }
 
-pn c_get_output(var w, cid) any {
+pn c_get_output(var w: World, cid: int) int {
     var k = w.cons[cid].kind
     if (k == K_EDIT) { return w.cons[cid].out }
     if (k == K_STAY) { return w.cons[cid].out }
@@ -337,7 +348,7 @@ pn c_get_output(var w, cid) any {
     return w.cons[cid].v1
 }
 
-pn c_mark_inputs(var w, cid, mark) any {
+pn c_mark_inputs(var w: World, cid: int, mark: int) int {
     var k = w.cons[cid].kind
     // Unary: no inputs
     if (k == K_EDIT) { return 0 }
@@ -365,7 +376,7 @@ pn c_mark_inputs(var w, cid, mark) any {
     return 0
 }
 
-pn c_inputs_known(var w, cid, mark) any {
+pn c_inputs_known(var w: World, cid: int, mark: int) int {
     var k = w.cons[cid].kind
     if (k == K_EDIT) { return 1 }
     if (k == K_STAY) { return 1 }
@@ -423,7 +434,7 @@ pn c_inputs_known(var w, cid, mark) any {
     return 1
 }
 
-pn c_recalculate(var w, cid) any {
+pn c_recalculate(var w: World, cid: int) int {
     var k = w.cons[cid].kind
     if (k == K_EDIT) {
         var o = w.cons[cid].out
@@ -497,7 +508,7 @@ pn c_recalculate(var w, cid) any {
     return 0
 }
 
-pn c_execute(var w, cid) any {
+pn c_execute(var w: World, cid: int) int {
     var k = w.cons[cid].kind
     // Edit and Stay: no-op
     if (k == K_EDIT) { return 0 }
@@ -537,20 +548,20 @@ pn c_execute(var w, cid) any {
 
 // --- Planner (planner state lives on the world) ---
 
-pn planner_new_mark(var w) any {
+pn planner_new_mark(var w: World) int {
     var cm = w.currentMark + 1
     w.currentMark = cm
     return cm
 }
 
-pn planner_next_cid(var w) any {
+pn planner_next_cid(var w: World) int {
     var nc = w.nextCid
     w.nextCid = nc + 1
     return nc
 }
 
 // c_satisfy: returns the overridden constraint id (or NO_CON)
-pn c_satisfy(var w, cid, mark) any {
+pn c_satisfy(var w: World, cid: int, mark: int) int {
     c_choose_method(w, cid, mark)
     var sat = c_is_satisfied(w, cid)
     if (sat == 1) {
@@ -587,12 +598,12 @@ pn c_satisfy(var w, cid, mark) any {
     return NO_CON
 }
 
-pn c_add_constraint(var w, cid) any {
+pn c_add_constraint(var w: World, cid: int) any {
     c_add_to_graph(w, cid)
     planner_incremental_add(w, cid)
 }
 
-pn c_destroy_constraint(var w, cid) any {
+pn c_destroy_constraint(var w: World, cid: int) any {
     var sat = c_is_satisfied(w, cid)
     if (sat == 1) {
         planner_incremental_remove(w, cid)
@@ -602,30 +613,31 @@ pn c_destroy_constraint(var w, cid) any {
 
 // --- Constraint constructors: allocate into w.cons, return the cid ---
 
-pn con_alloc(var w, kind, strength) any {
+pn con_alloc(var w: World, kind: int, strength: int) int {
     var cid = planner_next_cid(w)
-    push(w.cons, { cid: cid, kind: kind, strength: strength,
-                   out: NO_VAR, satisfied: 0,
-                   v1: NO_VAR, v2: NO_VAR, direction: 0,
-                   sc: NO_VAR, off: NO_VAR })
+    var constraint: Constraint = {
+        cid: cid, kind: kind, strength: strength, out: NO_VAR, satisfied: 0,
+        v1: NO_VAR, v2: NO_VAR, direction: 0, sc: NO_VAR, off: NO_VAR
+    }
+    push(w.cons, constraint)
     return cid
 }
 
-pn edit_constraint_new(var w, vid, strength) any {
+pn edit_constraint_new(var w: World, vid: int, strength: int) int {
     var cid = con_alloc(w, K_EDIT, strength)
     w.cons[cid].out = vid
     c_add_constraint(w, cid)
     return cid
 }
 
-pn stay_constraint_new(var w, vid, strength) any {
+pn stay_constraint_new(var w: World, vid: int, strength: int) int {
     var cid = con_alloc(w, K_STAY, strength)
     w.cons[cid].out = vid
     c_add_constraint(w, cid)
     return cid
 }
 
-pn equality_constraint_new(var w, v1, v2, strength) any {
+pn equality_constraint_new(var w: World, v1: int, v2: int, strength: int) int {
     var cid = con_alloc(w, K_EQUAL, strength)
     w.cons[cid].v1 = v1
     w.cons[cid].v2 = v2
@@ -633,7 +645,8 @@ pn equality_constraint_new(var w, v1, v2, strength) any {
     return cid
 }
 
-pn scale_constraint_new(var w, src, scale, offset, dest, strength) any {
+pn scale_constraint_new(var w: World, src: int, scale: int, offset: int,
+        dest: int, strength: int) int {
     var cid = con_alloc(w, K_SCALE, strength)
     w.cons[cid].v1 = src
     w.cons[cid].v2 = dest
@@ -644,7 +657,7 @@ pn scale_constraint_new(var w, src, scale, offset, dest, strength) any {
 }
 
 // --- Planner methods ---
-pn planner_incremental_add(var w, cid) any {
+pn planner_incremental_add(var w: World, cid: int) any {
     var mark = planner_new_mark(w)
     var overridden = c_satisfy(w, cid, mark)
     while (overridden != NO_CON) {
@@ -652,11 +665,11 @@ pn planner_incremental_add(var w, cid) any {
     }
 }
 
-pn planner_incremental_remove(var w, cid) any {
+pn planner_incremental_remove(var w: World, cid: int) any {
     var out = c_get_output(w, cid)
     c_mark_unsatisfied(w, cid)
     c_remove_from_graph(w, cid)
-    var unsatisfied = planner_remove_propagate_from(w, out)
+    var unsatisfied: Vec = planner_remove_propagate_from(w, out)
     var usz = vec_size(unsatisfied)
     var i: int = 0
     while (i < usz) {
@@ -666,7 +679,7 @@ pn planner_incremental_remove(var w, cid) any {
     }
 }
 
-pn planner_extract_plan(var w, var constraints: Vec) any {
+pn planner_extract_plan(var w: World, var constraints: Vec) Vec {
     var sources: Vec = vec_new()
     var csz = vec_size(constraints)
     var i: int = 0
@@ -685,7 +698,7 @@ pn planner_extract_plan(var w, var constraints: Vec) any {
     return plan
 }
 
-pn planner_make_plan(var w, var sources: Vec) any {
+pn planner_make_plan(var w: World, var sources: Vec) Vec {
     var mark = planner_new_mark(w)
     var plan: Vec = vec_new()
     var todo = sources
@@ -707,7 +720,7 @@ pn planner_make_plan(var w, var sources: Vec) any {
     return plan
 }
 
-pn planner_propagate_from(var w, vid) any {
+pn planner_propagate_from(var w: World, vid: int) any {
     var todo: Vec = vec_new()
     planner_add_constraints_consuming_to(w, vid, todo)
     var empty = vec_is_empty(todo)
@@ -720,7 +733,7 @@ pn planner_propagate_from(var w, vid) any {
     }
 }
 
-pn planner_add_constraints_consuming_to(var w, vid, var coll: Vec) any {
+pn planner_add_constraints_consuming_to(var w: World, vid: int, var coll: Vec) any {
     var det = w.vars[vid].determinedBy
     var cs: Vec = w.vars[vid].constraints
     var csz = vec_size(cs)
@@ -737,7 +750,7 @@ pn planner_add_constraints_consuming_to(var w, vid, var coll: Vec) any {
     }
 }
 
-pn planner_add_propagate(var w, cid, mark) any {
+pn planner_add_propagate(var w: World, cid: int, mark: int) int {
     var todo: Vec = vec_with(cid)
     var empty = vec_is_empty(todo)
     while (empty == 0) {
@@ -755,7 +768,7 @@ pn planner_add_propagate(var w, cid, mark) any {
     return 1
 }
 
-pn planner_change(var w, vid, newValue) any {
+pn planner_change(var w: World, vid: int, newValue: int) any {
     var editC = edit_constraint_new(w, vid, S_PREFERRED)
     var editV: Vec = vec_with(editC)
     var plan: Vec = planner_extract_plan(w, editV)
@@ -775,7 +788,7 @@ pn planner_change(var w, vid, newValue) any {
     c_destroy_constraint(w, editC)
 }
 
-pn planner_remove_propagate_from(var w, out) any {
+pn planner_remove_propagate_from(var w: World, out: int) Vec {
     var unsatisfied: Vec = vec_new()
     w.vars[out].determinedBy = NO_CON
     w.vars[out].walkStrength = S_ABSOLUTE_WEAKEST
@@ -818,7 +831,7 @@ pn planner_remove_propagate_from(var w, out) any {
 
 // --- Benchmark tests ---
 
-pn chain_test(n) any {
+pn chain_test(n: int) int {
     var w = world_new()
     // Create n+1 variables
     var vars: Vec = vec_new()
@@ -873,7 +886,7 @@ pn chain_test(n) any {
     return 1
 }
 
-pn projection_test(n) any {
+pn projection_test(n: int) int {
     var w = world_new()
     var dests: Vec = vec_new()
     var scale = var_value(w, 10)

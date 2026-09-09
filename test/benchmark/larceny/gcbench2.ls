@@ -2,7 +2,7 @@
 // GC stress test with typed maps — validates GC correctness under allocation pressure
 // Uses typed Node maps with container fields to stress GC compaction + tracing
 
-type Node = {left: map?, right: map?}
+type Node = {left: Node?, right: Node?}
 
 pn make_tree(depth: int) Node {
     if (depth == 0) {

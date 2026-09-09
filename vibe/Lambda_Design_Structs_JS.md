@@ -36,6 +36,16 @@
 > runtime primitives in `lambda/runtime` that the items promote. Radiant is
 > a compatibility gate. All anchors were re-resolved against `master` on
 > 2026-09-07.
+>
+> **Phase 2 addendum status: PROPOSED for user ratification — 2026-09-09.**
+> Section 8 re-measures the post-JSCU9–JSCU24 tree and extends this ledger with
+> **JSCU27–JSCU35**. The addendum changes no formal ruling: it continues the
+> implementation of **D1.2–D1.3**, **D2.4.1**, **D5.1.1v2**, **D5.1.3**,
+> **D5.3.5**, **D5.4.2–D5.4.4**, **D6.2.1–D6.2.3v2**, **D6.3.1**,
+> **D7.4.1v2–D7.4.3**, **D8.1.3v10** and **D8.2.4–D8.2.6**. Its controlling
+> rule is stricter than merely reducing `sizeof`: **one semantic concept has
+> one authority; one storage/lifecycle mechanism has one runtime data
+> structure.**
 
 ## 0. Why these four, and why in this order
 
@@ -1449,6 +1459,343 @@ explicit decision rather than being folded into the next slice.
   and flags. The frames become `ArrayList`s beside the vectors under
   JSCU13; whether a direct-eval nesting depth remains a checked policy
   limit is decided when the journals move.
+
+---
+
+## 8. Phase 2 — one concept/mechanism, one runtime data structure
+
+### 8.1 Boundary of the rule
+
+Two records are consolidated only when they have the same semantic identity,
+owner, lifetime, trace/finalize contract, mutation protocol and ordering
+semantics. If only their storage mechanism is shared, the shared mechanism or
+header is unified while semantic tails remain distinct. This is D1.3's
+guest-semantic boundary applied to data layout: reuse contracts below the
+boundary, never inherit another concept's semantics by accident.
+
+Therefore this phase does **not** aim at one large JS-state union. It removes
+duplicate authorities:
+
+- one directory owns context subsystem state;
+- one activation record owns a synchronous JS call's ambient state;
+- one realm slot store owns fixed rooted singleton/cache Items;
+- one global-environment table owns global binding records;
+- one job envelope and queue mechanism carry queued callbacks;
+- one rid table owns native resources;
+- one environment carrier owns outliving lexical storage;
+- one immutable code record owns facts about a function definition.
+
+Generator, async and Promise state machines remain distinct. So do nextTick,
+Promise-microtask, timer and RAF ordering; Lambda and JavaScript function value
+semantics; AST and MIR semantic walkers; transient property descriptors and
+stored accessor cells; and operation-specific native request payloads. JSCU8,
+D6.2.2v2, D6.3.1 and D8.1.3v10 require those distinctions.
+
+### 8.2 Post-round-1 tree census
+
+The 2026-09-09 current-tree layout probe changes the target. The first round
+removed the dominant generator/async/web slabs and reduced `JsFunction`, but
+several migrations stopped after replacing embedded records with pointers.
+
+| Structure / mechanism | Current macOS layout | Residue |
+|---|---:|---|
+| `JsRuntimeState` | **9,120 B** | JSCU16's ≤ 1,024 B ratchet is still missed by 8,096 B |
+| eagerly allocated JS realm records | **≥ 88,240 B measured** | `js_runtime_state_alloc_records` allocates seventeen records, including optional Node/Test262/readline/assert state |
+| `NodeRuntimeSession` | **805,648 B** | trace, permissions and diagnostics are embedded even when unused |
+| `NodeTraceState` | **528,928 B** | 64 categories and 2,048 events are inline |
+| `JsPermissionPolicy` | **263,175 B** | two 128-entry tables each inline a `PATH_MAX` path |
+| `JsDiagnosticsChannelState` | **8,832 B** | parallel 512-entry name/channel arrays plus 64 deferred errors |
+| `JsFunction` | **128 B** | value size ratchet is met; immutable per-definition facts still have no shared `FunctionCode` owner |
+| `JsMirTranspiler` / `JsMirFunctionEmitter` | **664 B / 1,560 B** | bulk is solved; duplicated cache/cursor/checkpoint shapes remain |
+
+`EvalContext` still carries `render_map_state`, `template_state_store`,
+`jube_node_session` and `js_state` beside `capsules[]`/`capsule_ops[]`.
+`ContextCapsuleId` names only DOM/web capsules. `NodeRuntimeSession` adds a
+second `module_states[]` directory. `JsRuntimeState` then acts as a third
+directory and manually allocates/frees its records. That is one context-state
+concept with three ownership mechanisms, contrary to D5.4.2–D5.4.4.
+
+Root ownership has the same residue. `JsRootRange`, `JsRootedState`,
+`JsNamespaceState`, the 64-entry reset registry and the hand-written
+`JS_RUNTIME_ROOT_STORAGE` count catalog coexist with `RootVector`. The source
+already records the failure mode: a range beginning at a derived field left
+the inherited namespace Item unrooted and scanned one Item past the struct.
+The layout-dependent count is the duplicated authority; the runtime record
+itself should determine its live Item extent (D5.3.5).
+
+Finally, ordinary semantic collections retain allocation-policy caps in their
+type layouts: 1,024 timers, 1,024 RAF callbacks, 512 global-module bindings,
+1,024 lexical bindings, 256 async hooks, 1,024 pending destroys, 256
+AsyncLocalStorage instances, 256 readline input/interface pairs, and the
+Test262/process/diagnostics tables. A language or protocol bound may remain a
+checked policy; an implementation capacity does not belong in the semantic
+record.
+
+### 8.3 JSCU27 — the context capsule directory is the only subsystem owner
+
+**Decision.** Replace the parallel `EvalContext::capsules[]` and
+`capsule_ops[]` fields with one `ContextCapsuleDirectory`. Its per-context
+state is only indexed slots and lifecycle/generation bits; a frozen global
+descriptor table owns each ID's name, size, lifetime and operations, per
+D5.4.4. An indexed read remains ordinary owner-thread loads with no lock,
+atomic or repeated catalog search.
+
+Move `render_map_state`, `template_state_store`, `jube_node_session` and
+`js_state` behind IDs. Register separate IDs for JS execution state, realm
+slots, global environment, code store, event loop, timers, Promise state,
+Node session/core-module state, rendering/template state and the existing DOM
+peers. `JsRuntimeState` is not a directory inside this directory; its small
+irreducible remainder becomes `JsExecutionState`.
+
+The descriptor declares a semantic lifetime scope: the existing `CONTEXT` or
+`REALM`, or the new `NODE_SESSION`. Construction, quiesce, heap release,
+heap replacement, checkpoint restoration, session detach and final destroy
+are directory walks over the matching scope. This completes JSCU18's
+"reset becomes construction" contract from D5.4.3.
+
+Node modules obtain their registered slot through the opaque Jube host API.
+They do not receive `EvalContext*`, and `NodeRuntimeSession::module_states[]`
+is deleted; this preserves D7.4.3 while removing the child directory.
+
+### 8.4 JSCU28 — one synchronous JavaScript call activation
+
+**Decision.** Introduce one `JsCallActivation` for the ambient state of a
+synchronous call:
+
+- `this`, `newTarget`, callee and private home class;
+- generator callee prototype where construction needs it;
+- actual argument span, count, source span and strictness;
+- the previous activation link and non-Item execution flags.
+
+Its Item fields occupy precise side-root slots; POD fields live in the native
+activation. `JsExecutionState` carries only the current-activation pointer.
+Call and construct entries create one activation and every helper reads that
+record instead of unrelated singleton fields. Return pops it once. Suspension
+is the D5.1.3 re-homing barrier: only facts needed after the native frame
+returns are copied into the suspended carrier.
+
+This deletes `current_this`, `new_target`, `current_private_home_class`,
+`generator_callee_proto`, `pending_call_args`, `pending_args_callee` and their
+save/restore clusters from `JsRuntimeState`. It also completes D6.2.2v2:
+`newTarget` is supplied to the construct capability and recorded in the
+activation, never communicated through a pending one-shot side channel.
+
+### 8.5 JSCU29 — one realm slot store and one global environment
+
+**Decision A: singleton/cache Items.** Introduce `JsRealmSlots`, containing
+one `RootVector` and a generated `JsRealmSlotId` catalog. It owns namespace
+objects, prototypes, constructors, well-known objects, intrinsic callables
+and small realm string caches. Optional slot ranges allocate RootVector blocks
+on first use. Typed accessors preserve subsystem names; storage and rooting
+have one authority.
+
+Delete `JsRootRange`, `JsRootedState`, `JsNamespaceState`,
+`root_range_registry[]`, `JS_RUNTIME_ROOT_STORAGE`, its numeric extents and
+its builtin-cache reset exemption. Heap replacement clears the one store by
+its declared lifetime; no reset walk rediscovers which fields are roots.
+
+**Decision B: global bindings.** Consolidate `JsGlobalBindingState` and
+`JsGlobalVarModuleBindingState` into one dynamic `JsGlobalEnvironment` with
+one `JsGlobalBinding` row per declared binding. The row owns key, value or
+module cell, storage kind, mutability and initialization state. Declarative,
+object-backed and module-backed behavior remain explicit kinds; their key and
+metadata no longer live in parallel arrays with independent counts.
+
+The same row discipline applies locally where a pair is one concept:
+readline input/interface becomes `JsReadlineInput`; diagnostics name/channel
+becomes `JsDiagnosticsChannel`; RAF id/callback becomes a job record. It does
+not justify a universal table for unrelated records.
+
+### 8.6 JSCU30 — one queued-job envelope and queue mechanism
+
+**Decision.** Define one `JsAsyncContextSnapshot` containing async resource,
+AsyncLocalStorage context and domain, and one `RuntimeJob` containing callback,
+argument pack, context snapshot, job kind and optional id. `RuntimeJobQueue`
+is the single queue storage mechanism.
+
+nextTick, Promise microtasks, unhandled-rejection work and RAF each instantiate
+a separately named queue. Their priority, checkpoint and drain rules stay
+separate under D6.3.1. A timer owns a `RuntimeJob` plus timer-only due/repeat
+and libuv state; Promise reaction lists remain Promise semantic state but
+materialize the same job envelope when scheduled.
+
+This replaces the current split among four-Item `RuntimeAsyncDeque` rows,
+RAF's callback/id parallel rings and the duplicated callback/resource/ALS/
+domain fields in `JsTimerHandle`. The implementation may use reusable chunks
+instead of one allocation per microtask, but the chunk layout must precisely
+trace the `RuntimeJob` Item fields and the release-build queue benchmark is a
+gate. Storage optimization may not recreate a second job record shape.
+
+### 8.7 JSCU31 — one generation-checked runtime resource table
+
+**Decision.** Promote the Jube Node generation-checked rid table to the
+runtime-owned `RuntimeResourceTable`, one per context. A resource entry owns:
+
+- generation-checked rid and immutable kind descriptor;
+- script-visible owner `Item`;
+- native payload and close/finalize operation;
+- referenced, closing and completion state.
+
+Timers, fetch work, filesystem handles, sockets, TLS handles and other native
+resources use this table rather than private pointer arrays or indexes.
+Operation-specific records retain their semantic tail but begin with one
+`RuntimeAsyncRequest` header for context/rid, completion post, cancellation
+and teardown. No string prefix selects executable behavior; the frozen kind
+descriptor does.
+
+Jube consumes the same table through its host API. Modules remain shielded
+from the loop and cannot pump, poll or drain it. This is the concrete shared
+micro-kernel required by D1.2 and D7.4.1v2–D7.4.2, and generalizes JSCU24
+instead of adding another JS resource mechanism beside it.
+
+### 8.8 JSCU32 — one environment carrier and one suspension prefix
+
+**Decision A: environments.** Replace `GC_TYPE_JS_ENV` and
+`GC_TYPE_JS_INTERP_ENV` with one tail-bearing `GcEnvironment` allocation and
+one tracer. A layout descriptor declares the outer link, traced header Items,
+Item-slot count, scalar-tail extent and semantic flags. Compiled Lambda,
+compiled JS and interpreted JS may expose different accessors, but allocate
+the same carrier and rely on the same trace/re-home contract.
+
+This unifies storage, not capture semantics. Lambda captures immutable Item
+snapshots while JavaScript captures mutable lexical cells by reference, as
+D6.2.3v2 requires. D8.1.3v10 still permits distinct AST and MIR activation
+records and semantic walkers.
+
+**Decision B: suspension.** Extract the common execution/continuation fields
+of `JsGeneratorStateRecord` and `JsAsyncContextStateRecord` into one
+`JsSuspendedActivation` prefix: runtime owner, resume entry, environment,
+state/program point, AST function/arguments/environments, replay storage and
+continuation ownership. Generator and async carriers retain distinct semantic
+tails and state machines. The one carrier/tracer owns all outliving Items and
+scalar tail state under D5.1.1v2 and D5.1.3.
+
+JSCU25's choice to represent a JS async activation as a weakly registered
+`LambdaTask` is scheduler semantics, not a prerequisite for this storage
+unification. JSCU26 may then reuse the carrier for `LambdaAsyncFrame` without
+forcing generator, async and Lambda-task behavior into one state machine.
+
+### 8.9 JSCU33 — one code authority; accessor cells are not functions
+
+**Decision A: callable code.** Complete JSCU19 rather than treating the
+128-byte `JsFunction` result as the end of the split. A construction-time
+builder creates and seals one immutable `CallableCode` per static definition;
+`JsCallableCode` extends it with distinct call/construct entries, body kind,
+module identity, source and JS catalog metadata. `Function` and `JsFunction`
+remain separate language value records containing value state and a code
+reference. AST body facts belong to the retained Script/code owner, not every
+closure made from that definition.
+
+This gives D6.2.1's definition-site identity, executable entries and signature
+one authority while preserving D6.2.2v2's separate JavaScript `[[Call]]` and
+`[[Construct]]` capabilities. Any generated-code offset migration retains the
+JSCUO6 static-assert inventory and lands only with release call/new gates.
+
+**Decision B: accessors.** Replace `JsAccessorPair`'s fake `LMD_TYPE_FUNC`
+layout with a dedicated internal `JsAccessorCell` carrier and trace rule. A
+shape marked `JSPD_IS_ACCESSOR` stores the internal cell pointer; generic Item
+or function operations never observe it. Its getter and setter Items are the
+only outgoing edges.
+
+An accessor pair is property storage, not a function value. The present
+`layout_magic` branch makes every FUNC tracer/destructor responsible for three
+unrelated layouts and makes safety depend on every consumer checking the
+shape flag first. The dedicated carrier restores D2.4.1's single authority
+and D6.2.1's meaning of a function value. Transient `JsPropertyDescriptor`
+remains distinct because it describes an operation, not stored identity.
+
+### 8.10 JSCU34 — one ArrayBuffer-view authority
+
+**Decision.** Introduce a `JsArrayBufferView` header owning buffer pointer,
+buffer Item identity, byte offset, explicit/tracking length and view kind.
+`JsDataView` consists of that header; `JsTypedArray` extends it with element
+type, Node Buffer brand and its derived `ArrayNum` view.
+
+Detachment, resizable-buffer out-of-bounds state, live-length derivation and
+`.buffer` identity read the common header. `ArrayNum` offset/length data is a
+derived cache, not a competing authority. DataView and each typed-array brand
+retain their distinct operations; only their ArrayBuffer-view mechanism is
+unified (D2.4.1).
+
+### 8.11 JSCU35 — consolidate compiler mechanisms, not semantic facts
+
+The runtime changes above take priority. The remaining compiler duplicates
+are smaller but are authority-drift risks:
+
+1. Define one `JsMirNameCache` record and instantiate it for property Items
+   and module NameIds. The result domains stay typed; the identical key,
+   function-owner, count and 32-entry storage shape is written once.
+2. Define one `JsMirCursor` containing current function item/function,
+   `JsFuncCollected`, class, scope environment/count and scope depth. Nested
+   function emission and branch lowering use one checkpoint/restore API;
+   branch checkpoints add a variable-scope transaction and closure-journal
+   mark instead of copying a second cursor shape.
+3. Replace the method/static-field/instance-field/static-block arrays in
+   `JsClassEntry` with one ordered tagged `JsClassMember` array. The member
+   kind selects its method, field or static-block tail and preserves source
+   evaluation order.
+4. Make shared `BindingId`/`FnAnalysis` facts authoritative. Backend records
+   retain only IDs and emitted artifacts instead of repeating name, binding,
+   binding node and declaration-kind facts across `JsModuleConstEntry`,
+   `JsNameSetEntry` and lowering maps.
+
+These implement D2.4.1 and D8.2.4–D8.2.6. They do not merge compiler semantic
+facts with emitted MIR state, and do not reopen the already-effective split
+between the 664-byte module coordinator and 1,560-byte function emitter.
+
+### 8.12 Landing order and acceptance
+
+Recommended order:
+
+1. **Bank isolated Node shrinkage.** Make trace categories/events,
+   permission grants/paths, diagnostics rows/errors and the CommonJS cache
+   directory dynamic and lazy. Read/write grants share one grant row with a
+   permission-kind mask; paths are normalized owned strings, never
+   `PATH_MAX` arrays.
+2. **Land JSCU27.** Move the four direct `EvalContext` owners and the Node
+   module slots into the one directory; make the lifecycle walks complete.
+3. **Land JSCU28–JSCU29.** Remove call side channels and the private root
+   registry before more state begins depending on either.
+4. **Land JSCU30–JSCU31.** Move jobs first, then resource owners, preserving
+   queue policy while deleting fixed handle tables.
+5. **Land JSCU33's accessor correction, then JSCU34.** Both are contained
+   carrier changes with direct conformance suites.
+6. **Land JSCU32 and JSCU33's callable-code half.** These touch generated ABI
+   and GC tracing, so they follow the ownership/lifecycle foundation and
+   require the broadest forced-GC gates.
+7. **Land JSCU35.** Compiler-only consolidation follows runtime correctness;
+   it must preserve the D8.2.6 compiler-time ratios.
+
+Structural ratchets:
+
+- `sizeof(JsExecutionState)` ≤ **512 B** and no `JsRuntimeState` directory;
+- `sizeof(NodeRuntimeSession)` ≤ **256 B**, excluding lazy capsule/resource
+  allocations;
+- zero direct subsystem-state pointers on `EvalContext` outside
+  `ContextCapsuleDirectory`;
+- zero `JsRootRange`, `JsRootedState`, `JsNamespaceState`, JS root reset
+  registry and hand-written root-range count;
+- an empty realm constructs only the execution, realm-slot and global-
+  environment capsules; Node/Test262/readline/assert state is absent until
+  first use;
+- one context rid table; timer/RAF/Node/fetch code owns no fixed handle table;
+- `LMD_TYPE_FUNC` allocations are actual callable values only;
+- one environment GC tag, allocation path and tracer;
+- no runtime `*_MAX` capacity unless the declaration cites the language,
+  protocol, security or explicit nesting-policy bound it enforces;
+- each retired cap has a focused test at old-limit + 1, including 1,025
+  timers, 1,025 RAF jobs, 513 module-backed globals, 1,025 lexical bindings,
+  257 async hooks, 257 ALS instances, 129 permission grants and 513
+  diagnostics channels.
+
+Every slice runs the §6 common gates plus its subsystem tests. JSCU27–JSCU34
+add forced-GC and heap-replacement runs across at least ten realm epochs;
+JSCU27/JSCU31 add two-context construct/destroy and Node attach/detach runs;
+JSCU28/JSCU32/JSCU33 add MIR and AST call/generator/async/closure coverage;
+JSCU34 adds resizable/detached ArrayBuffer, DataView, TypedArray and Node Buffer
+coverage. Queue/call/compiler performance is measured only with `make release`
+under rule 10. Each slice ends with the struct census, eager-allocation census
+and capsule-construction census recorded beside the old/new values.
 
 ---
 

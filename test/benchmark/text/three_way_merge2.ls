@@ -1,11 +1,11 @@
-// T22-0 typed source: only line parameters carry String contracts.
+// Typed variant: line and word collections remain homogeneous across every merge stage.
 
 let merge_rounds = 11000
 let line_count = 768
 let modulus = 1000000007
 
-pn build_base() {
-    var lines = []
+pn build_base() string[] {
+    var lines: array = []
     var index = 0
     while (index < line_count) {
         lines.push("section " ++ string(index) ++
@@ -15,8 +15,8 @@ pn build_base() {
     lines
 }
 
-pn make_variant(base, side: string) {
-    var lines = []
+pn make_variant(base: string[], side: string) string[] {
+    var lines: array = []
     var index = 0
     while (index < len(base)) {
         var line = base[index]
@@ -34,9 +34,10 @@ pn make_variant(base, side: string) {
     lines
 }
 
-fn word_at(words, index) => if (index < len(words)) words[index] else ""
+fn word_at(words: string[], index: int) string =>
+    if (index < len(words)) words[index] else ""
 
-pn merge_words(base_line: string, left_line: string, right_line: string) {
+pn merge_words(base_line: string, left_line: string, right_line: string) string {
     if (left_line == right_line) { return left_line }
     if (left_line == base_line) { return right_line }
     if (right_line == base_line) { return left_line }
@@ -46,7 +47,7 @@ pn merge_words(base_line: string, left_line: string, right_line: string) {
     var count = len(base_words)
     if (len(left_words) > count) { count = len(left_words) }
     if (len(right_words) > count) { count = len(right_words) }
-    var words = []
+    var words: array = []
     var index = 0
     while (index < count) {
         let base_word = word_at(base_words, index)
@@ -67,8 +68,8 @@ pn merge_words(base_line: string, left_line: string, right_line: string) {
     join(words, " ")
 }
 
-pn merge_lines(base_lines, left_lines, right_lines) {
-    var merged = []
+pn merge_lines(base_lines: string[], left_lines: string[], right_lines: string[]) string {
+    var merged: array = []
     var index = 0
     while (index < len(base_lines)) {
         let base_line = base_lines[index]

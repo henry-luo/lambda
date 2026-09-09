@@ -1,42 +1,48 @@
-// T22-0 typed source: only text-token and line parameters carry String contracts.
+// Typed variant: stable log and aggregation records cross procedures by named contracts.
+
+type LogRecord = {timestamp: string, level: string, service: string, status: int,
+    latency: int, region: string, route: string, bytes: int, message: string}
+type LogGroup = {count: int, errors: int, slow: int, totalLatency: int, totalBytes: int}
+type LogGroups = {api: LogGroup, worker: LogGroup, db: LogGroup, cache: LogGroup}
+type LogResult = {groups: LogGroups, accepted: int, rejected: int}
 
 let log_rounds = 180
 let log_count = 12000
 let modulus = 1000000007
 
-fn pad2(value) {
+fn pad2(value: int) string {
     if (value < 10) { "0" ++ string(value) }
     else { string(value) }
 }
 
-fn log_level(index) {
+fn log_level(index: int) string {
     if (index % 13 == 0) { "ERROR" }
     else if (index % 5 == 0) { "WARN" }
     else { "INFO" }
 }
 
-fn log_status(index) {
+fn log_status(index: int) int {
     if (index % 19 == 0) { 503 }
     else if (index % 7 == 0) { 404 }
     else { 200 }
 }
 
-fn log_route(index) {
+fn log_route(index: int) string {
     if (index % 2 == 0) { "/v1/items" } else { "/v1/search" }
 }
 
-fn log_message(index) {
+fn log_message(index: int) string {
     if (index % 11 == 0) { "retry-scheduled" } else { "request-complete" }
 }
 
-fn make_log_line(index) {
+fn make_log_line(index: int) string {
     let hour = pad2(index % 24)
     let minute = pad2(index % 60)
     let second = pad2((index * 7) % 60)
     let timestamp = "2026-09-07T" ++ hour ++ ":" ++ minute ++ ":" ++ second ++ "Z"
     let level = log_level(index)
-    let services = ["api", "worker", "db", "cache"]
-    let regions = ["us-east", "eu-west", "ap-south"]
+    let services: string[] = ["api", "worker", "db", "cache"]
+    let regions: string[] = ["us-east", "eu-west", "ap-south"]
     let service = services[index % len(services)]
     let region = regions[(index * 3) % len(regions)]
     let status = log_status(index)
@@ -65,8 +71,8 @@ fn make_log_line(index) {
     }
 }
 
-pn build_logs() {
-    var lines = []
+pn build_logs() string[] {
+    var lines: array = []
     var index = 0
     while (index < log_count) {
         lines.push(make_log_line(index))
@@ -75,7 +81,7 @@ pn build_logs() {
     lines
 }
 
-pn set_field(var record, key: string, value: string) {
+pn set_field(var record: LogRecord, key: string, value: string) any {
     if (key == "level") { record.level = value }
     else if (key == "service") { record.service = value }
     else if (key == "status") { record.status = int(value) }
@@ -86,9 +92,9 @@ pn set_field(var record, key: string, value: string) {
     else if (key == "message") { record.message = value }
 }
 
-pn parse_log_line(line: string) {
+pn parse_log_line(line: string) LogRecord {
     let fields = split(line, " ")
-    var record = {
+    var record: LogRecord = {
         timestamp: fields[0], level: "", service: "", status: 0, latency: 0,
         region: "", route: "", bytes: 0, message: ""
     }
@@ -110,17 +116,20 @@ pn parse_log_line(line: string) {
     record
 }
 
-fn empty_group() => {count: 0, errors: 0, slow: 0, totalLatency: 0, totalBytes: 0}
+fn empty_group() LogGroup =>
+    {count: 0, errors: 0, slow: 0, totalLatency: 0, totalBytes: 0}
 
-pn add_to_group(var group, record) {
+pn add_to_group(var group: LogGroup, record: LogRecord) any {
     group.count = group.count + 1
     group.totalLatency = group.totalLatency + record.latency
     group.totalBytes = group.totalBytes + record.bytes
     if (record.latency >= 500) { group.slow = group.slow + 1 }
 }
 
-pn process_logs(lines) {
-    var groups = {api: empty_group(), worker: empty_group(), db: empty_group(), cache: empty_group()}
+pn process_logs(lines: string[]) LogResult {
+    var groups: LogGroups = {
+        api: empty_group(), worker: empty_group(), db: empty_group(), cache: empty_group()
+    }
     var accepted = 0
     var rejected = 0
     var index = 0
