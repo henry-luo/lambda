@@ -1230,6 +1230,8 @@ typedef struct Input {
     Arena* arena;               // arena allocator
     NamePool* name_pool;        // centralized name management
     ShapePool* shape_pool;      // shape deduplication (NEW)
+    TypeMap* shape_transition_root;
+    int shape_transition_shapes;      // graph size, bounded by MAX_SHAPE_GRAPH
     ArrayList* type_list;       // list of types
     Item root;
     Input* parent;              // parent Input for hierarchical ownership (nullable)

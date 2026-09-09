@@ -942,8 +942,7 @@ static Item js_assert_strict_equal_message(Item actual, Item expected) {
         strbuf_append_str(sb, "- {\n");
         for (int64_t i = 0; i < len; i++) {
             Item key = js_elements_get_int(keys, i);
-            if (js_assert_string_equals(key, "__strict_arguments__")) continue;
-            Item av = js_get_key_default(actual, key);
+                Item av = js_get_key_default(actual, key);
             Item ev = js_get_key_default(expected, key);
             Item eq = js_util_isDeepStrictEqual(av, ev);
             bool same = (get_type_id(eq) == LMD_TYPE_BOOL && it2b(eq)) ||
@@ -1226,10 +1225,7 @@ static void js_assert_append_multiline_object(StrBuf* sb, Item value, int indent
                                               int depth_left) {
     Item keys = js_assert_enumerable_own_keys(value);
     int64_t len = js_array_length(keys);
-    int64_t visible_len = 0;
-    for (int64_t i = 0; i < len; i++) {
-        if (!js_assert_string_equals(js_elements_get_int(keys, i), "__strict_arguments__")) visible_len++;
-    }
+    int64_t visible_len = len;
     js_assert_append_line_prefix(sb, indent, sign);
     bool self_cycle = js_assert_is_self_cycle_object(value);
     if (self_cycle) strbuf_append_str(sb, "<ref *1> ");
@@ -1239,7 +1235,6 @@ static void js_assert_append_multiline_object(StrBuf* sb, Item value, int indent
     for (int pass = 0; pass < (self_cycle ? 2 : 1); pass++) {
     for (int64_t i = 0; i < len; i++) {
         Item key = js_elements_get_int(keys, i);
-        if (js_assert_string_equals(key, "__strict_arguments__")) continue;
         Item child = js_get_key_default(value, key);
         bool cycle_child = child.item == value.item;
         if (self_cycle && ((pass == 0) != cycle_child)) continue;
@@ -1579,7 +1574,6 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
     int64_t expected_len = js_array_length(expected_keys);
     for (int64_t i = 0; i < actual_len; i++) {
         Item key = js_elements_get_int(actual_keys, i);
-        if (js_assert_string_equals(key, "__strict_arguments__")) continue;
         Item av = js_get_key_default(actual, key);
         bool has_expected = js_assert_key_array_contains(expected_keys, key);
         Item ev = has_expected ? js_get_key_default(expected, key) : make_js_undefined();
@@ -1749,7 +1743,6 @@ static void js_assert_append_object_diff_recursive(StrBuf* sb, Item actual, Item
     }
     for (int64_t i = 0; i < expected_len; i++) {
         Item key = js_elements_get_int(expected_keys, i);
-        if (js_assert_string_equals(key, "__strict_arguments__")) continue;
         if (js_assert_key_array_contains(actual_keys, key)) continue;
         js_assert_append_line_prefix(sb, indent + 2, '-');
         js_assert_append_multiline_object_key(sb, key);

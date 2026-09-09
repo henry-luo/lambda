@@ -31,9 +31,22 @@ longer exists; the column measures these native C ports.
 | Kostya | 7/7 canonical workloads |
 | Larceny | 12/12 canonical workloads (`deriv` added 2026-08-19 with a tagged-struct expression tree) |
 | JetStream | 6/6 canonical rows (`crypto_sha1`, `cube3d`, `navier_stokes`, `raytrace3d`, `splay` added 2026-08-19) |
+| Text | 7/7 workloads (`prettier_ast`, `text_search`, `three_way_merge`, `log_pipeline` added 2026-09-09) |
 
 The two Lambda source variants (`name.ls` and `name2.ls`) represent the same
 benchmark with different Lambda typing; one native C port covers that workload.
+
+The 2026-09-09 text additions follow the same rule. `text_search`,
+`three_way_merge` and `log_pipeline` generate their corpora in C exactly as the
+`.ls` does and assert the same checksums. `prettier_ast` embeds the
+`prettier_ast.json` fixture as a string literal (the pattern `awfy/c2mir/json.c`
+already uses for its input) and parses it into typed `Node` structs once, then
+rebuilds the document IR on every one of the 256 iterations; its output is
+byte-identical to the Lambda port's, and both sides are pinned by the same
+`prettier_ast: CHECKSUM:56483873` marker that the other text rows use. That
+one-off parse is the only accounting difference between the two: the Lambda
+port's measured region excludes its own `input()` call, while the C timer wraps
+the whole body. It is well under 1% of the run.
 
 The 2026-08-19 additions port the previously excluded rows faithfully rather
 than simplifying them: the SOM-style benchmarks keep their object graphs as C

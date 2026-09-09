@@ -979,7 +979,10 @@ struct Container {
             uint8_t is_pinned:1;         // bit 2: reserved legacy pin marker; nursery data is always relocated
             uint8_t is_mutable_view:1;   // bit 3: a view writable through to its base (procedural in-place updates)
             uint8_t is_native_lane_array:1; // bit 4: List.items holds native lane words
-            uint8_t array_flag_reserved:3;
+            // NOT free: bits 5-7 are JsElementsKind, addressed through
+            // JS_ELEMENTS_STATE_MASK (0xe0). Taking one corrupts the elements
+            // state. `reserved_state` below is the byte with room to spare.
+            uint8_t array_flags_js_elements_kind:3;
         };
     };    
     uint8_t map_kind;      // MapKind tag (0 = plain, only used for map/object/element)
@@ -1007,6 +1010,22 @@ LAMBDA_STATIC_ASSERT(offsetof(Container, ctor_reserved_mask_hi) == 6,
                      "Container constructor mask high-byte ABI offset changed");
 LAMBDA_STATIC_ASSERT(offsetof(Container, reserved_state) == 7,
                      "Container reserved-state ABI offset changed");
+
+// `reserved_state` carries per-container state with no room in the two flag
+// bytes. Bit 0 marks a strict-mode Arguments object: `is_content` on the same
+// array already means "this is an Arguments object", and this says which kind.
+// It used to be an own `__strict_arguments__` property on the companion map,
+// which was visible to Object.keys and is still visible to
+// Object.getOwnPropertyNames — engine bookkeeping must not be a user property.
+#define CONTAINER_STATE_STRICT_ARGUMENTS ((uint8_t)(1u << 0))
+
+static inline bool container_is_strict_arguments(const Container* c) {
+    return c && (c->reserved_state & CONTAINER_STATE_STRICT_ARGUMENTS) != 0;
+}
+
+static inline void container_set_strict_arguments(Container* c) {
+    if (c) c->reserved_state |= CONTAINER_STATE_STRICT_ARGUMENTS;
+}
 LAMBDA_STATIC_ASSERT(sizeof(Container) == 8,
                      "Container header must remain eight bytes");
 

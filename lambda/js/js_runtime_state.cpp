@@ -1831,7 +1831,6 @@ extern "C" Item js_build_arguments_object() {
         arr_root, ItemNull,
         companion_root, ItemNull,
         key_root, ItemNull,
-        descriptor_root, ItemNull,
         tag_key_root, ItemNull,
         iterator_key_root, ItemNull,
         iterator_root, ItemNull,
@@ -1855,24 +1854,32 @@ extern "C" Item js_build_arguments_object() {
     companion_root.get().map->map_kind = MAP_KIND_ARRAY_PROPS;
     js_elements_set_props(arr_root.get().array, companion_root.get().map);
 
+    // T10-4: `{value, writable, enumerable: false, configurable}` is exactly
+    // what a storage define plus a non-enumerable mark produce, and that is the
+    // pattern the two symbol keys below already use. Building a descriptor
+    // object for it cost an allocation, four interned attribute writes and a
+    // full re-parse of the descriptor inside Object.defineProperty — per call.
     key_root.set(js_name_item("length", 6));
-    descriptor_root.set(js_new_object());
-    js_set_prototype(descriptor_root.get(), ItemNull);
-    js_set_key_cstr(descriptor_root.get(), "value", (Item){.item = i2it(argc)});
-    js_set_key_cstr(descriptor_root.get(), "writable", (Item){.item = b2it(true)});
-    js_set_key_cstr(descriptor_root.get(), "enumerable", (Item){.item = b2it(false)});
-    js_set_key_cstr(descriptor_root.get(), "configurable", (Item){.item = b2it(true)});
-    js_object_define_property(companion_root.get(), key_root.get(), descriptor_root.get());
+    js_define_own_key_storage(companion_root.get(), key_root.get(),
+        (Item){.item = i2it(argc)});
+    js_mark_non_enumerable(companion_root.get(), key_root.get());
 
+    // These are fresh own properties on a companion nobody has seen yet, so a
+    // storage define is the whole operation; routing them through OrdinarySet
+    // sent each one down Reflect.defineProperty with a materialized descriptor
+    // (24% of the arguments build). The ordinary-add kernel cannot shortcut
+    // them because it declines identity keys.
     tag_key_root.set(js_well_known_symbol_key(4));
-    js_set_key_default(companion_root.get(), tag_key_root.get(), js_name_item("Arguments", 9));
+    js_define_own_key_storage(companion_root.get(), tag_key_root.get(),
+        js_name_item("Arguments", 9));
     js_mark_non_enumerable(companion_root.get(), tag_key_root.get());
 
     // ES6 §9.4.4.6 step 12: Set Symbol.iterator to Array.prototype.values
     iterator_key_root.set(js_well_known_symbol_key(1));
     Item array_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY);
     iterator_root.set(js_get_key_cstr(array_proto, "values"));
-    js_set_key_default(companion_root.get(), iterator_key_root.get(), iterator_root.get());
+    js_define_own_key_storage(companion_root.get(), iterator_key_root.get(),
+        iterator_root.get());
     js_mark_non_enumerable(companion_root.get(), iterator_key_root.get());
 
     // v29: Set callee property (non-strict only; strict mode throws TypeError on access)
@@ -1883,18 +1890,18 @@ extern "C" Item js_build_arguments_object() {
         js_install_native_accessor(companion_root.get(), callee_key_root.get(),
                                    thrower_root.get(), thrower_root.get(),
                                    JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE);
-        js_set_key_cstr(companion_root.get(), "__strict_arguments__", (Item){.item = b2it(true)});
+        // Strictness is engine bookkeeping, not a property. It rides the
+        // arguments array's own header byte next to `is_content`, which already
+        // marks the array as an Arguments object.
+        container_set_strict_arguments((Container*)arr_root.get().array);
     } else {
         // Non-strict: callee is the function object (ES5 §10.6 step 13)
         if (callee_root.get().item != 0) {
+            // Same descriptor as `length` above, same cheaper spelling.
             callee_key_root.set(js_name_item("callee", 6));
-            descriptor_root.set(js_new_object());
-            js_set_prototype(descriptor_root.get(), ItemNull);
-            js_set_key_cstr(descriptor_root.get(), "value", callee_root.get());
-            js_set_key_cstr(descriptor_root.get(), "writable", (Item){.item = b2it(true)});
-            js_set_key_cstr(descriptor_root.get(), "enumerable", (Item){.item = b2it(false)});
-            js_set_key_cstr(descriptor_root.get(), "configurable", (Item){.item = b2it(true)});
-            js_object_define_property(companion_root.get(), callee_key_root.get(), descriptor_root.get());
+            js_define_own_key_storage(companion_root.get(), callee_key_root.get(),
+                callee_root.get());
+            js_mark_non_enumerable(companion_root.get(), callee_key_root.get());
         }
     }
 

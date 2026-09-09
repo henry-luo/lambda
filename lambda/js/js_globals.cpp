@@ -6459,6 +6459,27 @@ static bool js_reflect_receiver_accepts_data(Item receiver_descriptor,
     return !has_writable || it2b(js_to_boolean(writable));
 }
 
+// preventExtensions/seal/freeze are recorded as ordinary own marker properties,
+// so IsExtensible is the same three probes on every receiver kind. One table
+// keeps the spellings together — including the 17 that every writer and reader
+// in this file uses for `__non_extensible__` — instead of a fifth copy that can
+// drift, and answers from shape storage without interning the names per call
+// (9.4% of an object-literal allocation before this).
+static const struct { const char* name; int len; } kJsExtensibilityMarkers[3] = {
+    {"__non_extensible__", 17}, {"__sealed__", 10}, {"__frozen__", 10},
+};
+
+static bool js_map_is_extensible_storage(Map* m) {
+    if (!m) return true;
+    for (int i = 0; i < 3; i++) {
+        bool found = false;
+        Item marker = js_map_shape_lookup_ext(m, kJsExtensibilityMarkers[i].name,
+            kJsExtensibilityMarkers[i].len, &found);
+        if (found && js_is_truthy(marker)) return false;
+    }
+    return true;
+}
+
 // T10-3/D-B: OrdinarySet that creates a new own data property on an ordinary
 // extensible object. The general algorithm below proves the same facts by
 // materializing a descriptor object per prototype link and then re-parsing one
@@ -6503,23 +6524,7 @@ static bool js_ordinary_add_prototype_chain_is_clear(Item target, NameId name_id
     return false;
 }
 
-// preventExtensions/seal/freeze are recorded as ordinary own marker properties,
-// so extensibility is a shape question. The name spellings and the truthiness
-// test mirror js_object_is_extensible's Map branch exactly; only the interning
-// and prototype-aware map_get are dropped, neither of which can change the
-// answer for an own marker slot.
-static bool js_ordinary_map_is_extensible(Map* m) {
-    bool found = false;
-    // The 17 here is the length every writer and reader in this file uses.
-    Item marker = js_map_shape_lookup_ext(m, "__non_extensible__", 17, &found);
-    if (found && js_is_truthy(marker)) return false;
-    marker = js_map_shape_lookup_ext(m, "__sealed__", 10, &found);
-    if (found && js_is_truthy(marker)) return false;
-    marker = js_map_shape_lookup_ext(m, "__frozen__", 10, &found);
-    return !(found && js_is_truthy(marker));
-}
-
-static bool js_ordinary_add_own_data_property(Item target, Item key, Item value) {
+bool js_ordinary_add_own_data_property(Item target, Item key, Item value) {
     if (get_type_id(target) != LMD_TYPE_MAP || !target.map) return false;
     // MAP_KIND_PLAIN means no ShapeEntry on this object carries descriptor
     // attributes, so a hit in shape storage is always a plain data slot. It
@@ -6544,7 +6549,7 @@ static bool js_ordinary_add_own_data_property(Item target, Item key, Item value)
         // stored-type rules, which the named fast path already tried.
         return false;
     }
-    if (!js_ordinary_map_is_extensible(target.map)) return false;
+    if (!js_map_is_extensible_storage(target.map)) return false;
     if (!js_ordinary_add_prototype_chain_is_clear(target, name_id, name_hash,
             name, name_len)) {
         return false;
@@ -10905,57 +10910,31 @@ extern "C" Item js_object_is_extensible(Item obj) {
             ot != LMD_TYPE_ELEMENT)
         return (Item){.item = b2it(false)};
     if (ot == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(obj)) {
-        // Arrays: check companion map for __non_extensible__ marker
+        // Arrays keep the markers in the companion map.
         Array* arr = obj.array;
-        if (js_array_has_props(arr)) {
-            Map* props = js_array_props(arr);
-            bool found = false;
-            Item ne_v = js_map_shape_lookup_ext(props, "__non_extensible__", 17, &found);
-            if (found && js_is_truthy(ne_v)) return (Item){.item = b2it(false)};
-            Item sl_v = js_map_shape_lookup_ext(props, "__sealed__", 10, &found);
-            if (found && js_is_truthy(sl_v)) return (Item){.item = b2it(false)};
-            Item fr_v = js_map_shape_lookup_ext(props, "__frozen__", 10, &found);
-            if (found && js_is_truthy(fr_v)) return (Item){.item = b2it(false)};
-        }
-        return (Item){.item = b2it(true)};
+        bool extensible = !js_array_has_props(arr) ||
+            js_map_is_extensible_storage(js_array_props(arr));
+        return (Item){.item = b2it(extensible)};
     }
     if (ot == LMD_TYPE_FUNC) {
-        // Functions: check properties_map for __non_extensible__ marker
         JsFuncProps* fn = (JsFuncProps*)obj.function;
-        if (get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-            Map* pm = fn->properties_map.map;
-            bool found = false;
-            Item ne_v = js_map_shape_lookup_ext(pm, "__non_extensible__", 17, &found);
-            if (found && js_is_truthy(ne_v)) return (Item){.item = b2it(false)};
-            Item sl_v = js_map_shape_lookup_ext(pm, "__sealed__", 10, &found);
-            if (found && js_is_truthy(sl_v)) return (Item){.item = b2it(false)};
-            Item fr_v = js_map_shape_lookup_ext(pm, "__frozen__", 10, &found);
-            if (found && js_is_truthy(fr_v)) return (Item){.item = b2it(false)};
-        }
-        return (Item){.item = b2it(true)};
+        bool extensible = get_type_id(fn->properties_map) != LMD_TYPE_MAP ||
+            js_map_is_extensible_storage(fn->properties_map.map);
+        return (Item){.item = b2it(extensible)};
     }
     if (js_is_resting_error(obj)) {
-        bool found = false;
-        Item value = js_defprop_get_internal_state(obj, "__non_extensible__", 17, &found);
-        if (found && js_is_truthy(value)) return (Item){.item = b2it(false)};
-        value = js_defprop_get_internal_state(obj, "__sealed__", 10, &found);
-        if (found && js_is_truthy(value)) return (Item){.item = b2it(false)};
-        value = js_defprop_get_internal_state(obj, "__frozen__", 10, &found);
-        if (found && js_is_truthy(value)) return (Item){.item = b2it(false)};
+        // Error carriers reach the same own slots through their side map.
+        for (int i = 0; i < 3; i++) {
+            bool found = false;
+            Item marker = js_defprop_get_internal_state(obj,
+                kJsExtensibilityMarkers[i].name, kJsExtensibilityMarkers[i].len,
+                &found);
+            if (found && js_is_truthy(marker)) return (Item){.item = b2it(false)};
+        }
         return (Item){.item = b2it(true)};
     }
     if (ot != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    // non-extensible if explicitly marked, or sealed, or frozen
-    Item ne_k = js_name_item("__non_extensible__", 17);
-    Item ne_v = map_get(obj.map, ne_k);
-    if (js_is_truthy(ne_v)) return (Item){.item = b2it(false)};
-    Item sl_k = js_name_item("__sealed__", 10);
-    Item sl_v = map_get(obj.map, sl_k);
-    if (js_is_truthy(sl_v)) return (Item){.item = b2it(false)};
-    Item fr_k = js_name_item("__frozen__", 10);
-    Item fr_v = map_get(obj.map, fr_k);
-    if (js_is_truthy(fr_v)) return (Item){.item = b2it(false)};
-    return (Item){.item = b2it(true)};
+    return (Item){.item = b2it(js_map_is_extensible_storage(obj.map))};
 }
 
 // =============================================================================

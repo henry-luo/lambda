@@ -302,6 +302,12 @@ bool js_get_own_property_descriptor(Item object,
 bool js_get_own_property_descriptor_name_id(Item object, NameId name_id,
                                              JsPropertyDescriptor* out);
 
+// T10-3/D-B: OrdinarySet's "create a new own data property" case, decided from
+// shape storage instead of a descriptor object per prototype link. Returns
+// false — having written nothing — for every receiver, key or chain it cannot
+// prove cheaply, leaving the full algorithm as the semantics.
+bool js_ordinary_add_own_data_property(Item target, Item key, Item value);
+
 // ToPropertyDescriptor. Failures return the D8.4.3 merged ERROR Item.
 Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* out);
 

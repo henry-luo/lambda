@@ -1,0 +1,24 @@
+len 3 3 true false true
+callee true true false true
+keys 0,1,2
+tag [object Arguments]
+iter function 1|2|3
+idx 1 2 3
+mapped a 99
+mapped b 77
+99,77,3
+s len 2 2 true false true
+s callee accessor function function false false
+s callee throws true
+s unmapped 1
+s keys 0,1
+s tag [object Arguments]
+1|2
+zero 0 0 [object Arguments]
+escaped 2 x y ["x","y"]
+arrow 3
+delete [2,null]
+redef len 9
+sum 10 11 24
+internal keys "" ""
+enumerable ["0","1"] ["0","1"]
