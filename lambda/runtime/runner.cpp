@@ -1849,10 +1849,14 @@ void runtime_reset_heap(Runtime* runtime) {
         cleanup_context->template_registry = NULL;
         template_registry_destroy(template_registry);
 
-        if (runtime->js_runtime_used) {
-            // Cross-language JS caches retain Items from the current heap.
-            // Reset them before heap destruction so a later batch script cannot
-            // dereference stale Promise/module state from the preceding script.
+        // Any context that has a JS realm owns caches (constructors, intrinsic
+        // prototypes, module namespaces) built from this heap's pool. Reset
+        // them before heap destruction so a later batch script cannot
+        // dereference stale Promise/module state from the preceding script.
+        // `js_runtime_used` is the cross-language membrane flag, not "JS ran":
+        // gating on it left a plain JS batch's constructor cache dangling, and
+        // the next js_get_constructor faulted on freed pool memory.
+        if (js_runtime_state_for(cleanup_context)) {
             js_batch_reset();
         } else {
             // Lambda DOM imports also allocate Radiant Velmt/VArray wrappers

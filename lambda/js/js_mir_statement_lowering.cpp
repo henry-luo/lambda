@@ -1960,8 +1960,9 @@ void jm_emit_class_setup(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* c
 // has no such carrier.
 static bool jm_class_member_keys_can_suspend(JsMirTranspiler* mt, JsClassEntry* ce) {
     if (!ce) return false;
-    for (int i = 0; i < ce->method_count; i++) {
-        if (ce->methods[i].key_expr && jm_can_suspend(mt, ce->methods[i].key_expr)) {
+    for (int i = 0; i < ce->member_count; i++) {
+        JsClassMethodEntry* method = jm_class_member_method(ce, i);
+        if (method && method->key_expr && jm_can_suspend(mt, method->key_expr)) {
             return true;
         }
     }

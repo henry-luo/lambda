@@ -3492,6 +3492,9 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_active_module_var_store",
         "lambda_active_module_var_at",
         "js_with_save_depth", "js_with_restore_depth",
+        // The native-ABI throw lane parks/takes one already-rooted Item in the
+        // realm's async scratch range; no allocation, no re-entry.
+        "js_native_throw_publish", "js_native_throw_take",
     };
     const int audited_count = (int)(sizeof(audited) / sizeof(audited[0]));
     int no_gc_count = 0;

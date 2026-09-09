@@ -1865,6 +1865,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
         for (int member_index = 0; member_index < ce->member_count; member_index++) {
             if (ce->members[member_index].kind == JS_CLASS_MEMBER_METHOD) method_count++;
         }
+        // the count exists only for this trace, which release builds compile out
+        (void)method_count;
         log_debug("js-mir: class '%.*s' with %d methods, ctor=%p",
             ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "",
             method_count, (void*)ce->constructor);

@@ -436,15 +436,35 @@ in isolation before updating it.
 34 of 36 microtask-ordering probes now match Node on both lanes; before this
 work 8 rows were wrong on MIR.
 
+**The combinators own no second promise.** `Promise.all`/`allSettled`/`any`
+allocated an `internal_result` promise and forwarded it to the real capability
+with a `then`, so every aggregate settle was one microtask late:
+`Promise.all([1,2]).then(f)` ran `f` after `p2` where Node runs it after `p1`.
+A 17-case corpus (`temp/jsprobe/comb/c_*.js`) isolated it exactly: `Promise.race`
+was correct everywhere because `kind == 3` skipped the boundary, and
+`Promise.all` over a `Set` was correct on both lanes because the boundary was
+gated on `array_input`.
+
+Per ES2024 27.2.4.1.2 step 4.j an element handler resolves the *result
+capability* directly; there is no internal promise in the spec. The forwarding
+was legacy scaffolding, and its comment ("without it aggregate reactions run
+before later combinators have published their own jobs") described a symptom of
+the old fast path, not a live constraint. `js_promise_settle_combinator_result`
+already routes to the stored capability when handed a non-promise result, so a
+custom constructor now passes `ItemNull` and settles through its own
+`resolve`/`reject` — which is also what makes the subclass case
+(`class MyP extends Promise {}; MyP.all(...)`) land on Node's tick.
+`js_promise_forward_native_to_capability` survives only for
+`js_promise_invoke_then`'s own use.
+
+All 17 corpus cases now match Node on both lanes.
+`test/js/promise_jobs_j42_8.txt` moves two lines earlier
+(`all-double-result`, `settled-double-result`, now ahead of
+`race-double-result`); Node cannot run that fixture, so the new order was
+verified against Node with an isolated three-combinator repro.
+
 ### Still open
 
-- **`Promise.all`/`allSettled`/`any` over an array containing a promise** is one
-  tick late on both lanes. For array input the combinator allocates an
-  `internal_result` promise and forwards it to the real capability, and that
-  forwarding is the extra tick. It is deliberate — "without it aggregate
-  reactions run before later combinators have published their own jobs" — so
-  removing it needs the case that motivated it. `Promise.race`, and
-  `Promise.all` over plain values on the MIR lane, are already correct.
 - **`for await` over an async generator** is a tick out on MIR; the AST lane
   rejects `for await` outright.
 (A third defect found here, a throw swallowed by a natively-typed body, is
@@ -492,3 +512,41 @@ throwing path, implicit throws (`null.x`), a throw from inside a loop, repeated
 calls, calls after a caught throw, and the async rejection variants — matching
 Node on both lanes, including under `LAMBDA_GC_FORCE_EVERY=1
 LAMBDA_GC_POISON_FREED=1`.
+
+## Realm lifetime defects surfaced by the upstream merge (2026-09-10)
+
+Two crashes blocked the gate set after merging upstream `b9ca1a366`. Both were
+reproduced on that commit alone, with none of this work applied.
+
+**A heap reset must invalidate the realm a JS batch built.** `runtime_reset_heap`
+chose between `js_batch_reset()` and `dom_batch_reset()` on
+`runtime->js_runtime_used`. That flag is the *cross-language membrane* signal —
+`js_event_loop_attach_lambda_scheduler` reads it to decide whether a Lambda
+scheduler may be attached, and only `require`, `load_js_module` and a `.ls`
+import set it. A plain JS batch therefore skipped the JS reset entirely, and the
+constructor cache (`js_constructor_cache`, `JsCtor*` values allocated from
+`js_input->pool`) survived into the next generation; the following
+`js_get_constructor` read freed pool memory. The predicate is now "this context
+has a JS realm" — `js_runtime_state_for(cleanup_context)`, the same test the
+function already uses two lines earlier — which is what the reset is actually
+about. Broadening `js_runtime_used` instead is wrong: it hands a pure-JS context
+a Lambda scheduler and the loop never drains.
+
+**A store observer must not bootstrap the realm.**
+`js_sync_global_var_module_binding` runs on every `js_set_map_core` and began
+with `js_global_var_binding_refresh()`, which calls `js_get_global_this()` — a
+call that *builds* globalThis, the constructor table and every intrinsic
+prototype. An AST-lane ES module publishing its first export
+(`export let c = 1`) reached that from inside
+`js_materialize_builtin_proto_specs`, so constructor population walked a
+prototype chain that was still being linked and `js_prototype_lookup_ex_with_receiver`
+spun forever. The observer now returns early unless the store target already *is*
+globalThis (`js_is_global_this_object_value`, which reads the slot instead of
+creating it). Before globalThis exists no store can target it, so the skipped
+work was vacuous.
+
+Not fixed here, and confirmed present on `b9ca1a366` itself: global builtins are
+unreachable by identifier under `lambda.exe js-test-batch` (`typeof Symbol` is
+`"undefined"`), which fails 5450 test262 entries with
+`ReferenceError: Symbol is not defined` and friends. The failing set is
+byte-identical with and without this work.

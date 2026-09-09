@@ -796,8 +796,8 @@ static void js_runtime_state_visit_root_ranges(JsRuntimeState* state,
         "Promise unhandled queue and domain state", data);
     visit(&state->cluster.roots, &state->cluster.primary_options, 1,
         "cluster primary options", data);
-    visit(&state->async_await.roots, &state->async_await.resolved_value, 1,
-        "async await result handoff", data);
+    visit(&state->async_await.roots, &state->async_await.resolved_value, 2,
+        "async await result handoff and native throw lane", data);
     visit(&state->async_hooks->roots, &state->async_hooks->root_resource, 2,
         "async hooks current resources", data);
     visit(&state->event_loop_queue_roots, state->event_loop->queue_storage, 3,
