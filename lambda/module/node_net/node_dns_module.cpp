@@ -13,6 +13,7 @@
 #include "../../jube/jube_node_permission.h"
 #include "../../lambda-data.hpp"
 #include "../../runtime/transpiler.hpp"
+#include "../../runtime/async.h"
 #include "../../../lib/log.h"
 #include "../../../lib/uv_loop.h"
 #include "../../../lib/mem.h"
@@ -199,26 +200,26 @@ typedef struct DnsLookupOptions {
 
 typedef struct DnsLookupReq {
     uv_getaddrinfo_t req;
-    Item callback;
-    Item resolve;
-    Item reject;
+    uint32_t resource_id;
     bool all;
+    bool completed;
+    bool detached;
     char hostname[256];
 } DnsLookupReq;
 
 typedef struct DnsResolveReq {
     uv_getaddrinfo_t req;
-    Item callback;
-    Item resolve;
-    Item reject;
+    uint32_t resource_id;
     int family;
+    bool completed;
+    bool detached;
     char hostname[256];
     char syscall[16];
 } DnsResolveReq;
 
 typedef struct DnsScheduledReq {
     uv_timer_t timer;
-    Item callback;
+    uint32_t resource_id;
 } DnsScheduledReq;
 
 typedef struct DnsLookupServiceOptions {
@@ -229,19 +230,34 @@ typedef struct DnsLookupServiceOptions {
 
 static void dns_scheduled_close_cb(uv_handle_t* handle) {
     DnsScheduledReq* sr = (DnsScheduledReq*)handle->data;
-    if (sr) mem_free(sr);
+    if (sr) {
+        sr->resource_id = 0;
+        mem_free(sr);
+    }
+}
+
+static void dns_scheduled_resource_close(void* user) {
+    DnsScheduledReq* sr = (DnsScheduledReq*)user;
+    if (!sr || uv_is_closing((uv_handle_t*)&sr->timer)) return;
+    uv_timer_stop(&sr->timer);
+    uv_close((uv_handle_t*)&sr->timer, dns_scheduled_close_cb);
 }
 
 static void dns_scheduled_timer_cb(uv_timer_t* timer) {
     DnsScheduledReq* sr = (DnsScheduledReq*)timer->data;
     if (!sr) return;
-    Item callback = sr->callback;
-    uv_timer_stop(timer);
-    if (is_callable(callback)) {
-        js_call_function(callback, make_js_undefined(), NULL, 0);
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
+        &js_runtime_state.resources, sr, sr->resource_id);
+    RootFrame roots(1);
+    Rooted<Item> callback_root(roots, runtime_resource_table_value(
+        &js_runtime_state.resources, entry));
+    if (is_callable(callback_root.get())) {
+        js_call_function(callback_root.get(), make_js_undefined(), NULL, 0);
         js_microtask_flush();
     }
-    uv_close((uv_handle_t*)timer, dns_scheduled_close_cb);
+    uint32_t resource_id = sr->resource_id;
+    sr->resource_id = 0;
+    runtime_resource_table_remove_owned(&js_runtime_state.resources, sr, resource_id);
 }
 
 static Item dns_emit_scheduled_common(Item env_item, int success_arg_count) {
@@ -283,19 +299,33 @@ JS_FORWARD_STATIC_ITEM(dns_resolve_emit_scheduled, (Item env_item), dns_emit_sch
 JS_FORWARD_STATIC_ITEM(dns_lookup_service_emit_scheduled, (Item env_item), dns_emit_scheduled_common, (env_item, 3))
 
 static void dns_enqueue_scheduled(Item fn) {
+    RootFrame roots(1);
+    Rooted<Item> fn_root(roots, fn);
     uv_loop_t* loop = lambda_uv_loop();
     if (loop) {
         DnsScheduledReq* sr = (DnsScheduledReq*)mem_calloc(1, sizeof(DnsScheduledReq), MEM_CAT_JS_RUNTIME);
-        sr->callback = fn;
-        if (uv_timer_init(loop, &sr->timer) == 0) {
+        if (sr && uv_timer_init(loop, &sr->timer) == 0) {
             sr->timer.data = sr;
-            if (uv_timer_start(&sr->timer, dns_scheduled_timer_cb, 0, 0) == 0) return;
+            const RuntimeResourceDescriptor* descriptor =
+                runtime_resource_descriptor_from_legacy_name("DNSReqCallback");
+            Item root_values[1] = {fn_root.get()};
+            sr->resource_id = runtime_resource_table_add_root_span_owned(
+                &js_runtime_state.resources, sr, root_values, 1, descriptor,
+                dns_scheduled_resource_close, sr, false);
+            if (sr->resource_id != 0 &&
+                    uv_timer_start(&sr->timer, dns_scheduled_timer_cb, 0, 0) == 0) return;
+            if (sr->resource_id != 0) {
+                uint32_t resource_id = sr->resource_id;
+                sr->resource_id = 0;
+                runtime_resource_table_remove_owned(&js_runtime_state.resources, sr, resource_id);
+                return;
+            }
             uv_close((uv_handle_t*)&sr->timer, dns_scheduled_close_cb);
-        } else {
+        } else if (sr) {
             mem_free(sr);
         }
     }
-    js_next_tick_enqueue(fn);
+    js_next_tick_enqueue(fn_root.get());
 }
 
 static void dns_schedule(Item* values, int count, JsNativeP1 target) {
@@ -332,14 +362,57 @@ static Item dns_promise_reject_later(Item error) {
         error, make_js_undefined(), make_js_undefined(), make_js_undefined());
     return promise;
 }
-JS_FORWARD_STATIC_VOID( dns_lookup_finish, (DnsLookupReq* dr, Item error,                               Item callback_value, Item callback_family,                               Item promise_value), dns_lookup_schedule, (dr ? dr->callback : make_js_undefined(), dr ? dr->resolve : make_js_undefined(), dr ? dr->reject : make_js_undefined(), error, callback_value, callback_family, promise_value))
-JS_FORWARD_STATIC_VOID( dns_resolve_finish, (DnsResolveReq* dr, Item error, Item value), dns_resolve_schedule, (dr ? dr->callback : make_js_undefined(), dr ? dr->resolve : make_js_undefined(), dr ? dr->reject : make_js_undefined(), error, value))
+
+static Item dns_request_value(void* request, uint32_t resource_id, int root_index) {
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry_owned(
+        &js_runtime_state.resources, request, resource_id);
+    if (!entry || root_index < 0 || root_index >= entry->root_count) return ItemNull;
+    Item* value = root_vector_at(&js_runtime_state.resources.owner_values,
+        entry->root_slot + root_index);
+    return value ? *value : ItemNull;
+}
+
+static void dns_lookup_resource_close(void* user) {
+    DnsLookupReq* request = (DnsLookupReq*)user;
+    if (!request || request->completed) return;
+    request->detached = true;
+    (void)uv_cancel((uv_req_t*)&request->req);
+}
+
+static void dns_resolve_resource_close(void* user) {
+    DnsResolveReq* request = (DnsResolveReq*)user;
+    if (!request || request->completed) return;
+    request->detached = true;
+    (void)uv_cancel((uv_req_t*)&request->req);
+}
+
+static void dns_lookup_request_release(DnsLookupReq* request) {
+    if (!request) return;
+    uint32_t resource_id = request->resource_id;
+    request->resource_id = 0;
+    if (resource_id != 0) {
+        runtime_resource_table_remove_owned(&js_runtime_state.resources, request, resource_id);
+    }
+    mem_free(request);
+}
+
+static void dns_resolve_request_release(DnsResolveReq* request) {
+    if (!request) return;
+    uint32_t resource_id = request->resource_id;
+    request->resource_id = 0;
+    if (resource_id != 0) {
+        runtime_resource_table_remove_owned(&js_runtime_state.resources, request, resource_id);
+    }
+    mem_free(request);
+}
 
 static Item dns_lookup_values_from_addrinfo(struct addrinfo* res, bool all,
                                             Item* out_callback_value,
                                             Item* out_callback_family) {
     if (all) {
-        Item arr = js_array_new(0);
+        JS_ROOTS(roots,
+            arr_root, js_array_new(0),
+            record_root, ItemNull);
         for (struct addrinfo* ai = res; ai; ai = ai->ai_next) {
             char addr_str[INET6_ADDRSTRLEN];
             int family = 0;
@@ -354,12 +427,13 @@ static Item dns_lookup_values_from_addrinfo(struct addrinfo* res, bool all,
                 family = 6;
             }
             if (addr_str[0] != '\0') {
-                js_array_push(arr, make_lookup_record(addr_str, family));
+                record_root.set(make_lookup_record(addr_str, family));
+                js_array_push(arr_root.get(), record_root.get());
             }
         }
-        *out_callback_value = arr;
+        *out_callback_value = arr_root.get();
         *out_callback_family = make_js_undefined();
-        return arr;
+        return arr_root.get();
     }
 
     char addr_str[INET6_ADDRSTRLEN];
@@ -375,39 +449,72 @@ static Item dns_lookup_values_from_addrinfo(struct addrinfo* res, bool all,
         family = 6;
     }
 
-    Item address = make_string_item(addr_str);
-    *out_callback_value = address;
+    JS_ROOTS(roots,
+        address_root, make_string_item(addr_str),
+        record_root, ItemNull);
+    *out_callback_value = address_root.get();
     *out_callback_family = (Item){.item = i2it(family)};
-    return make_lookup_record(addr_str, family);
+    record_root.set(make_lookup_record(addr_str, family));
+    return record_root.get();
 }
 
 static void dns_lookup_cb(uv_getaddrinfo_t* req, int status, struct addrinfo* res) {
     DnsLookupReq* dr = (DnsLookupReq*)req->data;
-    if (!dr) {
+    if (!dr || dr->detached) {
         if (res) uv_freeaddrinfo(res);
+        if (dr) dns_lookup_request_release(dr);
+        return;
+    }
+    RootFrame roots(7);
+    Rooted<Item> callback_root(roots, dns_request_value(dr, dr->resource_id, 0));
+    Rooted<Item> resolve_root(roots, dns_request_value(dr, dr->resource_id, 1));
+    Rooted<Item> reject_root(roots, dns_request_value(dr, dr->resource_id, 2));
+    Rooted<Item> error_root(roots, ItemNull);
+    Rooted<Item> callback_value_root(roots, ItemNull);
+    Rooted<Item> callback_family_root(roots, ItemNull);
+    Rooted<Item> promise_value_root(roots, ItemNull);
+    if (dr->resource_id == 0 || (!js_is_callable(callback_root.get()) &&
+            !js_is_callable(resolve_root.get()) && !js_is_callable(reject_root.get()))) {
+        if (res) uv_freeaddrinfo(res);
+        dr->completed = true;
+        dns_lookup_request_release(dr);
         return;
     }
 
     if (status != 0 || !res) {
-        Item err = make_dns_error(status, dr->hostname);
-        dns_lookup_finish(dr, err, make_js_undefined(), make_js_undefined(), make_js_undefined());
+        error_root.set(make_dns_error(status, dr->hostname));
+        callback_value_root.set(make_js_undefined());
+        callback_family_root.set(make_js_undefined());
+        promise_value_root.set(make_js_undefined());
+        dns_lookup_schedule(callback_root.get(), resolve_root.get(), reject_root.get(),
+            error_root.get(), callback_value_root.get(), callback_family_root.get(),
+            promise_value_root.get());
         if (res) uv_freeaddrinfo(res);
-        mem_free(dr);
+        dr->completed = true;
+        dns_lookup_request_release(dr);
         return;
     }
 
     Item callback_value = make_js_undefined();
     Item callback_family = make_js_undefined();
-    Item promise_value = dns_lookup_values_from_addrinfo(res, dr->all,
-        &callback_value, &callback_family);
-    dns_lookup_finish(dr, ItemNull, callback_value, callback_family, promise_value);
+    promise_value_root.set(dns_lookup_values_from_addrinfo(res, dr->all,
+        &callback_value, &callback_family));
+    callback_value_root.set(callback_value);
+    callback_family_root.set(callback_family);
+    error_root.set(ItemNull);
+    dns_lookup_schedule(callback_root.get(), resolve_root.get(), reject_root.get(),
+        error_root.get(), callback_value_root.get(), callback_family_root.get(),
+        promise_value_root.get());
 
     uv_freeaddrinfo(res);
-    mem_free(dr);
+    dr->completed = true;
+    dns_lookup_request_release(dr);
 }
 
 static Item dns_resolve_values_from_addrinfo(struct addrinfo* res, int family) {
-    Item arr = js_array_new(0);
+    JS_ROOTS(roots,
+        arr_root, js_array_new(0),
+        address_root, ItemNull);
     for (struct addrinfo* ai = res; ai; ai = ai->ai_next) {
         char addr_str[INET6_ADDRSTRLEN];
         addr_str[0] = '\0';
@@ -419,37 +526,58 @@ static Item dns_resolve_values_from_addrinfo(struct addrinfo* res, int family) {
             uv_ip6_name(sa, addr_str, sizeof(addr_str));
         }
         if (addr_str[0] != '\0') {
-            js_array_push(arr, make_string_item(addr_str));
+            address_root.set(make_string_item(addr_str));
+            js_array_push(arr_root.get(), address_root.get());
         }
     }
-    return arr;
+    return arr_root.get();
 }
 
 static void dns_resolve_cb(uv_getaddrinfo_t* req, int status, struct addrinfo* res) {
     DnsResolveReq* dr = (DnsResolveReq*)req->data;
-    if (!dr) {
+    if (!dr || dr->detached) {
         if (res) uv_freeaddrinfo(res);
+        if (dr) dns_resolve_request_release(dr);
+        return;
+    }
+    RootFrame roots(5);
+    Rooted<Item> callback_root(roots, dns_request_value(dr, dr->resource_id, 0));
+    Rooted<Item> resolve_root(roots, dns_request_value(dr, dr->resource_id, 1));
+    Rooted<Item> reject_root(roots, dns_request_value(dr, dr->resource_id, 2));
+    Rooted<Item> error_root(roots, ItemNull);
+    Rooted<Item> value_root(roots, ItemNull);
+    if (dr->resource_id == 0 || (!js_is_callable(callback_root.get()) &&
+            !js_is_callable(resolve_root.get()) && !js_is_callable(reject_root.get()))) {
+        if (res) uv_freeaddrinfo(res);
+        dr->completed = true;
+        dns_resolve_request_release(dr);
         return;
     }
 
     if (status != 0 || !res) {
-        Item err = make_dns_resolve_error(status, dr->hostname, dr->syscall);
-        dns_resolve_finish(dr, err, make_js_undefined());
+        error_root.set(make_dns_resolve_error(status, dr->hostname, dr->syscall));
+        value_root.set(make_js_undefined());
+        dns_resolve_schedule(callback_root.get(), resolve_root.get(), reject_root.get(),
+            error_root.get(), value_root.get());
         if (res) uv_freeaddrinfo(res);
-        mem_free(dr);
+        dr->completed = true;
+        dns_resolve_request_release(dr);
         return;
     }
 
-    Item value = dns_resolve_values_from_addrinfo(res, dr->family);
-    if (js_array_length(value) == 0) {
-        Item err = make_dns_resolve_error(UV_EAI_NONAME, dr->hostname, dr->syscall);
-        dns_resolve_finish(dr, err, make_js_undefined());
+    value_root.set(dns_resolve_values_from_addrinfo(res, dr->family));
+    if (js_array_length(value_root.get()) == 0) {
+        error_root.set(make_dns_resolve_error(UV_EAI_NONAME, dr->hostname, dr->syscall));
+        value_root.set(make_js_undefined());
     } else {
-        dns_resolve_finish(dr, ItemNull, value);
+        error_root.set(ItemNull);
     }
+    dns_resolve_schedule(callback_root.get(), resolve_root.get(), reject_root.get(),
+        error_root.get(), value_root.get());
 
     uv_freeaddrinfo(res);
-    mem_free(dr);
+    dr->completed = true;
+    dns_resolve_request_release(dr);
 }
 
 static bool copy_hostname(Item hostname_item, char* out, int out_size) {
@@ -662,13 +790,20 @@ static bool dns_lookup_short_circuit_family(const DnsLookupOptions* options,
 JS_FORWARD_STATIC_RETURN(bool, dns_lookup_short_circuit_ip, (const DnsLookupOptions* options,                                         Item resolve, Item reject), dns_lookup_short_circuit_family, (options, resolve, reject, 4) || dns_lookup_short_circuit_family(options, resolve, reject, 6))
 
 static bool dns_lookup_start(const DnsLookupOptions* options, Item resolve, Item reject, bool use_hook) {
-    if (dns_lookup_short_circuit_ip(options, resolve, reject)) return true;
+    if (!options) return false;
+    JS_ROOTS(roots,
+        callback_root, options->callback,
+        resolve_root, resolve,
+        reject_root, reject);
+    DnsLookupOptions rooted_options = *options;
+    rooted_options.callback = callback_root.get();
+    if (dns_lookup_short_circuit_ip(&rooted_options, resolve_root.get(), reject_root.get())) return true;
 
     if (use_hook) {
-        int hook_status = dns_call_cares_getaddrinfo_hook(options);
+        int hook_status = dns_call_cares_getaddrinfo_hook(&rooted_options);
         if (hook_status != 0) {
-            Item err = make_dns_error(hook_status, options->hostname);
-            dns_lookup_schedule(options->callback, resolve, reject,
+            Item err = make_dns_error(hook_status, rooted_options.hostname);
+            dns_lookup_schedule(callback_root.get(), resolve_root.get(), reject_root.get(),
                 err, make_js_undefined(), make_js_undefined(), make_js_undefined());
             return true;
         }
@@ -681,22 +816,32 @@ static bool dns_lookup_start(const DnsLookupOptions* options, Item resolve, Item
     }
 
     DnsLookupReq* dr = (DnsLookupReq*)mem_calloc(1, sizeof(DnsLookupReq), MEM_CAT_JS_RUNTIME);
-    dr->callback = options->callback;
-    dr->resolve = resolve;
-    dr->reject = reject;
-    dr->all = options->all;
-    memcpy(dr->hostname, options->hostname, sizeof(dr->hostname));
+    if (!dr) return false;
+    dr->all = rooted_options.all;
+    memcpy(dr->hostname, rooted_options.hostname, sizeof(dr->hostname));
     dr->req.data = dr;
 
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = options->family == 4 ? AF_INET : (options->family == 6 ? AF_INET6 : AF_UNSPEC);
+    hints.ai_family = rooted_options.family == 4 ? AF_INET :
+        (rooted_options.family == 6 ? AF_INET6 : AF_UNSPEC);
     hints.ai_socktype = SOCK_STREAM;
 
-    int r = uv_getaddrinfo(loop, &dr->req, dns_lookup_cb, options->hostname, NULL, &hints);
+    const RuntimeResourceDescriptor* descriptor =
+        runtime_resource_descriptor_from_legacy_name("DNSReqCallback");
+    Item root_values[3] = {callback_root.get(), resolve_root.get(), reject_root.get()};
+    dr->resource_id = runtime_resource_table_add_root_span_owned(
+        &js_runtime_state.resources, dr, root_values, 3, descriptor,
+        dns_lookup_resource_close, dr, false);
+    if (dr->resource_id == 0) {
+        mem_free(dr);
+        return false;
+    }
+    int r = uv_getaddrinfo(loop, &dr->req, dns_lookup_cb, rooted_options.hostname, NULL, &hints);
     if (r != 0) {
         log_error("dns: lookup: uv_getaddrinfo failed: %s", uv_strerror(r));
-        mem_free(dr);
+        dr->completed = true;
+        dns_lookup_request_release(dr);
         return false;
     }
 
@@ -943,23 +1088,35 @@ static bool dns_call_cares_query_hook(const DnsResolveOptions* options,
 }
 
 static bool dns_resolve_start(const DnsResolveOptions* options, Item resolve, Item reject) {
+    if (!options) return false;
+    JS_ROOTS(roots,
+        callback_root, options->callback,
+        resolve_root, resolve,
+        reject_root, reject,
+        hook_value_root, ItemNull);
+    DnsResolveOptions rooted_options = *options;
+    rooted_options.callback = callback_root.get();
     Item hook_value = make_js_undefined();
     int hook_status = 0;
-    if (dns_call_cares_query_hook(options, &hook_status, &hook_value)) {
+    if (dns_call_cares_query_hook(&rooted_options, &hook_status, &hook_value)) {
+        hook_value_root.set(hook_value);
         if (hook_status != 0) {
-            Item err = make_dns_resolve_error(hook_status, options->hostname, options->syscall);
-            dns_resolve_schedule(options->callback, resolve, reject, err, make_js_undefined());
+            Item err = make_dns_resolve_error(hook_status, rooted_options.hostname, rooted_options.syscall);
+            dns_resolve_schedule(callback_root.get(), resolve_root.get(), reject_root.get(),
+                err, make_js_undefined());
         } else {
-            dns_resolve_schedule(options->callback, resolve, reject, ItemNull, hook_value);
+            dns_resolve_schedule(callback_root.get(), resolve_root.get(), reject_root.get(), ItemNull,
+                hook_value_root.get());
         }
         return true;
     }
 
-    if (options->family != 4 && options->family != 6) {
+    if (rooted_options.family != 4 && rooted_options.family != 6) {
         Item err = make_dns_resolve_code_error("ENOTIMP",
             "DNS record type is not implemented by this resolver backend",
-            options->hostname, options->syscall);
-        dns_resolve_schedule(options->callback, resolve, reject, err, make_js_undefined());
+            rooted_options.hostname, rooted_options.syscall);
+        dns_resolve_schedule(callback_root.get(), resolve_root.get(), reject_root.get(),
+            err, make_js_undefined());
         return true;
     }
 
@@ -970,23 +1127,32 @@ static bool dns_resolve_start(const DnsResolveOptions* options, Item resolve, It
     }
 
     DnsResolveReq* dr = (DnsResolveReq*)mem_calloc(1, sizeof(DnsResolveReq), MEM_CAT_JS_RUNTIME);
-    dr->callback = options->callback;
-    dr->resolve = resolve;
-    dr->reject = reject;
-    dr->family = options->family;
-    memcpy(dr->hostname, options->hostname, sizeof(dr->hostname));
-    memcpy(dr->syscall, options->syscall, sizeof(dr->syscall));
+    if (!dr) return false;
+    dr->family = rooted_options.family;
+    memcpy(dr->hostname, rooted_options.hostname, sizeof(dr->hostname));
+    memcpy(dr->syscall, rooted_options.syscall, sizeof(dr->syscall));
     dr->req.data = dr;
 
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = options->family == 6 ? AF_INET6 : AF_INET;
+    hints.ai_family = rooted_options.family == 6 ? AF_INET6 : AF_INET;
     hints.ai_socktype = SOCK_STREAM;
 
-    int r = uv_getaddrinfo(loop, &dr->req, dns_resolve_cb, options->hostname, NULL, &hints);
+    const RuntimeResourceDescriptor* descriptor =
+        runtime_resource_descriptor_from_legacy_name("DNSReqCallback");
+    Item root_values[3] = {callback_root.get(), resolve_root.get(), reject_root.get()};
+    dr->resource_id = runtime_resource_table_add_root_span_owned(
+        &js_runtime_state.resources, dr, root_values, 3, descriptor,
+        dns_resolve_resource_close, dr, false);
+    if (dr->resource_id == 0) {
+        mem_free(dr);
+        return false;
+    }
+    int r = uv_getaddrinfo(loop, &dr->req, dns_resolve_cb, rooted_options.hostname, NULL, &hints);
     if (r != 0) {
         log_error("dns: resolve: uv_getaddrinfo failed: %s", uv_strerror(r));
-        mem_free(dr);
+        dr->completed = true;
+        dns_resolve_request_release(dr);
         return false;
     }
 
@@ -1246,17 +1412,9 @@ extern "C" uint64_t js_get_heap_epoch(void);
 #define dns_resolver_prototype (js_runtime_state.dns.resolver_prototype)
 #define dns_promises_resolver_prototype (js_runtime_state.dns.promises_resolver_prototype)
 #define dns_default_servers (js_runtime_state.dns.default_servers)
-#define dns_roots_epoch (js_runtime_state.dns.roots_epoch)
 
-static void dns_register_roots_once(void) {
-    uint64_t epoch = js_get_heap_epoch();
-    if (dns_roots_epoch == epoch) return;
-    heap_register_gc_root(&dns_namespace.item);
-    heap_register_gc_root(&dns_promises_namespace.item);
-    heap_register_gc_root(&dns_resolver_prototype.item);
-    heap_register_gc_root(&dns_promises_resolver_prototype.item);
-    heap_register_gc_root(&dns_default_servers.item);
-    dns_roots_epoch = epoch;
+static bool dns_ensure_roots(void) {
+    return js_root_range_ensure_registered(&js_runtime_state.dns.roots);
 }
 
 static Item dns_array_copy(Item servers) {
@@ -1320,7 +1478,7 @@ static Item dns_load_system_servers(void) {
 }
 
 static Item dns_get_default_servers(void) {
-    dns_register_roots_once();
+    if (!dns_ensure_roots()) return ItemError;
     if (get_type_id(dns_default_servers) != LMD_TYPE_ARRAY) {
         dns_default_servers = dns_load_system_servers();
     }
@@ -1591,7 +1749,7 @@ static Item dns_make_resolver_constructor(bool promise_mode) {
 extern "C" Item js_get_dns_promises_namespace(void) {
     // The namespace is published only after its methods are installed; register
     // the owner slot first so forced collection cannot reclaim this partial image.
-    dns_register_roots_once();
+    if (!dns_ensure_roots()) return ItemError;
     if (dns_promises_namespace.item != 0) return dns_promises_namespace;
 
     dns_ensure_cares_channelwrap();
@@ -1619,7 +1777,7 @@ extern "C" Item js_get_dns_promises_namespace(void) {
 extern "C" Item js_get_dns_namespace(void) {
     // The namespace is published only after its methods are installed; register
     // the owner slot first so forced collection cannot reclaim this partial image.
-    dns_register_roots_once();
+    if (!dns_ensure_roots()) return ItemError;
     if (dns_namespace.item != 0) return dns_namespace;
 
     dns_ensure_cares_channelwrap();

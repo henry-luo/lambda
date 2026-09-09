@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "D5.1.1v2/D8.1.1v9: the wait edge snapshots only bindings read by the resumed continuation; locals created in its synchronous tail do not produce per-write async-frame traffic. The task handle/replay operands remain traced Item spills, so they are not mistaken for named-local snapshots.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "expect": [
+        "call\tlambda_async_frame_set_state"
+      ],
+      "count": {
+        "call\tlambda_async_frame_set_p, lambda_async_frame_set,": {"max": 3},
+        "call\tlambda_async_frame_get_p, lambda_async_frame_get,": {"max": 8}
+      }
+    }
+  ]
+}

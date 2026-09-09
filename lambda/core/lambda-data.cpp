@@ -391,7 +391,7 @@ bool it2b(Item itm) {
     return true;
 }
 
-static int64_t item_to_int64(Item itm, int64_t fallback) {
+static int64_t item_to_int64_or(Item itm, int64_t fallback) {
     TypeId type_id = get_type_id(itm);
     if (type_id == LMD_TYPE_INT) {
         return lambda_int_item_to_i64(itm);
@@ -400,7 +400,14 @@ static int64_t item_to_int64(Item itm, int64_t fallback) {
         return itm.get_int64();
     }
     else if (is_float_type_id(type_id)) {
-        return (int64_t)itm.get_double();
+        double value = itm.get_double();
+        // The shared IEEE specials are int poison at an IntLane boundary.
+        // Preserve that lane meaning explicitly; a machine-i64 conversion
+        // instead uses item_try_to_int64() and rejects them.
+        if (isnan(value)) return INT_LANE_NAN;
+        if (isinf(value)) return value < 0.0 ? INT_LANE_NEG_INF : INT_LANE_INF;
+        if (value < (double)INT64_MIN || value >= 0x1p63) return fallback;
+        return (int64_t)value;
     }
     else if (type_id == LMD_TYPE_BOOL) {
         return itm.bool_val ? 1 : 0;
@@ -418,14 +425,55 @@ static int64_t item_to_int64(Item itm, int64_t fallback) {
         // Native inferred integer parameters still form a representation
         // boundary: ordinary arithmetic may deliver the exact semantic
         // `integer` carrier here even when its value fits the native lane.
-        return decimal_to_int64_exact(itm, &value) ? value : INT64_MAX;
+        return decimal_to_int64_exact(itm, &value) ? value : fallback;
     }
     return fallback;
 }
 
+bool item_try_to_int64(Item itm, int64_t* out) {
+    if (!out) return false;
+    TypeId type_id = get_type_id(itm);
+    if (type_id == LMD_TYPE_INT) {
+        *out = lambda_int_item_to_i64(itm);
+        return true;
+    }
+    if (type_id == LMD_TYPE_INT64) {
+        *out = itm.get_int64();
+        return true;
+    }
+    if (is_float_type_id(type_id)) {
+        double value = itm.get_double();
+        if (!isfinite(value) || value < (double)INT64_MIN || value >= 0x1p63) return false;
+        *out = (int64_t)value;
+        return true;
+    }
+    if (type_id == LMD_TYPE_BOOL) {
+        *out = itm.bool_val ? 1 : 0;
+        return true;
+    }
+    if (type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = itm.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
+            double value = itm.get_num_sized_as_double();
+            if (!isfinite(value) || value < (double)INT64_MIN || value >= 0x1p63) return false;
+            *out = (int64_t)value;
+            return true;
+        }
+        *out = itm.get_num_sized_as_int64();
+        return true;
+    }
+    if (type_id == LMD_TYPE_UINT64) {
+        uint64_t value = itm.get_uint64();
+        if (value > (uint64_t)INT64_MAX) return false;
+        *out = (int64_t)value;
+        return true;
+    }
+    return type_id == LMD_TYPE_DECIMAL && decimal_to_int64_exact(itm, out);
+}
+
 int64_t it2i(Item itm) {
     // error and unsupported values retain the historical zero conversion.
-    return item_to_int64(itm, 0);
+    return item_to_int64_or(itm, 0);
 }
 
 // MIR JIT workaround: opaque store functions to prevent SSA optimizer from
@@ -433,9 +481,10 @@ int64_t it2i(Item itm) {
 void _store_i64(int64_t* dst, int64_t val) { *dst = val; }
 void _store_f64(double* dst, double val) { *dst = val; }
 
-// extract an integer Item as int64 (full precision)
+// Legacy lane accessor. Fallible machine-i64 conversion callers must use
+// item_try_to_int64(); only an IntLane boundary may receive its poison values.
 int64_t it2l(Item itm) {
-    return item_to_int64(itm, INT64_MAX);
+    return item_to_int64_or(itm, 0);
 }
 
 DateTime* it2k(Item itm) {
@@ -1030,6 +1079,12 @@ Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
         // pointer's first byte as an ANY tag truncates function/container values.
         Map* nested = map_shape_field_to_map(map_data, field);
         return nested ? (Item){.map = nested} : ItemNull;
+    }
+    if (field->flags & JSPD_IS_ACCESSOR) {
+        // Accessor cells occupy the FUNC-sized pointer lane, but are not
+        // callable values. Property kernels use the shape flag to decode the
+        // raw cell; generic map readers see its undefined identity instead.
+        return (Item){.item = *(uint64_t*)field_ptr};
     }
     LaneStorageDesc lane = {};
     if (shape_entry_uses_native_lane(field, &lane)) {

@@ -25,7 +25,7 @@ pn count(r: float, i: float, step: float, x: float, y: float) int {
     return max_count
 }
 
-pn mbrot(var matrix, r: float, i: float, step: float, n: int) any {
+pn mbrot(var matrix: (int*)*, r: float, i: float, step: float, n: int) any {
     var y: int = n - 1
     while (y >= 0) {
         var x: int = n - 1
@@ -38,12 +38,7 @@ pn mbrot(var matrix, r: float, i: float, step: float, n: int) any {
 }
 
 pn test(n: int) int {
-    var matrix = fill(n, null)
-    var idx: int = 0
-    while (idx < n) {
-        matrix[idx] = fill(n, 0)
-        idx = idx + 1
-    }
+    var matrix: (int*)* = [for (idx in 0 to n - 1) fill(n, 0)]
     mbrot(matrix, -1.0, -0.5, 0.005, n)
     var row0 = matrix[0]
     return row0[0]

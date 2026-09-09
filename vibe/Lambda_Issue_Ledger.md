@@ -74,7 +74,7 @@ Counts:
 |---|---|---:|---:|---:|---:|
 | LR_01 | Compilation pipeline, CLI & REPL | 8 | 2 | 0 | 10 |
 | LR_02 | Parsing & AST construction | 2 | 4 | 0 | 6 |
-| LR_03 | Value & type model | 5 | 1 | 0 | 6 |
+| LR_03 | Value & type model | 4 | 1 | 0 | 5 |
 | LR_04 | Numbers, decimal & datetime | 6 | 0 | 0 | 6 |
 | LR_05 | Strings, symbols & vectors | 2 | 1 | 0 | 3 |
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 0 | 0 |
@@ -86,13 +86,13 @@ Counts:
 | LR_12 | Procedural runtime | 7 | 0 | 0 | 7 |
 | LR_13 | Schema validator | 7 | 0 | 0 | 7 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 0 | 7 |
-| **Live total** | | **78** | **10** | **0** | **88** |
+| **Live total** | | **77** | **10** | **0** | **87** |
 
-The active ledger now contains 88 live records, with the 61 previously counted
+The active ledger now contains 87 live records, with the 61 previously counted
 resolved records moved to the archive. Duplicate/split records and
 verification-only findings remain represented there for provenance.
 Two original entries each split into a resolved half and a surviving residue —
-LR_03 #4 (sentinels → LR03-4 + LR03-5) and LR_05 #3 (two string orderings →
+LR_03 #4 (sentinels → LR03-R4 + LR03-5) and LR_05 #3 (two string orderings →
 LR05-R2 + LR05-R3). And two defects were **found during verification** rather
 than extracted: LR02-8 through LR02-10, each marked as such in place (a fourth, LR02-11, was fixed the same day and is now LR02-R6).
 
@@ -286,13 +286,6 @@ removed it is now purely a MIR Direct ↔ value-model coupling.
 fail-closed conversion boundary now distinguish the int lane from machine/full-width
 integers. Remaining workaround reduction is gated on expression-producer migration.
 
-<a id="lr03-4"></a><a id="lr10-5"></a>**LR03-4 · `it2l` error sentinel collides with a legitimate value · OPEN**
-`INT64_ERROR == INT64_MAX` (`lambda/lambda.h:1261`); `it2l`
-(`lambda/core/lambda-data.cpp:424`) returns it as the failure sentinel, so a
-real maximum int64 is indistinguishable from a conversion failure. Cross-link:
-the same collision is called out as `INT64_ERROR == INT_LANE_INF` in
-[v5 int migration in flight] — treat as one issue.
-
 <a id="lr03-5"></a>**LR03-5 · `it2d` / `it2b` coercions · PARTIAL**
 *Reframed as deliberate:* `it2d` poisons unrecognized types to `NaN`
 (`lambda-data.cpp:353`) with an in-code note that the previous `0.0` was silent
@@ -410,7 +403,7 @@ and by boxing to `ANY` outside loops. Related sharp edge: an error Item (e.g.
 from division by zero) is silently coerced to `0` / `0.0` / `false` when a boxed
 value is unboxed into a native variable. The range-checked conversion helper at
 `transpile-mir.cpp:15435`–`15451` narrows this for indices only (out-of-range
-yields `INT64_MAX`, itself colliding with [LR03-4](#lr03-4)).
+yields the legitimate finite value `INT64_MAX`).
 
 <a id="lr07-5"></a>**LR07-5 · `get_effective_type` only narrows IDENTs to ANY · OPEN**
 It does not catch every post-mutation type change, leaving a stale-type boxing
@@ -1331,7 +1324,7 @@ together, not individually.
 |---|---|---|
 | **Honest static types** | LR07-7, LR08-3, LR11-6, LR12-3 | The collector, the TCO gate, and the stack-check gate all trust transpiler type classification. Until that is provable, all three stay pessimistic. Fix per CLAUDE.md rule 15 with precise `RootFrame`/`Rooted` ownership. |
 | **Representation ↔ semantics coupling** | LR03-3, LR07-1, LR07-5, LR07-14 | Expression results carry no `ValueRep`; each consumer re-derives it. See [Result32 lane-parity + Tune19], [Compiling lane design]. |
-| **`INT64_MAX` sentinel collision** | LR03-4, LR07-4 | `INT64_ERROR == INT64_MAX` and `INT_LANE_INF` share one bit pattern; index OOB also lands on `INT64_MAX`. The former LR10-5 entry is a preserved alias for LR03-4. See [v5 int migration in flight]. |
+| **`INT64_MAX` sentinel residue** | LR07-4 | [LR03-R4](Lambda_Issue_Ledger(fixed).md#lr03-r4) removed `INT64_ERROR`; index OOB still lands on the legitimate finite value `INT64_MAX` and must get an explicit failure channel. |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
 | **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
 | **Process globals** | LR01-12, LR12-6 | `g_template_registry` and `g_dry_run` block concurrent runtimes. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |

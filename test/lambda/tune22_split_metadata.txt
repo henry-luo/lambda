@@ -1,0 +1,6 @@
+{
+  text: ["a", "b", "c"],
+  array_error: true,
+  text_error: true,
+  null_source: []
+}

@@ -644,6 +644,11 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     return ptr;
 }
 
+extern "C" void* heap_calloc_js_accessor_cell(size_t size) {
+    if (!context || !context->heap || !context->heap->gc) return NULL;
+    return gc_heap_calloc(context->heap->gc, size, GC_TYPE_JS_ACCESSOR);
+}
+
 extern "C" int64_t lambda_restore_number_frame_top(uint64_t* top) {
     Context* runtime = (Context*)context;
     if (!runtime || !top || !runtime->side_number_base ||
@@ -667,7 +672,7 @@ extern "C" void* heap_calloc_closure_env(size_t size) {
     if (size > SIZE_MAX / 2) return NULL;
     // Closure slots own a parallel scalar tail so captured wide numbers never
     // retain pointers into a completed invocation's number frame.
-    return gc_heap_calloc(context->heap->gc, size * 2, GC_TYPE_JS_ENV);
+    return gc_heap_calloc(context->heap->gc, size * 2, GC_TYPE_ENVIRONMENT);
 }
 
 // Specialized allocator for JIT: uses bump-pointer fast path with pre-computed
@@ -1034,16 +1039,6 @@ Item int2it_i64(int64_t value) {
     return {.item = lambda_int_box_lane(value)};
 }
 
-// Cold path for generated int boxing. Legacy native helpers (fn_len, index_of,
-// fn_idiv_i, the shift builtins) report failure in-band as INT64_ERROR, and the
-// retired compact encoder rejected that value by accident of its range check —
-// the only reason those errors ever surfaced. Keeping the test here lets the
-// emitted fast path fold it into the class predicate instead of branching twice.
-Item int2it_i64_or_error(int64_t value) {
-    if (value == INT64_ERROR) return ItemError;
-    return {.item = lambda_int_box_lane(value)};
-}
-
 Item flt2it(double dval) {
     uint64_t bits;
     memcpy(&bits, &dval, sizeof(bits));
@@ -1173,13 +1168,6 @@ Item box_uint64_value(uint64_t uval) {
     }
     *uptr = uval;
     return {.item = u2it(uptr)};
-}
-
-// Native helpers that return raw int64_t retain this historical error channel.
-// Ordinary language values must call box_int64_value(), which preserves INT64_MAX.
-Item box_int64_result_or_error(int64_t lval) {
-    if (lval == INT64_ERROR) return ItemError;
-    return box_int64_value(lval);
 }
 
 // Safe version of push_d that detects already-boxed FLOAT Items.

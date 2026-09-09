@@ -200,15 +200,7 @@ extern "C" void js_set_function_home_class(Item fn_item, Item home_class) {
 extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     JsFunction* fn = (JsFunction*)data;
     if (!fn) return 0;
-    if (fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) {
-        JsAccessorPair* pair = (JsAccessorPair*)data;
-        if (pair->layout_magic != JS_ACCESSOR_PAIR_LAYOUT_MAGIC) return 0;
-        // Accessor pairs share the FUNC tag for property-slot compatibility,
-        // but their getter and setter are the actual reachability edges.
-        gc_mark_item(gc, pair->getter.item);
-        gc_mark_item(gc, pair->setter.item);
-        return 1;
-    }
+    if (fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) return 0;
 
     // A GC-owned function is the reachability owner for its closure env and
     // bound argument vectors; tracing those edges replaces permanent root ranges.
@@ -364,12 +356,7 @@ extern "C" void js_function_gc_destroy(void* data) {
 extern "C" int js_function_gc_compact(void* data, gc_heap_t* gc) {
     JsFunction* fn = (JsFunction*)data;
     if (!fn) return 0;
-    if (fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) {
-        JsAccessorPair* pair = (JsAccessorPair*)data;
-        // Accessor pairs have no movable data-zone fields; skipping the legacy
-        // Function compactor prevents its field offsets from corrupting them.
-        return pair->layout_magic == JS_ACCESSOR_PAIR_LAYOUT_MAGIC;
-    }
+    if (fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) return 0;
     if (!fn->env || fn->env_size <= 0 ||
         !gc_data_zone_owns(gc->data_zone, fn->env)) return 1;
     // JsFunction is not the legacy Function layout. Its environment includes
@@ -1064,21 +1051,42 @@ JS_NATIVE_CLOSURE_ARITIES(JS_DEFINE_NATIVE_CLOSURE_FACTORY)
     void js_schedule_native_env(void (*schedule)(Item), type target, \
             int adapter_arity, const Item* values, int count) { \
         if (!schedule || !target || count < 0 || (count > 0 && !values)) return; \
+        RootFrame roots((size_t)count + 1); \
+        Rooted<Item> callback_root(roots, ItemNull); \
+        for (int i = 0; i < count; i++) { \
+            uint64_t* value_root = roots.take_slot(); \
+            if (!value_root) return; \
+            *value_root = values[i].item; \
+        } \
         Item* env = js_alloc_env(count); \
         if (count > 0 && !env) return; \
-        for (int i = 0; i < count; i++) env[i] = values[i]; \
-        Item callback = js_new_native_closure(target, adapter_arity, env, count); \
-        if (!item_is_error(callback)) schedule(callback); \
+        for (int i = 0; i < count; i++) { \
+            uint64_t* value_root = roots.slot((size_t)i + 1); \
+            env[i] = (Item){.item = value_root ? *value_root : 0}; \
+        } \
+        callback_root.set(js_new_native_closure(target, adapter_arity, env, count)); \
+        if (!item_is_error(callback_root.get())) schedule(callback_root.get()); \
     } \
     Item js_schedule_native_env_timeout(type target, int adapter_arity, \
             Item delay, const Item* values, int count) { \
         if (!target || count < 0 || (count > 0 && !values)) return ItemError; \
+        RootFrame roots((size_t)count + 2); \
+        Rooted<Item> delay_root(roots, delay); \
+        Rooted<Item> callback_root(roots, ItemNull); \
+        for (int i = 0; i < count; i++) { \
+            uint64_t* value_root = roots.take_slot(); \
+            if (!value_root) return ItemError; \
+            *value_root = values[i].item; \
+        } \
         Item* env = js_alloc_env(count); \
         if (count > 0 && !env) return ItemError; \
-        for (int i = 0; i < count; i++) env[i] = values[i]; \
-        Item callback = js_new_native_closure(target, adapter_arity, env, count); \
-        if (item_is_error(callback)) return callback; \
-        return js_setTimeout(callback, delay); \
+        for (int i = 0; i < count; i++) { \
+            uint64_t* value_root = roots.slot((size_t)i + 2); \
+            env[i] = (Item){.item = value_root ? *value_root : 0}; \
+        } \
+        callback_root.set(js_new_native_closure(target, adapter_arity, env, count)); \
+        if (item_is_error(callback_root.get())) return callback_root.get(); \
+        return js_setTimeout(callback_root.get(), delay_root.get()); \
     }
 
 JS_NATIVE_ENV_ARITIES(JS_DEFINE_NATIVE_ENV_SCHEDULER)
@@ -1212,7 +1220,7 @@ extern "C" void js_env_rehome_scalars(Item* env) {
     if (!env || !context || !context->heap || !context->heap->gc ||
             !gc_is_managed(context->heap->gc, env)) return;
     gc_header_t* header = gc_get_header(env);
-    if (header->type_tag != GC_TYPE_JS_ENV || header->alloc_size == 0) return;
+    if (!gc_environment_is_item_slots(header) || header->alloc_size == 0) return;
     int64_t count = (int64_t)(header->alloc_size / (2 * sizeof(Item)));
     // Generator environments mix boxed Items with raw state/spill words. Only
     // tagged pointers into the active number stack are valid scalar Items;

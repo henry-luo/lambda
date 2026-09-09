@@ -1,0 +1,11 @@
+{
+  join_values: ["alpha-beta", "alpha:beta", "hé-世界"],
+  join_index: ["-", "a", "é"],
+  split_values: ["", "a", "b", "", "c", "", "h", "é", "世", "界", "a", "b", "alpha", "beta", "a", "--", "b", "--", ""],
+  literal_zero: [false, true, false, false],
+  literal_prefix: [false, false, false, true],
+  literal_empty: [true, false, false, true],
+  literal_non_string: [false, false, false, true],
+  literal_null: [false, false, false, true],
+  literal_error: [false, false, false, true]
+}

@@ -101,7 +101,6 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(JS_ITER_DONE_SENTINEL >> 5
 // Maximum module-level live bindings tracked in the compact slot table.
 // Generated Unicode identifier tests declare thousands of top-level vars; keep
 // this above those rows so they stay on the indexed binding path.
-#define JS_MAX_MODULE_VARS 16384
 
 // =============================================================================
 // Type Conversion Functions
@@ -234,6 +233,21 @@ Item js_new_object(void);
 // Allocate a JS object with its immutable semantic metadata selected before
 // the object is returned to any caller. The class ID is a stable JsClass value.
 Item js_new_object_with_class(int class_id);
+// T10-2: the predicted-shape slot cap. ctor_reserved_mask is 16 bits wide, and
+// it is what keeps an unwritten slot absent rather than null, so a shape may
+// never carry more slots than the mask can track.
+#define JS_PREDICTED_SHAPE_MAX_SLOTS 16
+// T10-2: allocate an object literal on its compile-predicted shape. The site is
+// named by a range of the active module's property-key table, never a realm
+// pointer (D5.4.3). Falls back to js_new_object() when the shape is refused.
+Item js_new_object_shaped(int64_t first_key_index, int64_t key_count);
+// T10-2: initialize an unwritten predicted slot in place (NULL -> T retag), so
+// the instance stays on the shape its site's guard compares against.
+bool js_predicted_slot_initialize(Item target, NameRef key, Item value);
+// T10-2 item 2: guarded direct-slot read. The shape is a compile-time candidate;
+// the guard proves it at runtime and misses fall through to js_get_name_id.
+Item js_shaped_slot_get(Item object, int64_t first_key_index, int64_t key_count,
+                        int64_t slot, int64_t name_id);
 struct TypeMap;
 // Native carriers use the same pre-publication metadata-qualified empty shape.
 struct TypeMap* js_object_type_for_class(int class_id);

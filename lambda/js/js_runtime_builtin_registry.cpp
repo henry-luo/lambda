@@ -9,9 +9,8 @@
 
 // Intrinsic functions are realm-owned binding values. A shared target never
 // implies JavaScript identity; only an explicit binding alias can share a slot.
-#define js_builtin_cache (js_runtime_state.builtin_cache->entries)
-#define js_builtin_cache_init (js_runtime_state.builtin_cache->initialized)
-JS_FORWARD_STATIC_RETURN(bool, js_builtin_cache_ensure_roots, (void), js_root_range_ensure_registered, (&js_runtime_state.builtin_cache->roots))
+#define js_builtin_cache (js_runtime_state.intrinsic_slots->builtin_function_entries)
+#define js_builtin_cache_init (js_runtime_state.intrinsic_slots->builtin_function_initialized)
 
 
 static const JsIntrinsicTargetSpec JS_INTRINSIC_TARGET_SPECS[] = {
@@ -258,7 +257,7 @@ static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec
     // builtin to hand back. Realm-neutral DOM callers reach here through
     // property lookup on a Lambda-only document (ESO81).
     if (!js_input || !js_input->pool) return ItemNull;
-    if (!spec || !js_active_runtime_state || !js_builtin_cache_ensure_roots()) {
+    if (!spec || !js_realm_intrinsic_slots_ensure_roots()) {
         return ItemError;
     }
     if (!js_builtin_cache_init) {

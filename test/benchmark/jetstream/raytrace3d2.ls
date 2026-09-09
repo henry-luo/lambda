@@ -4,10 +4,11 @@
 // Type annotations enable MIR JIT Phase 3 direct byte-offset field access
 
 // Type definitions — field order MUST match map literal order in constructors.
-type Triangle = {axis: int, normal: array, nu: float, nv: float, nd: float, eu: float, ev: float, nu1: float, nv1: float, nu2: float, nv2: float, material: array, shader: map?, reflection: float}
-type Scene = {triangles: array, lights: array, ambient: array, background: array, n_lights: int, n_triangles: int}
-type Light = {pos: array, colour: array}
-type Camera = {origin: array, d0: array, d1: array, d2: array, d3: array}
+type Vec3 = float[]
+type Triangle = {axis: int, normal: Vec3, nu: float, nv: float, nd: float, eu: float, ev: float, nu1: float, nv1: float, nu2: float, nv2: float, material: Vec3, shader: map?, reflection: float}
+type Light = {pos: Vec3, colour: Vec3}
+type Scene = {triangles: Triangle[], lights: Light[], ambient: Vec3, background: Vec3, n_lights: int, n_triangles: int}
+type Camera = {origin: Vec3, d0: Vec3, d1: Vec3, d2: Vec3, d3: Vec3}
 
 // Vector operations (3-element arrays)
 pn vec3(x: float, y: float, z: float) float[] {
@@ -163,8 +164,8 @@ pn triangle_intersect(tri: Triangle, orig: float[], dir: float[], near: float, f
 }
 
 // Scene: list of triangles, lights, ambient, background
-pn create_scene(triangles: array) Scene {
-    var sc: Scene = {triangles: triangles, lights: fill(0, null),
+pn create_scene(triangles: Triangle[]) Scene {
+    var sc: Scene = {triangles: triangles, lights: [],
             ambient: [0.0, 0.0, 0.0], background: [0.8, 0.8, 1.0],
             n_lights: 0, n_triangles: len(triangles)}
     return sc

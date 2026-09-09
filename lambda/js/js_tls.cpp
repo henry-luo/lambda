@@ -37,6 +37,7 @@ extern "C" Item js_tls_socket_getSession(void);
 extern "C" uv_tcp_t* js_net_socket_adopt_for_tls(Item socket_obj, Item tls_obj);
 extern "C" void js_net_socket_tls_closed(Item socket_obj, bool had_error);
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
+extern __thread EvalContext* context;
 
 template <typename Target>
 JS_FORWARD_STATIC_VOID( tls_set_native, (Item object, const char* name, Target target), js_set_native_key, (object, make_string_item(name), target))
@@ -550,11 +551,6 @@ typedef struct JsTlsServer {
     bool         session_cache_ready;
 } JsTlsServer;
 
-typedef struct PendingTlsWriteCallback {
-    Item callback;
-    struct PendingTlsWriteCallback* next;
-} PendingTlsWriteCallback;
-
 typedef struct JsTlsSocket {
     uv_tcp_t       tcp;
     uv_tcp_t*      tcp_handle;
@@ -599,13 +595,28 @@ typedef struct JsTlsSocket {
     size_t         pending_write_len;
     unsigned char* client_hello_probe;
     size_t         client_hello_probe_len;
-    PendingTlsWriteCallback* pending_write_callbacks_head;
-    PendingTlsWriteCallback* pending_write_callbacks_tail;
+    RootVector     pending_write_callbacks;
+    int64_t        pending_write_callback_head;
+    bool           pending_write_callbacks_flushing;
     char           connect_host[256];
     char           local_address[256];
     char           requested_cipher[128];
     char           ticket_text[64];
 } JsTlsSocket;
+
+static JsTlsSocket* tls_socket_alloc(void) {
+    JsTlsSocket* sock = (JsTlsSocket*)mem_calloc(1, sizeof(JsTlsSocket), MEM_CAT_JS_RUNTIME);
+    if (!sock) return NULL;
+    root_vector_init(&sock->pending_write_callbacks, (Context*)context,
+        "TLS pending write callbacks");
+    return sock;
+}
+
+static void tls_socket_free(JsTlsSocket* sock) {
+    if (!sock) return;
+    root_vector_destroy(&sock->pending_write_callbacks);
+    mem_free(sock);
+}
 
 static uv_tcp_t* tls_socket_tcp(JsTlsSocket* sock) {
     if (!sock) return NULL;
@@ -755,7 +766,7 @@ static void tls_socket_finalize_closed(JsTlsSocket* sock, bool had_error) {
         tls_context_destroy(sock->tls_ctx);
         sock->tls_ctx = NULL;
     }
-    mem_free(sock);
+    tls_socket_free(sock);
 }
 
 static void tls_socket_destroy_pending_borrowed_socket(JsTlsSocket* sock) {
@@ -1282,38 +1293,69 @@ static bool tls_socket_queue_plaintext(JsTlsSocket* sock, const char* data, size
     return true;
 }
 
+static void tls_socket_compact_write_callbacks(JsTlsSocket* sock) {
+    if (!sock || sock->pending_write_callbacks_flushing ||
+            sock->pending_write_callback_head <= 0) {
+        return;
+    }
+    int64_t count = root_vector_count(&sock->pending_write_callbacks);
+    int64_t head = sock->pending_write_callback_head;
+    if (head >= count) {
+        root_vector_clear(&sock->pending_write_callbacks);
+        sock->pending_write_callback_head = 0;
+        return;
+    }
+    // Keep a FIFO queue without a second native callback-node structure.
+    int64_t remaining = count - head;
+    for (int64_t i = 0; i < remaining; i++) {
+        Item* source = root_vector_at(&sock->pending_write_callbacks, head + i);
+        Item* target = root_vector_at(&sock->pending_write_callbacks, i);
+        if (source && target) *target = *source;
+    }
+    root_vector_shrink(&sock->pending_write_callbacks, remaining);
+    sock->pending_write_callback_head = 0;
+}
+
+static bool tls_socket_has_write_callbacks(JsTlsSocket* sock) {
+    return sock && sock->pending_write_callback_head <
+        root_vector_count(&sock->pending_write_callbacks);
+}
+
 static void tls_socket_queue_write_callback(JsTlsSocket* sock, Item callback) {
     if (!sock || !is_callable(callback)) return;
-    PendingTlsWriteCallback* pending = (PendingTlsWriteCallback*)mem_calloc(
-        1, sizeof(PendingTlsWriteCallback), MEM_CAT_JS_RUNTIME);
-    if (!pending) return;
-    pending->callback = callback;
-    if (sock->pending_write_callbacks_tail) {
-        sock->pending_write_callbacks_tail->next = pending;
-    } else {
-        sock->pending_write_callbacks_head = pending;
+    RootFrame roots(1);
+    Rooted<Item> callback_root(roots, callback);
+    tls_socket_compact_write_callbacks(sock);
+    if (!root_vector_push(&sock->pending_write_callbacks, callback_root.get())) {
+        log_error("tls: could not retain write callback");
     }
-    sock->pending_write_callbacks_tail = pending;
 }
 
 static void tls_socket_finish_write_callbacks(JsTlsSocket* sock, Item err) {
     if (!sock) return;
-    PendingTlsWriteCallback* pending = sock->pending_write_callbacks_head;
-    sock->pending_write_callbacks_head = NULL;
-    sock->pending_write_callbacks_tail = NULL;
-    bool has_err = !tls_is_missing(err) && err.item != ITEM_NULL;
-    while (pending) {
-        PendingTlsWriteCallback* next = pending->next;
-        if (is_callable(pending->callback)) {
+    RootFrame roots(2);
+    Rooted<Item> err_root(roots, err);
+    Rooted<Item> callback_root(roots, make_js_undefined());
+    bool has_err = !tls_is_missing(err_root.get()) && err_root.get().item != ITEM_NULL;
+    int64_t finish_count = root_vector_count(&sock->pending_write_callbacks);
+    sock->pending_write_callbacks_flushing = true;
+    while (sock->pending_write_callback_head < finish_count) {
+        Item* stored = root_vector_at(&sock->pending_write_callbacks,
+            sock->pending_write_callback_head);
+        callback_root.set(stored ? *stored : make_js_undefined());
+        if (stored) *stored = make_js_undefined();
+        sock->pending_write_callback_head++;
+        if (is_callable(callback_root.get())) {
             if (has_err) {
-                js_call_function(pending->callback, make_js_undefined(), &err, 1);
+                Item callback_err = err_root.get();
+                js_call_function(callback_root.get(), make_js_undefined(), &callback_err, 1);
             } else {
-                js_call_function(pending->callback, make_js_undefined(), NULL, 0);
+                js_call_function(callback_root.get(), make_js_undefined(), NULL, 0);
             }
         }
-        mem_free(pending);
-        pending = next;
     }
+    sock->pending_write_callbacks_flushing = false;
+    tls_socket_compact_write_callbacks(sock);
     js_microtask_flush();
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, tls_is_want_io, (int status), (status == MBEDTLS_ERR_SSL_WANT_READ || status == MBEDTLS_ERR_SSL_WANT_WRITE))
@@ -1340,7 +1382,7 @@ static void tls_socket_close_transport(JsTlsSocket* sock, bool had_error) {
     if (!sock || !sock->tcp_initialized || sock->destroyed) return;
     sock->destroyed = true;
     sock->close_had_error = had_error;
-    if (sock->pending_write_callbacks_head) {
+    if (tls_socket_has_write_callbacks(sock)) {
         // Aborted TLS transports must finish queued write callbacks; otherwise
         // Node's WriteWrap leak regression waits forever for ECANCELED.
         Item err = had_error ? make_tls_write_canceled_error() : make_js_undefined();
@@ -1613,7 +1655,7 @@ extern "C" Item js_tls_socket_end(Item rest_args) {
         tls_socket_emit(self, "close", NULL, 0);
         sock->destroyed = true;
         tls_server_note_socket_closed(sock);
-        mem_free(sock);
+        tls_socket_free(sock);
         tls_socket_detach_js_object(self);
         return self;
     }
@@ -1650,7 +1692,7 @@ extern "C" Item js_tls_socket_destroy(void) {
         tls_connection_destroy(sock->tls_conn);
         sock->tls_conn = NULL;
     }
-    if (sock->pending_write_callbacks_head) {
+    if (tls_socket_has_write_callbacks(sock)) {
         // destroy() aborts queued pre-handshake writes; their callbacks must be
         // completed before the native wrapper is detached.
         tls_socket_finish_write_callbacks(sock, make_tls_write_canceled_error());
@@ -1864,7 +1906,7 @@ static void tls_socket_close_after_error(JsTlsSocket* sock) {
     if (!sock || sock->destroyed) return;
     sock->destroyed = true;
     tls_socket_clear_client_hello_probe(sock);
-    if (sock->pending_write_callbacks_head) {
+    if (tls_socket_has_write_callbacks(sock)) {
         // Handshake failures cancel writes that were accepted by JS but never
         // encrypted; WriteWrap callbacks must receive ECANCELED.
         tls_socket_finish_write_callbacks(sock, make_tls_write_canceled_error());
@@ -2128,7 +2170,7 @@ extern "C" Item js_tls_server_emit(Item event_item, Item socket_item) {
     if (!srv || get_type_id(event_item) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
 
     if (tls_string_equals_lit(event_item, "connection") && js_node_is_object_like(socket_item)) {
-        JsTlsSocket* client = (JsTlsSocket*)mem_calloc(1, sizeof(JsTlsSocket), MEM_CAT_JS_RUNTIME);
+        JsTlsSocket* client = tls_socket_alloc();
         if (!client) return (Item){.item = b2it(false)};
         client->tls_ctx = srv->tls_ctx;
         client->owns_context = false;
@@ -2152,7 +2194,8 @@ extern "C" Item js_tls_server_emit(Item event_item, Item socket_item) {
 }
 
 extern "C" Item js_tls_TLSSocket(Item socket_item, Item options_item) {
-    JsTlsSocket* sock = (JsTlsSocket*)mem_calloc(1, sizeof(JsTlsSocket), MEM_CAT_JS_RUNTIME);
+    JsTlsSocket* sock = tls_socket_alloc();
+    if (!sock) return js_new_error(make_string_item("Could not allocate TLS socket"));
     sock->is_server = false;
     if (js_node_is_object_like(options_item)) {
         Item is_server = js_get_key_cstr(options_item, "isServer");
@@ -2314,7 +2357,11 @@ extern "C" Item js_tls_connect(Item options_item) {
         return js_new_error(make_string_item("Failed to create TLS context"));
     }
 
-    JsTlsSocket* sock = (JsTlsSocket*)mem_calloc(1, sizeof(JsTlsSocket), MEM_CAT_JS_RUNTIME);
+    JsTlsSocket* sock = tls_socket_alloc();
+    if (!sock) {
+        tls_context_destroy(ctx);
+        return js_new_error(make_string_item("Could not allocate TLS socket"));
+    }
     if (!use_existing_socket) {
         uv_tcp_init(loop, &sock->tcp);
         sock->tcp.data = sock;
@@ -2420,7 +2467,11 @@ static void tls_server_connection_cb(uv_stream_t* server, int status) {
 
     uv_loop_t* loop = server->loop;
 
-    JsTlsSocket* client = (JsTlsSocket*)mem_calloc(1, sizeof(JsTlsSocket), MEM_CAT_JS_RUNTIME);
+    JsTlsSocket* client = tls_socket_alloc();
+    if (!client) {
+        log_error("tls: could not allocate accepted socket");
+        return;
+    }
     uv_tcp_init(loop, &client->tcp);
     client->tcp.data = client;
     client->tcp_handle = &client->tcp;
@@ -2441,7 +2492,7 @@ static void tls_server_connection_cb(uv_stream_t* server, int status) {
             if (client->tls_conn) tls_connection_destroy(client->tls_conn);
             tls_server_note_socket_closed(client);
             uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
-                mem_free(h->data);
+                tls_socket_free((JsTlsSocket*)h->data);
             });
             return;
         }
@@ -2450,7 +2501,7 @@ static void tls_server_connection_cb(uv_stream_t* server, int status) {
         uv_read_start((uv_stream_t*)&client->tcp, js_node_alloc_cb, tls_server_client_read_cb);
     } else {
         uv_close((uv_handle_t*)&client->tcp, [](uv_handle_t* h) {
-            mem_free(h->data);
+            tls_socket_free((JsTlsSocket*)h->data);
         });
     }
 }

@@ -19,19 +19,25 @@ typedef struct TemplateStateStore {
     bool owns_map;
 } TemplateStateStore;
 
+static const ContextCapsuleOps template_state_capsule_ops = {
+    "template-state", CONTEXT_CAPSULE_LIFETIME_CONTEXT, sizeof(TemplateStateStore),
+    NULL, NULL, NULL
+};
+
 static TemplateStateStore* tmpl_state_store(void) {
     if (!context) {
         log_error("template-state: no bound canonical EvalContext");
         abort();
     }
-    TemplateStateStore* store = (TemplateStateStore*)context->template_state_store;
+    TemplateStateStore* store = (TemplateStateStore*)context_capsule(
+        context, CONTEXT_CAPSULE_TEMPLATE_STATE);
     if (store) return store;
-    store = (TemplateStateStore*)mem_calloc(1, sizeof(TemplateStateStore), MEM_CAT_EVAL);
+    store = (TemplateStateStore*)context_capsule_ensure(context,
+        CONTEXT_CAPSULE_TEMPLATE_STATE, &template_state_capsule_ops);
     if (!store) {
         log_error("template-state: failed to allocate context store");
         abort();
     }
-    context->template_state_store = store;
     return store;
 }
 
@@ -68,13 +74,14 @@ void tmpl_state_init(void) {
 }
 
 void tmpl_state_destroy(void) {
-    if (!context || !context->template_state_store) return;
-    TemplateStateStore* store = (TemplateStateStore*)context->template_state_store;
+    if (!context) return;
+    TemplateStateStore* store = (TemplateStateStore*)context_capsule(
+        context, CONTEXT_CAPSULE_TEMPLATE_STATE);
+    if (!store) return;
     if (store->map && store->owns_map) {
         hashmap_free(store->map);
     }
-    context->template_state_store = NULL;
-    mem_free(store);
+    context_capsule_drop(context, CONTEXT_CAPSULE_TEMPLATE_STATE);
 }
 
 Item tmpl_state_get(Item model_item, const char* template_ref, const char* state_name) {

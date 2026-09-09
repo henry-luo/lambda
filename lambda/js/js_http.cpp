@@ -54,6 +54,7 @@ extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
 extern Item js_make_number(double d);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
+extern __thread EvalContext* context;
 
 template <typename Target>
 JS_FORWARD_STATIC_VOID( js_http_set_direct_method, (Item object, const char* name, Target target), js_set_native_key, (object, make_string_item(name), target))
@@ -841,8 +842,6 @@ static void http_conn_note_write_done(JsHttpConn* conn, int len) {
 
 typedef struct HttpResponseWriteReq {
     struct JsHttpConn* conn;
-    Item  response;
-    Item  callback;
     int   len;
     bool  close_after;
     bool  final;
@@ -935,8 +934,10 @@ static Item http_encode_write_chunk(Item chunk_item, Item encoding_item) {
 }
 
 static void http_call_write_callback(Item callback) {
-    if (!js_is_callable(callback)) return;
-    js_call_function(callback, make_js_undefined(), NULL, 0);
+    RootFrame roots(1);
+    Rooted<Item> callback_root(roots, callback);
+    if (!js_is_callable(callback_root.get())) return;
+    js_call_function(callback_root.get(), make_js_undefined(), NULL, 0);
     js_microtask_flush();
 }
 
@@ -1632,6 +1633,11 @@ static void http_response_write_settled(void* ud, int status, const char* data,
 }
 
 static void http_response_flush(Item self) {
+    RootFrame roots(2);
+    Rooted<Item> response_root(roots, self);
+    Rooted<Item> end_callback_root(roots,
+        js_get_key_cstr(response_root.get(), "__end_callback__"));
+    self = response_root.get();
     Item handle_item = js_get_key_cstr(self, "__conn__");
     if (handle_item.item == 0) return;
     JsHttpConn* conn = (JsHttpConn*)(uintptr_t)it2i(handle_item);
@@ -1653,9 +1659,8 @@ static void http_response_flush(Item self) {
     http_response_mark_sent(self, true);
         http_response_emit(self, "finish", NULL, 0, false);
         http_response_close_request(self);
-        Item callback = js_get_key_cstr(self, "__end_callback__");
-        if (js_is_callable(callback)) {
-            js_call_function(callback, make_js_undefined(), NULL, 0);
+        if (js_is_callable(end_callback_root.get())) {
+            js_call_function(end_callback_root.get(), make_js_undefined(), NULL, 0);
         }
         js_microtask_flush();
         http_conn_free_if_done(conn);
@@ -1710,9 +1715,8 @@ static void http_response_flush(Item self) {
         http_response_mark_sent(self, true);
         http_response_emit(self, "finish", NULL, 0, false);
         http_response_close_request(self);
-        Item callback = js_get_key_cstr(self, "__end_callback__");
-        if (js_is_callable(callback)) {
-            js_call_function(callback, make_js_undefined(), NULL, 0);
+        if (js_is_callable(end_callback_root.get())) {
+            js_call_function(end_callback_root.get(), make_js_undefined(), NULL, 0);
         }
         js_microtask_flush();
         return;
@@ -1917,12 +1921,9 @@ static void http_response_flush(Item self) {
     HttpResponseWriteReq* write_req =
         (HttpResponseWriteReq*)mem_calloc(1, sizeof(HttpResponseWriteReq), MEM_CAT_JS_RUNTIME);
     write_req->conn = conn;
-    write_req->response = self;
-    write_req->callback = js_get_key_cstr(self, "__end_callback__");
     write_req->len = total;
     write_req->close_after = close_after;
     write_req->final = true;
-    Item end_callback = write_req->callback;
     conn->pending_response_writes++;
     conn->bytes_written += total;
     // HTTP accepted sockets share net.Socket counters; update when bytes are
@@ -1946,8 +1947,8 @@ static void http_response_flush(Item self) {
         js_set_key_cstr(self, "writableFinished", (Item){.item = b2it(true)});
         http_response_emit(self, "finish", NULL, 0, false);
         http_response_close_request(self);
-        if (js_is_callable(end_callback)) {
-            js_call_function(end_callback, make_js_undefined(), NULL, 0);
+        if (js_is_callable(end_callback_root.get())) {
+            js_call_function(end_callback_root.get(), make_js_undefined(), NULL, 0);
         }
         js_microtask_flush();
         if (close_after && conn && !conn->destroyed) {
@@ -1963,8 +1964,8 @@ static void http_response_flush(Item self) {
         http_response_mark_sent(self, true);
         http_response_emit(self, "finish", NULL, 0, false);
         http_response_close_request(self);
-        if (js_is_callable(end_callback)) {
-            js_call_function(end_callback, make_js_undefined(), NULL, 0);
+        if (js_is_callable(end_callback_root.get())) {
+            js_call_function(end_callback_root.get(), make_js_undefined(), NULL, 0);
         }
         js_microtask_flush();
     }
@@ -3668,6 +3669,7 @@ typedef struct JsHttpClientReq {
     Item       socket_object;
     Item       agent;
     Item       response;
+    RuntimeCallbackSlots write_callbacks;
     char*      send_buf;
     int        send_len;
     int        send_head_len;
@@ -4133,6 +4135,7 @@ static void js_http_free_client_req(JsHttpClientReq* creq) {
     if (!creq) return;
     js_http_agent_clear_idle_client(creq);
     js_async_hooks_emit_destroy_resource(creq->async_resource);
+    runtime_callback_slots_destroy(&creq->write_callbacks);
     if (creq->send_buf) mem_free(creq->send_buf);
     if (creq->recv_buf) mem_free(creq->recv_buf);
     mem_free(creq);
@@ -4510,7 +4513,7 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
 
 typedef struct HttpClientWriteReq {
     JsHttpClientReq* creq;
-    Item  callback;
+    int64_t callback_slot;
 } HttpClientWriteReq;
 
 static void http_client_write_settled(void* ud, int status, const char* bytes,
@@ -4518,8 +4521,12 @@ static void http_client_write_settled(void* ud, int status, const char* bytes,
     (void)bytes; (void)byte_len;
     HttpClientWriteReq* write_req = (HttpClientWriteReq*)ud;
     JsHttpClientReq* creq = write_req ? write_req->creq : NULL;
+    RootFrame roots(1);
+    Rooted<Item> callback_root(roots, write_req && creq
+        ? runtime_callback_slots_take(&creq->write_callbacks,
+            write_req->callback_slot) : ItemNull);
     if (write_req) {
-        http_call_write_callback(write_req->callback);
+        http_call_write_callback(callback_root.get());
         mem_free(write_req);
     }
     if (creq && creq->close_after_send && !creq->destroyed) {
@@ -4531,15 +4538,24 @@ static void http_client_write_settled(void* ud, int status, const char* bytes,
 }
 
 static void http_client_write_bytes(JsHttpClientReq* creq, const char* data, int len, Item callback) {
+    RootFrame roots(1);
+    Rooted<Item> callback_root(roots, callback);
     if (!creq || !data || len <= 0 || creq->destroyed || !creq->connected) {
-        http_call_write_callback(callback);
+        http_call_write_callback(callback_root.get());
         return;
     }
     HttpClientWriteReq* write_req =
         (HttpClientWriteReq*)mem_calloc(1, sizeof(HttpClientWriteReq), MEM_CAT_JS_RUNTIME);
-    if (!write_req) { http_call_write_callback(callback); return; }
+    if (!write_req) { http_call_write_callback(callback_root.get()); return; }
     write_req->creq = creq;
-    write_req->callback = callback;
+    write_req->callback_slot = -1;
+    if (js_is_callable(callback_root.get()) &&
+            !runtime_callback_slots_add(&creq->write_callbacks,
+                callback_root.get(), &write_req->callback_slot)) {
+        mem_free(write_req);
+        http_call_write_callback(callback_root.get());
+        return;
+    }
     // C2.8: the shared helper settles exactly once whether or not libuv
     // accepted the submission, so the caller's write callback always runs.
     js_node_stream_write(http_client_stream(creq), data, (size_t)len,
@@ -4751,7 +4767,7 @@ static void http_client_connect_cb(uv_connect_t* req, int status) {
             (HttpClientWriteReq*)mem_calloc(1, sizeof(HttpClientWriteReq), MEM_CAT_JS_RUNTIME);
         if (!write_req) return;
         write_req->creq = creq;
-        write_req->callback = make_js_undefined();
+        write_req->callback_slot = -1;
         creq->sent = true;
         // C2.8: js_node_stream_write copies and owns the bytes, so the request
         // send buffer is released here rather than being handed to libuv.
@@ -5481,6 +5497,8 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
         creq->destroyed = false;
     } else {
         creq = (JsHttpClientReq*)mem_calloc(1, sizeof(JsHttpClientReq), MEM_CAT_JS_RUNTIME);
+        runtime_callback_slots_init(&creq->write_callbacks, (Context*)context,
+            "HTTP client write callbacks");
         creq->is_pipe = use_pipe;
         if (use_pipe) {
             uv_pipe_init(loop, &creq->pipe, 0);

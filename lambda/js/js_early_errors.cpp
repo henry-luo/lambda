@@ -18,9 +18,29 @@
 #include "js_runtime.h"
 #include "../../lib/log.h"
 #include "../../lib/utf.h"
+#include "../../lib/arraylist.h"
 #include <cstring>
 #include <cstdio>
 
+enum EarlyErrorNameKind {
+    EARLY_ERROR_NAME_PRIVATE = 1 << 0,
+    EARLY_ERROR_NAME_LABEL = 1 << 1,
+    EARLY_ERROR_NAME_ITERATION_LABEL = 1 << 2,
+};
+
+// One source-name ledger carries the lexical facts needed by early-error
+// checks. Entries borrow immutable parser source text for this compiler pass.
+struct EarlyErrorNameFact {
+    const char* chars = NULL;
+    int length = 0;
+    uint8_t kind = 0;
+    int function_scope = 0;
+};
+
+struct EarlyErrorNameLedger {
+    ArrayList* facts = NULL;
+    int function_scope = 0;
+};
 
 // context flags passed down during AST walk
 struct EarlyErrorCtx {
@@ -34,25 +54,10 @@ struct EarlyErrorCtx {
     bool in_static_init;     // class static block
     bool in_formal_parameters;
     int  error_count;
+    EarlyErrorNameLedger names;
 
-    const char* private_names[128];
-    int private_name_lens[128];
-    int private_name_count;
-
-    // Label tracking for continue target validation (ContainsUndefinedContinueTarget)
-    // iteration_labels: labels attached to iteration statements (for/while/do-while/for-in/for-of)
-    // non_iteration_labels: labels attached to non-iteration statements
-    const char* iteration_labels[32];
-    int iteration_label_lens[32];
-    int iteration_label_count;
     bool in_iteration;       // currently inside any iteration statement
     bool in_switch;          // currently inside switch
-
-    // All labels in scope (for break target validation per ContainsUndefinedBreakTarget).
-    // A labeled break may target any enclosing labeled statement, not only iterations.
-    const char* all_labels[64];
-    int all_label_lens[64];
-    int all_label_count;
 };
 
 // ---- helpers ---------------------------------------------------------------
@@ -104,34 +109,82 @@ static bool is_reserved_word(const char* name, bool strict) {
     if (strict && is_in_list(name, JS_STRICT_RESERVED)) return true;
     return false;
 }
-JS_FORWARD_STATIC_EXPRESSION(bool, is_private_name_string, (String* name), (name && name->len > 1 && name->chars[0] == '#'))
 
-static bool private_names_same_suffix(String* name, const char* declared, int declared_len) {
-    if (!is_private_name_string(name) || !declared || declared_len <= 1 || declared[0] != '#') return false;
-    int name_suffix_len = name->len - 1;
-    int declared_suffix_len = declared_len - 1;
-    if (name_suffix_len != declared_suffix_len) return false;
-    return strncmp(name->chars + 1, declared + 1, name_suffix_len) == 0;
+static int ee_name_ledger_mark(const EarlyErrorNameLedger* ledger) {
+    return ledger && ledger->facts ? ledger->facts->length : 0;
 }
+
+static void ee_name_ledger_truncate(EarlyErrorNameLedger* ledger, int mark) {
+    if (!ledger || !ledger->facts) return;
+    if (mark < 0) mark = 0;
+    while (ledger->facts->length > mark) {
+        int index = ledger->facts->length - 1;
+        mem_free(arraylist_get(ledger->facts, index));
+        arraylist_remove(ledger->facts, index);
+    }
+}
+
+static void ee_name_ledger_destroy(EarlyErrorNameLedger* ledger) {
+    if (!ledger) return;
+    ee_name_ledger_truncate(ledger, 0);
+    if (ledger->facts) arraylist_free(ledger->facts);
+    ledger->facts = NULL;
+}
+
+static bool ee_name_ledger_append(EarlyErrorNameLedger* ledger,
+        const char* chars, int length, uint8_t kind) {
+    if (!ledger || !chars || length <= 0) return false;
+    if (!ledger->facts) ledger->facts = arraylist_new(8);
+    EarlyErrorNameFact* fact = (EarlyErrorNameFact*)mem_calloc(1,
+        sizeof(EarlyErrorNameFact), MEM_CAT_JS_RUNTIME);
+    if (!fact || !ledger->facts) {
+        if (fact) mem_free(fact);
+        return false;
+    }
+    fact->chars = chars;
+    fact->length = length;
+    fact->kind = kind;
+    fact->function_scope = ledger->function_scope;
+    if (!arraylist_append(ledger->facts, fact)) {
+        mem_free(fact);
+        return false;
+    }
+    return true;
+}
+
+static bool ee_name_ledger_contains(const EarlyErrorNameLedger* ledger,
+        uint8_t required_kind, const char* chars, int length,
+        bool current_function_only) {
+    if (!ledger || !ledger->facts || !chars || length <= 0) return false;
+    for (int i = ledger->facts->length - 1; i >= 0; i--) {
+        EarlyErrorNameFact* fact = (EarlyErrorNameFact*)arraylist_get(
+            ledger->facts, i);
+        if (!fact || (fact->kind & required_kind) != required_kind) continue;
+        if (current_function_only && fact->function_scope != ledger->function_scope) continue;
+        if (fact->length == length && strncmp(fact->chars, chars, length) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+JS_FORWARD_STATIC_EXPRESSION(bool, is_private_name_string, (String* name), (name && name->len > 1 && name->chars[0] == '#'))
 
 static bool ctx_private_name_is_declared(EarlyErrorCtx* ctx, String* name) {
     if (!is_private_name_string(name)) return true;
-    for (int i = ctx->private_name_count - 1; i >= 0; i--) {
-        if (private_names_same_suffix(name, ctx->private_names[i], ctx->private_name_lens[i])) return true;
-    }
+    if (ee_name_ledger_contains(&ctx->names, EARLY_ERROR_NAME_PRIVATE,
+            name->chars, name->len, false)) return true;
     Item resolved = js_eval_private_resolve((Item){.item = s2it(name)});
     if (resolved.item != ItemNull.item) return true;
     return false;
 }
 
-static void ctx_add_private_name(EarlyErrorCtx* ctx, String* name) {
-    if (!is_private_name_string(name) || ctx->private_name_count >= 128) return;
-    for (int i = ctx->private_name_count - 1; i >= 0; i--) {
-        if (private_names_same_suffix(name, ctx->private_names[i], ctx->private_name_lens[i])) return;
-    }
-    ctx->private_names[ctx->private_name_count] = name->chars;
-    ctx->private_name_lens[ctx->private_name_count] = name->len;
-    ctx->private_name_count++;
+static bool ctx_add_private_name(EarlyErrorCtx* ctx, String* name) {
+    if (!is_private_name_string(name)) return true;
+    if (ee_name_ledger_contains(&ctx->names, EARLY_ERROR_NAME_PRIVATE,
+            name->chars, name->len, false)) return true;
+    return ee_name_ledger_append(&ctx->names, name->chars, name->len,
+        EARLY_ERROR_NAME_PRIVATE);
 }
 
 static void collect_class_private_names(EarlyErrorCtx* ctx, JsClassNode* cls) {
@@ -144,12 +197,16 @@ static void collect_class_private_names(EarlyErrorCtx* ctx, JsClassNode* cls) {
         if (m->node_type == JS_AST_NODE_METHOD_DEFINITION) {
             JsMethodDefinitionNode* md = (JsMethodDefinitionNode*)m;
             if (!md->computed && md->key && md->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                ctx_add_private_name(ctx, ((JsIdentifierNode*)md->key)->name);
+                if (!ctx_add_private_name(ctx, ((JsIdentifierNode*)md->key)->name)) {
+                    ee_error(ctx, m, "Cannot retain class private name");
+                }
             }
         } else if (m->node_type == JS_AST_NODE_FIELD_DEFINITION) {
             JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)m;
             if (!fd->computed && fd->key && fd->key->node_type == JS_AST_NODE_IDENTIFIER) {
-                ctx_add_private_name(ctx, ((JsIdentifierNode*)fd->key)->name);
+                if (!ctx_add_private_name(ctx, ((JsIdentifierNode*)fd->key)->name)) {
+                    ee_error(ctx, m, "Cannot retain class private name");
+                }
             }
         }
     }
@@ -468,14 +525,14 @@ static void walk_expression_child(JsAstNode* child, void* opaque) {
 
 static void walk_class_for_early_errors(EarlyErrorCtx* ctx, JsClassNode* cls) {
     bool was_strict = ctx->in_strict;
-    int saved_private_count = ctx->private_name_count;
+    int private_name_mark = ee_name_ledger_mark(&ctx->names);
     ctx->in_strict = true; // class bodies are always strict
     collect_class_private_names(ctx, cls);
     walk_expression(ctx, cls->superclass);
     for (JsAstNode* m = cls->body; m; m = m->next) {
         walk_statement(ctx, m);
     }
-    ctx->private_name_count = saved_private_count;
+    ee_name_ledger_truncate(&ctx->names, private_name_mark);
     ctx->in_strict = was_strict;
 }
 
@@ -486,15 +543,13 @@ static void walk_function_for_early_errors(EarlyErrorCtx* ctx, JsFunctionNode* f
     bool was_iteration = ctx->in_iteration;
     bool was_switch = ctx->in_switch;
     bool was_params = ctx->in_formal_parameters;
-    int was_label_count = ctx->iteration_label_count;
-    int was_all_label_count = ctx->all_label_count;
+    int was_function_scope = ctx->names.function_scope;
 
     ctx->in_generator = fn->is_generator;
     ctx->in_async = fn->is_async;
     ctx->in_iteration = false;
     ctx->in_switch = false;
-    ctx->iteration_label_count = 0;
-    ctx->all_label_count = 0;
+    ctx->names.function_scope++;
 
     // v17: "use strict" with non-simple params is SyntaxError
     check_strict_non_simple(ctx, fn);
@@ -516,8 +571,7 @@ static void walk_function_for_early_errors(EarlyErrorCtx* ctx, JsFunctionNode* f
     ctx->in_iteration = was_iteration;
     ctx->in_switch = was_switch;
     ctx->in_formal_parameters = was_params;
-    ctx->iteration_label_count = was_label_count;
-    ctx->all_label_count = was_all_label_count;
+    ctx->names.function_scope = was_function_scope;
 }
 
 static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
@@ -875,22 +929,17 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                 bool is_iteration = ls->body->node_type == AST_NODE_LOOP ||
                                     ls->body->node_type == JS_AST_NODE_FOR_IN_STATEMENT ||
                                     ls->body->node_type == JS_AST_NODE_FOR_OF_STATEMENT;
-                int saved_count = ctx->iteration_label_count;
-                if (is_iteration && ls->label && ctx->iteration_label_count < 32) {
-                    ctx->iteration_labels[ctx->iteration_label_count] = ls->label;
-                    ctx->iteration_label_lens[ctx->iteration_label_count] = ls->label_len;
-                    ctx->iteration_label_count++;
-                }
-                // track every label in scope so labeled breaks can be validated
-                int saved_all_count = ctx->all_label_count;
-                if (ls->label && ctx->all_label_count < 64) {
-                    ctx->all_labels[ctx->all_label_count] = ls->label;
-                    ctx->all_label_lens[ctx->all_label_count] = ls->label_len;
-                    ctx->all_label_count++;
+                int label_mark = ee_name_ledger_mark(&ctx->names);
+                if (ls->label) {
+                    uint8_t kind = EARLY_ERROR_NAME_LABEL;
+                    if (is_iteration) kind |= EARLY_ERROR_NAME_ITERATION_LABEL;
+                    if (!ee_name_ledger_append(&ctx->names, ls->label,
+                            ls->label_len, kind)) {
+                        ee_error(ctx, node, "Cannot retain statement label");
+                    }
                 }
                 walk_statement(ctx, ls->body);
-                ctx->iteration_label_count = saved_count;
-                ctx->all_label_count = saved_all_count;
+                ee_name_ledger_truncate(&ctx->names, label_mark);
             }
             break;
         }
@@ -904,14 +953,9 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                 }
             } else {
                 // continue with label: label must refer to an iteration statement
-                bool found = false;
-                for (int i = 0; i < ctx->iteration_label_count; i++) {
-                    if (ctx->iteration_label_lens[i] == cn->label_len &&
-                        strncmp(ctx->iteration_labels[i], cn->label, cn->label_len) == 0) {
-                        found = true;
-                        break;
-                    }
-                }
+                bool found = ee_name_ledger_contains(&ctx->names,
+                    EARLY_ERROR_NAME_LABEL | EARLY_ERROR_NAME_ITERATION_LABEL,
+                    cn->label, cn->label_len, true);
                 if (!found) {
                     ee_error(ctx, node, "Illegal continue statement: '%.*s' does not denote an iteration statement",
                         cn->label_len, cn->label);
@@ -932,14 +976,8 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                 // statement within the same function/script/eval code
                 // (ContainsUndefinedBreakTarget). Labels do not cross function
                 // or eval boundaries.
-                bool found = false;
-                for (int i = 0; i < ctx->all_label_count; i++) {
-                    if (ctx->all_label_lens[i] == bn->label_len &&
-                        strncmp(ctx->all_labels[i], bn->label, bn->label_len) == 0) {
-                        found = true;
-                        break;
-                    }
-                }
+                bool found = ee_name_ledger_contains(&ctx->names,
+                    EARLY_ERROR_NAME_LABEL, bn->label, bn->label_len, true);
                 if (!found) {
                     ee_error(ctx, node, "Undefined break target: '%.*s'",
                         bn->label_len, bn->label);
@@ -983,5 +1021,7 @@ int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast) {
         walk_statement(&ctx, ast);
     }
 
-    return ctx.error_count;
+    int error_count = ctx.error_count;
+    ee_name_ledger_destroy(&ctx.names);
+    return error_count;
 }

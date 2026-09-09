@@ -65,6 +65,10 @@ typedef enum SysFuncResultKind {
     // type — these rows accept only text, so a non-text argument is a runtime
     // error whose type must not be guessed from the argument (SI14).
     SYS_RESULT_TEXT_SAME_AS_ARG0,
+    // split has two distinct result families. A proven text/null source
+    // succeeds with ordinary String parts; ArrayNum and open sources retain
+    // the row's generic array success contract.
+    SYS_RESULT_TEXT_SPLIT,
 } SysFuncResultKind;
 
 // System function metadata + JIT import pointer
@@ -258,13 +262,10 @@ static inline TypeId sysfunc_c_ret_type_id(const SysFuncInfo* info) {
     // their public null result cannot be mistaken for an integer sentinel.
     case SYSFUNC_LEN:
         return LMD_TYPE_INT;
-    // These keep an int64_t C result. `int64()` because its Lambda type IS
-    // int64; the bitwise/shift family because bit reinterpretation is a
-    // machine operation on machine words, not number math — its result is
+    // The raw bitwise family operates on machine words. Its result is
     // converted into the int lane at the boundary below.
-    case SYSFUNC_INT64:
     case SYSFUNC_BAND: case SYSFUNC_BOR: case SYSFUNC_BXOR:
-    case SYSFUNC_BNOT: case SYSFUNC_SHL: case SYSFUNC_SHR:
+    case SYSFUNC_BNOT:
         return LMD_TYPE_INT64;
     // C functions returning Bool (uint8_t)
     case SYSFUNC_CONTAINS: case SYSFUNC_STARTS_WITH: case SYSFUNC_ENDS_WITH:

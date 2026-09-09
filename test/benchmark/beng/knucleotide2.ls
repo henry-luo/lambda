@@ -72,7 +72,7 @@ pn format3(x: float) string {
 }
 
 // sort by count descending, then alphabetically ascending
-pn sort_entries(entries) array {
+pn sort_entries(entries: array) array {
     entries = sort(entries, (e) => (e[0]))
     return sort(entries, {by: (e) => (e[1]), dir: 'desc'})
 }

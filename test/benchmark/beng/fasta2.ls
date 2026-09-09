@@ -46,13 +46,13 @@ pn repeat_fasta(id: string, desc: string, src: string, count: int) any {
 
 // IUB and HomoSapiens probability tables
 // stored as parallel arrays: chars and cumulative probs
-let IUB_CHARS = ["a", "c", "g", "t",
+let IUB_CHARS: string[] = ["a", "c", "g", "t",
                  "B", "D", "H", "K", "M", "N", "R", "S", "V", "W", "Y"]
-let IUB_PROBS = [0.27, 0.12, 0.12, 0.27,
+let IUB_PROBS: float[] = [0.27, 0.12, 0.12, 0.27,
                  0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02]
 
-let HS_CHARS = ["a", "c", "g", "t"]
-let HS_PROBS = [0.3029549426680, 0.1979883004921, 0.1975473066391, 0.3015094502008]
+let HS_CHARS: string[] = ["a", "c", "g", "t"]
+let HS_PROBS: float[] = [0.3029549426680, 0.1979883004921, 0.1975473066391, 0.3015094502008]
 
 // build cumulative probability table
 pn make_cumulative(probs: float[]) float[] {
@@ -68,8 +68,8 @@ pn make_cumulative(probs: float[]) float[] {
 }
 
 // seed is mutable via array trick: seed_arr[0]
-pn random_fasta(id: string, desc: string, chars, probs: float[],
-                count: int, var seed_arr: int[]) {
+pn random_fasta(id: string, desc: string, chars: string[], probs: float[],
+                count: int, var seed_arr: int[]) any {
     print(">" ++ id ++ " " ++ desc ++ "\n")
     var cum = make_cumulative(probs)
     var num_chars: int = len(chars)

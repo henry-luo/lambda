@@ -381,6 +381,13 @@ static TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool) {
     return clone;
 }
 
+// A recorded transition is only valid while its parent is still the shape it
+// was recorded from, so a hit re-checks the child's cloned prefix against it.
+// That is O(depth) per add and now runs on the hot path, but measured min-of-5
+// it is only 1.5% of an add at 8 fields and 3.1% at 256, and the width-dependent
+// cost of building an object is the same with and without it — so the cheaper
+// length/byte_size check that a shared parent would allow buys nothing real and
+// is not worth weakening this one for (JS_Tune_History rule 5).
 static bool map_transition_prefix_matches_parent(TypeMap* parent, TypeMap* target) {
     if (!parent || !target) return false;
     ShapeEntry* parent_entry = parent->shape;
@@ -414,18 +421,54 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
         TypeId type_id, Input* input, ShapeEntry** out_entry) {
     if (out_entry) *out_entry = NULL;
     if (!parent || !key || !input || !input->pool || !input->type_list) return NULL;
+    // D4.6.1v2: a pooled name's identity is its NameId. The record side below
+    // stores name_id for every entry but keeps `name` only for the id-less
+    // Input seam, so matching on `name` alone could never hit for a
+    // runtime-created property — which is why two objects that added the same
+    // fields in the same order never shared a shape.
+    NameId key_name_id = string_is_pooled(key) ? name_ref_id(key) : NAME_ID_NONE;
+    uint8_t key_kind = property_key_kind(key);
+    // The list is scanned per add, so it is bounded: a shape with more outgoing
+    // edges than this is a dictionary-shaped site (parsed data, per-record
+    // keys) where sharing cannot pay for a linear walk on every property.
+    // Past the bound the caller keeps its private shape, as before.
+    // The shared root is every plain map's first-property node, so its edge
+    // count is the number of distinct first properties in the whole program —
+    // a far larger budget than an interior shape needs. Capping it at 16 let it
+    // saturate after a few hundred objects, after which every map fell back to
+    // a private shape and the sharing bought nothing.
+    const int MAX_SHAPE_TRANSITIONS = parent->length == 0 ? 256 : 16;
+    int transition_count = 0;
     for (TypeMapTransition* tr = parent->transitions; tr; tr = tr->next) {
+        transition_count++;
         if (tr->value_type != type_id || tr->flags != 0 || !tr->target) continue;
-        if (tr->key_kind == NAME_KEY_STRING && tr->name &&
+        bool same_name;
+        if (tr->name_id != NAME_ID_NONE) {
+            same_name = tr->name_id == key_name_id && tr->key_kind == key_kind;
+        } else {
+            // The byte seam confirms Input-owned fields only; it must never
+            // select a runtime-created property that merely spells the same.
+            same_name = key_name_id == NAME_ID_NONE &&
+                tr->key_kind == NAME_KEY_STRING && tr->name &&
                 tr->name_len == (uint32_t)key->len &&
-                memcmp(tr->name, key->chars, key->len) == 0) {
-            if (map_transition_prefix_matches_parent(parent, tr->target)) {
-                if (out_entry) *out_entry = tr->target->last;
-                return tr->target;
-            }
-            continue;
+                memcmp(tr->name, key->chars, key->len) == 0;
+        }
+        if (!same_name) continue;
+        if (map_transition_prefix_matches_parent(parent, tr->target)) {
+            if (out_entry) *out_entry = tr->target->last;
+            return tr->target;
         }
     }
+
+    if (transition_count >= MAX_SHAPE_TRANSITIONS) return NULL;
+    // The per-node edge cap bounds one shape's fan-out, not the graph. A
+    // long-lived process that runs thousands of unrelated scripts through one
+    // Input (the test262 batch runner is the extreme case) would otherwise keep
+    // minting shapes for the rest of its life: with only the edge cap it grew
+    // to 5.4 GB. Past this budget every map keeps its private shape, which is
+    // exactly the behaviour before the graph existed.
+    const int MAX_SHAPE_GRAPH = 1024;
+    if (input->shape_transition_shapes >= MAX_SHAPE_GRAPH) return NULL;
 
     TypeMap* child = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
     if (!child) return NULL;
@@ -475,6 +518,7 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
 
     arraylist_append(input->type_list, child);
     child->type_index = input->type_list->length - 1;
+    input->shape_transition_shapes++;
 
     TypeMapTransition* tr = (TypeMapTransition*)pool_calloc(input->pool,
         sizeof(TypeMapTransition));
@@ -494,6 +538,53 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
     return child;
 }
 
+// The transition graph needs a shared root, otherwise the first add on a fresh
+// object mints a private TypeMap and the object never rejoins the graph. The
+// root is per-Input so its transitions and their targets share one pool
+// lifetime; the global EmptyMap could not hold them safely.
+static TypeMap* map_shape_transition_root(Input* input,
+        const struct JsClassMeta* js_meta) {
+    if (!input || !input->pool) return NULL;
+    if (input->shape_transition_root) {
+        // js_meta is part of shape identity and every child inherits the
+        // root's, so a differently classified blueprint may not share it.
+        return input->shape_transition_root->js_meta == js_meta
+            ? input->shape_transition_root : NULL;
+    }
+    TypeMap* root = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    if (!root) return NULL;
+    root->is_transition_shared_shape = true;
+    root->js_meta = js_meta;
+    input->shape_transition_root = root;
+    return root;
+}
+
+// One add through the shared shape graph. Returns true when this call owns the
+// outcome — the value was stored, or capacity growth failed and the caller must
+// give up exactly as the private path does.
+static bool map_put_via_shape_transition(Map** mp_ref, TypeMap* parent,
+        String* key, Item value, TypeId type_id, Input* input,
+        int64_t min_byte_end, MapDataGrowFn grow, void* grow_context) {
+    ShapeEntry* entry = NULL;
+    TypeMap* target = map_transition_target_for_add(parent, key, type_id, input,
+        &entry);
+    if (!target || !entry) return false;
+    int64_t byte_end = entry->byte_offset + type_info[type_id].byte_size;
+    if (byte_end < min_byte_end) byte_end = min_byte_end;
+    String* keys[1] = {key};
+    Item values[1] = {value};
+    Map* mp = *mp_ref;
+    if (!map_ensure_data_capacity_for_end(&mp, input->pool, byte_end,
+            parent->byte_size, grow, grow_context, keys, 1, values, 1)) {
+        return true;
+    }
+    *mp_ref = mp;
+    mp->type = target;
+    map_store_field_value((char*)mp->data + entry->byte_offset, type_id,
+        values[0]);
+    return true;
+}
+
 // Internal helper function - not exported in header but accessible to mark_builder.cpp
 void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
         MapDataGrowFn grow, void* grow_context) {
@@ -504,6 +595,21 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
         map_key_is_array_index_name(key);
     if (map_type == &EmptyMap) {
         const struct JsClassMeta* js_meta = map_type->js_meta;
+        // An ordinary map starts at the shared root, so all objects built by
+        // the same sequence of adds end up on one TypeMap. The root carries the
+        // blueprint's own js_meta — EmptyMap's is JS_CLASS_OBJECT once the JS
+        // metadata is initialized — because children inherit it and it is part
+        // of shape identity; gating on `!js_meta` instead made this path dead
+        // for every JS object and silently dropped their class brand.
+        if (!array_index_shape && key &&
+                !property_key_requires_identity(key) &&
+                mp->map_kind == MAP_KIND_PLAIN) {
+            TypeMap* root = map_shape_transition_root(input, js_meta);
+            if (root && map_put_via_shape_transition(&mp, root, key, value,
+                    type_id, input, 64, grow, grow_context)) {
+                return;
+            }
+        }
         // alloc map type and data chunk
         map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
         if (!map_type) { return; }
@@ -520,27 +626,10 @@ void map_put_with_data_growth(Map* mp, String* key, Item value, Input *input,
         value = values[0];
     } else if (typemap_is_shared_shape(map_type)) {
         if (key && !property_key_requires_identity(key) &&
-                mp->map_kind == MAP_KIND_PLAIN) {
-            ShapeEntry* transition_entry = NULL;
-            TypeMap* transition_type = map_transition_target_for_add(map_type, key,
-                type_id, input, &transition_entry);
-            if (transition_type && transition_entry) {
-                int bsize = type_info[type_id].byte_size;
-                int64_t byte_end = transition_entry->byte_offset + bsize;
-                String* keys[1] = {key};
-                Item values[1] = {value};
-                if (!map_ensure_data_capacity_for_end(&mp, input->pool, byte_end,
-                        map_type->byte_size, grow, grow_context,
-                        keys, 1, values, 1)) {
-                    return;
-                }
-                key = keys[0];
-                value = values[0];
-                mp->type = transition_type;
-                map_store_field_value((char*)mp->data + transition_entry->byte_offset,
-                    type_id, value);
-                return;
-            }
+                mp->map_kind == MAP_KIND_PLAIN &&
+                map_put_via_shape_transition(&mp, map_type, key, value, type_id,
+                    input, 0, grow, grow_context)) {
+            return;
         }
         // transition lookup is the fast path; if no compatible transition
         // exists, clone before appending a new ShapeEntry to this map only.
@@ -1444,6 +1533,11 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
         MEM_ROLE_INPUT, "input.name_pool");
     input->shape_pool = mem_shape_pool_create(dctx, pool, input->arena, NULL, "input.shape_pool");  // Initialize shape pool
     input->type_list = arraylist_new(16);
+    // Input is pool_alloc'd, not pool_calloc'd: every field must be set here.
+    // Leaving this one uninitialized made map_put dereference pool garbage.
+    input->shape_transition_root = nullptr;
+    input->shape_transition_shapes = 0;
+    input->predicted_shapes = nullptr;
     input->url = abs_url;
     input->path = nullptr;
     input->parent = parent;     // Set parent Input for hierarchical ownership

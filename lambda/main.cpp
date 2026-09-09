@@ -345,7 +345,7 @@ static void* js_cli_run_on_stack_thread(void* arg) {
         run_args->result = ItemError;
         return NULL;
     }
-    if (eval_context->js_state &&
+    if (js_runtime_state_for(eval_context) &&
             !js_runtime_state_init(eval_context)) {
         eval_context_shutdown(eval_context);
         run_args->result = ItemError;
@@ -354,7 +354,7 @@ static void* js_cli_run_on_stack_thread(void* arg) {
     run_args->result = transpile_js_to_mir_len(
         run_args->runtime, run_args->source, run_args->source_len, run_args->filename,
         run_args->result_home);
-    if (eval_context->js_state) js_runtime_state_shutdown(eval_context);
+    if (js_runtime_state_for(eval_context)) js_runtime_state_shutdown(eval_context);
     // Restore this worker's host signal stack before pthread teardown.
     lambda_stack_cleanup();
     // The large-stack worker is an eval-thread lifetime boundary. Cleanup
@@ -421,7 +421,7 @@ static void js_test262_hot_context_destroy(Runtime* runtime, EvalContext* batch_
         log_error("test262-hot-context: owner thread mismatch during destroy");
         return;
     }
-    if (batch_context->js_state) js_runtime_state_shutdown(batch_context);
+    if (js_runtime_state_for(batch_context)) js_runtime_state_shutdown(batch_context);
     // A signal can interrupt an allocator or a GC finalizer. Reclaim the bulk
     // heap generation without running those finalizers before replacing it.
     heap_discard_unfinalized();
@@ -2011,7 +2011,7 @@ static int node_runner_run_file(const char* exe_path, const char* file,
         Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, file, &result_home);
 #endif
         EvalContext* js_result_context = runtime_get_eval_context(&runtime);
-        if (js_result_context && js_result_context->js_state) {
+        if (js_result_context && js_runtime_state_for(js_result_context)) {
             if (!eval_context_init(js_result_context) ||
                     !js_runtime_state_init(js_result_context)) {
                 log_error("js-cli-result: failed to acquire Runtime owner");
@@ -2656,7 +2656,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             // Rebind the Runtime-owned capsule before caller-thread checks
             // inspect exceptions, promises, or other JS semantic state.
             EvalContext* js_result_context = runtime_get_eval_context(&runtime);
-            if (js_result_context && js_result_context->js_state) {
+            if (js_result_context && js_runtime_state_for(js_result_context)) {
                 if (!eval_context_init(js_result_context) ||
                         !js_runtime_state_init(js_result_context)) {
                     log_error("js-document-result: failed to acquire Runtime owner");

@@ -5,7 +5,8 @@
 // Type annotations enable MIR JIT Phase 3 direct byte-offset field access
 
 // Type definition — field order MUST match map literal order in hashmap_new
-type HashMap = {keys: array, values: array, hashes: array, nexts: array, heads: array, size: int, cap: int, threshold: int}
+type HashMap = {keys: int[], values: int[], hashes: int[], nexts: int[],
+    heads: int[], size: int, cap: int, threshold: int}
 
 // Hash map using open addressing with arrays
 // Buckets: array of {key, value, hash, next_idx} entries
@@ -51,7 +52,7 @@ pn find_free_slot(hm: HashMap) int {
 
 // S9.1.3/CW25: borrow the selected field array so a hot-loop store descends
 // and detaches the owner path once, then uses the unique in-place fast path.
-pn int_slot_set(var slots: array, index: int, value: int) any {
+pn int_slot_set(var slots: int[], index: int, value: int) any {
     slots[index] = value
 }
 
@@ -87,7 +88,7 @@ pn hashmap_put(var hm: HashMap, key: int, value: int) int {
 pn hashmap_rehash(var hm: HashMap) any {
     var old_cap = hm.cap
     var new_cap = old_cap * 2
-    var new_heads = fill(new_cap, EMPTY)
+    var new_heads: int[] = fill(new_cap, EMPTY)
     // Reset nexts
     var i: int = 0
     while (i < hm.size) {
@@ -107,10 +108,10 @@ pn hashmap_rehash(var hm: HashMap) any {
     hm.threshold = int(floor(float(new_cap) * LOAD_FACTOR))
     // Grow arrays if needed
     if (hm.size + new_cap > len(hm.keys)) {
-        var new_keys = fill(new_cap * 2, EMPTY)
-        var new_values = fill(new_cap * 2, 0)
-        var new_hashes2 = fill(new_cap * 2, 0)
-        var new_nexts = fill(new_cap * 2, EMPTY)
+        var new_keys: int[] = fill(new_cap * 2, EMPTY)
+        var new_values: int[] = fill(new_cap * 2, 0)
+        var new_hashes2: int[] = fill(new_cap * 2, 0)
+        var new_nexts: int[] = fill(new_cap * 2, EMPTY)
         i = 0
         while (i < hm.size) {
             new_keys[i] = hm.keys[i]

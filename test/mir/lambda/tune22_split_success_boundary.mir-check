@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "T22-4: only a total text split producer establishes the exact String[] success representation, so its destination boundary needs no lambda_type_check (S11.4.2, D8.4.1v2).",
+  "checks": [
+    {
+      "in_func": "_tune22_split_words_#",
+      "expect": ["call\tfn_split2_p, fn_split2"],
+      "forbid": ["call\tlambda_type_check_p, lambda_type_check"]
+    },
+    {
+      "in_func": "_main_#",
+      "expect": ["call\tfn_split2_p, fn_split2"],
+      "forbid": ["call\tlambda_type_check_p, lambda_type_check"]
+    }
+  ]
+}

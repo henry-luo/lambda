@@ -89,6 +89,14 @@ Item js_set_name_key(Item object, const char* name, Item value) {
 #define js_vm_stm_key js_runtime_key
 #define js_cc_key js_runtime_key
 
+static String* js_regexp_last_match_string_at(int slot) {
+    if (slot < 0 || slot >= (int)root_vector_count(&js_regexp_last_match.values)) {
+        return NULL;
+    }
+    Item value = *root_vector_at(&js_regexp_last_match.values, slot);
+    return get_type_id(value) == LMD_TYPE_STRING ? it2s(value) : NULL;
+}
+
 typedef struct JsProxyMapCarrier {
     Map base;
     JsProxyData payload;
@@ -271,6 +279,7 @@ extern "C" Item js_get_internal_fs_promises_namespace(void);
 extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
     NameId operation_name_id, TypeId value_type);
 Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out_found);
+static void js_set_prototype_fresh(Item object, Item prototype);
 static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
 static bool js_array_companion_has_array_index_shape(Array* arr);
 extern "C" bool js_promise_vmap_is(Item value);
@@ -640,12 +649,6 @@ static void js_array_store_owned(Array* arr, int64_t index, Item value) {
 
 // JsFunction layout and builtin ids live in js_runtime_internal.hpp.
 
-// Tracks the .prototype of the generator function being called.
-// Set by js_call_function before invoking a generator function, read by js_generator_create.
-#define js_generator_callee_proto (js_runtime_state.generator_callee_proto)
-#define js_current_private_home_class (js_runtime_state.current_private_home_class)
-
-
 static const char* JS_NATIVE_FUNCTION_SOURCE = "function () { [native code] }";
 static const int JS_NATIVE_FUNCTION_SOURCE_LEN = 29;
 
@@ -683,130 +686,87 @@ static bool js_function_push_vm_stack_source(JsFunction* fn) {
                                        origin->column_offset) != 0;
 }
 
-#define js_global_var_module_binding_keys (js_runtime_state.global_var_module_bindings->keys)
-#define js_global_var_module_binding_indices (js_runtime_state.global_var_module_bindings->indices)
-#define js_global_var_module_binding_state_ids (js_runtime_state.global_var_module_bindings->module_state_ids)
-#define js_global_var_module_binding_count (js_runtime_state.global_var_module_bindings->count)
-#define js_global_var_module_binding_epoch (js_runtime_state.global_var_module_bindings->epoch)
-#define js_global_var_module_binding_global (js_runtime_state.global_var_module_bindings->global)
-
 extern "C" Item js_vm_swap_global_this(Item next_global);
 extern "C" uint64_t js_get_heap_epoch(void);
 static Item js_262_eval_script(Item code);
 
-static bool js_global_var_binding_key_same(Item a, Item b) {
-    if (a.item == b.item) return true;
-    if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
-    String* as = it2s(a);
-    String* bs = it2s(b);
-    return as && bs && as->len == bs->len &&
-        memcmp(as->chars, bs->chars, (size_t)as->len) == 0;
+static JsGlobalEnvironment* js_global_environment_current(void) {
+    return js_active_runtime_state ? js_runtime_state.global_environment : NULL;
 }
 
 static void js_global_var_binding_refresh(void) {
+    JsGlobalEnvironment* environment = js_global_environment_current();
+    if (!js_global_environment_ensure(environment)) return;
     Item global = js_get_global_this();
     uint64_t epoch = js_get_heap_epoch();
-    if (js_global_var_module_binding_epoch == epoch &&
-        js_global_var_module_binding_global.item == global.item) {
+    Item& bound_global = js_global_environment_slot(environment,
+        JS_GLOBAL_ENV_MODULE_GLOBAL);
+    if (environment->module_epoch == epoch && bound_global.item == global.item) {
         return;
     }
-    js_global_var_module_binding_epoch = epoch;
-    js_global_var_module_binding_global = global;
-    js_global_var_module_binding_count = 0;
+    environment->module_epoch = epoch;
+    bound_global = global;
+    js_global_environment_remove_kind(environment, JS_GLOBAL_BINDING_MODULE_VAR);
 }
 
 extern "C" void js_register_global_var_module_binding(Item key, int64_t index) {
     js_global_var_binding_refresh();
     if (get_type_id(key) != LMD_TYPE_STRING || index < 0) return;
+    JsGlobalEnvironment* environment = js_global_environment_current();
+    if (!environment) return;
     uint32_t module_state_id = lambda_active_module_state_id();
-    for (int i = 0; i < js_global_var_module_binding_count; i++) {
-        if (js_global_var_binding_key_same(js_global_var_module_binding_keys[i], key)) {
-            js_global_var_module_binding_indices[i] = (int)index;
-            js_global_var_module_binding_state_ids[i] = module_state_id;
-            return;
-        }
-    }
-    if (js_global_var_module_binding_count >= JS_GLOBAL_VAR_MODULE_BINDING_CAP) return;
-    js_global_var_module_binding_keys[js_global_var_module_binding_count] = key;
-    js_global_var_module_binding_indices[js_global_var_module_binding_count] = (int)index;
-    js_global_var_module_binding_state_ids[js_global_var_module_binding_count] = module_state_id;
-    js_global_var_module_binding_count++;
+    js_global_environment_upsert(environment, JS_GLOBAL_BINDING_MODULE_VAR,
+        key, ItemNull, false, (int)index, module_state_id);
 }
 
 extern "C" void js_register_global_var_module_bindings_bulk(const Item* keys,
         const int* indices, int count) {
     js_global_var_binding_refresh();
     if (!keys || !indices || count <= 0) return;
+    JsGlobalEnvironment* environment = js_global_environment_current();
+    if (!environment) return;
     uint32_t module_state_id = lambda_active_module_state_id();
     for (int i = 0; i < count; i++) {
         Item key = keys[i];
         int index = indices[i];
         if (get_type_id(key) != LMD_TYPE_STRING || index < 0) continue;
-        bool updated = false;
-        for (int j = 0; j < js_global_var_module_binding_count; j++) {
-            if (js_global_var_binding_key_same(js_global_var_module_binding_keys[j], key)) {
-                js_global_var_module_binding_indices[j] = index;
-                js_global_var_module_binding_state_ids[j] = module_state_id;
-                updated = true;
-                break;
-            }
-        }
-        if (updated) continue;
-        if (js_global_var_module_binding_count >= JS_GLOBAL_VAR_MODULE_BINDING_CAP) return;
-        js_global_var_module_binding_keys[js_global_var_module_binding_count] = key;
-        js_global_var_module_binding_indices[js_global_var_module_binding_count] = index;
-        js_global_var_module_binding_state_ids[js_global_var_module_binding_count] = module_state_id;
-        js_global_var_module_binding_count++;
+        if (!js_global_environment_upsert(environment,
+                JS_GLOBAL_BINDING_MODULE_VAR, key, ItemNull, false, index,
+                module_state_id)) return;
     }
 }
 
 extern "C" void js_release_global_var_module_bindings_from(
         uint32_t first_module_state_id) {
-    if (first_module_state_id == UINT32_MAX) return;
-    int retained = 0;
-    for (int i = 0; i < js_global_var_module_binding_count; i++) {
-        if (js_global_var_module_binding_state_ids[i] >= first_module_state_id) {
-            continue;
-        }
-        if (retained != i) {
-            js_global_var_module_binding_keys[retained] =
-                js_global_var_module_binding_keys[i];
-            js_global_var_module_binding_indices[retained] =
-                js_global_var_module_binding_indices[i];
-            js_global_var_module_binding_state_ids[retained] =
-                js_global_var_module_binding_state_ids[i];
-        }
-        retained++;
-    }
-    // Registry keys borrow script NamePool storage; clear released slots before
-    // their generation destroys that pool (D5.3.3).
-    for (int i = retained; i < js_global_var_module_binding_count; i++) {
-        js_global_var_module_binding_keys[i] = ItemNull;
-        js_global_var_module_binding_indices[i] = 0;
-        js_global_var_module_binding_state_ids[i] = UINT32_MAX;
-    }
-    js_global_var_module_binding_count = retained;
+    js_global_environment_release_module_bindings(
+        js_global_environment_current(), first_module_state_id);
 }
 
 static void js_sync_global_var_module_binding(Item object, Item key, Item value) {
     js_global_var_binding_refresh();
-    if (object.item != js_global_var_module_binding_global.item ||
+    JsGlobalEnvironment* environment = js_global_environment_current();
+    if (!environment || object.item != js_global_environment_slot(environment,
+            JS_GLOBAL_ENV_MODULE_GLOBAL).item ||
         get_type_id(key) != LMD_TYPE_STRING) {
         return;
     }
-    for (int i = 0; i < js_global_var_module_binding_count; i++) {
-        if (js_global_var_binding_key_same(js_global_var_module_binding_keys[i], key)) {
+    int index = js_global_environment_find(environment,
+        JS_GLOBAL_BINDING_MODULE_VAR, key);
+    if (index >= 0) {
+        JsGlobalBinding* binding = js_global_environment_binding_at(
+            environment, index);
+        if (binding) {
             // Global `var` bindings are backed by the global object. When code
             // writes through `this.x`/`globalThis.x`, keep the optimized module
             // slot coherent without making every identifier read a property get.
             // The writer may be an indirect-eval function in another slab, so
             // update the binding's owner rather than its currently active slab.
-            uint32_t owner_state_id = js_global_var_module_binding_state_ids[i];
+            uint32_t owner_state_id = binding->module_state_id;
             RuntimeModuleStateScope module_state(context);
             if (owner_state_id != UINT32_MAX &&
                     !module_state.activate(owner_state_id)) return;
             lambda_active_module_var_store(
-                (uint32_t)js_global_var_module_binding_indices[i], value);
+                (uint32_t)binding->module_index, value);
             return;
         }
     }
@@ -2205,11 +2165,11 @@ extern "C" Item js_constructor_create_object(Item callee, Item new_target) {
                     }
                     depth++;
                 }
-                js_set_prototype(object_root.get(), instance_proto_root.get());
+                js_set_prototype_fresh(object_root.get(), instance_proto_root.get());
             } else if (js_is_js_array(instance_proto_root.get()) || pt == LMD_TYPE_ELEMENT) {
                 // ES OrdinaryCreateFromConstructor: when constructor's .prototype is
                 // any Object (incl. Array/Element), use it as instance's [[Prototype]].
-                js_set_prototype(object_root.get(), instance_proto_root.get());
+                js_set_prototype_fresh(object_root.get(), instance_proto_root.get());
             }
         }
     }
@@ -2362,7 +2322,7 @@ extern "C" void js_init_class_instance_field_metadata(Item class_item, int count
             get_type_id(class_item) != LMD_TYPE_FUNC || count <= 0) {
         return;
     }
-    RootFrame roots(6);
+    RootFrame roots(7);
     Rooted<Item> class_root(roots, class_item);
     Rooted<Item> keys_root(roots, js_array_new(count));
     Rooted<Item> values_root(roots, js_array_new(count));
@@ -3821,6 +3781,257 @@ extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
     return (Item){.map = m};
 }
 
+// ---------------------------------------------------------------------------
+// T10-2 item 1, compiler half: compile-predicted literal shapes.
+//
+// A site's shape is named by a contiguous range of the ACTIVE MODULE's
+// property-key table, so the constant baked into MIR is a pair of indices and
+// never a realm pointer (D5.4.3, D5.4.4) -- the same indirection
+// lambda_active_module_name_id already uses for a single name.
+//
+// Every slot is NULL-typed at pointer width. That is what makes the shape
+// knowable at compile time without knowing value types: the first write to a
+// slot retags it in place through fn_map_set's same-width path (NULL -> INT,
+// FLOAT, STRING, MAP, FUNC ...) and the layout never repacks. Per-instance
+// ctor_reserved_mask keeps a slot absent, not `null`, until it is written.
+//
+// These shapes are deliberately NOT interned in the shape transition graph:
+// retagging mutates the entry type, which would break the graph's invariant
+// that a target's entry type matches the edge's value_type and hand a later
+// add(x, NULL) lookup a shape whose x is already INT.
+// ---------------------------------------------------------------------------
+
+typedef struct JsPredictedShape {
+    uint64_t descriptor;   // [module_id:16][first_key_index:32][key_count:16]
+    TypeMap* shape;
+} JsPredictedShape;
+
+// One realm's literal sites are few; a bounded linear scan beats a hash table
+// and the caller memoizes the resolved TypeMap in a register per function.
+#define JS_PREDICTED_SHAPE_LIMIT 512
+
+static uint64_t js_predicted_shape_descriptor(uint32_t module_id,
+        uint32_t first_key_index, uint32_t key_count) {
+    return ((uint64_t)(module_id & 0xffffu) << 48) |
+        ((uint64_t)first_key_index << 16) | (uint64_t)(key_count & 0xffffu);
+}
+
+static TypeMap* js_predicted_shape_build(uint32_t first_key_index,
+        uint32_t key_count) {
+    if (!js_input || !js_input->pool || !js_input->type_list) return NULL;
+    TypeMap* tm = (TypeMap*)alloc_type(js_input->pool, LMD_TYPE_MAP,
+        sizeof(TypeMap));
+    if (!tm) return NULL;
+    ShapeEntry* first = NULL;
+    ShapeEntry* prev = NULL;
+    for (uint32_t i = 0; i < key_count; i++) {
+        NameId name_id = (NameId)lambda_active_module_name_id(first_key_index + i);
+        if (name_id == NAME_ID_NONE) return NULL;
+        NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
+            name_id);
+        if (!key) return NULL;
+        ShapeEntry* se = (ShapeEntry*)pool_calloc(js_input->pool,
+            sizeof(ShapeEntry) + sizeof(StrView));
+        if (!se) return NULL;
+        StrView* nv = (StrView*)((char*)se + sizeof(ShapeEntry));
+        nv->str = key->chars;
+        nv->length = key->len;
+        se->name = nv;
+        se->name_hash = property_key_hash(key);
+        se->name_id = name_id;
+        se->key_kind = property_key_kind(key);
+        // SCU9/D3.4.6: the storage descriptor is derived by the one resolver at
+        // assignment; a raw `se->type =` would leave `storage` zeroed and every
+        // read of the slot would resolve an invalid lane.
+        shape_entry_set_type(se, type_info[LMD_TYPE_NULL].type);
+        se->byte_offset = (int64_t)i * (int64_t)sizeof(void*);
+        se->next = NULL;
+        if (prev) prev->next = se; else first = se;
+        prev = se;
+    }
+    if (!first) return NULL;
+    tm->shape = first;
+    tm->last = prev;
+    tm->length = (int)key_count;
+    tm->byte_size = (int64_t)key_count * (int64_t)sizeof(void*);
+    tm->js_meta = js_class_meta_for_id((JsClass)JS_CLASS_OBJECT);
+    // Shared across every evaluation of the site, so a NULL downgrade must be
+    // refused (shape_entry_retag_is_safe); upgrades stay in place.
+    tm->is_shared_constructor_shape = true;
+    tm->is_private_clone = false;
+    tm->is_transition_shared_shape = false;
+    // slot_entries is what makes typemap_fixed_slot_prefix_count admit this
+    // layout; the offsets above already satisfy its i * sizeof(void*) rule.
+    ShapeEntry** slots = (ShapeEntry**)pool_calloc(js_input->pool,
+        (size_t)key_count * sizeof(ShapeEntry*));
+    if (!slots) return NULL;
+    ShapeEntry* walk = first;
+    for (uint32_t i = 0; i < key_count && walk; i++, walk = walk->next) {
+        slots[i] = walk;
+    }
+    tm->slot_entries = slots;
+    tm->slot_count = (int)key_count;
+    typemap_hash_build(tm, js_input->pool);
+    arraylist_append(js_input->type_list, tm);
+    tm->type_index = js_input->type_list->length - 1;
+    return tm;
+}
+
+// Resolve a site's predicted shape, interning it per realm. NULL means the
+// caller must fall back to the ordinary unshaped object path.
+//
+// Indexed by the range's own first key index rather than scanned: this runs on
+// every evaluation of the literal, so it has to cost what
+// lambda_active_module_name_id costs -- one bounds check and one array read.
+// The stored descriptor is re-compared because a module id can be reused within
+// a realm, and a stale row would otherwise hand this site another module's keys.
+static TypeMap* js_predicted_shape_resolve(uint32_t first_key_index,
+        uint32_t key_count) {
+    if (!js_input || !js_input->pool || key_count == 0 ||
+            key_count > JS_PREDICTED_SHAPE_MAX_SLOTS ||
+            first_key_index >= JS_PREDICTED_SHAPE_LIMIT) return NULL;
+    uint64_t descriptor = js_predicted_shape_descriptor(
+        lambda_active_module_state_id(), first_key_index, key_count);
+    ArrayList* cache = js_input->predicted_shapes;
+    if (cache && (int)first_key_index < cache->length) {
+        JsPredictedShape* row = (JsPredictedShape*)arraylist_get(cache,
+            (int)first_key_index);
+        if (row && row->descriptor == descriptor) return row->shape;
+    }
+    if (!cache) {
+        cache = arraylist_new(32);
+        if (!cache) return NULL;
+        js_input->predicted_shapes = cache;
+    }
+    while (cache->length <= (int)first_key_index) {
+        if (!arraylist_append(cache, NULL)) return NULL;
+    }
+    TypeMap* shape = js_predicted_shape_build(first_key_index, key_count);
+    JsPredictedShape* row = (JsPredictedShape*)pool_calloc(js_input->pool,
+        sizeof(JsPredictedShape));
+    if (!row) return shape;
+    row->descriptor = descriptor;
+    // A refused shape is cached as NULL so the refusal is decided once.
+    row->shape = shape;
+    arraylist_set(cache, (int)first_key_index, row);
+    return shape;
+}
+
+// MIR entry: allocate an object literal's instance on its predicted shape, with
+// every slot reserved so an unwritten field is absent rather than null.
+extern "C" Item js_new_object_shaped(int64_t first_key_index,
+        int64_t key_count) {
+    if (first_key_index < 0 || key_count <= 0) return js_new_object();
+    TypeMap* shape = js_predicted_shape_resolve((uint32_t)first_key_index,
+        (uint32_t)key_count);
+    if (!shape) return js_new_object();
+    // No ctor_reserved_mask here on purpose. A literal writes every one of its
+    // slots before the object is reachable, so there is no window in which an
+    // unwritten slot is observable -- and reserving them would make the literal's
+    // own stores miss the named fast path, which is the cost this shape exists to
+    // remove. A constructor prefix, where the window is real, will need the mask.
+    return js_new_object_with_typemap(shape);
+}
+
+static bool js_shape_write_same_size_slot(TypeMap* tm, ShapeEntry* entry,
+        void* data, Item value);
+static inline bool js_named_fast_store_can_write_same_slot(ShapeEntry* entry,
+        Item value);
+
+// T10-2: initialize a predicted shape's still-unwritten slot in place.
+//
+// A predicted slot exists from allocation but stays NULL-typed until its first
+// write, so CreateDataProperty on it is an INITIALIZATION, not a redefinition.
+// Sending it down the descriptor path clones the shape and detaches the
+// instance from the very shape the compiled guard compares against, which is
+// what made the guard miss every time.
+//
+// The retag is the NULL -> T upgrade shape_entry_retag_is_safe sanctions. Only
+// the T -> NULL downgrade is refused on a shared shape, because that one would
+// make the collector skip a sibling instance's live pointer. The upgrade is
+// safe in this direction: a sibling that has not yet written this slot holds
+// the zero word, which every admitted lane reads as its own zero (a null
+// container, integer 0), and no literal exposes an instance before all of its
+// slots are written.
+extern "C" bool js_predicted_slot_initialize(Item target, NameRef key,
+        Item value) {
+    if (get_type_id(target) != LMD_TYPE_MAP || !target.map) return false;
+    Map* m = target.map;
+    if (m->map_kind != MAP_KIND_PLAIN || !m->data) return false;
+    TypeMap* tm = (TypeMap*)m->type;
+    // Only a predicted shape: its contiguous pointer-width slots are what make
+    // an in-place retag a layout no-op rather than a repack.
+    if (!tm || !tm->is_shared_constructor_shape ||
+            typemap_fixed_slot_prefix_count(tm) <= 0) return false;
+    if (!key || property_key_kind(key) != NAME_KEY_STRING) return false;
+    NameId name_id = property_key_id(key);
+    if (name_id == NAME_ID_NONE) return false;
+    ShapeEntry* e = typemap_hash_lookup_by_name_id(tm, name_id,
+        property_key_hash(key));
+    if (!e || e->flags != 0 || !e->type) return false;
+    if (!typemap_entry_uses_fixed_slot(tm, e)) return false;
+    // A null value needs no retag -- the zeroed slot already reads as null --
+    // and leaving it to the ordinary path keeps one rule here, not two.
+    if (get_type_id(value) == LMD_TYPE_NULL) return false;
+    if (!shape_entry_storage_fits_data(e, m->data_cap)) return false;
+    // Two admissible cases, and no third. A NULL slot is the first write to
+    // this field: retag it, which is the safe direction. An already-typed slot
+    // is admitted only when the value needs NO retag -- the shape is shared by
+    // every instance of the site, so retagging INT to STRING here would have a
+    // sibling's integer read back as a pointer. A cross-type write instead
+    // falls through to the ordinary path, which clones and detaches.
+    //
+    // Refusing the already-typed case outright was a 9.7x regression: only the
+    // first instance took this path, and every later one landed in the
+    // descriptor slow path because its key now exists in the shape.
+    if (e->type->type_id != LMD_TYPE_NULL &&
+            !js_named_fast_store_can_write_same_slot(e, value)) return false;
+    return js_shape_write_same_size_slot(tm, e, m->data, value);
+}
+
+// T10-2 item 2: guarded direct-slot read.
+//
+// The site's shape is a compile-time CANDIDATE -- the receiver was initialized
+// by a literal with this shape somewhere the lowering could see it -- and
+// nothing static proves the object arriving here is that one. The guard
+// supplies the proof at runtime; any miss falls through to the ordinary named
+// kernel. The compare is against resolved constants and no code is ever
+// rewritten, so this is a guard chain, not an inline cache (D8.4.1v2, LC1v2).
+//
+// Shape identity subsumes most of what the kernel re-checks per access: every
+// descriptor, accessor, delete, freeze and extension path clones the TypeMap
+// before mutating it, so an instance that took any of them no longer carries
+// this shape and fails the compare.
+extern "C" Item js_get_name_id(Item object, NameId name_id);
+
+extern "C" Item js_shaped_slot_get(Item object, int64_t first_key_index,
+        int64_t key_count, int64_t slot, int64_t name_id) {
+    if (get_type_id(object) == LMD_TYPE_MAP && object.map) {
+        Map* m = object.map;
+        // MAP_KIND_PLAIN rules out dataset views, descriptor-promoted maps,
+        // array companion maps and every exotic receiver in one byte.
+        if (m->data && m->map_kind == MAP_KIND_PLAIN && !m->has_ctor_reserved &&
+                slot >= 0 && slot < (int64_t)key_count) {
+            TypeMap* shape = js_predicted_shape_resolve(
+                (uint32_t)first_key_index, (uint32_t)key_count);
+            if (shape && (TypeMap*)m->type == shape &&
+                    shape->slot_entries && slot < shape->slot_count) {
+                ShapeEntry* e = shape->slot_entries[slot];
+                // flags stay 0 by the clone rule above; the bounds test is kept
+                // because data_cap is per instance, not per shape.
+                if (e && e->flags == 0 &&
+                        shape_entry_storage_fits_data(e, m->data_cap)) {
+                    Item value = _map_read_field(e, m->data);
+                    // A sentinel can be written without cloning, so identity
+                    // does not subsume this one.
+                    if (!js_is_deleted_sentinel(value)) return value;
+                }
+            }
+        }
+    }
+    return js_get_name_id(object, (NameId)name_id);
+}
+
 // Forward declaration for prototype chain support
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 extern "C" Item js_prototype_lookup_ex_with_receiver(
@@ -3901,7 +4112,7 @@ Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out
 
 // P10d: Interned __proto__ key — avoid heap_create_name on every prototype lookup.
 // Initialized lazily on first use.
-#define js_proto_key_item (js_runtime_state.runtime_core_cache.proto_key)
+#define js_proto_key_item (js_runtime_state.intrinsic_slots->proto_key)
 void js_reset_proto_key() { js_proto_key_item = (Item){0}; }
 static Item js_get_proto_key() {
     if (js_proto_key_item.item == 0) {
@@ -5110,9 +5321,8 @@ extern "C" Item js_get_key_core(Item object, Item key,
                     if (object.array->is_content == 1 &&
                         ((str_key->len == 6 && strncmp(str_key->chars, "callee", 6) == 0) ||
                          (str_key->len == 6 && strncmp(str_key->chars, "caller", 6) == 0))) {
-                        bool strict_found = false;
-                        js_map_shape_lookup(pm, "__strict_arguments__", 20, &strict_found);
-                        if (strict_found) {
+                        if (container_is_strict_arguments(
+                                (const Container*)object.array)) {
                             return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
                         }
                     }
@@ -5367,28 +5577,29 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 if (str_key->len == 2 && str_key->chars[0] == '$' &&
                     str_key->chars[1] >= '1' && str_key->chars[1] <= '9') {
                     int gi = str_key->chars[1] - '1'; // $1 → index 0
-                    String* gs = js_regexp_last_match.groups[gi];
+                    String* gs = js_regexp_last_match_string_at(gi + 2);
                     return gs ? (Item){.item = s2it(gs)} : (Item){.item = s2it(heap_create_name("", 0))};
                 }
                 if ((str_key->len == 5 && strncmp(str_key->chars, "input", 5) == 0) ||
                     (str_key->len == 2 && strncmp(str_key->chars, "$_", 2) == 0)) {
-                    String* s = js_regexp_last_match.input;
+                    String* s = js_regexp_last_match_string_at(0);
                     return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
                 }
                 if ((str_key->len == 9 && strncmp(str_key->chars, "lastMatch", 9) == 0) ||
                     (str_key->len == 2 && strncmp(str_key->chars, "$&", 2) == 0)) {
-                    String* s = js_regexp_last_match.match;
+                    String* s = js_regexp_last_match_string_at(1);
                     return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
                 }
                 if ((str_key->len == 9 && strncmp(str_key->chars, "lastParen", 9) == 0) ||
                     (str_key->len == 2 && strncmp(str_key->chars, "$+", 2) == 0)) {
                     int gc = js_regexp_last_match.group_count;
-                    String* s = gc > 0 ? js_regexp_last_match.groups[gc - 1] : NULL;
+                    String* s = gc > 0
+                        ? js_regexp_last_match_string_at(gc + 1) : NULL;
                     return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
                 }
                 if ((str_key->len == 11 && strncmp(str_key->chars, "leftContext", 11) == 0) ||
                     (str_key->len == 2 && strncmp(str_key->chars, "$`", 2) == 0)) {
-                    String* inp = js_regexp_last_match.input;
+                    String* inp = js_regexp_last_match_string_at(0);
                     if (inp && js_regexp_last_match.match_start > 0) {
                         return (Item){.item = s2it(heap_strcpy(inp->chars, js_regexp_last_match.match_start))};
                     }
@@ -5396,7 +5607,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 }
                 if ((str_key->len == 12 && strncmp(str_key->chars, "rightContext", 12) == 0) ||
                     (str_key->len == 2 && strncmp(str_key->chars, "$'", 2) == 0)) {
-                    String* inp = js_regexp_last_match.input;
+                    String* inp = js_regexp_last_match_string_at(0);
                     if (inp && js_regexp_last_match.match_end < (int)inp->len) {
                         return (Item){.item = s2it(heap_strcpy(inp->chars + js_regexp_last_match.match_end,
                             (int)inp->len - js_regexp_last_match.match_end))};
@@ -6312,7 +6523,10 @@ static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item 
     return true;
 }
 
-static bool js_array_companion_write_same_size_slot(TypeMap* tm, ShapeEntry* entry,
+// Write into an existing slot whose lane is the same byte size as the value's,
+// retagging the entry when the shape permits. Used by array companion maps and
+// by T10-2's predicted-slot initialization -- nothing here is array-specific.
+static bool js_shape_write_same_size_slot(TypeMap* tm, ShapeEntry* entry,
         void* data, Item value) {
     if (!entry || !entry->type || !data) return false;
     TypeId field_type = entry->type->type_id;
@@ -6373,7 +6587,7 @@ static Item js_array_companion_try_write_existing_data(Item object, const char* 
             entry->byte_offset + value_size > (int64_t)pm->data_cap) {
         return js_status_ok();
     }
-    bool written = js_array_companion_write_same_size_slot((TypeMap*)pm->type, entry,
+    bool written = js_shape_write_same_size_slot((TypeMap*)pm->type, entry,
         pm->data, value);
     if (written && out_handled) *out_handled = true;
     return js_status_ok();
@@ -6493,13 +6707,9 @@ static Item js_set_array_core(Item object, Item key, Item value,
                 if (object.array->is_content == 1 &&
                     ((sk->len == 6 && strncmp(sk->chars, "callee", 6) == 0) ||
                      (sk->len == 6 && strncmp(sk->chars, "caller", 6) == 0)) &&
-                    js_array_has_props(object.array)) {
-                    bool strict_arguments = false;
-                    js_map_shape_lookup(js_array_props(object.array),
-                        "__strict_arguments__", 20, &strict_arguments);
-                    if (strict_arguments) {
-                        return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
-                    }
+                    container_is_strict_arguments(
+                        (const Container*)object.array)) {
+                    return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
                 }
                 // OrdinarySetWithOwnDescriptor: an own data property (stored in
                 // the array's companion map) shadows any prototype setter, so
@@ -8302,7 +8512,20 @@ extern "C" Item js_set_name_id(Item object, NameId name_id,
         reason = JS_OPT_REASON_NAMED_FAST_VALUE_TYPE;
     }
     js_named_fast_profile_miss(reason);
-    return js_set_key_policy(object, (Item){.item = s2it(key)}, value, strict);
+    Item key_item = (Item){.item = s2it(key)};
+    // T10-3: try the ordinary-add kernel here rather than three frames deeper.
+    // Reaching it through js_set_key_policy -> js_set_key_default ->
+    // js_set_completion_with_key re-derives facts this frame already has and
+    // costs 22-26% of `new P(x,y)`. The kernel proves every premise itself, so
+    // it is offered every miss, not just NAMED_FAST_NO_ENTRY: a receiver whose
+    // map was never admissible (an empty object still has data == NULL) misses
+    // as NO_RECEIVER, and an existing-but-unwritable slot misses with the entry
+    // present, which the kernel's own-absence test rejects. Both strictness
+    // modes complete a successful add with the assigned value.
+    if (js_ordinary_add_own_data_property(object, key_item, value)) {
+        return value;
+    }
+    return js_set_key_policy(object, key_item, value, strict);
 }
 
 // Convert a UTF-16 unit index to the corresponding byte offset in a UTF-8 string.
@@ -9484,31 +9707,33 @@ extern "C" Item js_array_push(Item array, Item value) {
 // Tagged Template Literals
 // =============================================================================
 
-#define js_template_registry (js_runtime_state.template_registry)
+#define js_template_entries (js_runtime_state.template_registry.entries)
+#define js_template_values (js_runtime_state.template_registry.values)
 
 extern "C" void js_reset_template_registry(void) {
     if (!js_active_runtime_state) return;
-    JsTemplateRegistryEntry* entry = js_template_registry;
+    JsTemplateRegistryEntry* entry = js_template_entries;
     while (entry) {
         JsTemplateRegistryEntry* next = entry->next;
-        heap_unregister_gc_root(&entry->object.item);
         mem_free(entry);
         entry = next;
     }
-    js_template_registry = NULL;
+    js_template_entries = NULL;
+    root_vector_clear(&js_template_values);
 }
 
 extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state) {
     if (!state) return;
     js_array_runtime_items_cleanup_map(state->array_runtime_items);
     state->array_runtime_items = NULL;
-    JsTemplateRegistryEntry* entry = state->template_registry;
+    JsTemplateRegistryEntry* entry = state->template_registry.entries;
     while (entry) {
         JsTemplateRegistryEntry* next = entry->next;
         mem_free(entry);
         entry = next;
     }
-    state->template_registry = NULL;
+    state->template_registry.entries = NULL;
+    root_vector_destroy(&state->template_registry.values);
 }
 
 extern "C" Item js_build_template_object(Item* cooked, Item* raw, int count) {
@@ -9530,20 +9755,33 @@ extern "C" Item js_build_template_object(Item* cooked, Item* raw, int count) {
 }
 
 extern "C" Item js_build_template_object_cached(Item* cooked, Item* raw, int count, int64_t site_id) {
-    for (JsTemplateRegistryEntry* entry = js_template_registry; entry; entry = entry->next) {
-        if (entry->site_id == site_id && entry->count == count) return entry->object;
+    for (JsTemplateRegistryEntry* entry = js_template_entries; entry; entry = entry->next) {
+        if (entry->site_id == site_id && entry->count == count) {
+            Item* object = root_vector_at(&js_template_values, entry->root_slot);
+            if (object) return *object;
+            // Heap replacement drops RootVector slots. Its stale native rows
+            // must not retain site ids that now refer to no template object.
+            js_reset_template_registry();
+            break;
+        }
     }
-    Item obj = js_build_template_object(cooked, raw, count);
-    JsTemplateRegistryEntry* entry = (JsTemplateRegistryEntry*)mem_calloc(1, sizeof(JsTemplateRegistryEntry), MEM_CAT_JS_RUNTIME);
+    RootFrame roots(1);
+    Rooted<Item> object_root(roots, js_build_template_object(cooked, raw, count));
+    if (!roots.valid()) return ItemError;
+    JsTemplateRegistryEntry* entry = (JsTemplateRegistryEntry*)mem_calloc(1,
+        sizeof(JsTemplateRegistryEntry), MEM_CAT_JS_RUNTIME);
     if (entry) {
         entry->site_id = site_id;
         entry->count = count;
-        entry->object = obj;
-        entry->next = js_template_registry;
-        heap_register_gc_root(&entry->object.item);
-        js_template_registry = entry;
+        entry->root_slot = root_vector_count(&js_template_values);
+        if (root_vector_push(&js_template_values, object_root.get())) {
+            entry->next = js_template_entries;
+            js_template_entries = entry;
+        } else {
+            mem_free(entry);
+        }
     }
-    return obj;
+    return object_root.get();
 }
 
 
@@ -9776,12 +10014,51 @@ JS_GLOBAL_UNARY_BODY(js_intrinsic_global_decode_uricomponent_body,
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_escape_body, js_escape(arg0))
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_unescape_body, js_unescape(arg0))
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_eval_body, js_builtin_eval(arg0, 1))
-JS_GLOBAL_BINARY_BODY(js_intrinsic_global_set_timeout_body,
-    js_setTimeout(arg0, arg1))
-JS_GLOBAL_BINARY_BODY(js_intrinsic_global_set_interval_body,
-    js_setInterval(arg0, arg1))
-JS_GLOBAL_UNARY_BODY(js_intrinsic_global_set_immediate_body,
-    js_setImmediate(arg0))
+static Item js_intrinsic_global_timer_body(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home, bool is_interval) {
+    (void)callee; (void)this_value; (void)result_home;
+    RootSpan actual_roots((size_t)(argc > 0 ? argc : 1));
+    if (!actual_roots.valid()) return ItemError;
+    for (int i = 0; i < argc; i++) actual_roots.words()[i] = args[i].item;
+    Item* actual = actual_roots.items();
+    RootFrame roots(3);
+    Rooted<Item> callback_root(roots, argc > 0 ? actual[0] : make_js_undefined());
+    Rooted<Item> delay_root(roots, argc > 1 ? actual[1] : make_js_undefined());
+    Rooted<Item> arguments_root(roots, ItemNull);
+    if (argc > 2) arguments_root.set(js_pack_args_span(actual + 2, argc - 2));
+    return is_interval
+        ? (argc > 2 ? js_setInterval_args(callback_root.get(), delay_root.get(),
+            arguments_root.get()) : js_setInterval(callback_root.get(), delay_root.get()))
+        : (argc > 2 ? js_setTimeout_args(callback_root.get(), delay_root.get(),
+            arguments_root.get()) : js_setTimeout(callback_root.get(), delay_root.get()));
+}
+
+Item js_intrinsic_global_set_timeout_body(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home) {
+    return js_intrinsic_global_timer_body(callee, this_value, args, argc,
+        result_home, false);
+}
+
+Item js_intrinsic_global_set_interval_body(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home) {
+    return js_intrinsic_global_timer_body(callee, this_value, args, argc,
+        result_home, true);
+}
+
+Item js_intrinsic_global_set_immediate_body(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home) {
+    (void)callee; (void)this_value; (void)result_home;
+    RootSpan actual_roots((size_t)(argc > 0 ? argc : 1));
+    if (!actual_roots.valid()) return ItemError;
+    for (int i = 0; i < argc; i++) actual_roots.words()[i] = args[i].item;
+    Item* actual = actual_roots.items();
+    RootFrame roots(2);
+    Rooted<Item> callback_root(roots, argc > 0 ? actual[0] : make_js_undefined());
+    Rooted<Item> arguments_root(roots, ItemNull);
+    if (argc > 1) arguments_root.set(js_pack_args_span(actual + 1, argc - 1));
+    return argc > 1 ? js_setImmediate_with_args(callback_root.get(),
+        arguments_root.get()) : js_setImmediate(callback_root.get());
+}
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_request_animation_frame_body,
     js_requestAnimationFrame(arg0))
 JS_GLOBAL_UNARY_BODY(js_intrinsic_global_structured_clone_body,
@@ -13534,13 +13811,10 @@ Item js_intrinsic_262_realm_regexp_get_hasindices_body(Item callee,
 }
 
 static void js_super_this_binding_push(Item initial_this) {
-    // the parallel bound-flag array is fixed; refuse deeper nesting explicitly
-    if (js_super_this_bound_depth >= JS_SUPER_THIS_STACK_MAX) return;
-    if (!js_item_stack_push(&js_runtime_state.super_this_values, initial_this)) {
-        log_error("js-super-this: failed to publish constructor binding root");
-        return;
-    }
-    js_super_this_bound_stack[js_super_this_bound_depth] = false;
+    JsCallActivation* activation = js_call_activation_current();
+    activation->derived_constructor = true;
+    activation->super_this_bound = false;
+    js_super_this_value = initial_this;
 }
 
 static Item js_throw_super_called_twice(void) {
@@ -13551,12 +13825,13 @@ static Item js_throw_super_called_twice(void) {
 }
 
 static Item js_super_this_binding_finish(Item result) {
-    if (js_super_this_bound_depth <= 0) return result;
-    int idx = js_super_this_bound_depth - 1;
-    bool initialized = js_super_this_bound_stack[idx];
-    Item bound_this = js_super_this_value_at(idx);
-    js_super_this_bound_stack[idx] = false;
-    js_item_stack_pop(&js_runtime_state.super_this_values);
+    JsCallActivation* activation = js_call_activation_current();
+    if (!activation->derived_constructor) return result;
+    bool initialized = activation->super_this_bound;
+    Item bound_this = js_super_this_value;
+    activation->derived_constructor = false;
+    activation->super_this_bound = false;
+    js_super_this_value = ItemNull;
 
     if (item_is_error(result)) return result;
     if (js_is_object_value(result)) return result;
@@ -13575,30 +13850,27 @@ static Item js_super_this_binding_finish(Item result) {
 extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
     if (item_is_error(construct_result)) return construct_result;
     Item bound_this = js_is_object_value(construct_result) ? construct_result : this_val;
-    if (js_super_this_bound_depth <= 0) {
+    JsCallActivation* activation = js_call_activation_current();
+    if (!activation->derived_constructor) {
         return js_throw_super_called_twice();
     }
-    if (js_super_this_bound_depth > 0) {
-        int idx = js_super_this_bound_depth - 1;
-        if (js_super_this_bound_stack[idx]) {
-            return js_throw_super_called_twice();
-        }
-        if (!js_is_object_value(bound_this) &&
-            (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&
-            js_is_object_value(js_super_this_value_at(idx))) {
-            bound_this = js_super_this_value_at(idx);
-        }
-        js_super_this_bound_stack[idx] = true;
-        js_super_this_value_at(idx) = bound_this;
+    if (activation->super_this_bound) {
+        return js_throw_super_called_twice();
     }
+    if (!js_is_object_value(bound_this) &&
+        (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&
+        js_is_object_value(js_super_this_value)) {
+        bound_this = js_super_this_value;
+    }
+    activation->super_this_bound = true;
+    js_super_this_value = bound_this;
     js_current_this = bound_this;
     return bound_this;
 }
 
 extern "C" Item js_get_super_this_value(void) {
-    if (js_super_this_bound_depth > 0) {
-        int idx = js_super_this_bound_depth - 1;
-        return js_super_this_value_at(idx);
+    if (js_call_activation_current()->derived_constructor) {
+        return js_super_this_value;
     }
     return js_get_this();
 }
@@ -13686,29 +13958,43 @@ static inline Item js_call_value(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted);
 
 
-// A `with` scope must not leak into a called function, so the call boundary
-// copies the caller's active with-scope objects into a native-stack array and
-// installs the callee's own (usually empty) with-env into the global stack.
-// That native copy is then the ONLY live reference to those scope objects while
-// the callee runs, so a GC during the callee would free them and the post-call
-// restore would write dangling pointers back. This RAII guard registers the
-// saved array as an exact GC root range for exactly that span and unregisters
-// before the native frame returns (by which point the values are back in the
-// GC-rooted global with-stack). Only pays a cost when a with-scope is actually
-// active across the call (depth > 0).
-struct JsSavedWithScopeRoots {
-    uint64_t* base;
-    JsSavedWithScopeRoots(Item* stack, int depth) : base(nullptr) {
-        if (depth > 0) {
-            base = (uint64_t*)stack;
-            heap_register_gc_root_range(base, depth);
+// A `with` scope must not leak into a called function. Its saved copy is a
+// dynamic exact root range because a lexical with-chain has no language cap.
+// The range remains live while the callee replaces the runtime stack.
+struct JsSavedWithScope {
+    Item* stack = NULL;
+    int depth = 0;
+    bool ready = true;
+    uint64_t* root_base = NULL;
+
+    explicit JsSavedWithScope(bool capture) {
+        if (!capture) return;
+        depth = js_with_save_stack(NULL, 0);
+        if (depth <= 0) return;
+        stack = (Item*)mem_alloc((size_t)depth * sizeof(Item), MEM_CAT_JS_RUNTIME);
+        if (!stack) {
+            depth = 0;
+            ready = false;
+            return;
         }
+        if (js_with_save_stack(stack, depth) != depth) {
+            mem_free(stack);
+            stack = NULL;
+            depth = 0;
+            ready = false;
+            return;
+        }
+        root_base = (uint64_t*)stack;
+        heap_register_gc_root_range(root_base, depth);
     }
-    ~JsSavedWithScopeRoots() {
-        if (base) heap_unregister_gc_root_range(base);
+
+    ~JsSavedWithScope() {
+        if (root_base) heap_unregister_gc_root_range(root_base);
+        mem_free(stack);
     }
-    JsSavedWithScopeRoots(const JsSavedWithScopeRoots&) = delete;
-    JsSavedWithScopeRoots& operator=(const JsSavedWithScopeRoots&) = delete;
+
+    JsSavedWithScope(const JsSavedWithScope&) = delete;
+    JsSavedWithScope& operator=(const JsSavedWithScope&) = delete;
 };
 
 // super() for class-expression superclasses: the class carrier is a function.
@@ -13828,7 +14114,7 @@ extern "C" Item js_super_apply_native(Item callee, Item this_val, Item args_arra
     return js_super_call_native(callee, this_val, args, argc);
 }
 
-#define js_call_stack_limit (js_runtime_state.call_stack_limit)
+#define js_call_stack_limit (js_runtime_state.execution.call_stack_limit)
 
 // global-ok: I (CLI policy frozen before the first JS context is created).
 // The executable accepts --stack-size before there is an EvalContext to own
@@ -14077,7 +14363,47 @@ extern "C" Item js_construct_value(Item callee, Item* args, int arg_count,
 // stack-overflow RangeError is semantics, so all call paths must advance the
 // same context-owned counter or deep recursion could escape the guard by
 // alternating paths.
-#define js_call_depth (js_runtime_state.call_depth)
+#define js_call_depth (js_runtime_state.execution.call_depth)
+
+static Item* js_call_activation_root_home(Rooted<Item>& rooted) {
+    return (Item*)(void*)rooted.home();
+}
+
+// One scope publishes all ambient call facts together. Its Item homes are in
+// the caller's RootFrame, so GC can update the active activation directly and
+// the destructor restores the previous call in one operation (JSCU28).
+class JsCallActivationScope {
+public:
+    JsCallActivationScope(Rooted<Item>& this_root, Rooted<Item>& new_target_root,
+            Rooted<Item>& generator_proto_root, Rooted<Item>& private_home_root,
+            Rooted<Item>& callee_root, Rooted<Item>& super_this_root,
+            Item* args, int arg_count, const char* source, int source_len,
+            int args_is_strict) {
+        activation_.items[JS_CALL_ACTIVATION_THIS] = js_call_activation_root_home(this_root);
+        activation_.items[JS_CALL_ACTIVATION_NEW_TARGET] =
+            js_call_activation_root_home(new_target_root);
+        activation_.items[JS_CALL_ACTIVATION_GENERATOR_CALLEE_PROTO] =
+            js_call_activation_root_home(generator_proto_root);
+        activation_.items[JS_CALL_ACTIVATION_PRIVATE_HOME_CLASS] =
+            js_call_activation_root_home(private_home_root);
+        activation_.items[JS_CALL_ACTIVATION_CALLEE] = js_call_activation_root_home(callee_root);
+        activation_.items[JS_CALL_ACTIVATION_SUPER_THIS] =
+            js_call_activation_root_home(super_this_root);
+        activation_.args = args;
+        activation_.arg_count = arg_count;
+        activation_.source = source;
+        activation_.source_len = source_len;
+        activation_.args_is_strict = args_is_strict;
+        js_call_activation_push(&activation_);
+    }
+
+    ~JsCallActivationScope() { js_call_activation_pop(&activation_); }
+
+    JsCallActivation* activation() { return &activation_; }
+
+private:
+    JsCallActivation activation_ = {};
+};
 
 static void js_prepare_new_target_for_call(bool install_new_target,
         Item construct_new_target) {
@@ -14110,21 +14436,23 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         ? (size_t)arg_count : 0);
     if (!js_prepare_owned_argument_span(args, arg_count, args_prerooted,
             call_arg_roots, "js-call-prerooted")) return ItemError;
-    RootFrame call_roots(7);
+    RootFrame call_roots(9);
     Rooted<Item> func_root(call_roots, func_item);
     Rooted<Item> this_root(call_roots, this_val);
     // Construct passes newTarget as an ordinary rooted operand. A zero value
     // identifies [[Call]] and cannot alias a published JavaScript value.
     Rooted<Item> construct_target_root(call_roots, construct_new_target);
-    // A nested call may collect before this dispatcher restores its caller
-    // state. These exact roots keep a super() call from restoring a moved
-    // receiver into js_current_this.
-    Rooted<Item> saved_this_root(call_roots, js_current_this);
-    Rooted<Item> saved_new_target_root(call_roots, js_new_target);
-    Rooted<Item> saved_private_home_class_root(call_roots,
-        js_current_private_home_class);
-    Rooted<Item> saved_pending_args_callee_root(call_roots,
-        js_pending_args_callee);
+    Rooted<Item> activation_this_root(call_roots, js_current_this);
+    Rooted<Item> activation_new_target_root(call_roots, js_new_target);
+    Rooted<Item> activation_generator_proto_root(call_roots, js_generator_callee_proto);
+    Rooted<Item> activation_private_home_root(call_roots, js_current_private_home_class);
+    Rooted<Item> activation_callee_root(call_roots, func_item);
+    Rooted<Item> activation_super_this_root(call_roots, ItemNull);
+    JsCallActivationScope call_activation(activation_this_root,
+        activation_new_target_root, activation_generator_proto_root,
+        activation_private_home_root, activation_callee_root,
+        activation_super_this_root, args, arg_count, js_pending_call_source,
+        js_pending_call_source_len, js_pending_args_is_strict);
     // Calls can allocate while resolving proxies, binding `this`, or invoking
     // callbacks; native locals are invisible to precise GC during that work.
     func_item = func_root.get();
@@ -14220,7 +14548,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         this_val = this_root.get();
         js_current_this = this_val;
     }
-    // v29: store callee for arguments.callee (used by js_build_arguments_object)
+    // `arguments.callee` and actual arguments belong to this activation, so a
+    // nested callback cannot overwrite its caller's view (D6.2.2v2; JSCU28).
     js_pending_args_callee = func_item;
     js_prepare_new_target_for_call(install_new_target,
         construct_target_root.get());
@@ -14237,10 +14566,13 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         fn->home_global.item != caller_global.item;
     if (switched_global) prev_global = js_vm_swap_global_this(fn->home_global);
     // Enter the callee's lexical with-environment, then restore caller state.
-    Item saved_with_stack[16];
-    int saved_with_depth = 0;
-    if (!common_lane) saved_with_depth = js_with_save_stack(saved_with_stack, 16);
-    JsSavedWithScopeRoots saved_with_roots(saved_with_stack, saved_with_depth);
+    JsSavedWithScope saved_with_scope(!common_lane);
+    if (!saved_with_scope.ready) {
+        if (switched_global) js_vm_swap_global_this(prev_global);
+        js_eval_initializer_context = prev_eval_initializer_context;
+        return js_throw_range_error("Could not save with scope stack");
+    }
+    int saved_with_depth = saved_with_scope.depth;
     // Ordinary calls usually have no caller or callee with-scope. A compiled
     // with body is the exception: an early return bypasses its generated pop,
     // so its empty entry stack still needs restoration after the call.
@@ -14251,7 +14583,6 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     }
     // For generator functions: set up callee proto so js_generator_create uses fn.prototype
     // If fn.prototype is not an object, js_generator_create falls back to depth-2.
-    Item saved_gen_callee_proto = js_generator_callee_proto;
     if (!common_lane && (fn->flags & JS_FUNC_FLAG_GENERATOR)) {
         js_generator_callee_proto = js_get_name_key(func_item, "prototype", 9);
     }
@@ -14269,20 +14600,13 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     Item result = js_invoke_fn_with_source(fn, args, arg_count, invoke_result_home,
         args_prerooted);
     if (pushed_vm_stack_source) js_eval_source_pop();
-    js_current_private_home_class = saved_private_home_class_root.get();
     if (derived_ctor_call) {
         result = js_super_this_binding_finish(result);
     }
-    js_generator_callee_proto = saved_gen_callee_proto;
     if (switched_with_stack) {
-        js_with_set_stack(saved_with_stack, saved_with_depth);
+        js_with_set_stack(saved_with_scope.stack, saved_with_depth);
     }
     if (switched_global) js_vm_swap_global_this(prev_global);
-    if (install_this) js_current_this = saved_this_root.get();
-    if (install_new_target) js_new_target = saved_new_target_root.get();
-    // D6.2.2v2: nested calls during parameter evaluation must not replace the
-    // generator callee whose current prototype is read after those parameters.
-    js_pending_args_callee = saved_pending_args_callee_root.get();
     js_eval_initializer_context = prev_eval_initializer_context;
     if (result_home && !uses_local_result_home &&
             lambda_item_uses_scalar_home(result)) {
@@ -14694,38 +15018,53 @@ static void js_regexp_update_last_match(String* input_s,
     re2::StringPiece* matches, int num_groups) {
     const char* input_str = input_s ? input_s->chars : "";
     int input_len = input_s ? (int)input_s->len : 0;
-    js_regexp_last_match.input = input_s ? input_s : heap_create_name("", 0);
+    RootFrame roots(3);
+    Rooted<Item> input_root(roots, ItemNull);
+    Rooted<Item> match_root(roots, ItemNull);
+    Rooted<Item> group_root(roots, ItemNull);
+    input_root.set((Item){.item = s2it(input_s ? input_s : heap_create_name("", 0))});
     if (matches[0].data() && input_s && matches[0].data() == input_str &&
         (int)matches[0].size() == input_len) {
-        js_regexp_last_match.match = input_s;
+        match_root.set(input_root.get());
     } else {
-        js_regexp_last_match.match = matches[0].data()
+        match_root.set((Item){.item = s2it(matches[0].data()
             ? heap_strcpy((char*)matches[0].data(), (int)matches[0].size())
-            : heap_create_name("", 0);
+            : heap_create_name("", 0))});
     }
     js_regexp_last_match.match_start = matches[0].data()
         ? (int)(matches[0].data() - input_str) : 0;
     js_regexp_last_match.match_end = js_regexp_last_match.match_start
         + (matches[0].data() ? (int)matches[0].size() : 0);
     int gc = num_groups - 1; // exclude group 0 (full match)
-    if (gc > JS_REGEXP_MAX_PAREN) gc = JS_REGEXP_MAX_PAREN;
     if (gc < 0) gc = 0;
+    root_vector_clear(&js_regexp_last_match.values);
+    if (!root_vector_push(&js_regexp_last_match.values, input_root.get()) ||
+            !root_vector_push(&js_regexp_last_match.values, match_root.get())) {
+        js_regexp_last_match.group_count = 0;
+        root_vector_clear(&js_regexp_last_match.values);
+        log_error("js-regexp: cannot record legacy match state");
+        return;
+    }
     js_regexp_last_match.group_count = gc;
     for (int i = 0; i < gc; i++) {
         int gi = i + 1; // groups[0] is full match, groups[1] is $1
         if (gi < num_groups && matches[gi].data()) {
             if (input_s && matches[gi].data() == input_str &&
                 (int)matches[gi].size() == input_len) {
-                js_regexp_last_match.groups[i] = input_s;
+                group_root.set(input_root.get());
             } else {
-                js_regexp_last_match.groups[i] = heap_strcpy((char*)matches[gi].data(), (int)matches[gi].size());
+                group_root.set((Item){.item = s2it(heap_strcpy(
+                    (char*)matches[gi].data(), (int)matches[gi].size()))});
             }
         } else {
-            js_regexp_last_match.groups[i] = heap_create_name("", 0);
+            group_root.set((Item){.item = s2it(heap_create_name("", 0))});
         }
-    }
-    for (int i = gc; i < JS_REGEXP_MAX_PAREN; i++) {
-        js_regexp_last_match.groups[i] = heap_create_name("", 0);
+        if (!root_vector_push(&js_regexp_last_match.values, group_root.get())) {
+            js_regexp_last_match.group_count = 0;
+            root_vector_clear(&js_regexp_last_match.values);
+            log_error("js-regexp: cannot grow legacy capture state");
+            return;
+        }
     }
 }
 
@@ -14735,6 +15074,15 @@ typedef enum JsRegexSimpleClassKind {
     JS_REGEX_SIMPLE_CLASS_WORD,
     JS_REGEX_SIMPLE_CLASS_WHITESPACE,
 } JsRegexSimpleClassKind;
+
+// One alias row keeps the RE2 spelling and public ECMAScript spelling of a
+// named capture together. They are one mapping fact, not four parallel arrays.
+struct JsRegexNameAlias {
+    char* re2_name = NULL;
+    int re2_len = 0;
+    char* js_name = NULL;
+    int js_len = 0;
+};
 
 struct JsRegexData {
     re2::RE2* re2;            // compiled regex (direct, for patterns without assertions)
@@ -14748,10 +15096,7 @@ struct JsRegexData {
     bool simple_class_one_or_more;
     bool simple_class_anchor_start;
     bool simple_class_anchor_end;
-    char** named_alias_re2_names;
-    int* named_alias_re2_lens;
-    char** named_alias_js_names;
-    int* named_alias_js_lens;
+    JsRegexNameAlias* named_aliases;
     int named_alias_count;
     bool global;              // 'g' flag
     bool ignore_case;         // 'i' flag
@@ -16149,8 +16494,23 @@ static void js_regex_reset_stale_repeated_captures(JsRegexData* rd,
         int parent;
         bool repeated;
     };
-    RegexGroupInfo groups[JS_REGEX_ANALYSIS_GROUPS];
-    int stack[JS_REGEX_ANALYSIS_GROUPS];
+    if (pattern.size() >= (size_t)INT_MAX || num_groups <= 1) return;
+    int group_capacity = num_groups;
+    int stack_capacity = (int)pattern.size() + 1;
+    // Group facts and nesting positions use the same growable scratch carrier.
+    // The former paired 256-slot arrays stopped clearing a late repeated child.
+    JsRegexScratch<RegexGroupInfo> groups_buf(group_capacity);
+    JsRegexScratch<int> stack_buf(stack_capacity);
+    if (groups_buf.count != group_capacity || stack_buf.count != stack_capacity) {
+        log_error("js-regex repeated-capture analysis: cannot retain pattern facts");
+        return;
+    }
+    RegexGroupInfo* groups = groups_buf.slots;
+    int* stack = stack_buf.slots;
+    for (int i = 0; i < group_capacity; i++) {
+        groups[i].parent = 0;
+        groups[i].repeated = false;
+    }
     int stack_depth = 0;
     int group_count = 0;
     bool in_class = false;
@@ -16173,17 +16533,25 @@ static void js_regex_reset_stale_repeated_captures(JsRegexData* rd,
 
         if (ch == '(') {
             int idx = 0;
-            if (js_regex_pattern_group_is_capturing(pattern, i) &&
-                group_count + 1 < JS_REGEX_ANALYSIS_GROUPS) {
+            if (js_regex_pattern_group_is_capturing(pattern, i)) {
+                if (group_count + 1 >= group_capacity ||
+                        stack_depth >= stack_capacity) {
+                    log_error("js-regex repeated-capture analysis: pattern facts exceed capacity");
+                    return;
+                }
                 group_count++;
                 idx = group_count;
                 groups[idx].parent = stack_depth > 0 ? stack[stack_depth - 1] : 0;
                 groups[idx].repeated = false;
             }
-            if (stack_depth < JS_REGEX_ANALYSIS_GROUPS) stack[stack_depth++] = idx;
+            if (stack_depth >= stack_capacity) {
+                log_error("js-regex repeated-capture analysis: nesting exceeds capacity");
+                return;
+            }
+            stack[stack_depth++] = idx;
         } else if (ch == ')' && stack_depth > 0) {
             int idx = stack[--stack_depth];
-            if (idx > 0 && idx < JS_REGEX_ANALYSIS_GROUPS) {
+            if (idx > 0 && idx < group_capacity) {
                 groups[idx].repeated = js_regex_pattern_has_quantifier_after(pattern, i + 1);
             }
         }
@@ -16199,7 +16567,7 @@ static void js_regex_reset_stale_repeated_captures(JsRegexData* rd,
             if (child == parent || !matches[child].data()) continue;
             int ancestor = groups[child].parent;
             bool inside_parent = false;
-            while (ancestor > 0 && ancestor < JS_REGEX_ANALYSIS_GROUPS) {
+            while (ancestor > 0 && ancestor < group_capacity) {
                 if (ancestor == parent) {
                     inside_parent = true;
                     break;
@@ -16376,10 +16744,11 @@ static const char* js_regex_original_group_name(JsRegexData* rd, const char* re2
     if (out_len) *out_len = re2_len;
     if (!rd || !re2_name || rd->named_alias_count <= 0) return re2_name;
     for (int i = 0; i < rd->named_alias_count; i++) {
-        if (rd->named_alias_re2_lens[i] == re2_len &&
-            memcmp(rd->named_alias_re2_names[i], re2_name, re2_len) == 0) {
-            if (out_len) *out_len = rd->named_alias_js_lens[i];
-            return rd->named_alias_js_names[i];
+        const JsRegexNameAlias* alias = &rd->named_aliases[i];
+        if (alias->re2_len == re2_len &&
+            memcmp(alias->re2_name, re2_name, re2_len) == 0) {
+            if (out_len) *out_len = alias->js_len;
+            return alias->js_name;
         }
     }
     return re2_name;
@@ -16457,9 +16826,15 @@ static bool js_regex_has_unescaped_anchor(const char* pattern, int pattern_len) 
 }
 
 static bool js_regex_has_nested_lookaround(const char* pattern, int pattern_len) {
+    if (pattern_len <= 0) return false;
+    JsRegexScratch<int> group_body_start_buf(pattern_len);
+    if (group_body_start_buf.count != pattern_len) {
+        log_error("js-regex nested-lookaround analysis: cannot retain group boundaries");
+        return true;
+    }
+    int* group_body_start = group_body_start_buf.slots;
     bool in_class = false;
     int group_depth = 0;
-    int group_body_start[64];
     for (int i = 0; i < pattern_len; i++) {
         char c = pattern[i];
         if (c == '\\') {
@@ -16475,21 +16850,23 @@ static bool js_regex_has_nested_lookaround(const char* pattern, int pattern_len)
                  (pattern[i + 2] == '<' && i + 3 < pattern_len &&
                   (pattern[i + 3] == '=' || pattern[i + 3] == '!')));
             if (is_lookaround && group_depth > 0 &&
-                    group_depth <= 64 && i > group_body_start[group_depth - 1]) {
+                    i > group_body_start[group_depth - 1]) {
                 // RE2 post-filters only see the outer assertion; a nested
                 // lookaround after assertion content must be evaluated with
                 // its enclosing assertion so alternation stays coupled.
                 return true;
             }
-            if (group_depth < 64) {
-                group_body_start[group_depth] = i + 1;
-                if (i + 2 < pattern_len && pattern[i + 1] == '?') {
-                    if (pattern[i + 2] == '=' || pattern[i + 2] == '!') {
-                        group_body_start[group_depth] = i + 3;
-                    } else if (pattern[i + 2] == '<' && i + 3 < pattern_len &&
-                               (pattern[i + 3] == '=' || pattern[i + 3] == '!')) {
-                        group_body_start[group_depth] = i + 4;
-                    }
+            if (group_depth >= group_body_start_buf.count) {
+                log_error("js-regex nested-lookaround analysis: group depth exceeds capacity");
+                return true;
+            }
+            group_body_start[group_depth] = i + 1;
+            if (i + 2 < pattern_len && pattern[i + 1] == '?') {
+                if (pattern[i + 2] == '=' || pattern[i + 2] == '!') {
+                    group_body_start[group_depth] = i + 3;
+                } else if (pattern[i + 2] == '<' && i + 3 < pattern_len &&
+                           (pattern[i + 3] == '=' || pattern[i + 3] == '!')) {
+                    group_body_start[group_depth] = i + 4;
                 }
             }
             group_depth++;
@@ -16504,6 +16881,17 @@ static bool js_regex_needs_backtrack(const char* pattern, int pattern_len, bool 
     if (multiline && js_regex_has_unescaped_anchor(pattern, pattern_len)) return true;
     if (js_regex_has_nested_lookaround(pattern, pattern_len)) return true;
 
+    if (pattern_len <= 0) return false;
+    struct JsRegexQuantifierFacts {
+        bool optional;
+        bool unbounded;
+    };
+    JsRegexScratch<JsRegexQuantifierFacts> group_facts_buf(pattern_len);
+    if (group_facts_buf.count != pattern_len) {
+        log_error("js-regex backtrack analysis: cannot retain group quantifier facts");
+        return true;
+    }
+    JsRegexQuantifierFacts* group_facts = group_facts_buf.slots;
     bool in_class = false;
     // group stack: per open group, track whether its body contains a bounded
     // optional ('?') and whether it contains an unbounded quantifier ('*'/'+').
@@ -16511,8 +16899,6 @@ static bool js_regex_needs_backtrack(const char* pattern, int pattern_len, bool 
     // nullable-discard shape RE2 mishandles (e.g. (a?b??)* ); route it. We must
     // NOT route when the body is also unbounded (e.g. (.*\n?)* ) — that is the
     // catastrophic-backtracking shape RE2 already handles correctly and linearly.
-    bool grp_opt[64];
-    bool grp_unb[64];
     int grp_depth = 0;
     for (int i = 0; i < pattern_len; i++) {
         char c = pattern[i];
@@ -16533,22 +16919,28 @@ static bool js_regex_needs_backtrack(const char* pattern, int pattern_len, bool 
             if (js_regex_lookahead_has_capture(pattern, pattern_len, i + 3)) return true;
         }
         if (c == '(') {
-            if (grp_depth < 64) { grp_opt[grp_depth] = false; grp_unb[grp_depth] = false; }
+            if (grp_depth >= group_facts_buf.count) {
+                log_error("js-regex backtrack analysis: group depth exceeds capacity");
+                return true;
+            }
+            group_facts[grp_depth].optional = false;
+            group_facts[grp_depth].unbounded = false;
             grp_depth++;
         } else if (c == ')') {
             if (grp_depth > 0) grp_depth--;
             // a quantifier applied to an optional-but-not-unbounded group -> route
-            if (i + 1 < pattern_len && grp_depth < 64) {
+            if (i + 1 < pattern_len && grp_depth < group_facts_buf.count) {
                 char q = pattern[i + 1];
                 if ((q == '*' || q == '+' || q == '{') &&
-                    grp_opt[grp_depth] && !grp_unb[grp_depth]) return true;
+                    group_facts[grp_depth].optional &&
+                    !group_facts[grp_depth].unbounded) return true;
             }
-        } else if (grp_depth > 0 && grp_depth <= 64 &&
+        } else if (grp_depth > 0 && grp_depth <= group_facts_buf.count &&
                    !(i > 0 && pattern[i - 1] == '(')) {
             // record bounded vs unbounded quantifiers in the innermost open group
             // (skip the '?' of a (?: / (?= / (?<name> group marker via the guard).
-            if (c == '?') grp_opt[grp_depth - 1] = true;
-            else if (c == '*' || c == '+') grp_unb[grp_depth - 1] = true;
+            if (c == '?') group_facts[grp_depth - 1].optional = true;
+            else if (c == '*' || c == '+') group_facts[grp_depth - 1].unbounded = true;
         }
         if (c == '(' && i + 3 < pattern_len && pattern[i + 1] == '?' &&
             pattern[i + 2] == '<' && (pattern[i + 3] == '=' || pattern[i + 3] == '!')) {
@@ -17234,6 +17626,43 @@ static void js_regex_apply_casefold_fixups(std::string& pat, bool has_unicode, b
     if (changed) pat = std::move(out);
 }
 
+struct JsRegexNameAliasList {
+    ArrayList* rows = NULL;
+
+    ~JsRegexNameAliasList() {
+        if (!rows) return;
+        for (int i = 0; i < rows->length; i++) {
+            mem_free(arraylist_get(rows, i));
+        }
+        arraylist_free(rows);
+    }
+
+    int count() const {
+        return rows ? rows->length : 0;
+    }
+
+    const JsRegexNameAlias* at(int index) const {
+        return rows ? (const JsRegexNameAlias*)arraylist_get(rows, index) : NULL;
+    }
+
+    bool append(char* re2_name, int re2_len, char* js_name, int js_len) {
+        if (!rows) rows = arraylist_new(4);
+        if (!rows) return false;
+        JsRegexNameAlias* row = (JsRegexNameAlias*)mem_calloc(1,
+            sizeof(JsRegexNameAlias), MEM_CAT_JS_RUNTIME);
+        if (!row) return false;
+        row->re2_name = re2_name;
+        row->re2_len = re2_len;
+        row->js_name = js_name;
+        row->js_len = js_len;
+        if (!arraylist_append(rows, row)) {
+            mem_free(row);
+            return false;
+        }
+        return true;
+    }
+};
+
 static Item js_create_regex_impl(const char* pattern, int pattern_len,
         const char* flags, int flags_len, bool cache_static_literal) {
     // The compile-cache entry owns a whole JsRegexData payload, not just the
@@ -17431,18 +17860,7 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     std::string v_processed;
     const char* effective_pattern = vpat;
     int effective_pattern_len = vpat_len;
-    const int max_named_aliases = 96;
-    char* named_alias_re2_names[96];
-    int named_alias_re2_lens[96];
-    char* named_alias_js_names[96];
-    int named_alias_js_lens[96];
-    int named_alias_count = 0;
-    for (int ai = 0; ai < max_named_aliases; ai++) {
-        named_alias_re2_names[ai] = NULL;
-        named_alias_re2_lens[ai] = 0;
-        named_alias_js_names[ai] = NULL;
-        named_alias_js_lens[ai] = 0;
-    }
+    JsRegexNameAliasList named_aliases;
     // Unicode binary properties such as Alphabetic are valid in both /u and
     // /v but RE2 does not recognize all of their names. Flatten their generated
     // ranges together with /v set operations before RE2 sees the class.
@@ -18002,21 +18420,23 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
                 continue;
             }
             int name_len = (int)(name_end - after);
-            if (js_regex_re2_group_name_needs_alias(processed_pattern.c_str() + after, name_len) &&
-                named_alias_count < max_named_aliases) {
+            if (js_regex_re2_group_name_needs_alias(
+                    processed_pattern.c_str() + after, name_len)) {
                 char alias_buf[32];
-                int alias_len = snprintf(alias_buf, sizeof(alias_buf), "JsCap%d", named_alias_count + 1);
+                int alias_len = snprintf(alias_buf, sizeof(alias_buf), "JsCap%d",
+                    named_aliases.count() + 1);
                 char* re2_copy = (char*)pool_calloc(js_input->pool, alias_len + 1);
+                char* js_copy = (char*)pool_calloc(js_input->pool, name_len + 1);
+                if (!re2_copy || !js_copy) {
+                    return js_throw_range_error("Cannot retain RegExp capture-name alias");
+                }
                 memcpy(re2_copy, alias_buf, alias_len);
                 re2_copy[alias_len] = '\0';
-                char* js_copy = (char*)pool_calloc(js_input->pool, name_len + 1);
                 memcpy(js_copy, processed_pattern.c_str() + after, name_len);
                 js_copy[name_len] = '\0';
-                named_alias_re2_names[named_alias_count] = re2_copy;
-                named_alias_re2_lens[named_alias_count] = alias_len;
-                named_alias_js_names[named_alias_count] = js_copy;
-                named_alias_js_lens[named_alias_count] = name_len;
-                named_alias_count++;
+                if (!named_aliases.append(re2_copy, alias_len, js_copy, name_len)) {
+                    return js_throw_range_error("Cannot retain RegExp capture-name alias");
+                }
                 processed_pattern.replace(after, name_len, alias_buf, alias_len);
                 processed_pattern.insert(pos + 2, "P");
                 pos = pos + 4 + alias_len + 1;
@@ -18124,17 +18544,16 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     rd->needs_utf16_subject = needs_utf16_subject;
     rd->literal_fast = literal_fast;
     rd->special_property_kind = special_property_kind;
-    if (named_alias_count > 0) {
-        rd->named_alias_re2_names = (char**)pool_calloc(js_input->pool, sizeof(char*) * named_alias_count);
-        rd->named_alias_re2_lens = (int*)pool_calloc(js_input->pool, sizeof(int) * named_alias_count);
-        rd->named_alias_js_names = (char**)pool_calloc(js_input->pool, sizeof(char*) * named_alias_count);
-        rd->named_alias_js_lens = (int*)pool_calloc(js_input->pool, sizeof(int) * named_alias_count);
-        rd->named_alias_count = named_alias_count;
-        for (int ai = 0; ai < named_alias_count; ai++) {
-            rd->named_alias_re2_names[ai] = named_alias_re2_names[ai];
-            rd->named_alias_re2_lens[ai] = named_alias_re2_lens[ai];
-            rd->named_alias_js_names[ai] = named_alias_js_names[ai];
-            rd->named_alias_js_lens[ai] = named_alias_js_lens[ai];
+    if (named_aliases.count() > 0) {
+        rd->named_aliases = (JsRegexNameAlias*)pool_calloc(js_input->pool,
+            sizeof(JsRegexNameAlias) * (size_t)named_aliases.count());
+        if (!rd->named_aliases) {
+            return js_throw_range_error("Cannot retain RegExp capture-name aliases");
+        }
+        rd->named_alias_count = named_aliases.count();
+        for (int ai = 0; ai < rd->named_alias_count; ai++) {
+            const JsRegexNameAlias* alias = named_aliases.at(ai);
+            rd->named_aliases[ai] = *alias;
         }
     }
     if (literal_fast) {
@@ -18156,7 +18575,7 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     // Store in permanent RE2 cache if no complex wrapper — survives batch resets for cross-test reuse.
     // Wrapper metadata owns its RE2 engine, so only direct RE2 compilations
     // may enter this cache. This keeps one unambiguous native owner.
-    if (permanent_cache_requested && !bt && special_property_kind == 0 && !literal_fast && named_alias_count == 0 &&
+    if (permanent_cache_requested && !bt && special_property_kind == 0 && !literal_fast && named_aliases.count() == 0 &&
         !needs_utf16_subject && !wrapper) {
         re2::RE2* perm_re2 = re2; // re2 points to either wrapper->re2 or directly-compiled re2
         char* perm_flags = new char[flags_len + 1];
@@ -26361,11 +26780,7 @@ static Item js_array_intrinsic_algorithm_into(Item arr,
 // =============================================================================
 
 // backing store for user-defined Math properties (e.g. Math.sumPrecise polyfill)
-#define js_math_object (js_runtime_state.namespaces->math)
-
-JS_FORWARD_STATIC_EXPRESSION(bool, js_runtime_namespaces_ensure_roots, (void),
-    js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.namespaces->roots))
+#define js_math_object (js_runtime_state.intrinsic_slots->math)
 
 // Root-range cleanup clears the context-owned slots to zero. Treat that
 // representation like ItemNull so a later realm rebuilds its namespace
@@ -26394,7 +26809,7 @@ static void js_namespace_set_to_string_tag(Item object, const char* name, int le
 static Item js_get_math_object() {
     if (js_namespace_cache_is_empty(js_math_object)) {
         // Math inherits from Object.prototype per ES spec (not null prototype)
-        js_runtime_namespaces_ensure_roots();
+        js_realm_intrinsic_slots_ensure_roots();
         js_math_object = js_new_object();
         // Keep namespace objects on the ordinary Object prototype chain.
         js_namespace_set_object_prototype(js_math_object);
@@ -26426,13 +26841,13 @@ static Item js_get_math_object() {
 JS_FORWARD_ITEM(js_get_math_object_value, (void), js_get_math_object, ())
 
 // v18n: JSON and console as global objects for bare identifier resolution
-#define js_json_object (js_runtime_state.namespaces->json)
+#define js_json_object (js_runtime_state.intrinsic_slots->json)
 void js_reset_json_object() { js_json_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_json_object_value() {
     if (js_namespace_cache_is_empty(js_json_object)) {
         // JSON inherits from Object.prototype per ES spec
-        js_runtime_namespaces_ensure_roots();
+        js_realm_intrinsic_slots_ensure_roots();
         js_json_object = js_new_object();
         js_namespace_set_object_prototype(js_json_object);
         js_namespace_set_to_string_tag(js_json_object, "JSON", 4);
@@ -26445,7 +26860,7 @@ extern "C" Item js_get_json_object_value() {
 // =============================================================================
 // CSS Namespace Object (CSS.supports, CSS.escape)
 // =============================================================================
-#define js_css_namespace_object (js_runtime_state.namespaces->css)
+#define js_css_namespace_object (js_runtime_state.intrinsic_slots->css)
 extern "C" void js_reset_css_namespace_object() { js_css_namespace_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_css_object_value() {
@@ -26453,7 +26868,7 @@ extern "C" Item js_get_css_object_value() {
         return js_css_namespace_object;
     }
 
-    js_runtime_namespaces_ensure_roots();
+    js_realm_intrinsic_slots_ensure_roots();
     js_css_namespace_object = js_new_object_with_class(JS_CLASS_CSS_NAMESPACE);
 
     js_install_builtin_method_specs(js_css_namespace_object, JS_BUILTIN_OWNER_CSS_METHOD);
@@ -26606,12 +27021,12 @@ static Item js_intl_segmenter_construct_body(Item callee, Item* args, int argc,
         target_root.get(), JS_CLASS_OBJECT);
 }
 
-#define js_intl_object (js_runtime_state.namespaces->intl)
+#define js_intl_object (js_runtime_state.intrinsic_slots->intl)
 extern "C" void js_reset_intl_object() { js_intl_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_intl_object_value() {
     if (!js_namespace_cache_is_empty(js_intl_object)) return js_intl_object;
-    js_runtime_namespaces_ensure_roots();
+    js_realm_intrinsic_slots_ensure_roots();
     RootFrame roots(8);
     Rooted<Item> intl_root(roots, js_object_create(ItemNull));
     Rooted<Item> segmenter_ctor_root(roots,
@@ -26651,12 +27066,12 @@ extern "C" Item js_get_intl_object_value() {
     return intl_root.get();
 }
 
-#define js_console_object (js_runtime_state.namespaces->console)
+#define js_console_object (js_runtime_state.intrinsic_slots->console)
 void js_reset_console_object() { js_console_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_console_object_value() {
     if (js_namespace_cache_is_empty(js_console_object)) {
-        js_runtime_namespaces_ensure_roots();
+        js_realm_intrinsic_slots_ensure_roots();
         js_console_object = js_object_create(ItemNull);
 
         // Populate console methods as function objects
@@ -26708,29 +27123,118 @@ extern "C" Item js_get_console_object_value() {
 }
 
 // test262 host object $262 — provides detachArrayBuffer for typed array tests
-#define js_262_object (js_runtime_state.namespaces->test262)
-#define JS_262_AGENT_MAX JS_TEST262_AGENT_MAX
-#define JS_262_AGENT_REPORT_MAX JS_TEST262_AGENT_REPORT_MAX
+#define js_262_object (js_runtime_state.intrinsic_slots->test262)
 #define js_262_eval_script_active (js_runtime_state.test262_agent->eval_script_active)
 #define js_262_agent_object (js_runtime_state.test262_agent->object)
 #define js_262_agent_callbacks (js_runtime_state.test262_agent->callbacks)
-#define js_262_agent_reports (js_runtime_state.test262_agent->reports)
-#define js_262_agent_report_waiters (js_runtime_state.test262_agent->report_waiters)
-#define js_262_agent_callback_count (js_runtime_state.test262_agent->callback_count)
-#define js_262_agent_report_head (js_runtime_state.test262_agent->report_head)
-#define js_262_agent_report_count (js_runtime_state.test262_agent->report_count)
+#define js_262_agent_report_values (js_runtime_state.test262_agent->report_values)
+#define js_262_agent_report_rows (js_runtime_state.test262_agent->reports)
 #define js_262_agent_current_slot (js_runtime_state.test262_agent->current_slot)
+
+static void js_262_agent_report_rows_clear(JsTest262AgentState* state) {
+    if (!state) return;
+    if (state->reports) {
+        for (int i = state->reports->length - 1; i >= 0; i--) {
+            mem_free(state->reports->data[i]);
+        }
+        arraylist_free(state->reports);
+        state->reports = NULL;
+    }
+    root_vector_clear(&state->report_values);
+}
+
+void js_test262_agent_state_destroy(JsTest262AgentState* state) {
+    if (!state) return;
+    js_262_agent_report_rows_clear(state);
+    root_vector_destroy(&state->callbacks);
+    root_vector_destroy(&state->report_values);
+}
+
+static bool js_262_agent_report_rows_ensure(void) {
+    JsTest262AgentState* state = js_active_runtime_state
+        ? js_runtime_state.test262_agent : NULL;
+    if (!state) return false;
+    int row_count = state->reports ? state->reports->length : 0;
+    if (root_vector_count(&state->report_values) != row_count) {
+        // Heap replacement clears RootVector values, so report metadata may
+        // not retain slots into the former heap.
+        js_262_agent_report_rows_clear(state);
+    }
+    return true;
+}
+
+static Item js_262_agent_callback_at(int64_t slot) {
+    Item* callback = root_vector_at(&js_262_agent_callbacks, slot);
+    return callback ? *callback : ItemNull;
+}
+
+static Item js_262_agent_report_value(const JsTest262AgentReport* row) {
+    Item* value = row ? root_vector_at(&js_262_agent_report_values,
+        row->root_slot) : NULL;
+    return value ? *value : ItemNull;
+}
+
+static bool js_262_agent_enqueue_report(Item report, int waiter_id) {
+    if (!js_262_agent_report_rows_ensure()) return false;
+    RootFrame roots(1);
+    Rooted<Item> report_root(roots, report);
+    JsTest262AgentReport* row = (JsTest262AgentReport*)mem_calloc(1,
+        sizeof(JsTest262AgentReport), MEM_CAT_JS_RUNTIME);
+    if (!row) return false;
+    row->root_slot = root_vector_count(&js_262_agent_report_values);
+    row->waiter_id = waiter_id;
+    if (!root_vector_push(&js_262_agent_report_values, report_root.get())) {
+        mem_free(row);
+        return false;
+    }
+    if (!js_262_agent_report_rows) js_262_agent_report_rows = arraylist_new(8);
+    if (!js_262_agent_report_rows ||
+            !arraylist_append(js_262_agent_report_rows, row)) {
+        root_vector_pop(&js_262_agent_report_values);
+        mem_free(row);
+        return false;
+    }
+    return true;
+}
+
+static bool js_262_agent_remove_report(int index, Item* report,
+        int* waiter_id) {
+    if (!js_262_agent_report_rows_ensure() || !js_262_agent_report_rows ||
+            index < 0 || index >= js_262_agent_report_rows->length) return false;
+    JsTest262AgentReport* row = (JsTest262AgentReport*)
+        js_262_agent_report_rows->data[index];
+    if (report) *report = js_262_agent_report_value(row);
+    if (waiter_id) *waiter_id = row->waiter_id;
+    int64_t tail_slot = root_vector_count(&js_262_agent_report_values) - 1;
+    JsTest262AgentReport* tail_row = NULL;
+    for (int i = 0; i < js_262_agent_report_rows->length; i++) {
+        JsTest262AgentReport* candidate = (JsTest262AgentReport*)
+            js_262_agent_report_rows->data[i];
+        if (candidate->root_slot == tail_slot) {
+            tail_row = candidate;
+            break;
+        }
+    }
+    if (!tail_row) return false;
+    if (row != tail_row) {
+        Item* destination = root_vector_at(&js_262_agent_report_values,
+            row->root_slot);
+        if (destination) {
+            *destination = js_262_agent_report_value(tail_row);
+            // The native FIFO row points at the one moved root value.
+            tail_row->root_slot = row->root_slot;
+        }
+    }
+    root_vector_pop(&js_262_agent_report_values);
+    arraylist_remove(js_262_agent_report_rows, index);
+    mem_free(row);
+    return true;
+}
 
 static void js_262_agent_reset_state() {
     js_262_agent_object = (Item){.item = ITEM_NULL};
-    for (int i = 0; i < JS_262_AGENT_MAX; i++) js_262_agent_callbacks[i] = ItemNull;
-    for (int i = 0; i < JS_262_AGENT_REPORT_MAX; i++) {
-        js_262_agent_reports[i] = ItemNull;
-        js_262_agent_report_waiters[i] = 0;
-    }
-    js_262_agent_callback_count = 0;
-    js_262_agent_report_head = 0;
-    js_262_agent_report_count = 0;
+    root_vector_clear(&js_262_agent_callbacks);
+    js_262_agent_report_rows_clear(js_runtime_state.test262_agent);
     js_262_agent_current_slot = -1;
     js_atomics_reset_waiters();
 }
@@ -26760,14 +27264,13 @@ static Item js_262_eval_script(Item code) {
 
 static Item js_262_agent_start(Item code) {
     js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
-    if (js_262_agent_callback_count >= JS_262_AGENT_MAX) {
-        return js_throw_type_error("$262.agent.start capacity exceeded");
-    }
-    int slot = js_262_agent_callback_count++;
-    js_262_agent_callbacks[slot] = ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> code_root(roots, code);
+    int64_t slot = root_vector_count(&js_262_agent_callbacks);
+    if (!root_vector_push(&js_262_agent_callbacks, ItemNull)) return ItemError;
     int saved_slot = js_262_agent_current_slot;
-    js_262_agent_current_slot = slot;
-    Item result = js_builtin_eval(code, 1);
+    js_262_agent_current_slot = (int)slot;
+    Item result = js_builtin_eval(code_root.get(), 1);
     js_262_agent_current_slot = saved_slot;
     if (item_is_error(result)) return result;
     return get_type_id(result) == LMD_TYPE_UNDEFINED ? result : make_js_undefined();
@@ -26775,24 +27278,28 @@ static Item js_262_agent_start(Item code) {
 
 static Item js_262_agent_receive_broadcast(Item callback) {
     js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
-    if (js_262_agent_current_slot < 0 || js_262_agent_current_slot >= JS_262_AGENT_MAX) {
+    if (js_262_agent_current_slot < 0 || js_262_agent_current_slot >=
+            root_vector_count(&js_262_agent_callbacks)) {
         return make_js_undefined();
     }
     if (!js_is_callable(callback)) {
         return js_throw_type_error("$262.agent.receiveBroadcast requires a function");
     }
-    js_262_agent_callbacks[js_262_agent_current_slot] = callback;
+    Item* callback_slot = root_vector_at(&js_262_agent_callbacks,
+        js_262_agent_current_slot);
+    if (callback_slot) *callback_slot = callback;
     return make_js_undefined();
 }
 
 static Item js_262_agent_broadcast(Item value) {
     js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
-    for (int i = 0; i < js_262_agent_callback_count; i++) {
-        Item callback = js_262_agent_callbacks[i];
+    int64_t callback_count = root_vector_count(&js_262_agent_callbacks);
+    for (int64_t i = 0; i < callback_count; i++) {
+        Item callback = js_262_agent_callback_at(i);
         if (!js_is_callable(callback)) continue;
         Item args[1] = { value };
         int saved_slot = js_262_agent_current_slot;
-        js_262_agent_current_slot = i;
+        js_262_agent_current_slot = (int)i;
         Item callback_result = js_call_function(callback, js_262_agent_object, args, 1);
         js_262_agent_current_slot = saved_slot;
         if (item_is_error(callback_result)) return callback_result;
@@ -26802,24 +27309,22 @@ static Item js_262_agent_broadcast(Item value) {
 
 static Item js_262_agent_report(Item value) {
     js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
-    if (js_262_agent_report_count >= JS_262_AGENT_REPORT_MAX) {
-        return js_throw_type_error("$262.agent.report capacity exceeded");
-    }
     JS_ASSIGN_OR_RETURN(report, js_to_string(value));
-    int tail = (js_262_agent_report_head + js_262_agent_report_count) % JS_262_AGENT_REPORT_MAX;
-    js_262_agent_reports[tail] = report;
-    js_262_agent_report_waiters[tail] = js_atomics_report_waiter_for_agent(js_262_agent_current_slot, report);
-    js_262_agent_report_count++;
+    int waiter_id = js_atomics_report_waiter_for_agent(
+        js_262_agent_current_slot, report);
+    if (!js_262_agent_enqueue_report(report, waiter_id)) return ItemError;
     return make_js_undefined();
 }
 
 static Item js_262_agent_get_report() {
     js_root_range_ensure_registered(&js_runtime_state.test262_agent->roots);
-    if (js_262_agent_report_count <= 0) return ItemNull;
+    if (!js_262_agent_report_rows_ensure() || !js_262_agent_report_rows ||
+            js_262_agent_report_rows->length == 0) return ItemNull;
     int ready_offset = -1;
-    for (int offset = 0; offset < js_262_agent_report_count; offset++) {
-        int idx = (js_262_agent_report_head + offset) % JS_262_AGENT_REPORT_MAX;
-        int waiter_id = js_262_agent_report_waiters[idx];
+    for (int offset = 0; offset < js_262_agent_report_rows->length; offset++) {
+        JsTest262AgentReport* row = (JsTest262AgentReport*)
+            js_262_agent_report_rows->data[offset];
+        int waiter_id = row->waiter_id;
         if (waiter_id <= 0 || js_atomics_report_waiter_ready(waiter_id)) {
             ready_offset = offset;
             break;
@@ -26827,22 +27332,18 @@ static Item js_262_agent_get_report() {
     }
     if (ready_offset < 0) return ItemNull;
 
-    int ready_idx = (js_262_agent_report_head + ready_offset) % JS_262_AGENT_REPORT_MAX;
-    int waiter_id = js_262_agent_report_waiters[ready_idx];
-    Item report = js_262_agent_reports[ready_idx];
-    if (waiter_id > 0) report = js_atomics_resolve_waiter_report(waiter_id, report);
-
-    for (int offset = ready_offset; offset < js_262_agent_report_count - 1; offset++) {
-        int dst = (js_262_agent_report_head + offset) % JS_262_AGENT_REPORT_MAX;
-        int src = (js_262_agent_report_head + offset + 1) % JS_262_AGENT_REPORT_MAX;
-        js_262_agent_reports[dst] = js_262_agent_reports[src];
-        js_262_agent_report_waiters[dst] = js_262_agent_report_waiters[src];
+    Item report = ItemNull;
+    int waiter_id = 0;
+    if (!js_262_agent_remove_report(ready_offset, &report, &waiter_id)) {
+        return ItemNull;
     }
-    int tail = (js_262_agent_report_head + js_262_agent_report_count - 1) % JS_262_AGENT_REPORT_MAX;
-    js_262_agent_reports[tail] = ItemNull;
-    js_262_agent_report_waiters[tail] = 0;
-    js_262_agent_report_count--;
-    return report;
+    RootFrame roots(1);
+    Rooted<Item> report_root(roots, report);
+    if (waiter_id > 0) {
+        report_root.set(js_atomics_resolve_waiter_report(waiter_id,
+            report_root.get()));
+    }
+    return report_root.get();
 }
 
 static Item js_262_agent_leaving() {
@@ -26874,7 +27375,7 @@ static Item js_262_get_agent_object() {
 
 extern "C" Item js_get_262_object_value() {
     if (js_namespace_cache_is_empty(js_262_object)) {
-        js_runtime_namespaces_ensure_roots();
+        js_realm_intrinsic_slots_ensure_roots();
         js_262_object = js_object_create(ItemNull);
         Item key = js_name_item("detachArrayBuffer", 17);
         Item fn = js_intrinsic_binding_get(
@@ -26893,13 +27394,13 @@ extern "C" Item js_get_262_object_value() {
 }
 
 // v25: Reflect global object for bare identifier resolution
-#define js_reflect_object (js_runtime_state.namespaces->reflect)
+#define js_reflect_object (js_runtime_state.intrinsic_slots->reflect)
 void js_reset_reflect_object() { js_reflect_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_reflect_object_value() {
     if (js_namespace_cache_is_empty(js_reflect_object)) {
         // Reflect inherits from Object.prototype per ES spec
-        js_runtime_namespaces_ensure_roots();
+        js_realm_intrinsic_slots_ensure_roots();
         js_reflect_object = js_new_object();
         js_namespace_set_object_prototype(js_reflect_object);
         js_namespace_set_to_string_tag(js_reflect_object, "Reflect", 7);
@@ -26911,14 +27412,14 @@ extern "C" Item js_get_reflect_object_value() {
 }
 
 // Atomics namespace object
-#define js_atomics_object (js_runtime_state.namespaces->atomics)
+#define js_atomics_object (js_runtime_state.intrinsic_slots->atomics)
 void js_reset_atomics_object() { js_atomics_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_atomics_object_value() {
     if (js_namespace_cache_is_empty(js_atomics_object)) {
         if (!js_atomics_runtime_state_ensure()) return ItemError;
         // spec: Atomics [[Prototype]] = %ObjectPrototype%
-        js_runtime_namespaces_ensure_roots();
+        js_realm_intrinsic_slots_ensure_roots();
         js_atomics_object = js_new_object();
         js_namespace_set_to_string_tag(js_atomics_object, "Atomics", 7);
 
@@ -27209,6 +27710,19 @@ JS_MATH_INTRINSIC_BODIES(JS_MATH_INTRINSIC_BODY)
 extern "C" const char JS_INTERNAL_PROTO_KEY[] = "__internal_proto__";
 extern "C" const int JS_INTERNAL_PROTO_KEY_LEN = 18;
 
+// The internal prototype key is a compile-time constant, so its shape hash is
+// one too. Every prototype hop was re-hashing these 18 bytes: js_get_prototype
+// was 6.4% of cd2 and all of it self time in this lookup. The value is
+// deterministic, so a racing initializer can only recompute the same number,
+// and typemap_hash_lookup_by_hash treats 0 as "hash it yourself".
+static uint32_t js_internal_proto_key_hash(void) {
+    static uint32_t cached = 0;
+    if (!cached) {
+        cached = typemap_name_hash(JS_INTERNAL_PROTO_KEY, JS_INTERNAL_PROTO_KEY_LEN);
+    }
+    return cached;
+}
+
 enum {
     JS_PROTO_CACHE_INTERNAL = 1u << 0,
     JS_PROTO_CACHE_PUBLIC = 1u << 1,
@@ -27221,19 +27735,19 @@ typedef struct JsProtoEntryCache {
 } JsProtoEntryCache;
 
 static ShapeEntry* js_proto_shape_entry(TypeMap* tm, const char* name,
-        int name_len, uint8_t cache_bit) {
+        int name_len, uint32_t name_hash, uint8_t cache_bit) {
     if (!tm || !name) return NULL;
     if (!typemap_is_shared_shape(tm)) {
-        return typemap_hash_lookup(tm, name, name_len);
+        return typemap_hash_lookup_by_hash(tm, name, name_len, name_hash);
     }
     JsProtoEntryCache* cache = tm->js_proto_entry_cache;
     if (!cache) {
         if (!js_input || !js_input->pool) {
-            return typemap_hash_lookup(tm, name, name_len);
+            return typemap_hash_lookup_by_hash(tm, name, name_len, name_hash);
         }
         cache = (JsProtoEntryCache*)pool_calloc(
             js_input->pool, sizeof(JsProtoEntryCache));
-        if (!cache) return typemap_hash_lookup(tm, name, name_len);
+        if (!cache) return typemap_hash_lookup_by_hash(tm, name, name_len, name_hash);
         tm->js_proto_entry_cache = cache;
     }
     ShapeEntry** cache_slot = cache_bit == JS_PROTO_CACHE_INTERNAL
@@ -27242,7 +27756,7 @@ static ShapeEntry* js_proto_shape_entry(TypeMap* tm, const char* name,
     // Shared constructor/transition shapes detach before structural or
     // descriptor mutation, so both positive and negative entry caches remain
     // valid for the lifetime of this TypeMap.
-    *cache_slot = typemap_hash_lookup(tm, name, name_len);
+    *cache_slot = typemap_hash_lookup_by_hash(tm, name, name_len, name_hash);
     cache->mask |= cache_bit;
     return *cache_slot;
 }
@@ -27286,7 +27800,35 @@ extern "C" void js_object_proto_setter(Item object, Item value) {
 }
 
 // Set the prototype of an object through the one internal prototype slot.
+// T10-2/D-E: OrdinaryCreateFromConstructor links the [[Prototype]] of an
+// instance that was allocated moments ago and is not yet reachable from
+// anywhere else. Two parts of the general setter are provably vacuous for such
+// a receiver and together cost ~20% of `new P(x,y)`: the cycle walk (a fresh
+// object appears in no prototype chain) and the intrinsic-mutation notice
+// (which scans every JS_CLASS prototype root and the constructor cache for an
+// Item that was just minted, so it can never match).
+static bool js_prototype_path_contains(RootVector* path, Item candidate) {
+    int64_t count = root_vector_count(path);
+    for (int64_t i = 0; i < count; i++) {
+        Item* prior = root_vector_at(path, i);
+        if (prior && prior->item == candidate.item) return true;
+    }
+    return false;
+}
+
+static void js_set_prototype_impl(Item object, Item prototype, bool fresh_object);
+
 extern "C" void js_set_prototype(Item object, Item prototype) {
+    js_set_prototype_impl(object, prototype, /*fresh_object=*/false);
+}
+
+// Only for a receiver this call site allocated and has not published.
+static void js_set_prototype_fresh(Item object, Item prototype) {
+    js_set_prototype_impl(object, prototype, /*fresh_object=*/true);
+}
+
+static void js_set_prototype_impl(Item object, Item prototype,
+        bool fresh_object) {
     // D3.4.7: prototype metadata is not a substitute for a rooted edge. The
     // validation/name/shape writes below can compact either operand, so keep
     // both Items exact-rooted until the internal slot has been published.
@@ -27307,6 +27849,44 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
     if (js_is_proxy(object)) {
         js_proxy_trap_set_prototype_of(object_root.get(), prototype_root.get());
         return;
+    }
+
+    TypeId candidate_type = get_type_id(prototype_root.get());
+    bool candidate_is_object = candidate_type == LMD_TYPE_MAP ||
+        candidate_type == LMD_TYPE_FUNC || candidate_type == LMD_TYPE_ELEMENT ||
+        js_is_js_array(prototype_root.get());
+    if (!fresh_object && candidate_is_object) {
+        // Prototype walks are a hot property-read path. Establish the
+        // acyclicity invariant at this rare mutation boundary instead of
+        // carrying a per-read depth cap or allocation-heavy visited set.
+        RootFrame cycle_roots(2);
+        Rooted<Item> cycle_object(cycle_roots, object_root.get());
+        Rooted<Item> current(cycle_roots, prototype_root.get());
+        RootVector path = {};
+        root_vector_init(&path, NULL, "prototype mutation path");
+        while (current.get().item != ItemNull.item) {
+            if (current.get().item == cycle_object.get().item) {
+                root_vector_destroy(&path);
+                log_error("js-set-prototype: circular prototype chain detected, rejecting");
+                return;
+            }
+            if (js_prototype_path_contains(&path, current.get())) {
+                root_vector_destroy(&path);
+                log_error("js-set-prototype: pre-existing circular prototype chain detected, rejecting");
+                return;
+            }
+            if (!root_vector_push(&path, current.get())) {
+                root_vector_destroy(&path);
+                log_error("js-set-prototype: cannot retain prototype mutation path");
+                return;
+            }
+            current.set(js_get_prototype_of(current.get()));
+            if (item_is_error(current.get())) {
+                root_vector_destroy(&path);
+                return;
+            }
+        }
+        root_vector_destroy(&path);
     }
     TypeId ot = get_type_id(object);
     if (ot == LMD_TYPE_ERROR || js_is_resting_error(object)) {
@@ -27377,27 +27957,13 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
     if (proto_type != LMD_TYPE_MAP && proto_type != LMD_TYPE_FUNC &&
         !js_is_js_array(prototype) && proto_type != LMD_TYPE_ELEMENT &&
         prototype.item != ItemNull.item) return;
-    // v16: Prevent circular prototype chains (ES spec §9.1.2)
-    if (get_type_id(prototype) == LMD_TYPE_MAP) {
-        Rooted<Item> p_root(roots, prototype_root.get());
-        int depth = 0;
-        while (p_root.get().item != ItemNull.item &&
-                get_type_id(p_root.get()) == LMD_TYPE_MAP && depth < 32) {
-            if (p_root.get().map == object_root.get().map) {
-                log_error("js_set_prototype: circular prototype chain detected, rejecting");
-                return;
-            }
-            p_root.set(js_get_prototype(p_root.get()));
-            depth++;
-        }
-    }
     Item internal_key = js_name_item(
         JS_INTERNAL_PROTO_KEY, JS_INTERNAL_PROTO_KEY_LEN);
     js_define_own_key_storage(object_root.get(), internal_key, prototype_root.get().item == ItemNull.item
         ? (Item){.item = ITEM_JS_UNDEFINED} : prototype_root.get());
     // Notify only after the validated link has been stored; rejected and
     // cyclic prototype updates leave the intrinsic epoch untouched.
-    js_intrinsic_note_prototype_mutation(object_root.get());
+    if (!fresh_object) js_intrinsic_note_prototype_mutation(object_root.get());
 }
 
 extern "C" void js_mark_own_proto_property(Item object) {
@@ -27687,7 +28253,8 @@ extern "C" Item js_get_prototype(Item object) {
 #endif
     Item internal_proto = ItemNull;
     ShapeEntry* internal_se = js_proto_shape_entry(tm,
-        JS_INTERNAL_PROTO_KEY, JS_INTERNAL_PROTO_KEY_LEN, JS_PROTO_CACHE_INTERNAL);
+        JS_INTERNAL_PROTO_KEY, JS_INTERNAL_PROTO_KEY_LEN,
+        js_internal_proto_key_hash(), JS_PROTO_CACHE_INTERNAL);
     JsShapeSlotStatus internal_status = js_proto_shape_slot_status(
         m, internal_se, &internal_proto);
     if (internal_status == JS_SHAPE_SLOT_DATA || internal_status == JS_SHAPE_SLOT_ACCESSOR)
@@ -27762,8 +28329,10 @@ static Item js_object_get_prototype_chain(Item object) {
     return proto;
 }
 
-// Walk the prototype chain to find a property
-// P10f: uses first-match lookup on each prototype level
+// Walk the prototype chain to find a property.
+// P10f: uses first-match lookup on each prototype level. Prototype mutation
+// rejects cycles, so class constructor [[Prototype]] links can be followed
+// without imposing an unrelated depth limit on ordinary property reads.
 extern "C" Item js_prototype_lookup_ex_with_receiver(
         Item object, Item property, Item receiver, bool* out_found) {
     if (out_found) *out_found = false;
@@ -27780,8 +28349,7 @@ extern "C" Item js_prototype_lookup_ex_with_receiver(
     bool string_key = get_type_id(property_root.get()) == LMD_TYPE_STRING;
     // walk up the chain via implicit __proto__
     proto_root.set(js_object_get_prototype_chain(object_root.get()));
-    int depth = 0;
-    while (proto_root.get().item != ItemNull.item && depth < 32) {
+    while (proto_root.get().item != ItemNull.item) {
         Item proto = proto_root.get();
         TypeId pt = get_type_id(proto);
         if (pt == LMD_TYPE_FUNC) {
@@ -27800,7 +28368,6 @@ extern "C" Item js_prototype_lookup_ex_with_receiver(
                 // Function.prototype's side-map shape.
             }
             proto_root.set(js_get_prototype_of(proto_root.get()));
-            depth++;
             continue;
         }
         if (pt == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(proto) ||
@@ -27814,7 +28381,6 @@ extern "C" Item js_prototype_lookup_ex_with_receiver(
                 return r;
             }
             proto_root.set(js_get_prototype_of(proto_root.get()));
-            depth++;
             continue;
         }
         if (pt != LMD_TYPE_MAP) break;
@@ -27846,7 +28412,6 @@ extern "C" Item js_prototype_lookup_ex_with_receiver(
         }
 
         proto_root.set(js_object_get_prototype_chain(proto_root.get()));
-        depth++;
     }
     return ItemNull;
 }
@@ -27936,21 +28501,31 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
 // [value, next_state] where next_state == -1 means done.
 using JsGenerator = JsGeneratorStateRecord;
 
+static void js_suspended_activation_gc_trace(
+        const JsSuspendedActivation* activation, gc_heap_t* gc) {
+    if (!activation || !gc) return;
+    if (activation->env) gc_mark_object_ptr(gc, activation->env);
+    gc_mark_item(gc, activation->ast_function.item);
+    gc_mark_item(gc, activation->ast_arguments.item);
+    gc_mark_item(gc, activation->ast_replay_values.item);
+    if (activation->ast_function_env) {
+        gc_mark_object_ptr(gc, activation->ast_function_env);
+    }
+    if (activation->ast_body_env) {
+        gc_mark_object_ptr(gc, activation->ast_body_env);
+    }
+}
+
 extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
     if (!map || !gc) return;
     Item generator_item = (Item){.map = map};
     if (!js_object_has_class(generator_item, JS_CLASS_GENERATOR)) return;
     JsGeneratorStateRecord* gen = &((JsGeneratorMapCarrier*)map)->state;
-    if (gen->env) gc_mark_object_ptr(gc, gen->env);
+    js_suspended_activation_gc_trace(gen, gc);
     gc_mark_item(gc, gen->private_home_class.item);
     gc_mark_item(gc, gen->delegate.item);
-    gc_mark_item(gc, gen->ast_function.item);
-    gc_mark_item(gc, gen->ast_arguments.item);
     gc_mark_item(gc, gen->ast_this.item);
-    gc_mark_item(gc, gen->ast_yield_values.item);
     gc_mark_item(gc, gen->ast_pending_resume_input.item);
-    if (gen->ast_function_env) gc_mark_object_ptr(gc, gen->ast_function_env);
-    if (gen->ast_body_env) gc_mark_object_ptr(gc, gen->ast_body_env);
     js_interp_generator_trace_continuations(gen, gc);
 }
 
@@ -28145,10 +28720,10 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     gen->ast_this = ast_this;
     gen->ast_function_env = NULL;
     gen->ast_body_env = NULL;
-    gen->ast_yield_skip = 0;
-    gen->ast_yield_values = get_type_id(ast_function) == LMD_TYPE_FUNC
+    gen->ast_replay_skip = 0;
+    gen->ast_replay_values = get_type_id(ast_function) == LMD_TYPE_FUNC
         ? js_array_new(0) : ItemNull;
-    if (item_is_error(gen->ast_yield_values)) return gen->ast_yield_values;
+    if (item_is_error(gen->ast_replay_values)) return gen->ast_replay_values;
     gen->ast_loop_continuations = NULL;
     gen->ast_list_continuation = NULL;
     gen->ast_array_binding_continuations = NULL;
@@ -28385,7 +28960,7 @@ static Item js_generator_resume_after_delegate_error(Item generator, JsGenerator
     if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
         // A delegate protocol failure completes yield* abruptly before the
         // AST replays its suspension point through the enclosing try/finally.
-        gen->ast_yield_skip++;
+        gen->ast_replay_skip++;
     }
     gen->delegate = ItemNull;
     gen->state = gen->delegate_resume;
@@ -28460,7 +29035,7 @@ extern "C" Item js_generator_next(Item generator, Item input) {
             if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
                 // Replaying the AST treats a completed yield* as one program
                 // point and injects the delegate's completion value there.
-                gen->ast_yield_skip++;
+                gen->ast_replay_skip++;
             }
             input = return_val;
             input_root.set(input);
@@ -28673,7 +29248,7 @@ static Item js_generator_delegate_abrupt_call(Item generator, JsGenerator* gen,
     if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
         // The AST generator has not counted the delegated yield yet. Replay
         // it as the completed yield* expression before delivering its result.
-        gen->ast_yield_skip++;
+        gen->ast_replay_skip++;
         return is_return ? js_generator_next(generator,
                 js_gen_return_signal(inner_value))
             : js_generator_next(generator, inner_value);
@@ -28736,7 +29311,7 @@ extern "C" Item js_generator_return(Item generator, Item value) {
             if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
                 // The delegate's initial yield belongs to yield*. Mark it
                 // complete before injecting the return completion into the AST.
-                gen->ast_yield_skip++;
+                gen->ast_replay_skip++;
                 return js_generator_next(generator, js_gen_return_signal(value));
             }
         }
@@ -29600,7 +30175,7 @@ extern "C" Item js_iterable_to_array(Item iterable) {
 // =============================================================================
 
 #define js_promise_unhandled_epoch (js_runtime_state.promises.unhandled_epoch)
-#define js_promise_unhandled_deque (js_runtime_state.promises.unhandled_deque)
+#define js_promise_unhandled_queue (js_runtime_state.promises.unhandled_queue)
 #define js_promise_unhandled_strict (js_runtime_state.promises.unhandled_strict)
 #define js_domain_current (js_runtime_state.promises.domain_current)
 #define js_domain_namespace (js_runtime_state.promises.domain_namespace)
@@ -29959,10 +30534,28 @@ extern "C" void js_domain_restore(Item previous) {
 }
 
 extern "C" Item js_domain_call_function(Item domain, Item fn, Item this_val, Item* args, int arg_count) {
-    Item previous = js_domain_set_stack(domain);
-    Item result = js_call_function(fn, this_val, args, arg_count);
-    js_domain_restore_stack(previous);
-    return result;
+    if (arg_count < 0 || (arg_count > 0 && !args)) return ItemError;
+    RootFrame roots((size_t)arg_count + 5);
+    Rooted<Item> domain_root(roots, domain);
+    Rooted<Item> fn_root(roots, fn);
+    Rooted<Item> this_root(roots, this_val);
+    Rooted<Item> previous_root(roots, ItemNull);
+    Rooted<Item> result_root(roots, ItemNull);
+    // Domain entry can allocate before js_call_function installs its own call frame.
+    for (int index = 0; index < arg_count; index++) {
+        uint64_t* arg_root = roots.take_slot();
+        if (!arg_root) return ItemError;
+        *arg_root = args[index].item;
+    }
+    previous_root.set(js_domain_set_stack(domain_root.get()));
+    Item* rooted_args = arg_count > 0 ? (Item*)alloca((size_t)arg_count * sizeof(Item)) : NULL;
+    for (int index = 0; index < arg_count; index++) {
+        uint64_t* arg_root = roots.slot((size_t)index + 5);
+        rooted_args[index] = (Item){.item = arg_root ? *arg_root : 0};
+    }
+    result_root.set(js_call_function(fn_root.get(), this_root.get(), rooted_args, arg_count));
+    js_domain_restore_stack(previous_root.get());
+    return result_root.get();
 }
 
 static Item js_domain_emit_error_at(Item domain, Item error, int parent_count, bool* out_handled) {
@@ -30468,8 +31061,10 @@ static void js_promise_schedule_unhandled_check(JsPromise* p) {
     }
     p->unhandled_check_scheduled = true;
     p->unhandled_epoch = js_promise_unhandled_epoch;
-    Item record[1] = {js_promise_to_item(p)};
-    if (!runtime_async_deque_push(&js_promise_unhandled_deque, record)) {
+    RuntimeJob job = {};
+    job.arguments = js_promise_to_item(p);
+    job.kind = RUNTIME_JOB_UNHANDLED_REJECTION;
+    if (!runtime_job_queue_push(&js_promise_unhandled_queue, &job)) {
         p = js_get_promise(promise_root.get());
         if (!p) return;
         p->unhandled_check_scheduled = false;
@@ -30478,10 +31073,11 @@ static void js_promise_schedule_unhandled_check(JsPromise* p) {
 }
 
 extern "C" void js_promise_flush_unhandled_checks(void) {
-    Item record[1] = {};
-    while (runtime_async_deque_pop(&js_promise_unhandled_deque, record)) {
-        Item promise_item = record[0];
-        js_promise_unhandled_check(promise_item);
+    RuntimeJob job = {};
+    while (runtime_job_queue_pop(&js_promise_unhandled_queue, &job)) {
+        if (job.kind == RUNTIME_JOB_UNHANDLED_REJECTION) {
+            js_promise_unhandled_check(job.arguments);
+        }
     }
 }
 
@@ -31428,7 +32024,7 @@ extern "C" Item js_await_sync_incremental(Item value) {
 
 // Async context: a running async function's suspended state machine.
 using JsAsyncContext = JsAsyncContextStateRecord;
-#define js_async_resolved_value (js_runtime_state.async_resolved_value)
+#define js_async_resolved_value (js_runtime_state.async_await.resolved_value)
 
 // JSCU10 (D5.1.1v2/D5.1.3): a suspended async activation is a GC-owned frame,
 // not a slot in a context-wide table. The carrier owns its re-homed env and
@@ -31449,14 +32045,9 @@ static JsAsyncContext* js_async_frame_from_item(Item frame_item) {
 extern "C" void js_async_frame_map_gc_trace(Map* map, gc_heap_t* gc) {
     if (!map || !gc || map->map_kind != MAP_KIND_ASYNC_FRAME) return;
     JsAsyncContext* ctx = &((JsAsyncFrameCarrier*)map)->state;
-    if (ctx->env) gc_mark_object_ptr(gc, ctx->env);
+    js_suspended_activation_gc_trace(ctx, gc);
     gc_mark_item(gc, ctx->this_val.item);
     gc_mark_item(gc, ctx->promise.item);
-    gc_mark_item(gc, ctx->ast_function.item);
-    gc_mark_item(gc, ctx->ast_arguments.item);
-    gc_mark_item(gc, ctx->ast_await_values.item);
-    if (ctx->ast_function_env) gc_mark_object_ptr(gc, ctx->ast_function_env);
-    if (ctx->ast_body_env) gc_mark_object_ptr(gc, ctx->ast_body_env);
     js_interp_async_trace_continuations(ctx, gc);
 }
 
@@ -31466,17 +32057,10 @@ extern "C" void js_async_frame_map_heap_destroy(Map* map) {
 }
 
 // One scratch Item (await's resolved-value handoff) survives across the suspend
-// check; register it once per heap epoch. This is all that remains of the old
-// 2,049-root async table.
-static void js_async_ensure_scratch_root() {
-    gc_heap_t* active_gc = context && context->heap ? context->heap->gc : NULL;
-    uint64_t active_epoch = js_get_heap_epoch();
-    if (!active_gc ||
-            (js_runtime_state.async_roots_registered_gc == active_gc &&
-             js_runtime_state.async_roots_registered_epoch == active_epoch)) return;
-    js_runtime_state.async_roots_registered_gc = active_gc;
-    js_runtime_state.async_roots_registered_epoch = active_epoch;
-    heap_register_gc_root(&js_async_resolved_value.item);
+// check. Its exact owner replaces the last direct async root registration.
+static bool js_async_ensure_scratch_root() {
+    return js_active_runtime_state &&
+        js_root_range_ensure_registered(&js_runtime_state.async_await.roots);
 }
 
 // Check if an awaited value requires suspension (pending promise)
@@ -31630,7 +32214,7 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
         return ItemError;
     }
     if (!js_mir_owner_is_current(runtime, "js-async-create")) return ItemError;
-    js_async_ensure_scratch_root();
+    if (!js_async_ensure_scratch_root()) return ItemError;
     // Allocate the GC-owned frame carrier; a zeroed allocation leaves the
     // continuation lists empty. The frame Item is rooted while the promise
     // allocation below may collect (JSCU10).
@@ -31660,10 +32244,10 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
     ctx->ast_body_env = NULL;
     ctx->ast_resume_statement = NULL;
     ctx->ast_loop_continuations = NULL;
-    ctx->ast_await_values = get_type_id(ast_function) == LMD_TYPE_FUNC
+    ctx->ast_replay_values = get_type_id(ast_function) == LMD_TYPE_FUNC
         ? js_array_new(0) : ItemNull;
-    if (item_is_error(ctx->ast_await_values)) return ctx->ast_await_values;
-    ctx->ast_await_skip = 0;
+    if (item_is_error(ctx->ast_replay_values)) return ctx->ast_replay_values;
+    ctx->ast_replay_skip = 0;
     ctx->ast_initialized = false;
 
     // Create a pending promise for this async function's result
@@ -32081,44 +32665,78 @@ extern "C" Item js_promise_all_settled(Item iterable) {
 // =============================================================================
 
 // Module descriptors and TLA edges live in the Runtime-owned canonical
-// registry; only scheduler counters and the active namespace are realm-local.
-#define js_active_module_namespace (js_runtime_state.modules.active_namespace)
+// registry; scheduler counters and module-provider namespaces are realm-local.
 #define g_tla_module_depth (js_runtime_state.modules.module_depth)
 #define g_async_eval_order_counter (js_runtime_state.modules.async_eval_order_counter)
 #define g_tla_draining_depth (js_runtime_state.modules.draining_depth)
 
-static void js_module_ensure_roots() {
-    if (!js_active_runtime_state || !context || !context->heap || !context->heap->gc) return;
-    JsModuleRuntimeState* state = &js_runtime_state.modules;
-    uint64_t epoch = js_get_heap_epoch();
-    if (state->roots_epoch != epoch) {
-        heap_register_gc_root(&state->active_namespace.item);
-        state->roots_epoch = epoch;
+static bool js_module_runtime_slots_ensure() {
+    if (!js_active_runtime_state) return false;
+    RootVector* values = &js_runtime_state.modules.values;
+    int64_t count = root_vector_count(values);
+    if (count == JS_MODULE_RUNTIME_SLOT_COUNT) return true;
+    if (count != 0) {
+        log_error("js-module-runtime: incomplete namespace slot store");
+        root_vector_clear(values);
     }
+    // Heap replacement empties the vector. The warning is scoped to the
+    // namespace generation, matching the former private epoch state.
+    js_runtime_state.modules.internal_test_binding_warning_scheduled = false;
+    for (int slot = 0; slot < JS_MODULE_RUNTIME_SLOT_COUNT; slot++) {
+        if (!root_vector_push(values, ItemNull)) {
+            root_vector_clear(values);
+            return false;
+        }
+    }
+    return true;
 }
 
-// called by js_batch_reset() to clear module cache between batch scripts
-void js_module_cache_reset() {
+static Item* js_module_runtime_slot(JsModuleRuntimeSlot slot) {
+    if (slot < 0 || slot >= JS_MODULE_RUNTIME_SLOT_COUNT ||
+            !js_module_runtime_slots_ensure()) {
+        return NULL;
+    }
+    return root_vector_at(&js_runtime_state.modules.values, slot);
+}
+
+static Item* js_module_active_namespace_slot() {
+    return js_module_runtime_slot(JS_MODULE_RUNTIME_ACTIVE_NAMESPACE);
+}
+
+// A checkpoint only replaces the active namespace; a full batch crosses a
+// heap epoch and must discard every cached module-provider namespace.
+void js_module_cache_reset(bool reset_provider_namespaces) {
     if (!js_active_runtime_state) return;
-    js_module_ensure_roots();
-    js_active_module_namespace = ItemNull;
+    if (reset_provider_namespaces) {
+        root_vector_clear(&js_runtime_state.modules.values);
+        js_runtime_state.modules.internal_test_binding_warning_scheduled = false;
+    } else {
+        Item* active_namespace = js_module_active_namespace_slot();
+        if (active_namespace) *active_namespace = ItemNull;
+    }
     g_tla_module_depth = 0;
     g_async_eval_order_counter = 0;
     g_tla_draining_depth = 0;
 }
 
 extern "C" Item js_get_active_module_namespace() {
-    js_module_ensure_roots();
-    if (get_type_id(js_active_module_namespace) != LMD_TYPE_NULL) {
-        return js_active_module_namespace;
+    Item* active_namespace = js_module_active_namespace_slot();
+    if (!active_namespace) return ItemError;
+    if (get_type_id(*active_namespace) != LMD_TYPE_NULL) {
+        return *active_namespace;
     }
     return js_new_object();
 }
 
 extern "C" Item js_set_active_module_namespace(Item namespace_obj) {
-    js_module_ensure_roots();
-    Item previous = js_active_module_namespace;
-    js_active_module_namespace = namespace_obj;
+    // Recreating the namespace slots after heap replacement may allocate.
+    RootFrame roots(1);
+    Rooted<Item> namespace_root(roots, namespace_obj);
+    if (!roots.valid()) return ItemError;
+    Item* active_namespace = js_module_active_namespace_slot();
+    if (!active_namespace) return ItemError;
+    Item previous = *active_namespace;
+    *active_namespace = namespace_root.get();
     return previous;
 }
 
@@ -32939,53 +33557,68 @@ static Item js_vm_make_cached_data_for_code(Item code) {
     return js_buffer_from_bytes((const char*)payload, (int)sizeof(payload));
 }
 
-struct JsVmContextBinding {
-    Item key;
+// VM aliases and compileFunction context extensions have the same lifetime:
+// an inserted own key must stay rooted until it is removed in reverse order.
+// Keep that fact in one dynamic journal instead of two capped Item arrays.
+struct JsVmTemporaryBindingJournal {
+    RootVector keys = {};
+
+    JsVmTemporaryBindingJournal() {
+        root_vector_init(&keys, NULL, "VM temporary binding keys");
+    }
+
+    ~JsVmTemporaryBindingJournal() {
+        root_vector_destroy(&keys);
+    }
+
+    bool record(Item key) {
+        return root_vector_push(&keys, key);
+    }
+
+    void restore(Item target) {
+        RootFrame roots(1);
+        Rooted<Item> target_root(roots, target);
+        if (!roots.valid()) return;
+        for (int64_t i = root_vector_count(&keys) - 1; i >= 0; i--) {
+            Item* key = root_vector_at(&keys, i);
+            if (key) js_delete_property(target_root.get(), *key);
+        }
+        root_vector_clear(&keys);
+    }
 };
 
-static void js_vm_track_temp_binding(Item key, JsVmContextBinding* bindings, int* count, int max_count) {
-    if (!bindings || !count || *count >= max_count) return;
-    bindings[*count].key = key;
-    (*count)++;
-}
-
-static void js_vm_set_temp_global_alias(Item sandbox, const char* name, int len,
-                                        JsVmContextBinding* bindings, int* count, int max_count) {
+static bool js_vm_set_temp_global_alias(Item sandbox, const char* name, int len,
+                                        JsVmTemporaryBindingJournal* journal) {
     Item key = js_name_item(name, len);
-    if (it2b(js_has_own_property(sandbox, key))) return;
+    if (it2b(js_has_own_property(sandbox, key))) return true;
+    if (!journal || !journal->record(key)) return false;
     js_set_key_default(sandbox, key, sandbox);
     js_mark_non_enumerable(sandbox, key);
-    js_vm_track_temp_binding(key, bindings, count, max_count);
+    return true;
 }
 
-static void js_vm_mask_temp_host_global(Item sandbox, const char* name, int len,
-                                        JsVmContextBinding* bindings, int* count, int max_count) {
+static bool js_vm_mask_temp_host_global(Item sandbox, const char* name, int len,
+                                        JsVmTemporaryBindingJournal* journal) {
     Item key = js_name_item(name, len);
-    if (it2b(js_has_own_property(sandbox, key))) return;
+    if (it2b(js_has_own_property(sandbox, key))) return true;
+    if (!journal || !journal->record(key)) return false;
     js_set_key_default(sandbox, key, make_js_undefined());
     js_mark_non_enumerable(sandbox, key);
-    js_vm_track_temp_binding(key, bindings, count, max_count);
+    return true;
 }
 
-static int js_vm_apply_context_bindings(Item sandbox, JsVmContextBinding* bindings, int max_count) {
-    int count = 0;
-    js_vm_set_temp_global_alias(sandbox, "globalThis", 10, bindings, &count, max_count);
-    js_vm_set_temp_global_alias(sandbox, "self", 4, bindings, &count, max_count);
-    js_vm_set_temp_global_alias(sandbox, "window", 6, bindings, &count, max_count);
-    js_vm_set_temp_global_alias(sandbox, "global", 6, bindings, &count, max_count);
-    js_vm_mask_temp_host_global(sandbox, "process", 7, bindings, &count, max_count);
-    js_vm_mask_temp_host_global(sandbox, "require", 7, bindings, &count, max_count);
-    js_vm_mask_temp_host_global(sandbox, "module", 6, bindings, &count, max_count);
-    js_vm_mask_temp_host_global(sandbox, "exports", 7, bindings, &count, max_count);
-    js_vm_mask_temp_host_global(sandbox, "__filename", 10, bindings, &count, max_count);
-    js_vm_mask_temp_host_global(sandbox, "__dirname", 9, bindings, &count, max_count);
-    return count;
-}
-
-static void js_vm_restore_context_bindings(Item sandbox, JsVmContextBinding* bindings, int count) {
-    for (int i = count - 1; i >= 0; i--) {
-        js_delete_property(sandbox, bindings[i].key);
-    }
+static bool js_vm_apply_context_bindings(Item sandbox,
+        JsVmTemporaryBindingJournal* journal) {
+    return js_vm_set_temp_global_alias(sandbox, "globalThis", 10, journal) &&
+        js_vm_set_temp_global_alias(sandbox, "self", 4, journal) &&
+        js_vm_set_temp_global_alias(sandbox, "window", 6, journal) &&
+        js_vm_set_temp_global_alias(sandbox, "global", 6, journal) &&
+        js_vm_mask_temp_host_global(sandbox, "process", 7, journal) &&
+        js_vm_mask_temp_host_global(sandbox, "require", 7, journal) &&
+        js_vm_mask_temp_host_global(sandbox, "module", 6, journal) &&
+        js_vm_mask_temp_host_global(sandbox, "exports", 7, journal) &&
+        js_vm_mask_temp_host_global(sandbox, "__filename", 10, journal) &&
+        js_vm_mask_temp_host_global(sandbox, "__dirname", 9, journal);
 }
 
 static Item js_vm_contextify(Item sandbox) {
@@ -33056,22 +33689,30 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox, Item options) {
     // namespace so units sharing this context don't clobber each other's slots.
     Item previous_proto = js_get_prototype_of(sandbox);
     js_set_prototype(sandbox, js_get_global_this());
-    JsVmContextBinding vm_bindings[16];
-    int vm_binding_count = js_vm_apply_context_bindings(sandbox, vm_bindings, 16);
+    JsVmTemporaryBindingJournal vm_bindings;
+    if (!js_vm_apply_context_bindings(sandbox, &vm_bindings)) {
+        vm_bindings.restore(sandbox);
+        js_set_prototype(sandbox, previous_proto);
+        return js_throw_range_error("Cannot retain VM context bindings");
+    }
     Item prev_this = js_get_current_this();
     Item prev_global = js_vm_swap_global_this(sandbox);
-    Item saved_with_stack[16];
-    int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
-    JsSavedWithScopeRoots saved_with_roots(saved_with_stack, saved_with_depth);
+    JsSavedWithScope saved_with_scope(true);
+    if (!saved_with_scope.ready) {
+        js_vm_swap_global_this(prev_global);
+        vm_bindings.restore(sandbox);
+        js_set_prototype(sandbox, previous_proto);
+        return js_throw_range_error("Could not save with scope stack");
+    }
     js_with_push(sandbox);
     js_set_this(sandbox);
     Item result = js_builtin_eval_with_options(code, 1 | 8, eval_options.filename,
                                                eval_options.line_offset,
                                                eval_options.column_offset);
     js_set_this(prev_this);
-    js_with_set_stack(saved_with_stack, saved_with_depth);
+    js_with_set_stack(saved_with_scope.stack, saved_with_scope.depth);
     js_vm_swap_global_this(prev_global);
-    js_vm_restore_context_bindings(sandbox, vm_bindings, vm_binding_count);
+    vm_bindings.restore(sandbox);
     js_set_prototype(sandbox, previous_proto);
     if (get_type_id(result) == LMD_TYPE_MAP && js_class_is_error_like(js_class_id(result))) {
         // VM contexts do not yet allocate separate Error prototypes; mark the
@@ -33108,12 +33749,11 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
     Item cached_data = (Item){.item = ITEM_JS_UNDEFINED};
     bool cached_data_produced = false;
     bool cached_data_rejected = false;
-    int extension_count = 0;
+    int64_t extension_count = 0;
     if (js_vm_is_options_object(options)) {
         JS_ASSIGN_OR_RETURN_INTO(context_extensions, js_get_key_default(options, js_name_item("contextExtensions", 17)));
         if (get_type_id(context_extensions) == LMD_TYPE_ARRAY) {
-            int64_t length = js_array_length(context_extensions);
-            extension_count = length > 16 ? 16 : (int)length;
+            extension_count = js_array_length(context_extensions);
         }
         JS_ASSIGN_OR_RETURN_INTO(parsing_context, js_get_key_default(options, js_name_item("parsingContext", 14)));
         JS_ASSIGN_OR_RETURN_INTO(cached_data, js_get_key_default(options, js_name_item("cachedData", 10)));
@@ -33134,19 +33774,24 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
     // For now, just wrap body as a function with no params
     StrBuf* eval_buf = strbuf_new();
     StrBuf* display_buf = strbuf_new();
-    Item extension_keys[16];
-    memset(extension_keys, 0, sizeof(extension_keys));
+    JsVmTemporaryBindingJournal extension_bindings;
     bool use_parsing_context = !js_vm_is_undefined_item(parsing_context) &&
         get_type_id(parsing_context) == LMD_TYPE_MAP;
     Item global_obj = use_parsing_context ? parsing_context : js_get_global_this();
     static int vm_compile_extension_counter = 0;
-    for (int i = 0; i < extension_count; i++) {
+    for (int64_t i = 0; i < extension_count; i++) {
         char ext_name[64];
         int ext_len = snprintf(ext_name, sizeof(ext_name),
-            "__vm_compile_context_ext_%d_%d", vm_compile_extension_counter++, i);
+            "__vm_compile_context_ext_%d_%lld", vm_compile_extension_counter++,
+            (long long)i);
         Item ext_key = js_name_item(ext_name, ext_len);
-        extension_keys[i] = ext_key;
         Item ext_obj = js_elements_get_int(context_extensions, i);
+        if (!extension_bindings.record(ext_key)) {
+            extension_bindings.restore(global_obj);
+            strbuf_free(eval_buf);
+            strbuf_free(display_buf);
+            return js_throw_range_error("Cannot retain VM context extension");
+        }
         js_set_key_default(global_obj, ext_key, ext_obj);
         strbuf_append_str_n(eval_buf, "with(", 5);
         strbuf_append_str_n(eval_buf, ext_name, ext_len);
@@ -33173,7 +33818,7 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
     strbuf_append_str_n(eval_buf, "){", 2);
     strbuf_append_str_n(eval_buf, code_str->chars, code_str->len);
     strbuf_append_str_n(eval_buf, "})", 2);
-    for (int i = 0; i < extension_count; i++) {
+    for (int64_t i = 0; i < extension_count; i++) {
         strbuf_append_str_n(eval_buf, "}", 1);
     }
     strbuf_append_str_n(display_buf, ") {\n", 4);
@@ -33188,31 +33833,35 @@ static Item js_vm_compileFunction(Item code, Item params, Item options) {
     Item previous_proto = ItemNull;
     Item prev_global = ItemNull;
     Item prev_this = ItemNull;
-    Item saved_with_stack[16];
-    int saved_with_depth = 0;
-    JsVmContextBinding vm_bindings[16];
-    int vm_binding_count = 0;
+    JsSavedWithScope saved_with_scope(use_parsing_context);
+    if (!saved_with_scope.ready) {
+        extension_bindings.restore(global_obj);
+        return js_throw_range_error("Could not save with scope stack");
+    }
+    JsVmTemporaryBindingJournal vm_bindings;
     if (use_parsing_context) {
         previous_proto = js_get_prototype_of(parsing_context);
         js_set_prototype(parsing_context, js_get_global_this());
-        vm_binding_count = js_vm_apply_context_bindings(parsing_context, vm_bindings, 16);
+        if (!js_vm_apply_context_bindings(parsing_context, &vm_bindings)) {
+            vm_bindings.restore(parsing_context);
+            extension_bindings.restore(global_obj);
+            js_set_prototype(parsing_context, previous_proto);
+            return js_throw_range_error("Cannot retain VM context bindings");
+        }
         prev_this = js_get_current_this();
         prev_global = js_vm_swap_global_this(parsing_context);
-        saved_with_depth = js_with_save_stack(saved_with_stack, 16);
         js_with_push(parsing_context);
         js_set_this(parsing_context);
     }
     Item result = js_builtin_eval(eval_code, 1);
     if (use_parsing_context) {
         js_set_this(prev_this);
-        js_with_set_stack(saved_with_stack, saved_with_depth);
+        js_with_set_stack(saved_with_scope.stack, saved_with_scope.depth);
         js_vm_swap_global_this(prev_global);
-        js_vm_restore_context_bindings(parsing_context, vm_bindings, vm_binding_count);
+        vm_bindings.restore(parsing_context);
         js_set_prototype(parsing_context, previous_proto);
     }
-    for (int i = extension_count - 1; i >= 0; i--) {
-        js_delete_property(global_obj, extension_keys[i]);
-    }
+    extension_bindings.restore(global_obj);
     if (get_type_id(result) == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)result.function;
         fn->source_text = display_source;
@@ -33329,7 +33978,6 @@ static Item js_dc_stores_key(void);
 
 extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
 
-#define JS_DC_CHANNEL_MAX JS_DIAGNOSTICS_CHANNEL_MAX
 static JsDiagnosticsChannelState* js_diagnostics_channel_state_current(bool attach) {
     if (attach) jube_modules_runtime_attach();
     void* session = jube_node_runtime_current_session();
@@ -33337,15 +33985,33 @@ static JsDiagnosticsChannelState* js_diagnostics_channel_state_current(bool atta
 }
 
 #define js_dc_state (*js_diagnostics_channel_state_current(true))
-#define js_dc_channel_names (js_dc_state.channel_names)
-#define js_dc_channels (js_dc_state.channels)
-#define js_dc_channel_count (js_dc_state.channel_count)
 #define js_dc_channel_proto (js_dc_state.channel_prototype)
 #define js_dc_tracing_channel_proto (js_dc_state.tracing_channel_prototype)
 #define js_dc_bounded_channel_proto (js_dc_state.bounded_channel_prototype)
 #define js_dc_channel_ctor (js_dc_state.channel_constructor)
 #define js_dc_tracing_channel_ctor (js_dc_state.tracing_channel_constructor)
 #define js_dc_bounded_channel_ctor (js_dc_state.bounded_channel_constructor)
+
+static Item js_dc_dynamic_array_ensure(Item* slot) {
+    if (slot && get_type_id(*slot) == LMD_TYPE_ARRAY) return *slot;
+    Item array = js_array_new(0);
+    if (slot) *slot = array;
+    return array;
+}
+
+static Item js_dc_channel_entries(void) {
+    return js_dc_dynamic_array_ensure(&js_dc_state.channel_entries);
+}
+
+static Item js_dc_deferred_error_entries(void) {
+    return js_dc_dynamic_array_ensure(&js_dc_state.deferred_errors);
+}
+
+static Item js_dc_channel_entry_part(Item entries, int64_t index, int64_t part) {
+    Item entry = js_elements_get_int(entries, index);
+    return get_type_id(entry) == LMD_TYPE_ARRAY && js_array_length(entry) > part
+        ? js_elements_get_int(entry, part) : ItemNull;
+}
 
 static bool js_dc_is_symbol(Item value) {
     return get_type_id(value) == LMD_TYPE_SYMBOL ||
@@ -33478,9 +34144,13 @@ static Item js_dc_channel_publish(Item message) {
 
 // Channel.hasSubscribers getter
 static Item js_dc_hasSubscribers(Item name) {
-    for (int i = 0; i < js_dc_channel_count; i++) {
-        if (js_dc_item_same(js_dc_channel_names[i], name)) {
-            return (Item){.item = b2it(js_dc_channel_has_active_subscribers(js_dc_channels[i]))};
+    Item entries = js_dc_channel_entries();
+    int64_t count = get_type_id(entries) == LMD_TYPE_ARRAY ? js_array_length(entries) : 0;
+    for (int64_t i = 0; i < count; i++) {
+        Item entry_name = js_dc_channel_entry_part(entries, i, 0);
+        if (js_dc_item_same(entry_name, name)) {
+            Item channel = js_dc_channel_entry_part(entries, i, 1);
+            return (Item){.item = b2it(js_dc_channel_has_active_subscribers(channel))};
         }
     }
     return (Item){.item = ITEM_FALSE};
@@ -33511,29 +34181,28 @@ static Item js_dc_stores_key(void) {
 static Item js_als_apply_context(Item context);
 static void js_als_restore_context(Item previous);
 
-#define JS_DC_DEFERRED_ERROR_MAX JS_DIAGNOSTICS_DEFERRED_ERROR_MAX
-#define js_dc_deferred_errors (js_dc_state.deferred_errors)
-#define js_dc_deferred_error_count (js_dc_state.deferred_error_count)
-
 static Item js_dc_emit_deferred_error(void) {
-    if (js_dc_deferred_error_count <= 0) return (Item){.item = ITEM_JS_UNDEFINED};
-    Item error = js_dc_deferred_errors[0];
-    for (int i = 1; i < js_dc_deferred_error_count; i++) {
-        js_dc_deferred_errors[i - 1] = js_dc_deferred_errors[i];
+    Item errors = js_dc_deferred_error_entries();
+    int64_t count = get_type_id(errors) == LMD_TYPE_ARRAY ? js_array_length(errors) : 0;
+    if (count <= 0) return (Item){.item = ITEM_JS_UNDEFINED};
+    RootFrame roots(2);
+    Rooted<Item> error_root(roots, js_elements_get_int(errors, 0));
+    Rooted<Item> remaining_root(roots, js_array_new(0));
+    for (int64_t i = 1; i < count; i++) {
+        js_array_push(remaining_root.get(), js_elements_get_int(errors, i));
     }
-    js_dc_deferred_error_count--;
-    js_dc_deferred_errors[js_dc_deferred_error_count] = (Item){0};
+    js_dc_state.deferred_errors = remaining_root.get();
+    Item error = error_root.get();
     js_process_emit(js_name_item("uncaughtException", 17), error);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 static void js_dc_defer_transform_error(Item error) {
     js_root_range_ensure_registered(&js_dc_state.roots);
-    if (js_dc_deferred_error_count >= JS_DC_DEFERRED_ERROR_MAX) {
-        js_process_emit(js_name_item("uncaughtException", 17), error);
-        return;
-    }
-    js_dc_deferred_errors[js_dc_deferred_error_count++] = error;
+    RootFrame roots(1);
+    Rooted<Item> error_root(roots, error);
+    Item errors = js_dc_deferred_error_entries();
+    js_array_push(errors, error_root.get());
     js_next_tick_enqueue(js_new_native_function(js_dc_emit_deferred_error));
 }
 
@@ -33686,14 +34355,17 @@ static Item js_dc_channel_withStoreScope(Item message) {
 // dc.channel(name) — create or return existing channel
 static Item js_dc_channel_factory(Item name) {
     js_root_range_ensure_registered(&js_dc_state.roots);
-    RootFrame roots(2);
+    RootFrame roots(4);
     Rooted<Item> name_root(roots, name);
     if (get_type_id(name) != LMD_TYPE_STRING && !js_dc_is_symbol(name)) {
         return js_dc_throw_invalid_arg_type("The \"name\" argument must be of type string or symbol.");
     }
-    for (int i = 0; i < js_dc_channel_count; i++) {
-        if (js_dc_item_same(js_dc_channel_names[i], name_root.get())) {
-            return js_dc_channels[i];
+    Rooted<Item> entries_root(roots, js_dc_channel_entries());
+    int64_t entry_count = get_type_id(entries_root.get()) == LMD_TYPE_ARRAY
+        ? js_array_length(entries_root.get()) : 0;
+    for (int64_t i = 0; i < entry_count; i++) {
+        if (js_dc_item_same(js_dc_channel_entry_part(entries_root.get(), i, 0), name_root.get())) {
+            return js_dc_channel_entry_part(entries_root.get(), i, 1);
         }
     }
 
@@ -33713,11 +34385,10 @@ static Item js_dc_channel_factory(Item name) {
     js_runtime_set_native_key(channel_root.get(), js_dc_key("unbindStore"), js_dc_channel_unbindStore);
     js_runtime_set_native_key(channel_root.get(), js_dc_key("runStores"), js_dc_channel_runStores);
     js_runtime_set_native_key(channel_root.get(), js_dc_key("withStoreScope"), js_dc_channel_withStoreScope);
-    if (js_dc_channel_count < JS_DC_CHANNEL_MAX) {
-        js_dc_channel_names[js_dc_channel_count] = name_root.get();
-        js_dc_channels[js_dc_channel_count] = channel_root.get();
-        js_dc_channel_count++;
-    }
+    Rooted<Item> entry_root(roots, js_array_new(0));
+    js_array_push(entry_root.get(), name_root.get());
+    js_array_push(entry_root.get(), channel_root.get());
+    js_array_push(entries_root.get(), entry_root.get());
     return channel_root.get();
 }
 
@@ -33876,30 +34547,57 @@ static int64_t js_dc_rest_length(Item rest_args) {
     return get_type_id(rest_args) == LMD_TYPE_ARRAY ? js_array_length(rest_args) : 0;
 }
 
-static Item js_dc_rest_get(Item rest_args, int64_t index) {
-    if (get_type_id(rest_args) != LMD_TYPE_ARRAY) return (Item){.item = ITEM_JS_UNDEFINED};
-    int64_t len = js_array_length(rest_args);
-    if (index < 0 || index >= len) return (Item){.item = ITEM_JS_UNDEFINED};
-    return js_elements_get_int(rest_args, index);
-}
+// The native call ABI needs contiguous Items, while a callback can receive an
+// unbounded JavaScript rest list. RootSpan is the one activation-local owner
+// for that ABI view; it replaces every diagnostics-channel scratch array.
+struct JsDcArgumentList {
+    RootSpan roots;
+    int count = 0;
+    bool valid = true;
 
-static int js_dc_rest_args(Item rest_args, Item* args_storage, Item** out_args) {
-    if (get_type_id(rest_args) != LMD_TYPE_ARRAY) {
-        *out_args = nullptr;
-        return 0;
+    explicit JsDcArgumentList(int64_t requested_count)
+        : roots(requested_count > 0 && requested_count <= INT_MAX
+                    ? (size_t)requested_count : 0) {
+        if (requested_count < 0 || requested_count > INT_MAX) {
+            valid = false;
+            return;
+        }
+        count = (int)requested_count;
+        if (count > 0 && !roots.valid()) valid = false;
     }
-    int64_t len64 = js_array_length(rest_args);
-    if (len64 <= 0) {
-        *out_args = nullptr;
-        return 0;
+
+    Item* items() {
+        return count > 0 ? roots.items() : NULL;
     }
-    int len = len64 > 16 ? 16 : (int)len64;
-    for (int i = 0; i < len; i++) {
-        args_storage[i] = js_elements_get_int(rest_args, i);
+
+    Item at(int index) {
+        return index >= 0 && index < count
+            ? roots.items()[index] : (Item){.item = ITEM_JS_UNDEFINED};
     }
-    *out_args = args_storage;
-    return len;
-}
+
+    void set(int index, Item value) {
+        if (index >= 0 && index < count) roots.items()[index] = value;
+    }
+};
+
+struct JsDcRestArguments {
+    RootFrame input_roots;
+    Rooted<Item> rest;
+    JsDcArgumentList values;
+
+    explicit JsDcRestArguments(Item rest_args)
+        : input_roots(1), rest(input_roots, rest_args),
+          values(js_dc_rest_length(rest.get())) {
+        if (!input_roots.valid() || !values.valid) return;
+        for (int i = 0; i < values.count; i++) {
+            values.set(i, js_elements_get_int(rest.get(), i));
+        }
+    }
+
+    bool valid() const {
+        return input_roots.valid() && values.valid;
+    }
+};
 
 static int js_dc_callback_position(Item value, int extra_count) {
     int64_t pos = 0;
@@ -33972,16 +34670,15 @@ static Item js_dc_tc_traceSync(Item fn, Item context, Item this_arg, Item rest_a
     Item start_ch = js_get_key_default(self, js_name_item("start", 5));
     Item end_ch = js_get_key_default(self, js_name_item("end", 3));
     Item error_ch = js_get_key_default(self, js_name_item("error", 5));
-    Item args_storage[16];
-    Item* args = nullptr;
-    int argc = js_dc_rest_args(rest_args, args_storage, &args);
+    JsDcRestArguments args(rest_args);
+    if (!args.valid()) return js_throw_range_error("Cannot retain diagnostics-channel arguments");
     bool should_trace = js_dc_channel_has_active_subscribers(start_ch) ||
                         js_dc_channel_has_active_subscribers(end_ch) ||
                         js_dc_channel_has_active_subscribers(error_ch);
     if (!should_trace) {
-        return js_call_function(fn, this_arg, args, argc);
+        return js_call_function(fn, this_arg, args.values.items(), args.values.count);
     }
-    Item result = js_dc_trace_invoke(fn, this_arg, args, argc,
+    Item result = js_dc_trace_invoke(fn, this_arg, args.values.items(), args.values.count,
         start_ch, end_ch, error_ch, context, true, NULL);
     return result;
 }
@@ -33994,19 +34691,19 @@ static Item js_dc_tc_tracePromise(Item fn, Item context, Item this_arg, Item res
     Item async_start_ch = js_get_key_default(self, js_name_item("asyncStart", 10));
     Item async_end_ch = js_get_key_default(self, js_name_item("asyncEnd", 8));
     Item error_ch = js_get_key_default(self, js_name_item("error", 5));
-    Item args_storage[16];
-    Item* args = nullptr;
-    int argc = js_dc_rest_args(rest_args, args_storage, &args);
+    JsDcRestArguments args(rest_args);
+    if (!args.valid()) return js_throw_range_error("Cannot retain diagnostics-channel arguments");
     bool should_trace = js_dc_channel_has_active_subscribers(start_ch) ||
                         js_dc_channel_has_active_subscribers(end_ch) ||
                         js_dc_channel_has_active_subscribers(async_start_ch) ||
                         js_dc_channel_has_active_subscribers(async_end_ch) ||
                         js_dc_channel_has_active_subscribers(error_ch);
     if (!should_trace) {
-        return js_call_function(fn, this_arg, args, argc);
+        return js_call_function(fn, this_arg, args.values.items(), args.values.count);
     }
     Item ctx = ItemNull;
-    JS_ASSIGN_OR_RETURN(result, js_dc_trace_invoke(fn, this_arg, args, argc,
+    JS_ASSIGN_OR_RETURN(result, js_dc_trace_invoke(fn, this_arg,
+        args.values.items(), args.values.count,
         start_ch, end_ch, error_ch, context, false, &ctx));
     Item then_fn = js_get_key_default(result, js_dc_key("then"));
     if (!js_is_callable(then_fn)) {
@@ -34038,21 +34735,17 @@ static Item js_dc_trace_callback_invoke(Item state, Item rest_args) {
     Item ctx = js_elements_get_int(state, 3);
     Item callback = js_elements_get_int(state, 4);
 
-    int64_t argc64 = js_dc_rest_length(rest_args);
-    int argc = argc64 > 15 ? 15 : (int)argc64;
-    Item args[15];
-    for (int i = 0; i < argc; i++) {
-        args[i] = js_dc_rest_get(rest_args, i);
-    }
+    JsDcRestArguments args(rest_args);
+    if (!args.valid()) return js_throw_range_error("Cannot retain diagnostics-channel arguments");
 
-    Item err = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+    Item err = args.values.at(0);
     bool has_error = !js_is_nullish(err);
     if (has_error) {
         js_set_key_default(ctx, js_dc_key("error"), err);
         js_dc_channel_publish_on(error_ch, ctx);
         js_delete_property(ctx, js_dc_key("error"));
-    } else if (argc > 1) {
-        js_set_key_default(ctx, js_dc_key("result"), args[1]);
+    } else if (args.values.count > 1) {
+        js_set_key_default(ctx, js_dc_key("result"), args.values.at(1));
     }
 
     Item async_store_context = js_dc_build_store_context(async_start_ch, ctx);
@@ -34060,7 +34753,8 @@ static Item js_dc_trace_callback_invoke(Item state, Item rest_args) {
     js_als_context_call_args(async_store_context, publish_fn, async_start_ch, &ctx, 1);
     js_dc_channel_publish_on(async_end_ch, ctx);
     return js_als_context_call_args(async_store_context, callback,
-                                    (Item){.item = ITEM_JS_UNDEFINED}, args, argc);
+                                    (Item){.item = ITEM_JS_UNDEFINED},
+                                    args.values.items(), args.values.count);
 }
 
 // TracingChannel.traceCallback(fn, position, context, thisArg, callback, ...args)
@@ -34072,18 +34766,19 @@ static Item js_dc_tc_traceCallback(Item fn, Item rest_args) {
     Item async_end_ch = js_get_key_default(self, js_name_item("asyncEnd", 8));
     Item error_ch = js_get_key_default(self, js_name_item("error", 5));
 
-    int64_t total = js_dc_rest_length(rest_args);
-    Item callback = js_dc_rest_get(rest_args, 3);
+    JsDcRestArguments rest(rest_args);
+    if (!rest.valid()) return js_throw_range_error("Cannot retain diagnostics-channel arguments");
+    int total = rest.values.count;
+    Item callback = rest.values.at(3);
     if (!js_is_callable(callback)) {
         return js_throw_type_error("The \"callback\" argument must be of type function.");
     }
 
-    Item position_item = js_dc_rest_get(rest_args, 0);
-    Item context = js_dc_rest_get(rest_args, 1);
-    Item this_arg = js_dc_rest_get(rest_args, 2);
+    Item position_item = rest.values.at(0);
+    Item context = rest.values.at(1);
+    Item this_arg = rest.values.at(2);
     Item ctx = js_dc_context_or_new(context);
-    int extra_count = total > 4 ? (int)(total - 4) : 0;
-    if (extra_count > 14) extra_count = 14;
+    int extra_count = total > 4 ? total - 4 : 0;
 
     bool should_trace = js_dc_channel_has_active_subscribers(start_ch) ||
                         js_dc_channel_has_active_subscribers(end_ch) ||
@@ -34105,26 +34800,27 @@ static Item js_dc_tc_traceCallback(Item fn, Item rest_args) {
     }
 
     int callback_pos = js_dc_callback_position(position_item, extra_count);
-    Item fn_args[15];
-    int fn_argc = extra_count + 1;
-    for (int i = 0; i < fn_argc; i++) {
+    JsDcArgumentList fn_args((int64_t)extra_count + 1);
+    if (!fn_args.valid) return js_throw_range_error("Cannot retain diagnostics-channel arguments");
+    for (int i = 0; i < fn_args.count; i++) {
         if (i < callback_pos) {
-            fn_args[i] = js_dc_rest_get(rest_args, 4 + i);
+            fn_args.set(i, rest.values.at(4 + i));
         } else if (i == callback_pos) {
-            fn_args[i] = callback_for_fn;
+            fn_args.set(i, callback_for_fn);
         } else {
-            fn_args[i] = js_dc_rest_get(rest_args, 4 + i - 1);
+            fn_args.set(i, rest.values.at(4 + i - 1));
         }
     }
 
     if (!should_trace) {
-        return js_call_function(fn, this_arg, fn_args, fn_argc);
+        return js_call_function(fn, this_arg, fn_args.items(), fn_args.count);
     }
 
     Item store_context = js_dc_build_store_context(start_ch, ctx);
     Item publish_fn = js_get_key_default(start_ch, js_dc_key("publish"));
     JS_ASSIGN_OR_RETURN(publish_result, js_als_context_call_args(store_context, publish_fn, start_ch, &ctx, 1));
-    Item result = js_als_context_call_args(store_context, fn, this_arg, fn_args, fn_argc);
+    Item result = js_als_context_call_args(store_context, fn, this_arg,
+        fn_args.items(), fn_args.count);
     if (item_is_error(result)) {
         Item error = js_error_lane_payload(result);
         js_set_key_default(ctx, js_dc_key("error"), error);
@@ -34142,9 +34838,8 @@ static Item js_dc_bc_run(Item context, Item fn, Item this_arg, Item rest_args) {
     Item self = js_get_this();
     Item start_ch = js_get_key_default(self, js_name_item("start", 5));
     Item end_ch = js_get_key_default(self, js_name_item("end", 3));
-    Item args_storage[16];
-    Item* args = nullptr;
-    int argc = js_dc_rest_args(rest_args, args_storage, &args);
+    JsDcRestArguments args(rest_args);
+    if (!args.valid()) return js_throw_range_error("Cannot retain diagnostics-channel arguments");
 
     Item store_context = js_dc_build_store_context(start_ch, context);
     Item previous = js_als_apply_context(store_context);
@@ -34154,7 +34849,7 @@ static Item js_dc_bc_run(Item context, Item fn, Item this_arg, Item rest_args) {
         return start_result;
     }
 
-    Item result = js_call_function(fn, this_arg, args, argc);
+    Item result = js_call_function(fn, this_arg, args.values.items(), args.values.count);
     if (item_is_error(result)) {
         Item error = js_error_lane_payload(result);
         (void)js_dc_channel_publish_on(end_ch, context);
@@ -34373,7 +35068,6 @@ extern "C" bool js_is_vm_context_error(Item value) {
 }
 
 #define js_cluster_primary_options (js_runtime_state.cluster.primary_options)
-#define js_cluster_primary_options_root_epoch (js_runtime_state.cluster.primary_options_root_epoch)
 #define js_cluster_next_worker_id (js_runtime_state.cluster.next_worker_id)
 
 static bool js_cluster_is_object_item(Item item) {
@@ -34579,13 +35273,13 @@ static Item js_cluster_fork(Item fork_env) {
 }
 
 static Item js_cluster_setup_primary(Item options) {
-    uint64_t epoch = js_get_heap_epoch();
-    if (js_cluster_primary_options_root_epoch != epoch) {
-        heap_register_gc_root(&js_cluster_primary_options.item);
-        // Cluster state is static, but every batch heap owns a fresh registry.
-        js_cluster_primary_options_root_epoch = epoch;
+    RootFrame roots(1);
+    Rooted<Item> options_root(roots, options);
+    if (!roots.valid() ||
+            !js_root_range_ensure_registered(&js_runtime_state.cluster.roots)) {
+        return ItemError;
     }
-    js_cluster_primary_options = options;
+    js_cluster_primary_options = options_root.get();
     Item self = js_get_this();
     js_runtime_set_native_key(self, js_name_item("fork", 4),
         js_cluster_fork);
@@ -35051,28 +35745,32 @@ static Item js_internal_repl_create(Item env, Item opts, Item cb) {
     return repl;
 }
 
-#define js_als_instances (js_runtime_state.async_local_storage->instances)
-#define js_als_instance_count (js_runtime_state.async_local_storage->instance_count)
+#define js_als_instances (&js_runtime_state.async_local_storage->instances)
+#define js_als_instance_count root_vector_count(js_als_instances)
 
 static Item js_als_store_key(void) {
     return js_name_item("_store", 6);
 }
 
+static Item js_als_instance_at(int64_t index) {
+    Item* instance = root_vector_at(js_als_instances, index);
+    return instance ? *instance : ItemNull;
+}
+
 static void js_als_register_instance(Item instance) {
-    if (!js_root_range_ensure_registered(&js_runtime_state.async_local_storage->roots)) return;
-    for (int i = 0; i < js_als_instance_count; i++) {
-        if (js_als_instances[i].item == instance.item) return;
+    for (int64_t i = 0; i < js_als_instance_count; i++) {
+        if (js_als_instance_at(i).item == instance.item) return;
     }
-    if (js_als_instance_count < JS_MAX_ALS_INSTANCES) {
-        js_als_instances[js_als_instance_count++] = instance;
+    if (!root_vector_push(js_als_instances, instance)) {
+        log_error("js-als: failed to retain AsyncLocalStorage instance");
     }
 }
 
 extern "C" Item js_als_capture_context(void) {
     Item context = js_array_new(0);
     Item store_key = js_als_store_key();
-    for (int i = 0; i < js_als_instance_count; i++) {
-        Item instance = js_als_instances[i];
+    for (int64_t i = 0; i < js_als_instance_count; i++) {
+        Item instance = js_als_instance_at(i);
         if (instance.item == 0) continue;
         Item pair = js_array_new(0);
         js_array_push(pair, instance);
@@ -35235,16 +35933,11 @@ static Item js_als_withScope(Item store) {
     return scope;
 }
 
-#define JS_ASYNC_HOOK_MAX JS_ASYNC_HOOK_STATE_MAX
-#define JS_ASYNC_PENDING_DESTROY_MAX JS_ASYNC_PENDING_DESTROY_STATE_MAX
-#define js_async_hooks_enabled_count (js_runtime_state.async_hooks->enabled_count)
 #define js_async_hooks_root_resource (js_runtime_state.async_hooks->root_resource)
 #define js_async_hooks_current_resource (js_runtime_state.async_hooks->current_resource)
 #define js_async_hooks_next_id (js_runtime_state.async_hooks->next_id)
-#define js_async_hooks (js_runtime_state.async_hooks->hooks)
-#define js_async_hook_count (js_runtime_state.async_hooks->hook_count)
-#define js_async_pending_destroy_resources (js_runtime_state.async_hooks->pending_destroy_resources)
-#define js_async_pending_destroy_count (js_runtime_state.async_hooks->pending_destroy_count)
+#define js_async_hook_values (js_runtime_state.async_hooks->hooks)
+#define js_async_pending_destroy_values (js_runtime_state.async_hooks->pending_destroy_resources)
 
 static Item js_async_hooks_symbol_key(const char* name, int name_len) {
     return js_symbol_for(js_name_item(name, name_len));
@@ -35287,14 +35980,19 @@ extern "C" void js_async_hooks_restore_resource(Item previous) {
     js_async_hooks_current_resource = previous;
 }
 
-static void js_async_hooks_add_hook(Item hook) {
-    js_root_range_ensure_registered(&js_runtime_state.async_hooks->roots);
-    for (int i = 0; i < js_async_hook_count; i++) {
-        if (js_async_hooks[i].item == hook.item) return;
+static Item js_async_hook_at(int64_t index) {
+    Item* value = root_vector_at(&js_async_hook_values, index);
+    return value ? *value : ItemNull;
+}
+
+static bool js_async_hooks_add_hook(Item hook) {
+    RootFrame roots(1);
+    Rooted<Item> hook_root(roots, hook);
+    int64_t hook_count = root_vector_count(&js_async_hook_values);
+    for (int64_t i = 0; i < hook_count; i++) {
+        if (js_async_hook_at(i).item == hook_root.get().item) return true;
     }
-    if (js_async_hook_count < JS_ASYNC_HOOK_MAX) {
-        js_async_hooks[js_async_hook_count++] = hook;
-    }
+    return root_vector_push(&js_async_hook_values, hook_root.get());
 }
 
 static bool js_async_hook_is_enabled(Item hook) {
@@ -35304,11 +36002,11 @@ static bool js_async_hook_is_enabled(Item hook) {
 
 static void js_async_hooks_emit_event(const char* name, int name_len,
         Item* args, int argc) {
-    if (js_async_hooks_enabled_count <= 0) return;
     Item callback_key = js_async_hooks_key("__lambda_async_hook_callbacks__");
     Item event_key = js_name_item(name, name_len);
-    for (int i = 0; i < js_async_hook_count; i++) {
-        Item hook = js_async_hooks[i];
+    int64_t hook_count = root_vector_count(&js_async_hook_values);
+    for (int64_t i = 0; i < hook_count; i++) {
+        Item hook = js_async_hook_at(i);
         if (hook.item == 0 || !js_async_hook_is_enabled(hook)) continue;
         Item callbacks = js_get_key_default(hook, callback_key);
         Item callback = js_get_key_default(callbacks, event_key);
@@ -35401,9 +36099,9 @@ static void js_async_resource_emit_destroy(Item resource) {
 }
 
 static void js_async_hooks_queue_destroy(Item resource) {
-    js_root_range_ensure_registered(&js_runtime_state.async_hooks->roots);
-    if (js_async_pending_destroy_count >= JS_ASYNC_PENDING_DESTROY_MAX) return;
-    js_async_pending_destroy_resources[js_async_pending_destroy_count++] = resource;
+    RootFrame roots(1);
+    Rooted<Item> resource_root(roots, resource);
+    root_vector_push(&js_async_pending_destroy_values, resource_root.get());
 }
 
 static bool js_async_hooks_is_gc_tracker(Item resource) {
@@ -35419,12 +36117,24 @@ static bool js_async_hooks_is_gc_tracker(Item resource) {
 }
 
 extern "C" void js_async_hooks_after_gc(void) {
-    int count = js_async_pending_destroy_count;
-    js_async_pending_destroy_count = 0;
-    for (int i = 0; i < count; i++) {
-        Item resource = js_async_pending_destroy_resources[i];
-        js_async_pending_destroy_resources[i] = (Item){0};
-        js_async_resource_emit_destroy(resource);
+    // Capture the original queue length: a destroy callback may enqueue a new
+    // resource, which belongs to the next drain just as it did in the former
+    // fixed queue.
+    int64_t count = root_vector_count(&js_async_pending_destroy_values);
+    for (int64_t i = 0; i < count; i++) {
+        Item* first = root_vector_at(&js_async_pending_destroy_values, 0);
+        if (!first) return;
+        RootFrame roots(1);
+        Rooted<Item> resource_root(roots, *first);
+        int64_t remaining = root_vector_count(&js_async_pending_destroy_values);
+        for (int64_t source = 1; source < remaining; source++) {
+            Item* destination = root_vector_at(&js_async_pending_destroy_values,
+                source - 1);
+            Item* next = root_vector_at(&js_async_pending_destroy_values, source);
+            if (destination && next) *destination = *next;
+        }
+        root_vector_pop(&js_async_pending_destroy_values);
+        js_async_resource_emit_destroy(resource_root.get());
     }
 }
 
@@ -35628,7 +36338,6 @@ static Item js_ah_enable(void) {
     Item enabled = js_get_key_default(self, enabled_key);
     if (get_type_id(enabled) != LMD_TYPE_BOOL || !it2b(enabled)) {
         js_set_key_default(self, enabled_key, (Item){.item = b2it(true)});
-        js_async_hooks_enabled_count++;
     }
     return self;
 }
@@ -35639,7 +36348,6 @@ static Item js_ah_disable(void) {
     Item enabled = js_get_key_default(self, enabled_key);
     if (get_type_id(enabled) == LMD_TYPE_BOOL && it2b(enabled)) {
         js_set_key_default(self, enabled_key, (Item){.item = b2it(false)});
-        if (js_async_hooks_enabled_count > 0) js_async_hooks_enabled_count--;
     }
     return self;
 }
@@ -35665,13 +36373,14 @@ static Item js_ah_createHook(Item callbacks) {
             }
         }
     }
-    Item hook = js_new_object();
-    js_async_hooks_add_hook(hook);
-    js_set_key_default(hook, js_async_hooks_key("__lambda_async_hook_callbacks__"), callbacks);
-    js_set_key_default(hook, js_async_hooks_key("__lambda_async_hook_enabled__"), (Item){.item = b2it(false)});
-    js_runtime_set_native_key(hook, js_name_item("enable", 6), js_ah_enable);
-    js_runtime_set_native_key(hook, js_name_item("disable", 7), js_ah_disable);
-    return hook;
+    RootFrame roots(1);
+    Rooted<Item> hook_root(roots, js_new_object());
+    if (!js_async_hooks_add_hook(hook_root.get())) return ItemError;
+    js_set_key_default(hook_root.get(), js_async_hooks_key("__lambda_async_hook_callbacks__"), callbacks);
+    js_set_key_default(hook_root.get(), js_async_hooks_key("__lambda_async_hook_enabled__"), (Item){.item = b2it(false)});
+    js_runtime_set_native_key(hook_root.get(), js_name_item("enable", 6), js_ah_enable);
+    js_runtime_set_native_key(hook_root.get(), js_name_item("disable", 7), js_ah_disable);
+    return hook_root.get();
 }
 
 static Item js_ah_executionAsyncId(void) {
@@ -35686,7 +36395,13 @@ static Item js_ah_triggerAsyncId(void) {
 }
 
 static Item js_internal_async_enabledHooksExist(void) {
-    return (Item){.item = b2it(js_async_hooks_enabled_count > 0)};
+    int64_t hook_count = root_vector_count(&js_async_hook_values);
+    for (int64_t i = 0; i < hook_count; i++) {
+        if (js_async_hook_is_enabled(js_async_hook_at(i))) {
+            return (Item){.item = ITEM_TRUE};
+        }
+    }
+    return (Item){.item = ITEM_FALSE};
 }
 
 static Item js_async_context_frame_current(void) {
@@ -35743,46 +36458,50 @@ extern "C" Item js_internal_util_inspect_get_string_width(Item value) {
 }
 
 extern "C" Item js_get_internal_async_hooks_namespace(void) {
-    static Item iah_ns = {0};
-    static uint64_t iah_epoch = (uint64_t)-1;
-    if (iah_ns.item == 0 || iah_epoch != js_heap_epoch) {
-        iah_epoch = js_heap_epoch;
-        iah_ns = js_new_object();
-        heap_register_gc_root(&iah_ns.item);
-        js_set_native_key(iah_ns, js_name_item("enabledHooksExist", 17), js_internal_async_enabledHooksExist);
-        Item symbols = js_new_object();
+    Item* namespace_item = js_module_runtime_slot(
+        JS_MODULE_RUNTIME_INTERNAL_ASYNC_HOOKS_NAMESPACE);
+    if (!namespace_item) return ItemError;
+    if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
+        *namespace_item = js_new_object();
+        js_set_native_key(*namespace_item, js_name_item("enabledHooksExist", 17),
+            js_internal_async_enabledHooksExist);
+        RootFrame roots(1);
+        Rooted<Item> symbols_root(roots, js_new_object());
+        if (!roots.valid()) return ItemError;
         // The public internal namespace must export the same symbol keys used
         // when resources are stamped, otherwise destructuring .symbols fails.
-        js_set_key_cstr(symbols, "async_id_symbol", js_async_hooks_symbol_key("nodejs.async_id_symbol", 22));
-        js_set_key_cstr(symbols, "trigger_async_id_symbol", js_async_hooks_symbol_key("nodejs.trigger_async_id_symbol", 30));
-        js_set_key_cstr(iah_ns, "symbols", symbols);
-        js_set_key_cstr(iah_ns, "default", iah_ns);
+        js_set_key_cstr(symbols_root.get(), "async_id_symbol",
+            js_async_hooks_symbol_key("nodejs.async_id_symbol", 22));
+        js_set_key_cstr(symbols_root.get(), "trigger_async_id_symbol",
+            js_async_hooks_symbol_key("nodejs.trigger_async_id_symbol", 30));
+        js_set_key_cstr(*namespace_item, "symbols", symbols_root.get());
+        js_set_key_cstr(*namespace_item, "default", *namespace_item);
     }
-    return iah_ns;
+    return *namespace_item;
 }
 
 extern "C" Item js_get_internal_async_context_frame_namespace(void) {
-    static Item acf_ns = {0};
-    static uint64_t acf_epoch = (uint64_t)-1;
-    if (acf_ns.item == 0 || acf_epoch != js_heap_epoch) {
-        acf_epoch = js_heap_epoch;
-        acf_ns = js_new_object();
-        heap_register_gc_root(&acf_ns.item);
-        js_set_key_cstr(acf_ns, "enabled", (Item){.item = b2it(true)});
-        js_set_native_key(acf_ns, js_name_item("current", 7), js_async_context_frame_current);
-        js_set_key_cstr(acf_ns, "default", acf_ns);
+    Item* namespace_item = js_module_runtime_slot(
+        JS_MODULE_RUNTIME_INTERNAL_ASYNC_CONTEXT_FRAME_NAMESPACE);
+    if (!namespace_item) return ItemError;
+    if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
+        *namespace_item = js_new_object();
+        js_set_key_cstr(*namespace_item, "enabled", (Item){.item = b2it(true)});
+        js_set_native_key(*namespace_item, js_name_item("current", 7),
+            js_async_context_frame_current);
+        js_set_key_cstr(*namespace_item, "default", *namespace_item);
     }
-    return acf_ns;
+    return *namespace_item;
 }
 
 extern "C" Item js_get_async_hooks_namespace(void) {
-    static Item ah_ns = {0};
-    static uint64_t ah_epoch = (uint64_t)-1;
-    if (ah_ns.item == 0 || ah_epoch != js_heap_epoch) {
-        ah_epoch = js_heap_epoch;
-        ah_ns = js_new_object();
-        heap_register_gc_root(&ah_ns.item);
+    Item* namespace_item = js_module_runtime_slot(
+        JS_MODULE_RUNTIME_ASYNC_HOOKS_NAMESPACE);
+    if (!namespace_item) return ItemError;
+    if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
+        *namespace_item = js_new_object();
         RootFrame roots(6);
+        if (!roots.valid()) return ItemError;
 
         // AsyncLocalStorage class
         Rooted<Item> als_class_root(roots, js_new_native_constructor(js_als_constructor));
@@ -35816,19 +36535,19 @@ extern "C" Item js_get_async_hooks_namespace(void) {
         // Module exports
         // Constructor graphs must stay rooted until the namespace publishes
         // them; property-key creation can collect between their setup calls.
-        js_set_key_cstr(ah_ns, "AsyncLocalStorage", als_class_root.get());
-        js_set_key_cstr(ah_ns, "AsyncResource", ar_class_root.get());
+        js_set_key_cstr(*namespace_item, "AsyncLocalStorage", als_class_root.get());
+        js_set_key_cstr(*namespace_item, "AsyncResource", ar_class_root.get());
 #define JS_ASYNC_HOOK_METHODS(M) \
         M("createHook", js_ah_createHook) M("executionAsyncId", js_ah_executionAsyncId) \
         M("triggerAsyncId", js_ah_triggerAsyncId) \
         M("executionAsyncResource", js_async_hooks_get_current_resource)
-#define JS_ASYNC_HOOK_INSTALL(name, target) js_runtime_set_native_method(ah_ns, name, target);
+#define JS_ASYNC_HOOK_INSTALL(name, target) js_runtime_set_native_method(*namespace_item, name, target);
         JS_ASYNC_HOOK_METHODS(JS_ASYNC_HOOK_INSTALL)
 #undef JS_ASYNC_HOOK_INSTALL
 #undef JS_ASYNC_HOOK_METHODS
-        js_set_key_cstr(ah_ns, "default", ah_ns);
+        js_set_key_cstr(*namespace_item, "default", *namespace_item);
     }
-    return ah_ns;
+    return *namespace_item;
 }
 
 static Item js_vm_stm_string(const char* chars, int len) {
@@ -36034,14 +36753,78 @@ static Item js_vm_stm_link(Item linker) {
 }
 
 struct JsVmStmBinding {
-    char local[64];
-    char export_name[64];
+    char* local;
+    int local_len;
+    char* export_name;
+    int export_name_len;
     int dep_index;
     bool namespace_import;
 };
 
+// SourceTextModule rewrites a source only while it is being evaluated. Keep
+// its import aliases in one dynamic native ledger instead of a fixed scratch
+// table with a second, independent identifier-size limit.
+struct JsVmStmBindingList {
+    ArrayList* rows = NULL;
+
+    ~JsVmStmBindingList() {
+        if (!rows) return;
+        for (int i = 0; i < rows->length; i++) {
+            JsVmStmBinding* row = (JsVmStmBinding*)arraylist_get(rows, i);
+            if (!row) continue;
+            mem_free(row->local);
+            mem_free(row->export_name);
+            mem_free(row);
+        }
+        arraylist_free(rows);
+    }
+
+    int count() const {
+        return rows ? rows->length : 0;
+    }
+
+    const JsVmStmBinding* at(int index) const {
+        return rows ? (const JsVmStmBinding*)arraylist_get(rows, index) : NULL;
+    }
+
+    bool append(const char* local, int local_len, const char* export_name,
+            int export_name_len, int dep_index, bool namespace_import) {
+        if (local_len <= 0 || export_name_len < 0) return false;
+        if (!rows) rows = arraylist_new(8);
+        if (!rows) return false;
+        JsVmStmBinding* row = (JsVmStmBinding*)mem_calloc(1,
+            sizeof(JsVmStmBinding), MEM_CAT_JS_RUNTIME);
+        if (!row) return false;
+        row->local = mem_strndup(local, (size_t)local_len, MEM_CAT_JS_RUNTIME);
+        if (!row->local) {
+            mem_free(row);
+            return false;
+        }
+        if (export_name_len > 0) {
+            row->export_name = mem_strndup(export_name,
+                (size_t)export_name_len, MEM_CAT_JS_RUNTIME);
+            if (!row->export_name) {
+                mem_free(row->local);
+                mem_free(row);
+                return false;
+            }
+        }
+        row->local_len = local_len;
+        row->export_name_len = export_name_len;
+        row->dep_index = dep_index;
+        row->namespace_import = namespace_import;
+        if (!arraylist_append(rows, row)) {
+            mem_free(row->export_name);
+            mem_free(row->local);
+            mem_free(row);
+            return false;
+        }
+        return true;
+    }
+};
+
 static void js_vm_stm_append_rewritten(StrBuf* out, const char* src, int len,
-                                       JsVmStmBinding* bindings, int binding_count) {
+        const JsVmStmBindingList& bindings) {
     for (int i = 0; i < len; i++) {
         if (js_vm_stm_match_kw(src, len, i, "import")) {
             int p = js_vm_stm_skip_ws(src, len, i + 6);
@@ -36053,17 +36836,20 @@ static void js_vm_stm_append_rewritten(StrBuf* out, const char* src, int len,
         }
         bool replaced = false;
         if ((i == 0 || !js_vm_stm_is_ident_char(src[i - 1])) && js_vm_stm_is_ident_char(src[i])) {
-            for (int b = 0; b < binding_count; b++) {
-                int local_len = (int)strlen(bindings[b].local);
+            for (int b = 0; b < bindings.count(); b++) {
+                const JsVmStmBinding* binding = bindings.at(b);
+                if (!binding) continue;
+                int local_len = binding->local_len;
                 if (local_len > 0 && i + local_len <= len &&
-                    memcmp(src + i, bindings[b].local, local_len) == 0 &&
+                    memcmp(src + i, binding->local, local_len) == 0 &&
                     (i + local_len >= len || !js_vm_stm_is_ident_char(src[i + local_len]))) {
                     char dep_name[64];
-                    int dep_len = snprintf(dep_name, sizeof(dep_name), "__vm_dep_%d", bindings[b].dep_index);
+                    int dep_len = snprintf(dep_name, sizeof(dep_name), "__vm_dep_%d", binding->dep_index);
                     strbuf_append_str_n(out, dep_name, dep_len);
-                    if (!bindings[b].namespace_import) {
+                    if (!binding->namespace_import) {
                         strbuf_append_char(out, '.');
-                        strbuf_append_str_n(out, bindings[b].export_name, strlen(bindings[b].export_name));
+                        strbuf_append_str_n(out, binding->export_name,
+                            binding->export_name_len);
                     }
                     i += local_len - 1;
                     replaced = true;
@@ -36075,37 +36861,20 @@ static void js_vm_stm_append_rewritten(StrBuf* out, const char* src, int len,
     }
 }
 
-static void js_vm_stm_add_binding(JsVmStmBinding* bindings, int* count, int max_count,
-                                  const char* local, int local_len,
-                                  const char* export_name, int export_len,
-                                  int dep_index, bool namespace_import) {
-    if (*count >= max_count || local_len <= 0 || local_len >= 63 ||
-        export_len < 0 || export_len >= 63) return;
-    JsVmStmBinding* b = &bindings[*count];
-    memcpy(b->local, local, local_len); b->local[local_len] = '\0';
-    if (export_len > 0) memcpy(b->export_name, export_name, export_len);
-    b->export_name[export_len] = '\0';
-    b->dep_index = dep_index;
-    b->namespace_import = namespace_import;
-    (*count)++;
-}
-
-static void js_vm_stm_parse_import_bindings(const char* stmt, int len, Item deps,
-                                            JsVmStmBinding* bindings, int* binding_count) {
+static bool js_vm_stm_parse_import_bindings(const char* stmt, int len, Item deps,
+        JsVmStmBindingList* bindings) {
     const char* spec = NULL; int spec_len = 0;
-    if (!js_vm_stm_find_quoted_spec(stmt, len, &spec, &spec_len)) return;
+    if (!js_vm_stm_find_quoted_spec(stmt, len, &spec, &spec_len)) return true;
     int dep_index = js_vm_stm_dep_index(deps, spec, spec_len);
-    if (dep_index < 0) return;
+    if (dep_index < 0) return true;
     int p = js_vm_stm_skip_ws(stmt, len, 6);
-    if (p >= len || stmt[p] == '\'' || stmt[p] == '"') return;
+    if (p >= len || stmt[p] == '\'' || stmt[p] == '"') return true;
     if (stmt[p] == '*') {
         p = js_vm_stm_skip_ws(stmt, len, p + 1);
         if (p + 2 <= len && memcmp(stmt + p, "as", 2) == 0) p = js_vm_stm_skip_ws(stmt, len, p + 2);
         int start = p;
         while (p < len && js_vm_stm_is_ident_char(stmt[p])) p++;
-        js_vm_stm_add_binding(bindings, binding_count, 32, stmt + start, p - start,
-                              "", 0, dep_index, true);
-        return;
+        return bindings->append(stmt + start, p - start, "", 0, dep_index, true);
     }
     if (stmt[p] == '{') {
         p++;
@@ -36122,29 +36891,33 @@ static void js_vm_stm_parse_import_bindings(const char* stmt, int len, Item deps
                 while (p < len && js_vm_stm_is_ident_char(stmt[p])) p++;
                 local_len = p - local_start;
             }
-            js_vm_stm_add_binding(bindings, binding_count, 32, stmt + local_start, local_len,
-                                  stmt + name_start, name_len, dep_index, false);
+            if (!bindings->append(stmt + local_start, local_len,
+                    stmt + name_start, name_len, dep_index, false)) return false;
             while (p < len && stmt[p] != ',' && stmt[p] != '}') p++;
             if (p < len && stmt[p] == ',') p++;
         }
-        return;
+        return true;
     }
     int start = p;
     while (p < len && js_vm_stm_is_ident_char(stmt[p])) p++;
-    js_vm_stm_add_binding(bindings, binding_count, 32, stmt + start, p - start,
-                          "default", 7, dep_index, false);
+    return bindings->append(stmt + start, p - start, "default", 7, dep_index,
+        false);
 }
 
 static Item js_vm_stm_build_eval_source(Item self) {
-    Item source_item = js_get_key_default(self, js_vm_stm_key("__source__"));
-    Item deps = js_get_key_default(self, js_vm_stm_key("dependencySpecifiers"));
+    RootFrame roots(2);
+    Rooted<Item> source_root(roots,
+        js_get_key_default(self, js_vm_stm_key("__source__")));
+    Rooted<Item> deps_root(roots,
+        js_get_key_default(self, js_vm_stm_key("dependencySpecifiers")));
+    Item source_item = source_root.get();
+    Item deps = deps_root.get();
     if (get_type_id(source_item) != LMD_TYPE_STRING) return source_item;
     String* s = it2s(source_item);
     const char* src = s->chars;
     int len = (int)s->len;
     StrBuf* out = strbuf_new();
-    JsVmStmBinding bindings[32];
-    int binding_count = 0;
+    JsVmStmBindingList bindings;
     int64_t dep_count = js_array_length(deps);
     strbuf_append_str_n(out, "var __vm_ns=globalThis.__vm_ns;\n",
                         strlen("var __vm_ns=globalThis.__vm_ns;\n"));
@@ -36160,13 +36933,18 @@ static Item js_vm_stm_build_eval_source(Item self) {
         if (js_vm_stm_match_kw(src, len, i, "import")) {
             int p = js_vm_stm_skip_ws(src, len, i + 6);
             if (p < len && src[p] == '(') continue;
-            js_vm_stm_append_rewritten(out, src + last, i - last, bindings, binding_count);
+            js_vm_stm_append_rewritten(out, src + last, i - last, bindings);
             int end = js_vm_stm_find_statement_end(src, len, i);
-            js_vm_stm_parse_import_bindings(src + i, end - i, deps, bindings, &binding_count);
+            if (!js_vm_stm_parse_import_bindings(src + i, end - i, deps,
+                    &bindings)) {
+                strbuf_free(out);
+                return js_throw_range_error(
+                    "Cannot retain SourceTextModule import bindings");
+            }
             last = end;
             i = end - 1;
         } else if (js_vm_stm_match_kw(src, len, i, "export")) {
-            js_vm_stm_append_rewritten(out, src + last, i - last, bindings, binding_count);
+            js_vm_stm_append_rewritten(out, src + last, i - last, bindings);
             int end = js_vm_stm_find_statement_end(src, len, i);
             int p = js_vm_stm_skip_ws(src, len, i + 6);
             if (js_vm_stm_match_kw(src, len, p, "default")) {
@@ -36175,7 +36953,7 @@ static Item js_vm_stm_build_eval_source(Item self) {
                     int name_start = js_vm_stm_skip_ws(src, len, p + 8);
                     int name_end = name_start;
                     while (name_end < len && js_vm_stm_is_ident_char(src[name_end])) name_end++;
-                    js_vm_stm_append_rewritten(out, src + p, end - p, bindings, binding_count);
+                    js_vm_stm_append_rewritten(out, src + p, end - p, bindings);
                     strbuf_append_str_n(out, "\n__vm_ns.default=",
                                         strlen("\n__vm_ns.default="));
                     strbuf_append_str_n(out, src + name_start, name_end - name_start);
@@ -36190,7 +36968,7 @@ static Item js_vm_stm_build_eval_source(Item self) {
                     }
                     strbuf_append_str_n(out, "__vm_ns.default=(",
                                         strlen("__vm_ns.default=("));
-                    js_vm_stm_append_rewritten(out, src + p, expr_end - p, bindings, binding_count);
+                    js_vm_stm_append_rewritten(out, src + p, expr_end - p, bindings);
                     strbuf_append_str_n(out, ");\n", 3);
                 }
             } else if (js_vm_stm_match_kw(src, len, p, "let") ||
@@ -36200,7 +36978,7 @@ static Item js_vm_stm_build_eval_source(Item self) {
                 int name_start = js_vm_stm_skip_ws(src, len, p + kw_len);
                 int name_end = name_start;
                 while (name_end < len && js_vm_stm_is_ident_char(src[name_end])) name_end++;
-                js_vm_stm_append_rewritten(out, src + p, end - p, bindings, binding_count);
+                js_vm_stm_append_rewritten(out, src + p, end - p, bindings);
                 strbuf_append_str_n(out, "\n__vm_ns.", 9);
                 strbuf_append_str_n(out, src + name_start, name_end - name_start);
                 strbuf_append_char(out, '=');
@@ -36222,7 +37000,7 @@ static Item js_vm_stm_build_eval_source(Item self) {
             i = end - 1;
         }
     }
-    js_vm_stm_append_rewritten(out, src + last, len - last, bindings, binding_count);
+    js_vm_stm_append_rewritten(out, src + last, len - last, bindings);
     Item result = js_vm_stm_string(out->str ? out->str : "", out->length);
     strbuf_free(out);
     return result;
@@ -36358,67 +37136,97 @@ static Item js_vm_stm_evaluate(Item options) {
 }
 
 static Item js_vm_SourceTextModule_constructor(Item source, Item options) {
-    Item module = js_new_object();
-    Item source_str = js_to_string(source);
-    js_set_key_default(module, js_vm_stm_key("__source__"), source_str);
-    js_set_key_default(module, js_vm_stm_key("__vm_module__"), (Item){.item = ITEM_TRUE});
-    js_set_key_default(module, js_vm_stm_key("__evaluated__"), (Item){.item = ITEM_FALSE});
-    js_set_key_default(module, js_vm_stm_key("__error__"), make_js_undefined());
-    js_set_key_default(module, js_vm_stm_key("__linked_modules__"), js_array_new(0));
-    js_set_key_default(module, js_vm_stm_key("dependencySpecifiers"), js_vm_stm_scan_deps(source_str));
-    Item ns = js_new_object();
-    js_set_key_default(ns, js_vm_stm_key("__vm_module_namespace__"), (Item){.item = ITEM_TRUE});
-    js_mark_non_enumerable(ns, js_vm_stm_key("__vm_module_namespace__"));
-    js_set_key_default(module, js_vm_stm_key("namespace"), ns);
-    if (js_vm_is_options_object(options)) {
-        Item context_opt = js_get_key_default(options, js_vm_stm_key("context"));
-        if (get_type_id(context_opt) == LMD_TYPE_MAP) js_set_key_default(module, js_vm_stm_key("context"), context_opt);
-        Item ident = js_get_key_default(options, js_vm_stm_key("identifier"));
-        if (get_type_id(ident) == LMD_TYPE_STRING) js_set_key_default(module, js_vm_stm_key("identifier"), ident);
-        Item dyn = js_get_key_default(options, js_vm_stm_key("importModuleDynamically"));
-        if (js_is_callable(dyn)) js_set_key_default(module, js_vm_stm_key("__importModuleDynamically__"), dyn);
+    RootFrame roots(6);
+    Rooted<Item> source_root(roots, source);
+    Rooted<Item> options_root(roots, options);
+    Rooted<Item> module_root(roots, js_new_object());
+    Rooted<Item> source_str_root(roots, js_to_string(source_root.get()));
+    Rooted<Item> modules_root(roots, js_array_new(0));
+    Rooted<Item> dependencies_root(roots,
+        js_vm_stm_scan_deps(source_str_root.get()));
+    Rooted<Item> namespace_root(roots, js_new_object());
+    if (!roots.valid()) return js_throw_range_error(
+        "Cannot retain SourceTextModule construction state");
+    js_set_key_default(module_root.get(), js_vm_stm_key("__source__"),
+        source_str_root.get());
+    js_set_key_default(module_root.get(), js_vm_stm_key("__vm_module__"),
+        (Item){.item = ITEM_TRUE});
+    js_set_key_default(module_root.get(), js_vm_stm_key("__evaluated__"),
+        (Item){.item = ITEM_FALSE});
+    js_set_key_default(module_root.get(), js_vm_stm_key("__error__"),
+        make_js_undefined());
+    js_set_key_default(module_root.get(), js_vm_stm_key("__linked_modules__"),
+        modules_root.get());
+    js_set_key_default(module_root.get(), js_vm_stm_key("dependencySpecifiers"),
+        dependencies_root.get());
+    js_set_key_default(namespace_root.get(),
+        js_vm_stm_key("__vm_module_namespace__"), (Item){.item = ITEM_TRUE});
+    js_mark_non_enumerable(namespace_root.get(),
+        js_vm_stm_key("__vm_module_namespace__"));
+    js_set_key_default(module_root.get(), js_vm_stm_key("namespace"),
+        namespace_root.get());
+    if (js_vm_is_options_object(options_root.get())) {
+        Item context_opt = js_get_key_default(options_root.get(),
+            js_vm_stm_key("context"));
+        if (get_type_id(context_opt) == LMD_TYPE_MAP) js_set_key_default(
+            module_root.get(), js_vm_stm_key("context"), context_opt);
+        Item ident = js_get_key_default(options_root.get(),
+            js_vm_stm_key("identifier"));
+        if (get_type_id(ident) == LMD_TYPE_STRING) js_set_key_default(
+            module_root.get(), js_vm_stm_key("identifier"), ident);
+        Item dyn = js_get_key_default(options_root.get(),
+            js_vm_stm_key("importModuleDynamically"));
+        if (js_is_callable(dyn)) js_set_key_default(module_root.get(),
+            js_vm_stm_key("__importModuleDynamically__"), dyn);
     }
-    Item identifier = js_get_key_default(module, js_vm_stm_key("identifier"));
+    Item identifier = js_get_key_default(module_root.get(),
+        js_vm_stm_key("identifier"));
     if (get_type_id(identifier) != LMD_TYPE_STRING) {
         char buf[64];
         int len = snprintf(buf, sizeof(buf), "vm:module(%d)",
-            js_runtime_state.vm.source_text_identifier_counter++);
-        js_set_key_default(module, js_vm_stm_key("identifier"), js_vm_stm_string(buf, len));
+            js_runtime_state.modules.vm_source_text_identifier_counter++);
+        js_set_key_default(module_root.get(), js_vm_stm_key("identifier"),
+            js_vm_stm_string(buf, len));
     }
-    js_vm_stm_set_status(module, "unlinked");
-    js_runtime_set_native_key(module, js_vm_stm_key("link"), js_vm_stm_link);
-    js_runtime_set_native_key(module, js_vm_stm_key("evaluate"), js_vm_stm_evaluate);
-    return module;
+    js_vm_stm_set_status(module_root.get(), "unlinked");
+    js_runtime_set_native_key(module_root.get(), js_vm_stm_key("link"),
+        js_vm_stm_link);
+    js_runtime_set_native_key(module_root.get(), js_vm_stm_key("evaluate"),
+        js_vm_stm_evaluate);
+    return module_root.get();
 }
 
 extern "C" Item js_get_vm_namespace(void) {
-    Item& vm_ns = js_runtime_state.vm.namespace_object;
-    uint64_t& vm_epoch = js_runtime_state.vm.namespace_epoch;
-    if (vm_ns.item == 0 || vm_epoch != js_heap_epoch) {
-        vm_epoch = js_heap_epoch;
-        vm_ns = js_new_object();
-        heap_register_gc_root(&vm_ns.item);
+    Item* namespace_item = js_module_runtime_slot(JS_MODULE_RUNTIME_VM_NAMESPACE);
+    if (!namespace_item) return ItemError;
+    if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
+        *namespace_item = js_new_object();
 
 #define JS_VM_METHODS(M) \
         M("createContext", js_vm_createContext) M("isContext", js_vm_isContext) \
         M("runInThisContext", js_vm_runInThisContext) M("runInContext", js_vm_run_with_sandbox) \
         M("runInNewContext", js_vm_run_with_sandbox) M("compileFunction", js_vm_compileFunction)
-#define JS_VM_INSTALL_METHOD(name, target) js_runtime_set_native_method(vm_ns, name, target);
+#define JS_VM_INSTALL_METHOD(name, target) js_runtime_set_native_method(*namespace_item, name, target);
         JS_VM_METHODS(JS_VM_INSTALL_METHOD)
 #undef JS_VM_INSTALL_METHOD
 #undef JS_VM_METHODS
-        js_runtime_set_native_constructor_key(vm_ns, js_name_item("Script", 6), js_vm_Script_constructor);
-        js_runtime_set_native_method(vm_ns, "createScript", js_vm_Script_constructor);
-        js_runtime_set_native_constructor_key(vm_ns, js_name_item("SourceTextModule", 16), js_vm_SourceTextModule_constructor);
+        js_runtime_set_native_constructor_key(*namespace_item, js_name_item("Script", 6),
+            js_vm_Script_constructor);
+        js_runtime_set_native_method(*namespace_item, "createScript", js_vm_Script_constructor);
+        js_runtime_set_native_constructor_key(*namespace_item,
+            js_name_item("SourceTextModule", 16), js_vm_SourceTextModule_constructor);
 
         // constants sub-object
-        Item constants = js_new_object();
-        js_set_key_cstr(constants, "USE_MAIN_CONTEXT_DEFAULT_LOADER", (Item){.item = i2it(1)});
-        js_set_key_cstr(vm_ns, "constants", constants);
+        RootFrame roots(1);
+        Rooted<Item> constants_root(roots, js_new_object());
+        if (!roots.valid()) return ItemError;
+        js_set_key_cstr(constants_root.get(), "USE_MAIN_CONTEXT_DEFAULT_LOADER",
+            (Item){.item = i2it(1)});
+        js_set_key_cstr(*namespace_item, "constants", constants_root.get());
 
-        js_set_key_cstr(vm_ns, "default", vm_ns);
+        js_set_key_cstr(*namespace_item, "default", *namespace_item);
     }
-    return vm_ns;
+    return *namespace_item;
 }
 
 static Item js_cares_getaddrinfo_default(Item hostname, Item family, Item hints, Item all) {
@@ -36583,32 +37391,34 @@ extern "C" Item js_internal_binding(Item name) {
     }
 
     if (s->len == 10 && memcmp(s->chars, "cares_wrap", 10) == 0) {
-        static Item cares_obj = {0};
-        static uint64_t cares_epoch = (uint64_t)-1;
-        if (cares_obj.item == 0 || cares_epoch != js_heap_epoch) {
-            cares_epoch = js_heap_epoch;
-            cares_obj = js_new_object();
-            heap_register_gc_root(&cares_obj.item);
-            js_set_native_key(cares_obj, js_name_item("getaddrinfo", 11), js_cares_getaddrinfo_default);
+        Item* namespace_item = js_module_runtime_slot(
+            JS_MODULE_RUNTIME_INTERNAL_CARES_WRAP_NAMESPACE);
+        if (!namespace_item) return ItemError;
+        if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
+            *namespace_item = js_new_object();
+            js_set_native_key(*namespace_item, js_name_item("getaddrinfo", 11),
+                js_cares_getaddrinfo_default);
         }
-        return cares_obj;
+        return *namespace_item;
     }
 
     if (s->len == 11 && memcmp(s->chars, "stream_wrap", 11) == 0) {
-        static Item stream_wrap_obj = {0};
-        static uint64_t stream_wrap_epoch = (uint64_t)-1;
-        if (stream_wrap_obj.item == 0 || stream_wrap_epoch != js_heap_epoch) {
-            stream_wrap_epoch = js_heap_epoch;
-            stream_wrap_obj = js_new_object();
-            heap_register_gc_root(&stream_wrap_obj.item);
-
-            Item stream_base_state = js_new_object();
-            js_set_key_cstr(stream_wrap_obj, "streamBaseState", stream_base_state);
-            js_set_key_cstr(stream_wrap_obj, "kReadBytesOrError", (Item){.item = i2it(0)});
-            js_set_key_cstr(stream_wrap_obj, "kArrayBufferOffset", (Item){.item = i2it(1)});
-        js_set_native_key(stream_wrap_obj, js_name_item("ShutdownWrap", 12), js_new_object);
+        Item* namespace_item = js_module_runtime_slot(
+            JS_MODULE_RUNTIME_INTERNAL_STREAM_WRAP_NAMESPACE);
+        if (!namespace_item) return ItemError;
+        if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
+            *namespace_item = js_new_object();
+            RootFrame roots(1);
+            Rooted<Item> stream_base_state_root(roots, js_new_object());
+            if (!roots.valid()) return ItemError;
+            js_set_key_cstr(*namespace_item, "streamBaseState",
+                stream_base_state_root.get());
+            js_set_key_cstr(*namespace_item, "kReadBytesOrError", (Item){.item = i2it(0)});
+            js_set_key_cstr(*namespace_item, "kArrayBufferOffset", (Item){.item = i2it(1)});
+            js_set_native_key(*namespace_item, js_name_item("ShutdownWrap", 12),
+                js_new_object);
         }
-        return stream_wrap_obj;
+        return *namespace_item;
     }
 
     if (s->len == 2 && memcmp(s->chars, "fs", 2) == 0) {
@@ -36685,6 +37495,14 @@ static JsCommonJsCompileCacheState* js_commonjs_compile_cache_state_current(bool
 #define g_js_cc_disabled (g_js_cc_state.disabled)
 #define g_js_cc_reported (g_js_cc_state.reported)
 
+static bool js_cc_set_dir(const char* directory) {
+    char* copy = directory ? mem_strdup(directory, MEM_CAT_SYSTEM) : NULL;
+    if (directory && !copy) return false;
+    mem_free(g_js_cc_dir);
+    g_js_cc_dir = copy;
+    return true;
+}
+
 static bool js_cc_write_allowed(const char* dir) {
     return js_permission_has_fs_write(dir) != 0;
 }
@@ -36738,7 +37556,8 @@ static bool js_cc_mkdir_recursive(const char* path) {
 }
 
 static void js_cc_emit_cache_report(void) {
-    if (!g_js_cc_enabled || g_js_cc_disabled || g_js_cc_reported || !g_js_cc_dir[0]) return;
+    if (!g_js_cc_enabled || g_js_cc_disabled || g_js_cc_reported ||
+            !g_js_cc_dir || !g_js_cc_dir[0]) return;
     g_js_cc_reported = true;
 
     char cache_subdir[4096];
@@ -36762,8 +37581,9 @@ static void js_cc_init_from_env(void) {
     }
     const char* env_dir = getenv("NODE_COMPILE_CACHE");
     if (env_dir && env_dir[0]) {
-        js_cc_make_absolute(env_dir, g_js_cc_dir, (int)sizeof(g_js_cc_dir));
-        g_js_cc_enabled = true;
+        char absolute_dir[4096];
+        js_cc_make_absolute(env_dir, absolute_dir, (int)sizeof(absolute_dir));
+        if (js_cc_set_dir(absolute_dir)) g_js_cc_enabled = true;
     }
 }
 
@@ -36821,7 +37641,9 @@ extern "C" Item js_module_enable_compile_cache(Item arg) {
         return js_cc_result(0, NULL, msg);
     }
 
-    snprintf(g_js_cc_dir, sizeof(g_js_cc_dir), "%s", abs_dir);
+    if (!js_cc_set_dir(abs_dir)) {
+        return js_cc_result(0, NULL, "Unable to allocate compile cache directory");
+    }
     g_js_cc_enabled = true;
     js_cc_emit_cache_report();
     return js_cc_result(1, g_js_cc_dir, NULL);
@@ -36829,7 +37651,9 @@ extern "C" Item js_module_enable_compile_cache(Item arg) {
 
 extern "C" Item js_module_get_compile_cache_dir(void) {
     js_cc_init_from_env();
-    if (!g_js_cc_enabled || g_js_cc_disabled || !g_js_cc_dir[0]) return make_js_undefined();
+    if (!g_js_cc_enabled || g_js_cc_disabled || !g_js_cc_dir || !g_js_cc_dir[0]) {
+        return make_js_undefined();
+    }
     return js_name_item(g_js_cc_dir, strlen(g_js_cc_dir));
 }
 
@@ -36862,12 +37686,11 @@ extern "C" Item js_module_is_builtin(Item id);
 // the public specifier and obtains this namespace through that service bridge.
 extern "C" Item js_get_node_module_namespace(void) {
     js_cc_init_from_env();
-    static Item module_ns = {0};
-    static uint64_t module_epoch = (uint64_t)-1;
-    if (module_ns.item == 0 || module_epoch != js_heap_epoch) {
-        module_epoch = js_heap_epoch;
-        module_ns = js_new_object();
-        heap_register_gc_root(&module_ns.item);
+    Item* namespace_item = js_module_runtime_slot(
+        JS_MODULE_RUNTIME_NODE_MODULE_NAMESPACE);
+    if (!namespace_item) return ItemError;
+    if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
+        *namespace_item = js_new_object();
         JS_ROOTS(roots,
             builtin_modules_root, ItemNull,
             constants_root, ItemNull,
@@ -36881,7 +37704,7 @@ extern "C" Item js_get_node_module_namespace(void) {
         // Reflection follows the exact owner index used by resolution, so a
         // profile cannot advertise a legacy host fallback it does not load.
         jube_specifier_index_names(js_module_append_catalog_name, arr);
-        js_set_key_cstr(module_ns, "builtinModules", builtin_modules_root.get());
+        js_set_key_cstr(*namespace_item, "builtinModules", builtin_modules_root.get());
         extern Item js_module_create_require(Item filename);
         extern Item js_module_enable_compile_cache(Item arg);
         extern Item js_module_get_compile_cache_dir(void);
@@ -36891,7 +37714,7 @@ extern "C" Item js_get_node_module_namespace(void) {
         M("enableCompileCache", js_module_enable_compile_cache) \
         M("getCompileCacheDir", js_module_get_compile_cache_dir) \
         M("flushCompileCache", js_module_flush_compile_cache)
-#define JS_MODULE_INSTALL_METHOD(name, target) js_set_native_method(module_ns, name, target);
+#define JS_MODULE_INSTALL_METHOD(name, target) js_set_native_method(*namespace_item, name, target);
         JS_MODULE_METHODS(JS_MODULE_INSTALL_METHOD)
 #undef JS_MODULE_INSTALL_METHOD
 #undef JS_MODULE_METHODS
@@ -36902,22 +37725,22 @@ extern "C" Item js_get_node_module_namespace(void) {
         js_set_key_default(status_root.get(), js_cc_key("ALREADY_ENABLED"), (Item){.item = i2it(2)});
         js_set_key_default(status_root.get(), js_cc_key("DISABLED"), (Item){.item = i2it(3)});
         js_set_key_default(constants_root.get(), js_cc_key("compileCacheStatus"), status_root.get());
-        js_set_key_default(module_ns, js_cc_key("constants"), constants_root.get());
+        js_set_key_default(*namespace_item, js_cc_key("constants"), constants_root.get());
         // Module constructor stub
-        js_set_key_cstr(module_ns, "Module", module_ns);
+        js_set_key_cstr(*namespace_item, "Module", *namespace_item);
         // default export is the module object itself
-        js_set_key_cstr(module_ns, "default", module_ns);
+        js_set_key_cstr(*namespace_item, "default", *namespace_item);
     }
     js_cc_emit_cache_report();
-    return module_ns;
+    return *namespace_item;
 }
 
 extern "C" Item js_get_domain_namespace(void) {
-    static uint64_t dom_epoch = (uint64_t)-1;
-    if (js_domain_namespace.item == 0 || dom_epoch != js_heap_epoch) {
-        dom_epoch = js_heap_epoch;
+    if (js_domain_namespace.item == 0) {
+        if (!js_root_range_ensure_registered(&js_runtime_state.promises.roots)) {
+            return ItemError;
+        }
         js_domain_namespace = js_new_object();
-        heap_register_gc_root(&js_domain_namespace.item);
         js_set_native_key(js_domain_namespace, js_name_item("create", 6), js_domain_create);
         js_set_native_key(js_domain_namespace, js_name_item("createDomain", 12), js_domain_create);
         js_runtime_set_native_constructor_key(js_domain_namespace, js_name_item("Domain", 6), js_domain_create);
@@ -36928,51 +37751,51 @@ extern "C" Item js_get_domain_namespace(void) {
 }
 
 extern "C" Item js_get_cluster_namespace(void) {
-    static Item cl_ns = {0};
-    static uint64_t cl_epoch = (uint64_t)-1;
-    static bool cl_worker_mode = false;
+    Item* namespace_item = js_module_runtime_slot(
+        JS_MODULE_RUNTIME_CLUSTER_NAMESPACE);
+    if (!namespace_item) return ItemError;
     bool is_worker = js_cluster_is_worker_process();
-    if (cl_ns.item == 0 || cl_epoch != js_heap_epoch || cl_worker_mode != is_worker) {
-        cl_epoch = js_heap_epoch;
-        cl_worker_mode = is_worker;
-        cl_ns = js_new_object();
-        heap_register_gc_root(&cl_ns.item);
-        js_set_key_cstr(cl_ns, "isPrimary", (Item){.item = b2it(!is_worker)});
-        js_set_key_cstr(cl_ns, "isMaster", (Item){.item = b2it(!is_worker)});
-        js_set_key_cstr(cl_ns, "isWorker", (Item){.item = b2it(is_worker)});
+    if (get_type_id(*namespace_item) == LMD_TYPE_NULL ||
+            js_runtime_state.cluster.namespace_is_worker != is_worker) {
+        js_runtime_state.cluster.namespace_is_worker = is_worker;
+        *namespace_item = js_new_object();
+        js_set_key_cstr(*namespace_item, "isPrimary", (Item){.item = b2it(!is_worker)});
+        js_set_key_cstr(*namespace_item, "isMaster", (Item){.item = b2it(!is_worker)});
+        js_set_key_cstr(*namespace_item, "isWorker", (Item){.item = b2it(is_worker)});
         if (is_worker) {
             // Cluster workers are selected by the inherited worker id, not
             // argv; otherwise the worker re-enters primary/testcase code.
-            js_set_key_cstr(cl_ns, "worker", js_cluster_make_worker_object());
+            js_set_key_cstr(*namespace_item, "worker", js_cluster_make_worker_object());
         }
 #define JS_CLUSTER_METHODS(M) \
         M("setupPrimary", js_cluster_setup_primary) M("setupMaster", js_cluster_setup_primary) \
         M("fork", js_cluster_fork)
-#define JS_CLUSTER_INSTALL(name, target) js_set_native_method(cl_ns, name, target);
+#define JS_CLUSTER_INSTALL(name, target) js_set_native_method(*namespace_item, name, target);
         JS_CLUSTER_METHODS(JS_CLUSTER_INSTALL)
 #undef JS_CLUSTER_INSTALL
 #undef JS_CLUSTER_METHODS
-        js_set_key_cstr(cl_ns, "default", cl_ns);
+        js_set_key_cstr(*namespace_item, "default", *namespace_item);
     }
-    return cl_ns;
+    return *namespace_item;
 }
 
 extern "C" Item js_get_repl_namespace(void) {
-    static Item repl_namespace = {0};
-    static uint64_t repl_epoch = (uint64_t)-1;
-    if (repl_namespace.item != 0 && repl_epoch == js_heap_epoch) return repl_namespace;
-    repl_epoch = js_heap_epoch;
-    repl_namespace = js_new_object();
-    heap_register_gc_root(&repl_namespace.item);
+    Item* namespace_item = js_module_runtime_slot(
+        JS_MODULE_RUNTIME_REPL_NAMESPACE);
+    if (!namespace_item) return ItemError;
+    if (get_type_id(*namespace_item) != LMD_TYPE_NULL) return *namespace_item;
+    *namespace_item = js_new_object();
     // The host owns REPL evaluation and terminal I/O; node-core publishes its
     // observable namespace through the resolver boundary.
-    js_set_native_key(repl_namespace, js_name_item("start", 5), js_repl_start);
-    js_runtime_set_native_constructor_key(repl_namespace, js_name_item("REPLServer", 10), js_repl_start);
-    js_set_key_cstr(repl_namespace, "REPL_MODE_SLOPPY", js_name_item("sloppy", 6));
-    js_set_key_cstr(repl_namespace, "REPL_MODE_STRICT", js_name_item("strict", 6));
-    js_runtime_set_native_constructor_key(repl_namespace, js_name_item("Recoverable", 11), js_repl_recoverable_ctor);
-    js_set_key_cstr(repl_namespace, "default", repl_namespace);
-    return repl_namespace;
+    js_set_native_key(*namespace_item, js_name_item("start", 5), js_repl_start);
+    js_runtime_set_native_constructor_key(*namespace_item, js_name_item("REPLServer", 10),
+        js_repl_start);
+    js_set_key_cstr(*namespace_item, "REPL_MODE_SLOPPY", js_name_item("sloppy", 6));
+    js_set_key_cstr(*namespace_item, "REPL_MODE_STRICT", js_name_item("strict", 6));
+    js_runtime_set_native_constructor_key(*namespace_item, js_name_item("Recoverable", 11),
+        js_repl_recoverable_ctor);
+    js_set_key_cstr(*namespace_item, "default", *namespace_item);
+    return *namespace_item;
 }
 
 extern "C" Item js_get_diagnostics_channel_namespace(void) {
@@ -37021,12 +37844,12 @@ extern "C" Item js_get_diagnostics_channel_namespace(void) {
 
 typedef void (*JsInternalNamespacePopulate)(Item);
 
-static Item js_get_internal_namespace(Item* namespace_item, uint64_t* namespace_epoch,
+static Item js_get_internal_namespace(JsModuleRuntimeSlot slot,
         JsInternalNamespacePopulate populate) {
-    if (namespace_item->item == 0 || *namespace_epoch != js_heap_epoch) {
-        *namespace_epoch = js_heap_epoch;
+    Item* namespace_item = js_module_runtime_slot(slot);
+    if (!namespace_item) return ItemError;
+    if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
         *namespace_item = js_new_object();
-        heap_register_gc_root(&namespace_item->item);
         populate(*namespace_item);
         js_set_key_cstr(*namespace_item, "default", *namespace_item);
     }
@@ -37051,57 +37874,38 @@ static void js_populate_internal_repl_namespace(Item namespace_item) {
 }
 
 extern "C" Item js_get_internal_crypto_util_namespace(void) {
-    static Item namespace_item = {0};
-    static uint64_t namespace_epoch = (uint64_t)-1;
-    return js_get_internal_namespace(&namespace_item, &namespace_epoch,
+    return js_get_internal_namespace(JS_MODULE_RUNTIME_INTERNAL_CRYPTO_UTIL_NAMESPACE,
         js_populate_internal_crypto_util_namespace);
 }
 
 extern "C" Item js_get_internal_util_namespace(void) {
-    static Item namespace_item = {0};
-    static uint64_t namespace_epoch = (uint64_t)-1;
-    return js_get_internal_namespace(&namespace_item, &namespace_epoch,
+    return js_get_internal_namespace(JS_MODULE_RUNTIME_INTERNAL_UTIL_NAMESPACE,
         js_populate_internal_util_namespace);
 }
 
 extern "C" Item js_get_internal_util_inspect_namespace(void) {
-    static Item namespace_item = {0};
-    static uint64_t namespace_epoch = (uint64_t)-1;
-    return js_get_internal_namespace(&namespace_item, &namespace_epoch,
+    return js_get_internal_namespace(JS_MODULE_RUNTIME_INTERNAL_UTIL_INSPECT_NAMESPACE,
         js_populate_internal_util_inspect_namespace);
 }
 
 extern "C" Item js_get_internal_repl_namespace(void) {
-    static Item namespace_item = {0};
-    static uint64_t namespace_epoch = (uint64_t)-1;
-    return js_get_internal_namespace(&namespace_item, &namespace_epoch,
+    return js_get_internal_namespace(JS_MODULE_RUNTIME_INTERNAL_REPL_NAMESPACE,
         js_populate_internal_repl_namespace);
 }
 
 extern "C" Item js_get_internal_test_binding_namespace(void) {
-    static Item itb_ns = {0};
-    static uint64_t itb_epoch = (uint64_t)-1;
-    static uint64_t itb_warning_epoch = (uint64_t)-1;
-    static bool itb_warning_scheduled = false;
-    static bool itb_populated = false;
-    if (!itb_populated || itb_epoch != js_heap_epoch) {
-        itb_ns = js_get_internal_namespace(&itb_ns, &itb_epoch,
-            [](Item namespace_item) {
-                js_set_native_key(namespace_item,
-                    js_name_item("internalBinding", 15),
-                    js_internal_binding);
-            });
-        itb_populated = true;
-    }
-    if (itb_warning_epoch != js_heap_epoch) {
-        itb_warning_epoch = js_heap_epoch;
-        itb_warning_scheduled = false;
-    }
-    if (!itb_warning_scheduled) {
-        itb_warning_scheduled = true;
+    Item namespace_item = js_get_internal_namespace(
+        JS_MODULE_RUNTIME_INTERNAL_TEST_BINDING_NAMESPACE,
+        [](Item value) {
+            js_set_native_key(value, js_name_item("internalBinding", 15),
+                js_internal_binding);
+        });
+    if (item_is_error(namespace_item)) return namespace_item;
+    if (!js_runtime_state.modules.internal_test_binding_warning_scheduled) {
+        js_runtime_state.modules.internal_test_binding_warning_scheduled = true;
         js_next_tick_enqueue(js_new_native_function(js_emit_internal_test_binding_warning));
     }
-    return itb_ns;
+    return namespace_item;
 }
 
 extern "C" Item js_module_get_builtin(Item specifier) {
@@ -37621,16 +38425,12 @@ void js_deep_batch_reset() {
     js_domain_current = (Item){0};
     js_domain_namespace = (Item){0};
     js_item_stack_clear(&js_domain_stack_state);
-    memset(js_als_instances, 0, sizeof(js_als_instances));
-    js_als_instance_count = 0;
-    js_async_hooks_enabled_count = 0;
+    root_vector_clear(js_als_instances);
     js_async_hooks_root_resource = (Item){0};
     js_async_hooks_current_resource = (Item){0};
     js_async_hooks_next_id = 2;
-    memset(js_async_hooks, 0, sizeof(js_async_hooks));
-    js_async_hook_count = 0;
-    memset(js_async_pending_destroy_resources, 0, sizeof(js_async_pending_destroy_resources));
-    js_async_pending_destroy_count = 0;
+    root_vector_clear(&js_async_hook_values);
+    root_vector_clear(&js_async_pending_destroy_values);
     js_async_resolved_value = (Item){0};
     js_reset_transient_call_state();
     // generator proto caches point into old heap — must reset

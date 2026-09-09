@@ -63,6 +63,10 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 Symbol* heap_create_symbol(const char* symbol);
 void heap_destroy();
 void expand_list(List *list, Arena* arena = nullptr);
+// Reserve enough backing for verbatim appends without changing array_push's
+// content and scalar-tail semantics. The caller must retain the array through
+// a Rooted owner (or an external arena owner) across this allocating call.
+bool array_reserve_append_slots(Array* array, int64_t append_count);
 
 extern "C" {
 #ifndef WASM_BUILD

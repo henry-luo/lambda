@@ -46,14 +46,16 @@ static JsPermissionPolicy* js_permission_policy_mutable() {
     if (policy) return policy;
     jube_modules_runtime_attach();
     void* session = jube_node_runtime_current_session();
-    policy = session ? jube_node_permission_policy(session) : NULL;
+    policy = session ? jube_node_permission_policy_ensure(session) : NULL;
     if (!policy) {
         // The bootstrap policy remains available if the optional Node session
         // cannot be attached; callers still observe the command-line policy.
         return &js_permission_bootstrap_policy;
     }
     if (!policy->initialized) {
-        memcpy(policy, &js_permission_bootstrap_policy, sizeof(*policy));
+        if (!js_permission_policy_copy(policy, &js_permission_bootstrap_policy)) {
+            return &js_permission_bootstrap_policy;
+        }
         policy->initialized = true;
     }
     return policy;
@@ -65,8 +67,6 @@ static JsPermissionPolicy* js_permission_policy_mutable() {
 #define g_permission_inspector (js_permission_policy_current()->inspector)
 #define g_permission_addon (js_permission_policy_current()->addon)
 #define g_permission_wasi (js_permission_policy_current()->wasi)
-#define g_fs_read_grants (js_permission_policy_current()->fs_read_grants)
-#define g_fs_write_grants (js_permission_policy_current()->fs_write_grants)
 
 static Item js_perm_string_item(const char* str) {
     if (!str) str = "";
@@ -83,14 +83,41 @@ static bool js_perm_scope_equals(Item value, const char* lit) {
     return s->len == len && memcmp(s->chars, lit, len) == 0;
 }
 
-static void js_permission_clear_grants(JsPermissionGrant* grants) {
-    for (int i = 0; i < JS_PERMISSION_MAX_GRANTS; i++) {
-        grants[i].path[0] = '\0';
-        grants[i].wildcard_all = false;
-        grants[i].wildcard_prefix = false;
-        grants[i].directory = false;
-        grants[i].active = false;
+static void js_permission_clear_grants(JsPermissionPolicy* policy) {
+    if (!policy || !policy->grants) return;
+    for (int i = 0; i < policy->grants->length; i++) {
+        JsPermissionGrant* grant =
+            (JsPermissionGrant*)arraylist_get(policy->grants, i);
+        if (!grant) continue;
+        mem_free(grant->path);
+        mem_free(grant);
     }
+    arraylist_free(policy->grants);
+    policy->grants = NULL;
+}
+
+void js_permission_policy_destroy(JsPermissionPolicy* policy) {
+    if (!policy) return;
+    js_permission_clear_grants(policy);
+    memset(policy, 0, sizeof(*policy));
+}
+
+void js_permission_shutdown(void) {
+    // Command-line policy is process-owned, unlike the lazy session copies.
+    js_permission_policy_destroy(&js_permission_bootstrap_policy);
+}
+
+static bool js_permission_append_grant(JsPermissionPolicy* policy,
+                                       JsPermissionGrant* grant) {
+    if (!policy || !grant) return false;
+    if (!policy->grants) {
+        policy->grants = arraylist_new(4);
+        if (!policy->grants) return false;
+    }
+    if (arraylist_append(policy->grants, grant)) return true;
+    mem_free(grant->path);
+    mem_free(grant);
+    return false;
 }
 
 extern "C" void js_permission_reset(void) {
@@ -103,8 +130,7 @@ extern "C" void js_permission_reset(void) {
     policy->inspector = false;
     policy->addon = false;
     policy->wasi = false;
-    js_permission_clear_grants(policy->fs_read_grants);
-    js_permission_clear_grants(policy->fs_write_grants);
+    js_permission_clear_grants(policy);
 }
 
 JS_FORWARD_EXPRESSION(int, js_permission_enabled, (void), g_permission_enabled ? 1 : 0)
@@ -170,30 +196,12 @@ static bool js_perm_path_is_dir(const char* path) {
     return S_ISDIR(st.st_mode);
 }
 
-static void js_permission_add_grant(JsPermissionGrant* grants, const char* raw) {
-    if (!raw || !raw[0]) return;
-    for (int i = 0; i < JS_PERMISSION_MAX_GRANTS; i++) {
-        if (!grants[i].active) {
-            JsPermissionGrant* grant = &grants[i];
-            grant->active = true;
-            grant->wildcard_all = strcmp(raw, "*") == 0;
-            grant->wildcard_prefix = false;
-            grant->directory = false;
-            grant->path[0] = '\0';
-            if (grant->wildcard_all) return;
-
-            char temp[PATH_MAX];
-            snprintf(temp, sizeof(temp), "%s", raw);
-            int len = (int)strlen(temp);
-            if (len > 0 && temp[len - 1] == '*') {
-                grant->wildcard_prefix = true;
-                temp[len - 1] = '\0';
-            }
-            js_perm_normalize_absolute(temp, grant->path, sizeof(grant->path));
-            grant->directory = js_perm_path_is_dir(grant->path);
-            return;
-        }
-    }
+static bool js_permission_grant_same(const JsPermissionGrant* grant,
+                                     const char* path, uint8_t shape_flags) {
+    if (!grant || (grant->flags & ~(JS_PERMISSION_GRANT_READ |
+            JS_PERMISSION_GRANT_WRITE)) != shape_flags) return false;
+    if (!path) return grant->path == NULL;
+    return grant->path && strcmp(grant->path, path) == 0;
 }
 
 static const char* js_permission_flag_value(const char* arg, const char* name) {
@@ -204,7 +212,54 @@ static const char* js_permission_flag_value(const char* arg, const char* name) {
     return NULL;
 }
 
-static void js_permission_add_grant_values(JsPermissionGrant* grants, const char* values) {
+static void js_permission_add_grant(JsPermissionPolicy* policy, uint8_t access,
+                                    const char* raw) {
+    if (!policy || !raw || !raw[0]) return;
+    uint8_t shape_flags = 0;
+    char normalized[PATH_MAX] = {};
+    const char* path = normalized;
+    if (strcmp(raw, "*") == 0) {
+        shape_flags = JS_PERMISSION_GRANT_WILDCARD_ALL;
+        path = NULL;
+    } else {
+        char temp[PATH_MAX];
+        snprintf(temp, sizeof(temp), "%s", raw);
+        int len = (int)strlen(temp);
+        if (len > 0 && temp[len - 1] == '*') {
+            shape_flags |= JS_PERMISSION_GRANT_WILDCARD_PREFIX;
+            temp[len - 1] = '\0';
+        }
+        js_perm_normalize_absolute(temp, normalized, (int)sizeof(normalized));
+        if (js_perm_path_is_dir(normalized)) {
+            shape_flags |= JS_PERMISSION_GRANT_DIRECTORY;
+        }
+    }
+
+    if (policy->grants) {
+        for (int i = 0; i < policy->grants->length; i++) {
+            JsPermissionGrant* grant =
+                (JsPermissionGrant*)arraylist_get(policy->grants, i);
+            if (js_permission_grant_same(grant, path, shape_flags)) {
+                grant->flags |= access;
+                return;
+            }
+        }
+    }
+
+    JsPermissionGrant* grant =
+        (JsPermissionGrant*)mem_calloc(1, sizeof(JsPermissionGrant), MEM_CAT_SYSTEM);
+    if (!grant) return;
+    grant->path = path ? mem_strdup(path, MEM_CAT_SYSTEM) : NULL;
+    if (path && !grant->path) {
+        mem_free(grant);
+        return;
+    }
+    grant->flags = (uint8_t)(shape_flags | access);
+    js_permission_append_grant(policy, grant);
+}
+
+static void js_permission_add_grant_values(JsPermissionPolicy* policy, uint8_t access,
+                                           const char* values) {
     if (!values || !values[0]) return;
     const char* p = values;
     while (*p) {
@@ -216,7 +271,7 @@ static void js_permission_add_grant_values(JsPermissionGrant* grants, const char
             if (len >= (int)sizeof(one)) len = (int)sizeof(one) - 1;
             memcpy(one, start, len);
             one[len] = '\0';
-            js_permission_add_grant(grants, one);
+            js_permission_add_grant(policy, access, one);
         }
         if (*p == ',') p++;
     }
@@ -233,8 +288,7 @@ extern "C" void js_permission_init_from_argv(int argc, const char** argv) {
     policy->inspector = false;
     policy->addon = false;
     policy->wasi = false;
-    js_permission_clear_grants(policy->fs_read_grants);
-    js_permission_clear_grants(policy->fs_write_grants);
+    js_permission_clear_grants(policy);
     for (int i = 0; i < argc; i++) {
         const char* arg = argv[i];
         if (!arg) continue;
@@ -255,31 +309,71 @@ extern "C" void js_permission_init_from_argv(int argc, const char** argv) {
             const char* write_val = js_permission_flag_value(arg, "--allow-fs-write");
             if (read_val) {
                 if (!read_val[0] && i + 1 < argc) read_val = argv[++i];
-                js_permission_add_grant_values(policy->fs_read_grants, read_val);
+                js_permission_add_grant_values(policy, JS_PERMISSION_GRANT_READ, read_val);
             } else if (write_val) {
                 if (!write_val[0] && i + 1 < argc) write_val = argv[++i];
-                js_permission_add_grant_values(policy->fs_write_grants, write_val);
+                js_permission_add_grant_values(policy, JS_PERMISSION_GRANT_WRITE, write_val);
             }
         }
     }
     void* session = jube_node_runtime_current_session();
-    JsPermissionPolicy* session_policy = session ? jube_node_permission_policy(session) : NULL;
-    if (session_policy) {
-        memcpy(session_policy, &js_permission_bootstrap_policy, sizeof(*session_policy));
+    JsPermissionPolicy* session_policy =
+        session ? jube_node_permission_policy_ensure(session) : NULL;
+    if (session_policy && js_permission_policy_copy(session_policy,
+                                                     &js_permission_bootstrap_policy)) {
         session_policy->initialized = true;
     }
 }
 
-static bool js_permission_grant_matches(JsPermissionGrant* grant, const char* normalized) {
-    if (!grant->active) return false;
-    if (grant->wildcard_all) return true;
+bool js_permission_policy_copy(JsPermissionPolicy* dst, const JsPermissionPolicy* src) {
+    if (!dst || !src) return false;
+    if (dst == src) return true;
+    js_permission_policy_destroy(dst);
+    dst->initialized = src->initialized;
+    dst->enabled = src->enabled;
+    dst->child_process = src->child_process;
+    dst->net = src->net;
+    dst->inspector = src->inspector;
+    dst->addon = src->addon;
+    dst->wasi = src->wasi;
+    if (!src->grants) return true;
+    for (int i = 0; i < src->grants->length; i++) {
+        const JsPermissionGrant* grant =
+            (const JsPermissionGrant*)arraylist_get(src->grants, i);
+        if (!grant) continue;
+        JsPermissionGrant* copy =
+            (JsPermissionGrant*)mem_calloc(1, sizeof(JsPermissionGrant), MEM_CAT_SYSTEM);
+        if (!copy) {
+            js_permission_policy_destroy(dst);
+            return false;
+        }
+        copy->path = grant->path ? mem_strdup(grant->path, MEM_CAT_SYSTEM) : NULL;
+        if (grant->path && !copy->path) {
+            mem_free(copy);
+            js_permission_policy_destroy(dst);
+            return false;
+        }
+        copy->flags = grant->flags;
+        if (!js_permission_append_grant(dst, copy)) {
+            js_permission_policy_destroy(dst);
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool js_permission_grant_matches(const JsPermissionGrant* grant,
+                                        uint8_t access, const char* normalized) {
+    if (!grant || !(grant->flags & access)) return false;
+    if (grant->flags & JS_PERMISSION_GRANT_WILDCARD_ALL) return true;
     if (!normalized || !normalized[0]) return false;
+    if (!grant->path) return false;
     int grant_len = (int)strlen(grant->path);
-    if (grant->wildcard_prefix) {
+    if (grant->flags & JS_PERMISSION_GRANT_WILDCARD_PREFIX) {
         return strncmp(normalized, grant->path, grant_len) == 0;
     }
     if (strcmp(normalized, grant->path) == 0) return true;
-    if (grant->directory && grant_len > 1 &&
+    if ((grant->flags & JS_PERMISSION_GRANT_DIRECTORY) && grant_len > 1 &&
         strncmp(normalized, grant->path, grant_len) == 0 &&
         normalized[grant_len] == '/') {
         return true;
@@ -287,51 +381,66 @@ static bool js_permission_grant_matches(JsPermissionGrant* grant, const char* no
     return false;
 }
 
-static bool js_permission_grants_have_all(JsPermissionGrant* grants) {
-    for (int i = 0; i < JS_PERMISSION_MAX_GRANTS; i++) {
-        if (grants[i].active && grants[i].wildcard_all) return true;
+static bool js_permission_grants_have_all(const JsPermissionPolicy* policy,
+                                          uint8_t access) {
+    if (!policy || !policy->grants) return false;
+    for (int i = 0; i < policy->grants->length; i++) {
+        const JsPermissionGrant* grant =
+            (const JsPermissionGrant*)arraylist_get(policy->grants, i);
+        if (grant && (grant->flags & access) &&
+                (grant->flags & JS_PERMISSION_GRANT_WILDCARD_ALL)) return true;
     }
     return false;
 }
 
-static bool js_permission_has_grant(JsPermissionGrant* grants, const char* path) {
+static bool js_permission_has_grant(const JsPermissionPolicy* policy, uint8_t access,
+                                    const char* path) {
     if (!g_permission_enabled) return true;
-    if (!path) return js_permission_grants_have_all(grants);
+    if (!path) return js_permission_grants_have_all(policy, access);
     char normalized[PATH_MAX];
     js_perm_normalize_absolute(path, normalized, sizeof(normalized));
-    for (int i = 0; i < JS_PERMISSION_MAX_GRANTS; i++) {
-        if (js_permission_grant_matches(&grants[i], normalized)) return true;
+    if (!policy || !policy->grants) return false;
+    for (int i = 0; i < policy->grants->length; i++) {
+        const JsPermissionGrant* grant =
+            (const JsPermissionGrant*)arraylist_get(policy->grants, i);
+        if (js_permission_grant_matches(grant, access, normalized)) return true;
     }
     return false;
 }
 
 JS_FORWARD_STATIC_EXPRESSION(int, js_permission_has_fs_grant,
-    (const char* path, JsPermissionGrant* grants),
-    js_permission_has_grant(grants, path) ? 1 : 0)
+    (const char* path, uint8_t access),
+    js_permission_has_grant(js_permission_policy_current(), access, path) ? 1 : 0)
 
 JS_FORWARD_STATIC_EXPRESSION(int, js_permission_has_full_fs_grant,
-    (JsPermissionGrant* grants),
-    (!g_permission_enabled || js_permission_grants_have_all(grants)) ? 1 : 0)
+    (uint8_t access),
+    (!g_permission_enabled || js_permission_grants_have_all(
+        js_permission_policy_current(), access)) ? 1 : 0)
 
 JS_FORWARD_RETURN(int, js_permission_has_fs_read, (const char* path),
-    js_permission_has_fs_grant, (path, g_fs_read_grants))
+    js_permission_has_fs_grant, (path, JS_PERMISSION_GRANT_READ))
 JS_FORWARD_RETURN(int, js_permission_has_fs_write, (const char* path),
-    js_permission_has_fs_grant, (path, g_fs_write_grants))
+    js_permission_has_fs_grant, (path, JS_PERMISSION_GRANT_WRITE))
 JS_FORWARD_RETURN(int, js_permission_has_full_fs_read, (void),
-    js_permission_has_full_fs_grant, (g_fs_read_grants))
+    js_permission_has_full_fs_grant, (JS_PERMISSION_GRANT_READ))
 JS_FORWARD_RETURN(int, js_permission_has_full_fs_write, (void),
-    js_permission_has_full_fs_grant, (g_fs_write_grants))
+    js_permission_has_full_fs_grant, (JS_PERMISSION_GRANT_WRITE))
 
-static void js_permission_drop_grants(JsPermissionGrant* grants, const char* path) {
-    if (!path) {
-        js_permission_clear_grants(grants);
-        return;
-    }
+static void js_permission_drop_grants(JsPermissionPolicy* policy, uint8_t access,
+                                      const char* path) {
+    if (!policy || !policy->grants) return;
     char normalized[PATH_MAX];
-    js_perm_normalize_absolute(path, normalized, sizeof(normalized));
-    for (int i = 0; i < JS_PERMISSION_MAX_GRANTS; i++) {
-        if (!grants[i].active || grants[i].wildcard_all) continue;
-        if (strcmp(grants[i].path, normalized) == 0) grants[i].active = false;
+    if (path) js_perm_normalize_absolute(path, normalized, sizeof(normalized));
+    for (int i = policy->grants->length - 1; i >= 0; i--) {
+        JsPermissionGrant* grant =
+            (JsPermissionGrant*)arraylist_get(policy->grants, i);
+        if (!grant || !(grant->flags & access)) continue;
+        if (path && (!grant->path || strcmp(grant->path, normalized) != 0)) continue;
+        grant->flags &= (uint8_t)~access;
+        if (grant->flags & (JS_PERMISSION_GRANT_READ | JS_PERMISSION_GRANT_WRITE)) continue;
+        mem_free(grant->path);
+        mem_free(grant);
+        arraylist_remove(policy->grants, i);
     }
 }
 
@@ -358,9 +467,9 @@ extern "C" Item js_process_permission_has(Item scope_item, Item resource_item) {
             if (!js_perm_item_to_cstr(resource_item, resource, sizeof(resource))) return (Item){.item = ITEM_FALSE};
             path = resource;
         }
-        bool ok = kind == JS_PERMISSION_FS_READ
-            ? js_permission_has_grant(g_fs_read_grants, path)
-            : js_permission_has_grant(g_fs_write_grants, path);
+        bool ok = js_permission_has_grant(js_permission_policy_current(),
+            kind == JS_PERMISSION_FS_READ ? JS_PERMISSION_GRANT_READ :
+                                            JS_PERMISSION_GRANT_WRITE, path);
         return (Item){.item = b2it(ok)};
     }
     if (js_perm_scope_equals(scope_item, "child")) {
@@ -393,8 +502,8 @@ extern "C" Item js_process_permission_drop(Item scope_item, Item resource_item) 
         if (!js_perm_item_to_cstr(resource_item, resource, sizeof(resource))) return (Item){.item = ITEM_FALSE};
         path = resource;
     }
-    js_permission_drop_grants(kind == JS_PERMISSION_FS_READ
-            ? policy->fs_read_grants : policy->fs_write_grants, path);
+    js_permission_drop_grants(policy, kind == JS_PERMISSION_FS_READ
+            ? JS_PERMISSION_GRANT_READ : JS_PERMISSION_GRANT_WRITE, path);
     return (Item){.item = ITEM_TRUE};
 }
 
@@ -445,5 +554,3 @@ extern "C" Item js_permission_check_fs_write(const char* path) {
 #undef g_permission_inspector
 #undef g_permission_addon
 #undef g_permission_wasi
-#undef g_fs_read_grants
-#undef g_fs_write_grants

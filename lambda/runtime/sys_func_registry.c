@@ -28,6 +28,9 @@
 extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT, TYPE_COMPLEX;
 extern Type TYPE_STRING, TYPE_SYMBOL, TYPE_DTIME, TYPE_ANY, TYPE_ERROR, TYPE_TYPE;
 extern Type TYPE_NUMBER, TYPE_DECIMAL, TYPE_BINARY;
+// The registry is C while TypeArray is a C++ extension of Type. The exported
+// object's Type prefix is enough here; AST consumers see the full TypeArray.
+extern Type TYPE_ARRAY;
 // NOTE: do NOT reach for `TYPE_LIST` as a success_type here. It is a bare
 // `Type` singleton ({.type_id = LMD_TYPE_ARRAY}), but consumers of an
 // ARRAY-typed Type* cast it to `TypeArray*` and read `->nested` — past the end
@@ -289,7 +292,7 @@ SysFuncInfo sys_func_defs[] = {
     // to LMD_TYPE_INT64 rather than the NUM_SIZED family that makes the
     // others callable, so it needs this explicit row.
     {SYSFUNC_INT64, "i64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_ITEM, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0,
+     C_RET_ITEM, C_ARG_ITEM, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0,
      false, &TYPE_INT64, true},
 
     {SYSFUNC_FLOAT, "float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
@@ -619,11 +622,15 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_URL_RESOLVE, "url_resolve", 2, &TYPE_STRING, false, false, false, LMD_TYPE_STRING, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_url_resolve", FPTR(fn_url_resolve), NULL, NULL, false, 0},
 
-    {SYSFUNC_SPLIT, "split", 2, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_split2", FPTR(fn_split), NULL, NULL, false, 0},
+    {SYSFUNC_SPLIT, "split", 2, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_split2", FPTR(fn_split), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ (Type*)&TYPE_ARRAY, /* may_error */ true,
+     /* result */ SYS_RESULT_TEXT_SPLIT},
 
-    {SYSFUNC_SPLIT3, "split", 3, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_split3", FPTR(fn_split3), NULL, NULL, false, 0},
+    {SYSFUNC_SPLIT3, "split", 3, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_split3", FPTR(fn_split3), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ (Type*)&TYPE_ARRAY, /* may_error */ true,
+     /* result */ SYS_RESULT_TEXT_SPLIT},
 
     {SYSFUNC_JOIN, "join", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_join2", FPTR(fn_join2), NULL, NULL, false, 0},
@@ -1061,10 +1068,10 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_INT64, C_ARG_NATIVE, "fn_bnot", FPTR(fn_bnot), NULL, NULL, false, 0},
 
     {SYSFUNC_SHL, "shl", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_NATIVE, "fn_shl", FPTR(fn_shl), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_shl_item", FPTR(fn_shl_item), NULL, NULL, false, 0},
 
     {SYSFUNC_SHR, "shr", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_NATIVE, "fn_shr", FPTR(fn_shr), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_shr_item", FPTR(fn_shr_item), NULL, NULL, false, 0},
 
     {SYSFUNC_USHR, "ushr", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_ushr_item", FPTR(fn_ushr_item), NULL, NULL, false, 0},
@@ -1568,12 +1575,6 @@ JitImport jit_runtime_imports[] = {
     {"int2it_i64", FPTR(int2it_i64),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
-    {"int2it_i64_or_error", FPTR(int2it_i64_or_error),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
-    {"box_int64_result_or_error", FPTR(box_int64_result_or_error),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"box_uint64_value", FPTR(box_uint64_value),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -1668,6 +1669,13 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"fn_string_char_eq_ascii", FPTR(fn_string_char_eq_ascii),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"it2l", FPTR(it2l),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
@@ -1774,8 +1782,6 @@ JitImport jit_runtime_imports[] = {
     {"fn_abs_f", FPTR(fn_abs_f)},
     {"fn_neg_i", FPTR(fn_neg_i)},
     {"fn_neg_f", FPTR(fn_neg_f)},
-    {"fn_mod_i", FPTR(fn_mod_i)},
-    {"fn_idiv_i", FPTR(fn_idiv_i)},
     {"fn_not_u", FPTR(fn_not_u)},
     {"fn_sign_i", FPTR(fn_sign_i)},
     {"fn_sign_f", FPTR(fn_sign_f)},
@@ -1934,6 +1940,7 @@ JitImport jit_runtime_imports[] = {
     {"cow_path_set_raw", FPTR(cow_path_set_raw)},
     {"cow_path_set", FPTR(cow_path_set)},
     {"cow_path_borrow", FPTR(cow_path_borrow)},
+    {"cow_path_borrow_fixed", FPTR(cow_path_borrow_fixed)},
     {"cow_path_set_inplace", FPTR(cow_path_set_inplace)},
     {"pn_push_cow", FPTR(pn_push_cow)},
     {"pn_splice_cow", FPTR(pn_splice_cow)},
@@ -2054,6 +2061,9 @@ JitImport jit_runtime_imports[] = {
     {"js_eq_raw", FPTR(js_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_loose_eq_raw", FPTR(js_loose_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_new_object", FPTR(js_new_object)},
+    {"js_new_object_shaped", FPTR(js_new_object_shaped)},
+    {"js_shaped_slot_get", FPTR(js_shaped_slot_get),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM}},
     {"js_get_key_default", FPTR(js_get_key_default)},
     // Property reads can materialize out-of-band numeric Items; the explicit
     // boxed contract lets MIR reserve a caller scalar home without treating
@@ -3452,6 +3462,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_module_name_id_at",
         "lambda_active_module_name_id", "lambda_active_module_name_item",
         "lambda_async_frame_get_word",
+        // Exact String-character equality reads only the already-rooted Item.
+        "fn_string_char_eq_ascii",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         // v5 int lane: pure integer arithmetic on lane values, no allocation.
         "lambda_int_lane_to_double_c", "lambda_float_null_lane_c",

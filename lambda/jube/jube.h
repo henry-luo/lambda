@@ -66,6 +66,12 @@ typedef void (*JubeAsyncWorkCallback)(void* user);
 typedef void (*JubeAsyncCompletionCallback)(void* user, int status);
 typedef void (*JubeAsyncDestroyCallback)(void* user);
 
+// A hosted request names its immutable host descriptor without selecting an
+// executable path by text. The host owns its rid and exact Item span.
+enum JubeAsyncResourceKind {
+    JUBE_ASYNC_RESOURCE_FILESYSTEM_REQUEST = 1,
+};
+
 // Public compiler value kinds are intentionally narrower than MIR_type_t.
 // Hosted languages may request only ABI-relevant register classes; the host
 // retains the implementation-specific MIR representation.
@@ -1125,6 +1131,17 @@ struct JubeHostAsyncAPI {
     // Posts Node's conventional (err, result) callback shape through the
     // host-owned next-tick queue; the module never retains callback values.
     void (*next_tick_callback)(void* session, Item callback, Item error, Item result);
+    // A native request has one context-table rid and one exact Item span.
+    // The host releases the row only after libuv has returned ownership, so a
+    // module keeps only POD state and the rid in its request tail.
+    int (*work_submit_root_span)(void* session, int resource_kind,
+                                 const Item* root_values, int root_count,
+                                 JubeAsyncWorkCallback work,
+                                 JubeAsyncCompletionCallback complete,
+                                 JubeAsyncDestroyCallback destroy, void* user,
+                                 uint32_t* out_resource_id);
+    Item (*work_resource_value)(void* session, uint32_t resource_id,
+                                int root_index);
 };
 
 // Binary values stay host-owned.  The returned byte pointer is borrowed for

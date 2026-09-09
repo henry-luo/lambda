@@ -52,16 +52,11 @@ extern "C" void js_domain_restore_stack(Item previous);
 // Task Queues
 // =============================================================================
 
-#define RAF_CAPACITY JS_EVENT_RAF_CAPACITY
 #define TASK_FLUSH_WORK_BUDGET 8192
-#define next_tick_deque (js_runtime_state.event_loop->next_tick_deque)
-#define microtask_deque (js_runtime_state.event_loop->microtask_deque)
+#define next_tick_queue (js_runtime_state.event_loop->next_tick_queue)
+#define microtask_queue (js_runtime_state.event_loop->microtask_queue)
+#define animation_frame_queue (js_runtime_state.event_loop->animation_frame_queue)
 #define microtask_running (js_runtime_state.event_loop->microtask_running)
-#define raf_callback_ring (js_runtime_state.event_loop->raf_callback)
-#define raf_id_ring (js_runtime_state.event_loop->raf_id)
-#define raf_head (js_runtime_state.event_loop->raf_head)
-#define raf_tail (js_runtime_state.event_loop->raf_tail)
-#define raf_count (js_runtime_state.event_loop->raf_count)
 #define next_raf_id (js_runtime_state.event_loop->next_raf_id)
 #define auto_close_mode (js_runtime_state.event_loop->auto_close_mode)
 #define auto_close_after_load (js_runtime_state.event_loop->auto_close_after_load)
@@ -90,7 +85,8 @@ JS_FORWARD_EXPRESSION(bool, js_event_loop_auto_close_mode, (void),
 JS_FORWARD_EXPRESSION(bool, js_event_loop_is_shutting_down, (void),
     js_active_runtime_state ? event_loop_shutting_down : false)
 
-static bool js_async_queue_push(RuntimeAsyncDeque* queue, Item cb) {
+static bool js_async_queue_push(RuntimeJobQueue* queue, Item cb,
+                                RuntimeJobKind kind) {
     if (!js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots)) {
         return false;
     }
@@ -99,31 +95,37 @@ static bool js_async_queue_push(RuntimeAsyncDeque* queue, Item cb) {
         resource_root, js_async_hooks_get_current_resource(),
         als_root, js_als_capture_context(),
         domain_root, js_domain_capture_async_stack());
-    Item record[4] = {callback_root.get(), resource_root.get(),
-        als_root.get(), domain_root.get()};
-    return runtime_async_deque_push(queue, record);
+    RuntimeJob job = {};
+    job.callback = callback_root.get();
+    job.context.resource = resource_root.get();
+    job.context.als_context = als_root.get();
+    job.context.domain = domain_root.get();
+    job.kind = kind;
+    return runtime_job_queue_push(queue, &job);
 }
 
-static void js_async_queue_enqueue(RuntimeAsyncDeque* queue, Item callback,
-                                   const char* queue_name) {
+static void js_async_queue_enqueue(RuntimeJobQueue* queue, Item callback,
+                                   RuntimeJobKind kind, const char* queue_name) {
     if (!js_is_callable(callback)) {
         log_error("event_loop: %s enqueue called with non-function (type=%d)",
             queue_name, get_type_id(callback));
         return;
     }
-    if (!js_async_queue_push(queue, callback)) {
-        log_error("event_loop: failed to grow %s deque", queue_name);
+    if (!js_async_queue_push(queue, callback, kind)) {
+        log_error("event_loop: failed to grow %s queue", queue_name);
     }
 }
-JS_FORWARD_VOID( js_microtask_enqueue, (Item callback), js_async_queue_enqueue, (&microtask_deque, callback, "microtask"))
-JS_FORWARD_VOID( js_next_tick_enqueue, (Item callback), js_async_queue_enqueue, (&next_tick_deque, callback, "nextTick"))
+JS_FORWARD_VOID( js_microtask_enqueue, (Item callback), js_async_queue_enqueue,
+    (&microtask_queue, callback, RUNTIME_JOB_MICROTASK, "microtask"))
+JS_FORWARD_VOID( js_next_tick_enqueue, (Item callback), js_async_queue_enqueue,
+    (&next_tick_queue, callback, RUNTIME_JOB_NEXT_TICK, "nextTick"))
 
 // Js57 P2c: visible queue size for the bounded-await drain heuristic.
 // Returns the combined pending nextTick + microtask count so js_await_sync can
 // detect whether a drain turn made progress (no progress = give up early).
 JS_FORWARD_EXPRESSION(int, js_microtask_pending_count, (void),
-    (int)(runtime_async_deque_size(&next_tick_deque) +
-        runtime_async_deque_size(&microtask_deque)))
+    (int)(runtime_job_queue_size(&next_tick_queue) +
+        runtime_job_queue_size(&microtask_queue)))
 JS_FORWARD_EXPRESSION(bool, js_microtask_is_running, (void), (js_active_runtime_state && microtask_running))
 
 struct JsEventLoopCallbackScope {
@@ -139,14 +141,15 @@ struct JsEventLoopCallbackScope {
     JsEventLoopCallbackScope& operator=(const JsEventLoopCallbackScope&) = delete;
 };
 
-static Item js_run_queued_callback(Item cb, Item resource, Item als_context, Item domain) {
-    RootFrame roots(6);
+static Item js_run_queued_callback(const RuntimeJob* job) {
+    RootFrame roots(7);
     // Queue pop clears the persistent slots before context setup can allocate;
     // keep the dequeued callback graph exact-rooted for the entire invocation.
-    Rooted<Item> callback_root(roots, cb);
-    Rooted<Item> resource_root(roots, resource);
-    Rooted<Item> als_root(roots, als_context);
-    Rooted<Item> domain_root(roots, domain);
+    Rooted<Item> callback_root(roots, job->callback);
+    Rooted<Item> arguments_root(roots, job->arguments);
+    Rooted<Item> resource_root(roots, job->context.resource);
+    Rooted<Item> als_root(roots, job->context.als_context);
+    Rooted<Item> domain_root(roots, job->context.domain);
     Rooted<Item> previous_resource_root(roots, ItemNull);
     Rooted<Item> previous_domain_root(roots, ItemNull);
     if (!js_is_callable(callback_root.get())) return make_js_undefined();
@@ -154,7 +157,16 @@ static Item js_run_queued_callback(Item cb, Item resource, Item als_context, Ite
     previous_resource_root.set(js_async_hooks_enter_resource(resource_root.get()));
     previous_domain_root.set(js_domain_set_stack(domain_root.get()));
     JsEventLoopCallbackScope callback_scope;
-    Item result = js_als_context_call(als_root.get(), callback_root.get(), ItemNull, ItemNull, 0);
+    Item result = make_js_undefined();
+    if (get_type_id(arguments_root.get()) == LMD_TYPE_ARRAY &&
+            arguments_root.get().array->length > 0) {
+        Array* args = arguments_root.get().array;
+        result = js_als_context_call_args(als_root.get(), callback_root.get(),
+            ItemNull, args->items, args->length);
+    } else {
+        result = js_als_context_call(als_root.get(), callback_root.get(),
+            ItemNull, ItemNull, 0);
+    }
     js_domain_restore_stack(previous_domain_root.get());
     js_async_hooks_restore_resource(previous_resource_root.get());
     return result;
@@ -164,16 +176,16 @@ extern "C" void js_microtask_flush(void) {
     (void)js_microtask_flush_result();
 }
 
-static void js_drain_async_queue(RuntimeAsyncDeque* queue,
+static void js_drain_async_queue(RuntimeJobQueue* queue,
         Rooted<Item>& first_error_root, int& safety, int limit) {
     int drained = 0;
-    while (runtime_async_deque_size(queue) > 0 &&
+    while (runtime_job_queue_size(queue) > 0 &&
             safety < TASK_FLUSH_WORK_BUDGET && drained < limit) {
-        Item record[4] = {};
-        if (!runtime_async_deque_pop(queue, record)) break;
+        RuntimeJob job = {};
+        if (!runtime_job_queue_pop(queue, &job)) break;
         bool previous_running = microtask_running;
         microtask_running = true;
-        Item result = js_run_queued_callback(record[0], record[1], record[2], record[3]);
+        Item result = js_run_queued_callback(&job);
         microtask_running = previous_running;
         if (item_is_error(result) && !item_is_error(first_error_root.get())) {
             first_error_root.set(result);
@@ -187,16 +199,16 @@ extern "C" Item js_microtask_flush_result(void) {
     RootFrame roots(1);
     Rooted<Item> first_error_root(roots, ItemNull);
     int safety = 0;
-    while ((runtime_async_deque_size(&next_tick_deque) > 0 ||
-            runtime_async_deque_size(&microtask_deque) > 0) &&
+    while ((runtime_job_queue_size(&next_tick_queue) > 0 ||
+            runtime_job_queue_size(&microtask_queue) > 0) &&
            safety < TASK_FLUSH_WORK_BUDGET) {
-        js_drain_async_queue(&next_tick_deque, first_error_root, safety,
+        js_drain_async_queue(&next_tick_queue, first_error_root, safety,
             TASK_FLUSH_WORK_BUDGET);
-        js_drain_async_queue(&microtask_deque, first_error_root, safety,
+        js_drain_async_queue(&microtask_queue, first_error_root, safety,
             TASK_FLUSH_WORK_BUDGET);
     }
-    if (runtime_async_deque_size(&next_tick_deque) == 0 &&
-            runtime_async_deque_size(&microtask_deque) == 0) {
+    if (runtime_job_queue_size(&next_tick_queue) == 0 &&
+            runtime_job_queue_size(&microtask_queue) == 0) {
         js_promise_flush_unhandled_checks();
     }
     return first_error_root.get();
@@ -209,43 +221,35 @@ extern "C" Item js_microtask_step(void) {
     RootFrame roots(1);
     Rooted<Item> first_error_root(roots, ItemNull);
     int safety = 0;
-    if (runtime_async_deque_size(&next_tick_deque) > 0) {
-        js_drain_async_queue(&next_tick_deque, first_error_root, safety, 1);
-    } else if (runtime_async_deque_size(&microtask_deque) > 0) {
-        js_drain_async_queue(&microtask_deque, first_error_root, safety, 1);
+    if (runtime_job_queue_size(&next_tick_queue) > 0) {
+        js_drain_async_queue(&next_tick_queue, first_error_root, safety, 1);
+    } else if (runtime_job_queue_size(&microtask_queue) > 0) {
+        js_drain_async_queue(&microtask_queue, first_error_root, safety, 1);
     }
     return first_error_root.get();
 }
 
 static bool raf_push(Item cb, int64_t id) {
-    if (raf_count >= RAF_CAPACITY) {
-        log_error("event_loop: animation frame queue overflow (%d)", RAF_CAPACITY);
-        return false;
-    }
     RootFrame roots(1);
     Rooted<Item> callback_root(roots, cb);
-    if (!js_root_range_ensure_registered(&js_runtime_state.event_loop_raf_roots)) {
+    if (!js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots)) {
         return false;
     }
-    raf_callback_ring[raf_tail] = callback_root.get();
-    raf_id_ring[raf_tail] = id;
-    raf_tail = (raf_tail + 1) % RAF_CAPACITY;
-    raf_count++;
-    return true;
+    RuntimeJob job = {};
+    job.callback = callback_root.get();
+    job.id = id;
+    job.kind = RUNTIME_JOB_ANIMATION_FRAME;
+    return runtime_job_queue_push(&animation_frame_queue, &job);
 }
 
 static Item raf_pop(int64_t* out_id) {
-    if (raf_count == 0) {
+    RuntimeJob job = {};
+    if (!runtime_job_queue_pop(&animation_frame_queue, &job)) {
         if (out_id) *out_id = -1;
         return ItemNull;
     }
-    Item cb = raf_callback_ring[raf_head];
-    if (out_id) *out_id = raf_id_ring[raf_head];
-    raf_callback_ring[raf_head] = ItemNull;
-    raf_id_ring[raf_head] = -1;
-    raf_head = (raf_head + 1) % RAF_CAPACITY;
-    raf_count--;
-    return cb;
+    if (out_id) *out_id = job.id;
+    return job.callback;
 }
 
 extern "C" Item js_requestAnimationFrame(Item callback) {
@@ -260,21 +264,13 @@ extern "C" Item js_requestAnimationFrame(Item callback) {
 
 extern "C" void js_cancelAnimationFrame(Item request_id) {
     if (get_type_id(request_id) != LMD_TYPE_INT) return;
-    int64_t id = it2i(request_id);
-    for (int i = 0; i < raf_count; i++) {
-        int idx = (raf_head + i) % RAF_CAPACITY;
-        if (raf_id_ring[idx] == id) {
-            raf_callback_ring[idx] = ItemNull;
-            raf_id_ring[idx] = -1;
-            return;
-        }
-    }
+    runtime_job_queue_cancel(&animation_frame_queue, it2i(request_id));
 }
 
 JS_FORWARD_EXPRESSION(int, js_animation_frame_has_pending, (void),
     // the host loop can outlive a document's JS capsule, so do not read its
     // per-runtime animation-frame queue after script teardown.
-    js_active_runtime_state && raf_count > 0 ? 1 : 0)
+    js_active_runtime_state && runtime_job_queue_size(&animation_frame_queue) > 0 ? 1 : 0)
 
 static void js_event_loop_render_checkpoint(void) {
     if (!dom_get_ui_context() || dom_is_host_driven_loop()) {
@@ -293,7 +289,7 @@ static void js_event_loop_render_checkpoint(void) {
 }
 
 extern "C" int js_animation_frame_flush(double timestamp_ms) {
-    int pending = raf_count;
+    int pending = (int)runtime_job_queue_size(&animation_frame_queue);
     int called = 0;
     if (pending <= 0) return 0;
     // The frame clock supplies absolute monotonic time; DOMHighResTimeStamp is
@@ -330,14 +326,15 @@ extern "C" int js_animation_frame_drain(int max_frames) {
     int frames = 0;
     int called = 0;
     double timestamp_ms = js_performance_monotonic_now_ms();
-    while (raf_count > 0 && frames < max_frames) {
+    while (runtime_job_queue_size(&animation_frame_queue) > 0 && frames < max_frames) {
         timestamp_ms += 16.6667;
         called += js_animation_frame_flush(timestamp_ms);
         js_event_loop_drain();
         frames++;
     }
-    if (raf_count > 0) {
-        log_error("event_loop: animation frame drain stopped with %d callback(s) pending", raf_count);
+    if (runtime_job_queue_size(&animation_frame_queue) > 0) {
+        log_error("event_loop: animation frame drain stopped with %d callback(s) pending",
+            (int)runtime_job_queue_size(&animation_frame_queue));
     }
     return called;
 }
@@ -348,21 +345,15 @@ extern "C" int js_animation_frame_drain(int max_frames) {
 
 typedef struct JsTimerHandle {
     uv_timer_t timer;
-    int64_t    id;
-    Item       callback;
+    RuntimeJob job;
     Item       object;
-    Item       async_resource;
-    Item       als_context;
-    Item       domain;
+    uint32_t   resource_id;
     bool       is_interval;
-    Item       extra_args[8];   // extra args to pass to callback
-    int        extra_count;     // number of extra args
     Heap*      runtime_heap;
     EvalContext* runtime_context;
     NamePool*  runtime_name_pool;
     Pool*      runtime_pool;
     void*      runtime_doc;
-    bool       roots_registered;
     bool       closing;
     double     virtual_due_ms;
     double     virtual_repeat_ms;
@@ -370,10 +361,10 @@ typedef struct JsTimerHandle {
     bool       virtual_refed;
 } JsTimerHandle;
 
-#define MAX_TIMER_HANDLES JS_EVENT_TIMER_CAPACITY
-#define MAX_MOCK_SCHEDULER_WAITS JS_EVENT_MOCK_WAIT_CAPACITY
-#define timer_handles ((JsTimerHandle**)js_runtime_state.timers->handles)
-#define timer_handle_count (js_runtime_state.timers->handle_count)
+#define timer_resources (js_runtime_state.resources)
+#define timer_handle_count runtime_resource_table_active_count_owned(\
+    &timer_resources, js_runtime_state.timers)
+#define timer_slot_count runtime_resource_table_slot_count(&timer_resources)
 #define next_timer_id (js_runtime_state.timers->next_id)
 #define timer_progress_generation (js_runtime_state.timers->progress_generation)
 #define timer_force_shutdown (js_runtime_state.timers->force_shutdown)
@@ -384,11 +375,46 @@ typedef struct JsTimerHandle {
 #define mock_scheduler_enabled (js_runtime_state.timers->mock_scheduler_enabled)
 #define mock_scheduler_now_ms (js_runtime_state.timers->mock_scheduler_now_ms)
 #define mock_scheduler_waits (js_runtime_state.timers->mock_waits)
-#define mock_scheduler_roots_epoch (js_runtime_state.timers->mock_roots_epoch)
-extern "C" uint64_t js_get_heap_epoch(void);
 
 static void close_all_timer_handles(void);
-static void timer_register_gc_roots(JsTimerHandle* th);
+static void timer_close_native_handle(JsTimerHandle* th);
+
+static JsTimerHandle* timer_handle_at(int index) {
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry_at(
+        &timer_resources, index);
+    return entry && entry->lifecycle_owner == js_runtime_state.timers
+        ? (JsTimerHandle*)entry->close_user : NULL;
+}
+
+static void timer_resource_close(void* user) {
+    timer_close_native_handle((JsTimerHandle*)user);
+}
+
+static bool timer_registry_append(JsTimerHandle* handle) {
+    if (!handle) return false;
+    JS_ROOTS(roots,
+        owner_root,
+        handle->object.item ? handle->object : handle->job.callback);
+    Rooted<Item> callback_root(roots, handle->job.callback);
+    Rooted<Item> arguments_root(roots, handle->job.arguments);
+    Rooted<Item> resource_root(roots, handle->job.context.resource);
+    Rooted<Item> als_root(roots, handle->job.context.als_context);
+    Rooted<Item> domain_root(roots, handle->job.context.domain);
+    Item root_values[] = {
+        owner_root.get(), callback_root.get(), arguments_root.get(),
+        resource_root.get(), als_root.get(), domain_root.get(),
+    };
+    const RuntimeResourceDescriptor* descriptor =
+        runtime_resource_descriptor_from_legacy_name("timer");
+    handle->resource_id = runtime_resource_table_add_root_span_owned(
+        &timer_resources, js_runtime_state.timers, root_values, 6, descriptor,
+        timer_resource_close, handle, true);
+    return handle->resource_id != 0;
+}
+
+static void timer_registry_clear(void) {
+    runtime_resource_table_clear_owned(&timer_resources, js_runtime_state.timers);
+}
 
 typedef struct JsTimerRuntimeScope {
     void* saved_doc;
@@ -397,17 +423,13 @@ typedef struct JsTimerRuntimeScope {
 
 static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, int resource_len) {
     if (!th) return;
-    RootFrame roots((size_t)(5 + th->extra_count));
-    Rooted<Item> callback_root(roots, th->callback);
+    RootFrame roots(6);
+    Rooted<Item> callback_root(roots, th->job.callback);
+    Rooted<Item> arguments_root(roots, th->job.arguments);
     Rooted<Item> object_root(roots, th->object);
-    Rooted<Item> resource_root(roots, th->async_resource);
-    Rooted<Item> als_root(roots, th->als_context);
-    Rooted<Item> domain_root(roots, th->domain);
-    uint64_t* extra_roots[8] = {nullptr};
-    for (int i = 0; i < th->extra_count; i++) {
-        extra_roots[i] = roots.take_slot();
-        if (extra_roots[i]) *extra_roots[i] = th->extra_args[i].item;
-    }
+    Rooted<Item> resource_root(roots, th->job.context.resource);
+    Rooted<Item> als_root(roots, th->job.context.als_context);
+    Rooted<Item> domain_root(roots, th->job.context.domain);
 
     // The native timer record is not a GC object. Publish its callback and
     // captured values before building more async state, then transfer them to
@@ -415,14 +437,12 @@ static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, 
     resource_root.set(js_async_hooks_create_resource(resource_name, resource_len));
     als_root.set(js_als_capture_context());
     domain_root.set(js_domain_capture_async_stack());
-    th->callback = callback_root.get();
+    th->job.callback = callback_root.get();
+    th->job.arguments = arguments_root.get();
     th->object = object_root.get();
-    th->async_resource = resource_root.get();
-    th->als_context = als_root.get();
-    th->domain = domain_root.get();
-    for (int i = 0; i < th->extra_count; i++) {
-        th->extra_args[i] = (Item){.item = extra_roots[i] ? *extra_roots[i] : 0};
-    }
+    th->job.context.resource = resource_root.get();
+    th->job.context.als_context = als_root.get();
+    th->job.context.domain = domain_root.get();
     if (context) {
         th->runtime_heap = context->heap;
         th->runtime_context = context;
@@ -430,7 +450,6 @@ static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, 
         th->runtime_pool = context->pool;
     }
     th->runtime_doc = dom_get_document();
-    timer_register_gc_roots(th);
 }
 
 static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
@@ -460,77 +479,36 @@ static void timer_runtime_exit(JsTimerRuntimeScope* scope) {
     }
 }
 
-static void timer_unregister_gc_roots(JsTimerHandle *th) {
-    if (!th || !th->roots_registered) return;
-
-    // timer roots belong to the captured heap. they do not need the captured
-    // document, and re-entering a detached document can rebuild DOM globals on
-    // a runtime that is being torn down.
-    void* saved_doc = th->runtime_doc;
-    th->runtime_doc = nullptr;
-    JsTimerRuntimeScope scope;
-    if (timer_runtime_enter(th, &scope)) {
-        heap_unregister_gc_root(&th->callback.item);
-        if (th->object.item) heap_unregister_gc_root(&th->object.item);
-        heap_unregister_gc_root(&th->async_resource.item);
-        heap_unregister_gc_root(&th->als_context.item);
-        heap_unregister_gc_root(&th->domain.item);
-        for (int j = 0; j < th->extra_count; j++) {
-            heap_unregister_gc_root(&th->extra_args[j].item);
-        }
-        timer_runtime_exit(&scope);
-    }
-    th->runtime_doc = saved_doc;
-    th->roots_registered = false;
-}
-
 static void timer_close_cb(uv_handle_t *handle) {
     JsTimerHandle *th = (JsTimerHandle *)handle->data;
-    timer_unregister_gc_roots(th);
-    // remove from tracking array
-    for (int i = 0; i < timer_handle_count; i++) {
-        if (timer_handles[i] == th) {
-            timer_handles[i] = timer_handles[timer_handle_count - 1];
-            timer_handle_count--;
-            break;
-        }
-    }
     mem_free(th);
 }
 
-// register a timer handle's callback and extra_args as GC roots so they
-// survive garbage collection while the timer is pending
-static void timer_register_gc_roots(JsTimerHandle *th) {
-    JsTimerRuntimeScope scope;
-    if (!timer_runtime_enter(th, &scope)) return;
-    heap_register_gc_root(&th->callback.item);
-    if (th->object.item) heap_register_gc_root(&th->object.item);
-    heap_register_gc_root(&th->async_resource.item);
-    heap_register_gc_root(&th->als_context.item);
-    heap_register_gc_root(&th->domain.item);
-    for (int j = 0; j < th->extra_count; j++) {
-        heap_register_gc_root(&th->extra_args[j].item);
-    }
-    timer_runtime_exit(&scope);
-    th->roots_registered = true;
-}
-
-static void timer_close_handle(JsTimerHandle *th) {
+static void timer_close_native_handle(JsTimerHandle *th) {
     if (!th || th->closing) return;
     th->closing = true;
     th->virtual_active = false;
-    // close callbacks may run after document/runtime teardown; unregister roots
-    // while the captured heap is still valid so late libuv cleanup only frees.
-    timer_unregister_gc_roots(th);
     if (!timer_force_shutdown) {
         JsTimerRuntimeScope scope;
         if (timer_runtime_enter(th, &scope)) {
-            js_async_hooks_emit_destroy_resource(th->async_resource);
+            js_async_hooks_emit_destroy_resource(th->job.context.resource);
             timer_runtime_exit(&scope);
         }
     }
     uv_timer_stop(&th->timer);
     uv_close((uv_handle_t *)&th->timer, timer_close_cb);
+}
+
+static void timer_close_handle(JsTimerHandle *th) {
+    if (!th || th->closing) return;
+    if (th->resource_id != 0) {
+        uint32_t resource_id = th->resource_id;
+        th->resource_id = 0;
+        runtime_resource_table_remove_owned(&timer_resources,
+            js_runtime_state.timers, resource_id);
+        return;
+    }
+    timer_close_native_handle(th);
 }
 
 static void timer_mark_object_destroyed(JsTimerHandle* th) {
@@ -546,31 +524,31 @@ static void timer_forget_unsafe_handle(JsTimerHandle* th) {
     th->runtime_heap = nullptr;
     th->runtime_name_pool = nullptr;
     th->runtime_pool = nullptr;
-    th->roots_registered = false;
-    th->callback = ItemNull;
+    th->job.callback = ItemNull;
+    th->job.arguments = ItemNull;
     th->object = ItemNull;
-    th->async_resource = ItemNull;
-    th->als_context = ItemNull;
-    th->domain = ItemNull;
-    for (int j = 0; j < th->extra_count; j++) {
-        th->extra_args[j] = ItemNull;
-    }
-    th->extra_count = 0;
+    th->job.context.resource = ItemNull;
+    th->job.context.als_context = ItemNull;
+    th->job.context.domain = ItemNull;
+    th->job.kind = RUNTIME_JOB_NONE;
     th->closing = true;
     mem_free(th);
 }
 
 static void timer_abandon_all_without_uv(const char* reason_prefix) {
-    for (int i = timer_handle_count - 1; i >= 0; i--) {
-        JsTimerHandle* th = timer_handles[i];
+    for (int index = timer_slot_count - 1; index >= 0; index--) {
+        JsTimerHandle* th = timer_handle_at(index);
         if (!th) continue;
         log_debug("%s freeing timer %lld without libuv close",
                   reason_prefix ? reason_prefix : "[JS_TIMER_ABANDON_UNSAFE]",
-                  (long long)th->id);
+                  (long long)th->job.id);
+        uint32_t resource_id = th->resource_id;
+        th->resource_id = 0;
+        runtime_resource_table_forget_owned(&timer_resources,
+            js_runtime_state.timers, resource_id);
         timer_forget_unsafe_handle(th);
-        timer_handles[i] = nullptr;
     }
-    timer_handle_count = 0;
+    timer_registry_clear();
     // Signal watchdog recovery can corrupt libuv queue links; abandon the loop
     // with the timer records so later global cleanup does not walk stale handles.
     lambda_uv_abandon();
@@ -586,24 +564,23 @@ static void timer_fire_cb(uv_timer_t *handle) {
     JS_ROOTS(roots,
         callback_result_root, ItemNull,
         previous_resource_root, ItemNull,
-        previous_domain_root, ItemNull);
+        previous_domain_root, ItemNull,
+        arguments_root, th ? th->job.arguments : ItemNull);
     JsTimerRuntimeScope scope;
     if (timer_runtime_enter(th, &scope)) {
         JsEventLoopCallbackScope callback_scope;
-        previous_resource_root.set(js_async_hooks_enter_resource(th->async_resource));
-        previous_domain_root.set(js_domain_set_stack(th->domain));
-        if (js_is_callable(th->callback)) {
-            if (th->extra_count > 0) {
-                if (th->extra_count == 1) {
-                    callback_result_root.set(js_als_context_call(th->als_context, th->callback, ItemNull,
-                                        th->extra_args[0], 1));
-                } else {
-                    callback_result_root.set(js_als_context_call_args(th->als_context, th->callback, ItemNull,
-                                             th->extra_args, th->extra_count));
-                }
+        previous_resource_root.set(js_async_hooks_enter_resource(th->job.context.resource));
+        previous_domain_root.set(js_domain_set_stack(th->job.context.domain));
+        if (js_is_callable(th->job.callback)) {
+            if (get_type_id(arguments_root.get()) == LMD_TYPE_ARRAY &&
+                    arguments_root.get().array->length > 0) {
+                Array* args = arguments_root.get().array;
+                callback_result_root.set(js_als_context_call_args(
+                    th->job.context.als_context, th->job.callback, ItemNull,
+                    args->items, args->length));
             } else {
-                callback_result_root.set(js_als_context_call(th->als_context, th->callback,
-                    ItemNull, ItemNull, 0));
+                callback_result_root.set(js_als_context_call(th->job.context.als_context,
+                    th->job.callback, ItemNull, ItemNull, 0));
             }
         }
         js_domain_restore_stack(previous_domain_root.get());
@@ -801,9 +778,9 @@ static int64_t extract_timer_id(Item timer_id) {
 static JsTimerHandle* find_timer_handle(Item timer_id) {
     int64_t id = extract_timer_id(timer_id);
     if (id < 0) return NULL;
-    for (int i = 0; i < timer_handle_count; i++) {
-        JsTimerHandle* th = timer_handles[i];
-        if (th && th->id == id && !th->closing) return th;
+    for (int i = 0; i < timer_slot_count; i++) {
+        JsTimerHandle* th = timer_handle_at(i);
+        if (th && th->job.id == id && !th->closing) return th;
     }
     return NULL;
 }
@@ -842,12 +819,13 @@ JS_FORWARD_EXPRESSION(double, js_event_loop_virtual_clock_now_ms, (void),
 
 static JsTimerHandle* virtual_timer_next_due(double target_ms) {
     JsTimerHandle* next = nullptr;
-    for (int index = 0; index < timer_handle_count; index++) {
-        JsTimerHandle* timer = timer_handles[index];
+    for (int index = 0; index < timer_slot_count; index++) {
+        JsTimerHandle* timer = timer_handle_at(index);
         if (!timer || timer->closing || !timer->virtual_active ||
             timer->virtual_due_ms > target_ms) continue;
         if (!next || timer->virtual_due_ms < next->virtual_due_ms ||
-            (timer->virtual_due_ms == next->virtual_due_ms && timer->id < next->id)) {
+            (timer->virtual_due_ms == next->virtual_due_ms &&
+                timer->job.id < next->job.id)) {
             next = timer;
         }
     }
@@ -855,7 +833,8 @@ static JsTimerHandle* virtual_timer_next_due(double target_ms) {
 }
 
 static int virtual_timer_fire_due(double target_ms) {
-    const int callback_limit = MAX_TIMER_HANDLES * 64;
+    // The work budget limits a runaway virtual clock, not timer capacity.
+    const int callback_limit = (timer_handle_count > 0 ? timer_handle_count : 1) * 64;
     int fired = 0;
     while (fired < callback_limit) {
         JsTimerHandle* timer = virtual_timer_next_due(target_ms);
@@ -938,27 +917,38 @@ static uv_loop_t* js_timer_get_loop(const char* name) {
     return loop;
 }
 
-static void js_timer_copy_extra_args(JsTimerHandle* th, Item args_array,
+static void js_timer_capture_argument_pack(JsTimerHandle* th, Item args_array,
         bool has_args) {
-    if (!has_args || get_type_id(args_array) != LMD_TYPE_ARRAY) return;
-    Array* arr = args_array.array;
-    int count = (int)arr->length;
-    if (count > 8) count = 8;
-    for (int i = 0; i < count; i++) th->extra_args[i] = arr->items[i];
-    th->extra_count = count;
+    if (!th) return;
+    th->job.arguments = has_args && get_type_id(args_array) == LMD_TYPE_ARRAY
+        ? args_array : ItemNull;
 }
 
 static Item js_timer_finish_create(uv_loop_t* loop, JsTimerHandle* th,
         JsClass timer_class, uint64_t delay, uint64_t repeat,
         const char* capture_name, int capture_name_len) {
     timer_capture_runtime(th, capture_name, capture_name_len);
+    // The native timer is not GC-managed. Keep its whole job envelope exact
+    // while constructing the public handle, then publish that same envelope
+    // through the resource row below.
+    JS_ROOTS(roots,
+        callback_root, th->job.callback,
+        arguments_root, th->job.arguments,
+        resource_root, th->job.context.resource,
+        als_root, th->job.context.als_context,
+        domain_root, th->job.context.domain);
     uv_timer_init(loop, &th->timer);
     timer_start(loop, th, delay, repeat);
-    Item timer_obj = make_timer_object(th->id, timer_class);
+    Item timer_obj = make_timer_object(th->job.id, timer_class);
     th->object = timer_obj;
-    timer_register_gc_roots(th);
-    if (timer_handle_count < MAX_TIMER_HANDLES) {
-        timer_handles[timer_handle_count++] = th;
+    th->job.callback = callback_root.get();
+    th->job.arguments = arguments_root.get();
+    th->job.context.resource = resource_root.get();
+    th->job.context.als_context = als_root.get();
+    th->job.context.domain = domain_root.get();
+    if (!timer_registry_append(th)) {
+        timer_close_handle(th);
+        return ItemNull;
     }
     return timer_obj;
 }
@@ -1005,12 +995,12 @@ static Item js_schedule_timer(Item callback, Item delay, Item args_array,
     JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
     if (!th) return ItemNull;
 
-    th->id = next_timer_id++;
-    th->callback = callback_root.get();
+    th->job.id = next_timer_id++;
+    th->job.callback = callback_root.get();
+    th->job.kind = RUNTIME_JOB_TIMER;
     th->is_interval = is_interval;
-    th->extra_count = 0;
     th->timer.data = th;
-    js_timer_copy_extra_args(th, args_array, has_args);
+    js_timer_capture_argument_pack(th, args_array, has_args);
     return js_timer_finish_create(loop, th, JS_CLASS_TIMEOUT, ms,
         is_interval ? ms : 0, "Timeout", 7);
 }
@@ -1037,12 +1027,12 @@ static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) 
     JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
     if (!th) return ItemNull;
 
-    th->id = next_timer_id++;
-    th->callback = callback;
+    th->job.id = next_timer_id++;
+    th->job.callback = callback;
+    th->job.kind = RUNTIME_JOB_TIMER;
     th->is_interval = false;
-    th->extra_count = 0;
     th->timer.data = th;
-    js_timer_copy_extra_args(th, args_array, has_args);
+    js_timer_capture_argument_pack(th, args_array, has_args);
     // immediates queued while draining the current check phase belong to the next turn.
     return js_timer_finish_create(loop, th, JS_CLASS_IMMEDIATE, 1, 0,
         "Immediate", 9);
@@ -1051,30 +1041,39 @@ JS_FORWARD_ITEM(js_setImmediate_timer, (Item callback), js_setImmediate_impl, (c
 JS_FORWARD_ITEM(js_setImmediate_timer_args, (Item callback, Item args_array), js_setImmediate_impl, (callback, args_array, true))
 
 // Helper: create a JS array from the fixed argument packs emitted for timers.
-static Item js_pack_args(Item* values, int count) {
+extern "C" Item js_pack_args_span(Item* values, int count) {
+    if (count < 0 || (count > 0 && !values)) return ItemNull;
+    RootSpan value_roots(count > 0 ? (size_t)count : 0);
+    if (count > 0 && !value_roots.valid()) return ItemNull;
+    for (int i = 0; i < count; i++) {
+        value_roots.words()[i] = values[i].item;
+    }
     Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    if (!arr) return ItemNull;
     arr->type_id = LMD_TYPE_ARRAY;
     arr->items = nullptr;
     arr->length = 0;
     arr->capacity = 0;
-    for (int i = 0; i < count; i++) array_push(arr, values[i]);
+    for (int i = 0; i < count; i++) {
+        array_push(arr, (Item){.item = value_roots.words()[i]});
+    }
     return (Item){.array = arr};
 }
 #define JS_PACK_ARGS_1(name, a1) \
 extern "C" Item name(Item a1) { \
-    Item values[1] = {a1}; return js_pack_args(values, 1); \
+    Item values[1] = {a1}; return js_pack_args_span(values, 1); \
 }
 #define JS_PACK_ARGS_2(name, a1, a2) \
 extern "C" Item name(Item a1, Item a2) { \
-    Item values[2] = {a1, a2}; return js_pack_args(values, 2); \
+    Item values[2] = {a1, a2}; return js_pack_args_span(values, 2); \
 }
 #define JS_PACK_ARGS_3(name, a1, a2, a3) \
 extern "C" Item name(Item a1, Item a2, Item a3) { \
-    Item values[3] = {a1, a2, a3}; return js_pack_args(values, 3); \
+    Item values[3] = {a1, a2, a3}; return js_pack_args_span(values, 3); \
 }
 #define JS_PACK_ARGS_4(name, a1, a2, a3, a4) \
 extern "C" Item name(Item a1, Item a2, Item a3, Item a4) { \
-    Item values[4] = {a1, a2, a3, a4}; return js_pack_args(values, 4); \
+    Item values[4] = {a1, a2, a3, a4}; return js_pack_args_span(values, 4); \
 }
 JS_PACK_ARGS_1(js_pack_args_1, a1)
 JS_PACK_ARGS_2(js_pack_args_2, a1, a2)
@@ -1172,10 +1171,85 @@ static Item check_timer_options(Item options, Item* reject_out, int* result_code
     return js_status_ok();
 }
 
+enum JsMockSchedulerWaitValue {
+    JS_MOCK_WAIT_PROMISE = 0,
+    JS_MOCK_WAIT_RESOLVE,
+    JS_MOCK_WAIT_REJECT,
+    JS_MOCK_WAIT_SIGNAL,
+    JS_MOCK_WAIT_VALUE_COUNT,
+};
+
+static Item mock_scheduler_wait_value(const JsMockSchedulerWait* wait,
+        int value_index) {
+    Item* value = wait ? root_vector_at((RootVector*)&wait->values, value_index) : NULL;
+    return value ? *value : ItemNull;
+}
+
+static void mock_scheduler_wait_destroy(JsMockSchedulerWait* wait) {
+    if (!wait) return;
+    root_vector_destroy(&wait->values);
+    mem_free(wait);
+}
+
+static void mock_scheduler_clear_state(JsEventLoopTimerState* state) {
+    if (!state || !state->mock_waits) return;
+    for (int i = state->mock_waits->length - 1; i >= 0; i--) {
+        mock_scheduler_wait_destroy((JsMockSchedulerWait*)
+            state->mock_waits->data[i]);
+    }
+    arraylist_free(state->mock_waits);
+    state->mock_waits = NULL;
+}
+
+extern "C" void js_event_loop_timer_state_destroy(JsEventLoopTimerState* state) {
+    mock_scheduler_clear_state(state);
+}
+
+static void mock_scheduler_clear(void) {
+    mock_scheduler_clear_state(js_active_runtime_state
+        ? js_runtime_state.timers : NULL);
+}
+
+static void mock_scheduler_wait_remove(int index) {
+    if (!mock_scheduler_waits || index < 0 || index >= mock_scheduler_waits->length)
+        return;
+    mock_scheduler_wait_destroy((JsMockSchedulerWait*)
+        mock_scheduler_waits->data[index]);
+    arraylist_remove(mock_scheduler_waits, index);
+}
+
+static bool mock_scheduler_wait_append(Item promise, Item resolve, Item reject,
+        Item signal, int64_t due_ms) {
+    JsMockSchedulerWait* wait = (JsMockSchedulerWait*)mem_calloc(1,
+        sizeof(JsMockSchedulerWait), MEM_CAT_JS_RUNTIME);
+    if (!wait) return false;
+    root_vector_init(&wait->values, (Context*)context, "JS mock scheduler wait");
+    if (!root_vector_push(&wait->values, promise) ||
+            !root_vector_push(&wait->values, resolve) ||
+            !root_vector_push(&wait->values, reject) ||
+            !root_vector_push(&wait->values, signal)) {
+        mock_scheduler_wait_destroy(wait);
+        return false;
+    }
+    if (!mock_scheduler_waits) {
+        mock_scheduler_waits = arraylist_new(8);
+        if (!mock_scheduler_waits) {
+            mock_scheduler_wait_destroy(wait);
+            return false;
+        }
+    }
+    if (!arraylist_append(mock_scheduler_waits, wait)) {
+        mock_scheduler_wait_destroy(wait);
+        return false;
+    }
+    wait->due_ms = due_ms;
+    return true;
+}
+
 static void js_mock_scheduler_set_enabled(bool enabled) {
+    mock_scheduler_clear();
     mock_scheduler_enabled = enabled;
     mock_scheduler_now_ms = 0;
-    memset(mock_scheduler_waits, 0, sizeof(mock_scheduler_waits));
 }
 JS_FORWARD_VOID( js_mock_scheduler_enable, (void), js_mock_scheduler_set_enabled, (true))
 JS_FORWARD_VOID( js_mock_scheduler_reset, (void), js_mock_scheduler_set_enabled, (false))
@@ -1185,27 +1259,31 @@ extern "C" void js_mock_scheduler_tick(Item delay) {
     mock_scheduler_now_ms += (int64_t)normalize_timer_delay(delay);
     Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
 
-    for (int i = 0; i < MAX_MOCK_SCHEDULER_WAITS; i++) {
-        JsMockSchedulerWait* wait = &mock_scheduler_waits[i];
-        if (!wait->active || wait->due_ms > mock_scheduler_now_ms) continue;
-        wait->active = false;
-        if (get_type_id(wait->signal) == LMD_TYPE_MAP) {
-            Item aborted = js_get_key_cstr(wait->signal, "aborted");
+    for (int i = mock_scheduler_waits ? mock_scheduler_waits->length - 1 : -1;
+            i >= 0; i--) {
+        JsMockSchedulerWait* wait = (JsMockSchedulerWait*)mock_scheduler_waits->data[i];
+        if (!wait || wait->due_ms > mock_scheduler_now_ms) continue;
+        Item signal = mock_scheduler_wait_value(wait, JS_MOCK_WAIT_SIGNAL);
+        if (get_type_id(signal) == LMD_TYPE_MAP) {
+            Item aborted = js_get_key_cstr(signal, "aborted");
             if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
-                Item err = make_abort_error(wait->signal);
+                Item err = make_abort_error(signal);
                 Item args[1] = { err };
-                js_call_function(wait->reject, ItemNull, args, 1);
+                js_call_function(mock_scheduler_wait_value(wait, JS_MOCK_WAIT_REJECT),
+                    ItemNull, args, 1);
+                mock_scheduler_wait_remove(i);
                 continue;
             }
         }
         Item args[1] = { undef };
-        js_call_function(wait->resolve, ItemNull, args, 1);
+        js_call_function(mock_scheduler_wait_value(wait, JS_MOCK_WAIT_RESOLVE),
+            ItemNull, args, 1);
+        mock_scheduler_wait_remove(i);
     }
     js_microtask_flush();
 }
 
 static Item js_mock_scheduler_wait(Item delay, Item options) {
-
     Item reject_out = ItemNull;
     int opt_rc = 0;
     JS_ASSIGN_OR_RETURN(options_status, check_timer_options(options, &reject_out, &opt_rc));
@@ -1215,39 +1293,24 @@ static Item js_mock_scheduler_wait(Item delay, Item options) {
     Item promise = js_get_key_cstr(resolvers, "promise");
     Item resolve_fn = js_get_key_cstr(resolvers, "resolve");
     Item reject_fn = js_get_key_cstr(resolvers, "reject");
+    Item signal = get_type_id(options) == LMD_TYPE_MAP
+        ? js_get_key_cstr(options, "signal")
+        : (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+    JS_ROOTS(roots,
+        promise_root, promise,
+        resolve_root, resolve_fn,
+        reject_root, reject_fn,
+        signal_root, signal);
 
-    Item signal = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-    if (get_type_id(options) == LMD_TYPE_MAP) {
-        signal = js_get_key_cstr(options, "signal");
+    if (!mock_scheduler_wait_append(promise_root.get(), resolve_root.get(),
+            reject_root.get(), signal_root.get(), mock_scheduler_now_ms +
+            (int64_t)normalize_timer_delay(delay))) {
+        return js_promise_reject(js_new_error(js_name_item(
+            "Mock scheduler wait allocation failed", 35)));
     }
-
-    for (int i = 0; i < MAX_MOCK_SCHEDULER_WAITS; i++) {
-        JsMockSchedulerWait* wait = &mock_scheduler_waits[i];
-        if (wait->active) continue;
-        wait->promise = promise;
-        wait->resolve = resolve_fn;
-        wait->reject = reject_fn;
-        wait->signal = signal;
-        wait->due_ms = mock_scheduler_now_ms + (int64_t)normalize_timer_delay(delay);
-        wait->active = true;
-        // Mock scheduler waits must not allocate real uv timers; otherwise
-        // official fake-timer tests sleep for the virtual delay before passing.
-        return promise;
-    }
-
-    return js_promise_reject(js_new_error(js_name_item("Mock scheduler wait queue full", 35)));
-}
-
-static void mock_scheduler_register_gc_roots(void) {
-    uint64_t epoch = js_get_heap_epoch();
-    if (mock_scheduler_roots_epoch == epoch) return;
-    for (int i = 0; i < MAX_MOCK_SCHEDULER_WAITS; i++) {
-        heap_register_gc_root(&mock_scheduler_waits[i].promise.item);
-        heap_register_gc_root(&mock_scheduler_waits[i].resolve.item);
-        heap_register_gc_root(&mock_scheduler_waits[i].reject.item);
-        heap_register_gc_root(&mock_scheduler_waits[i].signal.item);
-    }
-    mock_scheduler_roots_epoch = epoch;
+    // Mock scheduler waits must not allocate real uv timers; otherwise
+    // official fake-timer tests sleep for the virtual delay before passing.
+    return promise_root.get();
 }
 
 static Item js_set_promise_timer(Item delay, Item value, Item options,
@@ -1266,56 +1329,64 @@ static Item js_set_promise_timer(Item delay, Item value, Item options,
     Item promise = js_get_key_default(resolvers, k_promise);
     Item resolve_fn = js_get_key_default(resolvers, k_resolve);
     Item reject_fn = js_get_key_default(resolvers, k_reject);
+    JS_ROOTS(roots,
+        promise_root, promise,
+        resolve_root, resolve_fn,
+        reject_root, reject_fn,
+        value_root, value,
+        options_root, options);
 
-    // store resolve_fn as callback, value as extra_arg
+    // The resolve callback and delayed value use the same timer job envelope
+    // as public setTimeout callbacks.
     uv_loop_t *loop = lambda_uv_loop();
-    if (!loop) return promise;
+    if (!loop) return promise_root.get();
 
     uint64_t ms = start_delay ? start_delay : normalize_timer_delay(delay);
 
     JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
-    if (!th) return promise;
+    if (!th) return promise_root.get();
 
-    th->id = next_timer_id++;
-    th->callback = resolve_fn;
+    th->job.id = next_timer_id++;
+    th->job.callback = resolve_root.get();
+    Item delayed_value = value_root.get();
+    th->job.arguments = js_pack_args_span(&delayed_value, 1);
+    th->job.kind = RUNTIME_JOB_TIMER;
     th->is_interval = false;
-    th->extra_args[0] = value;
-    th->extra_count = 1;
     th->timer.data = th;
     timer_capture_runtime(th, timer_name, timer_name_len);
 
     uv_timer_init(loop, &th->timer);
     timer_start(loop, th, ms, 0);
-    timer_register_gc_roots(th);
 
-    if (timer_handle_count < MAX_TIMER_HANDLES) {
-        timer_handles[timer_handle_count++] = th;
+    if (!timer_registry_append(th)) {
+        timer_close_handle(th);
+        return promise_root.get();
     }
 
     // if signal present, add abort listener to reject promise and clear timer
-    if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item signal = js_get_key_cstr(options, "signal");
+    if (get_type_id(options_root.get()) == LMD_TYPE_MAP) {
+        Item signal = js_get_key_cstr(options_root.get(), "signal");
         if (get_type_id(signal) == LMD_TYPE_MAP) {
             // create an abort handler closure that captures timer id and reject_fn
             // we store timer_id and reject_fn in a wrapper object on the signal
-            Item timer_id_item = (Item){.item = i2it(th->id)};
+            Item timer_id_item = (Item){.item = i2it(th->job.id)};
             // add 'abort' event listener — when aborted, reject the promise
         Item listeners = js_get_key_cstr(signal, "__listeners__");
             if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
                 // store reject_fn and timer_id in the abort entry for manual dispatch
                 Item entry = js_new_object();
                 js_set_key_cstr(entry, "type", js_name_item("abort", 5));
-                js_set_key_cstr(entry, "__timer_reject__", reject_fn);
+                js_set_key_cstr(entry, "__timer_reject__", reject_root.get());
                 js_set_key_cstr(entry, "__timer_id__", timer_id_item);
                 js_set_key_cstr(entry, "__timer_signal__", signal);
                 // the abort dispatcher handles the stored rejection path
-                js_set_key_cstr(entry, "handler", reject_fn);
+                js_set_key_cstr(entry, "handler", reject_root.get());
                 js_array_push(listeners, entry);
             }
         }
     }
 
-    return promise;
+    return promise_root.get();
 }
 
 // setTimeout(delay, value, options) → Promise that resolves to value after delay ms
@@ -1354,9 +1425,9 @@ extern "C" Item js_scheduler_yield(void) {
 extern "C" void js_clearTimeout(Item timer_id) {
     int64_t id = extract_timer_id(timer_id);
     if (id < 0) return;
-    for (int i = 0; i < timer_handle_count; i++) {
-        if (timer_handles[i]->id == id) {
-            JsTimerHandle *th = timer_handles[i];
+    for (int i = 0; i < timer_slot_count; i++) {
+        JsTimerHandle* th = timer_handle_at(i);
+        if (th && th->job.id == id) {
             timer_mark_object_destroyed(th);
             timer_close_handle(th);
             return;
@@ -1370,21 +1441,18 @@ extern "C" void js_event_loop_cancel_document_timers(void* dom_doc) {
     // longer have that owner cannot safely inspect a different capsule.
     if (!js_active_runtime_state || !dom_doc) return;
 
-    for (int i = 0; i < timer_handle_count; i++) {
-        JsTimerHandle *th = timer_handles[i];
+    for (int i = 0; i < timer_slot_count; i++) {
+        JsTimerHandle *th = timer_handle_at(i);
         if (!th || th->runtime_doc != dom_doc) continue;
 
         log_debug("[JS_TIMER_DETACH] canceling timer %lld for document %p",
-                  (long long)th->id, dom_doc);
+                  (long long)th->job.id, dom_doc);
         th->runtime_doc = nullptr;
-        timer_unregister_gc_roots(th);
-        th->callback = ItemNull;
-        th->async_resource = ItemNull;
-        th->als_context = ItemNull;
-        for (int j = 0; j < th->extra_count; j++) {
-            th->extra_args[j] = ItemNull;
-        }
-        th->extra_count = 0;
+        th->job.callback = ItemNull;
+        th->job.arguments = ItemNull;
+        th->job.context.resource = ItemNull;
+        th->job.context.als_context = ItemNull;
+        th->job.context.domain = ItemNull;
         timer_close_handle(th);
     }
 }
@@ -1393,8 +1461,8 @@ extern "C" void js_event_loop_abandon_document_timers(void* dom_doc) {
     if (!js_active_runtime_state || !dom_doc) return;
 
     bool found = false;
-    for (int i = 0; i < timer_handle_count; i++) {
-        JsTimerHandle *th = timer_handles[i];
+    for (int i = 0; i < timer_slot_count; i++) {
+        JsTimerHandle *th = timer_handle_at(i);
         if (th && th->runtime_doc == dom_doc) {
             found = true;
             break;
@@ -1437,29 +1505,20 @@ extern "C" void js_event_loop_init(void) {
     }
     event_loop_shutting_down = false;
 
-    // reset the two logical JS lanes without retaining queue-owned Items.
-    runtime_async_deque_clear(&next_tick_deque);
-    runtime_async_deque_clear(&microtask_deque);
+    // Reset the policy-specific queues without retaining job-owned Items.
+    runtime_job_queue_clear(&next_tick_queue);
+    runtime_job_queue_clear(&microtask_queue);
+    runtime_job_queue_clear(&animation_frame_queue);
     (void)js_root_range_ensure_registered(&js_runtime_state.event_loop_queue_roots);
-    (void)js_root_range_ensure_registered(&js_runtime_state.event_loop_raf_roots);
-    memset(raf_callback_ring, 0, sizeof(raf_callback_ring));
-    raf_head = 0;
-    raf_tail = 0;
-    raf_count = 0;
     next_raf_id = 1;
-    // The document host config owns auto-close policy across nested script entries.
-    // reset timers — clear stale callback pointers
-    for (int i = 0; i < timer_handle_count; i++) {
-        timer_handles[i] = NULL;
-    }
-    timer_handle_count = 0;
+    // No timer is live here; release the retired registry allocation rather
+    // than retaining a historical fixed-capacity table between documents.
+    timer_registry_clear();
     next_timer_id = 1;
     timer_nan_warning_emitted = false;
     timer_negative_warning_emitted = false;
 
-    // Mock scheduler waits are static, so queued promise resolvers are rooted
-    // individually rather than through the deque's non-Item control fields.
-    mock_scheduler_register_gc_roots();
+    mock_scheduler_clear();
 
     // initialize libuv loop
     lambda_uv_init();
@@ -1479,7 +1538,7 @@ extern "C" void js_event_loop_shutdown(void) {
     timer_force_shutdown = true;
     close_all_timer_handles();
     if (loop) {
-        int safety = MAX_TIMER_HANDLES + 16;
+        int safety = timer_handle_count + 16;
         while (timer_handle_count > 0 && safety-- > 0) {
             uv_run(loop, UV_RUN_NOWAIT);
         }
@@ -1489,15 +1548,13 @@ extern "C" void js_event_loop_shutdown(void) {
     if (timer_handle_count > 0) {
         log_error("event_loop: shutdown left %d timer handle(s) pending close",
                   timer_handle_count);
+    } else {
+        timer_registry_clear();
     }
 
-    runtime_async_deque_clear(&next_tick_deque);
-    runtime_async_deque_clear(&microtask_deque);
-    memset(raf_callback_ring, 0, sizeof(raf_callback_ring));
-    memset(raf_id_ring, 0, sizeof(raf_id_ring));
-    raf_head = 0;
-    raf_tail = 0;
-    raf_count = 0;
+    runtime_job_queue_clear(&next_tick_queue);
+    runtime_job_queue_clear(&microtask_queue);
+    runtime_job_queue_clear(&animation_frame_queue);
 }
 
 // Maximum time (ms) the event loop drain is allowed to run before being
@@ -1552,8 +1609,8 @@ typedef struct JsCloseRefedState {
 static void event_loop_close_refed_handle_cb(uv_handle_t* h, void* arg) {
     JsCloseRefedState* state = (JsCloseRefedState*)arg;
     if (!state || !h || h == state->skip || uv_is_closing(h) || !uv_has_ref(h)) return;
-    for (int i = 0; i < timer_handle_count; i++) {
-        JsTimerHandle* th = timer_handles[i];
+    for (int i = 0; i < timer_slot_count; i++) {
+        JsTimerHandle* th = timer_handle_at(i);
         if (!th || h != (uv_handle_t*)&th->timer) continue;
         // Watchdog cleanup must update the JS timer owner before closing libuv;
         // a raw close leaves the registry live and clearTimeout closes it twice.
@@ -1658,8 +1715,8 @@ static void drain_watchdog_timer_cb(uv_timer_t* handle) {
 // Stop and close all active interval timers so they don't keep the event
 // loop alive after drain completes or times out.
 static void stop_all_interval_timers(void) {
-    for (int i = timer_handle_count - 1; i >= 0; i--) {
-        JsTimerHandle* th = timer_handles[i];
+    for (int i = timer_slot_count - 1; i >= 0; i--) {
+        JsTimerHandle* th = timer_handle_at(i);
         if (th && th->is_interval) {
             timer_close_handle(th);
         }
@@ -1670,8 +1727,8 @@ static void stop_all_interval_timers(void) {
 // queued by onload get a browser-like macrotask turn, but pending timers must
 // not keep the static layout pass alive.
 static void close_all_timer_handles(void) {
-    for (int i = timer_handle_count - 1; i >= 0; i--) {
-        JsTimerHandle* th = timer_handles[i];
+    for (int i = timer_slot_count - 1; i >= 0; i--) {
+        JsTimerHandle* th = timer_handle_at(i);
         if (th) {
             timer_close_handle(th);
         }

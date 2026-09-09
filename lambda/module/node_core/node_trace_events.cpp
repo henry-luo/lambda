@@ -20,7 +20,7 @@ static Item node_trace_root_value(const uint64_t* slot) {
 
 static NodeTraceState* node_trace_state(void) {
     void* session = jube_node_runtime_current_session();
-    return session ? jube_node_trace_state(session) : NULL;
+    return session ? jube_node_trace_state_ensure(session) : NULL;
 }
 
 static void node_trace_copy_cstr(char* dst, int dst_size, const char* src, int src_len) {
@@ -30,6 +30,59 @@ static void node_trace_copy_cstr(char* dst, int dst_size, const char* src, int s
     if (src_len >= dst_size) src_len = dst_size - 1;
     memcpy(dst, src, (size_t)src_len);
     dst[src_len] = '\0';
+}
+
+static char* node_trace_copy_chars(const char* src, int src_len) {
+    if (!src) src = "";
+    if (src_len < 0) src_len = (int)strlen(src);
+    char* copy = (char*)mem_alloc((size_t)src_len + 1, MEM_CAT_SYSTEM);
+    if (!copy) return NULL;
+    if (src_len > 0) memcpy(copy, src, (size_t)src_len);
+    copy[src_len] = '\0';
+    return copy;
+}
+
+static int node_trace_category_count(const NodeTraceState* state) {
+    return state && state->categories ? state->categories->length : 0;
+}
+
+static NodeTraceCategory* node_trace_category_at(const NodeTraceState* state, int index) {
+    return state && state->categories && index >= 0 && index < state->categories->length
+        ? (NodeTraceCategory*)arraylist_get(state->categories, index) : NULL;
+}
+
+static int node_trace_event_count(const NodeTraceState* state) {
+    return state && state->events ? state->events->length : 0;
+}
+
+static NodeTraceEvent* node_trace_event_at(const NodeTraceState* state, int index) {
+    return state && state->events && index >= 0 && index < state->events->length
+        ? (NodeTraceEvent*)arraylist_get(state->events, index) : NULL;
+}
+
+static void node_trace_release_categories(NodeTraceState* state) {
+    if (!state || !state->categories) return;
+    for (int i = 0; i < state->categories->length; i++) {
+        NodeTraceCategory* category = node_trace_category_at(state, i);
+        if (!category) continue;
+        mem_free(category->name);
+        mem_free(category);
+    }
+    arraylist_free(state->categories);
+    state->categories = NULL;
+}
+
+static void node_trace_release_events(NodeTraceState* state) {
+    if (!state || !state->events) return;
+    for (int i = 0; i < state->events->length; i++) {
+        NodeTraceEvent* event = node_trace_event_at(state, i);
+        if (!event) continue;
+        mem_free(event->cat);
+        mem_free(event->name);
+        mem_free(event);
+    }
+    arraylist_free(state->events);
+    state->events = NULL;
 }
 
 static bool node_trace_copy_value_string(Item value, char* out, int out_size,
@@ -60,8 +113,9 @@ static bool node_trace_category_matches(const char* enabled, const char* categor
 
 static int node_trace_find_category(NodeTraceState* state, const char* name) {
     if (!state || !name) return -1;
-    for (int i = 0; i < state->category_count; i++) {
-        if (strcmp(state->categories[i].name, name) == 0) return i;
+    for (int i = 0; i < node_trace_category_count(state); i++) {
+        NodeTraceCategory* category = node_trace_category_at(state, i);
+        if (category && category->name && strcmp(category->name, name) == 0) return i;
     }
     return -1;
 }
@@ -71,14 +125,24 @@ static void node_trace_add_category(NodeTraceState* state, const char* name,
     if (!state || !name || !name[0]) return;
     int idx = node_trace_find_category(state, name);
     if (idx >= 0) {
-        state->categories[idx].refs++;
-        state->categories[idx].from_exec_argv =
-            state->categories[idx].from_exec_argv || from_exec_argv;
+        NodeTraceCategory* category = node_trace_category_at(state, idx);
+        category->refs++;
+        category->from_exec_argv = category->from_exec_argv || from_exec_argv;
         return;
     }
-    if (state->category_count >= NODE_TRACE_MAX_CATEGORIES) return;
-    NodeTraceCategory* category = &state->categories[state->category_count++];
-    node_trace_copy_cstr(category->name, (int)sizeof(category->name), name, -1);
+    if (!state->categories) {
+        state->categories = arraylist_new(4);
+        if (!state->categories) return;
+    }
+    NodeTraceCategory* category =
+        (NodeTraceCategory*)mem_calloc(1, sizeof(NodeTraceCategory), MEM_CAT_SYSTEM);
+    if (!category) return;
+    category->name = node_trace_copy_chars(name, -1);
+    if (!category->name || !arraylist_append(state->categories, category)) {
+        mem_free(category->name);
+        mem_free(category);
+        return;
+    }
     category->refs = 1;
     category->from_exec_argv = from_exec_argv;
 }
@@ -86,13 +150,13 @@ static void node_trace_add_category(NodeTraceState* state, const char* name,
 static void node_trace_remove_category(NodeTraceState* state, const char* name) {
     if (!state) return;
     int idx = node_trace_find_category(state, name);
-    if (idx < 0 || state->categories[idx].from_exec_argv) return;
-    if (state->categories[idx].refs > 0) state->categories[idx].refs--;
-    if (state->categories[idx].refs > 0) return;
-    for (int i = idx; i + 1 < state->category_count; i++) {
-        state->categories[i] = state->categories[i + 1];
-    }
-    state->category_count--;
+    NodeTraceCategory* category = node_trace_category_at(state, idx);
+    if (!category || category->from_exec_argv) return;
+    if (category->refs > 0) category->refs--;
+    if (category->refs > 0) return;
+    mem_free(category->name);
+    mem_free(category);
+    arraylist_remove(state->categories, idx);
 }
 
 static void node_trace_add_categories_from_chars(NodeTraceState* state, const char* chars,
@@ -179,9 +243,10 @@ static bool node_trace_is_category_enabled_cstr(const char* category) {
     NodeTraceState* state = node_trace_state();
     if (!state) return false;
     node_trace_init_from_exec_argv(state);
-    for (int i = 0; i < state->category_count; i++) {
-        if (state->categories[i].refs > 0 &&
-                node_trace_category_matches(state->categories[i].name, category)) {
+    for (int i = 0; i < node_trace_category_count(state); i++) {
+        NodeTraceCategory* enabled = node_trace_category_at(state, i);
+        if (enabled && enabled->refs > 0 &&
+                node_trace_category_matches(enabled->name, category)) {
             return true;
         }
     }
@@ -279,7 +344,7 @@ static Item node_trace_manual_trace(Item phase, Item category, Item name, Item i
 
 static NodeTraceState* node_trace_ensure_state(void) {
     void* session = jube_node_runtime_current_session();
-    return session ? jube_node_trace_state(session) : NULL;
+    return session ? jube_node_trace_state_ensure(session) : NULL;
 }
 
 static Item node_trace_namespace_item(NodeTraceState* state) {
@@ -323,12 +388,12 @@ static Item node_trace_get_enabled_categories(void) {
     StrBuf* sb = strbuf_new();
     if (!sb) return ItemNull;
     bool first = true;
-    for (int i = 0; i < state->category_count; i++) {
-        if (state->categories[i].refs <= 0) continue;
+    for (int i = 0; i < node_trace_category_count(state); i++) {
+        NodeTraceCategory* category = node_trace_category_at(state, i);
+        if (!category || category->refs <= 0) continue;
         if (!first) strbuf_append_char(sb, ',');
         first = false;
-        strbuf_append_str_n(sb, state->categories[i].name,
-                            strlen(state->categories[i].name));
+        strbuf_append_str_n(sb, category->name, strlen(category->name));
     }
     Item result = node_trace_host->value->string_from_utf8_n(sb->str, sb->length);
     strbuf_free(sb);
@@ -454,11 +519,24 @@ static Item node_trace_manual_trace(Item phase, Item category, Item name, Item i
     if (!state || !node_trace_value_to_category_string(category, category_text,
                                                         (int)sizeof(category_text)) ||
             !node_trace_is_category_enabled_cstr(category_text) ||
-            !node_trace_value_to_category_string(name, trace_name, (int)sizeof(trace_name)) ||
-            state->event_count >= NODE_TRACE_MAX_EVENTS) {
+            !node_trace_value_to_category_string(name, trace_name, (int)sizeof(trace_name))) {
         return node_trace_undefined();
     }
-    NodeTraceEvent* event = &state->events[state->event_count++];
+    if (!state->events) {
+        state->events = arraylist_new(16);
+        if (!state->events) return node_trace_undefined();
+    }
+    NodeTraceEvent* event =
+        (NodeTraceEvent*)mem_calloc(1, sizeof(NodeTraceEvent), MEM_CAT_SYSTEM);
+    if (!event) return node_trace_undefined();
+    event->cat = node_trace_copy_chars(category_text, -1);
+    event->name = node_trace_copy_chars(trace_name, -1);
+    if (!event->cat || !event->name || !arraylist_append(state->events, event)) {
+        mem_free(event->cat);
+        mem_free(event->name);
+        mem_free(event);
+        return node_trace_undefined();
+    }
     int64_t phase_number = 0;
     char phase_text[8];
     int phase_length = 0;
@@ -471,8 +549,6 @@ static Item node_trace_manual_trace(Item phase, Item category, Item name, Item i
     } else {
         event->ph = 'i';
     }
-    node_trace_copy_cstr(event->cat, (int)sizeof(event->cat), category_text, -1);
-    node_trace_copy_cstr(event->name, (int)sizeof(event->name), trace_name, -1);
     event->ts = uv_hrtime() / 1000;
     int64_t id_number = 0;
     event->has_id = node_trace_host->value->number_to_int64_exact &&
@@ -512,12 +588,23 @@ void node_trace_events_emit_async_hooks_init(const char* type_chars, int type_le
                                              int64_t async_id, int64_t trigger_id) {
     (void)trigger_id;
     NodeTraceState* state = node_trace_state();
-    if (!state || !node_trace_is_category_enabled_cstr("node.async_hooks") ||
-            state->event_count >= NODE_TRACE_MAX_EVENTS) return;
-    NodeTraceEvent* event = &state->events[state->event_count++];
+    if (!state || !node_trace_is_category_enabled_cstr("node.async_hooks")) return;
+    if (!state->events) {
+        state->events = arraylist_new(16);
+        if (!state->events) return;
+    }
+    NodeTraceEvent* event =
+        (NodeTraceEvent*)mem_calloc(1, sizeof(NodeTraceEvent), MEM_CAT_SYSTEM);
+    if (!event) return;
+    event->cat = node_trace_copy_chars("node,node.async_hooks", -1);
+    event->name = node_trace_copy_chars(type_chars, type_len);
+    if (!event->cat || !event->name || !arraylist_append(state->events, event)) {
+        mem_free(event->cat);
+        mem_free(event->name);
+        mem_free(event);
+        return;
+    }
     event->ph = 'b';
-    node_trace_copy_cstr(event->cat, (int)sizeof(event->cat), "node,node.async_hooks", -1);
-    node_trace_copy_cstr(event->name, (int)sizeof(event->name), type_chars, type_len);
     event->ts = uv_hrtime() / 1000;
     event->id = async_id;
     event->has_id = true;
@@ -528,7 +615,8 @@ void node_trace_events_flush(void) {
     NodeTraceState* state = node_trace_state();
     if (!state) return;
     node_trace_init_from_exec_argv(state);
-    if (state->file_written || state->event_count <= 0) return;
+    int event_count = node_trace_event_count(state);
+    if (state->file_written || event_count <= 0) return;
     FILE* file = fopen("node_trace.1.log", "wb");
     if (!file) {
         log_error("node-trace-events: failed to open node_trace.1.log");
@@ -541,9 +629,12 @@ void node_trace_events_flush(void) {
     }
     strbuf_append_str_n(sb, "{\"traceEvents\":[", 16);
     long pid = (long)uv_os_getpid();
-    for (int i = 0; i < state->event_count; i++) {
-        NodeTraceEvent* event = &state->events[i];
-        if (i > 0) strbuf_append_char(sb, ',');
+    bool first_event = true;
+    for (int i = 0; i < event_count; i++) {
+        NodeTraceEvent* event = node_trace_event_at(state, i);
+        if (!event || !event->cat || !event->name) continue;
+        if (!first_event) strbuf_append_char(sb, ',');
+        first_event = false;
         strbuf_append_str_n(sb, "{\"pid\":", 7);
         strbuf_append_int64(sb, (int64_t)pid);
         strbuf_append_str_n(sb, ",\"tid\":0,\"ts\":", 14);
@@ -592,8 +683,8 @@ void node_trace_events_shutdown(void) {
 void node_trace_events_runtime_reset(void* session) {
     NodeTraceState* state = jube_node_trace_state(session);
     if (!state) return;
-    state->category_count = 0;
-    state->event_count = 0;
+    node_trace_release_categories(state);
+    node_trace_release_events(state);
     state->initialized = false;
     state->file_written = false;
 }
@@ -607,5 +698,7 @@ void node_trace_events_runtime_detach(void* session) {
         node_trace_host->node->roots->persistent_root_unregister(session,
                                                                   &state->namespace_item);
     }
+    node_trace_release_categories(state);
+    node_trace_release_events(state);
     memset(state, 0, sizeof(*state));
 }

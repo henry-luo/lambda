@@ -7632,9 +7632,8 @@ extern "C" Item js_get_crypto_namespace(void) {
     if (!crypto_ensure_roots()) return ItemError;
     if (crypto_namespace.item != 0) return crypto_namespace;
 
-    // The module cache is published only after this large constructor returns;
-    // root its stable slot first so forced GC cannot reclaim the partial object.
-    heap_register_gc_root(&crypto_namespace.item);
+    // crypto's rooted realm range is registered before this lazy constructor
+    // starts, so its namespace slot is safe to publish across allocations.
     crypto_namespace = js_new_object();
 
     JS_ROOTS(roots,
@@ -7749,8 +7748,8 @@ extern "C" Item js_get_crypto_namespace(void) {
 }
 
 static void crypto_reset_live_contexts(void) {
-    // Every live context is an entry in the session table; closing the kind
-    // runs each one's release callback.
+    // The host ABI maps this legacy prefix once to the shared table's frozen
+    // crypto group; resource-table teardown never dispatches on text.
     jube_node_resource_close_kind(jube_node_runtime_current_session(), "crypto.");
 }
 

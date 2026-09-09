@@ -16,6 +16,14 @@ i64(-123)
 // Test 3: i64 conversion from string
 i64('1234567890123456789')
 i64('-9876543210987654321')
+// INT64_MAX is a valid i64 result, never a conversion-error sentinel.
+i64('9223372036854775807')
+i64(9223372036854775807i64)
+i64('9223372036854775808')
+// Keep the error result boxed across a typed native-call boundary.
+fn identity_i64(value: i64) => value
+identity_i64(i64('9223372036854775807'))
+identity_i64(i64('9223372036854775808'))
 
 // Test 4: i64 conversion from float
 i64(3.14)

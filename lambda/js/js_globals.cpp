@@ -2092,10 +2092,6 @@ JS_FORWARD_STATIC_EXPRESSION(bool*, js_process_exit_requested_slot, (void),
 #define js_process_object (js_runtime_state.process->object)
 #define js_process_exit_code_value (js_runtime_state.process->exit_code)
 #define js_process_exit_requested_value (js_runtime_state.process->exit_requested)
-#define process_exit_listeners (js_runtime_state.process->exit_listeners)
-#define process_exit_listener_count (js_runtime_state.process->exit_listener_count)
-#define process_uncaught_listeners (js_runtime_state.process->uncaught_listeners)
-#define process_uncaught_listener_count (js_runtime_state.process->uncaught_listener_count)
 #define js_process_exiting (js_runtime_state.process->exiting)
 #define process_listener_map (js_runtime_state.process->listener_map)
 #define process_total_listener_count (js_runtime_state.process->total_listener_count)
@@ -2105,6 +2101,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool*, js_process_exit_requested_slot, (void),
 #define js_process_ipc_disconnect_emitted (js_runtime_state.process->ipc_disconnect_emitted)
 #define js_process_ipc_force_ref (js_runtime_state.process->ipc_force_ref)
 #define js_process_ipc_pending_messages (js_runtime_state.process->ipc_pending_messages)
+#define js_process_ipc_write_callbacks (js_runtime_state.process->ipc_write_callbacks)
 #define js_process_ipc_buf (js_runtime_state.process->ipc_buffer)
 #define js_process_ipc_len (js_runtime_state.process->ipc_length)
 #define js_process_ipc_cap (js_runtime_state.process->ipc_capacity)
@@ -2867,14 +2864,12 @@ template <typename Target>
 JS_FORWARD_STATIC_VOID( js_process_set_method, (Item ns, const char* name, Target target,         int adapter_arity), js_install_native_method, (ns, name, target, adapter_arity))
 
 // ─── process.on(event, listener) ────────────────────────────────────────────
-// simple event emitter for process: supports 'exit', 'uncaughtException', 'beforeExit'
-// plus general events via a listener map
-#define MAX_PROCESS_LISTENERS JS_PROCESS_LISTENER_MAX
+// One dynamic event map owns every process listener, including lifecycle
+// events, so delivery cannot diverge from process.listeners().
 
 static void js_process_ipc_refresh_ref(void);
 static void js_process_ipc_flush_pending(void);
 static void js_process_update_events_count(void);
-static void js_process_remove_from_fixed_list(Item* listeners, int* count, Item listener);
 
 static Item get_process_listener_map() {
     if (process_listener_map.item == 0) {
@@ -2891,32 +2886,6 @@ static bool process_event_name_equals(Item event_name, const char* name, int nam
 }
 JS_FORWARD_STATIC_RETURN(bool, js_process_is_ipc_event, (Item event_name), process_event_name_equals, (event_name, "message", 7) || process_event_name_equals(event_name, "disconnect", 10))
 
-static void js_process_update_fixed_list(Item event_name, Item listener, bool add) {
-    Item* listeners = NULL;
-    int* count = NULL;
-    if (process_event_name_equals(event_name, "exit", 4)) {
-        listeners = process_exit_listeners;
-        count = &process_exit_listener_count;
-    } else if (process_event_name_equals(event_name, "uncaughtException", 17)) {
-        listeners = process_uncaught_listeners;
-        count = &process_uncaught_listener_count;
-    }
-    if (!count) return;
-    if (add) {
-        if (*count < MAX_PROCESS_LISTENERS) listeners[(*count)++] = listener;
-    } else {
-        js_process_remove_from_fixed_list(listeners, count, listener);
-    }
-}
-
-static void js_process_clear_fixed_list(Item event_name) {
-    if (process_event_name_equals(event_name, "exit", 4)) {
-        process_exit_listener_count = 0;
-    } else if (process_event_name_equals(event_name, "uncaughtException", 17)) {
-        process_uncaught_listener_count = 0;
-    }
-}
-
 static void js_process_record_uncaught_handler_failure(void) {
     js_process_exit_code_value = 1;
     if (js_process_object.item != ITEM_NULL) {
@@ -2930,8 +2899,6 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
     bool is_sym = js_key_is_symbol_c(event_name);
     if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
     if (!js_is_callable(listener)) return js_process_object;
-    js_process_update_fixed_list(event_name, listener, true);
-
     // also store in general listener map
     Item map = get_process_listener_map();
     Item arr = js_get_key_default(map, event_name);
@@ -2994,8 +2961,17 @@ extern "C" void js_process_emit_exit(int code) {
     if (js_process_exiting) return;
     js_process_exiting = true;
     Item code_item = (Item){.item = i2it((int64_t)code)};
-    for (int i = 0; i < process_exit_listener_count; i++) {
-        js_call_function(process_exit_listeners[i], js_process_object, &code_item, 1);
+    Item map = get_process_listener_map();
+    Item listeners = js_get_key_default(map, js_name_item("exit", 4));
+    if (get_type_id(listeners) != LMD_TYPE_ARRAY) return;
+    int64_t listener_count = js_array_length(listeners);
+    for (int64_t i = 0; i < listener_count; i++) {
+        Item listener = js_elements_get_int(listeners, i);
+        if (js_is_callable(listener)) {
+            // Exit delivery has historically ignored listener failures while
+            // continuing the remaining callbacks.
+            js_call_function(listener, js_process_object, &code_item, 1);
+        }
     }
 }
 
@@ -3006,8 +2982,6 @@ extern "C" Item js_process_emit_before_exit(int code) {
 }
 
 extern "C" void js_process_reset_listeners(void) {
-    process_exit_listener_count = 0;
-    process_uncaught_listener_count = 0;
     js_process_exiting = false;
     js_process_exit_requested_value = false;
     process_total_listener_count = 0;
@@ -3056,23 +3030,12 @@ static void js_process_update_events_count(void) {
     js_set_key_cstr(js_process_object, "_eventsCount", (Item){.item = i2it((int64_t)process_total_listener_count)});
 }
 
-static void js_process_remove_from_fixed_list(Item* listeners, int* count, Item listener) {
-    int write = 0;
-    for (int read = 0; read < *count; read++) {
-        if (listeners[read].item == listener.item) continue;
-        listeners[write++] = listeners[read];
-    }
-    *count = write;
-}
-
 // process.removeListener(event, listener)
 extern "C" Item js_process_removeListener(Item event_name, Item listener) {
     TypeId etype = get_type_id(event_name);
     bool is_sym = js_key_is_symbol_c(event_name);
     if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
     if (!js_is_callable(listener)) return js_process_object;
-
-    js_process_update_fixed_list(event_name, listener, false);
 
     Item map = get_process_listener_map();
     Item arr = js_get_key_default(map, event_name);
@@ -3109,8 +3072,6 @@ extern "C" Item js_process_removeAllListeners(Item event_name) {
     extern void js_promise_note_unhandled_listener_reset(void);
     TypeId etype = get_type_id(event_name);
     if (etype == LMD_TYPE_UNDEFINED || event_name.item == ITEM_JS_UNDEFINED || event_name.item == ItemNull.item) {
-        process_exit_listener_count = 0;
-        process_uncaught_listener_count = 0;
         process_total_listener_count = 0;
         process_ipc_liveness_listener_count = 0;
         if (!js_process_ensure_roots()) return ItemNull;
@@ -3123,11 +3084,9 @@ extern "C" Item js_process_removeAllListeners(Item event_name) {
     bool is_sym = js_key_is_symbol_c(event_name);
     if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
 
-    if (etype == LMD_TYPE_STRING) {
-        js_process_clear_fixed_list(event_name);
-        if (process_event_name_equals(event_name, "unhandledRejection", 18)) {
-            js_promise_note_unhandled_listener_reset();
-        }
+    if (etype == LMD_TYPE_STRING &&
+            process_event_name_equals(event_name, "unhandledRejection", 18)) {
+        js_promise_note_unhandled_listener_reset();
     }
 
     Item map = get_process_listener_map();
@@ -3166,7 +3125,7 @@ extern "C" Item js_process_listeners(Item event_name) {
 typedef struct JsProcessIpcWriteReq {
     uv_write_t req;
     char* data;
-    Item callback;
+    int64_t callback_slot;
 } JsProcessIpcWriteReq;
 
 JS_FORWARD_STATIC_EXPRESSION(uv_pipe_t*, js_process_ipc_pipe_ptr, (void),
@@ -3180,7 +3139,7 @@ typedef struct JsProcessIpcScope {
 static bool js_process_ipc_enter(uv_handle_t* handle, JsProcessIpcScope* scope) {
     memset(scope, 0, sizeof(*scope));
     EvalContext* owner = handle ? (EvalContext*)handle->data : NULL;
-    if (!owner || !owner->js_state) return false;
+    if (!owner || !js_runtime_state_for(owner)) return false;
     if (!eval_context_matches(owner) ||
             !js_runtime_state_thread_matches(owner)) {
         // libuv must deliver IPC completion on the context's owner loop.
@@ -3254,15 +3213,23 @@ static void js_process_ipc_close_cb(uv_handle_t* handle) {
 
 static void js_process_ipc_write_cb(uv_write_t* req, int status) {
     JsProcessIpcScope scope = {};
-    if (!js_process_ipc_enter((uv_handle_t*)req->handle, &scope)) return;
+    if (!js_process_ipc_enter((uv_handle_t*)req->handle, &scope)) {
+        JsProcessIpcWriteReq* stale = (JsProcessIpcWriteReq*)req;
+        if (stale && stale->data) mem_free(stale->data);
+        if (stale) mem_free(stale);
+        return;
+    }
     JsProcessIpcWriteReq* wr = (JsProcessIpcWriteReq*)req;
-    Item callback = wr->callback;
+    RootFrame roots(1);
+    Rooted<Item> callback_root(roots,
+        wr ? runtime_callback_slots_take(&js_process_ipc_write_callbacks,
+            wr->callback_slot) : make_js_undefined());
     if (wr->data) mem_free(wr->data);
     mem_free(wr);
     (void)status;
-    if (js_is_callable(callback)) {
+    if (js_is_callable(callback_root.get())) {
         Item arg = make_js_undefined();
-        js_call_function(callback, make_js_undefined(), &arg, 1);
+        js_call_function(callback_root.get(), make_js_undefined(), &arg, 1);
         js_microtask_flush();
     }
     js_process_ipc_refresh_ref();
@@ -3499,6 +3466,8 @@ static void js_process_ipc_init_from_env(void) {
 }
 
 extern "C" Item js_process_send(Item msg, Item callback) {
+    RootFrame roots(1);
+    Rooted<Item> callback_root(roots, callback);
     if (!js_process_ipc_active || js_process_ipc_closing) return (Item){.item = b2it(false)};
     JS_ASSIGN_OR_RETURN(json, js_json_stringify(msg));
     if (get_type_id(json) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
@@ -3507,7 +3476,7 @@ extern "C" Item js_process_send(Item msg, Item callback) {
     size_t len = s->len + 1;
     JsProcessIpcWriteReq* wr = (JsProcessIpcWriteReq*)mem_calloc(1, sizeof(JsProcessIpcWriteReq), MEM_CAT_JS_RUNTIME);
     if (!wr) return (Item){.item = b2it(false)};
-    wr->callback = js_is_callable(callback) ? callback : make_js_undefined();
+    wr->callback_slot = -1;
     wr->data = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
     if (!wr->data) {
         mem_free(wr);
@@ -3515,11 +3484,21 @@ extern "C" Item js_process_send(Item msg, Item callback) {
     }
     memcpy(wr->data, s->chars, s->len);
     wr->data[s->len] = '\n';
+    if (js_is_callable(callback_root.get()) &&
+            !runtime_callback_slots_add(&js_process_ipc_write_callbacks,
+                callback_root.get(), &wr->callback_slot)) {
+        log_error("js-process-ipc: could not retain write callback");
+        mem_free(wr->data);
+        mem_free(wr);
+        return (Item){.item = b2it(false)};
+    }
     uv_buf_t buf = uv_buf_init(wr->data, (unsigned int)len);
     uv_ref((uv_handle_t*)&js_process_ipc_pipe);
     int r = uv_write(&wr->req, (uv_stream_t*)&js_process_ipc_pipe, &buf, 1, js_process_ipc_write_cb);
     if (r == 0) return (Item){.item = b2it(true)};
     js_process_ipc_refresh_ref();
+    (void)runtime_callback_slots_take(&js_process_ipc_write_callbacks,
+        wr->callback_slot);
     mem_free(wr->data);
     mem_free(wr);
     log_error("process_ipc: write failed: %s", uv_strerror(r));
@@ -4626,22 +4605,22 @@ extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item);
 extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_t cp);
 extern "C" uint64_t js_get_heap_epoch();
 
-#define g_uri_last_four_byte_string (js_runtime_state.global_string_caches->uri_last_four_byte_string)
-#define g_uri_last_four_byte_cp (js_runtime_state.global_string_caches->uri_last_four_byte_cp)
-#define g_uri_last_four_byte_epoch (js_runtime_state.global_string_caches->uri_last_four_byte_epoch)
-#define g_last_from_char_code_string (js_runtime_state.global_string_caches->last_from_char_code_string)
-#define g_last_from_char_code_cp (js_runtime_state.global_string_caches->last_from_char_code_cp)
-#define g_last_from_char_code_epoch (js_runtime_state.global_string_caches->last_from_char_code_epoch)
-#define g_ascii_char_pool (js_runtime_state.global_string_caches->ascii_chars)
-#define g_ascii_char_pool_epoch (js_runtime_state.global_string_caches->ascii_chars_epoch)
-#define js_decode_uri_component_error (js_runtime_state.global_string_caches->decode_uri_component_error)
-#define js_decode_uri_component_error_epoch (js_runtime_state.global_string_caches->decode_uri_component_error_epoch)
-#define js_decode_uri_error (js_runtime_state.global_string_caches->decode_uri_error)
-#define js_decode_uri_error_epoch (js_runtime_state.global_string_caches->decode_uri_error_epoch)
+#define g_uri_last_four_byte_string (js_runtime_state.string_caches->uri_last_four_byte_string)
+#define g_uri_last_four_byte_cp (js_runtime_state.string_caches->uri_last_four_byte_cp)
+#define g_uri_last_four_byte_epoch (js_runtime_state.string_caches->uri_last_four_byte_epoch)
+#define g_last_from_char_code_string (js_runtime_state.string_caches->last_from_char_code_string)
+#define g_last_from_char_code_cp (js_runtime_state.string_caches->last_from_char_code_cp)
+#define g_last_from_char_code_epoch (js_runtime_state.string_caches->last_from_char_code_epoch)
+#define g_ascii_char_pool (js_runtime_state.string_caches->ascii_chars)
+#define g_ascii_char_pool_epoch (js_runtime_state.string_caches->ascii_chars_epoch)
+#define js_decode_uri_component_error (js_runtime_state.string_caches->decode_uri_component_error)
+#define js_decode_uri_component_error_epoch (js_runtime_state.string_caches->decode_uri_component_error_epoch)
+#define js_decode_uri_error (js_runtime_state.string_caches->decode_uri_error)
+#define js_decode_uri_error_epoch (js_runtime_state.string_caches->decode_uri_error_epoch)
 
 static bool js_global_string_caches_ensure_roots(void) {
     if (!js_active_runtime_state) return false;
-    JsRootRange* roots = &js_runtime_state.global_string_caches->roots;
+    JsRootRange* roots = &js_runtime_state.string_caches->roots;
     if (roots->roots_epoch == js_get_heap_epoch()) return true;
     return js_root_range_ensure_registered(roots);
 }
@@ -5230,28 +5209,42 @@ JS_FORWARD_VOID( js_console_debug_multi, (Item* args, int argc), js_console_emit
 // Console stub methods (count, clear, group, time, trace, assert, dir, table)
 // =============================================================================
 
-// console.count / console.countReset
-#define js_console_count_map (js_runtime_state.console.count_values)
-#define js_console_count_keys (js_runtime_state.console.count_keys)
-#define js_console_count_used (js_runtime_state.console.count_used)
-#define js_console_timers (js_runtime_state.console.timers)
-#define js_console_timer_keys (js_runtime_state.console.timer_keys)
-#define js_console_timer_used (js_runtime_state.console.timer_used)
+// console.count / console.countReset / console.time share one label record.
+#define js_console_labels (js_runtime_state.console.labels)
 #define js_console_group_depth (js_runtime_state.console.group_depth)
 
-static int* js_console_count_slot(const char* label, int label_len) {
-    uint32_t h = 0;
-    for (int i = 0; i < label_len; i++) h = h * 31 + (uint8_t)label[i];
-    for (int i = 0; i < js_console_count_used; i++) {
-        if (js_console_count_keys[i] == h) return &js_console_count_map[i];
+static JsConsoleLabel* js_console_label_find(const char* chars, int length) {
+    if (!js_console_labels || !chars || length < 0) return NULL;
+    for (int i = 0; i < js_console_labels->length; i++) {
+        JsConsoleLabel* label = (JsConsoleLabel*)arraylist_get(js_console_labels, i);
+        if (label && label->length == length &&
+                memcmp(label->chars, chars, (size_t)length) == 0) return label;
     }
-    if (js_console_count_used < 64) {
-        int idx = js_console_count_used++;
-        js_console_count_keys[idx] = h;
-        js_console_count_map[idx] = 0;
-        return &js_console_count_map[idx];
+    return NULL;
+}
+
+static JsConsoleLabel* js_console_label_get_or_create(const char* chars, int length) {
+    JsConsoleLabel* found = js_console_label_find(chars, length);
+    if (found) return found;
+    if (!chars || length < 0) return NULL;
+    JsConsoleLabel* label = (JsConsoleLabel*)mem_calloc(1, sizeof(JsConsoleLabel),
+        MEM_CAT_JS_RUNTIME);
+    if (!label) return NULL;
+    label->chars = (char*)mem_alloc((size_t)length + 1, MEM_CAT_JS_RUNTIME);
+    if (!label->chars) {
+        mem_free(label);
+        return NULL;
     }
-    return &js_console_count_map[0]; // fallback
+    memcpy(label->chars, chars, (size_t)length);
+    label->chars[length] = '\0';
+    label->length = length;
+    if (!js_console_labels) js_console_labels = arraylist_new(8);
+    if (!js_console_labels || !arraylist_append(js_console_labels, label)) {
+        mem_free(label->chars);
+        mem_free(label);
+        return NULL;
+    }
+    return label;
 }
 
 static void js_console_resolve_label(Item label_item, bool coerce, char* label_buf,
@@ -5284,9 +5277,10 @@ extern "C" Item js_console_count_fn(Item label_item) {
     const char* label;
     int label_len;
     js_console_resolve_label(label_item, true, label_buf, (int)sizeof(label_buf), &label, &label_len);
-    int* slot = js_console_count_slot(label, label_len);
-    (*slot)++;
-    int n = snprintf(buf, sizeof(buf), "%.*s: %d\n", label_len, label, *slot);
+    JsConsoleLabel* state = js_console_label_get_or_create(label, label_len);
+    if (!state) return (Item){.item = ITEM_JS_UNDEFINED};
+    state->count++;
+    int n = snprintf(buf, sizeof(buf), "%.*s: %d\n", label_len, label, state->count);
     js_console_write_to_stdout(buf, n);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -5296,18 +5290,16 @@ extern "C" Item js_console_countReset_fn(Item label_item) {
     const char* label;
     int label_len;
     js_console_resolve_label(label_item, true, label_buf, (int)sizeof(label_buf), &label, &label_len);
-    int* slot = js_console_count_slot(label, label_len);
-    *slot = 0;
+    JsConsoleLabel* state = js_console_label_get_or_create(label, label_len);
+    if (state) state->count = 0;
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 // console.time / console.timeEnd / console.timeLog
-
-static int js_console_timer_find(uint32_t h) {
-    for (int i = 0; i < js_console_timer_used; i++) {
-        if (js_console_timer_keys[i] == h) return i;
-    }
-    return -1;
+static double js_console_monotonic_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
 }
 
 extern "C" Item js_console_time_fn(Item label_item) {
@@ -5315,17 +5307,10 @@ extern "C" Item js_console_time_fn(Item label_item) {
     int label_len;
     char label_buf[1];
     js_console_resolve_label(label_item, false, label_buf, 1, &label, &label_len);
-    uint32_t h = 0;
-    for (int i = 0; i < label_len; i++) h = h * 31 + (uint8_t)label[i];
-    int idx = js_console_timer_find(h);
-    if (idx < 0 && js_console_timer_used < 32) {
-        idx = js_console_timer_used++;
-        js_console_timer_keys[idx] = h;
-    }
-    if (idx >= 0) {
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        js_console_timers[idx] = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+    JsConsoleLabel* state = js_console_label_get_or_create(label, label_len);
+    if (state) {
+        state->timer_started_ms = js_console_monotonic_ms();
+        state->timer_active = true;
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -5335,14 +5320,9 @@ extern "C" Item js_console_timeEnd_fn(Item label_item) {
     int label_len;
     char label_buf[1];
     js_console_resolve_label(label_item, false, label_buf, 1, &label, &label_len);
-    uint32_t h = 0;
-    for (int i = 0; i < label_len; i++) h = h * 31 + (uint8_t)label[i];
-    int idx = js_console_timer_find(h);
-    if (idx >= 0) {
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        double now = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
-        double elapsed = now - js_console_timers[idx];
+    JsConsoleLabel* state = js_console_label_find(label, label_len);
+    if (state && state->timer_active) {
+        double elapsed = js_console_monotonic_ms() - state->timer_started_ms;
         char buf[256];
         int n = snprintf(buf, sizeof(buf), "%.*s: %.3fms\n", label_len, label, elapsed);
         js_console_write_to_stdout(buf, n);
@@ -5973,9 +5953,9 @@ JS_FORWARD_RETURN(bool, js_is_typed_array_ctor_name, (const char* name, int len)
 // Its .constructor creates generator-flagged functions (non-constructable via 'new').
 // Function-prototype identity is observable and therefore belongs to each JS
 // realm. These direct fields stay lock-free on prototype lookup paths.
-#define js_generator_function_proto_cache (js_runtime_state.function_prototypes.generator_function)
-#define js_async_generator_function_proto_cache (js_runtime_state.function_prototypes.async_generator_function)
-#define js_async_function_proto_cache (js_runtime_state.function_prototypes.async_function)
+#define js_generator_function_proto_cache (js_runtime_state.intrinsic_slots->generator_function)
+#define js_async_generator_function_proto_cache (js_runtime_state.intrinsic_slots->async_generator_function)
+#define js_async_function_proto_cache (js_runtime_state.intrinsic_slots->async_function)
 
 
 using JsFuncFlagsAccess = JsFunction;
@@ -6459,6 +6439,27 @@ static bool js_reflect_receiver_accepts_data(Item receiver_descriptor,
     return !has_writable || it2b(js_to_boolean(writable));
 }
 
+// preventExtensions/seal/freeze are recorded as ordinary own marker properties,
+// so IsExtensible is the same three probes on every receiver kind. One table
+// keeps the spellings together — including the 17 that every writer and reader
+// in this file uses for `__non_extensible__` — instead of a fifth copy that can
+// drift, and answers from shape storage without interning the names per call
+// (9.4% of an object-literal allocation before this).
+static const struct { const char* name; int len; } kJsExtensibilityMarkers[3] = {
+    {"__non_extensible__", 17}, {"__sealed__", 10}, {"__frozen__", 10},
+};
+
+static bool js_map_is_extensible_storage(Map* m) {
+    if (!m) return true;
+    for (int i = 0; i < 3; i++) {
+        bool found = false;
+        Item marker = js_map_shape_lookup_ext(m, kJsExtensibilityMarkers[i].name,
+            kJsExtensibilityMarkers[i].len, &found);
+        if (found && js_is_truthy(marker)) return false;
+    }
+    return true;
+}
+
 // T10-3/D-B: OrdinarySet that creates a new own data property on an ordinary
 // extensible object. The general algorithm below proves the same facts by
 // materializing a descriptor object per prototype link and then re-parsing one
@@ -6503,23 +6504,7 @@ static bool js_ordinary_add_prototype_chain_is_clear(Item target, NameId name_id
     return false;
 }
 
-// preventExtensions/seal/freeze are recorded as ordinary own marker properties,
-// so extensibility is a shape question. The name spellings and the truthiness
-// test mirror js_object_is_extensible's Map branch exactly; only the interning
-// and prototype-aware map_get are dropped, neither of which can change the
-// answer for an own marker slot.
-static bool js_ordinary_map_is_extensible(Map* m) {
-    bool found = false;
-    // The 17 here is the length every writer and reader in this file uses.
-    Item marker = js_map_shape_lookup_ext(m, "__non_extensible__", 17, &found);
-    if (found && js_is_truthy(marker)) return false;
-    marker = js_map_shape_lookup_ext(m, "__sealed__", 10, &found);
-    if (found && js_is_truthy(marker)) return false;
-    marker = js_map_shape_lookup_ext(m, "__frozen__", 10, &found);
-    return !(found && js_is_truthy(marker));
-}
-
-static bool js_ordinary_add_own_data_property(Item target, Item key, Item value) {
+bool js_ordinary_add_own_data_property(Item target, Item key, Item value) {
     if (get_type_id(target) != LMD_TYPE_MAP || !target.map) return false;
     // MAP_KIND_PLAIN means no ShapeEntry on this object carries descriptor
     // attributes, so a hit in shape storage is always a plain data slot. It
@@ -6544,7 +6529,7 @@ static bool js_ordinary_add_own_data_property(Item target, Item key, Item value)
         // stored-type rules, which the named fast path already tried.
         return false;
     }
-    if (!js_ordinary_map_is_extensible(target.map)) return false;
+    if (!js_map_is_extensible_storage(target.map)) return false;
     if (!js_ordinary_add_prototype_chain_is_clear(target, name_id, name_hash,
             name, name_len)) {
         return false;
@@ -7679,6 +7664,13 @@ extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
             if (nm && !(nm->len >= 2 && nm->chars[0] == '_' && nm->chars[1] == '_')) {
                 bool key_exists = false;
                 js_map_shape_lookup_ext(m, nm->chars, (int)nm->len, &key_exists);
+                // T10-2: an existing but still-unwritten predicted slot is an
+                // initialization. Tried before the extensibility query because
+                // that query allocates and this store does not.
+                if (key_exists && js_predicted_slot_initialize(obj_root.get(),
+                        nm, value_root.get())) {
+                    return obj_root.get();
+                }
                 if (!key_exists && js_is_truthy(js_object_is_extensible(obj_root.get()))) {
                     // Extensibility is an allocating host query; reload the
                     // map after it because GC may relocate the receiver's
@@ -9504,7 +9496,7 @@ extern "C" Item js_test262_decimal_to_percent_hex_string(Item n_item) {
     // These strings survive hot-batch resets; store them in the context root
     // range so a later collection cannot turn the 256-entry table into stale Items.
     bool cache_rooted = js_global_string_caches_ensure_roots();
-    Item* cached = js_runtime_state.global_string_caches->test262_percent_hex;
+    Item* cached = js_runtime_state.string_caches->test262_percent_hex;
     if (cache_rooted && cached[byte].item) return cached[byte];
     char buf[3];
     buf[0] = '%';
@@ -9531,7 +9523,7 @@ static inline bool js_test262_percent_escape_cp_from_append(String* left, uint32
     // the prior static pointer outlived both GC and hot-realm reset boundaries.
     bool cache_rooted = js_global_string_caches_ensure_roots();
     Item left_value = (Item){.item = s2it(left)};
-    Item cached_left_item = js_runtime_state.global_string_caches->test262_cached_percent_left;
+    Item cached_left_item = js_runtime_state.string_caches->test262_cached_percent_left;
     uint32_t byte0 = 0;
     uint32_t byte1 = 0;
     uint32_t byte2 = 0;
@@ -9547,15 +9539,15 @@ static inline bool js_test262_percent_escape_cp_from_append(String* left, uint32
         byte1 = (uint32_t)((b1_high << 4) | b1_low);
         byte2 = (uint32_t)((b2_high << 4) | b2_low);
         if (cache_rooted) {
-            js_runtime_state.global_string_caches->test262_cached_percent_left = left_value;
-            js_runtime_state.global_string_caches->test262_percent_byte0 = byte0;
-            js_runtime_state.global_string_caches->test262_percent_byte1 = byte1;
-            js_runtime_state.global_string_caches->test262_percent_byte2 = byte2;
+            js_runtime_state.string_caches->test262_cached_percent_left = left_value;
+            js_runtime_state.string_caches->test262_percent_byte0 = byte0;
+            js_runtime_state.string_caches->test262_percent_byte1 = byte1;
+            js_runtime_state.string_caches->test262_percent_byte2 = byte2;
         }
     } else {
-        byte0 = js_runtime_state.global_string_caches->test262_percent_byte0;
-        byte1 = js_runtime_state.global_string_caches->test262_percent_byte1;
-        byte2 = js_runtime_state.global_string_caches->test262_percent_byte2;
+        byte0 = js_runtime_state.string_caches->test262_percent_byte0;
+        byte1 = js_runtime_state.string_caches->test262_percent_byte1;
+        byte2 = js_runtime_state.string_caches->test262_percent_byte2;
     }
     if (byte0 < 0xF0 || byte0 > 0xF4) return false;
     if ((byte1 & 0xC0) != 0x80 || (byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80) return false;
@@ -10718,11 +10710,12 @@ static bool js_object_apply_integrity_descriptor(Item obj, Item key, bool frozen
 }
 
 static Item js_object_set_integrity(Item obj, bool frozen) {
+    JS_ROOTS(roots, object_root, obj, keys_root, ItemNull);
     // ES6: non-objects return the argument
-    TypeId ot = get_type_id(obj);
+    TypeId ot = get_type_id(object_root.get());
     if (ot != LMD_TYPE_MAP && ot != LMD_TYPE_ARRAY &&
-            !js_is_ordinary_numeric_array(obj) && ot != LMD_TYPE_FUNC &&
-            ot != LMD_TYPE_ELEMENT) return obj;
+            !js_is_ordinary_numeric_array(object_root.get()) && ot != LMD_TYPE_FUNC &&
+            ot != LMD_TYPE_ELEMENT) return object_root.get();
     // Js55 P12: per ES2024 §10.4.5.16 IntegerIndexedDefineOwnProperty step 3.c
     // and SetIntegrityLevel("frozen") at §7.3.16, freezing a TypedArray that's
     // backed by a resizable ArrayBuffer always throws TypeError — the integer-
@@ -10730,33 +10723,37 @@ static Item js_object_set_integrity(Item obj, bool frozen) {
     // false} because the buffer can resize behind them. Applies even for
     // currently-zero-length TAs (the buffer could grow). Tracking buffer-
     // backed TA detection via js_is_typed_array + the buffer handle flags.
-    if (frozen && js_is_typed_array(obj)) {
-        JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
+    if (frozen && js_is_typed_array(object_root.get())) {
+        JsTypedArray* ta = js_get_typed_array_ptr(object_root.get().map);
         if (ta && js_arraybuffer_resizable(ta->buffer)) {
             return js_throw_type_error("Cannot freeze a TypedArray backed by a resizable ArrayBuffer");
         }
     }
-    JS_ASSIGN_OR_RETURN(prevent_status, js_object_prevent_extensions(obj));
+    JS_ASSIGN_OR_RETURN(prevent_status, js_object_prevent_extensions(object_root.get()));
     if (get_type_id(prevent_status) == LMD_TYPE_BOOL && !it2b(prevent_status)) {
         return js_throw_type_error(frozen
             ? "Object.freeze: preventExtensions returned false"
             : "Object.seal: preventExtensions returned false");
     }
     // ES §7.3.16 SetIntegrityLevel: one key walk keeps seal and freeze aligned.
-    Item keys = js_reflect_own_keys(obj);
-    if (get_type_id(keys) == LMD_TYPE_ARRAY) {
-        for (int i = 0; i < keys.array->length; i++) {
-            Item key = keys.array->items[i];
-            if (!js_object_apply_integrity_descriptor(obj, key, frozen)) return obj;
+    // Descriptor application may allocate, so keep the reflected key carrier
+    // alive for the whole walk rather than dereferencing a collected array.
+    keys_root.set(js_reflect_own_keys(object_root.get()));
+    if (get_type_id(keys_root.get()) == LMD_TYPE_ARRAY) {
+        for (int i = 0; i < keys_root.get().array->length; i++) {
+            Item key = keys_root.get().array->items[i];
+            if (!js_object_apply_integrity_descriptor(object_root.get(), key, frozen)) {
+                return object_root.get();
+            }
         }
     }
     // Proxies need the integrity descriptor updates above, but the internal
     // marker belongs only to ordinary storage and would leak through ownKeys.
-    if (js_is_proxy(obj)) return obj;
+    if (js_is_proxy(object_root.get())) return object_root.get();
     const char* marker = frozen ? "__frozen__" : "__sealed__";
     Item key = js_name_item(marker, 10);
-    js_defprop_set_internal_state(obj, key, (Item){.item = b2it(true)});
-    return obj;
+    js_defprop_set_internal_state(object_root.get(), key, (Item){.item = b2it(true)});
+    return object_root.get();
 }
 JS_FORWARD_ITEM(js_object_freeze, (Item obj), js_object_set_integrity, (obj, true))
 
@@ -10905,57 +10902,31 @@ extern "C" Item js_object_is_extensible(Item obj) {
             ot != LMD_TYPE_ELEMENT)
         return (Item){.item = b2it(false)};
     if (ot == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(obj)) {
-        // Arrays: check companion map for __non_extensible__ marker
+        // Arrays keep the markers in the companion map.
         Array* arr = obj.array;
-        if (js_array_has_props(arr)) {
-            Map* props = js_array_props(arr);
-            bool found = false;
-            Item ne_v = js_map_shape_lookup_ext(props, "__non_extensible__", 17, &found);
-            if (found && js_is_truthy(ne_v)) return (Item){.item = b2it(false)};
-            Item sl_v = js_map_shape_lookup_ext(props, "__sealed__", 10, &found);
-            if (found && js_is_truthy(sl_v)) return (Item){.item = b2it(false)};
-            Item fr_v = js_map_shape_lookup_ext(props, "__frozen__", 10, &found);
-            if (found && js_is_truthy(fr_v)) return (Item){.item = b2it(false)};
-        }
-        return (Item){.item = b2it(true)};
+        bool extensible = !js_array_has_props(arr) ||
+            js_map_is_extensible_storage(js_array_props(arr));
+        return (Item){.item = b2it(extensible)};
     }
     if (ot == LMD_TYPE_FUNC) {
-        // Functions: check properties_map for __non_extensible__ marker
         JsFuncProps* fn = (JsFuncProps*)obj.function;
-        if (get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-            Map* pm = fn->properties_map.map;
-            bool found = false;
-            Item ne_v = js_map_shape_lookup_ext(pm, "__non_extensible__", 17, &found);
-            if (found && js_is_truthy(ne_v)) return (Item){.item = b2it(false)};
-            Item sl_v = js_map_shape_lookup_ext(pm, "__sealed__", 10, &found);
-            if (found && js_is_truthy(sl_v)) return (Item){.item = b2it(false)};
-            Item fr_v = js_map_shape_lookup_ext(pm, "__frozen__", 10, &found);
-            if (found && js_is_truthy(fr_v)) return (Item){.item = b2it(false)};
-        }
-        return (Item){.item = b2it(true)};
+        bool extensible = get_type_id(fn->properties_map) != LMD_TYPE_MAP ||
+            js_map_is_extensible_storage(fn->properties_map.map);
+        return (Item){.item = b2it(extensible)};
     }
     if (js_is_resting_error(obj)) {
-        bool found = false;
-        Item value = js_defprop_get_internal_state(obj, "__non_extensible__", 17, &found);
-        if (found && js_is_truthy(value)) return (Item){.item = b2it(false)};
-        value = js_defprop_get_internal_state(obj, "__sealed__", 10, &found);
-        if (found && js_is_truthy(value)) return (Item){.item = b2it(false)};
-        value = js_defprop_get_internal_state(obj, "__frozen__", 10, &found);
-        if (found && js_is_truthy(value)) return (Item){.item = b2it(false)};
+        // Error carriers reach the same own slots through their side map.
+        for (int i = 0; i < 3; i++) {
+            bool found = false;
+            Item marker = js_defprop_get_internal_state(obj,
+                kJsExtensibilityMarkers[i].name, kJsExtensibilityMarkers[i].len,
+                &found);
+            if (found && js_is_truthy(marker)) return (Item){.item = b2it(false)};
+        }
         return (Item){.item = b2it(true)};
     }
     if (ot != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    // non-extensible if explicitly marked, or sealed, or frozen
-    Item ne_k = js_name_item("__non_extensible__", 17);
-    Item ne_v = map_get(obj.map, ne_k);
-    if (js_is_truthy(ne_v)) return (Item){.item = b2it(false)};
-    Item sl_k = js_name_item("__sealed__", 10);
-    Item sl_v = map_get(obj.map, sl_k);
-    if (js_is_truthy(sl_v)) return (Item){.item = b2it(false)};
-    Item fr_k = js_name_item("__frozen__", 10);
-    Item fr_v = map_get(obj.map, fr_k);
-    if (js_is_truthy(fr_v)) return (Item){.item = b2it(false)};
-    return (Item){.item = b2it(true)};
+    return (Item){.item = b2it(js_map_is_extensible_storage(obj.map))};
 }
 
 // =============================================================================
@@ -13039,25 +13010,20 @@ extern "C" Item js_escape(Item str_item) {
 // v12: globalThis
 // =============================================================================
 
-// globalThis and lexical bindings are direct fields of the active context.
-// Their public lookup paths never use a lock or an atomic operation.
-#define js_global_this_obj (js_runtime_state.global_bindings->global_this)
-#define js_global_var_cached_defined_keys (js_runtime_state.global_bindings->var_defined_keys)
-#define js_global_var_cached_defined_count (js_runtime_state.global_bindings->var_defined_count)
-#define js_global_var_cached_defined_epoch (js_runtime_state.global_bindings->var_defined_epoch)
-#define js_global_var_cached_global (js_runtime_state.global_bindings->var_defined_global)
-#define js_window_event_value (js_runtime_state.global_bindings->window_event)
-#define js_window_event_intercept_enabled (js_runtime_state.global_bindings->window_event_intercept_enabled)
-#define js_global_lexical_keys (js_runtime_state.global_bindings->lexical_keys)
-#define js_global_lexical_values (js_runtime_state.global_bindings->lexical_values)
-#define js_global_lexical_immutable (js_runtime_state.global_bindings->lexical_immutable)
-#define js_global_lexical_binding_count (js_runtime_state.global_bindings->lexical_count)
-#define js_global_lexical_epoch (js_runtime_state.global_bindings->lexical_epoch)
-#define js_global_lexical_global (js_runtime_state.global_bindings->lexical_global)
+// Global object identity and every global binding row use the one realm-owned
+// RootVector. Their public paths remain owner-thread direct loads/stores.
+#define js_global_environment_state (js_runtime_state.global_environment)
+#define js_global_this_obj (js_global_environment_slot(js_global_environment_state, \
+    JS_GLOBAL_ENV_GLOBAL_THIS))
+#define js_window_event_value (js_global_environment_slot(js_global_environment_state, \
+    JS_GLOBAL_ENV_WINDOW_EVENT))
+#define js_window_event_intercept_enabled \
+    (js_global_environment_state->window_event_intercept_enabled)
 
-JS_FORWARD_STATIC_EXPRESSION(bool, js_global_bindings_ensure_roots, (void),
-    js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.global_bindings->roots))
+static bool js_global_bindings_ensure_roots() {
+    return js_active_runtime_state &&
+        js_global_environment_ensure(js_global_environment_state);
+}
 
 static bool js_key_is_event_name(Item key) {
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
@@ -13066,7 +13032,6 @@ static bool js_key_is_event_name(Item key) {
 }
 
 static void js_window_event_ensure_rooted() {
-    if (js_runtime_state.global_bindings->roots.roots_epoch == js_get_heap_epoch()) return;
     js_global_bindings_ensure_roots();
 }
 
@@ -13090,10 +13055,12 @@ extern "C" void js_set_window_event_global_value(Item value) {
 }
 
 static void js_global_var_define_cache_reset() {
-    memset(js_global_var_cached_defined_keys, 0, sizeof(js_global_var_cached_defined_keys));
-    js_global_var_cached_defined_count = 0;
-    js_global_var_cached_defined_epoch = 0;
-    js_global_var_cached_global = (Item){0};
+    if (!js_global_bindings_ensure_roots()) return;
+    js_global_environment_remove_kind(js_global_environment_state,
+        JS_GLOBAL_BINDING_OBJECT_VAR);
+    js_global_environment_state->object_var_epoch = 0;
+    js_global_environment_slot(js_global_environment_state,
+        JS_GLOBAL_ENV_OBJECT_VAR_GLOBAL) = ItemNull;
 }
 
 /**
@@ -13105,24 +13072,31 @@ extern "C" void js_globals_batch_reset() {
     js_global_this_obj = (Item){0};
     js_window_event_value = make_js_undefined();
     js_window_event_intercept_enabled = false;
+    js_global_environment_clear_bindings(js_global_environment_state);
     // Partial batch resets retain the heap but recreate realm builtins; clear
-    // URI/character fast-cache Items so a later decode cannot retain a stale
-    // error/prototype graph from the prior test realm.
-    js_runtime_state.global_string_caches->uri_last_four_byte_string = (Item){0};
-    js_runtime_state.global_string_caches->last_from_char_code_string = (Item){0};
-    js_runtime_state.global_string_caches->decode_uri_component_error = (Item){0};
-    js_runtime_state.global_string_caches->decode_uri_error = (Item){0};
-    memset(js_runtime_state.global_string_caches->ascii_chars, 0,
-           sizeof(js_runtime_state.global_string_caches->ascii_chars));
-    memset(js_runtime_state.global_string_caches->test262_percent_hex, 0,
-           sizeof(js_runtime_state.global_string_caches->test262_percent_hex));
-    js_runtime_state.global_string_caches->test262_cached_percent_left = (Item){0};
-    js_runtime_state.global_string_caches->uri_last_four_byte_epoch = 0;
-    js_runtime_state.global_string_caches->last_from_char_code_cp = -1;
-    js_runtime_state.global_string_caches->last_from_char_code_epoch = 0;
-    js_runtime_state.global_string_caches->ascii_chars_epoch = ~0ULL;
-    js_runtime_state.global_string_caches->decode_uri_component_error_epoch = 0;
-    js_runtime_state.global_string_caches->decode_uri_error_epoch = 0;
+    // string-cache Items so no fast path retains an old realm graph.
+    js_runtime_state.string_caches->last_four_byte_escape = (Item){0};
+    memset(js_runtime_state.string_caches->percent_prefixes, 0,
+           sizeof(js_runtime_state.string_caches->percent_prefixes));
+    memset(js_runtime_state.string_caches->percent_bytes, 0,
+           sizeof(js_runtime_state.string_caches->percent_bytes));
+    js_runtime_state.string_caches->uri_last_four_byte_string = (Item){0};
+    js_runtime_state.string_caches->last_from_char_code_string = (Item){0};
+    js_runtime_state.string_caches->decode_uri_component_error = (Item){0};
+    js_runtime_state.string_caches->decode_uri_error = (Item){0};
+    memset(js_runtime_state.string_caches->ascii_chars, 0,
+           sizeof(js_runtime_state.string_caches->ascii_chars));
+    memset(js_runtime_state.string_caches->test262_percent_hex, 0,
+           sizeof(js_runtime_state.string_caches->test262_percent_hex));
+    js_runtime_state.string_caches->test262_cached_percent_left = (Item){0};
+    js_runtime_state.string_caches->last_four_byte_cp = 0;
+    js_runtime_state.string_caches->last_four_byte_epoch = 0;
+    js_runtime_state.string_caches->uri_last_four_byte_epoch = 0;
+    js_runtime_state.string_caches->last_from_char_code_cp = -1;
+    js_runtime_state.string_caches->last_from_char_code_epoch = 0;
+    js_runtime_state.string_caches->ascii_chars_epoch = ~0ULL;
+    js_runtime_state.string_caches->decode_uri_component_error_epoch = 0;
+    js_runtime_state.string_caches->decode_uri_error_epoch = 0;
     js_global_var_define_cache_reset();
     // reset constructor cache (function objects from old pool)
     extern void js_ctor_cache_reset();
@@ -14341,22 +14315,25 @@ JS_FORWARD_ITEM(js_get_global_object, (), js_get_global_this, ())
 // ============================================================================
 #define js_with_stack_at(i) js_item_stack_at(&js_with_stack_state, (i))
 #define js_with_stack_depth js_item_stack_depth(&js_with_stack_state)
-#define js_last_with_binding_scope (js_runtime_state.with_scope.last_binding_slots[0])
-#define js_last_with_binding_key (js_runtime_state.with_scope.last_binding_slots[1])
-#define js_last_with_binding_roots (js_runtime_state.with_scope.last_binding_roots)
+#define js_last_with_binding_scope (*root_vector_at(&js_runtime_state.with_scope.last_binding_values, 0))
+#define js_last_with_binding_key (*root_vector_at(&js_runtime_state.with_scope.last_binding_values, 1))
 #define js_last_with_binding_valid (js_runtime_state.with_scope.last_binding_valid)
 
-// GC root registration for the with-scope stack. The stack (and the memoized
-// binding cache) can hold the ONLY reference to a with-scope object — e.g.
-// `with ({...})` where the operand's JIT register dies after js_with_push, or
-// the js_to_object wrapper created for a primitive operand. Without rooting,
-// any allocation inside the with body can collect the scope object and
-// subsequent unqualified-name lookups read freed memory. Keep both exact
-// ranges registered before publishing either a scope or a cache entry.
-// the scope stack roots itself (RootVector); only the binding cache range is
-// still a fixed registered pair
-JS_FORWARD_STATIC_EXPRESSION(bool, js_with_ensure_roots, (void),
-    js_root_range_ensure_registered(&js_last_with_binding_roots))
+// The scope stack and its two-value binding memo can each be the sole owner of
+// a scope object. RootVector owns both; recreate the fixed memo slots after a
+// heap replacement before exposing either reference.
+static bool js_with_ensure_roots(void) {
+    RootVector* memo = &js_runtime_state.with_scope.last_binding_values;
+    if (root_vector_count(memo) == 2) return true;
+    root_vector_clear(memo);
+    js_last_with_binding_valid = false;
+    if (!root_vector_push(memo, ItemNull) || !root_vector_push(memo, ItemNull)) {
+        root_vector_clear(memo);
+        log_error("js-with: could not grow binding memo");
+        return false;
+    }
+    return true;
+}
 
 static Item js_throw_binding_reference_error(Item key);
 
@@ -14379,9 +14356,7 @@ static bool js_with_scope_is_object(Item value) {
 extern "C" void js_with_batch_reset(void) {
     js_item_stack_clear(&js_with_stack_state);
     js_last_with_binding_valid = false;
-    // the binding cache slots are registered GC roots — stale Items from the
-    // prior script must not survive into the next heap's root scan
-    js_root_range_clear(&js_last_with_binding_roots);
+    root_vector_clear(&js_runtime_state.with_scope.last_binding_values);
 }
 
 extern "C" Item js_with_push(Item obj) {
@@ -14393,10 +14368,10 @@ extern "C" Item js_with_push(Item obj) {
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC) {
         JS_ASSIGN_OR_RETURN_INTO(obj, js_to_object(obj));
     }
-    if (js_with_stack_depth < JS_WITH_STACK_MAX) {
-        js_last_with_binding_valid = false;
-        js_item_stack_push(&js_with_stack_state, obj);
+    if (!js_item_stack_push(&js_with_stack_state, obj)) {
+        return js_throw_range_error("Could not grow with scope stack");
     }
+    js_last_with_binding_valid = false;
     return js_status_ok();
 }
 
@@ -14429,10 +14404,12 @@ extern "C" int js_with_save_stack(Item* out_stack, int max_depth) {
 extern "C" void js_with_set_stack(Item* stack, int depth) {
     if (!js_with_ensure_roots()) return;
     if (depth < 0) depth = 0;
-    if (depth > JS_WITH_STACK_MAX) depth = JS_WITH_STACK_MAX;
     js_item_stack_clear(&js_with_stack_state);
     for (int i = 0; i < depth; i++) {
-        if (!js_item_stack_push(&js_with_stack_state, stack ? stack[i] : ItemNull)) break;
+        if (!js_item_stack_push(&js_with_stack_state, stack ? stack[i] : ItemNull)) {
+            log_error("js-with: could not restore scope stack");
+            break;
+        }
     }
     js_last_with_binding_valid = false;
 }
@@ -14458,6 +14435,9 @@ JS_FORWARD_EXPRESSION(int64_t, js_with_depth_active, (void), js_with_stack_depth
 // Check with-scope stack for a property (most recent scope first)
 static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
     *found = false;
+    if (!js_with_ensure_roots()) {
+        return js_throw_range_error("Could not grow with binding memo");
+    }
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
         Item scope_obj = js_with_stack_at(i);
         if (js_with_scope_is_object(scope_obj)) {
@@ -14513,6 +14493,7 @@ static Item js_get_with_binding_or_fallback_impl(Item key, Item fallback,
     if (js_with_stack_depth <= 0) return fallback;
     bool found = false;
     Item result = js_with_scope_lookup(key, &found, strict);
+    if (item_is_error(result)) return result;
     return found ? result : fallback;
 }
 JS_FORWARD_ITEM(js_get_with_binding_or_fallback, (Item key, Item fallback), js_get_with_binding_or_fallback_impl, (key, fallback, false))
@@ -14522,7 +14503,8 @@ extern "C" Item js_get_last_with_binding_base_or_undefined(Item key) {
     // plain identifier calls inside `with` keep the Object Environment Record as
     // the call reference base; reuse the exact binding found while reading the
     // callee so argument side effects cannot change the chosen `this`.
-    if (!js_last_with_binding_valid || !js_with_binding_key_same(js_last_with_binding_key, key)) {
+    if (!js_with_ensure_roots() || !js_last_with_binding_valid ||
+            !js_with_binding_key_same(js_last_with_binding_key, key)) {
         return make_js_undefined();
     }
     Item scope_obj = js_last_with_binding_scope;
@@ -14599,7 +14581,8 @@ static Item js_set_with_binding_resolved(Item scope_obj, Item key, Item value,
 }
 
 extern "C" Item js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict) {
-    if (!js_last_with_binding_valid || !js_with_binding_key_same(js_last_with_binding_key, key)) {
+    if (!js_with_ensure_roots() || !js_last_with_binding_valid ||
+            !js_with_binding_key_same(js_last_with_binding_key, key)) {
         return (Item){.item = b2it(false)};
     }
     Item scope_obj = js_last_with_binding_scope;
@@ -14639,23 +14622,25 @@ extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_bin
 extern "C" uint64_t js_get_heap_epoch();
 
 static void js_global_lexical_refresh(void) {
+    if (!js_global_bindings_ensure_roots()) return;
     Item global = js_get_global_this();
     uint64_t epoch = js_get_heap_epoch();
-    if (js_global_lexical_epoch == epoch &&
-        js_global_lexical_global.item == global.item) {
+    Item& lexical_global = js_global_environment_slot(js_global_environment_state,
+        JS_GLOBAL_ENV_LEXICAL_GLOBAL);
+    if (js_global_environment_state->lexical_epoch == epoch &&
+        lexical_global.item == global.item) {
         return;
     }
-    js_global_lexical_epoch = epoch;
-    js_global_lexical_global = global;
-    js_global_lexical_binding_count = 0;
+    js_global_environment_state->lexical_epoch = epoch;
+    lexical_global = global;
+    js_global_environment_remove_kind(js_global_environment_state,
+        JS_GLOBAL_BINDING_LEXICAL);
 }
 
 static int js_global_lexical_find(Item key) {
     js_global_lexical_refresh();
-    for (int i = js_global_lexical_binding_count - 1; i >= 0; i--) {
-        if (js_with_binding_key_same(js_global_lexical_keys[i], key)) return i;
-    }
-    return -1;
+    return js_global_environment_find(js_global_environment_state,
+        JS_GLOBAL_BINDING_LEXICAL, key);
 }
 
 extern "C" int64_t js_global_lexical_binding_exists(Item key) {
@@ -14667,17 +14652,24 @@ extern "C" int64_t js_global_lexical_binding_exists(Item key) {
 extern "C" Item js_global_lexical_get_or_fallback(Item key, Item fallback) {
     JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     int idx = js_global_lexical_find(key);
-    return idx >= 0 ? js_global_lexical_values[idx] : fallback;
+    JsGlobalBinding* binding = js_global_environment_binding_at(
+        js_global_environment_state, idx);
+    return binding ? js_global_environment_binding_value(
+        js_global_environment_state, binding) : fallback;
 }
 
 extern "C" Item js_global_lexical_set_if_exists(Item key, Item value) {
     JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     int idx = js_global_lexical_find(key);
     if (idx < 0) return (Item){.item = b2it(false)};
-    if (js_global_lexical_immutable[idx]) {
+    JsGlobalBinding* binding = js_global_environment_binding_at(
+        js_global_environment_state, idx);
+    if (!binding) return (Item){.item = b2it(false)};
+    if (binding->immutable) {
         return js_throw_type_error("Assignment to constant variable");
     }
-    js_global_lexical_values[idx] = value;
+    js_global_environment_set_binding_value(js_global_environment_state,
+        binding, value);
     return (Item){.item = b2it(true)};
 }
 
@@ -14686,20 +14678,19 @@ extern "C" void js_global_lexical_declare(Item key, Item value, int64_t immutabl
     if (item_is_error(key)) return;
     int idx = js_global_lexical_find(key);
     if (idx >= 0) {
-        js_global_lexical_values[idx] = value;
-        js_global_lexical_immutable[idx] = immutable != 0;
-        return;
-    }
-    if (js_global_lexical_binding_count >= JS_GLOBAL_LEX_BIND_MAX) {
-        log_error("js-global-lexical: binding table overflow");
+        JsGlobalBinding* binding = js_global_environment_binding_at(
+            js_global_environment_state, idx);
+        if (!binding) return;
+        js_global_environment_set_binding_value(js_global_environment_state,
+            binding, value);
+        binding->immutable = immutable != 0;
         return;
     }
     // Script global lexical declarations live in the global environment record
     // but not on the global object, so Object.hasOwnProperty must stay false.
-    int binding_idx = js_global_lexical_binding_count++;
-    js_global_lexical_keys[binding_idx] = key;
-    js_global_lexical_values[binding_idx] = value;
-    js_global_lexical_immutable[binding_idx] = immutable != 0;
+    js_global_environment_upsert(js_global_environment_state,
+        JS_GLOBAL_BINDING_LEXICAL, key, value, immutable != 0, -1,
+        UINT32_MAX);
 }
 
 // js_get_global_property: look up a property on the global object by name string
@@ -14836,6 +14827,9 @@ static Item js_set_global_property_after_with_lookup_impl(Item key, Item value,
 static Item js_set_global_property_impl(Item key, Item value, bool strict) {
     // Check with-scope stack first — assignments inside 'with' resolve to scope object
     if (js_with_stack_depth > 0) {
+        if (!js_with_ensure_roots()) {
+            return js_throw_range_error("Could not grow with binding memo");
+        }
         for (int i = js_with_stack_depth - 1; i >= 0; i--) {
             Item scope_obj = js_with_stack_at(i);
             if (js_with_scope_is_object(scope_obj)) {
@@ -14939,17 +14933,19 @@ extern "C" void js_define_global_property_v(int64_t kind, Item key, Item value) 
 }
 
 extern "C" void js_define_global_var_property(Item key, Item value) {
+    if (!js_global_bindings_ensure_roots()) return;
     Item global = js_get_global_this();
     uint64_t epoch = js_get_heap_epoch();
-    if (js_global_var_cached_defined_epoch != epoch ||
-        js_global_var_cached_global.item != global.item) {
+    if (js_global_environment_state->object_var_epoch != epoch ||
+        js_global_environment_slot(js_global_environment_state,
+            JS_GLOBAL_ENV_OBJECT_VAR_GLOBAL).item != global.item) {
         js_global_var_define_cache_reset();
-        js_global_var_cached_defined_epoch = epoch;
-        js_global_var_cached_global = global;
+        js_global_environment_state->object_var_epoch = epoch;
+        js_global_environment_slot(js_global_environment_state,
+            JS_GLOBAL_ENV_OBJECT_VAR_GLOBAL) = global;
     }
-    for (int i = 0; i < js_global_var_cached_defined_count; i++) {
-        if (js_global_var_cached_defined_keys[i].item == key.item) return;
-    }
+    if (js_global_environment_find(js_global_environment_state,
+            JS_GLOBAL_BINDING_OBJECT_VAR, key) >= 0) return;
 
     Item name = js_to_string(key);
     if (get_type_id(name) != LMD_TYPE_STRING) return;
@@ -14968,9 +14964,9 @@ extern "C" void js_define_global_var_property(Item key, Item value) {
     // non-configurable attribute required by CreateGlobalVarBinding.
     js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd,
         is_new_property, /*existing_accessor*/false);
-    if (js_global_var_cached_defined_count < 64) {
-        js_global_var_cached_defined_keys[js_global_var_cached_defined_count++] = key;
-    }
+    js_global_environment_upsert(js_global_environment_state,
+        JS_GLOBAL_BINDING_OBJECT_VAR, key, ItemNull, false, -1,
+        UINT32_MAX);
 }
 
 static bool js_define_global_var_property_fast_absent(Item global, Item key, Item value) {
@@ -15053,7 +15049,7 @@ extern "C" void js_init_module_vars_undefined_bulk(const int* indices,
         if (js_define_global_var_properties_bulk_absent(global, keys, count)) {
             for (int i = 0; i < count; i++) {
                 int index = indices[i];
-                if (index < 0 || index >= JS_MAX_MODULE_VARS) continue;
+                if (index < 0) continue;
                 lambda_active_module_var_store((uint32_t)index, undef);
             }
             js_register_global_var_module_bindings_bulk(keys, indices, count);
@@ -15063,7 +15059,7 @@ extern "C" void js_init_module_vars_undefined_bulk(const int* indices,
     }
     for (int i = 0; i < count; i++) {
         int index = indices[i];
-        if (index < 0 || index >= JS_MAX_MODULE_VARS) continue;
+        if (index < 0) continue;
         lambda_active_module_var_store((uint32_t)index, undef);
         if (define_global_var_properties) {
             // Allocation failure may disable only the bulk acceleration; it
@@ -15194,32 +15190,80 @@ extern "C" Item js_evalscript_check_global_lex_decl(Item key) {
 // so temporarily expose caller var/parameter bindings through global lookup.
 #define js_eval_bridge (js_runtime_state.eval.bridge)
 #define js_eval_local (js_runtime_state.eval.local)
-#define js_eval_env_binding_count ((int)root_vector_count(&js_eval_bridge.env_keys))
-#define js_eval_env_frame_stack (js_eval_bridge.env_frame_marks)
-#define js_eval_env_frame_depth (js_eval_bridge.env_frame_depth)
-#define js_eval_global_lexical_binding_count ((int)root_vector_count(&js_eval_bridge.global_lexical_keys))
-#define js_eval_global_lexical_frame_stack (js_eval_bridge.global_lexical_frame_marks)
-#define js_eval_global_lexical_frame_depth (js_eval_bridge.global_lexical_frame_depth)
-#define js_eval_private_binding_count ((int)root_vector_count(&js_eval_bridge.private_unscoped_keys))
-#define js_eval_private_frame_stack (js_eval_bridge.private_frame_marks)
-#define js_eval_private_frame_depth (js_eval_bridge.private_frame_depth)
+#define js_eval_env (&js_eval_bridge.env)
+#define js_eval_global_lexical (&js_eval_bridge.global_lexical)
+#define js_eval_private (&js_eval_bridge.private_names)
+#define js_eval_env_binding_count ((int)root_vector_count(&js_eval_env->keys))
+#define js_eval_global_lexical_binding_count ((int)root_vector_count(&js_eval_global_lexical->keys))
+#define js_eval_private_binding_count ((int)root_vector_count(&js_eval_private->unscoped_keys))
 #define js_eval_local_binding_count ((int)root_vector_count(&js_eval_local.keys))
-#define js_eval_local_frame_depth (js_eval_local.frame_depth)
 #define js_eval_lexical_binding_count ((int)root_vector_count(&js_eval_local.lexical_keys))
 #define js_eval_immutable_binding_count ((int)root_vector_count(&js_eval_local.immutable_keys))
 
-static void js_eval_push_bridge_frame(int* depth, int* marks, int count,
-        const char* label) {
-    if (*depth >= JS_EVAL_ENV_FRAME_MAX) {
-        log_error("js-eval-%s: frame stack overflow", label);
-        return;
-    }
-    marks[(*depth)++] = count;
+static int js_eval_binding_journal_frame_count(JsEvalBindingJournal* journal) {
+    return journal && journal->frames ? journal->frames->length : 0;
 }
 
+static JsEvalBridgeFrame* js_eval_binding_journal_current_frame(
+        JsEvalBindingJournal* journal) {
+    int frame_count = js_eval_binding_journal_frame_count(journal);
+    return frame_count > 0
+        ? (JsEvalBridgeFrame*)arraylist_get(journal->frames, frame_count - 1) : NULL;
+}
+
+static JsEvalBridgeBinding* js_eval_binding_journal_binding_at(
+        JsEvalBindingJournal* journal, int index) {
+    return journal && journal->bindings && index >= 0 && index < journal->bindings->length
+        ? (JsEvalBridgeBinding*)arraylist_get(journal->bindings, index) : NULL;
+}
+
+static bool js_eval_binding_journal_record(JsEvalBindingJournal* journal,
+        Item key, bool from_journal, bool immutable, const char* label);
+
+static bool js_eval_binding_journal_push_frame(JsEvalBindingJournal* journal,
+        const char* label) {
+    if (!journal->frames) journal->frames = arraylist_new(8);
+    JsEvalBridgeFrame* frame = (JsEvalBridgeFrame*)mem_calloc(1,
+        sizeof(JsEvalBridgeFrame), MEM_CAT_JS_RUNTIME);
+    if (!frame || !journal->frames || !arraylist_append(journal->frames, frame)) {
+        mem_free(frame);
+        log_error("js-eval-%s: cannot grow frame journal", label);
+        return false;
+    }
+    frame->binding_mark = (int)root_vector_count(&journal->keys);
+    return true;
+}
+
+static int js_eval_private_frame_count(void) {
+    return js_eval_private->frames ? js_eval_private->frames->length : 0;
+}
+
+static JsEvalBridgeFrame* js_eval_private_current_frame(void) {
+    int frame_count = js_eval_private_frame_count();
+    return frame_count > 0
+        ? (JsEvalBridgeFrame*)arraylist_get(js_eval_private->frames, frame_count - 1)
+        : NULL;
+}
+
+#define js_eval_env_frame_depth js_eval_binding_journal_frame_count(js_eval_env)
+#define js_eval_global_lexical_frame_depth js_eval_binding_journal_frame_count(js_eval_global_lexical)
+#define js_eval_private_frame_depth js_eval_private_frame_count()
+
+static int js_eval_local_frame_count(void) {
+    return js_eval_local.frame_marks ? js_eval_local.frame_marks->length : 0;
+}
+
+static JsEvalLocalFrameMarks* js_eval_local_current_frame(void) {
+    int frame_count = js_eval_local_frame_count();
+    return frame_count > 0
+        ? (JsEvalLocalFrameMarks*)arraylist_get(js_eval_local.frame_marks, frame_count - 1)
+        : NULL;
+}
+
+#define js_eval_local_frame_depth js_eval_local_frame_count()
+
 extern "C" void js_eval_env_push_frame(void) {
-    js_eval_push_bridge_frame(&js_eval_env_frame_depth,
-        js_eval_env_frame_stack, js_eval_env_binding_count, "env");
+    js_eval_binding_journal_push_frame(js_eval_env, "env");
 }
 
 // Bridge vars introduced by a PRIOR direct eval in this function scope
@@ -15235,39 +15279,31 @@ extern "C" void js_eval_env_push_frame(void) {
 extern "C" void js_eval_env_bridge_journal_vars(void) {
     if (js_eval_env_frame_depth <= 0 || js_eval_local_frame_depth <= 0) return;
     Item global = js_get_global_this();
-    int frame_start = js_eval_local.frame_marks[js_eval_local_frame_depth - 1].local_mark;
+    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
+    if (!local_frame) return;
+    int frame_start = local_frame->local_mark;
     for (int i = frame_start; i < js_eval_local_binding_count; i++) {
-        int binding_idx = js_eval_env_binding_count;
-        if (binding_idx >= JS_EVAL_ENV_BIND_MAX) {
-            log_error("js-eval-env: binding stack overflow bridging journal vars");
-            break;
-        }
         Item key = *root_vector_at(&js_eval_local.keys, i);
-        if (!root_vector_push(&js_eval_bridge.env_keys, key)) break;
-        js_eval_bridge.env_from_journal[binding_idx] = true;
-        js_eval_bridge.env_had_own[binding_idx] = it2b(js_has_own_property(global, key));
-        Item old_value = js_eval_bridge.env_had_own[binding_idx]
-            ? js_get_key_default(global, key) : make_js_undefined();
-        if (!root_vector_push(&js_eval_bridge.env_old_values, old_value)) {
-            root_vector_pop(&js_eval_bridge.env_keys);
-            break;
-        }
+        if (!js_eval_binding_journal_record(js_eval_env, key, true, false,
+                "env")) break;
         js_set_key_default(global, key, *root_vector_at(&js_eval_local.values, i));
     }
 }
 
 extern "C" void js_eval_global_lexical_push_frame(void) {
-    js_eval_push_bridge_frame(&js_eval_global_lexical_frame_depth,
-        js_eval_global_lexical_frame_stack,
-        js_eval_global_lexical_binding_count, "global-lexical");
+    js_eval_binding_journal_push_frame(js_eval_global_lexical, "global-lexical");
 }
 
 extern "C" int64_t js_eval_local_push_frame(void) {
-    if (js_eval_local_frame_depth >= JS_EVAL_LOCAL_FRAME_MAX) {
-        log_error("js-eval-local: frame stack overflow");
+    if (!js_eval_local.frame_marks) js_eval_local.frame_marks = arraylist_new(8);
+    JsEvalLocalFrameMarks* marks = (JsEvalLocalFrameMarks*)mem_calloc(1,
+        sizeof(JsEvalLocalFrameMarks), MEM_CAT_JS_RUNTIME);
+    if (!marks || !js_eval_local.frame_marks ||
+        !arraylist_append(js_eval_local.frame_marks, marks)) {
+        mem_free(marks);
+        log_error("js-eval-local: cannot grow frame journal");
         return 0;
     }
-    JsEvalLocalFrameMarks* marks = &js_eval_local.frame_marks[js_eval_local_frame_depth++];
     marks->local_mark = js_eval_local_binding_count;
     marks->lexical_mark = js_eval_lexical_binding_count;
     marks->immutable_mark = js_eval_immutable_binding_count;
@@ -15276,47 +15312,60 @@ extern "C" int64_t js_eval_local_push_frame(void) {
 
 extern "C" void js_eval_local_pop_frame(void) {
     if (js_eval_local_frame_depth <= 0) return;
-    JsEvalLocalFrameMarks marks = js_eval_local.frame_marks[--js_eval_local_frame_depth];
+    int frame_index = js_eval_local_frame_depth - 1;
+    JsEvalLocalFrameMarks marks = *js_eval_local_current_frame();
     root_vector_shrink(&js_eval_local.keys, marks.local_mark);
     root_vector_shrink(&js_eval_local.values, marks.local_mark);
     root_vector_shrink(&js_eval_local.lexical_keys, marks.lexical_mark);
     root_vector_shrink(&js_eval_local.immutable_keys, marks.immutable_mark);
+    mem_free(arraylist_get(js_eval_local.frame_marks, frame_index));
+    arraylist_remove(js_eval_local.frame_marks, frame_index);
 }
 
 extern "C" void js_eval_private_push_frame(void) {
-    if (js_eval_private_frame_depth >= JS_EVAL_LOCAL_FRAME_MAX) {
-        log_error("js-eval-private: frame stack overflow");
+    if (!js_eval_private->frames) js_eval_private->frames = arraylist_new(8);
+    JsEvalBridgeFrame* frame = (JsEvalBridgeFrame*)mem_calloc(1,
+        sizeof(JsEvalBridgeFrame), MEM_CAT_JS_RUNTIME);
+    if (!frame || !js_eval_private->frames ||
+        !arraylist_append(js_eval_private->frames, frame)) {
+        mem_free(frame);
+        log_error("js-eval-private: cannot grow frame journal");
         return;
     }
-    js_eval_private_frame_stack[js_eval_private_frame_depth++] = js_eval_private_binding_count;
+    frame->binding_mark = js_eval_private_binding_count;
 }
 
 extern "C" void js_eval_private_pop_frame(void) {
     if (js_eval_private_frame_depth <= 0) return;
-    int frame_start = js_eval_private_frame_stack[--js_eval_private_frame_depth];
-    root_vector_shrink(&js_eval_bridge.private_unscoped_keys, frame_start);
-    root_vector_shrink(&js_eval_bridge.private_scoped_keys, frame_start);
+    int frame_index = js_eval_private_frame_depth - 1;
+    JsEvalBridgeFrame frame = *js_eval_private_current_frame();
+    root_vector_shrink(&js_eval_private->unscoped_keys, frame.binding_mark);
+    root_vector_shrink(&js_eval_private->scoped_keys, frame.binding_mark);
+    mem_free(arraylist_get(js_eval_private->frames, frame_index));
+    arraylist_remove(js_eval_private->frames, frame_index);
 }
 
 extern "C" void js_eval_private_bind(Item unscoped_key, Item scoped_key) {
     if (js_eval_private_frame_depth <= 0) return;
     if (get_type_id(unscoped_key) != LMD_TYPE_STRING || get_type_id(scoped_key) != LMD_TYPE_STRING) return;
-    if (js_eval_private_binding_count >= JS_EVAL_PRIVATE_BIND_MAX) {
-        log_error("js-eval-private: binding stack overflow");
+    if (!root_vector_push(&js_eval_private->unscoped_keys, unscoped_key)) {
+        log_error("js-eval-private: cannot grow name journal");
         return;
     }
-    if (!root_vector_push(&js_eval_bridge.private_unscoped_keys, unscoped_key)) return;
-    if (!root_vector_push(&js_eval_bridge.private_scoped_keys, scoped_key)) {
-        root_vector_pop(&js_eval_bridge.private_unscoped_keys);
+    if (!root_vector_push(&js_eval_private->scoped_keys, scoped_key)) {
+        root_vector_pop(&js_eval_private->unscoped_keys);
+        log_error("js-eval-private: cannot grow scoped-name journal");
     }
 }
 
 extern "C" Item js_eval_private_resolve(Item unscoped_key) {
     if (js_eval_private_frame_depth <= 0 || get_type_id(unscoped_key) != LMD_TYPE_STRING) return ItemNull;
-    int frame_start = js_eval_private_frame_stack[js_eval_private_frame_depth - 1];
+    JsEvalBridgeFrame* frame = js_eval_private_current_frame();
+    if (!frame) return ItemNull;
+    int frame_start = frame->binding_mark;
     for (int i = js_eval_private_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same((*root_vector_at(&js_eval_bridge.private_unscoped_keys, (i))), unscoped_key)) {
-            return (*root_vector_at(&js_eval_bridge.private_scoped_keys, (i)));
+        if (js_with_binding_key_same((*root_vector_at(&js_eval_private->unscoped_keys, (i))), unscoped_key)) {
+            return (*root_vector_at(&js_eval_private->scoped_keys, (i)));
         }
     }
     return ItemNull;
@@ -15324,7 +15373,9 @@ extern "C" Item js_eval_private_resolve(Item unscoped_key) {
 
 static int js_eval_local_find_binding(Item key) {
     if (js_eval_local_frame_depth <= 0) return -1;
-    int frame_start = js_eval_local.frame_marks[js_eval_local_frame_depth - 1].local_mark;
+    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
+    if (!local_frame) return -1;
+    int frame_start = local_frame->local_mark;
     for (int i = js_eval_local_binding_count - 1; i >= frame_start; i--) {
         if (js_with_binding_key_same((*root_vector_at(&js_eval_local.keys, (i))), key)) return i;
     }
@@ -15350,27 +15401,29 @@ extern "C" void js_eval_local_export_var(Item key, Item value) {
         return;
     }
     if (js_eval_env_frame_depth <= 0) return;
-    if (js_eval_local_binding_count >= JS_EVAL_LOCAL_BIND_MAX) {
-        log_error("js-eval-local: binding stack overflow");
+    if (!root_vector_push(&js_eval_local.keys, key)) {
+        log_error("js-eval-local: cannot grow var journal");
         return;
     }
-    if (!root_vector_push(&js_eval_local.keys, key)) return;
     if (!root_vector_push(&js_eval_local.values, value)) {
         root_vector_pop(&js_eval_local.keys);
+        log_error("js-eval-local: cannot grow var value journal");
     }
 }
 
 extern "C" int64_t js_eval_local_current_var_count(void) {
     if (js_eval_local_frame_depth <= 0) return 0;
-    int frame_start = js_eval_local.frame_marks[
-        js_eval_local_frame_depth - 1].local_mark;
+    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
+    if (!local_frame) return 0;
+    int frame_start = local_frame->local_mark;
     return js_eval_local_binding_count - frame_start;
 }
 
 extern "C" Item js_eval_local_current_var_key(int64_t index) {
     if (js_eval_local_frame_depth <= 0 || index < 0) return ItemNull;
-    int frame_start = js_eval_local.frame_marks[
-        js_eval_local_frame_depth - 1].local_mark;
+    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
+    if (!local_frame) return ItemNull;
+    int frame_start = local_frame->local_mark;
     int binding_index = frame_start + (int)index;
     return binding_index >= frame_start && binding_index < js_eval_local_binding_count
         ? (*root_vector_at(&js_eval_local.keys, (binding_index))) : ItemNull;
@@ -15378,24 +15431,23 @@ extern "C" Item js_eval_local_current_var_key(int64_t index) {
 
 extern "C" Item js_eval_local_current_var_value(int64_t index) {
     if (js_eval_local_frame_depth <= 0 || index < 0) return ItemNull;
-    int frame_start = js_eval_local.frame_marks[
-        js_eval_local_frame_depth - 1].local_mark;
+    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
+    if (!local_frame) return ItemNull;
+    int frame_start = local_frame->local_mark;
     int binding_index = frame_start + (int)index;
     return binding_index >= frame_start && binding_index < js_eval_local_binding_count
         ? (*root_vector_at(&js_eval_local.values, (binding_index))) : ItemNull;
 }
 
-static void js_eval_local_note_binding(Item key, RootVector* keys, int capacity,
+static void js_eval_local_note_binding(Item key, RootVector* keys,
         int frame_start, const char* label) {
     int count = (int)root_vector_count(keys);
     for (int i = count - 1; i >= frame_start; i--) {
         if (js_with_binding_key_same(*root_vector_at(keys, i), key)) return;
     }
-    if (count >= capacity) {
-        log_error("js-eval-%s: binding stack overflow", label);
-        return;
+    if (!root_vector_push(keys, key)) {
+        log_error("js-eval-%s: cannot grow binding journal", label);
     }
-    root_vector_push(keys, key);
 }
 
 static int64_t js_eval_local_has_binding(RootVector* keys, int frame_start, Item key) {
@@ -15407,91 +15459,116 @@ static int64_t js_eval_local_has_binding(RootVector* keys, int frame_start, Item
 
 extern "C" void js_eval_local_note_lexical_binding(Item key) {
     if (js_eval_local_frame_depth <= 0) return;
+    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
+    if (!local_frame) return;
     js_eval_local_note_binding(key, &js_eval_local.lexical_keys,
-        JS_EVAL_LEXICAL_BIND_MAX,
-        js_eval_local.frame_marks[js_eval_local_frame_depth - 1].lexical_mark,
+        local_frame->lexical_mark,
         "lexical");
 }
 
 extern "C" int64_t js_eval_local_has_lexical_binding(Item key) {
     if (js_eval_local_frame_depth <= 0) return 0;
+    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
+    if (!local_frame) return 0;
     return js_eval_local_has_binding(&js_eval_local.lexical_keys,
-        js_eval_local.frame_marks[js_eval_local_frame_depth - 1].lexical_mark,
+        local_frame->lexical_mark,
         key);
 }
 
 extern "C" void js_eval_local_note_immutable_binding(Item key) {
     if (js_eval_local_frame_depth <= 0) return;
+    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
+    if (!local_frame) return;
     js_eval_local_note_binding(key, &js_eval_local.immutable_keys,
-        JS_EVAL_IMMUTABLE_BIND_MAX,
-        js_eval_local.frame_marks[js_eval_local_frame_depth - 1].immutable_mark,
+        local_frame->immutable_mark,
         "immutable");
 }
 
 extern "C" int64_t js_eval_local_has_immutable_binding(Item key) {
     if (js_eval_local_frame_depth <= 0) return 0;
+    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
+    if (!local_frame) return 0;
     return js_eval_local_has_binding(&js_eval_local.immutable_keys,
-        js_eval_local.frame_marks[js_eval_local_frame_depth - 1].immutable_mark,
+        local_frame->immutable_mark,
         key);
 }
 
-// The key lane's count is the group's binding index; the POD columns are
-// written at that index after the key is published (JSCU13/JSCU14).
-static void js_eval_bridge_bind(Item key, Item value, int* frame_depth,
-        RootVector* keys, bool* had_own, RootVector* old_values,
-        bool* from_journal, const char* label) {
-    if (*frame_depth <= 0) return;
-    int binding_idx = (int)root_vector_count(keys);
-    if (binding_idx >= JS_EVAL_ENV_BIND_MAX) {
-        log_error("js-eval-%s: binding stack overflow", label);
-        return;
+// The root lanes are kept separate from the non-Item binding row, so GC only
+// scans Items while each bridge binding still has one ownership record.
+static bool js_eval_binding_journal_record(JsEvalBindingJournal* journal,
+        Item key, bool from_journal, bool immutable, const char* label) {
+    if (!js_eval_binding_journal_current_frame(journal)) return false;
+    if (!journal->bindings) journal->bindings = arraylist_new(8);
+    JsEvalBridgeBinding* binding = (JsEvalBridgeBinding*)mem_calloc(1,
+        sizeof(JsEvalBridgeBinding), MEM_CAT_JS_RUNTIME);
+    if (!binding || !journal->bindings) {
+        mem_free(binding);
+        log_error("js-eval-%s: cannot grow binding journal", label);
+        return false;
     }
     Item global = js_get_global_this();
-    if (!root_vector_push(keys, key)) return;
-    if (from_journal) from_journal[binding_idx] = false;
-    had_own[binding_idx] = it2b(js_has_own_property(global, key));
-    Item old_value = had_own[binding_idx]
-        ? js_get_key_default(global, key) : make_js_undefined();
-    if (!root_vector_push(old_values, old_value)) {
-        root_vector_pop(keys);
-        return;
+    if (!root_vector_push(&journal->keys, key)) {
+        mem_free(binding);
+        log_error("js-eval-%s: cannot grow key journal", label);
+        return false;
     }
+    binding->from_journal = from_journal;
+    binding->immutable = immutable;
+    binding->had_own = it2b(js_has_own_property(global, key));
+    Item old_value = binding->had_own
+        ? js_get_key_default(global, key) : make_js_undefined();
+    if (!root_vector_push(&journal->old_values, old_value)) {
+        root_vector_pop(&journal->keys);
+        mem_free(binding);
+        log_error("js-eval-%s: cannot grow old-value journal", label);
+        return false;
+    }
+    if (!arraylist_append(journal->bindings, binding)) {
+        root_vector_pop(&journal->old_values);
+        root_vector_pop(&journal->keys);
+        mem_free(binding);
+        log_error("js-eval-%s: cannot append binding row", label);
+        return false;
+    }
+    return true;
+}
+
+static void js_eval_bridge_bind(JsEvalBindingJournal* journal, Item key,
+        Item value, bool immutable, const char* label) {
+    if (!js_eval_binding_journal_record(journal, key, false, immutable, label)) return;
+    Item global = js_get_global_this();
     js_set_key_default(global, key, value);
 }
 
 extern "C" void js_eval_env_bind(Item key, Item value) {
-    js_eval_bridge_bind(key, value, &js_eval_env_frame_depth,
-        &js_eval_bridge.env_keys, js_eval_bridge.env_had_own,
-        &js_eval_bridge.env_old_values, js_eval_bridge.env_from_journal, "env");
+    js_eval_bridge_bind(js_eval_env, key, value, false, "env");
 }
 
 extern "C" void js_eval_global_lexical_bind(Item key, Item value, int64_t immutable) {
-    int binding_count = js_eval_global_lexical_binding_count;
-    js_eval_bridge_bind(key, value, &js_eval_global_lexical_frame_depth,
-        &js_eval_bridge.global_lexical_keys,
-        js_eval_bridge.global_lexical_had_own,
-        &js_eval_bridge.global_lexical_old_values, NULL, "global-lexical");
-    if (js_eval_global_lexical_binding_count > binding_count) {
-        js_eval_bridge.global_lexical_immutable[binding_count] = immutable != 0;
-    }
+    js_eval_bridge_bind(js_eval_global_lexical, key, value, immutable != 0,
+        "global-lexical");
 }
 
 extern "C" int64_t js_eval_env_has_binding(Item key) {
     if (js_eval_env_frame_depth <= 0) return 0;
-    int frame_start = js_eval_env_frame_stack[js_eval_env_frame_depth - 1];
+    JsEvalBridgeFrame* frame = js_eval_binding_journal_current_frame(js_eval_env);
+    if (!frame) return 0;
+    int frame_start = frame->binding_mark;
     for (int i = js_eval_env_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same((*root_vector_at(&js_eval_bridge.env_keys, (i))), key)) return 1;
+        if (js_with_binding_key_same((*root_vector_at(&js_eval_env->keys, (i))), key)) return 1;
     }
     return 0;
 }
 
 static int js_eval_global_lexical_find_binding(Item key) {
     if (js_eval_global_lexical_frame_depth <= 0) return -1;
-    int frame_start = js_eval_global_lexical_frame_stack[
-        js_eval_global_lexical_frame_depth - 1];
+    JsEvalBridgeFrame* frame = js_eval_binding_journal_current_frame(
+        js_eval_global_lexical);
+    if (!frame) return -1;
+    int frame_start = frame->binding_mark;
     for (int i = js_eval_global_lexical_binding_count - 1;
             i >= frame_start; i--) {
-        if (js_with_binding_key_same((*root_vector_at(&js_eval_bridge.global_lexical_keys, (i))), key)) {
+        if (js_with_binding_key_same((*root_vector_at(&js_eval_global_lexical->keys, (i))), key)) {
             return i;
         }
     }
@@ -15506,18 +15583,21 @@ extern "C" Item js_eval_global_lexical_get_or_fallback(Item key, Item fallback) 
     int binding_idx = js_eval_global_lexical_find_binding(key);
     if (binding_idx < 0) return fallback;
     return js_get_key_default(js_get_global_this(),
-        (*root_vector_at(&js_eval_bridge.global_lexical_keys, (binding_idx))));
+        (*root_vector_at(&js_eval_global_lexical->keys, (binding_idx))));
 }
 
 extern "C" Item js_eval_global_lexical_set_if_exists(Item key, Item value) {
     int binding_idx = js_eval_global_lexical_find_binding(key);
     if (binding_idx < 0) return (Item){.item = b2it(false)};
-    if (js_eval_bridge.global_lexical_immutable[binding_idx]) {
+    JsEvalBridgeBinding* binding = js_eval_binding_journal_binding_at(
+        js_eval_global_lexical, binding_idx);
+    if (!binding) return (Item){.item = b2it(false)};
+    if (binding->immutable) {
         return js_throw_type_error("Assignment to constant variable");
     }
     Item global = js_get_global_this();
     Item set_result = js_set_key_default(global,
-        (*root_vector_at(&js_eval_bridge.global_lexical_keys, (binding_idx))), value);
+        (*root_vector_at(&js_eval_global_lexical->keys, (binding_idx))), value);
     if (item_is_error(set_result)) return set_result;
     return (Item){.item = b2it(true)};
 }
@@ -15526,24 +15606,13 @@ JS_FORWARD_EXPRESSION(int64_t, js_eval_env_is_active, (void), js_eval_env_frame_
 
 extern "C" void js_eval_env_track_global_binding(Item key) {
     if (js_eval_env_frame_depth <= 0) return;
-    int frame_start = js_eval_env_frame_stack[js_eval_env_frame_depth - 1];
+    JsEvalBridgeFrame* frame = js_eval_binding_journal_current_frame(js_eval_env);
+    if (!frame) return;
+    int frame_start = frame->binding_mark;
     for (int i = js_eval_env_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same((*root_vector_at(&js_eval_bridge.env_keys, (i))), key)) return;
+        if (js_with_binding_key_same((*root_vector_at(&js_eval_env->keys, (i))), key)) return;
     }
-    int binding_idx = js_eval_env_binding_count;
-    if (binding_idx >= JS_EVAL_ENV_BIND_MAX) {
-        log_error("js-eval-env: binding stack overflow");
-        return;
-    }
-    Item global = js_get_global_this();
-    if (!root_vector_push(&js_eval_bridge.env_keys, key)) return;
-    js_eval_bridge.env_from_journal[binding_idx] = false;
-    js_eval_bridge.env_had_own[binding_idx] = it2b(js_has_own_property(global, key));
-    Item old_value = js_eval_bridge.env_had_own[binding_idx]
-        ? js_get_key_default(global, key) : make_js_undefined();
-    if (!root_vector_push(&js_eval_bridge.env_old_values, old_value)) {
-        root_vector_pop(&js_eval_bridge.env_keys);
-    }
+    js_eval_binding_journal_record(js_eval_env, key, false, false, "env");
 }
 
 static void js_eval_restore_global_binding(Item global, Item key, Item old_value, bool had_own) {
@@ -15566,20 +15635,29 @@ static void js_eval_restore_global_binding(Item global, Item key, Item old_value
 
 extern "C" void js_eval_env_pop_frame(void) {
     if (js_eval_env_frame_depth <= 0) return;
-    int frame_start = js_eval_env_frame_stack[--js_eval_env_frame_depth];
+    int frame_index = js_eval_env_frame_depth - 1;
+    JsEvalBridgeFrame* frame_row = js_eval_binding_journal_current_frame(js_eval_env);
+    if (!frame_row) return;
+    JsEvalBridgeFrame frame = *frame_row;
+    mem_free(frame_row);
+    arraylist_remove(js_eval_env->frames, frame_index);
     Item global = js_get_global_this();
-    while (js_eval_env_binding_count > frame_start) {
+    while (js_eval_env_binding_count > frame.binding_mark) {
         int binding_idx = js_eval_env_binding_count - 1;
         // The vacated slots are cleared, so the popped pair is kept as exact
         // side-stack roots across the restoring property operations.
         RootFrame roots(2);
-        Rooted<Item> key_root(roots, *root_vector_at(&js_eval_bridge.env_keys, binding_idx));
+        Rooted<Item> key_root(roots, *root_vector_at(&js_eval_env->keys, binding_idx));
         Rooted<Item> old_root(roots,
-            *root_vector_at(&js_eval_bridge.env_old_values, binding_idx));
-        bool had_own = js_eval_bridge.env_had_own[binding_idx];
-        bool from_journal = js_eval_bridge.env_from_journal[binding_idx];
-        root_vector_shrink(&js_eval_bridge.env_keys, binding_idx);
-        root_vector_shrink(&js_eval_bridge.env_old_values, binding_idx);
+            *root_vector_at(&js_eval_env->old_values, binding_idx));
+        JsEvalBridgeBinding* binding = js_eval_binding_journal_binding_at(
+            js_eval_env, binding_idx);
+        bool had_own = binding && binding->had_own;
+        bool from_journal = binding && binding->from_journal;
+        root_vector_shrink(&js_eval_env->keys, binding_idx);
+        root_vector_shrink(&js_eval_env->old_values, binding_idx);
+        mem_free(binding);
+        arraylist_remove(js_eval_env->bindings, binding_idx);
         if (from_journal) {
             // journal-origin vars have no static slot the caller could write
             // back to; assignments made by the eval'd code landed in the
@@ -15597,18 +15675,28 @@ extern "C" void js_eval_env_pop_frame(void) {
 
 extern "C" void js_eval_global_lexical_pop_frame(void) {
     if (js_eval_global_lexical_frame_depth <= 0) return;
-    int frame_start = js_eval_global_lexical_frame_stack[--js_eval_global_lexical_frame_depth];
+    int frame_index = js_eval_global_lexical_frame_depth - 1;
+    JsEvalBridgeFrame* frame_row = js_eval_binding_journal_current_frame(
+        js_eval_global_lexical);
+    if (!frame_row) return;
+    JsEvalBridgeFrame frame = *frame_row;
+    mem_free(frame_row);
+    arraylist_remove(js_eval_global_lexical->frames, frame_index);
     Item global = js_get_global_this();
-    while (js_eval_global_lexical_binding_count > frame_start) {
+    while (js_eval_global_lexical_binding_count > frame.binding_mark) {
         int binding_idx = js_eval_global_lexical_binding_count - 1;
         RootFrame roots(2);
         Rooted<Item> key_root(roots,
-            *root_vector_at(&js_eval_bridge.global_lexical_keys, binding_idx));
+            *root_vector_at(&js_eval_global_lexical->keys, binding_idx));
         Rooted<Item> old_root(roots,
-            *root_vector_at(&js_eval_bridge.global_lexical_old_values, binding_idx));
-        bool had_own = js_eval_bridge.global_lexical_had_own[binding_idx];
-        root_vector_shrink(&js_eval_bridge.global_lexical_keys, binding_idx);
-        root_vector_shrink(&js_eval_bridge.global_lexical_old_values, binding_idx);
+            *root_vector_at(&js_eval_global_lexical->old_values, binding_idx));
+        JsEvalBridgeBinding* binding = js_eval_binding_journal_binding_at(
+            js_eval_global_lexical, binding_idx);
+        bool had_own = binding && binding->had_own;
+        root_vector_shrink(&js_eval_global_lexical->keys, binding_idx);
+        root_vector_shrink(&js_eval_global_lexical->old_values, binding_idx);
+        mem_free(binding);
+        arraylist_remove(js_eval_global_lexical->bindings, binding_idx);
         js_eval_restore_global_binding(global, key_root.get(), old_root.get(), had_own);
     }
 }
@@ -15644,8 +15732,8 @@ extern "C" Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_
 
 // Global builtin function values retain the catalog ID that selected them.
 // The registry is the sole owner of names, arities, and cache identity.
-#define global_builtin_fn_cache (js_runtime_state.constructors->global_builtin_functions)
-#define global_builtin_fn_cache_init (js_runtime_state.constructors->global_builtin_initialized)
+#define global_builtin_fn_cache (js_runtime_state.intrinsic_slots->global_builtin_functions)
+#define global_builtin_fn_cache_init (js_runtime_state.intrinsic_slots->global_builtin_initialized)
 
 // The preamble snapshot owns the realm's catalog-backed global functions too;
 // partial reset must keep their identity alongside Number.parseFloat and the
@@ -15705,8 +15793,8 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
 // `Array.prototype.push` work correctly.
 // =============================================================================
 
-#define js_constructor_cache (js_runtime_state.constructors->constructors)
-#define js_ctor_cache_init (js_runtime_state.constructors->constructors_initialized)
+#define js_constructor_cache (js_runtime_state.intrinsic_slots->constructors)
+#define js_ctor_cache_init (js_runtime_state.intrinsic_slots->constructors_initialized)
 static void js_typed_array_base_reset();
 
 // Forward declaration: snapshot mechanism preserves ctor identity across batch resets.
@@ -15914,12 +16002,12 @@ static void js_typed_array_base_reset(); // forward declaration
 
 // %TypedArray% intrinsic: shared base constructor for all TypedArray types.
 // (Forward declarations moved up so the snapshot code below can reference them.)
-#define js_typed_array_base (js_runtime_state.constructors->typed_array_base)
-#define js_typed_array_base_proto (js_runtime_state.constructors->typed_array_base_prototype)
+#define js_typed_array_base (js_runtime_state.intrinsic_slots->typed_array_base)
+#define js_typed_array_base_proto (js_runtime_state.intrinsic_slots->typed_array_base_prototype)
 // float16array is still part of the typed-array surface; the prototype snapshot
 // table must cover every JsTypedArrayType enum slot.
 #define JS_TYPED_ARRAY_TYPE_COUNT JS_TYPED_ARRAY_CACHE_TYPE_COUNT
-#define js_typed_array_per_type_proto (js_runtime_state.constructors->typed_array_prototypes)
+#define js_typed_array_per_type_proto (js_runtime_state.intrinsic_slots->typed_array_prototypes)
 
 // Map snapshot: the pristine shadow is a rooted GC Map, rather than untraced raw
 // bytes, so accessors and other pointer fields remain alive across collections.
@@ -16557,6 +16645,7 @@ extern "C" Item js_get_typed_array_per_type_proto(int element_type);
 extern "C" Item js_get_typed_array_base_proto(); // forward declaration
 
 extern "C" Item js_get_typed_array_base() {
+    if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
     if (js_typed_array_base.item != 0) return js_typed_array_base;
     // Create the %TypedArray% intrinsic function object
     JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
@@ -16574,7 +16663,6 @@ extern "C" Item js_get_typed_array_base() {
     // be final even though its prototype is initialized lazily afterwards.
     js_function_finalize_capabilities(fn);
     js_typed_array_base = (Item){.function = (Function*)fn};
-    heap_register_gc_root(&js_typed_array_base.item);
     // Eagerly initialize %TypedArray%.prototype so it's available before any
     // concrete TypedArray prototype chain is set up (e.g., Object.getPrototypeOf(Int8Array).prototype)
     js_get_typed_array_base_proto();
@@ -16585,9 +16673,9 @@ extern "C" Item js_get_typed_array_base() {
 extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor);
 
 extern "C" Item js_get_typed_array_base_proto() {
+    if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
     if (js_typed_array_base_proto.item != 0) return js_typed_array_base_proto;
     js_typed_array_base_proto = js_new_object();
-    heap_register_gc_root(&js_typed_array_base_proto.item);
     // Set __is_proto__ marker
     js_set_name_key(js_typed_array_base_proto, "__is_proto__", 12, (Item){.item = b2it(true)});
     // Connect %TypedArray%.prototype to %TypedArray%
@@ -16618,6 +16706,7 @@ static void js_typed_array_base_reset() {
 // Sets constructor → concrete constructor, BYTES_PER_ELEMENT, __proto__ → %TypedArray%.prototype
 extern "C" Item js_get_typed_array_per_type_proto(int element_type) {
     if (element_type < 0 || element_type >= JS_TYPED_ARRAY_TYPE_COUNT) return js_get_typed_array_base_proto();
+    if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;
     if (js_typed_array_per_type_proto[element_type].item != 0) return js_typed_array_per_type_proto[element_type];
 
     // Determine constructor name and BYTES_PER_ELEMENT
@@ -16641,8 +16730,8 @@ extern "C" Item js_get_typed_array_per_type_proto(int element_type) {
     }
 
     Item base_proto = js_get_typed_array_base_proto();
+    if (item_is_error(base_proto)) return base_proto;
     Item per_type = js_new_object();
-    heap_register_gc_root(&js_typed_array_per_type_proto[element_type].item);
     js_typed_array_per_type_proto[element_type] = per_type;
 
     // Set __proto__ to %TypedArray%.prototype
@@ -17166,8 +17255,9 @@ static const JsWellKnownSymbolSpec* js_well_known_symbol_spec(uint64_t id) {
 }
 
 static NameId js_well_known_symbol_name_id(uint64_t id) {
-    if (!context || !context->js_state) return NULL;
-    JsWellKnownRefs* refs = &context->js_state->well_known;
+    JsRuntimeState* state = js_runtime_state_for(context);
+    if (!state) return NULL;
+    JsWellKnownRefs* refs = &state->well_known;
     NameId key = NAME_ID_NONE;
     switch (id) {
     case JS_SYMBOL_ID_ITERATOR: key = refs->symbol_iterator; break;

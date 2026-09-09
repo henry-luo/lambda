@@ -13,27 +13,7 @@
 #include "../runtime/async.h"
 #include "../runtime/root_vector.h"
 #include "../../lib/hashmap.h"
-
-#define JS_REGEXP_MAX_PAREN 9
-#define JS_ROOT_RANGE_REGISTRY_MAX 64
-#define JS_EVENT_RAF_CAPACITY 1024
-#define JS_EVENT_TIMER_CAPACITY 1024
-#define JS_EVENT_MOCK_WAIT_CAPACITY 128
-#define JS_WITH_STACK_MAX 16
-// derived-constructor nesting depth: a checked policy limit, not a struct size
-#define JS_SUPER_THIS_STACK_MAX 128
-#define JS_READLINE_INPUT_MAP_MAX 256
-#define JS_GLOBAL_VAR_MODULE_BINDING_CAP 512
-#define JS_GLOBAL_LEX_BIND_MAX 1024
-#define JS_TEST262_AGENT_MAX 16
-#define JS_TEST262_AGENT_REPORT_MAX 64
-#define JS_PROCESS_LISTENER_MAX 32
-#define JS_ASYNC_HOOK_STATE_MAX 256
-#define JS_ASYNC_PENDING_DESTROY_STATE_MAX 1024
-#define JS_MAX_ALS_INSTANCES 256
-#define JS_DOM_STORAGE_ENTRY_CAP 128
-#define JS_DOM_MEDIA_QUERY_CAP 64
-#define JS_DOM_PROMPT_QUEUE_CAP 32
+#include "../../lib/arraylist.h"
 
 struct JsFunction;
 struct JsInterpEnv;
@@ -66,30 +46,33 @@ private:
 struct JsTemplateRegistryEntry {
     int64_t site_id = 0;
     int count = 0;
-    Item object = {};
+    int64_t root_slot = -1;
     JsTemplateRegistryEntry* next = NULL;
 };
 
+// Tagged-template metadata is native, while each frozen template object is a
+// precise dynamic root owned by the same registry.
+struct JsTemplateRegistry {
+    JsTemplateRegistryEntry* entries = NULL;
+    RootVector values = {};
+};
+
 struct JsMockSchedulerWait {
-    Item promise = {};
-    Item resolve = {};
-    Item reject = {};
-    Item signal = {};
+    // One scheduled wait owns its four async edges; a dynamic collection of
+    // these records replaces the former capped parallel-root array.
+    RootVector values = {};
     int64_t due_ms = 0;
-    bool active = false;
 };
 
 struct JsEventLoopQueueState {
-    Item queue_storage[2] = {};
-    RuntimeAsyncDeque next_tick_deque = {};
-    RuntimeAsyncDeque microtask_deque = {};
+    // Each queue owns a GC Array of one RuntimeJob shape. Queue order stays
+    // policy-specific while storage and captured context are shared (JSCU30).
+    Item queue_storage[3] = {};
+    RuntimeJobQueue next_tick_queue = {};
+    RuntimeJobQueue microtask_queue = {};
+    RuntimeJobQueue animation_frame_queue = {};
     bool microtask_running = false;
 
-    Item raf_callback[JS_EVENT_RAF_CAPACITY] = {};
-    int64_t raf_id[JS_EVENT_RAF_CAPACITY] = {};
-    int raf_head = 0;
-    int raf_tail = 0;
-    int raf_count = 0;
     int64_t next_raf_id = 1;
     bool auto_close_mode = false;
     // Static capture closes only after the document's load lifecycle completes.
@@ -101,10 +84,8 @@ struct JsEventLoopQueueState {
 };
 
 struct JsEventLoopTimerState {
-    // The native timer records are individually allocated; this context-owned
-    // index is their only shared owner and is never published process-wide.
-    void* handles[JS_EVENT_TIMER_CAPACITY] = {};
-    int handle_count = 0;
+    // Timer scheduling stays policy-specific; live handles are rows in the
+    // context-wide JsRuntimeState resource table.
     int64_t next_id = 1;
     uint64_t progress_generation = 0;
     bool force_shutdown = false;
@@ -115,19 +96,17 @@ struct JsEventLoopTimerState {
 
     bool mock_scheduler_enabled = false;
     int64_t mock_scheduler_now_ms = 0;
-    JsMockSchedulerWait mock_waits[JS_EVENT_MOCK_WAIT_CAPACITY] = {};
-    uint64_t mock_roots_epoch = 0;
+    ArrayList* mock_waits = NULL;
 };
 struct JsRegexpLastMatch {
-    String* input;
-    String* match;
-    String* groups[JS_REGEXP_MAX_PAREN];
-    int group_count;
-    int match_start;
-    int match_end;
+    // Slots 0/1 are input and full match; remaining slots are capture groups.
+    // This is the one rooted carrier for RegExp legacy state, rather than a
+    // nine-group native array that silently changed `$+` semantics.
+    RootVector values = {};
+    int group_count = 0;
+    int match_start = 0;
+    int match_end = 0;
 };
-
-typedef void (*JsRootRangeResetFn)(void* owner);
 
 // A fixed Item range whose address outlives every heap epoch.  Registration is
 // deliberately owned by the range so clients cannot publish a live Item before
@@ -137,9 +116,6 @@ struct JsRootRange {
     int slot_count = 0;
     uint64_t roots_epoch = 0;
     const char* name = NULL;
-    void* reset_owner = NULL;
-    JsRootRangeResetFn reset = NULL;
-    bool reset_registered = false;
 };
 
 // All context-owned caches expose the same precise root owner; keeping that
@@ -172,8 +148,9 @@ static inline Item& js_item_stack_at(JsItemStack* stack, int index) {
 
 struct JsWithScopeState {
     JsItemStack stack = {};
-    Item last_binding_slots[2] = {};
-    JsRootRange last_binding_roots = {};
+    // The memo is two semantic values, but its root ownership is the same
+    // growable exact-root mechanism as the with-scope stack.
+    RootVector last_binding_values = {};
     bool last_binding_valid = false;
 };
 
@@ -189,39 +166,37 @@ struct JsCompiledArtifact {
 };
 
 struct JsCodeStore {
-    JsCompiledArtifact* artifacts = NULL;
-    int count = 0;
-    int capacity = 0;
+    ArrayList* artifacts = NULL;
 };
 
 bool js_code_store_push(JsCodeStore* store, void* mir_context);
 // Hands the last pushed artifact ownership of a source buffer.
 void js_code_store_attach_source(JsCodeStore* store, char* source_owner);
 void* js_code_store_last_context(JsCodeStore* store);
+int js_code_store_count(const JsCodeStore* store);
+JsCompiledArtifact* js_code_store_artifact_at(JsCodeStore* store, int index);
+void js_code_store_clear_rows(JsCodeStore* store);
 void js_code_store_destroy(JsCodeStore* store);
 
 // Node DNS exports are per-realm objects and must not retain values from a
 // different heap through file-static cache slots.
-struct JsDnsState {
+struct JsDnsState : JsRootedState {
     Item namespace_object = {};
     Item promises_namespace = {};
     Item resolver_prototype = {};
     Item promises_resolver_prototype = {};
     Item default_servers = {};
-    uint64_t roots_epoch = 0;
 };
 
-struct JsBuiltinCacheState : JsRootedState {
-    Item entries[JS_INTRINSIC_BINDING_COUNT] = {};
-    bool initialized = false;
+struct JsReadlineInput {
+    int64_t root_slot = -1;
 };
 
 struct JsReadlineState : JsNamespaceState {
     Item promises_namespace = {};
     Item completion_interface = {};
-    Item inputs[JS_READLINE_INPUT_MAP_MAX] = {};
-    Item interfaces[JS_READLINE_INPUT_MAP_MAX] = {};
-    int input_count = 0;
+    RootVector input_values = {};
+    ArrayList* inputs = NULL;
     bool create_promises_mode = false;
 };
 
@@ -281,41 +256,49 @@ struct JsHttpState : JsNamespaceState {
 };
 
 struct JsAssertMockSlot {
-    Item calls = {};
-    Item original = {};
+    int64_t root_slot = -1;
     int call_count = 0;
     bool in_use = false;
+};
+
+// A mock wrapper identifies one stable native row through its payload. The
+// registry owns the rows and their calls/original Item pair precisely.
+struct JsAssertMockRegistry {
+    ArrayList* slots = NULL;
+    RootVector values = {};
+};
+
+void js_assert_mock_registry_clear(JsAssertMockRegistry* registry);
+void js_assert_mock_registry_destroy(JsAssertMockRegistry* registry);
+
+// node:test scopes require ordered hook lifetimes. The two phase lanes share
+// one rooted ledger; a describe/run mark shrinks the corresponding lane.
+struct JsNodeTestHookLedger {
+    RootVector before_each = {};
+    RootVector after_each = {};
 };
 
 // assert and node:test retain namespace identity, hook closures, and mock
 // call records. They are realm values, so this fixed context slab keeps their
 // repeated test-runner access direct and isolated.
-struct JsAssertState {
+struct JsAssertState : JsRootedState {
     Item namespace_object = {};
     Item internal_errors_namespace = {};
     Item internal_myers_diff_namespace = {};
     Item options_key = {};
     Item diff_key = {};
-    Item instances[64] = {};
-    int instance_count = 0;
-    uint64_t key_epoch = 0;
-    uint64_t instances_roots_epoch = 0;
-
-    Item node_test_namespace = {};
-    Item before_each_store = {};
-    Item after_each_store = {};
-    Item event_queue = {};
+    // Assertion instances outlive the creating call and share one dynamic
+    // root collection instead of a capped side registry.
+    RootVector instances = {};
+    // Node test namespace and its transient event queue share exact dynamic
+    // roots instead of two unregistered Item fields plus an epoch sidecar.
+    RootVector node_test_values = {};
+    JsNodeTestHookLedger node_test_hooks = {};
+    JsAssertMockRegistry mocks = {};
     int node_test_total_count = 0;
     int node_test_pass_count = 0;
     int node_test_fail_count = 0;
     int64_t node_test_next_id = 1;
-    uint64_t node_test_roots_epoch = 0;
-    Item before_each_hooks[64] = {};
-    Item after_each_hooks[64] = {};
-    int before_each_count = 0;
-    int after_each_count = 0;
-    JsAssertMockSlot mock_slots[64] = {};
-    int mock_slot_count = 0;
 };
 
 struct JsNetState : JsNamespaceState {
@@ -381,9 +364,8 @@ struct JsDomState : JsRootedState {
     UiContext* current_ui_context = NULL;
     bool host_driven_loop = false;
     DomDocument* main_document = NULL;
-    char* prompt_queue[JS_DOM_PROMPT_QUEUE_CAP] = {};
-    int prompt_head = 0;
-    int prompt_tail = 0;
+    // A queued response is either an owned UTF-8 string or NULL for Cancel.
+    ArrayList* prompt_responses = NULL;
 };
 
 struct JsDomStorageEntry {
@@ -393,12 +375,11 @@ struct JsDomStorageEntry {
 
 struct JsDomStorageState {
     Item object = {};
-    JsDomStorageEntry entries[JS_DOM_STORAGE_ENTRY_CAP] = {};
-    int count = 0;
+    ArrayList* entries = NULL;
 };
 
 struct JsDomMediaQueryState {
-    Item object = {};
+    int64_t object_slot = -1;
     char* query = NULL;
     bool matches = false;
 };
@@ -406,45 +387,18 @@ struct JsDomMediaQueryState {
 struct JsDomPlatformState {
     JsDomStorageState local_storage = {};
     JsDomStorageState session_storage = {};
-    JsDomMediaQueryState media_queries[JS_DOM_MEDIA_QUERY_CAP] = {};
-    int media_query_count = 0;
+    ArrayList* media_queries = NULL;
+    RootVector media_query_objects = {};
+    bool media_query_roots_initialized = false;
     uint64_t roots_epoch = 0;
 };
 
-// String-concatenation fast tables are read on a hot path. They are plain
-// owner-thread fields: no lock, atomic, or per-call context lookup is needed.
-struct JsStringConcatState : JsRootedState {
+// All realm-owned string fast paths share one contiguous Item range. The
+// finite byte/code-point tables cache value domains; they are not registries.
+struct JsStringCacheState : JsRootedState {
     Item last_four_byte_escape = {};
     Item percent_prefixes[16] = {};
     Item percent_bytes[256] = {};
-    uint32_t last_four_byte_cp = 0;
-    uint64_t last_four_byte_epoch = 0;
-};
-
-// Optimized global-var module slots are execution semantics. The fixed table
-// is context-local so ordinary property writes never serialize across realms.
-struct JsGlobalVarModuleBindingState : JsRootedState {
-    Item global = {};
-    Item keys[JS_GLOBAL_VAR_MODULE_BINDING_CAP] = {};
-    int indices[JS_GLOBAL_VAR_MODULE_BINDING_CAP] = {};
-    uint32_t module_state_ids[JS_GLOBAL_VAR_MODULE_BINDING_CAP] = {};
-    int count = 0;
-    uint64_t epoch = 0;
-};
-
-struct JsRuntimeCoreCacheState : JsRootedState {
-    Item proto_key = {};
-};
-
-struct JsFunctionPrototypeState : JsRootedState {
-    Item generator_function = {};
-    Item async_generator_function = {};
-    Item async_function = {};
-};
-
-// URI and one-byte-string fast caches are hit inside primitive operations.
-// Keep them context-local so those operations remain direct loads/stores.
-struct JsGlobalStringCacheState : JsRootedState {
     Item uri_last_four_byte_string = {};
     Item last_from_char_code_string = {};
     Item decode_uri_component_error = {};
@@ -452,6 +406,8 @@ struct JsGlobalStringCacheState : JsRootedState {
     Item ascii_chars[128] = {};
     Item test262_percent_hex[256] = {};
     Item test262_cached_percent_left = {};
+    uint32_t last_four_byte_cp = 0;
+    uint64_t last_four_byte_epoch = 0;
     uint32_t test262_percent_byte0 = 0;
     uint32_t test262_percent_byte1 = 0;
     uint32_t test262_percent_byte2 = 0;
@@ -464,39 +420,86 @@ struct JsGlobalStringCacheState : JsRootedState {
     uint64_t decode_uri_error_epoch = 0;
 };
 
-// Global-object and lexical-environment caches are realm semantics. Item
-// storage is grouped before scalar metadata for one exact, one-time root range.
-struct JsGlobalBindingState : JsRootedState {
-    Item global_this = {};
-    Item var_defined_keys[64] = {};
-    Item var_defined_global = {};
-    Item window_event = {};
-    Item lexical_global = {};
-    Item lexical_keys[JS_GLOBAL_LEX_BIND_MAX] = {};
-    Item lexical_values[JS_GLOBAL_LEX_BIND_MAX] = {};
-    int var_defined_count = 0;
-    uint64_t var_defined_epoch = 0;
-    bool window_event_intercept_enabled = false;
-    int lexical_count = 0;
-    uint64_t lexical_epoch = 0;
-    bool lexical_immutable[JS_GLOBAL_LEX_BIND_MAX] = {};
+// One global-environment row represents either a declarative lexical binding,
+// an object-backed global var declaration, or a module-slot bridge. The row's
+// key/value pair resides in the environment RootVector so GC ownership is
+// independent of the native metadata tail (D5.3.5; JSCU29).
+enum JsGlobalBindingKind : uint8_t {
+    JS_GLOBAL_BINDING_LEXICAL,
+    JS_GLOBAL_BINDING_OBJECT_VAR,
+    JS_GLOBAL_BINDING_MODULE_VAR,
 };
+
+struct JsGlobalBinding {
+    int64_t root_slot = -1;     // key at root_slot, value at root_slot + 1
+    int module_index = -1;
+    uint32_t module_state_id = UINT32_MAX;
+    JsGlobalBindingKind kind = JS_GLOBAL_BINDING_LEXICAL;
+    bool immutable = false;
+};
+
+enum JsGlobalEnvironmentSlot : int {
+    JS_GLOBAL_ENV_GLOBAL_THIS,
+    JS_GLOBAL_ENV_WINDOW_EVENT,
+    JS_GLOBAL_ENV_OBJECT_VAR_GLOBAL,
+    JS_GLOBAL_ENV_LEXICAL_GLOBAL,
+    JS_GLOBAL_ENV_MODULE_GLOBAL,
+    JS_GLOBAL_ENV_SLOT_COUNT,
+};
+
+struct JsGlobalEnvironment {
+    RootVector roots = {};
+    JsGlobalBinding* bindings = NULL;
+    int binding_count = 0;
+    int binding_capacity = 0;
+    uint64_t object_var_epoch = 0;
+    uint64_t lexical_epoch = 0;
+    uint64_t module_epoch = 0;
+    bool window_event_intercept_enabled = false;
+};
+
+bool js_global_environment_init(JsGlobalEnvironment* environment,
+    Context* owner);
+void js_global_environment_destroy(JsGlobalEnvironment* environment);
+bool js_global_environment_ensure(JsGlobalEnvironment* environment);
+Item& js_global_environment_slot(JsGlobalEnvironment* environment,
+    JsGlobalEnvironmentSlot slot);
+int js_global_environment_find(JsGlobalEnvironment* environment,
+    JsGlobalBindingKind kind, Item key);
+JsGlobalBinding* js_global_environment_binding_at(
+    JsGlobalEnvironment* environment, int index);
+Item js_global_environment_binding_key(JsGlobalEnvironment* environment,
+    const JsGlobalBinding* binding);
+Item js_global_environment_binding_value(JsGlobalEnvironment* environment,
+    const JsGlobalBinding* binding);
+void js_global_environment_set_binding_value(JsGlobalEnvironment* environment,
+    JsGlobalBinding* binding, Item value);
+bool js_global_environment_upsert(JsGlobalEnvironment* environment,
+    JsGlobalBindingKind kind, Item key, Item value, bool immutable,
+    int module_index, uint32_t module_state_id);
+void js_global_environment_clear_bindings(JsGlobalEnvironment* environment);
+void js_global_environment_remove_kind(JsGlobalEnvironment* environment,
+    JsGlobalBindingKind kind);
+void js_global_environment_release_module_bindings(
+    JsGlobalEnvironment* environment, uint32_t first_module_state_id);
 
 #define JS_TYPED_ARRAY_CACHE_TYPE_COUNT 12
 
-// Constructor identity is observable (`Array === globalThis.Array`), so these
-// caches must be private to a realm even though construction is infrequent.
-struct JsConstructorCacheState : JsRootedState {
+// These values all cache intrinsic realm identity: prototype-key lookups,
+// function prototypes, constructors and standard namespace objects. Keeping
+// their Items contiguous gives the realm one precise owner and reset contract
+// without treating catalog-indexed constructor arrays as dynamic registries.
+struct JsRealmIntrinsicSlots : JsRootedState {
+    Item proto_key = {};
+    Item generator_function = {};
+    Item async_generator_function = {};
+    Item async_function = {};
+    Item builtin_function_entries[JS_INTRINSIC_BINDING_COUNT] = {};
     Item global_builtin_functions[JS_BUILTIN_GLOBAL_MAX] = {};
     Item constructors[JS_CTOR_MAX] = {};
     Item typed_array_base = {};
     Item typed_array_base_prototype = {};
     Item typed_array_prototypes[JS_TYPED_ARRAY_CACHE_TYPE_COUNT] = {};
-    bool global_builtin_initialized = false;
-    bool constructors_initialized = false;
-};
-
-struct JsRuntimeNamespaceState : JsRootedState {
     Item math = {};
     Item json = {};
     Item css = {};
@@ -505,22 +508,28 @@ struct JsRuntimeNamespaceState : JsRootedState {
     Item test262 = {};
     Item reflect = {};
     Item atomics = {};
+    bool builtin_function_initialized = false;
+    bool global_builtin_initialized = false;
+    bool constructors_initialized = false;
 };
 
-struct JsVmRuntimeState {
-    Item namespace_object = {};
-    uint64_t namespace_epoch = 0;
-    int source_text_identifier_counter = 0;
+enum : int {
+    JS_REALM_INTRINSIC_SLOT_COUNT = 1 + 3 + JS_INTRINSIC_BINDING_COUNT +
+        JS_BUILTIN_GLOBAL_MAX + JS_CTOR_MAX + 2 + JS_TYPED_ARRAY_CACHE_TYPE_COUNT + 8,
+};
+
+struct JsTest262AgentReport {
+    int64_t root_slot = -1;
+    int waiter_id = 0;
 };
 
 struct JsTest262AgentState : JsRootedState {
     Item object = {};
-    Item callbacks[JS_TEST262_AGENT_MAX] = {};
-    Item reports[JS_TEST262_AGENT_REPORT_MAX] = {};
-    int report_waiters[JS_TEST262_AGENT_REPORT_MAX] = {};
-    int callback_count = 0;
-    int report_head = 0;
-    int report_count = 0;
+    // Agent slots contain only callback identities; report rows carry the
+    // paired waiter metadata with their one rooted report value.
+    RootVector callbacks = {};
+    RootVector report_values = {};
+    ArrayList* reports = NULL;
     int current_slot = -1;
     int64_t eval_script_active = 0;
     // Atomics waiter records are allocated only when the Atomics namespace is
@@ -529,19 +538,15 @@ struct JsTest262AgentState : JsRootedState {
 };
 
 // Node process state is realm-local apart from the operating-system process.
-// The fixed listener and pending-message tables are exactly rooted once.
+// The one dynamic listener map is the authority for every process event.
 struct JsProcessState : JsRootedState {
     Item argv = {};
     Item exec_argv = {};
     Item object = {};
-    Item exit_listeners[JS_PROCESS_LISTENER_MAX] = {};
-    Item uncaught_listeners[JS_PROCESS_LISTENER_MAX] = {};
     Item listener_map = {};
     Item ipc_pending_messages = {};
     int exit_code = 0;
     bool exit_requested = false;
-    int exit_listener_count = 0;
-    int uncaught_listener_count = 0;
     bool exiting = false;
     int total_listener_count = 0;
     int ipc_liveness_listener_count = 0;
@@ -549,6 +554,9 @@ struct JsProcessState : JsRootedState {
     bool ipc_closing = false;
     bool ipc_disconnect_emitted = false;
     bool ipc_force_ref = false;
+    // Every outstanding libuv IPC write refers to this one exact callback
+    // store; request structs retain only a POD slot index (JSCU31).
+    RuntimeCallbackSlots ipc_write_callbacks = {};
     void* ipc_pipe = NULL;
     char* ipc_buffer = NULL;
     size_t ipc_length = 0;
@@ -569,14 +577,19 @@ struct JsIteratorState : JsRootedState {
     Item async_iterator_prototype = {};
 };
 
+// One label owns both console.count and console.time state. A label may serve
+// either operation independently, but it has one realm-local identity.
+struct JsConsoleLabel {
+    char* chars = NULL;
+    int length = 0;
+    int count = 0;
+    double timer_started_ms = 0.0;
+    bool timer_active = false;
+};
+
 // Console counters/timers are observable per JS realm, not process-wide logs.
 struct JsConsoleState {
-    int count_values[64] = {};
-    uint32_t count_keys[64] = {};
-    int count_used = 0;
-    double timers[32] = {};
-    uint32_t timer_keys[32] = {};
-    int timer_used = 0;
+    ArrayList* labels = NULL;
     int group_depth = 0;
 };
 
@@ -627,12 +640,11 @@ struct JsWellKnownRefs {
 struct JsAsyncHooksState : JsRootedState {
     Item root_resource = {};
     Item current_resource = {};
-    Item hooks[JS_ASYNC_HOOK_STATE_MAX] = {};
-    Item pending_destroy_resources[JS_ASYNC_PENDING_DESTROY_STATE_MAX] = {};
-    int enabled_count = 0;
+    // Hook and deferred-destroy collections outlive native calls, so each
+    // owns one growable rooted store instead of a capped parallel table.
+    RootVector hooks = {};
+    RootVector pending_destroy_resources = {};
     int64_t next_id = 2;
-    int hook_count = 0;
-    int pending_destroy_count = 0;
 };
 
 enum JsPromiseState {
@@ -660,7 +672,7 @@ struct JsPromise : VMap {
 };
 
 struct JsPromiseRuntimeState : JsRootedState {
-    RuntimeAsyncDeque unhandled_deque = {};
+    RuntimeJobQueue unhandled_queue = {};
     // Keep the three GC-visible owner slots contiguous; the deque control
     // record is native metadata and must never be scanned as an Item range.
     Item unhandled_storage = {};
@@ -674,25 +686,47 @@ struct JsPromiseRuntimeState : JsRootedState {
     JsItemStack domain_stack = {};
 };
 
+enum JsModuleRuntimeSlot : int {
+    JS_MODULE_RUNTIME_ACTIVE_NAMESPACE,
+    JS_MODULE_RUNTIME_VM_NAMESPACE,
+    JS_MODULE_RUNTIME_INTERNAL_ASYNC_HOOKS_NAMESPACE,
+    JS_MODULE_RUNTIME_INTERNAL_ASYNC_CONTEXT_FRAME_NAMESPACE,
+    JS_MODULE_RUNTIME_ASYNC_HOOKS_NAMESPACE,
+    JS_MODULE_RUNTIME_INTERNAL_CRYPTO_UTIL_NAMESPACE,
+    JS_MODULE_RUNTIME_INTERNAL_UTIL_NAMESPACE,
+    JS_MODULE_RUNTIME_INTERNAL_UTIL_INSPECT_NAMESPACE,
+    JS_MODULE_RUNTIME_INTERNAL_REPL_NAMESPACE,
+    JS_MODULE_RUNTIME_INTERNAL_TEST_BINDING_NAMESPACE,
+    JS_MODULE_RUNTIME_NODE_MODULE_NAMESPACE,
+    JS_MODULE_RUNTIME_CLUSTER_NAMESPACE,
+    JS_MODULE_RUNTIME_REPL_NAMESPACE,
+    JS_MODULE_RUNTIME_INTERNAL_CARES_WRAP_NAMESPACE,
+    JS_MODULE_RUNTIME_INTERNAL_STREAM_WRAP_NAMESPACE,
+    JS_MODULE_RUNTIME_SLOT_COUNT,
+};
+
 // Module scheduling state is context-owned; canonical descriptors and their
-// namespace/TLA edges live in Runtime::module_registry.
+// namespace/TLA edges live in Runtime::module_registry. All module-provider
+// namespaces, including the replaceable active namespace, share one exact-root
+// carrier instead of independent Item/epoch registrations (D5.3.5).
 struct JsModuleRuntimeState {
-    Item active_namespace = {};
+    RootVector values = {};
     int module_depth = 0;
     int async_eval_order_counter = 0;
     int draining_depth = 0;
-    uint64_t roots_epoch = 0;
+    int vm_source_text_identifier_counter = 0;
+    bool internal_test_binding_warning_scheduled = false;
 };
 
-struct JsClusterState {
+struct JsClusterState : JsRootedState {
     Item primary_options = {};
-    uint64_t primary_options_root_epoch = 0;
     int64_t next_worker_id = 1;
+    bool namespace_is_worker = false;
 };
 
-struct JsAsyncLocalStorageState : JsRootedState {
-    Item instances[JS_MAX_ALS_INSTANCES] = {};
-    int instance_count = 0;
+struct JsAsyncLocalStorageState {
+    // Instances survive callbacks and therefore need stable, growable roots.
+    RootVector instances = {};
 };
 
 struct JsPerformanceState {
@@ -705,13 +739,28 @@ struct JsPerformanceState {
     double virtual_clock_ms = 0.0;
 };
 
-struct JsGeneratorStateRecord {
+// The common durable part of generator and async execution. It owns exactly
+// the outliving activation edges; each state machine keeps its own semantic
+// tail (D5.1.1v2, D6.2.2v2; JSCU32).
+struct JsSuspendedActivation {
     TypeId type_id = LMD_TYPE_MAP;
     Context* runtime_context = NULL;
     void* state_fn = NULL;
     Item* env = NULL;
     int env_size = 0;
     int64_t state = 0;
+    Item ast_function = {};
+    Item ast_arguments = {};
+    JsInterpEnv* ast_function_env = NULL;
+    JsInterpEnv* ast_body_env = NULL;
+    // Generator yields and async awaits replay through the same Item ledger.
+    Item ast_replay_values = {};
+    int64_t ast_replay_skip = 0;
+    JsInterpGeneratorLoopContinuation* ast_loop_continuations = NULL;
+    bool ast_initialized = false;
+};
+
+struct JsGeneratorStateRecord : JsSuspendedActivation {
     bool done = false;
     bool started = false;
     bool executing = false;
@@ -720,20 +769,9 @@ struct JsGeneratorStateRecord {
     Item delegate = {};
     int64_t delegate_resume = -1;
     int delegate_idx = 0;
-    // AST generators retain the same GC-owned lexical records as ordinary
-    // interpreted functions; their yield count is a resumable program point.
-    Item ast_function = {};
-    Item ast_arguments = {};
     Item ast_this = {};
-    JsInterpEnv* ast_function_env = NULL;
-    JsInterpEnv* ast_body_env = NULL;
-    int64_t ast_yield_skip = 0;
-    // Replay uses prior next() values when a nested yield resumes before its
-    // enclosing yield is reached again.
-    Item ast_yield_values = {};
     // Terminal-yield loop continuations keep AST generators resumable without
     // replaying completed iterations on every next().
-    JsInterpGeneratorLoopContinuation* ast_loop_continuations = NULL;
     JsInterpGeneratorListContinuation* ast_list_continuation = NULL;
     // A destructuring target can suspend after IteratorStep. Retain its
     // iterator/value cursor so replay does not advance the iterator twice.
@@ -743,37 +781,20 @@ struct JsGeneratorStateRecord {
     // can finish propagating that abrupt completion.
     int64_t ast_pending_resume_yield = 0;
     Item ast_pending_resume_input = {};
-    bool ast_initialized = false;
 };
 
-struct JsAsyncContextStateRecord {
-    Context* runtime_context = NULL;
-    void* state_fn = NULL;
-    Item* env = NULL;
-    int env_size = 0;
-    int state = 0;
+struct JsAsyncContextStateRecord : JsSuspendedActivation {
     Item promise = {};
     // resumed MIR property names must use the module image that compiled the body.
     uint32_t module_state_id = UINT32_MAX;
     Item this_val = {};
-    // AST continuations use the same context/promise table as MIR async
-    // functions, but retain interpreter-owned lexical environments.
-    Item ast_function = {};
-    Item ast_arguments = {};
-    JsInterpEnv* ast_function_env = NULL;
-    JsInterpEnv* ast_body_env = NULL;
     AstNode* ast_resume_statement = NULL;
-    Item ast_await_values = {};
-    JsInterpGeneratorLoopContinuation* ast_loop_continuations = NULL;
-    int64_t ast_await_skip = 0;
-    bool ast_initialized = false;
 };
 
 bool js_root_range_ensure_registered(JsRootRange* range);
-void js_root_range_clear(JsRootRange* range);
-bool js_root_range_register_reset(JsRootRange* range, void* owner,
-                                  JsRootRangeResetFn reset);
-void js_root_range_reset_all(void);
+void js_root_range_unregister(JsRootRange* range);
+void js_readline_state_destroy(JsReadlineState* state);
+void js_test262_agent_state_destroy(JsTest262AgentState* state);
 void js_item_stack_init(JsItemStack* stack, Context* owner, const char* name);
 void js_item_stack_destroy(JsItemStack* stack);
 bool js_item_stack_push(JsItemStack* stack, Item value);
@@ -781,53 +802,53 @@ void js_item_stack_pop(JsItemStack* stack);
 void js_item_stack_clear(JsItemStack* stack);
 void js_item_stack_shrink(JsItemStack* stack, int depth);
 
-#define JS_EVAL_SOURCE_STACK_MAX 16
-
-// Source records span a runtime eval or a VM-originated function call. Their
-// Item fields are separate exact ranges; POD metadata is never scanned as an
-// Item merely because it is adjacent to source roots.
-// JSCU14(c): the Item lanes are RootVectors; the POD lanes stay parallel
-// fixed arrays bounded by the same explicit limit (JSCU13, JSCUO7). The
-// depth is the filename lane's count.
-struct JsEvalSourceState {
-    RootVector filenames = {};
-    RootVector codes = {};
-    int64_t line_offset_slots[JS_EVAL_SOURCE_STACK_MAX] = {};
-    int64_t column_offset_slots[JS_EVAL_SOURCE_STACK_MAX] = {};
-    bool compact_slots[JS_EVAL_SOURCE_STACK_MAX] = {};
+// Source records span a runtime eval or a VM-originated function call. One
+// row owns the complete source-context fact; its Item fields live in the
+// paired RootVector slots so the native metadata remains unscanned.
+struct JsEvalSourceRecord {
+    int64_t filename_slot = -1;
+    int64_t source_slot = -1;
+    int64_t line_offset = 0;
+    int64_t column_offset = 0;
+    bool compact_stack = false;
 };
 
-#define JS_EVAL_ENV_BIND_MAX 512
-#define JS_EVAL_ENV_FRAME_MAX 32
-#define JS_EVAL_LOCAL_BIND_MAX 512
-#define JS_EVAL_LOCAL_FRAME_MAX 64
-#define JS_EVAL_LEXICAL_BIND_MAX 512
-#define JS_EVAL_IMMUTABLE_BIND_MAX 512
-#define JS_EVAL_PRIVATE_BIND_MAX 256
+struct JsEvalSourceState {
+    RootVector values = {};
+    ArrayList* records = NULL;
+};
 
 // A direct-eval bridge exists for one generated eval call.  Item columns are
 // structure-of-arrays so each exact GC range excludes the bool metadata.
-// Each group's binding count is its key lane's count; the POD columns are
-// indexed by the same position and bounded by the explicit *_BIND_MAX.
+// Each binding row keeps the parallel rooted lanes' non-Item facts; frames
+// own their start positions, so neither growth policy uses a second cap.
+struct JsEvalBridgeBinding {
+    bool had_own = false;
+    bool from_journal = false;
+    bool immutable = false;
+};
+
+struct JsEvalBridgeFrame {
+    int binding_mark = 0;
+};
+
+struct JsEvalBindingJournal {
+    RootVector keys = {};
+    RootVector old_values = {};
+    ArrayList* bindings = NULL;
+    ArrayList* frames = NULL;
+};
+
+struct JsEvalPrivateJournal {
+    RootVector unscoped_keys = {};
+    RootVector scoped_keys = {};
+    ArrayList* frames = NULL;
+};
+
 struct JsEvalBridgeState {
-    RootVector env_keys = {};
-    RootVector env_old_values = {};
-    bool env_had_own[JS_EVAL_ENV_BIND_MAX] = {};
-    bool env_from_journal[JS_EVAL_ENV_BIND_MAX] = {};
-    int env_frame_marks[JS_EVAL_ENV_FRAME_MAX] = {};
-    int env_frame_depth = 0;
-
-    RootVector global_lexical_keys = {};
-    RootVector global_lexical_old_values = {};
-    bool global_lexical_had_own[JS_EVAL_ENV_BIND_MAX] = {};
-    bool global_lexical_immutable[JS_EVAL_ENV_BIND_MAX] = {};
-    int global_lexical_frame_marks[JS_EVAL_ENV_FRAME_MAX] = {};
-    int global_lexical_frame_depth = 0;
-
-    RootVector private_unscoped_keys = {};
-    RootVector private_scoped_keys = {};
-    int private_frame_marks[JS_EVAL_LOCAL_FRAME_MAX] = {};
-    int private_frame_depth = 0;
+    JsEvalBindingJournal env = {};
+    JsEvalBindingJournal global_lexical = {};
+    JsEvalPrivateJournal private_names = {};
 };
 
 typedef struct JsEvalLocalFrameMarks {
@@ -841,8 +862,7 @@ typedef struct JsEvalLocalFrameMarks {
 struct JsEvalLocalState {
     RootVector keys = {};
     RootVector values = {};
-    JsEvalLocalFrameMarks frame_marks[JS_EVAL_LOCAL_FRAME_MAX] = {};
-    int frame_depth = 0;
+    ArrayList* frame_marks = NULL;
     RootVector lexical_keys = {};
     RootVector immutable_keys = {};
 };
@@ -855,14 +875,13 @@ struct JsEvalState {
 
 // One catalog of the eval journals' rooted lanes for init/destroy/clear.
 #define JS_EVAL_STATE_VECTORS(M, state) \
-    M(&(state)->source.filenames, "eval source filenames") \
-    M(&(state)->source.codes, "eval source code") \
-    M(&(state)->bridge.env_keys, "eval env keys") \
-    M(&(state)->bridge.env_old_values, "eval env old values") \
-    M(&(state)->bridge.global_lexical_keys, "eval global lexical keys") \
-    M(&(state)->bridge.global_lexical_old_values, "eval global lexical old values") \
-    M(&(state)->bridge.private_unscoped_keys, "eval private unscoped keys") \
-    M(&(state)->bridge.private_scoped_keys, "eval private scoped keys") \
+    M(&(state)->source.values, "eval source values") \
+    M(&(state)->bridge.env.keys, "eval env keys") \
+    M(&(state)->bridge.env.old_values, "eval env old values") \
+    M(&(state)->bridge.global_lexical.keys, "eval global lexical keys") \
+    M(&(state)->bridge.global_lexical.old_values, "eval global lexical old values") \
+    M(&(state)->bridge.private_names.unscoped_keys, "eval private unscoped keys") \
+    M(&(state)->bridge.private_names.scoped_keys, "eval private scoped keys") \
     M(&(state)->local.keys, "eval local keys") \
     M(&(state)->local.values, "eval local values") \
     M(&(state)->local.lexical_keys, "eval lexical keys") \
@@ -890,9 +909,53 @@ struct JsIntrinsicState {
     int array_sym_iter_ever_set = 0;
 };
 
+// A synchronous call has one ambient owner. Its Item homes are either the
+// context-owned base RootVector or one exact native RootFrame, so a nested
+// call replaces one activation link instead of mutating parallel globals
+// (D5.1.1v2, D6.2.2v2; JSCU28).
+typedef enum JsCallActivationItem {
+    JS_CALL_ACTIVATION_THIS = 0,
+    JS_CALL_ACTIVATION_NEW_TARGET,
+    JS_CALL_ACTIVATION_GENERATOR_CALLEE_PROTO,
+    JS_CALL_ACTIVATION_PRIVATE_HOME_CLASS,
+    JS_CALL_ACTIVATION_CALLEE,
+    JS_CALL_ACTIVATION_SUPER_THIS,
+    JS_CALL_ACTIVATION_ITEM_COUNT,
+} JsCallActivationItem;
+
+struct JsCallActivation {
+    JsCallActivation* previous = NULL;
+    Item* items[JS_CALL_ACTIVATION_ITEM_COUNT] = {};
+    Item* args = NULL;
+    int arg_count = 0;
+    const char* source = NULL;
+    int source_len = 0;
+    int args_is_strict = 0;
+    bool derived_constructor = false;
+    bool super_this_bound = false;
+};
+
+struct JsExecutionState {
+    // The base activation remains live outside a JS call and is rooted by the
+    // runtime's one growable root primitive. Before a heap exists, the
+    // fallback keeps bootstrap bookkeeping valid; it is copied into the
+    // precise homes before JavaScript can publish an Item.
+    RootVector base_activation_items = {};
+    Item base_activation_fallback[JS_CALL_ACTIVATION_ITEM_COUNT] = {};
+    JsCallActivation base_activation = {};
+    JsCallActivation* current_activation = NULL;
+    int call_depth = 0;
+    int call_stack_limit = 4096;
+};
+
+// Await's result handoff is the one realm-owned async Item that outlives the
+// native suspend check; activations themselves are GC-owned frame carriers.
+struct JsAsyncAwaitState : JsRootedState {
+    Item resolved_value = {};
+};
+
 struct JsRuntimeState {
     JsDnsState dns = {};
-    JsBuiltinCacheState* builtin_cache = NULL;
     JsReadlineState* readline = NULL;
     JsBufferState buffer = {};
     JsHttpsState https = {};
@@ -914,18 +977,9 @@ struct JsRuntimeState {
     // JSCU17: DOM/web state moved to context capsules (peers of this JS
     // capsule, not children of it); see runtime/context_capsule.h.
     HashMap* dom_attached_expando_roots = NULL;
-    JsStringConcatState* string_concat = NULL;
-    JsGlobalVarModuleBindingState* global_var_module_bindings = NULL;   // JSCU16: allocated with the realm, not embedded
-    JsRuntimeCoreCacheState runtime_core_cache = {};
-    JsFunctionPrototypeState function_prototypes = {};
-    JsGlobalStringCacheState* global_string_caches = NULL;
-    JsGlobalBindingState* global_bindings = NULL;   // JSCU16: allocated with the realm, not embedded
-    JsConstructorCacheState* constructors = NULL;
-    JsRuntimeNamespaceState* namespaces = NULL;
-    // VM namespaces and generated module identifiers are observable realm
-    // state. Keeping them here prevents a new document from accepting an
-    // equal epoch and reusing an Item from a retired document heap.
-    JsVmRuntimeState vm = {};
+    JsStringCacheState* string_caches = NULL;
+    JsGlobalEnvironment* global_environment = NULL;   // one dynamic realm binding table (JSCU29)
+    JsRealmIntrinsicSlots* intrinsic_slots = NULL;
     JsTest262AgentState* test262_agent = NULL;
     JsProcessState* process = NULL;
     JsIteratorState* iterators = NULL;
@@ -941,7 +995,7 @@ struct JsRuntimeState {
     // Native buffer ownership and tagged-template identity are realm-local
     // caches. Their pointer lookups remain ordinary context-local accesses.
     HashMap* array_runtime_items = NULL;
-    JsTemplateRegistryEntry* template_registry = NULL;
+    JsTemplateRegistry template_registry = {};
     void* prototype_snapshot_state = NULL;
     void* regex_compile_cache = NULL;
     void* regex_permanent_cache = NULL;
@@ -951,6 +1005,9 @@ struct JsRuntimeState {
     JsEvalState eval = {};
     JsEventLoopQueueState* event_loop = NULL;   // JSCU16: allocated with the realm, not embedded
     JsEventLoopTimerState* timers = NULL;   // JSCU16: allocated with the realm, not embedded
+    // The sole generation-checked native-resource registry for this context.
+    // Timer and Node/Jube records use distinct lifecycle-owner keys within it.
+    RuntimeResourceTable resources = {};
     JsWithScopeState with_scope = {};
     JsCodeStore code_store = {};
     void* dynamic_function_cache_state = NULL;
@@ -980,11 +1037,9 @@ struct JsRuntimeState {
     // Resumable code retains function environments after its creating native
     // frame has returned.  The fixed tables are context-owned so resumes never
     // consult process-global state or contend with another isolate.
-    // JSCU10: async activations are GC-owned frames, not a fixed table. Only
-    // the single await scratch value keeps an epoch-guarded root.
-    Item async_resolved_value = {};
-    void* async_roots_registered_gc = NULL;
-    uint64_t async_roots_registered_epoch = UINT64_MAX;
+    // JSCU10: async activations are GC-owned frames, not a fixed table. The
+    // await handoff is its own precise one-Item owner.
+    JsAsyncAwaitState async_await = {};
     int dynamic_func_counter = 0;
 
     // Test262 keeps its harness in one module slab while each script needs an
@@ -997,41 +1052,46 @@ struct JsRuntimeState {
 
     JsRegexpLastMatch regexp_last_match = {};
 
-    Item current_this = {0};
-    // Call/constructor bindings are active execution semantics, not process
-    // diagnostics.  They are owner-thread fields so dispatch stays ordinary
-    // loads and stores with no lock or atomic operation.
-    Item generator_callee_proto = {0};
-    Item current_private_home_class = {0};
-    int call_depth = 0;
-    int call_stack_limit = 4096;
-    Item new_target = {0};
-    // The bound flags are POD kept beside, never inside, the rooted vector
-    // (JSCU13); their bound is the explicit nesting policy below.
-    bool super_this_bound_stack[JS_SUPER_THIS_STACK_MAX] = {};
-    JsItemStack super_this_values = {};
-    Item* pending_call_args = NULL;
-    int pending_call_argc = 0;
-    const char* pending_call_source = NULL;
-    int pending_call_source_len = 0;
+    JsExecutionState execution = {};
     Map* cached_object_proto = NULL;
     bool resolving_object_proto = false;
     bool private_field_initializing = false;
     bool eval_initializer_context = false;
-    int pending_args_is_strict = 0;
-    Item pending_args_callee = {0};
 
-    // Each context owns both range descriptors and the registry that resets
-    // them. A heap replacement in one runtime must never touch another.
+    // The event-loop queues share their three fixed, context-owned Item homes.
     JsRootRange event_loop_queue_roots = {};
-    JsRootRange event_loop_raf_roots = {};
-    JsRootRange* root_range_registry[JS_ROOT_RANGE_REGISTRY_MAX] = {};
-    int root_range_registry_count = 0;
 };
 
 // This derived TLS cache is initialized once after the eval thread acquires
 // its context. It must stay paired with `context` until thread teardown.
 extern __thread JsRuntimeState* js_active_runtime_state;
+static inline JsRuntimeState* js_runtime_state_for(EvalContext* owner) {
+    return owner ? (JsRuntimeState*)context_capsule(owner, CONTEXT_CAPSULE_JS_RUNTIME) : NULL;
+}
+
+static inline JsCallActivation* js_call_activation_current(void) {
+    JsExecutionState* execution = &js_active_runtime_state->execution;
+    return execution->current_activation ? execution->current_activation
+        : &execution->base_activation;
+}
+
+static inline Item& js_call_activation_item(JsCallActivationItem slot) {
+    Item* item = js_call_activation_current()->items[slot];
+    // Runtime initialization publishes every base home before JS dispatch;
+    // side-rooted activations copy the same complete slot shape.
+    return *item;
+}
+
+static inline void js_call_activation_push(JsCallActivation* activation) {
+    if (!activation) return;
+    activation->previous = js_call_activation_current();
+    js_active_runtime_state->execution.current_activation = activation;
+}
+
+static inline void js_call_activation_pop(JsCallActivation* activation) {
+    if (!activation || js_active_runtime_state->execution.current_activation != activation) return;
+    js_active_runtime_state->execution.current_activation = activation->previous;
+}
 bool js_runtime_state_init(EvalContext* context);
 bool js_runtime_state_thread_matches(const EvalContext* context);
 bool js_runtime_state_shutdown(EvalContext* context);
@@ -1052,19 +1112,19 @@ extern "C" bool js_promise_initial_unhandled_rejections_strict(void);
 #define g_array_sym_iter_ever_set (js_intrinsic_state.array_sym_iter_ever_set)
 #define js_heap_epoch (js_runtime_state.heap_epoch)
 #define js_regexp_last_match (js_runtime_state.regexp_last_match)
-#define js_current_this (js_runtime_state.current_this)
-#define js_new_target (js_runtime_state.new_target)
-#define js_super_this_bound_stack (js_runtime_state.super_this_bound_stack)
-#define js_super_this_value_at(i) js_item_stack_at(&js_runtime_state.super_this_values, (i))
-#define js_super_this_bound_depth js_item_stack_depth(&js_runtime_state.super_this_values)
-#define js_pending_call_args (js_runtime_state.pending_call_args)
-#define js_pending_call_argc (js_runtime_state.pending_call_argc)
-#define js_pending_call_source (js_runtime_state.pending_call_source)
-#define js_pending_call_source_len (js_runtime_state.pending_call_source_len)
+#define js_current_this js_call_activation_item(JS_CALL_ACTIVATION_THIS)
+#define js_new_target js_call_activation_item(JS_CALL_ACTIVATION_NEW_TARGET)
+#define js_generator_callee_proto js_call_activation_item(JS_CALL_ACTIVATION_GENERATOR_CALLEE_PROTO)
+#define js_current_private_home_class js_call_activation_item(JS_CALL_ACTIVATION_PRIVATE_HOME_CLASS)
+#define js_pending_args_callee js_call_activation_item(JS_CALL_ACTIVATION_CALLEE)
+#define js_super_this_value js_call_activation_item(JS_CALL_ACTIVATION_SUPER_THIS)
+#define js_pending_call_args (js_call_activation_current()->args)
+#define js_pending_call_argc (js_call_activation_current()->arg_count)
+#define js_pending_call_source (js_call_activation_current()->source)
+#define js_pending_call_source_len (js_call_activation_current()->source_len)
 #define js_cached_object_proto (js_runtime_state.cached_object_proto)
 #define js_resolving_object_proto (js_runtime_state.resolving_object_proto)
 #define js_private_field_initializing (js_runtime_state.private_field_initializing)
 #define js_eval_initializer_context (js_runtime_state.eval_initializer_context)
 #define js_deferred_instance_field_class (js_runtime_state.operations.deferred_instance_field_class)
-#define js_pending_args_is_strict (js_runtime_state.pending_args_is_strict)
-#define js_pending_args_callee (js_runtime_state.pending_args_callee)
+#define js_pending_args_is_strict (js_call_activation_current()->args_is_strict)

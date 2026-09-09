@@ -161,8 +161,8 @@ void decimal_constants_release(struct _ArrayList* constants);
 // If item is already decimal, returns a COPY (caller must free)
 mpd_t* decimal_item_to_mpd(Item item, mpd_context_t* ctx);
 
-// Convert mpd_t* to int64 (truncates toward zero)
-int64_t decimal_mpd_to_int64(mpd_t* dec, mpd_context_t* ctx);
+// Convert mpd_t* to int64 without reserving a numeric error value.
+bool decimal_mpd_try_to_int64(mpd_t* dec, mpd_context_t* ctx, int64_t* out);
 
 // Convert mpd_t* to double
 double decimal_mpd_to_double(mpd_t* dec, mpd_context_t* ctx);
@@ -219,8 +219,8 @@ Item decimal_round(Item a);
 // Truncate: round toward zero (removes fractional part)
 Item decimal_trunc(Item a);
 
-// Convert decimal Item to int64 (truncates toward zero)
-int64_t decimal_to_int64(Item item);
+// Convert decimal Item to int64 (truncates toward zero).
+bool decimal_try_to_int64(Item item, int64_t* out);
 
 // Extract an exactly integral in-range int64 without truncation or clamping.
 bool decimal_to_int64_exact(Item item, int64_t* out);

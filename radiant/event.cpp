@@ -4418,7 +4418,7 @@ bool radiant_focus_element(DomDocument* doc, View* target) {
     // allocate and dispatch while that retained context owns the thread.
     if (!runtime_context_bind_retained(runtime, focus_ctx)) return false;
     input_context = nullptr;
-    if (focus_ctx->js_state && !js_runtime_state_init(focus_ctx)) {
+    if (js_runtime_state_for(focus_ctx) && !js_runtime_state_init(focus_ctx)) {
         input_context = saved_input_ctx;
         return false;
     }
@@ -4439,7 +4439,7 @@ static bool event_document_has_js_runtime(EventContext* evcon) {
     // A direct `lambda.exe js --document` evaluation owns a JS context before
     // the loader can retain it on the document. It is still a real live DOM
     // realm for synchronous re-entry such as execCommand's post-action input.
-    return document && context && context->js_state &&
+    return document && context && js_runtime_state_for(context) &&
         dom_get_document() == document;
 }
 
@@ -6830,7 +6830,7 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->handler_ctx->pool = runtime_heap(runtime)->pool;
     s->saved_input_ctx = input_context;
     if (!eval_context_init(s->handler_ctx) ||
-            (s->handler_ctx->js_state &&
+            (js_runtime_state_for(s->handler_ctx) &&
              !js_runtime_state_init(s->handler_ctx))) {
         return false;
     }

@@ -7,6 +7,13 @@
 
 // Keep C++ linkage to match the active runtime API.
 void* heap_alloc(int size, TypeId type_id);
+// Dedicated internal carrier for accessor getter/setter storage. It is not a
+// public Item type and must never be allocated as LMD_TYPE_FUNC.
+#ifdef __cplusplus
+extern "C" void* heap_calloc_js_accessor_cell(size_t size);
+#else
+void* heap_calloc_js_accessor_cell(size_t size);
+#endif
 void heap_init();
 void heap_destroy();
 String* heap_create_name(const char* str, size_t len);

@@ -9,7 +9,7 @@ pn get_row_column(free_rows: bool[], free_maxs: bool[], free_mins: bool[], r: in
 }
 
 pn set_row_column(var free_rows: bool[], var free_maxs: bool[], var free_mins: bool[],
-                  r: int, c: int, v: bool) {
+                  r: int, c: int, v: bool) any {
     free_rows[r] = v
     free_maxs[c + r] = v
     free_mins[c - r + 7] = v

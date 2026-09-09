@@ -849,8 +849,11 @@ typedef struct ByteStorage ByteStorage;
 typedef struct ByteBufferHandle ByteBufferHandle;
 
 /*
-* The C verion of Lambda Item and data structures are defined primarily for MIR JIT ciompiler
-*/
+ * C-compatible Item and data-structure definitions support active C runtime
+ * components, including GC, MIR runtime/import handling, and Path. They mirror
+ * the C++ layouts in lambda.hpp for the shared runtime ABI; they are not a
+ * C2MIR input interface.
+ */
 
 // only define DateTime if not already defined by lib/datetime.h
 #ifndef __cplusplus
@@ -976,7 +979,10 @@ struct Container {
             uint8_t is_pinned:1;         // bit 2: reserved legacy pin marker; nursery data is always relocated
             uint8_t is_mutable_view:1;   // bit 3: a view writable through to its base (procedural in-place updates)
             uint8_t is_native_lane_array:1; // bit 4: List.items holds native lane words
-            uint8_t array_flag_reserved:3;
+            // NOT free: bits 5-7 are JsElementsKind, addressed through
+            // JS_ELEMENTS_STATE_MASK (0xe0). Taking one corrupts the elements
+            // state. `reserved_state` below is the byte with room to spare.
+            uint8_t array_flags_js_elements_kind:3;
         };
     };    
     uint8_t map_kind;      // MapKind tag (0 = plain, only used for map/object/element)
@@ -1004,6 +1010,22 @@ LAMBDA_STATIC_ASSERT(offsetof(Container, ctor_reserved_mask_hi) == 6,
                      "Container constructor mask high-byte ABI offset changed");
 LAMBDA_STATIC_ASSERT(offsetof(Container, reserved_state) == 7,
                      "Container reserved-state ABI offset changed");
+
+// `reserved_state` carries per-container state with no room in the two flag
+// bytes. Bit 0 marks a strict-mode Arguments object: `is_content` on the same
+// array already means "this is an Arguments object", and this says which kind.
+// It used to be an own `__strict_arguments__` property on the companion map,
+// which was visible to Object.keys and is still visible to
+// Object.getOwnPropertyNames — engine bookkeeping must not be a user property.
+#define CONTAINER_STATE_STRICT_ARGUMENTS ((uint8_t)(1u << 0))
+
+static inline bool container_is_strict_arguments(const Container* c) {
+    return c && (c->reserved_state & CONTAINER_STATE_STRICT_ARGUMENTS) != 0;
+}
+
+static inline void container_set_strict_arguments(Container* c) {
+    if (c) c->reserved_state |= CONTAINER_STATE_STRICT_ARGUMENTS;
+}
 LAMBDA_STATIC_ASSERT(sizeof(Container) == 8,
                      "Container header must remain eight bytes");
 
@@ -1555,7 +1577,6 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 }
 #endif
 
-#define INT64_ERROR           INT64_MAX
 #define LAMBDA_INT64_MAX    (INT64_MAX - 1)
 
 // DateTime error sentinel — all bits set = clearly invalid
@@ -2405,6 +2426,7 @@ extern "C" {
     double array_float_get_value(ArrayNum *arr, int64_t index);
     Item list_get(List *list, int64_t index);
     Item fn_string_ascii_at(Item str, int64_t index);
+    uint8_t fn_string_char_eq_ascii(Item str, int64_t index, uint8_t expected);
     Item map_get(Map* map, Item key);
     Item elmt_get(Element *elmt, Item key);
     Item object_get(Object* obj, Item key);
@@ -2445,12 +2467,8 @@ extern "C" {
     int64_t lambda_int_lane_mul_slow(int64_t a, int64_t b);
     int64_t lambda_int_lane_divmod_slow(int64_t a, int64_t b, int64_t is_mod);
     Item int2it_i64(int64_t value); // same encoder, native-int64 caller
-    Item int2it_i64_or_error(int64_t value); // + legacy INT64_ERROR boundary
     Item push_d(double dval);
     Item box_int64_value(int64_t lval);
-    // Compatibility boundary for legacy native helpers whose raw int64 result
-    // uses INT64_ERROR as an out-of-band failure signal.
-    Item box_int64_result_or_error(int64_t lval);
     Item box_uint64_value(uint64_t uval);
     Item push_d_safe(double val);   // safe boxing: detects already-boxed FLOAT Items
     Item push_k(DateTime dtval);
@@ -2473,6 +2491,7 @@ extern "C" {
     #define const_k(index)      (*(DateTime*)_const_pool[index])
 
     // item unboxing
+    bool item_try_to_int64(Item item, int64_t* out);
     int64_t it2l(Item item);
     uint64_t it2u(Item item);
     double it2d(Item item);
@@ -2512,7 +2531,7 @@ extern "C" {
     Item fn_content(Item item);   // read-only array view over an element's content
     int64_t fn_seq_count(Item item);  // positions a positional traversal visits
     Item fn_int(Item a);
-    int64_t fn_int64(Item a);
+    Item fn_int64(Item a);
     Item fn_float(Item a);
     Item fn_decimal(Item a);
     Item fn_binary(Item a);
@@ -2697,8 +2716,6 @@ extern "C" {
     double fn_abs_f(double x);
     int64_t fn_neg_i(int64_t x);
     double fn_neg_f(double x);
-    int64_t fn_mod_i(int64_t a, int64_t b);    // handles div-by-zero (returns INT64_ERROR)
-    int64_t fn_idiv_i(int64_t a, int64_t b);   // handles div-by-zero (returns INT64_ERROR)
 
     // Collection length — type-specialized native variants
     // G0: these return a Lambda `int`, so they return int's one native
@@ -3008,6 +3025,9 @@ extern "C" {
     Item cow_path_set_inplace(Item owner, Item path, Item value);
     // CW25: detach root..leaf and return the leaf, for a `var` path borrow.
     Item cow_path_borrow(Item owner, Item path);
+    // CW25: bounded descriptor form for compiler-known member/int paths.
+    Item cow_path_borrow_fixed(Item owner, int64_t count,
+        Item key0, Item key1, Item key2);
 
     // runtime type coercion for typed array annotations (int[], float[], etc.)
     // converts generic Array/List to typed array, or validates existing typed array

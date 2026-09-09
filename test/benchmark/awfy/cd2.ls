@@ -23,6 +23,10 @@ let NP = 4
 let NC = 5
 
 type Arr = {l0: array, sz: int}
+// Typed numeric arrays are fixed-size; these stores must stay growable.
+// Their element contracts are enforced at the RbtTable API (D2.4.1).
+type RbtTable = {keys: array, vals: array}
+type Vec3 = float[]
 
 // =====================================================
 // Helpers
@@ -56,7 +60,7 @@ pn check_overlap(low: float, high: float) int {
     return 0
 }
 
-pn get_old_or_new(old, newp) any {
+pn get_old_or_new(old: any, newp: Vec3) Vec3 {
     if (old == null) { return newp }
     return old
 }
@@ -84,7 +88,7 @@ pn arr_get(a: Arr, idx: int) any {
     return r
 }
 
-pn arr_set(var a: Arr, idx: int, val) int {
+pn arr_set(var a: Arr, idx: int, val: any) int {
     var i2 = idx % 32
     var mid = shr(idx, 5)
     var i1 = mid % 16
@@ -115,7 +119,7 @@ pn vec_new() array {
     return []
 }
 
-pn vec_add(var v, item) int {
+pn vec_add(var v: array, item: any) int {
     push(v, item)
     return 0
 }
@@ -136,19 +140,17 @@ pn vec_size(v: array) int {
 
 // The original tree stored linked node values. Under COW every lookup is a
 // snapshot, so the mutable owner is an explicit key/value table instead
-// (D3.3.1). The CD workload needs ordered iteration only, not tree balancing.
+// (D3.3.1v2). The CD workload needs ordered iteration only, not tree balancing.
 
-pn rbt_new() any {
+pn rbt_new() RbtTable {
     var keys = vec_new()
     var vals = vec_new()
-    var table = { keys: null, vals: null }
-    table.keys = keys
-    table.vals = vals
+    var table: RbtTable = {keys: keys, vals: vals}
     return table
 }
 
-pn rbt_find_node(tree, key: int) int {
-    var keys = tree.keys
+pn rbt_find_node(tree: RbtTable, key: int) int {
+    let keys = tree.keys
     var i = 0
     while (i < len(keys)) {
         if (keys[i] == key) {
@@ -159,11 +161,11 @@ pn rbt_find_node(tree, key: int) int {
     return NIL
 }
 
-pn rbt_nd(tree, id: int) array {
+pn rbt_nd(tree: RbtTable, id: int) array {
     return [tree.keys[id], tree.vals[id]]
 }
 
-pn rbt_put(var tree, key: int, value) any {
+pn rbt_put(var tree: RbtTable, key: int, value: any) any {
     var index = rbt_find_node(tree, key)
     var keys = tree.keys
     var vals = tree.vals
@@ -180,7 +182,7 @@ pn rbt_put(var tree, key: int, value) any {
     return null
 }
 
-pn rbt_get(tree, key: int) any {
+pn rbt_get(tree: RbtTable, key: int) any {
     var index = rbt_find_node(tree, key)
     if (index == NIL) {
         return null
@@ -188,14 +190,14 @@ pn rbt_get(tree, key: int) any {
     return tree.vals[index]
 }
 
-pn rbt_first(tree) int {
+pn rbt_first(tree: RbtTable) int {
     if (len(tree.keys) == 0) {
         return NIL
     }
     return 0
 }
 
-pn rbt_successor(tree, id: int) int {
+pn rbt_successor(tree: RbtTable, id: int) int {
     var next = id + 1
     if (next >= len(tree.keys)) {
         return NIL
@@ -203,7 +205,7 @@ pn rbt_successor(tree, id: int) int {
     return next
 }
 
-pn rbt_remove(var tree, key: int) any {
+pn rbt_remove(var tree: RbtTable, key: int) any {
     var index = rbt_find_node(tree, key)
     if (index == NIL) {
         return null
@@ -236,7 +238,7 @@ pn v2d_key(x: int, y: int) int {
 // =====================================================
 // Vector3D operations
 // =====================================================
-pn v3d_new(x, y, z) array {
+pn v3d_new(x: float, y: float, z: float) Vec3 {
     return [x, y, z]
 }
 
@@ -328,7 +330,7 @@ pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float,
 // =====================================================
 // Recurse: draw motion into voxel map
 // =====================================================
-pn recurse_draw(voxel_map, seen_tree, vx: int, vy: int,
+pn recurse_draw(voxel_map: RbtTable, seen_tree: RbtTable, vx: int, vy: int,
         p1x: float, p1y: float, p2x: float, p2y: float,
         motion_idx: int) array {
     // The recursive frontier returns both owned tables explicitly. A nested
@@ -346,9 +348,10 @@ pn recurse_draw(voxel_map, seen_tree, vx: int, vy: int,
         return [voxels, seen]
     }
 
-    var entries = rbt_get(voxels, voxel_key)
-    if (entries == null) {
-        entries = vec_new()
+    var stored_entries = rbt_get(voxels, voxel_key)
+    var entries: array = vec_new()
+    if (stored_entries != null) {
+        entries = stored_entries
     }
     vec_add(entries, motion_idx)
     rbt_put(voxels, voxel_key, entries)
@@ -384,7 +387,7 @@ pn recurse_draw(voxel_map, seen_tree, vx: int, vy: int,
 // =====================================================
 // findIntersection between two motions
 // =====================================================
-pn find_intersection(m1, m2) any {
+pn find_intersection(m1: array, m2: array) any {
     // Motion: [cs, p1x, p1y, p1z, p2x, p2y, p2z]
     var i1x = m1[1]
     var i1y = m1[2]
@@ -487,7 +490,8 @@ pn find_intersection(m1, m2) any {
 // =====================================================
 // Motion: array [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 // =====================================================
-pn motion_new(cs: int, p1x, p1y, p1z, p2x, p2y, p2z) array {
+pn motion_new(cs: int, p1x: float, p1y: float, p1z: float,
+        p2x: float, p2y: float, p2z: float) array {
     return [cs, p1x, p1y, p1z, p2x, p2y, p2z]
 }
 
@@ -514,7 +518,7 @@ pn simulate_frame(numAircraft: int, tval: float) array {
     return frame
 }
 
-pn handle_new_frame(var stateTree, frame: array) int {
+pn handle_new_frame(var stateTree: RbtTable, frame: array) int {
     var motions = vec_new()
     var seenTree = rbt_new()
     var frameSz = vec_size(frame)
@@ -561,7 +565,7 @@ pn handle_new_frame(var stateTree, frame: array) int {
     // Reduce collision set
     var voxelMap = rbt_new()
     var motionsSz = vec_size(motions)
-    var vxy = [null, null]
+    var vxy: array = [0.0, 0.0]
     var mi = 0
     while (mi < motionsSz) {
         var mot = vec_at(motions, mi)

@@ -3239,26 +3239,47 @@ extern "C" Item dom_collect_frame_windows_array(void) {
 // script editors that gate on window.prompt (link URL, mention name) run
 // end-to-end. FIFO; context-owned with the document realm.
 // ---------------------------------------------------------------------------
-#define s_prompt_queue (js_runtime_state.dom.prompt_queue)
-#define s_prompt_head (js_runtime_state.dom.prompt_head)
-#define s_prompt_tail (js_runtime_state.dom.prompt_tail)
+struct DomPromptResponse {
+    char* value;
+};
+
+#define s_prompt_responses (js_runtime_state.dom.prompt_responses)
+
+static void dom_window_dialog_response_destroy(DomPromptResponse* response) {
+    if (!response) return;
+    mem_free(response->value);
+    mem_free(response);
+}
 
 extern "C" void dom_window_dialog_push_response(const char* value) {
     if (!js_active_runtime_state) return;
-    int next = (s_prompt_tail + 1) % JS_DOM_PROMPT_QUEUE_CAP;
-    if (next == s_prompt_head) return;  // queue full — drop
-    s_prompt_queue[s_prompt_tail] = value ? mem_strdup(value, MEM_CAT_JS_RUNTIME) : NULL;
-    s_prompt_tail = next;
+    if (!s_prompt_responses) s_prompt_responses = arraylist_new(8);
+    DomPromptResponse* response = (DomPromptResponse*)mem_calloc(1,
+        sizeof(DomPromptResponse), MEM_CAT_JS_RUNTIME);
+    if (!response || !s_prompt_responses ||
+            !arraylist_append(s_prompt_responses, response)) {
+        mem_free(response);
+        return;
+    }
+    if (value) {
+        response->value = mem_strdup(value, MEM_CAT_JS_RUNTIME);
+        if (!response->value) {
+            arraylist_remove(s_prompt_responses, s_prompt_responses->length - 1);
+            mem_free(response);
+        }
+    }
 }
 
 extern "C" void dom_window_dialog_reset(void) {
     if (!js_active_runtime_state) return;
-    while (s_prompt_head != s_prompt_tail) {
-        if (s_prompt_queue[s_prompt_head]) mem_free(s_prompt_queue[s_prompt_head]);
-        s_prompt_head = (s_prompt_head + 1) % JS_DOM_PROMPT_QUEUE_CAP;
+    if (s_prompt_responses) {
+        for (int i = 0; i < s_prompt_responses->length; i++) {
+            dom_window_dialog_response_destroy(
+                (DomPromptResponse*)arraylist_get(s_prompt_responses, i));
+        }
+        arraylist_free(s_prompt_responses);
+        s_prompt_responses = NULL;
     }
-    s_prompt_head = 0;
-    s_prompt_tail = 0;
 }
 
 // window.prompt(message, default) — positional args (unused); returns the next
@@ -3266,18 +3287,19 @@ extern "C" void dom_window_dialog_reset(void) {
 extern "C" Item dom_window_prompt(Item message_item, Item default_item) {
     (void)message_item; (void)default_item;
     if (!js_active_runtime_state) return ItemNull;
-    if (s_prompt_head == s_prompt_tail) return ItemNull;
-    char* r = s_prompt_queue[s_prompt_head];
-    s_prompt_head = (s_prompt_head + 1) % JS_DOM_PROMPT_QUEUE_CAP;
-    if (!r) return ItemNull;  // seeded Cancel
-    Item out = js_name_item(r);
-    mem_free(r);
+    if (!s_prompt_responses || s_prompt_responses->length == 0) return ItemNull;
+    DomPromptResponse* response = (DomPromptResponse*)arraylist_get(s_prompt_responses, 0);
+    arraylist_remove(s_prompt_responses, 0);
+    if (!response || !response->value) {
+        dom_window_dialog_response_destroy(response);
+        return ItemNull;  // seeded Cancel
+    }
+    Item out = js_name_item(response->value);
+    dom_window_dialog_response_destroy(response);
     return out;
 }
 
-#undef s_prompt_queue
-#undef s_prompt_head
-#undef s_prompt_tail
+#undef s_prompt_responses
 
 // [dom_install_window_dialog_globals moved to lambda/js/js_dom_realm.cpp]
 

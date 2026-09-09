@@ -427,12 +427,12 @@ void free_document(DomDocument* doc) {
         log_error("free_document: could not bind the document EvalContext");
         return;
     }
-    if (timer_owner && timer_owner->js_state) {
+    if (timer_owner && js_runtime_state_for(timer_owner)) {
         // Timer handles live in the document capsule; teardown must not inspect
         // another document's queue through an ambient host context.
         if (!js_runtime_state_init(timer_owner)) return;
     }
-    if (timer_owner && timer_owner->js_state) {
+    if (timer_owner && js_runtime_state_for(timer_owner)) {
         if (script_runner_js_batch_cleanup_unsafe()) {
             js_event_loop_abandon_document_timers(doc);
         } else {
@@ -445,7 +445,7 @@ void free_document(DomDocument* doc) {
         // its canonical context until thread teardown; nested cleanup cannot
         // save and restore a different evaluator.
         if (!eval_context_matches(state_owner)) return;
-        if (state_owner->js_state &&
+        if (js_runtime_state_for(state_owner) &&
                 !js_runtime_state_init(state_owner)) return;
     }
     radiant_document_destroy_state(doc);

@@ -72,7 +72,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
     // replace a different evaluator already assigned to that thread.
     if (!runtime_context_bind_retained(runtime, pump_ctx)) return false;
     input_context = nullptr;
-    if (pump_ctx->js_state && !js_runtime_state_init(pump_ctx)) {
+    if (js_runtime_state_for(pump_ctx) && !js_runtime_state_init(pump_ctx)) {
         input_context = saved_input_ctx;
         return false;
     }
