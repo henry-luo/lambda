@@ -18,6 +18,7 @@ extern "C" {
 #include "../core/print.h"
 #include "sys_func_registry.h"
 #include "compiler_timing.hpp"
+#include "type_contract.hpp"
 
 typedef struct JubeModuleImport {
     String* module;
@@ -175,19 +176,9 @@ static inline bool ast_type_func_has_var_parameter(const TypeFunc* signature) {
 // every Item. T0's ordinary COW setter therefore supplies the full contract;
 // only a narrower element type needs the checked-store runtime entry.
 static inline Type* ast_declared_array_element(Type* declared) {
-    if (!declared) return NULL;
-    if (declared->type_id == LMD_TYPE_TYPE &&
-            declared->kind == TYPE_KIND_UNARY &&
-            ((TypeUnary*)declared)->op == OPERATOR_REPEAT) {
-        return type_field_unwrap_simple_decl(((TypeUnary*)declared)->operand);
-    }
-    Type* semantic = type_field_unwrap_simple_decl(declared);
-    if (!semantic || semantic->type_id != LMD_TYPE_ARRAY || semantic == &TYPE_LIST) {
-        return NULL;
-    }
-    TypeArray* array = (TypeArray*)semantic;
-    return !array->item_patterns && array->nested
-        ? type_field_unwrap_simple_decl(array->nested) : NULL;
+    LambdaArrayContractInfo info = {};
+    return lambda_array_contract_info(declared, &info)
+        ? type_field_unwrap_simple_decl(info.immediate_element) : NULL;
 }
 
 static inline bool ast_declared_type_is_open_any_array(Type* declared) {

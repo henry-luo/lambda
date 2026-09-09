@@ -892,9 +892,10 @@ AstNode* parse_primary(Lexer* lx) {
     return (AstNode*)ident;
 }
 
-// Apply one occurrence suffix: `?`, `+`, `*`, `[n]`, `[n, m]`, `[n+]`, `[]`.
-// No chaining — `int[3]*` does not parse; group explicitly. `T?[]` is the
-// nullable-array special case (nullable binds before the array count).
+// Apply one suffix: `?`, `+`, `*`, `[n]`, `[n, m]`, `[n+]`, or array `[]`.
+// Counted occurrences never chain (`int[3]*` still needs grouping), but the
+// value-array constructor does: `T[][]` denotes an array of arrays. `T?[]`
+// keeps its existing nullable-element binding (D3.1.1v2).
 AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
     if (lx->p >= lx->end) { return operand; }
     char c = *lx->p;
@@ -920,8 +921,13 @@ AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
         }
         if (depth) { fail(lx, "unterminated occurrence count"); return NULL; }
         StrView op = {op_start, (size_t)(lx->p - op_start)};
-        ast_node->op = OPERATOR_REPEAT;
-        parse_occurrence_count(op, &type->min_count, &type->max_count);
+        // Empty brackets are the first-class homogeneous-array constructor.
+        // Counted brackets remain validator occurrence patterns and must not
+        // silently acquire value-array membership semantics (D3.1.1v2).
+        ast_node->op = op.length == 2 ? OPERATOR_ARRAY : OPERATOR_REPEAT;
+        if (ast_node->op == OPERATOR_REPEAT) {
+            parse_occurrence_count(op, &type->min_count, &type->max_count);
+        }
     }
     ast_node->op_str.str = op_start;
     ast_node->op_str.length = (size_t)(lx->p - op_start);
@@ -932,7 +938,14 @@ AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
     type->type_index = lx->tp->type_list->length - 1;
     ast_node->type = wrap_type(lx, (Type*)type);
 
-    // `int?[]` — the array count binds outside the nullable element
+    // Array rank composes left-to-right: `T[][]` is Array(Array(T)). Only an
+    // immediately empty pair is eligible; `T[3][]` remains a validator
+    // occurrence followed by trailing input instead of changing its meaning.
+    if (ast_node->op == OPERATOR_ARRAY && lx->p + 1 < lx->end &&
+            lx->p[0] == '[' && lx->p[1] == ']') {
+        return apply_occurrence(lx, (AstNode*)ast_node);
+    }
+    // `int?[]` — the array count binds outside the nullable element.
     if (ast_node->op == OPERATOR_OPTIONAL && lx->p < lx->end && *lx->p == '[') {
         return apply_occurrence(lx, (AstNode*)ast_node);
     }

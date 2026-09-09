@@ -411,6 +411,7 @@ struct List : Map {
     int64_t length;
     int64_t extra;  // count of reserved tail items (wide scalars)
     int64_t capacity;
+    ArrayRepCert* rep_cert;  // full homogeneous-array representation proof
 
     ConstItem get(int index) const;
 };
@@ -634,6 +635,7 @@ struct ArrayNum : Map {
     int64_t length;
     int64_t extra;  // for is_ndim/is_view: ArrayNumShape*; else count of extra elements
     int64_t capacity;
+    ArrayRepCert* rep_cert;  // full homogeneous-array representation proof
 
     ArrayNumElemType get_elem_type() const { return (ArrayNumElemType)map_kind; }
     void set_elem_type(ArrayNumElemType e) { map_kind = (uint8_t)e; }

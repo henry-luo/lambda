@@ -14,7 +14,7 @@
     {
       "in_func": "_main_#",
       "expect": [
-        "call\tensure_typed_array_p, ensure_typed_array"
+        "call\tlambda_type_check_p, lambda_type_check"
       ]
     }
   ]

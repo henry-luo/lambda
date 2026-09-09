@@ -15,7 +15,7 @@
       "in_func": "_tune15_array_consumer_#",
       "expect": [
         "and\t{{r}}, _array_witness, 1",
-        "call\tensure_typed_array_p, ensure_typed_array"
+        "call\tlambda_type_check_p, lambda_type_check"
       ]
     }
   ]

@@ -588,7 +588,12 @@ static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) 
                arg_tid == LMD_TYPE_UINT64 || arg_tid == LMD_TYPE_BOOL ||
                type_is_sized_integer(arg_elem);
     default:
-        return false;
+        // Named maps, nested arrays, and pointer-lane scalars are checked by
+        // the same structural relation as a normal declared boundary. The
+        // numeric cases above remain explicit because their admission may
+        // convert carriers rather than merely compare contracts (D3.1.1v2).
+        return lambda_type_contract_semantically_compatible(arg_elem,
+            expected_elem);
     }
 }
 
@@ -616,17 +621,11 @@ static bool ast_is_numeric_literal_syntax(AstNode* node) {
 static bool typed_array_annotation_compatible(Type* arg_type, Type* param_type) {
     arg_type = unwrap_simple_type_type(arg_type);
     param_type = unwrap_simple_type_type(param_type);
-    if (!arg_type || !param_type || param_type->kind != TYPE_KIND_UNARY) return false;
+    if (!arg_type || !param_type) return false;
 
-    TypeUnary* unary = (TypeUnary*)param_type;
-    Type* expected_elem = unwrap_simple_type_type(unary->operand);
-    if (!expected_elem) return false;
-    if (expected_elem->type_id != LMD_TYPE_INT &&
-        expected_elem->type_id != LMD_TYPE_FLOAT &&
-        expected_elem->type_id != LMD_TYPE_INT64 &&
-        expected_elem->type_id != LMD_TYPE_UINT64) {
-        return false;
-    }
+    LambdaArrayContractInfo expected_info = {};
+    if (!lambda_array_contract_info(param_type, &expected_info)) return false;
+    Type* expected_elem = expected_info.immediate_element;
 
     if (arg_type->type_id == LMD_TYPE_ARRAY_NUM) return true;
     if (arg_type->type_id != LMD_TYPE_ARRAY) return false;
@@ -637,19 +636,9 @@ static bool typed_array_annotation_compatible(Type* arg_type, Type* param_type) 
 }
 
 static Type* typed_array_expected_element(Type* param_type) {
-    param_type = unwrap_simple_type_type(param_type);
-    if (!param_type || param_type->kind != TYPE_KIND_UNARY) return NULL;
-
-    TypeUnary* unary = (TypeUnary*)param_type;
-    Type* expected_elem = unwrap_simple_type_type(unary->operand);
-    if (!expected_elem) return NULL;
-    if (expected_elem->type_id != LMD_TYPE_INT &&
-        expected_elem->type_id != LMD_TYPE_FLOAT &&
-        expected_elem->type_id != LMD_TYPE_INT64 &&
-        expected_elem->type_id != LMD_TYPE_UINT64) {
-        return NULL;
-    }
-    return expected_elem;
+    LambdaArrayContractInfo info = {};
+    return lambda_array_contract_info(param_type, &info)
+        ? info.immediate_element : NULL;
 }
 
 static bool typed_array_argument_compatible(AstNode* arg, Type* param_type) {
@@ -1783,7 +1772,7 @@ static Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
         }
         if (boundary_type_is_extended(owner_type, TYPE_KIND_UNARY)) {
             TypeUnary* occurrence = (TypeUnary*)owner_type;
-            if (occurrence->op == OPERATOR_REPEAT) {
+            if (occurrence->op == OPERATOR_ARRAY) {
                 return boundary_unwrap_type(occurrence->operand);
             }
         }
@@ -4171,11 +4160,8 @@ static bool known_magnitude_comparable_type_set(Type* left, Type* right) {
 
 
 static Type* known_array_element_type(Type* type) {
-    if (!type) return NULL;
-    if (type->type_id == LMD_TYPE_ARRAY || type->type_id == LMD_TYPE_ARRAY_NUM) {
-        return ((TypeArray*)type)->nested;
-    }
-    return type;
+    LambdaArrayContractInfo info = {};
+    return lambda_array_contract_info(type, &info) ? info.immediate_element : type;
 }
 
 static Type* binary_array_result_element_type(AstBinaryNode* ast_node) {

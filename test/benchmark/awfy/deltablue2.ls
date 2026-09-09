@@ -43,14 +43,15 @@ let K_SCALE = 4
 let NO_CON = 0    // handle-store spelling of a null constraint
 let NO_VAR = -1   // handle-store spelling of a null variable
 
-// Growable stores remain open `array` carriers while their record values and
-// every scalar handle carry explicit contracts (D2.4.1, D3.2.4v2).
-type Vec = array
-type Variable = {val: int, constraints: array, determinedBy: int,
+// Handles are homogeneous integer lanes. The world owns concrete record
+// lanes; cons[0] is deliberately null, hence only that store is nullable.
+// This exercises T[]'s MapVariable*/MapConstraint* mapping (D3.2.4v3).
+type Vec = int[]
+type Variable = {val: int, constraints: Vec, determinedBy: int,
     walkStrength: int, stay: int, mark: int}
 type Constraint = {cid: int, kind: int, strength: int, out: int,
     satisfied: int, v1: int, v2: int, direction: int, sc: int, off: int}
-type World = {vars: array, cons: array, currentMark: int, nextCid: int}
+type World = {vars: Variable[], cons: Constraint?[], currentMark: int, nextCid: int}
 
 // --- Vector ---
 

@@ -34,13 +34,16 @@ type Person = {
 }
 ```
 
-### Array Occurrence Operators
+### Homogeneous Arrays and Occurrence Patterns
 
-Control array cardinality with occurrence operators:
+`T[]` is the homogeneous array contract: every logical element must satisfy
+`T`, including values admitted from dynamic input. Bracket occurrence forms
+remain structural schema patterns; they are not alternate spellings of `T[]`
+(**S11.1.1v2**, **S11.4.1v3**).
 
 ```lambda
 type Document = {
-    // zero or more elements (can be empty)
+    // homogeneous strings, including the empty array
     tags: string[],
 
     // zero or more elements (can be empty) — bracket form

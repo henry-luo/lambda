@@ -177,8 +177,8 @@ static LambdaWideResultProof wide_result_proof_inner(const Type* type,
         }
         case TYPE_KIND_UNARY: {
             const TypeUnary* unary = (const TypeUnary*)type;
-            if (unary->op == OPERATOR_REPEAT) {
-                // A repeated value is a container, regardless of its element
+            if (unary->op == OPERATOR_ARRAY) {
+                // An array value is a container regardless of its element
                 // contract; the result itself cannot be a wide scalar.
                 return LAMBDA_WIDE_RESULT_FREE;
             }
@@ -216,7 +216,7 @@ LambdaWideResultProof lambda_type_wide_result_proof(const Type* type) {
     return wide_result_proof_inner(type, 0);
 }
 
-LambdaWideResultProof lambda_type_wide_result_proof(TypeId type_id) {
+LambdaWideResultProof lambda_type_wide_result_proof_for_type_id(TypeId type_id) {
     if (type_id == LMD_TYPE_ANY || type_id == LMD_TYPE_TYPE)
         return LAMBDA_WIDE_RESULT_UNKNOWN;
     if (type_id == LMD_TYPE_FLOAT ||
@@ -306,6 +306,219 @@ bool lambda_type_contract_semantically_compatible(Type* candidate, Type* expecte
     return contract_semantics_compatible(candidate, expected);
 }
 
+static Type* array_contract_unwrap(Type* type, int depth) {
+    if (!type || depth > 32) return NULL;
+    type = contract_unwrap_type(type);
+    if (!type) return NULL;
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_PARAM) {
+        TypeParam* parameter = (TypeParam*)type;
+        Type* contract = parameter->contract_type ? parameter->contract_type :
+            parameter->full_type;
+        return contract && contract != type
+            ? array_contract_unwrap(contract, depth + 1) : NULL;
+    }
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_CONSTRAINED) {
+        Type* base = ((TypeConstrained*)type)->base;
+        return base && base != type ? array_contract_unwrap(base, depth + 1) : NULL;
+    }
+    return type;
+}
+
+static bool array_contract_layer(Type* type, Type** element) {
+    if (!type || !element) return false;
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
+        TypeUnary* unary = (TypeUnary*)type;
+        if (unary->op == OPERATOR_ARRAY && unary->operand) {
+            *element = unary->operand;
+            return true;
+        }
+    }
+    // TypeArray is the inferred homogeneous-array carrier. A tuple/pattern
+    // retains its per-slot metadata and is never silently treated as T[].
+    if ((type->type_id == LMD_TYPE_ARRAY || type->type_id == LMD_TYPE_ARRAY_NUM) &&
+            type != &TYPE_ARRAY && type != &TYPE_LIST) {
+        TypeArray* array = (TypeArray*)type;
+        if (!array->item_patterns && array->nested) {
+            *element = array->nested;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool lambda_array_contract_info(Type* contract, LambdaArrayContractInfo* out) {
+    if (!out) return false;
+    *out = {};
+    Type* root = array_contract_unwrap(contract, 0);
+    if (!root) return false;
+
+    Type* current = root;
+    Type* element = NULL;
+    while (out->rank < 32 && array_contract_layer(current, &element)) {
+        element = array_contract_unwrap(element, 0);
+        if (!element) return false;
+        if (out->rank == 0) out->immediate_element = element;
+        out->leaf_element = element;
+        out->rank++;
+        current = element;
+    }
+    if (out->rank == 0) return false;
+
+    out->array_contract = root;
+    out->leaf_lane = lambda_lane_storage_desc_for(out->leaf_element);
+    out->has_leaf_lane = out->leaf_lane.kind != LANE_STORAGE_INVALID;
+    return true;
+}
+
+Type* lambda_array_contract_canonical(Type* contract) {
+    LambdaArrayContractInfo info = {};
+    return lambda_array_contract_info(contract, &info) ? info.array_contract : NULL;
+}
+
+static bool array_contract_semantically_equal(Type* left, Type* right) {
+    left = array_contract_unwrap(left, 0);
+    right = array_contract_unwrap(right, 0);
+    for (;;) {
+        Type* left_element = NULL;
+        Type* right_element = NULL;
+        bool left_is_array = array_contract_layer(left, &left_element);
+        bool right_is_array = array_contract_layer(right, &right_element);
+        if (left_is_array != right_is_array) return false;
+        if (!left_is_array) return contract_semantics_equal(left, right);
+        left = array_contract_unwrap(left_element, 0);
+        right = array_contract_unwrap(right_element, 0);
+        if (!left || !right) return false;
+    }
+}
+
+bool lambda_array_contract_compatible(Type* candidate, Type* expected,
+        bool invariant) {
+    LambdaArrayContractInfo candidate_info = {};
+    LambdaArrayContractInfo expected_info = {};
+    if (!lambda_array_contract_info(candidate, &candidate_info) ||
+            !lambda_array_contract_info(expected, &expected_info) ||
+            candidate_info.rank != expected_info.rank) {
+        return false;
+    }
+    if (invariant) {
+        // Declared T[] and inferred TypeArray use different construction
+        // nodes. Equality is their rank-plus-leaf contract, not node identity.
+        return array_contract_semantically_equal(candidate_info.array_contract,
+            expected_info.array_contract);
+    }
+    if (expected_info.immediate_element == &TYPE_ANY) return true;
+    return contract_semantics_compatible(candidate_info.immediate_element,
+        expected_info.immediate_element);
+}
+
+bool lambda_array_num_elem_type_for_contract(Type* element,
+        ArrayNumElemType* out_type) {
+    if (!element || !out_type || lambda_type_accepts_null(element)) return false;
+    element = contract_unwrap_type(element);
+    if (!element) return false;
+    switch (element->type_id) {
+    case LMD_TYPE_INT: *out_type = ELEM_INT; return true;
+    case LMD_TYPE_INT64: *out_type = ELEM_INT64; return true;
+    case LMD_TYPE_UINT64: *out_type = ELEM_UINT64; return true;
+    case LMD_TYPE_FLOAT: *out_type = ELEM_FLOAT64; return true;
+    case LMD_TYPE_BOOL: *out_type = ELEM_BOOL; return true;
+    case LMD_TYPE_NUM_SIZED:
+        switch (type_num_sized_kind(element)) {
+        case NUM_INT8: *out_type = ELEM_INT8; return true;
+        case NUM_INT16: *out_type = ELEM_INT16; return true;
+        case NUM_INT32: *out_type = ELEM_INT32; return true;
+        case NUM_UINT8: *out_type = ELEM_UINT8; return true;
+        case NUM_UINT16: *out_type = ELEM_UINT16; return true;
+        case NUM_UINT32: *out_type = ELEM_UINT32; return true;
+        case NUM_FLOAT16: *out_type = ELEM_FLOAT16; return true;
+        case NUM_FLOAT32: *out_type = ELEM_FLOAT32; return true;
+        default: return false;
+        }
+    default:
+        return false;
+    }
+}
+
+ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract) {
+    LambdaArrayContractInfo info = {};
+    if (!pool || !lambda_array_contract_info(contract, &info)) return NULL;
+    ArrayRepCert* cert = (ArrayRepCert*)pool_calloc(pool, sizeof(ArrayRepCert));
+    if (!cert) return NULL;
+    cert->array_contract = info.array_contract;
+    cert->immediate_element = info.immediate_element;
+    cert->leaf_element = info.leaf_element;
+    cert->leaf_lane = info.leaf_lane;
+    cert->rank = info.rank;
+    cert->flags = ARRAY_REP_CERT_EXACT | ARRAY_REP_CERT_ERROR_FREE;
+    if (info.leaf_element && (info.leaf_element->type_id == LMD_TYPE_MAP ||
+            info.leaf_element->type_id == LMD_TYPE_ELEMENT)) {
+        cert->flags |= ARRAY_REP_CERT_REIFIED;
+    }
+    return cert;
+}
+
+static ArrayRepCert* array_rep_cert_for_value(Item value) {
+    TypeId type_id = get_type_id(value);
+    if (type_id != LMD_TYPE_ARRAY && type_id != LMD_TYPE_ARRAY_NUM &&
+            type_id != LMD_TYPE_ELEMENT) {
+        return NULL;
+    }
+    return value.array ? value.array->rep_cert : NULL;
+}
+
+static bool array_cert_requires_native_lane(const ArrayRepCert* cert) {
+    if (!cert || cert->rank != 1) return false;
+    // Pointer values always need their raw T* lane. Nullable scalar lanes are
+    // likewise represented by a native Array lane; non-nullable scalars use
+    // ArrayNum and generic/union contracts remain boxed Items.
+    return cert->leaf_lane.kind == LANE_STORAGE_POINTER ||
+        (cert->leaf_lane.native && cert->leaf_lane.nullable);
+}
+
+static bool array_representation_matches_cert(Item value,
+        const ArrayRepCert* cert) {
+    if (!cert || cert->rank == 0) return false;
+    TypeId value_type = get_type_id(value);
+    if (value_type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNumElemType elem_type = ELEM_INT;
+        return cert->rank == 1 && value.array_num &&
+            lambda_array_num_elem_type_for_contract(cert->leaf_element, &elem_type) &&
+            value.array_num->get_elem_type() == elem_type;
+    }
+    if (value_type != LMD_TYPE_ARRAY || !value.array) return false;
+    if (cert->rank != 1) {
+        // A nested T[][] outer carrier contains boxed child array Items.
+        return !array_has_native_lane(value.array);
+    }
+    if (array_cert_requires_native_lane(cert)) {
+        return array_native_lane_matches_desc(value.array, &cert->leaf_lane);
+    }
+    // A rank-one abstract/union/null contract owns ordinary boxed Items.
+    return !array_has_native_lane(value.array);
+}
+
+bool lambda_array_rep_proves(Item value, Type* target_contract, bool invariant) {
+    ArrayRepCert* cert = array_rep_cert_for_value(value);
+    if (!cert || !(cert->flags & ARRAY_REP_CERT_EXACT) || !cert->array_contract) {
+        return false;
+    }
+    return array_representation_matches_cert(value, cert) &&
+        lambda_array_contract_compatible(cert->array_contract, target_contract,
+            invariant);
+}
+
+void lambda_array_install_rep_cert(Item value, ArrayRepCert* cert) {
+    TypeId type_id = get_type_id(value);
+    if ((type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_NUM ||
+            type_id == LMD_TYPE_ELEMENT) && value.array) {
+        value.array->rep_cert = cert;
+    }
+}
+
+void lambda_array_clear_rep_cert(Item value) {
+    lambda_array_install_rep_cert(value, NULL);
+}
+
 MapContractRelation lambda_map_contract_relation(const TypeMap* candidate,
         const TypeMap* expected) {
     if (!candidate || !expected) return MAP_CONTRACT_INCOMPATIBLE;
@@ -368,8 +581,19 @@ static void lambda_type_format_name_inner(const Type* type, char* buffer,
         char operand_name[128];
         lambda_type_format_name_inner(unary->operand, operand_name,
             sizeof(operand_name), depth + 1);
-        if (unary->op == OPERATOR_REPEAT) {
+        if (unary->op == OPERATOR_ARRAY) {
             snprintf(buffer, capacity, "%s[]", operand_name);
+            return;
+        }
+        if (unary->op == OPERATOR_REPEAT) {
+            if (unary->max_count < 0) {
+                snprintf(buffer, capacity, "%s[%d+]", operand_name, unary->min_count);
+            } else if (unary->min_count == unary->max_count) {
+                snprintf(buffer, capacity, "%s[%d]", operand_name, unary->min_count);
+            } else {
+                snprintf(buffer, capacity, "%s[%d,%d]", operand_name,
+                    unary->min_count, unary->max_count);
+            }
             return;
         }
         if (unary->op == OPERATOR_OPTIONAL) {

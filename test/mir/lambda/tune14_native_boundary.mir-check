@@ -5,7 +5,7 @@
     {
       "in_func": "_tune14_float_sum_#",
       "expect": [
-        "call\tensure_typed_array_p, ensure_typed_array",
+        "call\tlambda_type_check_p, lambda_type_check",
         "dadd\t{{r}}"
       ],
       "forbid": [
@@ -15,7 +15,7 @@
     {
       "in_func": "_tune14_bitwise_#",
       "expect": [
-        "call\tensure_typed_array_p, ensure_typed_array",
+        "call\tlambda_type_check_p, lambda_type_check",
         "rsh\t{{r}}",
         "and\t{{r}}"
       ],
@@ -28,7 +28,7 @@
     {
       "in_func": "_tune14_rebind_#",
       "expect": [
-        "call\tensure_typed_array_p, ensure_typed_array",
+        "call\tlambda_type_check_p, lambda_type_check",
         "mov\t{{r}}, i64:({{r}})",
         "add\t{{r}}, {{r}}, {{r}}"
       ],

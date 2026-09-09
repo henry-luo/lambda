@@ -379,6 +379,18 @@ TEST(LambdaNegativeTests, test_type_enforcement_typed_array_write) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_array_write.ls");
 }
 
+TEST(LambdaNegativeTests, test_type_enforcement_nested_array_write) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_nested_array_write.ls");
+}
+
+TEST(LambdaNegativeTests, test_type_enforcement_ndim_array_write) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_ndim_array_write.ls");
+}
+
+TEST(LambdaNegativeTests, test_type_enforcement_mask_array_write) {
+    test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_mask_array_write.ls");
+}
+
 TEST(LambdaNegativeTests, test_type_enforcement_dynamic_arity) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/type_enforcement_dynamic_arity.ls");
 }
