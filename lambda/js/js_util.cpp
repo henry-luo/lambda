@@ -557,11 +557,6 @@ static void js_util_inspect_append_property(StrBuf* sb, Item owner, Item key,
                                             bool* first) {
     if (get_type_id(key) != LMD_TYPE_STRING) return;
     String* ks = it2s(key);
-    if (ks && ks->len == 20 && memcmp(ks->chars, "__strict_arguments__", 20) == 0) {
-        // Strict Arguments stores this engine marker in the companion map; Node
-        // inspect/deep diagnostics must not expose it as a user property.
-        return;
-    }
     bool enumerable = true;
     if (ks) enumerable = js_props_obj_query_enumerable(owner, ks->chars, (int)ks->len);
     bool hidden = ctx && ctx->show_hidden && !enumerable;
@@ -762,11 +757,6 @@ static Item js_util_inspect_arguments(Item obj_item, JsInspectContext* ctx, int 
         Item key = js_elements_get_int(keys, i);
         if (get_type_id(key) != LMD_TYPE_STRING) continue;
         String* ks = it2s(key);
-        if (ks && ks->len == 20 && memcmp(ks->chars, "__strict_arguments__", 20) == 0) {
-            // Strict Arguments uses this internal bit for callee semantics; it
-            // is not part of the public Arguments inspect shape.
-            continue;
-        }
         Item value = js_get_key_default(obj_item, key);
         Item text = js_util_inspect_value(value, ctx, depth_left - 1);
         String* ts = get_type_id(text) == LMD_TYPE_STRING ? it2s(text) : NULL;
@@ -1645,36 +1635,6 @@ static Item js_util_enumerable_own_keys(Item object, bool include_symbols) {
         ? js_typed_array_enumerable_custom_keys(object)
         : js_object_keys(object);
     if (get_type_id(result) != LMD_TYPE_ARRAY) result = js_array_new(0);
-    int64_t result_len = js_array_length(result);
-    Item filtered = ItemNull;
-    bool filtered_any = false;
-    for (int64_t i = 0; i < result_len; i++) {
-        Item key = js_elements_get_int(result, i);
-        String* ks = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
-        bool skip_key = false;
-        if (ks && ks->len == 20 && memcmp(ks->chars, "__strict_arguments__", 20) == 0) {
-            // The strict Arguments marker is runtime bookkeeping, not an
-            // enumerable user key for Node-compatible deep equality.
-            skip_key = true;
-        }
-        if (skip_key) {
-            if (!filtered_any) {
-                filtered = js_array_new(0);
-                for (int64_t j = 0; j < i; j++) js_array_push(filtered, js_elements_get_int(result, j));
-            }
-            filtered_any = true;
-            continue;
-        }
-        if (filtered_any && get_type_id(filtered) != LMD_TYPE_ARRAY) {
-            filtered = js_array_new(0);
-            for (int64_t j = 0; j < i; j++) js_array_push(filtered, js_elements_get_int(result, j));
-        }
-        if (get_type_id(filtered) == LMD_TYPE_ARRAY) js_array_push(filtered, key);
-    }
-    if (filtered_any) {
-        if (get_type_id(filtered) != LMD_TYPE_ARRAY) filtered = js_array_new(0);
-        result = filtered;
-    }
     if (!include_symbols) return result;
 
     Item symbols = js_object_get_own_property_symbols(object);

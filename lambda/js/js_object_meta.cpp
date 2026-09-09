@@ -163,6 +163,29 @@ JsClassId js_class_id_from_meta(const JsClassMeta* meta) {
 
 const JsClassMeta* js_object_meta(Item value) {
     TypeId type = get_type_id(value);
+    // The overwhelmingly common receiver is an ordinary Map, and this function
+    // sits under every named property access (10.9% of cd2). Answer that case
+    // from the TypeMap directly instead of walking the exotic-type ladder and
+    // calling js_error_carrier_type_map() — a function call per access — on the
+    // way. Comparing the carrier's address needs no initialization: a Map can
+    // only carry that type after js_error_carrier_type_map() produced it.
+    if (type == LMD_TYPE_MAP && value.map) {
+        TypeMap* tm = (TypeMap*)value.map->type;
+        if (tm == &js_error_carrier_type) {
+            // A resting LambdaError shares the Map lane; the typed carrier is
+            // the semantic owner, so its physical prefix must not classify it.
+            return js_class_meta_for_id(js_error_class_id(value));
+        }
+        if (tm) {
+#ifndef NDEBUG
+            assert(typemap_ptr_is_plausible(tm));
+#endif
+            if (tm->js_meta) return tm->js_meta;
+        }
+        // A Map is never an array, a numeric array or a function; the rest of
+        // the ladder below cannot match, so stop here.
+        return js_class_meta_for_id(JS_CLASS_NONE);
+    }
     if (type == LMD_TYPE_ERROR) {
         return js_class_meta_for_id(js_error_class_id(value));
     }
@@ -171,19 +194,6 @@ const JsClassMeta* js_object_meta(Item value) {
     }
     if (is_virtual_container_type_id(type) && virtual_host_type(value)) {
         return js_class_meta_for_id(JS_CLASS_WEB_API_RESOURCE);
-    }
-    if (type == LMD_TYPE_MAP && value.map &&
-            value.map->type == js_error_carrier_type_map()) {
-        // resting LambdaError values share the Map lane; the typed carrier is
-        // the semantic owner, so do not let its physical prefix classify it.
-        return js_class_meta_for_id(js_error_class_id(value));
-    }
-    if (type == LMD_TYPE_MAP && value.map && value.map->type) {
-        TypeMap* tm = (TypeMap*)value.map->type;
-#ifndef NDEBUG
-        assert(typemap_ptr_is_plausible(tm));
-#endif
-        if (tm->js_meta) return tm->js_meta;
     }
     if (type == LMD_TYPE_ARRAY_NUM && js_is_ordinary_numeric_array(value))
         return js_class_meta_for_id(JS_CLASS_ARRAY);

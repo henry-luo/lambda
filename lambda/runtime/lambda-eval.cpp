@@ -9793,6 +9793,23 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
     return false;
 }
 
+// Resolve a field in a freshly installed shape. A ShapeEntry created from an
+// unpooled key carries NAME_ID_NONE, so probing by NameId alone can miss even
+// though the field is right there — and the callers below then fall back to the
+// entry from the *previous* shape, which map_rebuild_for_type_change cannot find
+// in the chain it is rebuilding and therefore silently skips, losing the write.
+// Same two-probe rule as js_named_fast_lookup: identity first, byte seam second.
+static ShapeEntry* map_resolve_entry_in_shape(TypeMap* shape, NameRef key_ref,
+        const char* key_cstr, size_t key_len) {
+    if (!shape) return NULL;
+    if (key_ref && property_key_id(key_ref) != NAME_ID_NONE) {
+        ShapeEntry* hit = typemap_hash_lookup_by_name_id(shape,
+            property_key_id(key_ref), property_key_hash(key_ref));
+        if (hit) return hit;
+    }
+    return map_find_shape_entry(shape, key_cstr, key_len);
+}
+
 static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
         TypeMap** map_type_slot, void** type_slot, const char* key_cstr,
         size_t key_len, NameRef key_ref, ShapeEntry* entry, TypeId value_type) {
@@ -9807,23 +9824,27 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
     if (transition) {
         *map_type_slot = transition;
         if (type_slot) *type_slot = transition;
-        ShapeEntry* refreshed = key_ref && property_key_id(key_ref) != NAME_ID_NONE
-            ? typemap_hash_lookup_by_name_id(transition,
-                property_key_id(key_ref), property_key_hash(key_ref))
-            : map_find_shape_entry(transition, key_cstr, key_len);
+        ShapeEntry* refreshed = map_resolve_entry_in_shape(transition, key_ref,
+            key_cstr, key_len);
         if (refreshed) return refreshed;
     }
     TypeMap* clone = js_typemap_clone_for_mutation_pub(map_item);
     if (!clone) return entry;
     *map_type_slot = clone;
     if (type_slot) *type_slot = clone;
-    ShapeEntry* refreshed = key_ref && property_key_id(key_ref) != NAME_ID_NONE
-        ? typemap_hash_lookup_by_name_id(clone,
-            property_key_id(key_ref), property_key_hash(key_ref))
-        : map_find_shape_entry(clone, key_cstr, key_len);
     // Ordinary Input and runtime strings use the id-less byte seam; identity
     // keys recover the cloned slot by NameId.
-    return refreshed ? refreshed : entry;
+    ShapeEntry* refreshed = map_resolve_entry_in_shape(clone, key_ref,
+        key_cstr, key_len);
+    if (refreshed) return refreshed;
+    // The clone installed itself on the map, so the pre-detach entry is no
+    // longer in the live chain. Returning it anyway is what silently dropped a
+    // width-changing store: map_rebuild_for_type_change matches the changed
+    // field by pointer and simply skips one it cannot find. Fail loudly instead
+    // — the caller turns NULL into an error rather than a wrong answer.
+    log_error("map_detach: '%.*s' not found in detached shape %p",
+        (int)key_len, key_cstr ? key_cstr : "", (void*)clone);
+    return NULL;
 }
 
 Item fn_map_set(Item map_item, Item key, Item value) {

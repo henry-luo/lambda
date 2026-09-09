@@ -33,7 +33,7 @@
 | MIR (typed) / Node geo (63 rows) | 0.85x | 0.78x | **0.91x** † | ≤ 0.70x |
 | MIR (untyped) / Node geo (63 rows) | 1.37x | 0.97x | **1.08x** † | ≤ 1.0x |
 | Rows > 20x C2MIR (typed) | 8 | — | **7** | ≤ 3 |
-| Text rows with a typed source | 3/3 | 3/3 | **3/7** | — |
+| Text rows with a typed source | 3/3 | 3/3 | **7/7** (T22-7) | — |
 
 † The v38 geomeans include four new text rows that have no typed source
 (`untyped_fallback`) and no C2MIR port; on the 59 shared rows typed/Node is
@@ -314,14 +314,76 @@ semantics change (`COW_EXEC_PROFILE` copies unchanged).
   be an `ord` compare on the ASCII lane (the interned 1-char table already
   exists; json2 spends 10 helper calls per digit test).
 
-### T22-7 — Benchmark hygiene (do first; small)
+### T22-7 — Benchmark hygiene (do first; small) — **LANDED 2026-09-09**
 
-- **Typed variants** for the four text rows (`*2.ls`), under the measured
-  annotation rules: `int[]` on the search-function parameters (2.1x today),
-  `string` on line parameters, **no** typed locals, **no** typed holders on
-  the prettier document maps (they alias).
-- **C2MIR ports** for the four rows (the ceiling table currently excludes
-  them); `text/c2mir/fast_diff.c` is the template.
+The four rows now have a typed variant and a native port, so the Text suite is
+7/7 on both and the ceiling table covers it.
+
+**Typed variants** (`text_search2.ls`, `three_way_merge2.ls`,
+`log_pipeline2.ls`, `prettier_ast2.ls`, each with its `.txt` golden).
+Parameters only, no typed locals, no named contracts on the document or record
+maps. Checksums match the untyped goldens and JIT/interpreter output is
+identical on all four.
+
+| Row | untyped | typed | typed/untyped |
+|---|---:|---:|---:|
+| text_search | 15.28 s | **7.11 s** | 0.47 |
+| prettier_ast | 1.15 s | 1.05 s | 0.91 |
+| three_way_merge | 3.65 s | 3.62 s | 0.99 |
+| log_pipeline | 6.55 s | 6.44 s | 0.98 |
+
+Three annotation facts fell out of building them, all measured on the v38
+archive, and all of them are evidence for the tracks above rather than for
+annotating harder:
+
+1. **A `pn` return contract costs about 1.5x when the function returns from
+   inside a loop.** Adding `int` returns to text_search's three search
+   functions took it from 7.8 s to 12.2 s; typed `int` locals in the same
+   functions cost a further ~1.2x. Only the parameter contracts pay, because a
+   parameter is admitted once per call while a return contract is re-admitted
+   per return. This is the T20-6 annotation-tax ledger, restated on a new row.
+2. **`string` parameters do fire the inline compare, and the admission
+   cancels it.** three_way_merge's dump goes from `fn_eq` 11 / `fn_str_eq_ptr`
+   0 to `fn_eq` 6 / `fn_str_eq_ptr` 7, and log_pipeline's from 13 / 0 to
+   5 / 10 — so the annotation reaches the `transpile-mir.cpp:9647` path
+   exactly as intended. But `lambda_type_check` sites rise with it (10 to 15,
+   and 12 to 21) and both rows come out flat. **T22-1c is therefore the right
+   place for this win, not the source**: the inline literal compare belongs in
+   the untyped lane, where there is no admission to pay for it.
+3. **text_search is the one row where annotation alone is worth 2.1x**, and
+   §2.2 already says what the remaining ~9x over Node is (T22-2a/2b).
+
+**C2MIR ports** (`text/c2mir/{text_search,three_way_merge,log_pipeline,
+prettier_ast}.c`), registered in `run_c2mir_benchmarks.py`; `7/7` pass with the
+same checksums as the `.ls`. `prettier_ast.c` embeds the JSON fixture as a
+string literal (the `awfy/c2mir/json.c` pattern) and parses it into typed
+`Node` structs once, then rebuilds the document IR on each of the 256
+iterations; its formatted output is byte-identical to the Lambda port's, so the
+shared `text/prettier_ast.txt` golden — now the full expected stdout rather
+than a one-line marker — checks both. The one-off parse is inside the C timer
+and outside Lambda's, and is well under 1% of that row.
+
+Ceiling for the four new rows, first measurement (single run, machine not
+quiet — treat as provisional):
+
+| Row | MIR-T | C2MIR | MIR-T / C2MIR |
+|---|---:|---:|---:|
+| prettier_ast | 1.05 s | 25.7 | **40.9x** |
+| text_search | 7.11 s | 538 | 13.2x |
+| log_pipeline | 6.44 s | 645 | 10.0x |
+| three_way_merge | 3.62 s | 840 | 4.3x |
+
+prettier_ast at ~41x lands it in the widest-gap cohort with deltablue, havlak
+and hashmap, and unlike those three it is not a mutable aliasing graph — it is
+allocation and dispatch over immutable document nodes, which makes it the most
+tractable member of that group.
+
+⚠ log_pipeline is bimodal under load (2.5–3.2 s and 6–7.3 s at 60 rounds on
+the same binary and source); nine interleaved pairs put typed at 0.92 of
+untyped by median and faster by minimum, but a publishable A/B for that row
+still needs a quiet machine.
+
+**Still open in this track:**
 - knucleotide2's `main` should not be a task frame: move the
   `io.read(...)^` outside the timed region into a helper, or (engine side)
   keep frame-word spills only for locals live across a suspension point —
@@ -372,7 +434,7 @@ after T22-1 lands.
 | MIR (typed) / C2MIR geo (59 rows) | 5.05x | ~4.6x | **≤ 4.0x** | ≤ 3.5x |
 | Rows > 20x C2MIR (typed) | 7 | 6 | **≤ 4** | ≤ 2 |
 | MIR (typed) / Node geo (63 rows) | 0.91x | ~0.8x | **≤ 0.70x** | ≤ 0.60x |
-| Text rows with a typed source and a C2MIR port | 3/7 | 7/7 | 7/7 | — |
+| Text rows with a typed source and a C2MIR port | **7/7 (landed)** | 7/7 | 7/7 | — |
 
 ---
 

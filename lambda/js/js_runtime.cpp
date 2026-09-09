@@ -271,6 +271,7 @@ extern "C" Item js_get_internal_fs_promises_namespace(void);
 extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
     NameId operation_name_id, TypeId value_type);
 Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out_found);
+static void js_set_prototype_fresh(Item object, Item prototype);
 static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
 static bool js_array_companion_has_array_index_shape(Array* arr);
 extern "C" bool js_promise_vmap_is(Item value);
@@ -2205,11 +2206,11 @@ extern "C" Item js_constructor_create_object(Item callee, Item new_target) {
                     }
                     depth++;
                 }
-                js_set_prototype(object_root.get(), instance_proto_root.get());
+                js_set_prototype_fresh(object_root.get(), instance_proto_root.get());
             } else if (js_is_js_array(instance_proto_root.get()) || pt == LMD_TYPE_ELEMENT) {
                 // ES OrdinaryCreateFromConstructor: when constructor's .prototype is
                 // any Object (incl. Array/Element), use it as instance's [[Prototype]].
-                js_set_prototype(object_root.get(), instance_proto_root.get());
+                js_set_prototype_fresh(object_root.get(), instance_proto_root.get());
             }
         }
     }
@@ -5110,9 +5111,8 @@ extern "C" Item js_get_key_core(Item object, Item key,
                     if (object.array->is_content == 1 &&
                         ((str_key->len == 6 && strncmp(str_key->chars, "callee", 6) == 0) ||
                          (str_key->len == 6 && strncmp(str_key->chars, "caller", 6) == 0))) {
-                        bool strict_found = false;
-                        js_map_shape_lookup(pm, "__strict_arguments__", 20, &strict_found);
-                        if (strict_found) {
+                        if (container_is_strict_arguments(
+                                (const Container*)object.array)) {
                             return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
                         }
                     }
@@ -6493,13 +6493,9 @@ static Item js_set_array_core(Item object, Item key, Item value,
                 if (object.array->is_content == 1 &&
                     ((sk->len == 6 && strncmp(sk->chars, "callee", 6) == 0) ||
                      (sk->len == 6 && strncmp(sk->chars, "caller", 6) == 0)) &&
-                    js_array_has_props(object.array)) {
-                    bool strict_arguments = false;
-                    js_map_shape_lookup(js_array_props(object.array),
-                        "__strict_arguments__", 20, &strict_arguments);
-                    if (strict_arguments) {
-                        return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
-                    }
+                    container_is_strict_arguments(
+                        (const Container*)object.array)) {
+                    return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
                 }
                 // OrdinarySetWithOwnDescriptor: an own data property (stored in
                 // the array's companion map) shadows any prototype setter, so
@@ -8302,7 +8298,20 @@ extern "C" Item js_set_name_id(Item object, NameId name_id,
         reason = JS_OPT_REASON_NAMED_FAST_VALUE_TYPE;
     }
     js_named_fast_profile_miss(reason);
-    return js_set_key_policy(object, (Item){.item = s2it(key)}, value, strict);
+    Item key_item = (Item){.item = s2it(key)};
+    // T10-3: try the ordinary-add kernel here rather than three frames deeper.
+    // Reaching it through js_set_key_policy -> js_set_key_default ->
+    // js_set_completion_with_key re-derives facts this frame already has and
+    // costs 22-26% of `new P(x,y)`. The kernel proves every premise itself, so
+    // it is offered every miss, not just NAMED_FAST_NO_ENTRY: a receiver whose
+    // map was never admissible (an empty object still has data == NULL) misses
+    // as NO_RECEIVER, and an existing-but-unwritable slot misses with the entry
+    // present, which the kernel's own-absence test rejects. Both strictness
+    // modes complete a successful add with the assigned value.
+    if (js_ordinary_add_own_data_property(object, key_item, value)) {
+        return value;
+    }
+    return js_set_key_policy(object, key_item, value, strict);
 }
 
 // Convert a UTF-16 unit index to the corresponding byte offset in a UTF-8 string.
@@ -27209,6 +27218,19 @@ JS_MATH_INTRINSIC_BODIES(JS_MATH_INTRINSIC_BODY)
 extern "C" const char JS_INTERNAL_PROTO_KEY[] = "__internal_proto__";
 extern "C" const int JS_INTERNAL_PROTO_KEY_LEN = 18;
 
+// The internal prototype key is a compile-time constant, so its shape hash is
+// one too. Every prototype hop was re-hashing these 18 bytes: js_get_prototype
+// was 6.4% of cd2 and all of it self time in this lookup. The value is
+// deterministic, so a racing initializer can only recompute the same number,
+// and typemap_hash_lookup_by_hash treats 0 as "hash it yourself".
+static uint32_t js_internal_proto_key_hash(void) {
+    static uint32_t cached = 0;
+    if (!cached) {
+        cached = typemap_name_hash(JS_INTERNAL_PROTO_KEY, JS_INTERNAL_PROTO_KEY_LEN);
+    }
+    return cached;
+}
+
 enum {
     JS_PROTO_CACHE_INTERNAL = 1u << 0,
     JS_PROTO_CACHE_PUBLIC = 1u << 1,
@@ -27221,19 +27243,19 @@ typedef struct JsProtoEntryCache {
 } JsProtoEntryCache;
 
 static ShapeEntry* js_proto_shape_entry(TypeMap* tm, const char* name,
-        int name_len, uint8_t cache_bit) {
+        int name_len, uint32_t name_hash, uint8_t cache_bit) {
     if (!tm || !name) return NULL;
     if (!typemap_is_shared_shape(tm)) {
-        return typemap_hash_lookup(tm, name, name_len);
+        return typemap_hash_lookup_by_hash(tm, name, name_len, name_hash);
     }
     JsProtoEntryCache* cache = tm->js_proto_entry_cache;
     if (!cache) {
         if (!js_input || !js_input->pool) {
-            return typemap_hash_lookup(tm, name, name_len);
+            return typemap_hash_lookup_by_hash(tm, name, name_len, name_hash);
         }
         cache = (JsProtoEntryCache*)pool_calloc(
             js_input->pool, sizeof(JsProtoEntryCache));
-        if (!cache) return typemap_hash_lookup(tm, name, name_len);
+        if (!cache) return typemap_hash_lookup_by_hash(tm, name, name_len, name_hash);
         tm->js_proto_entry_cache = cache;
     }
     ShapeEntry** cache_slot = cache_bit == JS_PROTO_CACHE_INTERNAL
@@ -27242,7 +27264,7 @@ static ShapeEntry* js_proto_shape_entry(TypeMap* tm, const char* name,
     // Shared constructor/transition shapes detach before structural or
     // descriptor mutation, so both positive and negative entry caches remain
     // valid for the lifetime of this TypeMap.
-    *cache_slot = typemap_hash_lookup(tm, name, name_len);
+    *cache_slot = typemap_hash_lookup_by_hash(tm, name, name_len, name_hash);
     cache->mask |= cache_bit;
     return *cache_slot;
 }
@@ -27286,7 +27308,26 @@ extern "C" void js_object_proto_setter(Item object, Item value) {
 }
 
 // Set the prototype of an object through the one internal prototype slot.
+// T10-2/D-E: OrdinaryCreateFromConstructor links the [[Prototype]] of an
+// instance that was allocated moments ago and is not yet reachable from
+// anywhere else. Two parts of the general setter are provably vacuous for such
+// a receiver and together cost ~20% of `new P(x,y)`: the cycle walk (a fresh
+// object appears in no prototype chain) and the intrinsic-mutation notice
+// (which scans every JS_CLASS prototype root and the constructor cache for an
+// Item that was just minted, so it can never match).
+static void js_set_prototype_impl(Item object, Item prototype, bool fresh_object);
+
 extern "C" void js_set_prototype(Item object, Item prototype) {
+    js_set_prototype_impl(object, prototype, /*fresh_object=*/false);
+}
+
+// Only for a receiver this call site allocated and has not published.
+static void js_set_prototype_fresh(Item object, Item prototype) {
+    js_set_prototype_impl(object, prototype, /*fresh_object=*/true);
+}
+
+static void js_set_prototype_impl(Item object, Item prototype,
+        bool fresh_object) {
     // D3.4.7: prototype metadata is not a substitute for a rooted edge. The
     // validation/name/shape writes below can compact either operand, so keep
     // both Items exact-rooted until the internal slot has been published.
@@ -27378,7 +27419,7 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
         !js_is_js_array(prototype) && proto_type != LMD_TYPE_ELEMENT &&
         prototype.item != ItemNull.item) return;
     // v16: Prevent circular prototype chains (ES spec §9.1.2)
-    if (get_type_id(prototype) == LMD_TYPE_MAP) {
+    if (!fresh_object && get_type_id(prototype) == LMD_TYPE_MAP) {
         Rooted<Item> p_root(roots, prototype_root.get());
         int depth = 0;
         while (p_root.get().item != ItemNull.item &&
@@ -27397,7 +27438,7 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
         ? (Item){.item = ITEM_JS_UNDEFINED} : prototype_root.get());
     // Notify only after the validated link has been stored; rejected and
     // cyclic prototype updates leave the intrinsic epoch untouched.
-    js_intrinsic_note_prototype_mutation(object_root.get());
+    if (!fresh_object) js_intrinsic_note_prototype_mutation(object_root.get());
 }
 
 extern "C" void js_mark_own_proto_property(Item object) {
@@ -27687,7 +27728,8 @@ extern "C" Item js_get_prototype(Item object) {
 #endif
     Item internal_proto = ItemNull;
     ShapeEntry* internal_se = js_proto_shape_entry(tm,
-        JS_INTERNAL_PROTO_KEY, JS_INTERNAL_PROTO_KEY_LEN, JS_PROTO_CACHE_INTERNAL);
+        JS_INTERNAL_PROTO_KEY, JS_INTERNAL_PROTO_KEY_LEN,
+        js_internal_proto_key_hash(), JS_PROTO_CACHE_INTERNAL);
     JsShapeSlotStatus internal_status = js_proto_shape_slot_status(
         m, internal_se, &internal_proto);
     if (internal_status == JS_SHAPE_SLOT_DATA || internal_status == JS_SHAPE_SLOT_ACCESSOR)
