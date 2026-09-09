@@ -60,6 +60,7 @@ static FontHandle* create_handle(FontContext* ctx,
 
     handle->tables = NULL;
     handle->ref_count = 1;
+    handle->cache_identity = font_context_next_handle_identity(ctx);
     handle->ctx = ctx;
     handle->memory_buffer = memory_buffer;
     handle->memory_buffer_size = memory_buffer_size;
@@ -112,6 +113,7 @@ static FontHandle* create_handle(FontContext* ctx,
 
     handle->tables = NULL;
     handle->ref_count = 1;
+    handle->cache_identity = font_context_next_handle_identity(ctx);
     handle->ctx = ctx;
     handle->memory_buffer = memory_buffer;
     handle->memory_buffer_size = memory_buffer_size;
@@ -176,6 +178,7 @@ static FontHandle* create_handle(FontContext* ctx,
 
     handle->tables = NULL;
     handle->ref_count = 1;
+    handle->cache_identity = font_context_next_handle_identity(ctx);
     handle->ctx = ctx;
     handle->memory_buffer = memory_buffer;
     handle->memory_buffer_size = memory_buffer_size;

@@ -128,6 +128,7 @@ FontContext* font_context_create(FontContextConfig* config) {
     ctx->owns_pool = owns_pool;
     ctx->owns_arena = owns_arena;
     ctx->glyph_cache_generation = 1;
+    ctx->next_handle_identity = 1;
 
     // create glyph arena (separate for bitmap data, resettable)
     bool owns_glyph_arena = false;
@@ -713,10 +714,7 @@ float font_get_x_height_ratio(FontHandle* handle) {
 }
 
 float font_get_small_caps_scale(FontHandle* handle) {
-    const FontMetrics* metrics = font_get_metrics(handle);
-    if (metrics && metrics->x_height > 0 && metrics->cap_height > 0) {
-        float scale = metrics->x_height / metrics->cap_height;
-        if (scale > 0.0f && scale < 1.0f) return scale;
-    }
+    (void)handle;
+    // Chromium synthesizes unavailable small caps from 70%-em uppercase glyphs.
     return 0.7f;
 }

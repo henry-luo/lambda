@@ -185,8 +185,8 @@ static RdtMatrix matrix4_project_to_2d(const RdtMatrix4* matrix) {
     return result;
 }
 
-static RdtMatrix4 matrix4_parent_perspective(float distance,
-                                             float origin_x, float origin_y) {
+RdtMatrix4 compute_parent_perspective_matrix_3d(float distance,
+                                                float origin_x, float origin_y) {
     if (distance <= 0.0f) return rdt_matrix4_identity();
     RdtMatrix4 perspective = rdt_matrix4_identity();
     perspective.values[14] = -1.0f / distance;
@@ -205,7 +205,7 @@ RdtMatrix compute_transform_matrix(TransformFunction* functions,
     if (!functions) return rdt_matrix_identity();
     RdtMatrix4 matrix = compute_transform_matrix_3d(
         functions, width, height, origin_x, origin_y);
-    RdtMatrix4 perspective = matrix4_parent_perspective(
+    RdtMatrix4 perspective = compute_parent_perspective_matrix_3d(
         perspective_distance, perspective_origin_x, perspective_origin_y);
     matrix = rdt_matrix4_multiply(&perspective, &matrix);
     return matrix4_project_to_2d(&matrix);

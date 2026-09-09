@@ -322,7 +322,8 @@ CssEnum layout_intrinsic_max_size_keyword(ViewBlock* block, bool horizontal);
 float layout_resolve_intrinsic_size_keyword(CssEnum keyword, float min_size,
                                             float max_size, float available_outer_size);
 float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* element,
-                                           bool horizontal, float inline_base);
+                                           bool horizontal, float inline_base,
+                                           bool inline_base_is_definite = false);
 bool layout_display_contents_has_block_child(DomElement* element);
 bool layout_display_is_inline_level(CssEnum display);
 void layout_set_view_geometry(View* view, float x, float y,
@@ -445,6 +446,8 @@ IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, Av
 IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
 void layout_form_control(LayoutContext* lycon, ViewBlock* block);
 float form_control_em_size(LayoutContext* lycon, ViewBlock* block, float em);
+bool form_input_uses_fixed_intrinsic_size(const FormControlProp* form);
+float form_button_flow_content_intrinsic_width(LayoutContext* lycon, ViewBlock* block);
 void layout_refresh_html_em_replaced_size(LayoutContext* lycon, DomElement* element);
 float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arrow);
 float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,

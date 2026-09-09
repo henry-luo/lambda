@@ -73,6 +73,7 @@ struct FontHandle {
     FontTables* tables;                 // parsed TTF/OTF tables (NULL if not available)
     int         ref_count;              // reference counting
     bool        resources_destroyed;    // native/file resources already released
+    uint64_t    cache_identity;         // unique lifetime identity; addresses are reusable
 
     // cached metrics (computed lazily on first font_get_metrics call)
     FontMetrics metrics;
@@ -272,6 +273,7 @@ struct FontContext {
     // face cache: cache_key → FontHandle*
     struct hashmap*  face_cache;
     uint32_t         lru_counter;       // monotonically increasing for LRU
+    uint64_t         next_handle_identity;
 
     // font file data cache: file_path → (data, len) — avoids re-reading the same file
     struct hashmap*  file_data_cache;
@@ -308,6 +310,12 @@ struct FontContext {
     // because pool_destroy will free all grouped owner memory in bulk
     bool            destroying;
 };
+
+static inline uint64_t font_context_next_handle_identity(FontContext* ctx) {
+    uint64_t identity = ctx->next_handle_identity++;
+    if (identity == 0) identity = ctx->next_handle_identity++;
+    return identity;
+}
 
 // ============================================================================
 // Internal helper: face cache key
@@ -371,6 +379,7 @@ typedef struct BitmapCacheEntry {
     uint32_t        codepoint;
     GlyphRenderMode mode;
     FontHandle*     handle;
+    uint64_t        handle_identity;
     GlyphBitmap     bitmap;
 } BitmapCacheEntry;
 
@@ -382,6 +391,7 @@ typedef struct BitmapCacheEntry {
 
 typedef struct LoadedGlyphCacheEntry {
     FontHandle* caller_handle;  // handle passed by caller (key part 1)
+    uint64_t    handle_identity; // caller lifetime, because pool addresses are reusable
     uint32_t    codepoint;      // (key part 2)
     bool        for_rendering;  // (key part 3)
     bool        emoji_presentation; // (key part 4)

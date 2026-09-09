@@ -2179,10 +2179,15 @@ static float flex_form_intrinsic_size(ViewElement* item,
     if (!item || !item->form) return 0.0f;
 
     float size = horizontal ? item->form->intrinsic_width : item->form->intrinsic_height;
-    // Textarea intrinsic height depends on the resolved line-height, and a
-    // button's vertical fallback must not reuse its horizontal text width.
-    // Horizontal buttons retain their authored-child text measurement path.
-    bool needs_measured_intrinsic = item->tag() == MARKUP_NAME_TEXTAREA ||
+    // Fixed-format inputs derive native metrics after the cascade. Their
+    // resolver-time generic fallback is not their flex auto base size (notably
+    // for color and date controls). CSS Flexbox §9.2 therefore needs the
+    // current replaced intrinsic size here. A button's vertical fallback must
+    // likewise not reuse its horizontal text width.
+    bool needs_measured_intrinsic =
+        (item->form->control_type == FORM_CONTROL_TEXT &&
+         form_input_uses_fixed_intrinsic_size(item->form)) ||
+        item->tag() == MARKUP_NAME_TEXTAREA ||
         (item->tag() == MARKUP_NAME_BUTTON && !horizontal);
     if (!needs_measured_intrinsic) return size;
     if (!flex_layout || !flex_layout->lycon) return size;
@@ -4078,6 +4083,18 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
                 bool cross_is_horizontal = !is_horizontal;
                 LayoutAxisRefs cross(item, cross_is_horizontal);
                 float cross_size = cross_is_horizontal ? form_size.max_width : form_size.max_height;
+                if (cross_is_horizontal && item->tag() == MARKUP_NAME_BUTTON &&
+                    layout_block_has_automatic_size(item_block, true)) {
+                    // CSS Flexbox §9.4 sizes an auto cross axis from the item's
+                    // fit-content box before align-self is applied. A button's
+                    // flow label supplies that content width; do not install it
+                    // as a used main-axis width for row-flex buttons.
+                    float flow_content_width = form_button_flow_content_intrinsic_width(
+                        lycon, item_block);
+                    if (flow_content_width > cross_size) {
+                        cross_size = flow_content_width;
+                    }
+                }
                 // (CSS may override UA font-size set during resolve_htm_style)
                 if (is_horizontal && item->form->control_type == FORM_CONTROL_TEXT &&
                     item->font && item->fontp()->font_size > 0 && lycon->ui_context) {

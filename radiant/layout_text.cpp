@@ -3978,7 +3978,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon, str, text_end, text_transform, collapse_spaces);
         float leading_space_w = 0.0f;
         bool min_content_line = is_min_content_mode(lycon, text_node);
-        if (collapse_spaces && min_content_line) {
+        if (had_leading_space && !lycon->line.has_space) {
+            // CSS Text 3 §4.1.1: a leading segment break becomes one space;
+            // include its advance when deciding whether its first word fits.
             leading_space_w = layout_measure_space_advance(
                 lycon, font_box_handle(&lycon->font), lycon->font.style);
             if (lycon->font.style) {
@@ -4447,14 +4449,20 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         if (!text_autospace_is_combining_mark(codepoint)) {
             lycon->line.prev_text_autospace_codepoint = codepoint;
         }
+        uint32_t incoming_kerning_codepoint = shaped_text_run
+            ? shaped_run_first_codepoint : codepoint;
+        uint32_t outgoing_kerning_codepoint = codepoint;
+        if (collapse_spaces && is_space(codepoint)) {
+            // CSS Text 3 §4.1.1: collapsed segment breaks shape as U+0020.
+            incoming_kerning_codepoint = (uint32_t)' ';
+            outgoing_kerning_codepoint = (uint32_t)' ';
+        }
         if (lycon->font.style->has_kerning) {
             // fallback or styled inline cannot form a pair in the next font.
             if (lycon->line.prev_codepoint &&
                 lycon->line.prev_kerning_font_style == lycon->font.style) {
-                uint32_t kerning_codepoint = shaped_text_run
-                    ? shaped_run_first_codepoint : codepoint;
                 float kerning_css = text_kerning_adjustment(
-                    lycon, lycon->line.prev_codepoint, kerning_codepoint);
+                    lycon, lycon->line.prev_codepoint, incoming_kerning_codepoint);
                 if (kerning_css != 0.0f) {
                     if (str == text_start + rect->start_index) {
                         rect->x += kerning_css;
@@ -4464,7 +4472,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     }
                 }
             }
-            lycon->line.prev_codepoint = codepoint;
+            lycon->line.prev_codepoint = outgoing_kerning_codepoint;
             lycon->line.prev_kerning_font_style = lycon->font.style;
         }
 #ifdef RADIANT_TRACE_TEXT_LAYOUT

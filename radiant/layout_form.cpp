@@ -32,7 +32,9 @@ static bool form_input_uses_editable_line_baseline(const FormControlProp* form) 
         strcmp(type, "number") == 0;
 }
 
-static bool apply_fixed_input_intrinsic_size(FormControlProp* form) {
+static const FixedInputIntrinsicSize* fixed_input_intrinsic_size(
+    const FormControlProp* form) {
+    if (!form || !form->input_type) return nullptr;
     static const FixedInputIntrinsicSize sizes[] = {
         // Chromium's native date/time editors retain fractional CSS-pixel
         // field metrics that differ from the generic text-control box.
@@ -44,12 +46,24 @@ static bool apply_fixed_input_intrinsic_size(FormControlProp* form) {
     };
     for (const FixedInputIntrinsicSize& size : sizes) {
         if (strcmp(form->input_type, size.type) == 0) {
-            form->intrinsic_width = size.width;
-            form->intrinsic_height = size.height;
-            return true;
+            return &size;
         }
     }
-    return false;
+    return nullptr;
+}
+
+bool form_input_uses_fixed_intrinsic_size(const FormControlProp* form) {
+    if (!form || !form->input_type) return false;
+    return strcmp(form->input_type, "datetime-local") == 0 ||
+        fixed_input_intrinsic_size(form) != nullptr;
+}
+
+static bool apply_fixed_input_intrinsic_size(FormControlProp* form) {
+    const FixedInputIntrinsicSize* size = fixed_input_intrinsic_size(form);
+    if (!size) return false;
+    form->intrinsic_width = size->width;
+    form->intrinsic_height = size->height;
+    return true;
 }
 
 static void set_form_child_box(DomElement* elem, float x, float y,
@@ -163,26 +177,26 @@ static bool form_control_has_specified_line_height(const ViewBlock* block) {
         style_tree_get_declaration(style, CSS_PROPERTY_FONT));
 }
 
+static float form_control_normal_line_height(LayoutContext* lycon, FontProp* font,
+                                             float fallback) {
+    if (lycon && lycon->ui_context && font) {
+        FontBox temp_font;
+        setup_font(lycon->ui_context, &temp_font, font);
+        if (font_box_handle(&temp_font)) {
+            float normal = calc_normal_line_height(font_box_handle(&temp_font));
+            if (normal > 0.0f) return normal;
+        }
+    }
+    return fallback;
+}
+
 static float textarea_used_line_height(LayoutContext* lycon, ViewBlock* block,
                                        FontProp* font, bool has_css_font) {
     if (!font || font->font_size <= 0.0f) return 0.0f;
 
-    if (!form_control_has_specified_line_height(block)) {
-        // The textarea UA rule supplies `normal`; inherited author line-height
-        // must not replace that specified control value.
-        if (lycon->ui_context) {
-            FontBox temp_font;
-            setup_font(lycon->ui_context, &temp_font, font);
-            if (font_box_handle(&temp_font)) {
-                float normal = calc_normal_line_height(font_box_handle(&temp_font));
-                if (normal > 0.0f) return normal;
-            }
-        }
-        return has_css_font ? font->font_size * 1.2f : 15.0f;
-    }
-
     float line_height = 0.0f;
-    if (block && block->blk && block->block_mut()->line_height) {
+    if (form_control_has_specified_line_height(block) && block && block->blk &&
+        block->block_mut()->line_height) {
         const CssValue* value = block->block()->line_height;
         if (value->type == CSS_VALUE_TYPE_NUMBER) {
             line_height = value->data.number.value * font->font_size;
@@ -193,8 +207,9 @@ static float textarea_used_line_height(LayoutContext* lycon, ViewBlock* block,
         }
     }
     if (line_height > 0.0f) return line_height;
-    // Keep the same UA fallback used for intrinsic textarea sizing.
-    return has_css_font ? font->font_size * 1.2f : 15.0f;
+    // `normal` is a font metric, including when an author font shorthand resets it.
+    return form_control_normal_line_height(
+        lycon, font, has_css_font ? font->font_size * 1.2f : 15.0f);
 }
 
 static int textarea_visual_line_count(LayoutContext* lycon, FontProp* font,
@@ -340,33 +355,30 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
         }
     }
     form->intrinsic_width = content_w;
-    // Height: Chrome uses max(default_content_height, normal_line_height).
-    // Default content height = TEXT_HEIGHT - border - padding = 17px.
-    // When font-size is larger than default, line-height dominates.
+    // With the native UA font, Chrome preserves its 21px border-box minimum.
+    // An author font or line-height instead determines the content height;
+    // applying the UA minimum there would double-count replaced decorations.
     {
         float def_bp_v = 2 * (FormDefaults::TEXT_PADDING_V + FormDefaults::TEXT_BORDER);
         float default_content_h = FormDefaults::TEXT_HEIGHT - def_bp_v;
-        float line_h = default_content_h;
-        if (font && font->font_size > 0 && lycon->ui_context) {
-            FontBox temp_font;
-            setup_font(lycon->ui_context, &temp_font, font);
-            if (font_box_handle(&temp_font)) {
-                line_h = calc_normal_line_height(font_box_handle(&temp_font));
-            }
-        }
-        if (font && font->font_size > 0 && font->font_size != ua_font_size) {
-            float css_normal_line_h = font->font_size * 1.15f;
-            line_h = css_normal_line_h;
-        }
-        if (form_control_has_specified_line_height(block) &&
-            block->blk && block->block_mut()->line_height && font) {
+        bool has_css_font = form_control_has_specified_font(block) ||
+            (font && font->font_size > 0 && font->font_size != ua_font_size);
+        float line_h = form_control_normal_line_height(
+            lycon, font, has_css_font && font ? font->font_size * 1.15f : default_content_h);
+        bool has_used_line_height = false;
+        if (form_control_has_specified_line_height(block) && block->blk &&
+            block->block_mut()->line_height && font) {
             float resolved_line_h = layout_resolve_line_height_value(
                 lycon, block->block()->line_height, block, font->font_size);
             // Native inputs reset inherited line-height, while an author line-height
             // sets the auto-height content box; glyph bounds alone are too short.
-            if (resolved_line_h > 0.0f) line_h = resolved_line_h;
+            if (resolved_line_h > 0.0f) {
+                line_h = resolved_line_h;
+                has_used_line_height = true;
+            }
         }
-        form->intrinsic_height = (line_h > default_content_h) ? line_h : default_content_h;
+        form->intrinsic_height = (has_css_font || has_used_line_height)
+            ? line_h : max(line_h, default_content_h);
     }
 }
 
@@ -443,6 +455,20 @@ const char* form_button_label_text(ViewBlock* block, FormControlProp* form) {
         if (strcmp(form->input_type, "reset") == 0) return "Reset";
     }
     return text;
+}
+
+float form_button_flow_content_intrinsic_width(LayoutContext* lycon,
+                                               ViewBlock* block) {
+    if (!lycon || !block || block->tag() != MARKUP_NAME_BUTTON ||
+        !block->first_child) {
+        return 0.0f;
+    }
+    FontProp* font = block->font ? block->font : lycon->font.style;
+    LayoutFontScope font_scope(lycon);
+    if (font && lycon->ui_context) setup_font(lycon->ui_context, &lycon->font, font);
+    return measure_direct_text_children_intrinsic_width(
+        lycon, static_cast<DomElement*>(block), false,
+        layout_inherited_text_transform(block));
 }
 
 static bool form_button_has_authored_vertical_box(ViewBlock* block) {

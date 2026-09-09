@@ -527,6 +527,23 @@ static DomNode* inline_next_participating_child(DomNode* node) {
     return nullptr;
 }
 
+static bool inline_empty_box_between_block_siblings(DomNode* node) {
+    if (!node) return false;
+    DomNode* previous = nullptr;
+    for (DomNode* sibling = node->prev_sibling; sibling;
+         sibling = sibling->prev_sibling) {
+        if (sibling->is_comment() || inline_edge_whitespace_can_collapse(sibling)) continue;
+        if (sibling->is_element() &&
+            layout_display_is_none(resolve_display_value(sibling))) {
+            continue;
+        }
+        previous = sibling;
+        break;
+    }
+    DomNode* next = inline_next_participating_child(node);
+    return inline_child_is_block_split(previous) && inline_child_is_block_split(next);
+}
+
 // Find the last block exposed by an inline wrapper; trailing inline content
 // breaks adjacency with the next split block.
 static bool inline_wrapper_last_block(DomElement* wrapper,
@@ -2964,6 +2981,19 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
     if (last_child_for_trim && saved_trailing > 0) {
         last_child_for_trim->width += saved_trailing;
+    }
+    if (!had_children && !has_inline_axis_decoration &&
+        inline_empty_box_between_block_siblings(elmt)) {
+        // CSS 2.1 §9.2.1.1: the empty anonymous inline run starts after the
+        // preceding block, rather than inheriting that block's final cursor.
+        update_line_for_bfc_floats(lycon);
+        span->x = lycon->block.direction == CSS_VALUE_RTL
+            ? lycon->line.effective_right : lycon->line.effective_left;
+        span->y = lycon->block.advance_y;
+        if (inline_cb) {
+            inline_cb->min_x = inline_cb->max_x = span->x;
+            inline_cb->min_y = inline_cb->max_y = span->y;
+        }
     }
     // CSS 2.1 §9.4.3: Relatively positioned inline elements are offset from their normal position
     if (span->position && span->positionp()->position == CSS_VALUE_RELATIVE) {

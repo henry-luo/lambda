@@ -1902,6 +1902,7 @@ struct JsDomHtmlInterfaceEntry {
 static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"a", "HTMLAnchorElement"},
     {"button", "HTMLButtonElement"},
+    {"canvas", "HTMLCanvasElement"},
     {"form", "HTMLFormElement"},
     {"img", "HTMLImageElement"},
     {"input", "HTMLInputElement"},
@@ -2004,6 +2005,12 @@ extern "C" bool radiant_dom_is_node(Item item);
 // Jube POC: unwrap/type policy is exposed through the radiant module so DOM
 // nodes no longer depend on the retired DOM map wrapper shell.
 JS_FORWARD_RETURN(void*, dom_unwrap_element, (Item item), radiant_dom_unwrap_node, (item))
+
+extern "C" bool dom_is_html_canvas_element(Item item) {
+    DomNode* node = (DomNode*)dom_unwrap_element(item);
+    DomElement* element = node ? node->as_element() : nullptr;
+    return element && element->tag() == MARKUP_NAME_CANVAS;
+}
 
 extern "C" void* dom_unwrap_element_impl(Item item) {
     TypeId tid = get_type_id(item);

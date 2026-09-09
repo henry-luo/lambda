@@ -985,6 +985,15 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     {
         block->ensure_block(lycon);
         block->ensure_boundary(lycon);
+        DomNode* parent_node = elmt->parent;
+        DomElement* parent = parent_node && parent_node->is_element()
+            ? parent_node->as_element() : nullptr;
+        if (parent && parent->blk &&
+            parent->block()->text_align != CSS_VALUE__UNDEF) {
+            // CSS Text §6.1: the UA list rule leaves text-align inherited;
+            // use the direct computed parent rather than the ambient context.
+            block->blk->text_align = parent->block()->text_align;
+        }
         // margin: 1em 0; padding: 0 0 0 40px;
         // UA stylesheet: nested lists have margin: 0
         // Chrome: :is(ul, ol, dir, menu, dl) ul, :is(ul, ol, dir, menu, dl) ol { margin-block: 0 }

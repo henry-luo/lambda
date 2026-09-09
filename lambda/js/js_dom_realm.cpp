@@ -22,6 +22,7 @@
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../dom/dom.h"
+#include "../dom/dom_canvas.h"
 #include "../dom/dom_realm_hooks.h"
 #include "js_runtime.h"
 #include "js_props.h"
@@ -394,6 +395,8 @@ extern "C" void dom_install_collection_globals(void) {
         _install_iface(global, ctor_name);
         _link_iface_proto(global, ctor_name, "HTMLElement");
     }
+    _install_iface(global, "CanvasRenderingContext2D");
+    dom_canvas_install_html_interface(_iface_proto(global, "HTMLCanvasElement"));
     _install_document_fragment_iface(global);
     _link_iface_proto(global, "DocumentFragment", "Node");
     _install_iface(global, "ShadowRoot");

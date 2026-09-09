@@ -103,6 +103,7 @@ static TransformProp make_transform_prop_default() {
     value.origin_x = value.origin_y = 50.0f;
     value.origin_x_percent = value.origin_y_percent = true;
     value.perspective_origin_x = value.perspective_origin_y = 50.0f;
+    value.perspective_origin_x_percent = value.perspective_origin_y_percent = true;
     value.transform_style = (CssEnum)0;
     value.backface_visibility = CSS_VALUE_VISIBLE;
     return value;
