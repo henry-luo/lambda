@@ -7706,10 +7706,11 @@ extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
     //    [[DefineOwnProperty]] behaviour;
     //  - string key not "__"-prefixed: excludes __proto__ (own-proto marking),
     //    identity symbol/private keys and attribute markers;
-    //  - key has no existing shape entry (js_map_shape_lookup_ext reports found even
-    //    for deleted-sentinel entries, so map_put never creates a duplicate, and
-    //    redefinition of an existing own property keeps its spec-correct path);
-    //  - target is extensible.
+    //  - an existing key must pass predicted-slot admission (live default data,
+    //    valid storage, no reserved constructor slot); incompatible lanes use
+    //    Lambda's shared transition writer;
+    //  - a new key requires an extensible target. Deleted entries count as
+    //    existing so redefinition retains its descriptor/insertion-order path.
     if (get_type_id(name_root.get()) == LMD_TYPE_STRING) {
         String* identity_name = it2s(name_root.get());
         if (identity_name && property_key_requires_identity(identity_name)) {
@@ -7740,12 +7741,11 @@ extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
             if (nm && !(nm->len >= 2 && nm->chars[0] == '_' && nm->chars[1] == '_')) {
                 bool key_exists = false;
                 js_map_shape_lookup_ext(m, nm->chars, (int)nm->len, &key_exists);
-                // T10-2: an existing but still-unwritten predicted slot is an
-                // initialization. Tried before the extensibility query because
-                // that query allocates and this store does not.
-                if (key_exists && js_predicted_slot_initialize(obj_root.get(),
-                        nm, value_root.get())) {
-                    return obj_root.get();
+                if (key_exists) {
+                    bool handled = false;
+                    JS_RETURN_IF_ERROR(js_predicted_slot_initialize(obj_root.get(),
+                        nm, value_root.get(), &handled));
+                    if (handled) return obj_root.get();
                 }
                 if (!key_exists && js_is_truthy(js_object_is_extensible(obj_root.get()))) {
                     // Extensibility is an allocating host query; reload the

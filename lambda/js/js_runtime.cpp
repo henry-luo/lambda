@@ -3817,7 +3817,6 @@ typedef struct JsPredictedShape {
 
 // One realm's literal sites are few; a bounded linear scan beats a hash table
 // and the caller memoizes the resolved TypeMap in a register per function.
-#define JS_PREDICTED_SHAPE_LIMIT 512
 
 static uint64_t js_predicted_shape_descriptor(uint32_t module_id,
         uint32_t first_key_index, uint32_t key_count) {
@@ -3864,8 +3863,8 @@ static TypeMap* js_predicted_shape_build(uint32_t first_key_index,
     tm->length = (int)key_count;
     tm->byte_size = (int64_t)key_count * (int64_t)sizeof(void*);
     tm->js_meta = js_class_meta_for_id((JsClass)JS_CLASS_OBJECT);
-    // Shared across every evaluation of the site, so a NULL downgrade must be
-    // refused (shape_entry_retag_is_safe); upgrades stay in place.
+    // the initial blueprint may learn non-null lanes. Publishing null seals
+    // it as an immutable transition root before any sibling can reinterpret it.
     tm->is_shared_constructor_shape = true;
     tm->is_private_clone = false;
     tm->is_transition_shared_shape = false;
@@ -3926,8 +3925,15 @@ static TypeMap* js_predicted_shape_resolve(uint32_t first_key_index,
     return shape;
 }
 
-// MIR entry: allocate an object literal's instance on its predicted shape, with
-// every slot reserved so an unwritten field is absent rather than null.
+// Pool-owned metadata, independent of GC and of any observed receiver. MIR
+// resolves this compile-selected recipe per activation, never learns an IC.
+extern "C" void* js_literal_shape(int64_t first_key_index, int64_t key_count) {
+    if (first_key_index < 0 || first_key_index >= JS_PREDICTED_SHAPE_LIMIT ||
+            key_count <= 0 || key_count > JS_PREDICTED_SHAPE_MAX_SLOTS) return NULL;
+    return js_predicted_shape_resolve((uint32_t)first_key_index, (uint32_t)key_count);
+}
+
+// MIR entry: allocate a literal on its predicted shape before field evaluation.
 extern "C" Item js_new_object_shaped(int64_t first_key_index,
         int64_t key_count) {
     if (first_key_index < 0 || key_count <= 0) return js_new_object();
@@ -3946,56 +3952,48 @@ static bool js_shape_write_same_size_slot(TypeMap* tm, ShapeEntry* entry,
         void* data, Item value);
 static inline bool js_named_fast_store_can_write_same_slot(ShapeEntry* entry,
         Item value);
+static inline bool js_named_fast_store_same_slot(ShapeEntry* entry, void* data,
+        Item value);
 
-// T10-2: initialize a predicted shape's still-unwritten slot in place.
-//
-// A predicted slot exists from allocation but stays NULL-typed until its first
-// write, so CreateDataProperty on it is an INITIALIZATION, not a redefinition.
-// Sending it down the descriptor path clones the shape and detaches the
-// instance from the very shape the compiled guard compares against, which is
-// what made the guard miss every time.
-//
-// The retag is the NULL -> T upgrade shape_entry_retag_is_safe sanctions. Only
-// the T -> NULL downgrade is refused on a shared shape, because that one would
-// make the collector skip a sibling instance's live pointer. The upgrade is
-// safe in this direction: a sibling that has not yet written this slot holds
-// the zero word, which every admitted lane reads as its own zero (a null
-// container, integer 0), and no literal exposes an instance before all of its
-// slots are written.
-extern "C" bool js_predicted_slot_initialize(Item target, NameRef key,
-        Item value) {
-    if (get_type_id(target) != LMD_TYPE_MAP || !target.map) return false;
+// initialize a default data slot without allocating a property descriptor.
+// Once a literal stores an observable null, its blueprint must join the
+// immutable transition graph: a later NULL -> T retag would reinterpret that
+// earlier instance's null bytes as T (D3.4.5-D3.4.6).
+extern "C" Item js_predicted_slot_initialize(Item target, NameRef key,
+        Item value, bool* handled) {
+    *handled = false;
+    if (get_type_id(target) != LMD_TYPE_MAP || !target.map) return ItemNull;
     Map* m = target.map;
-    if (m->map_kind != MAP_KIND_PLAIN || !m->data) return false;
+    if (m->map_kind != MAP_KIND_PLAIN || m->is_static || !m->data) return ItemNull;
     TypeMap* tm = (TypeMap*)m->type;
-    // Only a predicted shape: its contiguous pointer-width slots are what make
-    // an in-place retag a layout no-op rather than a repack.
-    if (!tm || !tm->is_shared_constructor_shape ||
-            typemap_fixed_slot_prefix_count(tm) <= 0) return false;
-    if (!key || property_key_kind(key) != NAME_KEY_STRING) return false;
+    if (!typemap_is_shared_shape(tm) ||
+            typemap_fixed_slot_prefix_count(tm) <= 0) return ItemNull;
+    if (!key || property_key_kind(key) != NAME_KEY_STRING) return ItemNull;
     NameId name_id = property_key_id(key);
-    if (name_id == NAME_ID_NONE) return false;
+    if (name_id == NAME_ID_NONE) return ItemNull;
     ShapeEntry* e = typemap_hash_lookup_by_name_id(tm, name_id,
         property_key_hash(key));
-    if (!e || e->flags != 0 || !e->type) return false;
-    if (!typemap_entry_uses_fixed_slot(tm, e)) return false;
-    // A null value needs no retag -- the zeroed slot already reads as null --
-    // and leaving it to the ordinary path keeps one rule here, not two.
-    if (get_type_id(value) == LMD_TYPE_NULL) return false;
-    if (!shape_entry_storage_fits_data(e, m->data_cap)) return false;
-    // Two admissible cases, and no third. A NULL slot is the first write to
-    // this field: retag it, which is the safe direction. An already-typed slot
-    // is admitted only when the value needs NO retag -- the shape is shared by
-    // every instance of the site, so retagging INT to STRING here would have a
-    // sibling's integer read back as a pointer. A cross-type write instead
-    // falls through to the ordinary path, which clones and detaches.
-    //
-    // Refusing the already-typed case outright was a 9.7x regression: only the
-    // first instance took this path, and every later one landed in the
-    // descriptor slow path because its key now exists in the shape.
-    if (e->type->type_id != LMD_TYPE_NULL &&
-            !js_named_fast_store_can_write_same_slot(e, value)) return false;
-    return js_shape_write_same_size_slot(tm, e, m->data, value);
+    if (!e || e->flags != 0 || !e->type ||
+            !typemap_entry_uses_fixed_slot(tm, e) ||
+            !shape_entry_storage_fits_data(e, m->data_cap) ||
+            map_ctor_offset_is_reserved(m, e->byte_offset)) return ItemNull;
+
+    *handled = true;
+    if (get_type_id(value) == LMD_TYPE_NULL && tm->is_shared_constructor_shape) {
+        tm->is_shared_constructor_shape = false;
+        tm->is_transition_shared_shape = true;
+    }
+    if (js_named_fast_store_can_write_same_slot(e, value) &&
+            js_named_fast_store_same_slot(e, m->data, value)) return ItemNull;
+
+    // only the unpublished, null-free blueprint may still learn a field type.
+    if (tm->is_shared_constructor_shape && e->type->type_id == LMD_TYPE_NULL &&
+            js_shape_write_same_size_slot(tm, e, m->data, value)) return ItemNull;
+
+    // reuse Lambda's storage/transition writer for incompatible lanes. It
+    // preserves siblings and caches the new shape instead of cloning a
+    // throwaway descriptor and a private TypeMap on every literal evaluation.
+    return fn_map_set(target, (Item){.item = s2it(key)}, value);
 }
 
 // T10-2 item 2: guarded direct-slot read.

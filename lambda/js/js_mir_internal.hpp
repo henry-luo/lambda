@@ -95,11 +95,12 @@ typedef struct JsMirReference {
     bool is_private;
     bool computed_key;
     bool property_key_canonicalized;
-    // T10-1/D-A: a computed key carried in a native numeric register stays in
-    // a double lane. ToPropertyKey would format it as text, intern the text in
-    // the NamePool, and have the kernel parse it back into an index.
+    // retain the evaluated numeric carrier instead of formatting an index
+    // as a property name. Exactly one native register is set on admission.
     bool key_is_number;
-    MIR_reg_t key_num_reg;      // MIR_T_D, valid only when key_is_number
+    MIR_reg_t key_num_reg;      // F64 carrier, or zero for an integer key
+    MIR_reg_t key_index_reg;    // original I64 carrier, or zero for an F64 key
+    JsMemberNode* member;       // compile-only shape candidate provenance
     uint32_t named_key_index;
     NameId named_key_id;
     int jube_slot;
@@ -628,6 +629,7 @@ static inline MirValue jm_item_value(MIR_reg_t reg,
     return em_value_for_rep(reg, semantic_type, VALUE_REP_ITEM);
 }
 MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MirValue value);
+MIR_reg_t jm_transpile_member_as_number(JsMirTranspiler* mt, JsMemberNode* member);
 MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                          TypeId target_type);
 MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,

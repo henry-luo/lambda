@@ -1338,6 +1338,13 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         return jm_transpile_conditional_as_native(mt, (JsConditionalNode*)expr, target_type);
     }
 
+    if (target_type == LMD_TYPE_FLOAT && expr &&
+            expr->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        // A pre-existing numeric demand can consume a guarded element load
+        // directly. Its miss performs the same Item conversion as below.
+        return jm_transpile_member_as_number(mt, (JsMemberNode*)expr);
+    }
+
     MirValue value = jm_transpile_expression_value(mt, expr);
     if (value.rep == VALUE_REP_RAW_NON_GC_POINTER) {
         value = em_require_rep(&mt->func_em->em, value, VALUE_REP_ITEM);

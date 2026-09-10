@@ -233,19 +233,19 @@ Item js_new_object(void);
 // Allocate a JS object with its immutable semantic metadata selected before
 // the object is returned to any caller. The class ID is a stable JsClass value.
 Item js_new_object_with_class(int class_id);
-// T10-2: the predicted-shape slot cap. ctor_reserved_mask is 16 bits wide, and
-// it is what keeps an unwritten slot absent rather than null, so a shape may
-// never carry more slots than the mask can track.
+// predicted shapes share the fixed-slot cap with constructor prefixes.
 #define JS_PREDICTED_SHAPE_MAX_SLOTS 16
 // T10-2: allocate an object literal on its compile-predicted shape. The site is
 // named by a range of the active module's property-key table, never a realm
 // pointer (D5.4.3). Falls back to js_new_object() when the shape is refused.
 Item js_new_object_shaped(int64_t first_key_index, int64_t key_count);
-// T10-2: initialize an unwritten predicted slot in place (NULL -> T retag), so
-// the instance stays on the shape its site's guard compares against.
-bool js_predicted_slot_initialize(Item target, NameRef key, Item value);
+// initialize an admitted default predicted slot, using shared transitions for
+// incompatible lanes. May allocate; handled distinguishes refusal from error.
+Item js_predicted_slot_initialize(Item target, NameRef key, Item value, bool* handled);
 // T10-2 item 2: guarded direct-slot read. The shape is a compile-time candidate;
 // the guard proves it at runtime and misses fall through to js_get_name_id.
+#define JS_PREDICTED_SHAPE_LIMIT 512
+void* js_literal_shape(int64_t first_key_index, int64_t key_count);
 Item js_shaped_slot_get(Item object, int64_t first_key_index, int64_t key_count,
                         int64_t slot, int64_t name_id);
 struct TypeMap;

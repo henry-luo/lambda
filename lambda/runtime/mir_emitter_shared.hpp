@@ -1203,6 +1203,68 @@ static inline void em_emit_insn(MirEmitter* em, MIR_insn_t insn) {
 static inline void em_emit_label(MirEmitter* em, MIR_label_t label) {
     mir_append_emit_label(em->ctx, em->func_item, label);
 }
+
+static inline MIR_reg_t em_load_at(MirEmitter* em, MIR_reg_t base,
+        MIR_disp_t offset, MIR_type_t type, const char* name) {
+    MIR_reg_t value = em_new_reg(em, name,
+        type == MIR_T_D ? MIR_T_D : type == MIR_T_F ? MIR_T_F : MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx,
+        type == MIR_T_D ? MIR_DMOV : type == MIR_T_F ? MIR_FMOV : MIR_MOV,
+        MIR_new_reg_op(em->ctx, value),
+        MIR_new_mem_op(em->ctx, type, offset, base, 0, 1)));
+    return value;
+}
+
+// Establish pointer/kind before dereferencing an inferred container candidate.
+// A scalar Item (including inline IEEE doubles) must never reach the header.
+static inline MIR_reg_t em_guard_container(MirEmitter* em, MIR_reg_t item,
+        TypeId kind, MIR_label_t miss, bool proven_kind = false) {
+    if (!proven_kind) {
+        MIR_reg_t tag = em_new_reg(em, "grd_tag", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH,
+            MIR_new_reg_op(em->ctx, tag), MIR_new_reg_op(em->ctx, item),
+            MIR_new_int_op(em->ctx, 56)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE,
+            MIR_new_label_op(em->ctx, miss), MIR_new_reg_op(em->ctx, tag),
+            MIR_new_int_op(em->ctx, 0)));
+    }
+    MIR_reg_t pointer = em_new_reg(em, "grd_ptr", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, pointer), MIR_new_reg_op(em->ctx, item),
+        MIR_new_uint_op(em->ctx, UINT64_C(0x00ffffffffffffff))));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BEQ,
+        MIR_new_label_op(em->ctx, miss), MIR_new_reg_op(em->ctx, pointer),
+        MIR_new_int_op(em->ctx, 0)));
+    if (!proven_kind && kind != LMD_TYPE_RAW_POINTER) {
+        MIR_reg_t actual = em_load_at(em, pointer,
+            LAMBDA_GC_OFF_CONTAINER_TYPE_ID, MIR_T_U8, "grd_kind");
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BNE,
+            MIR_new_label_op(em->ctx, miss), MIR_new_reg_op(em->ctx, actual),
+            MIR_new_int_op(em->ctx, kind)));
+    }
+    return pointer;
+}
+
+// The one dense element address calculation for Lambda and JS. Callers own
+// representation, bounds, presence, mutability and lifetime admission.
+static inline MIR_reg_t em_element_address(MirEmitter* em, MIR_reg_t items,
+        MIR_reg_t index, int width) {
+    MIR_reg_t offset = em_new_reg(em, "boff", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, width == 8 ? MIR_LSH : MIR_MUL,
+        MIR_new_reg_op(em->ctx, offset), MIR_new_reg_op(em->ctx, index),
+        MIR_new_int_op(em->ctx, width == 8 ? 3 : width)));
+    MIR_reg_t address = em_new_reg(em, "eadr", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ADD,
+        MIR_new_reg_op(em->ctx, address), MIR_new_reg_op(em->ctx, items),
+        MIR_new_reg_op(em->ctx, offset)));
+    return address;
+}
+
+static inline MIR_reg_t em_array_element_address(MirEmitter* em,
+        MIR_reg_t array, MIR_reg_t index, int width) {
+    return em_element_address(em, em_load_at(em, array,
+        LAMBDA_GC_OFF_LIST_ITEMS, MIR_T_I64, "itms"), index, width);
+}
 static inline MIR_reg_t em_load_frame_top(MirEmitter* em, MIR_reg_t runtime,
                                           size_t context_offset,
                                           const char* prefix) {

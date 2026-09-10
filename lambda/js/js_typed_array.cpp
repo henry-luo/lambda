@@ -2,6 +2,7 @@
  * JavaScript Typed Array, ArrayBuffer, and DataView Implementation for Lambda
  */
 #include "js_typed_array.h"
+#include "js_typed_array_carrier.hpp"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "js_class.h"
@@ -26,11 +27,6 @@ typedef struct JsArrayBufferMapCarrier {
     Map base;
     JsArrayBuffer* payload;
 } JsArrayBufferMapCarrier;
-
-typedef struct JsTypedArrayMapCarrier {
-    Map base;
-    JsTypedArray payload;
-} JsTypedArrayMapCarrier;
 
 typedef struct JsDataViewMapCarrier {
     Map base;

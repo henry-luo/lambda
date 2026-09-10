@@ -23,6 +23,7 @@
 #include "side_stack.h"
 #include "recovery_frame.h"
 #include "../js/js_test262_fast_paths.h"
+#include "../js/js_exec_profile.h"
 
 // External Type globals (defined in lambda-data.cpp)
 extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT, TYPE_COMPLEX;
@@ -2068,6 +2069,19 @@ JitImport jit_runtime_imports[] = {
     {"js_loose_eq_raw", FPTR(js_loose_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_new_object", FPTR(js_new_object)},
     {"js_new_object_shaped", FPTR(js_new_object_shaped)},
+    {"js_literal_shape", FPTR(js_literal_shape),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES, JIT_EXCEPTION_PRESERVES, 0}},
+#ifdef LAMBDA_JS_EXEC_PROFILE
+    {"js_opt_trace_record", FPTR(js_opt_trace_record),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES, JIT_EXCEPTION_PRESERVES, 0}},
+#endif
     {"js_shaped_slot_get", FPTR(js_shaped_slot_get),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM}},
     {"js_get_key_default", FPTR(js_get_key_default)},
@@ -3492,6 +3506,14 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_int_lane_divmod_slow", "int2it_lane",
         "js_is_truthy", "js_is_nullish",
         "js_typed_array_matches_type", "js_number_key_to_index_fast",
+        // resolves NameIds and builds pool-owned shape metadata only; the
+        // cache uses ArrayList allocation, with no GC heap or JS re-entry.
+        "js_literal_shape",
+#ifdef LAMBDA_JS_EXEC_PROFILE
+        // updates native counters; first-use getenv/atexit cannot collect or
+        // re-enter JS. This diagnostic import is absent from release MIR.
+        "js_opt_trace_record",
+#endif
         "js_error_lane_payload",
         "js_set_this", "js_get_new_target",
         "js_set_direct_new_target", "js_set_function_source",
