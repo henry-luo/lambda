@@ -63,6 +63,7 @@ bool css_display_element_is_replaced(DomElement* dom_elem) {
     // their HTML conditions make them replaced.
     NameId tag_id = dom_elem->tag_id;
     bool is_replaced = layout_tag_is_css_replaced(tag_id) ||
+        tag_id == MARKUP_NAME_SVG ||
         (tag_id == MARKUP_NAME_OBJECT && dom_elem->get_attribute(MARKUP_NAME_DATA)) ||
         (tag_id == MARKUP_NAME_AUDIO && dom_elem->has_attribute(MARKUP_NAME_CONTROLS));
     if (dom_elem->specified_style) {
@@ -147,7 +148,8 @@ static CssDisplayKeywordResult css_display_keyword_result(CssEnum keyword,
             {spec.outer, spec.replaced_inner && is_replaced
                 ? RDT_DISPLAY_REPLACED :
                 (spec.inner == CSS_VALUE_MATH && !is_mathml
-                    ? CSS_VALUE_FLOW : spec.inner)}, false, spec.blockify};
+                    ? (is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW)
+                    : spec.inner)}, false, spec.blockify};
         result.display.list_item = spec.list_item;
         result.handled = true;
         return result;
