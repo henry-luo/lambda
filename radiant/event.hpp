@@ -197,6 +197,18 @@ typedef union RdtEvent {
     FocusEvent focus;
 } RdtEvent;
 
+void rdt_event_set_mouse_position(RdtEvent* event, EventType type,
+                                  float x, float y, double timestamp);
+void rdt_event_set_mouse_button(RdtEvent* event, EventType type,
+                                float x, float y, int button, int clicks,
+                                int mods, double timestamp);
+void rdt_event_set_scroll(RdtEvent* event, float x, float y,
+                          float xoffset, float yoffset, double timestamp);
+void rdt_event_set_key(RdtEvent* event, EventType type, int key, int mods,
+                       int scancode, double timestamp);
+void rdt_event_set_text_input(RdtEvent* event, uint32_t codepoint,
+                              double timestamp);
+
 #ifndef RADIANT_EVENT_CORE_ONLY
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 #endif
@@ -2178,6 +2190,7 @@ struct AnimationScheduler;
 struct DomElement;
 struct DomDocument;
 struct EventStateLog;
+void event_state_log_sanitize_doc_name(const char* in, char* out, size_t out_sz);
 struct StateDumpLog;
 struct SelectorMatcher;
 struct SmTransitionScope;

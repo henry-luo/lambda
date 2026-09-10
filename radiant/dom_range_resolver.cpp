@@ -14,6 +14,7 @@
 
 #include "event.hpp"
 #include "view.hpp"
+#include "layout.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
@@ -188,57 +189,6 @@ static bool resolve_node_edge(DomNode* node, bool trailing,
                                  out_x, out_y, out_h);
 }
 
-static bool caret_codepoint_has_zero_advance(uint32_t codepoint) {
-    if (codepoint >= 0x1F3FB && codepoint <= 0x1F3FF) return true;
-    if (codepoint >= 0xFE00 && codepoint <= 0xFE0F) return true;
-    if (codepoint >= 0xE0100 && codepoint <= 0xE01EF) return true;
-    switch (codepoint) {
-        case 0x00AD:
-        case 0x034F:
-        case 0x061C:
-        case 0x180E:
-        case 0x200B:
-        case 0x200C:
-        case 0x200D:
-        case 0x200E:
-        case 0x200F:
-        case 0x202A:
-        case 0x202B:
-        case 0x202C:
-        case 0x202D:
-        case 0x202E:
-        case 0x2060:
-        case 0x2061:
-        case 0x2062:
-        case 0x2063:
-        case 0x2064:
-        case 0x2066:
-        case 0x2067:
-        case 0x2068:
-        case 0x2069:
-        case 0xFEFF:
-            return true;
-        default:
-            return false;
-    }
-}
-
-static float caret_unicode_space_width_em(uint32_t codepoint) {
-    if (caret_codepoint_has_zero_advance(codepoint)) return -1.0f;
-    switch (codepoint) {
-        case 0x2000: return 0.5f;
-        case 0x2001: return 1.0f;
-        case 0x2002: return 0.5f;
-        case 0x2003: return 1.0f;
-        case 0x2004: return 1.0f / 3.0f;
-        case 0x2005: return 0.25f;
-        case 0x2006: return 1.0f / 6.0f;
-        case 0x2009: return 1.0f / 5.0f;
-        case 0x200A: return 1.0f / 10.0f;
-        default: return 0.0f;
-    }
-}
-
 static bool caret_text_codepoint_at(DomText* text, int byte_offset,
                                     uint32_t* out_codepoint) {
     if (out_codepoint) *out_codepoint = 0;
@@ -263,7 +213,7 @@ static float caret_text_one_ch_width(DomText* text) {
 
 static float caret_text_codepoint_width(DomText* text, uint32_t codepoint) {
     if (!text || !text->font) return 0.0f;
-    float space_em = caret_unicode_space_width_em(codepoint);
+    float space_em = text_unicode_space_width_em(codepoint);
     if (space_em < 0.0f) return 0.0f;
     if (space_em > 0.0f) return space_em * text->font->font_size;
     if (codepoint == ' ' && text->font->space_width > 0.0f) {
@@ -362,18 +312,25 @@ static bool is_inline_sequence_neighbor(DomNode* node) {
     }
 }
 
-static bool resolve_previous_inline_neighbor_edge(DomNode* node,
-                                                  View** out_view, int* out_byte,
-                                                  float* out_x, float* out_y,
-                                                  float* out_h) {
+static bool resolve_inline_neighbor_edge(DomNode* node, bool previous,
+                                         View** out_view, int* out_byte,
+                                         float* out_x, float* out_y,
+                                         float* out_h) {
     DomNode* current = node;
     while (current) {
-        for (DomNode* previous = current->prev_sibling; previous;
-                previous = previous->prev_sibling) {
-            if (!is_inline_sequence_neighbor(previous)) continue;
-            if (resolve_node_edge(previous, true, out_view, out_byte,
-                    out_x, out_y, out_h)) {
-                return true;
+        if (previous) {
+            for (DomNode* sibling = current->prev_sibling; sibling;
+                    sibling = sibling->prev_sibling) {
+                if (!is_inline_sequence_neighbor(sibling)) continue;
+                if (resolve_node_edge(sibling, true, out_view, out_byte,
+                        out_x, out_y, out_h)) return true;
+            }
+        } else {
+            for (DomNode* sibling = current->next_sibling; sibling;
+                    sibling = sibling->next_sibling) {
+                if (!is_inline_sequence_neighbor(sibling)) continue;
+                if (resolve_node_edge(sibling, false, out_view, out_byte,
+                        out_x, out_y, out_h)) return true;
             }
         }
         DomNode* parent = current->parent;
@@ -383,26 +340,22 @@ static bool resolve_previous_inline_neighbor_edge(DomNode* node,
     return false;
 }
 
+static bool resolve_previous_inline_neighbor_edge(DomNode* node,
+                                                  View** out_view, int* out_byte,
+                                                  float* out_x, float* out_y,
+                                                  float* out_h) {
+    return resolve_inline_neighbor_edge(node, true, out_view, out_byte,
+                                        out_x, out_y, out_h);
+}
+
 static bool resolve_next_inline_neighbor_edge(DomNode* node,
                                               View** out_view, int* out_byte,
                                               float* out_x, float* out_y,
                                               float* out_h) {
-    DomNode* current = node;
-    while (current) {
-        for (DomNode* next = current->next_sibling; next;
-                next = next->next_sibling) {
-            if (!is_inline_sequence_neighbor(next)) continue;
-            if (resolve_node_edge(next, false, out_view, out_byte,
-                    out_x, out_y, out_h)) {
-                return true;
-            }
-        }
-        DomNode* parent = current->parent;
-        if (!should_climb_inline_boundary(parent)) break;
-        current = parent;
-    }
-    return false;
+    return resolve_inline_neighbor_edge(node, false, out_view, out_byte,
+                                        out_x, out_y, out_h);
 }
+
 
 // Map a (DomNode, UTF-16 offset) boundary to (View*, byte_offset, x, y, h)
 // in absolute CSS coordinates. Returns false if the boundary cannot be
@@ -927,11 +880,7 @@ static void find_editable_boundary_hit(View* node, float vx, float vy,
 // click on one resolves to a caret in the parent, before or after the element.
 static bool is_non_caret_container_element(DomElement* el) {
     if (!el) return true;
-    NameId tag = el->tag();
-    return tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_HR || tag == MARKUP_NAME_BR ||
-        tag == MARKUP_NAME_INPUT || tag == MARKUP_NAME_TEXTAREA || tag == MARKUP_NAME_SELECT ||
-        tag == MARKUP_NAME_VIDEO || tag == MARKUP_NAME_CANVAS || tag == MARKUP_NAME_EMBED ||
-        tag == MARKUP_NAME_OBJECT || tag == MARKUP_NAME_IFRAME || tag == MARKUP_NAME_AUDIO;
+    return layout_tag_is_non_caret_container(el->tag());
 }
 
 // True if the subtree holds any non-empty text — used to keep this fallback

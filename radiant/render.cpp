@@ -13,6 +13,20 @@
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
 
+Element* rdt_picture_find_element_id(Element* root, const char* id,
+                                     RdtPictureElementAttribute attribute) {
+    if (!root || !id || !attribute) return nullptr;
+    const char* element_id = attribute(root, "id");
+    if (element_id && strcmp(element_id, id) == 0) return root;
+    for (int64_t i = 0; i < root->length; i++) {
+        Item child = root->items[i];
+        if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
+        Element* found = rdt_picture_find_element_id(child.element, id, attribute);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
 static bool render_inline_trace_enabled(void) {
     static int enabled = -1;
     if (enabled < 0) {

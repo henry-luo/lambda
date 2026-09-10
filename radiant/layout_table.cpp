@@ -603,9 +603,8 @@ static bool is_cell_empty(ViewTableCell* cell) {
                 const unsigned char* p = (const unsigned char*)text;
                 const unsigned char* p_end = p + strlen(text);
                 while (p < p_end) {
-                    uint32_t codepoint;
-                    int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-                    if (bytes <= 0) break;  // Invalid UTF-8
+                    uint32_t codepoint = 0;
+                    if (!layout_utf8_next_codepoint(&p, p_end, &codepoint)) break;
                     bool is_ws = (codepoint == 0x0020 || codepoint == 0x0009 || codepoint == 0x000A ||
                                   codepoint == 0x000B || codepoint == 0x000C || codepoint == 0x000D);
                     if (!is_ws) {
@@ -616,7 +615,6 @@ static bool is_cell_empty(ViewTableCell* cell) {
                     if (!is_ws) {
                         return false;
                     }
-                    p += bytes;
                 }
             }
         }
@@ -6228,25 +6226,8 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
     bool collapse_ws = should_collapse_whitespace(cell);
     // CSS Text 3 §5.2: word-break: break-word behaves as overflow-wrap: anywhere
     CssEnum cell_overflow_wrap = CSS_VALUE_NORMAL;
-    {
-        DomNode* n = static_cast<DomNode*>(cell);
-        while (n) {
-            if (n->is_element()) {
-                DomElement* el = lam::dom_require<DOM_NODE_ELEMENT>(n);
-                if (el->blk) {
-                    if (el->block()->overflow_wrap != 0) {
-                        cell_overflow_wrap = el->block()->overflow_wrap;
-                        break;
-                    }
-                    if (el->block()->word_break == CSS_VALUE_BREAK_WORD) {
-                        cell_overflow_wrap = CSS_VALUE_ANYWHERE;
-                        break;
-                    }
-                }
-            }
-            n = n->parent;
-        }
-    }
+    layout_resolve_inherited_text_wrap(static_cast<DomNode*>(cell),
+                                       &cell_overflow_wrap);
     // CSS 2.1: For inline content, consecutive text nodes flow on the same line.
     float inline_run_max = 0.0f;  // Running sum for current inline sequence
     float float_run_max = 0.0f;   // Sum of side-by-side floats in the current run
@@ -6367,10 +6348,11 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                 if (!child_elem->bound && !child_elem->specified_style) {
                     NameId ctag = child_elem->tag();
                     if (ctag == MARKUP_NAME_INPUT) {
-                        const char* inp_type = child_elem->get_attribute("type");
-                        if (inp_type && strcmp(inp_type, "radio") == 0) {
+                        FormInputKind input_kind = form_input_kind(
+                            child_elem->get_attribute("type"));
+                        if (input_kind == FORM_INPUT_KIND_RADIO) {
                             inline_margin_h = FormDefaults::RADIO_MARGIN_LEFT + FormDefaults::RADIO_MARGIN_RIGHT;
-                        } else if (inp_type && strcmp(inp_type, "checkbox") == 0) {
+                        } else if (input_kind == FORM_INPUT_KIND_CHECKBOX) {
                             inline_margin_h = FormDefaults::CHECKBOX_MARGIN_LEFT + FormDefaults::CHECKBOX_MARGIN_RIGHT;
                         }
                     }

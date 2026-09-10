@@ -16,10 +16,6 @@ extern "C" {
 #include <stdlib.h>
 #include "../lib/file.h"
 
-static bool is_http_url(const char* url) {
-    return url && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
-}
-
 bool radiant_is_supported_web_font_source(const char* url, const char* format) {
     if (format && *format) {
         if (strcasecmp(format, "woff2") == 0 ||
@@ -49,7 +45,7 @@ bool radiant_is_supported_web_font_source(const char* url, const char* format) {
 }
 
 static void resolve_missing_font_source_path(char** source, const char* base_path) {
-    if (!source || !*source || !base_path || is_http_url(*source) ||
+    if (!source || !*source || !base_path || radiant_url_is_http(*source) ||
         strncmp(*source, "data:", 5) == 0) {
         return;
     }
@@ -135,17 +131,10 @@ void parse_font_face_rule(LayoutContext* lycon, void* rule) {
         return;
     }
 
-    // Get base path from document URL
-    const char* base_path = nullptr;
-    char* owned_base_path = nullptr;
-    if (lycon->doc && lycon->doc->url) {
-        if (lycon->doc->url->scheme == URL_SCHEME_HTTP || lycon->doc->url->scheme == URL_SCHEME_HTTPS) {
-            base_path = url_get_href(lycon->doc->url);
-        } else {
-            owned_base_path = url_to_local_path(lycon->doc->url);
-            base_path = owned_base_path;
-        }
-    }
+    // Resource ownership stays explicit: this helper always returns a font-owned copy.
+    char* owned_base_path = radiant_document_resource_base(
+        lycon->doc, MEM_CAT_FONT);
+    const char* base_path = owned_base_path;
 
     // Parse using CSS module
     CssFontFaceDescriptor* css_desc = css_parse_font_face_content(content, nullptr);
@@ -208,7 +197,7 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         // every @font-face source here blocks large docs before layout starts.
         if (css_desc->src_urls) {
             for (int j = 0; j < css_desc->src_count; j++) {
-                if (is_http_url(css_desc->src_urls[j].url)) {
+                if (radiant_url_is_http(css_desc->src_urls[j].url)) {
                     if (!radiant_is_supported_web_font_source(
                             css_desc->src_urls[j].url, css_desc->src_urls[j].format)) {
                         clog_debug(font_log, "Skipping unsupported remote font source: %s (format: %s)",
@@ -220,7 +209,7 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
                 }
             }
         }
-        if (is_http_url(css_desc->src_url)) {
+        if (radiant_url_is_http(css_desc->src_url)) {
             mem_free(css_desc->src_url);
             css_desc->src_url = nullptr;
         }
@@ -292,65 +281,21 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
         return;
     }
 
-    // Default base path from document URL (used for inline styles).
-    const char* doc_base_path = nullptr;
-    char* owned_doc_base_path = nullptr;
-    if (doc->url) {
-        if (doc->url->scheme == URL_SCHEME_HTTP || doc->url->scheme == URL_SCHEME_HTTPS) {
-            doc_base_path = url_get_href(doc->url);
-        } else {
-            owned_doc_base_path = url_to_local_path(doc->url);
-            doc_base_path = owned_doc_base_path;
-        }
-    }
+    // Resource ownership stays explicit: this helper always returns a font-owned copy.
+    char* owned_doc_base_path = radiant_document_resource_base(
+        doc, MEM_CAT_FONT);
+    const char* doc_base_path = owned_doc_base_path;
 
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* stylesheet = doc->stylesheets[i];
         if (!stylesheet) continue;
 
-        // Use stylesheet's origin_url if available, otherwise fall back to document URL
-        // This is important for external CSS files where font URLs are relative to the CSS file
+        // An external stylesheet owns the base for its relative font URLs.
         const char* base_path = doc_base_path;
-        char* stylesheet_path = nullptr;
-
-        if (stylesheet->origin_url) {
-            // origin_url can be either a plain file path or a file:// URL
-            // Check if it starts with "/" (plain file path) or "file://" (URL)
-            if (stylesheet->origin_url[0] == '/') {
-                // Plain file path - use directly
-                stylesheet_path = mem_strdup(stylesheet->origin_url, MEM_CAT_FONT);  // must use mem_strdup to match url_to_local_path
-                if (stylesheet_path) {
-                    base_path = stylesheet_path;
-                    clog_debug(font_log, "Using stylesheet origin_url (plain path) for font resolution: %s", base_path);
-                }
-            } else if (strncmp(stylesheet->origin_url, "http://", 7) == 0 ||
-                       strncmp(stylesheet->origin_url, "https://", 8) == 0) {
-                stylesheet_path = mem_strdup(stylesheet->origin_url, MEM_CAT_FONT);
-                if (stylesheet_path) {
-                    base_path = stylesheet_path;
-                    clog_debug(font_log, "Using stylesheet origin_url (remote URL) for font resolution: %s", base_path);
-                }
-            } else if (strncmp(stylesheet->origin_url, "file://", 7) == 0) {
-                // URL - parse and convert
-                Url* stylesheet_url = url_parse(stylesheet->origin_url);
-                if (stylesheet_url) {
-                    stylesheet_path = url_to_local_path(stylesheet_url);
-                    url_destroy(stylesheet_url);
-                    if (stylesheet_path) {
-                        base_path = stylesheet_path;
-                        clog_debug(font_log, "Using stylesheet origin_url (file URL) for font resolution: %s", base_path);
-                    }
-                }
-            } else {
-                // Relative path - resolve to absolute using CWD so font paths are correct
-                char* resolved = file_realpath(stylesheet->origin_url);
-                if (resolved) {
-                    stylesheet_path = resolved;  // file_realpath returns malloc'd string
-                    base_path = stylesheet_path;
-                    clog_debug(font_log, "Using stylesheet origin_url (resolved relative path) for font resolution: %s", base_path);
-                }
-            }
-        }
+        char* stylesheet_path = stylesheet->origin_url
+            ? radiant_resolve_resource_path(stylesheet->origin_url,
+                doc_base_path, false, MEM_CAT_FONT) : nullptr;
+        if (stylesheet_path) base_path = stylesheet_path;
 
         process_font_face_rules_from_stylesheet(uicon, stylesheet, base_path);
 
@@ -407,19 +352,8 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
     // Also register with FontContext so that font_resolve() can find @font-face
     // descriptors directly, without going through load_font_with_descriptors().
     if (uicon->font_ctx && descriptor->family_name) {
-        // map CssEnum weight/style → FontWeight/FontSlant
-        // Note: CSS_VALUE_NORMAL and CSS_VALUE_BOLD are CssEnum values (not
-        // numeric weights), so check them explicitly before the numeric range.
-        FontWeight fw = FONT_WEIGHT_NORMAL;
-        if (descriptor->font_weight == CSS_VALUE_BOLD)
-            fw = FONT_WEIGHT_BOLD;
-        else if (descriptor->font_weight != CSS_VALUE_NORMAL &&
-                 descriptor->font_weight >= 100 && descriptor->font_weight <= 900)
-            fw = (FontWeight)descriptor->font_weight;
-
-        FontSlant fs = FONT_SLANT_NORMAL;
-        if (descriptor->font_style == CSS_VALUE_ITALIC) fs = FONT_SLANT_ITALIC;
-        else if (descriptor->font_style == CSS_VALUE_OBLIQUE) fs = FONT_SLANT_OBLIQUE;
+        FontWeight fw = radiant_font_weight_from_css(descriptor->font_weight);
+        FontSlant fs = radiant_font_slant_from_css(descriptor->font_style);
 
         // build sources array from descriptor's src_entries + src_local_path
         int src_count = descriptor->src_count;

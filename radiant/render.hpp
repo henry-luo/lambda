@@ -8,6 +8,7 @@
 #include <thorvg_capi.h>
 #include "view.hpp"
 #include "event.hpp"
+#include "rdt_video.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/arena.h"
@@ -25,6 +26,11 @@
 #include "../lib/strbuf.h"
 
 // consolidated Radiant render API (DD4); declarations below retain their source-file section names for history lookup.
+
+typedef const char* (*RdtPictureElementAttribute)(Element* element,
+                                                   const char* attribute);
+Element* rdt_picture_find_element_id(Element* root, const char* id,
+                                     RdtPictureElementAttribute attribute);
 
 struct RadiantGradientLine {
     float x1;
@@ -1918,7 +1924,9 @@ float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count);
 void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
                           ClipShape** clip_shapes, int clip_depth);
 int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
-                           ClipShape** shape_ptrs);
+                           ClipShape** shape_ptrs,
+                           ScratchArena* scratch = nullptr,
+                           float offset_x = 0.0f, float offset_y = 0.0f);
 
 // ===== display_list_surface_region.hpp =====
 static inline bool surface_region_clip(ImageSurface* surface,
@@ -2400,114 +2408,6 @@ inline void radiant_clear_image_source_data(ImageSurface* surface) {
     surface->source_data = nullptr;
     surface->source_data_len = 0;
 }
-
-// ===== rdt_video.h =====
-// rdt_video.h — Platform-agnostic video playback API for Radiant
-//
-// Three-tier threading model:
-//   Decode thread  → demux + decode + colour convert
-//   Playback thread → PTS scheduling + audio output + A/V sync
-//   Render thread   → polls latest frame via rdt_video_get_frame()
-//
-// macOS:  AVFoundation manages decode + playback internally.
-// Windows: Media Foundation decode thread + WASAPI playback thread.
-// Linux:  FFmpeg decode thread + PulseAudio/ALSA playback thread.
-
-#ifndef RADIANT_RDT_VIDEO_API
-#define RADIANT_RDT_VIDEO_API
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-typedef struct RdtVideo RdtVideo;
-
-typedef enum {
-    RDT_VIDEO_STATE_IDLE,
-    RDT_VIDEO_STATE_LOADING,
-    RDT_VIDEO_STATE_READY,
-    RDT_VIDEO_STATE_PLAYING,
-    RDT_VIDEO_STATE_PAUSED,
-    RDT_VIDEO_STATE_ENDED,
-    RDT_VIDEO_STATE_ERROR,
-} RdtVideoState;
-
-typedef struct {
-    uint8_t*    pixels;     // RGBA 32bpp, caller-owned buffer
-    int         width;
-    int         height;
-    int         stride;     // bytes per row
-    double      pts;        // presentation timestamp (seconds)
-} RdtVideoFrame;
-
-typedef struct {
-    void (*on_state_changed)(RdtVideo* video, RdtVideoState state, void* userdata);
-    void (*on_frame_ready)(RdtVideo* video, void* userdata);
-    void (*on_duration_known)(RdtVideo* video, double seconds, void* userdata);
-    void (*on_video_size_known)(RdtVideo* video, int width, int height, void* userdata);
-} RdtVideoCallbacks;
-
-// ---------------------------------------------------------------------------
-// Lifecycle
-// ---------------------------------------------------------------------------
-
-RdtVideo*       rdt_video_create(const RdtVideoCallbacks* cb, void* userdata);
-void            rdt_video_destroy(RdtVideo* video);
-
-// ---------------------------------------------------------------------------
-// Source — local file path only (web URLs deferred to future)
-// ---------------------------------------------------------------------------
-
-int             rdt_video_open_file(RdtVideo* video, const char* file_path);
-
-// ---------------------------------------------------------------------------
-// Layout rect — decode resolution capped to this size to limit memory.
-// Call on layout change. Width/height in physical pixels.
-// ---------------------------------------------------------------------------
-
-void            rdt_video_set_layout_rect(RdtVideo* video, int width, int height);
-
-// ---------------------------------------------------------------------------
-// Playback control
-// ---------------------------------------------------------------------------
-
-void            rdt_video_play(RdtVideo* video);
-void            rdt_video_pause(RdtVideo* video);
-void            rdt_video_seek(RdtVideo* video, double seconds);
-void            rdt_video_set_loop(RdtVideo* video, bool loop);
-
-// ---------------------------------------------------------------------------
-// Audio control
-// ---------------------------------------------------------------------------
-
-void            rdt_video_set_volume(RdtVideo* video, float volume);  // 0.0–1.0
-void            rdt_video_set_muted(RdtVideo* video, bool muted);
-
-// ---------------------------------------------------------------------------
-// Query — all thread-safe, lock-free reads
-// ---------------------------------------------------------------------------
-
-RdtVideoState   rdt_video_get_state(RdtVideo* video);
-double          rdt_video_get_current_time(RdtVideo* video);
-double          rdt_video_get_duration(RdtVideo* video);
-int             rdt_video_get_width(RdtVideo* video);   // intrinsic video width
-int             rdt_video_get_height(RdtVideo* video);  // intrinsic video height
-bool            rdt_video_has_audio(RdtVideo* video);
-float           rdt_video_get_volume(RdtVideo* video);  // 0.0–1.0
-
-// ---------------------------------------------------------------------------
-// Frame retrieval — returns the latest decoded frame.
-// Copies into caller-owned buffer. Returns 0 on success, -1 if no frame.
-// The playback thread manages PTS scheduling; this always returns the current frame.
-// ---------------------------------------------------------------------------
-
-int             rdt_video_get_frame(RdtVideo* video, RdtVideoFrame* frame);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif // RADIANT_RDT_VIDEO_API
 
 // ===== GIF player declarations =====
 #ifdef __cplusplus
@@ -3312,6 +3212,12 @@ struct RenderContext;
 typedef struct RenderContext RenderContext;
 
 RdtPath* render_path_create_rounded_rect(Rect rect, const Corner* radius);
+void render_path_append_rounded_rect(RdtPath* path, Rect rect,
+                                     const Corner* radius, bool clockwise);
+Corner render_path_uniform_corner(float top_left, float top_right,
+                                  float bottom_right, float bottom_left);
+void render_path_append_svg_rounded_rect(StrBuf* out, Rect rect,
+                                         const Corner* radius);
 RdtPath* render_path_create_clip_path(RenderContext* rdcon);
 
 // ===== render_clip.hpp =====
@@ -3333,7 +3239,39 @@ RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon);
 void render_clip_pop_scope(RenderContext* rdcon, RenderClipScope* scope);
 
 // ===== render_composite.hpp =====
+typedef enum RenderCompositeRegionMode {
+    RENDER_COMPOSITE_REGION_BLEND,
+    RENDER_COMPOSITE_REGION_PREMULTIPLIED,
+    RENDER_COMPOSITE_REGION_PREMULTIPLIED_FULL,
+    RENDER_COMPOSITE_REGION_OPACITY
+} RenderCompositeRegionMode;
 uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnum blend_mode);
+void render_composite_apply_region(ImageSurface* surface, const uint32_t* backdrop,
+                                   int x0, int y0, int width, int height,
+                                   RenderCompositeRegionMode mode,
+                                   CssEnum blend_mode, uint8_t opacity,
+                                   const ClipShape* exclude_shape = nullptr,
+                                   const ClipShape* include_shape = nullptr);
+void render_composite_blend_surface(ImageSurface* surface, const uint32_t* backdrop,
+                                    int x0, int y0, int width, int height,
+                                    CssEnum blend_mode);
+uint32_t render_pixel_source_over_opaque(uint32_t destination, uint32_t source);
+uint32_t render_pixel_pack_abgr(uint32_t red, uint32_t green,
+                                uint32_t blue, uint32_t alpha);
+uint8_t render_pixel_premultiply_channel(uint8_t channel, uint8_t alpha);
+uint8_t render_pixel_unpremultiply_channel(uint8_t channel, uint8_t alpha);
+uint32_t render_pixel_source_over_straight(uint32_t destination, uint32_t source,
+                                           uint8_t opacity);
+uint32_t render_pixel_source_over_premultiplied(uint32_t destination, uint32_t source);
+uint32_t render_pixel_source_over_premultiplied_opaque(uint32_t destination, uint32_t source);
+uint32_t render_pixel_destination_over_premultiplied(uint32_t destination, uint32_t source);
+uint32_t render_pixel_sample_bilinear(const uint8_t* pixels, int width, int height,
+                                      int pitch, float x, float y, bool wrap,
+                                      bool round_channels);
+void render_pixel_source_over_coverage(uint8_t* destination, Color color,
+                                       uint32_t coverage);
+void render_pixel_source_over_opaque_bytes(uint8_t* destination, uint32_t source,
+                                           uint8_t opacity);
 
 void render_composite_source_over_premul(ImageSurface* surface, const uint32_t* backdrop,
                                          int x0, int y0, int width, int height);
@@ -3491,6 +3429,7 @@ void draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y);
 
 // ===== render_img.hpp =====
 // Function declarations for image rendering
+StrBuf* render_encode_surface_png(ImageSurface* surface);
 void save_surface_to_png(ImageSurface* surface, const char* filename);
 void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quality);
 int render_html_to_png(const char* html_file, const char* png_file,
@@ -3556,15 +3495,26 @@ typedef struct RenderExportSession {
     Url* base_url;
     DomDocument* document;
     float output_scale;
+    float device_scale;
+    float raster_scale;
     int content_width;
     int content_height;
+    int viewport_width;
+    int viewport_height;
+    bool auto_width;
+    bool auto_height;
 } RenderExportSession;
 
 void render_output_target_init(RenderOutputTarget* target, RenderOutputKind kind,
                                const char* output_file);
+void render_output_target_apply_session(RenderOutputTarget* target,
+                                        const RenderExportSession* session);
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
                                  int fallback_width, int fallback_height, float output_scale);
+bool render_export_session_begin_raster(RenderExportSession* session, const char* html_file,
+                                        int viewport_width, int viewport_height,
+                                        float output_scale, float device_scale);
 void render_export_session_end(RenderExportSession* session);
 int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
                                              RenderOutputTarget* target);

@@ -19,11 +19,7 @@ static RdtPath* render_clip_create_rounded_rect_path(float x, float y, float w, 
     if (r_tr > max_rx) r_tr = max_rx; if (r_tr > max_ry) r_tr = max_ry;
     if (r_br > max_rx) r_br = max_rx; if (r_br > max_ry) r_br = max_ry;
     if (r_bl > max_rx) r_bl = max_rx; if (r_bl > max_ry) r_bl = max_ry;
-    Corner radius = {};
-    radius.horizontal[0] = radius.vertical[0] = r_tl;
-    radius.horizontal[1] = radius.vertical[1] = r_tr;
-    radius.horizontal[2] = radius.vertical[2] = r_br;
-    radius.horizontal[3] = radius.vertical[3] = r_bl;
+    Corner radius = render_path_uniform_corner(r_tl, r_tr, r_br, r_bl);
     Rect rect = {x, y, w, h};
     return render_path_create_rounded_rect(rect, &radius);
 }
@@ -405,6 +401,17 @@ static bool render_clip_push_shape_scope(RenderContext* rdcon, RenderClipScope* 
     return true;
 }
 
+static bool render_clip_push_owned_shape(RenderContext* rdcon,
+                                         RenderClipScope* scope,
+                                         ClipShape* shape) {
+    if (!shape || !render_clip_push_shape_scope(rdcon, scope, shape)) {
+        if (shape && rdcon) render_clip_free_shape(&rdcon->scratch, shape);
+        return false;
+    }
+    scope->owns_shape = true;
+    return true;
+}
+
 RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* block,
                                            float parent_x, float parent_y, float scale) {
     RenderClipScope scope = {};
@@ -439,12 +446,7 @@ RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* bloc
         return scope;
     }
 
-    scope.owns_shape = true;
-    if (!render_clip_push_shape_scope(rdcon, &scope, css_shape)) {
-        render_clip_free_shape(&rdcon->scratch, css_shape);
-        scope = {};
-        return scope;
-    }
+    if (!render_clip_push_owned_shape(rdcon, &scope, css_shape)) return scope;
     log_debug("[CLIP] CSS clip-path: %s on element %s", clip_str, block->node_name());
     return scope;
 }
@@ -467,12 +469,7 @@ RenderClipScope render_clip_push_rect_scope(RenderContext* rdcon, const Bound* c
     if (!shape) {
         return scope;
     }
-    scope.owns_shape = true;
-    if (!render_clip_push_shape_scope(rdcon, &scope, shape)) {
-        render_clip_free_shape(&rdcon->scratch, shape);
-        scope = {};
-        return scope;
-    }
+    if (!render_clip_push_owned_shape(rdcon, &scope, shape)) return scope;
     log_debug("[CLIP] pushed rect clip: (%.0f,%.0f) %.0fx%.0f",
         clip->left, clip->top, w, h);
     return scope;
@@ -499,12 +496,7 @@ RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon) {
     if (!shape) {
         return scope;
     }
-    scope.owns_shape = true;
-    if (!render_clip_push_shape_scope(rdcon, &scope, shape)) {
-        render_clip_free_shape(&rdcon->scratch, shape);
-        scope = {};
-        return scope;
-    }
+    if (!render_clip_push_owned_shape(rdcon, &scope, shape)) return scope;
 
     // Clear the flag so child elements do not redundantly push the same clip.
     rdcon->block.has_clip_radius = false;

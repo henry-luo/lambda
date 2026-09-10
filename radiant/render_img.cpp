@@ -13,7 +13,6 @@ extern "C" {
 #include "../radiant/radiant.hpp"
 #include <stdio.h>
 #include <string.h>
-#include <png.h>
 #include <turbojpeg.h>
 #include <chrono>
 #ifndef _WIN32
@@ -44,58 +43,26 @@ static inline int getrusage(int who, struct rusage* r) {
 
 // Save surface to PNG using libpng
 void save_surface_to_png(ImageSurface* surface, const char* filename) {
+    StrBuf* png_bytes = render_encode_surface_png(surface);
+    if (!png_bytes) {
+        log_error("Failed to encode PNG surface");
+        return;
+    }
     FILE* fp = fopen(filename, "wb");
     if (!fp) {
         log_error("Failed to open file for writing: %s", filename);
+        strbuf_free(png_bytes);
         return;
     }
-
-    png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-    if (!png_ptr) {
-        log_error("Failed to create PNG write struct");
-        fclose(fp);
-        return;
-    }
-
-    png_infop info_ptr = png_create_info_struct(png_ptr);
-    if (!info_ptr) {
-        log_error("Failed to create PNG info struct");
-        png_destroy_write_struct(&png_ptr, NULL);
-        fclose(fp);
-        return;
-    }
-
-    if (setjmp(png_jmpbuf(png_ptr))) {
-        log_error("Error during PNG creation");
-        png_destroy_write_struct(&png_ptr, &info_ptr);
-        fclose(fp);
-        return;
-    }
-
-    png_init_io(png_ptr, fp);
-
-    // Set image information
-    png_set_IHDR(png_ptr, info_ptr, surface->width, surface->height,
-                 8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
-                 PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
-
-    png_write_info(png_ptr, info_ptr);
-
-    // Write image data
-    uint8_t** row_pointers = (uint8_t**)mem_alloc(sizeof(uint8_t*) * surface->height, MEM_CAT_RENDER);
-    for (int y = 0; y < surface->height; y++) {
-        row_pointers[y] = (uint8_t*)surface->pixels + y * surface->pitch;
-    }
-
-    png_write_image(png_ptr, row_pointers);
-    png_write_end(png_ptr, NULL);
-
-    // Clean up
-    mem_free(row_pointers);
-    png_destroy_write_struct(&png_ptr, &info_ptr);
+    size_t png_length = png_bytes->length;
+    size_t written = fwrite(png_bytes->str, 1, png_length, fp);
     fclose(fp);
-
-    log_info("Successfully saved PNG: %s", filename);
+    strbuf_free(png_bytes);
+    if (written == png_length) {
+        log_info("Successfully saved PNG: %s", filename);
+    } else {
+        log_error("Failed to write complete PNG: %s", filename);
+    }
 }
 
 // Save surface to JPEG using TurboJPEG
@@ -201,82 +168,16 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
-
-    if (output_scale <= 0) output_scale = 1.0f;
-    if (device_scale <= 0) device_scale = 1.0f;
-
-    float raster_scale = output_scale * device_scale;
-
-    // Remember if we need to auto-size (viewport was 0)
-    bool auto_width = (viewport_width == 0);
-    bool auto_height = (viewport_height == 0);
-
-    // Use reasonable defaults for layout if auto-sizing (CSS pixels)
-    int layout_width = viewport_width > 0 ? viewport_width : 1200;
-    int layout_height = viewport_height > 0 ? viewport_height : 800;
-
-    // Initialize UI context in headless mode
-    UiContext ui_context;
-    if (ui_context_init(&ui_context, true, device_scale) != 0) {
+    RenderExportSession session;
+    if (!render_export_session_begin_raster(&session, html_file,
+            viewport_width, viewport_height, output_scale, device_scale)) {
         return 1;
     }
-
-    // Create a surface at the derived raster density.
-    int surface_width = (int)(layout_width * raster_scale);
-    int surface_height = (int)(layout_height * raster_scale);
-    ui_context_create_surface(&ui_context, surface_width, surface_height);
-
-    // Update UI context dimensions
-    ui_context.window_width = surface_width;    // physical pixels
-    ui_context.window_height = surface_height;  // physical pixels
-    ui_context.viewport_width = layout_width;   // CSS pixels
-    ui_context.viewport_height = layout_height; // CSS pixels
-
-    // Get current directory for relative path resolution
-    Url* cwd = get_current_dir();
-    if (!cwd) {
-        ui_context_cleanup(&ui_context);
-        return 1;
-    }
-
-    auto t_init = high_resolution_clock::now();
-    log_info("[TIMING] Init: %.1fms", duration<double, std::milli>(t_init - t_start).count());
-
-    // Load and layout the HTML document
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file, layout_width, layout_height);
-    if (!doc) {
-        ui_context_cleanup(&ui_context);
-        return 1;
-    }
-
-    auto t_load = high_resolution_clock::now();
-    log_info("[TIMING] Load HTML: %.1fms", duration<double, std::milli>(t_load - t_init).count());
-
-    ui_context.document = doc;
-
-    // This API's output scale is raster density; semantic page zoom remains
-    // document-owned and independent.
-    doc->viewport.output_scale = output_scale;
-    ui_context_sync_document_raster_scale(&ui_context, doc);
-
-    // Process @font-face rules before layout
-    process_document_font_faces(&ui_context, doc);
-
-    auto t_fonts = high_resolution_clock::now();
-    log_info("[TIMING] Font faces: %.1fms", duration<double, std::milli>(t_fonts - t_load).count());
-
-    // Layout the document
-    if (doc->root) {
-        layout_html_doc(&ui_context, doc, false);
-    }
-
-    auto t_layout = high_resolution_clock::now();
-    log_info("[TIMING] Layout: %.1fms", duration<double, std::milli>(t_layout - t_fonts).count());
-
-    // Calculate content bounds if auto-sizing
-    // Layout remains logical; only destination dimensions use raster density.
-    int output_width = (int)(layout_width * raster_scale);
-    int output_height = (int)(layout_height * raster_scale);
+    UiContext* ui_context = session.ui_context;
+    DomDocument* doc = session.document;
+    float raster_scale = session.raster_scale;
+    int output_width = (int)(session.content_width * raster_scale);
+    int output_height = (int)(session.content_height * raster_scale);
 
     // pixel threshold above which tiled rendering is used to avoid OOM on huge pages
     // (32 M pixels × 4 bytes = 128 MB; e.g. 1200-px wide → ~26 000 px tall)
@@ -288,13 +189,15 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
         if (v > 0) PNG_TILE_THRESHOLD = (int64_t)v;
     }
 
-    bool rendered = false;  // set to true when tiled path handles rendering
+    bool rendered = false;
 
     int content_max_x = 0, content_max_y = 0;
-    if (render_png_resolve_auto_size(doc, raster_scale, auto_width, auto_height,
+    if (render_png_resolve_auto_size(doc, raster_scale,
+            session.auto_width, session.auto_height,
             &output_width, &output_height, &content_max_x, &content_max_y)) {
         log_info("Auto-sized output dimensions: %dx%d (content bounds with 50px padding, output_scale=%.2f, device_scale=%.2f)",
-                 output_width, output_height, output_scale, device_scale);
+                 output_width, output_height, session.output_scale,
+                 session.device_scale);
 
         if ((int64_t)output_width * output_height > PNG_TILE_THRESHOLD) {
             // Large page: render in tiles to avoid allocating a single huge surface
@@ -304,15 +207,11 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
             render_output_target_init(&target, RENDER_OUTPUT_TILED_PNG, png_file);
             target.width = output_width;
             target.height = output_height;
-            target.viewport_width = viewport_width;
-            target.viewport_height = viewport_height;
-            target.output_scale = output_scale;
-            target.device_scale = device_scale;
-            render_output_render_view_tree_to_target(&ui_context, doc->view_tree, &target);
+            render_output_target_apply_session(&target, &session);
+            render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target);
             rendered = true;
         } else {
-            // Normal path: allocate the full surface
-            ui_context_create_surface(&ui_context, output_width, output_height);
+            ui_context_create_surface(ui_context, output_width, output_height);
         }
     }
 
@@ -321,101 +220,45 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
         if (doc && doc->view_tree) {
             RenderOutputTarget target;
             render_output_target_init(&target, RENDER_OUTPUT_PNG, png_file);
-            target.surface = ui_context.surface;
-            target.viewport_width = viewport_width;
-            target.viewport_height = viewport_height;
-            target.output_scale = output_scale;
-            target.device_scale = device_scale;
-            render_output_render_view_tree_to_target(&ui_context, doc->view_tree, &target);
+            target.surface = ui_context->surface;
+            render_output_target_apply_session(&target, &session);
+            render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target);
         } else {
-            ui_context_cleanup(&ui_context);
+            render_export_session_end(&session);
             return 1;
         }
     }
 
-    auto t_render = high_resolution_clock::now();
-    log_info("[TIMING] Render: %.1fms", duration<double, std::milli>(t_render - t_layout).count());
-
-    ui_context_cleanup(&ui_context);
-
     auto t_end = high_resolution_clock::now();
-    log_info("[TIMING] Cleanup: %.1fms", duration<double, std::milli>(t_end - t_render).count());
     log_info("[TIMING] TOTAL: %.1fms", duration<double, std::milli>(t_end - t_start).count());
+    render_export_session_end(&session);
     return 0;
 }
 
 // Main function to layout HTML and render to JPEG
 // output_scale is export density; device_scale is platform pixel density.
 int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width, int viewport_height, float output_scale, float device_scale) {
-
-    if (output_scale <= 0) output_scale = 1.0f;
-    if (device_scale <= 0) device_scale = 1.0f;
-
-    float raster_scale = output_scale * device_scale;
-
-    // Initialize UI context in headless mode
-    UiContext ui_context;
-    if (ui_context_init(&ui_context, true, device_scale) != 0) {
+    RenderExportSession session;
+    if (!render_export_session_begin_raster(&session, html_file,
+            viewport_width, viewport_height, output_scale, device_scale)) {
         return 1;
     }
+    UiContext* ui_context = session.ui_context;
+    DomDocument* doc = session.document;
 
-    // Calculate destination dimensions from logical viewport and raster density.
-    int output_width = (int)(viewport_width * raster_scale);
-    int output_height = (int)(viewport_height * raster_scale);
-
-    // Create a surface for rendering with scaled dimensions
-    ui_context_create_surface(&ui_context, output_width, output_height);
-
-    // Update UI context dimensions
-    ui_context.window_width = output_width;     // physical pixels
-    ui_context.window_height = output_height;   // physical pixels
-    ui_context.viewport_width = viewport_width;   // CSS pixels
-    ui_context.viewport_height = viewport_height; // CSS pixels
-
-    // Get current directory for relative path resolution
-    Url* cwd = get_current_dir();
-    if (!cwd) {
-        ui_context_cleanup(&ui_context);
-        return 1;
-    }
-
-    // Load and layout the HTML document
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file, viewport_width, viewport_height);
-    if (!doc) {
-        ui_context_cleanup(&ui_context);
-        return 1;
-    }
-
-    ui_context.document = doc;
-
-    doc->viewport.output_scale = output_scale;
-    ui_context_sync_document_raster_scale(&ui_context, doc);
-
-    // Process @font-face rules before layout
-    process_document_font_faces(&ui_context, doc);
-
-    // Layout the document
-    if (doc->root) {
-        layout_html_doc(&ui_context, doc, false);
-    }
-
-    // Render the document
     if (doc && doc->view_tree) {
         RenderOutputTarget target;
         render_output_target_init(&target, RENDER_OUTPUT_JPEG, jpeg_file);
-        target.surface = ui_context.surface;
+        target.surface = ui_context->surface;
         target.jpeg_quality = quality;
-        target.viewport_width = viewport_width;
-        target.viewport_height = viewport_height;
-        target.output_scale = output_scale;
-        target.device_scale = device_scale;
-        render_output_render_view_tree_to_target(&ui_context, doc->view_tree, &target);
+        render_output_target_apply_session(&target, &session);
+        render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target);
     } else {
-        ui_context_cleanup(&ui_context);
+        render_export_session_end(&session);
         return 1;
     }
 
-    ui_context_cleanup(&ui_context);
+    render_export_session_end(&session);
     return 0;
 }
 

@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "layout.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
@@ -170,34 +171,32 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
                 float s = rdcon->raster_scale;
                 const FontMetrics* _mk = font_get_metrics(font_box_handle(&rdcon->font));
                 float ascend = _mk ? (_mk->hhea_ascender * s) : 12.0f;
+                FontStyleDesc marker_style = font_style_desc_from_prop(rdcon->font.style);
+                FontHandle* marker_font = font_box_handle(&rdcon->font);
+                const char* marker_end = marker_prop->text_content +
+                    strlen(marker_prop->text_content);
 
                 float total_text_width = 0.0f;
                 const char* p = marker_prop->text_content;
-                while (*p) {
+                while (p < marker_end) {
                     uint32_t cp;
-                    int bytes = str_utf8_decode(p, strlen(p), &cp);
-                    if (bytes <= 0) { p++; continue; }
-                    p += bytes;
-                    FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
-                    LoadedGlyph* glyph = font_load_glyph(font_box_handle(&rdcon->font), &sd, cp, false);
+                    if (!layout_utf8_next_codepoint(&p, marker_end, &cp)) continue;
+                    LoadedGlyph* glyph = font_load_glyph(marker_font, &marker_style, cp, false);
                     total_text_width += glyph ? glyph->advance_x + rdcon->font.style->letter_spacing * s : (rdcon->font.style->space_width * s);
                 }
 
                 float tx = x + (width * s) - total_text_width;
                 p = marker_prop->text_content;
-                while (*p) {
+                while (p < marker_end) {
                     uint32_t cp;
-                    int bytes = str_utf8_decode(p, strlen(p), &cp);
-                    if (bytes <= 0) { p++; continue; }
-                    p += bytes;
+                    if (!layout_utf8_next_codepoint(&p, marker_end, &cp)) continue;
 
                     if (cp == ' ') {
                         tx += rdcon->font.style->space_width * s;
                         continue;
                     }
 
-                    FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
-                    LoadedGlyph* glyph = font_load_glyph(font_box_handle(&rdcon->font), &sd, cp, true);
+                    LoadedGlyph* glyph = font_load_glyph(marker_font, &marker_style, cp, true);
                     if (glyph) {
                         draw_glyph(rdcon, &glyph->bitmap, lroundf(tx + glyph->bitmap.bearing_x), lroundf(y + ascend - glyph->bitmap.bearing_y));
                         tx += glyph->advance_x + rdcon->font.style->letter_spacing * s;

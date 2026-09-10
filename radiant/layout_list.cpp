@@ -354,21 +354,7 @@ bool layout_list_item_has_in_flow_content(DomElement* element) {
         dom_element_has_after_content(element)) {
         return true;
     }
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (child->is_text()) {
-            if (layout_text_node_has_content(child)) return true;
-            continue;
-        }
-        if (!child->is_element()) continue;
-        DomElement* child_elem = child->as_element();
-        DisplayValue child_display = resolve_display_value(child);
-        if (layout_display_is_none(child_display) ||
-            layout_element_is_abs_or_fixed(child_elem)) {
-            continue;
-        }
-        return true;
-    }
-    return false;
+    return layout_element_has_in_flow_content(element, layout_text_node_has_content);
 }
 
 static float list_marker_bullet_inline_size(float font_size, bool is_outside,
@@ -443,15 +429,12 @@ static bool list_style_image_is_none(const ListStyleImage* image) {
 
 static bool list_marker_intrinsic_size(DomElement* parent_elem, ImageSurface* image,
                                        float effective_zoom, float* width, float* height) {
-    if (!parent_elem || !image || !image->has_intrinsic_size || !width || !height) {
+    if (!image || !image->has_intrinsic_size) return false;
+    float image_width = 0.0f;
+    float image_height = 0.0f;
+    if (!layout_image_intrinsic_size(parent_elem, image, &image_width, &image_height)) {
         return false;
     }
-    bool from_image_orientation = layout_image_orientation_uses_from_image(parent_elem);
-    float image_width = (from_image_orientation || image->encoded_width <= 0) ?
-        (float)image->width : (float)image->encoded_width;
-    float image_height = (from_image_orientation || image->encoded_height <= 0) ?
-        (float)image->height : (float)image->encoded_height;
-    if (image_width <= 0.0f || image_height <= 0.0f) return false;
 
     // CSS zoom applies to the used dimensions of an intrinsic marker image;
     // retaining decoded dimensions leaves a dynamically zoomed marker in its old box.

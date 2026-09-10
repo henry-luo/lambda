@@ -869,17 +869,10 @@ bool dom_edit_replace_range_u16(DocState* state, DomText* text,
     return changed;
 }
 
-static bool editing_dom_node_is_within(DomNode* node, DomNode* ancestor) {
-    for (DomNode* current = node; current; current = current->parent) {
-        if (current == ancestor) return true;
-    }
-    return false;
-}
-
 static bool editing_dom_host_contains_boundary(DomElement* host,
                                                DomBoundary boundary) {
     if (!host || !boundary.node) return false;
-    if (!editing_dom_node_is_within(boundary.node, host)) return false;
+    if (!view_geometry_dom_is_descendant(boundary.node, host, true)) return false;
     EditingHost boundary_host;
     return editing_host_lookup(boundary.node, &boundary_host) &&
         boundary_host.host == host &&
@@ -1073,7 +1066,7 @@ DomEditInvocation* dom_edit_invocation_lookup(DocState* state,
     // the editable host or its descendants; document handlers use edit_target
     // first to obtain that canonical receiver (D7.2.5).
     if (!invocation || invocation->host->doc != receiver->doc ||
-        !editing_dom_node_is_within(invocation->host, receiver)) {
+        !view_geometry_dom_is_descendant(invocation->host, receiver, true)) {
         return nullptr;
     }
     return invocation;
@@ -1343,10 +1336,10 @@ bool dom_edit_wrap_range_u16(DomEditInvocation* invocation, uint32_t start_u16,
     return true;
 }
 
-static bool editing_dom_move_child(DocState* state, DomNode* child,
-                                   DomElement* destination, DomNode* reference) {
-    if (!state || !child || !destination || !child->parent) return false;
-    if (reference && reference->parent != static_cast<DomNode*>(destination)) {
+static bool editing_dom_insert_child_bridge(DomElement* destination, DomNode* child,
+                                            DomNode* reference) {
+    if (!destination || !child ||
+        (reference && reference->parent != static_cast<DomNode*>(destination))) {
         return false;
     }
     RootFrame roots(2);
@@ -1366,25 +1359,18 @@ static bool editing_dom_move_child(DocState* state, DomNode* child,
         child->parent == static_cast<DomNode*>(destination);
 }
 
+static bool editing_dom_move_child(DocState* state, DomNode* child,
+                                   DomElement* destination, DomNode* reference) {
+    if (!state || !child || !destination || !child->parent) return false;
+    return editing_dom_insert_child_bridge(destination, child, reference);
+}
+
 static bool editing_dom_insert_child(DocState* state, DomElement* parent,
                                      DomNode* child, DomNode* reference) {
-    if (!state || !parent || !child || child->parent ||
-        (reference && reference->parent != static_cast<DomNode*>(parent))) {
+    if (!state || !parent || !child || child->parent) {
         return false;
     }
-    RootFrame roots(2);
-    Rooted<Item> child_item(roots, dom_wrap_element(child));
-    Rooted<Item> reference_item(roots,
-        reference ? dom_wrap_element(reference) : ItemNull);
-    if (child_item.get().item == ItemNull.item ||
-        (reference && reference_item.get().item == ItemNull.item)) {
-        return false;
-    }
-    Item inserted = reference
-        ? dom_insert_before_bridge(parent, child_item.get(), reference_item.get())
-        : dom_append_child_bridge(parent, child_item.get());
-    return inserted.item != ItemNull.item &&
-        child->parent == static_cast<DomNode*>(parent);
+    return editing_dom_insert_child_bridge(parent, child, reference);
 }
 
 static bool editing_dom_remove_child(DocState* state, DomNode* child) {
@@ -1865,7 +1851,7 @@ static bool editing_dom_split_block(DocState* state, DomElement* host,
                                     DomElement* source, const char* tag,
                                     DomBoundary caret, DomBoundary* out_caret) {
     if (!state || !host || !source || !tag || !*tag || !out_caret ||
-        !caret.node || !editing_dom_node_is_within(source, host)) {
+        !caret.node || !view_geometry_dom_is_descendant(source, host, true)) {
         return false;
     }
     DomElement* parent = source == host ? host :
@@ -1873,7 +1859,7 @@ static bool editing_dom_split_block(DocState* state, DomElement* host,
             ? source->parent->as_element() : nullptr);
     DomNode* source_node = static_cast<DomNode*>(source);
     if (!parent || !source_node ||
-        !editing_dom_node_is_within(caret.node, source_node)) return false;
+        !view_geometry_dom_is_descendant(caret.node, source_node, true)) return false;
 
     DomElement* new_block = (DomElement*)dom_create_backed_element_bridge(host->doc, tag);
     if (!new_block) return false;
@@ -1966,8 +1952,8 @@ bool dom_edit_merge_adjacent_blocks(DomEditInvocation* invocation,
     if (!invocation || !invocation->active || !start_block || !end_block ||
         !start_block->parent || start_block->parent != end_block->parent ||
         start_block->next_sibling != static_cast<DomNode*>(end_block) ||
-        !editing_dom_node_is_within(start_block, invocation->host) ||
-        !editing_dom_node_is_within(end_block, invocation->host)) {
+        !view_geometry_dom_is_descendant(start_block, invocation->host, true) ||
+        !view_geometry_dom_is_descendant(end_block, invocation->host, true)) {
         return false;
     }
     if (!editing_dom_transaction_begin(invocation)) return false;
@@ -1981,7 +1967,7 @@ bool dom_edit_merge_adjacent_blocks(DomEditInvocation* invocation,
                                   static_cast<DomNode*>(end_block))) {
         return editing_dom_transaction_reject(invocation);
     }
-    if (!editing_dom_node_is_within(invocation->caret_node, start_block)) {
+    if (!view_geometry_dom_is_descendant(invocation->caret_node, start_block, true)) {
         editing_dom_record_caret(invocation, static_cast<DomNode*>(start_block),
                                  dom_node_boundary_length(
                                      static_cast<DomNode*>(start_block)), true);
@@ -2055,8 +2041,8 @@ bool dom_edit_unwrap_range_u16(DomEditInvocation* invocation, uint32_t start_u16
     DomElement* host = invocation->host;
     DomText* text = invocation->text;
     if (!host || !text || !state->dom_selection) return false;
-    if (!fmt->parent || !editing_dom_node_is_within(fmt, host) ||
-        !editing_dom_node_is_within(text, fmt)) return false;
+    if (!fmt->parent || !view_geometry_dom_is_descendant(fmt, host, true) ||
+        !view_geometry_dom_is_descendant(text, fmt, true)) return false;
     DomNode* text_node = static_cast<DomNode*>(text);
     if (fmt->first_child != text_node || text_node->next_sibling) return false;
     uint32_t total = dom_text_utf16_length(text);

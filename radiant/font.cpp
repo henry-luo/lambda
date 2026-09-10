@@ -108,33 +108,16 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
         return;
     }
 
-    // map CssEnum weight/style → FontWeight/FontSlant
-    // CSS 2.1 §15.6: Use numeric weight for precise matching (100-900)
-    FontWeight fw = FONT_WEIGHT_NORMAL;
-    if (fprop->font_weight_numeric > 0) {
-        // Use precise numeric weight from CSS (100-900)
-        fw = (FontWeight)fprop->font_weight_numeric;
-    } else if (fprop->font_weight == CSS_VALUE_BOLD || fprop->font_weight == CSS_VALUE_BOLDER) {
-        fw = FONT_WEIGHT_BOLD;
-    } else if (fprop->font_weight == CSS_VALUE_LIGHTER) {
-        fw = FONT_WEIGHT_LIGHT;
-    }
-
-    FontSlant fs = FONT_SLANT_NORMAL;
-    if (fprop->font_style == CSS_VALUE_ITALIC) fs = FONT_SLANT_ITALIC;
-    else if (fprop->font_style == CSS_VALUE_OBLIQUE) fs = FONT_SLANT_OBLIQUE;
-
     // Some intrinsic-layout paths create a FontProp only for a non-family
     // property (for example list-marker spacing). A missing family still has
     // the CSS initial serif value; do not pass an invalid style to the resolver.
     const char* family = fprop->family;
     if ((!family || !family[0]) && uicon) family = uicon->default_font.family;
 
-    FontStyleDesc style = {};
-    style.family  = family;
-    style.size_px = font_prop_used_size(fprop);
-    style.weight  = fw;
-    style.slant   = fs;
+    FontStyleDesc style = font_style_desc_from_prop(fprop);
+    style.family = family;
+    FontWeight fw = style.weight;
+    FontSlant fs = style.slant;
 
     float raster_scale = ui_context_raster_scale(uicon);
     if (font_handle_matches_prop(fprop->font_handle, fprop, family, fw, fs,

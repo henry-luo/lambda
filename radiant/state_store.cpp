@@ -188,41 +188,11 @@ static void state_dump_make_temp_dir(void) {
 #endif
 }
 
-static void state_dump_sanitize_doc_name(const char* in, char* out, size_t out_sz) {
-    if (!out || out_sz == 0) return;
-    out[0] = '\0';
-    if (!in || !*in) {
-        snprintf(out, out_sz, "doc");
-        return;
-    }
-
-    const char* base = in;
-    for (const char* p = in; *p; p++) {
-        if (*p == '/' || *p == '\\') base = p + 1;
-    }
-
-    size_t i = 0;
-    for (const char* p = base; *p && i + 1 < out_sz && i < 64; p++) {
-        char c = *p;
-        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-            (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_') {
-            out[i++] = c;
-        } else {
-            out[i++] = '_';
-        }
-    }
-    if (i == 0) {
-        snprintf(out, out_sz, "doc");
-    } else {
-        out[i] = '\0';
-    }
-}
-
 bool StateDumpLog::init(const char* doc_name) {
     state_dump_make_temp_dir();
 
     pid = (int)getpid();
-    state_dump_sanitize_doc_name(doc_name, doc_id, sizeof(doc_id));
+    event_state_log_sanitize_doc_name(doc_name, doc_id, sizeof(doc_id));
     snprintf(path, sizeof(path), "./temp/state/state_%d_%s.mark",
              pid, doc_id);
 
@@ -2543,9 +2513,7 @@ static bool view_state_nodes_correspond(const DomNode* old_node,
 static bool view_state_is_text_control(View* view) {
     if (!view || !view->is_element()) return false;
     DomElement* elem = lam::dom_require_element(view);
-    return elem && elem->form &&
-        (elem->form->control_type == FORM_CONTROL_TEXT ||
-         elem->form->control_type == FORM_CONTROL_TEXTAREA);
+    return elem && form_control_is_text_editable(elem->form);
 }
 
 static void view_state_rekey_node(DocState* state, View* old_view, View* new_view) {
@@ -2817,10 +2785,7 @@ static uint32_t state_map_sync_focus_path(DocState* state, View* focused,
 }
 
 static bool view_state_target_path_contains(View* target, View* candidate) {
-    for (View* node = target; node; node = static_cast<View*>(node->parent)) {
-        if (node == candidate) return true;
-    }
-    return false;
+    return view_geometry_is_descendant(target, candidate);
 }
 
 static uint32_t view_state_sync_interaction_flag_path(DocState* state, DomNode* root,
@@ -6075,6 +6040,29 @@ static int skip_collapsed_whitespace_backward(unsigned char* str, int prev_offse
     return new_offset;
 }
 
+static View* state_store_next_meaningful_view(View* view) {
+    View* next = view ? find_next_navigable_view(view) : nullptr;
+    while (next && !has_meaningful_content(next)) {
+        next = find_next_navigable_view(next);
+    }
+    return next;
+}
+
+static View* state_store_prev_meaningful_view(View* view) {
+    View* previous = view ? find_prev_navigable_view(view) : nullptr;
+    while (previous && !has_meaningful_content(previous)) {
+        previous = find_prev_navigable_view(previous);
+    }
+    return previous;
+}
+
+static void state_store_show_caret(DocState* state) {
+    if (state && state_store_ensure_selection_presentation(state)) {
+        state->selection_presentation->caret_visible = true;
+        state->selection_presentation->caret_blink_time = 0;
+    }
+}
+
 static bool state_store_commit_collapsed_caret(DocState* state,
                                                View* view,
                                                int char_offset,
@@ -6087,10 +6075,7 @@ static bool state_store_commit_collapsed_caret(DocState* state,
         return true;
     }
     if (state->editing.pointer_selecting) {
-        if (state_store_ensure_selection_presentation(state)) {
-            state->selection_presentation->caret_visible = true;
-            state->selection_presentation->caret_blink_time = 0;
-        }
+        state_store_show_caret(state);
         state->needs_repaint = true;
         log_debug("%s: deferred canonical collapse during active selection",
             source ? source : "state_store_commit_collapsed_caret");
@@ -6104,10 +6089,7 @@ static bool state_store_commit_collapsed_caret(DocState* state,
             return false;
         }
         state->editing.pointer_selecting = false;
-        if (state_store_ensure_selection_presentation(state)) {
-            state->selection_presentation->caret_visible = true;
-            state->selection_presentation->caret_blink_time = 0;
-        }
+        state_store_show_caret(state);
         state->needs_repaint = true;
         return true;
     }
@@ -6121,10 +6103,7 @@ static bool state_store_commit_collapsed_caret(DocState* state,
         return false;
     }
     state->editing.pointer_selecting = false;
-    if (state_store_ensure_selection_presentation(state)) {
-        state->selection_presentation->caret_visible = true;
-        state->selection_presentation->caret_blink_time = 0;
-    }
+    state_store_show_caret(state);
     state->needs_repaint = true;
     return true;
 }
@@ -6179,10 +6158,7 @@ void state_store_caret_move(DocState* state, int delta) {
                 }
             } else {
                 // Already at end of text, now cross to next view
-                View* next_view = find_next_navigable_view(view);
-                while (next_view && !has_meaningful_content(next_view)) {
-                    next_view = find_next_navigable_view(next_view);
-                }
+                View* next_view = state_store_next_meaningful_view(view);
                 if (next_view) {
                     caret->view = next_view;
                     // Skip leading whitespace in new view (when crossing view boundary, treat as if we passed whitespace)
@@ -6227,10 +6203,7 @@ void state_store_caret_move(DocState* state, int delta) {
                 }
             } else {
                 // At start of text, now cross to previous view
-                View* prev_view = find_prev_navigable_view(view);
-                while (prev_view && !has_meaningful_content(prev_view)) {
-                    prev_view = find_prev_navigable_view(prev_view);
-                }
+                View* prev_view = state_store_prev_meaningful_view(view);
                 if (prev_view) {
                     caret->view = prev_view;
                     // Position at end of prev view, skipping trailing whitespace (when crossing view boundary)
@@ -6266,10 +6239,7 @@ void state_store_caret_move(DocState* state, int delta) {
                 caret->char_offset = 1;
             } else {
                 // Already after, move to next view with meaningful content
-                View* next_view = find_next_navigable_view(view);
-                while (next_view && !has_meaningful_content(next_view)) {
-                    next_view = find_next_navigable_view(next_view);
-                }
+                View* next_view = state_store_next_meaningful_view(view);
                 if (next_view) {
                     caret->view = next_view;
                     caret->char_offset = 0;
@@ -6284,10 +6254,7 @@ void state_store_caret_move(DocState* state, int delta) {
                 caret->char_offset = 0;
             } else {
                 // Already before, move to previous view with meaningful content
-                View* prev_view = find_prev_navigable_view(view);
-                while (prev_view && !has_meaningful_content(prev_view)) {
-                    prev_view = find_prev_navigable_view(prev_view);
-                }
+                View* prev_view = state_store_prev_meaningful_view(view);
                 if (prev_view) {
                     caret->view = prev_view;
                     int prev_length = get_view_content_length(prev_view);
@@ -6301,19 +6268,13 @@ void state_store_caret_move(DocState* state, int delta) {
     } else {
         // Other non-text views: try to navigate to adjacent views with meaningful content
         if (delta > 0) {
-            View* next_view = find_next_navigable_view(view);
-            while (next_view && !has_meaningful_content(next_view)) {
-                next_view = find_next_navigable_view(next_view);
-            }
+            View* next_view = state_store_next_meaningful_view(view);
             if (next_view) {
                 caret->view = next_view;
                 caret->char_offset = 0;
             }
         } else if (delta < 0) {
-            View* prev_view = find_prev_navigable_view(view);
-            while (prev_view && !has_meaningful_content(prev_view)) {
-                prev_view = find_prev_navigable_view(prev_view);
-            }
+            View* prev_view = state_store_prev_meaningful_view(view);
             if (prev_view) {
                 caret->view = prev_view;
                 caret->char_offset = get_view_content_length(prev_view);
@@ -8149,26 +8110,22 @@ static void append_view_text_rects(StrBuf* sb, ViewText* text, bool escape_html)
     }
 }
 
-static void extract_text_recursive(View* view, StrBuf* sb) {
-    if (!view) return;
+typedef struct StateStoreTextExtraction {
+    View* root;
+    StrBuf* output;
+} StateStoreTextExtraction;
 
-    if (view->view_type == RDT_VIEW_TEXT) {
+static bool extract_text_visitor(View* view, bool entering, void* context) {
+    StateStoreTextExtraction* extraction = (StateStoreTextExtraction*)context;
+    if (entering && view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = lam::view_require_text(view);
-        append_view_text_rects(sb, text, false);
+        append_view_text_rects(extraction->output, text, false);
     }
-
-    // Recurse into children
-    View* child = view->is_element() ? (lam::view_require_element(view))->first_child : nullptr;
-    while (child) {
-        extract_text_recursive(child, sb);
-
-        // Add space or newline between block-level elements
-        if (child->is_block()) {
-            strbuf_append_char(sb, '\n');
-        }
-
-        child = child->next_sibling;
+    if (!entering && view != extraction->root && view->is_block()) {
+        // Add space or newline between block-level elements.
+        strbuf_append_char(extraction->output, '\n');
     }
+    return true;
 }
 
 char* extract_text_from_view(View* view, Arena* arena) {
@@ -8177,7 +8134,8 @@ char* extract_text_from_view(View* view, Arena* arena) {
     StrBuf* sb = strbuf_new();
     if (!sb) return NULL;
 
-    extract_text_recursive(view, sb);
+    StateStoreTextExtraction extraction = {view, sb};
+    view_geometry_walk_tree(view, extract_text_visitor, &extraction);
     char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
     strbuf_free(sb);
     return result;
@@ -8348,13 +8306,12 @@ static char* extract_dom_range_text_to_arena(DomRange* range, Arena* arena) {
 /**
  * Helper: recursively extract HTML from view tree
  */
-static void extract_html_recursive(View* view, StrBuf* sb) {
-    if (!view) return;
-
-    if (view->view_type == RDT_VIEW_TEXT) {
+static bool extract_html_visitor(View* view, bool entering, void* context) {
+    StrBuf* sb = (StrBuf*)context;
+    if (entering && view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = lam::view_require_text(view);
         append_view_text_rects(sb, text, true);
-    } else if (view->is_element()) {
+    } else if (entering && view->is_element()) {
         ViewElement* element = lam::view_require_element(view);
 
         // Opening tag
@@ -8366,20 +8323,16 @@ static void extract_html_recursive(View* view, StrBuf* sb) {
             strbuf_append_char(sb, '>');
         }
 
-        // Recurse into children
-        View* child = element->first_child;
-        while (child) {
-            extract_html_recursive(child, sb);
-            child = child->next_sibling;
-        }
-
-        // Closing tag
+    } else if (!entering && view->is_element()) {
+        ViewElement* element = lam::view_require_element(view);
+        const char* tag_name = element->tag_name;
         if (tag_name) {
             strbuf_append_str(sb, "</");
             strbuf_append_str(sb, tag_name);
             strbuf_append_char(sb, '>');
         }
     }
+    return true;
 }
 
 char* extract_html_from_view(View* view, Arena* arena) {
@@ -8388,7 +8341,7 @@ char* extract_html_from_view(View* view, Arena* arena) {
     StrBuf* sb = strbuf_new_cap(4096);
     if (!sb) return NULL;
 
-    extract_html_recursive(view, sb);
+    view_geometry_walk_tree(view, extract_html_visitor, sb);
     char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
     strbuf_free(sb);
     return result;

@@ -64,40 +64,7 @@ static inline uint32_t glyph_sample_coverage_bilinear(const GlyphBitmap* bitmap,
 }
 
 static inline void glyph_blend_coverage_pixel(uint8_t* p, Color color, uint32_t coverage) {
-    uint32_t src_a = (coverage * color.a + 127) / 255;
-    if (src_a == 0) return;
-    uint32_t inv_a = 255 - src_a;
-
-    if (p[3] == 255) {
-        if (color.c == 0xFF000000) {
-            p[0] = p[0] * inv_a / 255;
-            p[1] = p[1] * inv_a / 255;
-            p[2] = p[2] * inv_a / 255;
-            p[3] = 0xFF;
-        } else {
-            p[0] = (p[0] * inv_a + color.r * src_a) / 255;
-            p[1] = (p[1] * inv_a + color.g * src_a) / 255;
-            p[2] = (p[2] * inv_a + color.b * src_a) / 255;
-            p[3] = 0xFF;
-        }
-        return;
-    }
-
-    uint32_t dst_a = p[3];
-    uint32_t out_a = src_a + (dst_a * inv_a + 127) / 255;
-    if (out_a == 0) {
-        p[0] = p[1] = p[2] = p[3] = 0;
-        return;
-    }
-
-    // glyph replay surfaces are premultiplied; transparent fringes must not store straight white.
-    uint32_t out_r = (color.r * src_a + 127) / 255 + (p[0] * inv_a + 127) / 255;
-    uint32_t out_g = (color.g * src_a + 127) / 255 + (p[1] * inv_a + 127) / 255;
-    uint32_t out_b = (color.b * src_a + 127) / 255 + (p[2] * inv_a + 127) / 255;
-    p[0] = (uint8_t)(out_r > 255 ? 255 : out_r);
-    p[1] = (uint8_t)(out_g > 255 ? 255 : out_g);
-    p[2] = (uint8_t)(out_b > 255 ? 255 : out_b);
-    p[3] = (uint8_t)(out_a > 255 ? 255 : out_a);
+    render_pixel_source_over_coverage(p, color, coverage);
 }
 
 static inline void glyph_draw_coverage_bitmap(ImageSurface* surface, const GlyphBitmap* bitmap,
@@ -228,34 +195,12 @@ static inline GlyphColorSample glyph_sample_bgra_bilinear(const GlyphBitmap* bit
                                                           float src_x, float src_y) {
     GlyphColorSample out = {};
     if (!bitmap || !bitmap->buffer || bitmap->width <= 0 || bitmap->height <= 0) return out;
-
-    int sx0 = (int)src_x;
-    int sy0 = (int)src_y;
-    int sx1 = sx0 + 1;
-    int sy1 = sy0 + 1;
-    float fx = src_x - sx0;
-    float fy = src_y - sy0;
-
-    if (sx0 < 0) { sx0 = 0; fx = 0.0f; }
-    if (sy0 < 0) { sy0 = 0; fy = 0.0f; }
-    if (sx0 >= (int)bitmap->width) sx0 = bitmap->width - 1;
-    if (sy0 >= (int)bitmap->height) sy0 = bitmap->height - 1;
-    if (sx1 >= (int)bitmap->width) sx1 = bitmap->width - 1;
-    if (sy1 >= (int)bitmap->height) sy1 = bitmap->height - 1;
-
-    const uint8_t* s00 = bitmap->buffer + sy0 * bitmap->pitch + sx0 * 4;
-    const uint8_t* s10 = bitmap->buffer + sy0 * bitmap->pitch + sx1 * 4;
-    const uint8_t* s01 = bitmap->buffer + sy1 * bitmap->pitch + sx0 * 4;
-    const uint8_t* s11 = bitmap->buffer + sy1 * bitmap->pitch + sx1 * 4;
-
-    float w00 = (1.0f - fx) * (1.0f - fy);
-    float w10 = fx * (1.0f - fy);
-    float w01 = (1.0f - fx) * fy;
-    float w11 = fx * fy;
-
-    out.b = (uint8_t)(s00[0] * w00 + s10[0] * w10 + s01[0] * w01 + s11[0] * w11 + 0.5f);
-    out.g = (uint8_t)(s00[1] * w00 + s10[1] * w10 + s01[1] * w01 + s11[1] * w11 + 0.5f);
-    out.r = (uint8_t)(s00[2] * w00 + s10[2] * w10 + s01[2] * w01 + s11[2] * w11 + 0.5f);
-    out.a = (uint8_t)(s00[3] * w00 + s10[3] * w10 + s01[3] * w01 + s11[3] * w11 + 0.5f);
+    uint32_t packed = render_pixel_sample_bilinear(
+        bitmap->buffer, bitmap->width, bitmap->height, bitmap->pitch,
+        src_x, src_y, false, true);
+    out.b = (uint8_t)(packed & 0xFFu);
+    out.g = (uint8_t)((packed >> 8) & 0xFFu);
+    out.r = (uint8_t)((packed >> 16) & 0xFFu);
+    out.a = (uint8_t)((packed >> 24) & 0xFFu);
     return out;
 }

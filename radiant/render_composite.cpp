@@ -71,7 +71,7 @@ uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnu
         uint8_t rr = render_composite_blend_channel(br, sr, blend_mode);
         uint8_t rg = render_composite_blend_channel(bg, sg, blend_mode);
         uint8_t rb = render_composite_blend_channel(bb, sb, blend_mode);
-        return (255u << 24) | ((uint32_t)rb << 16) | ((uint32_t)rg << 8) | rr;
+        return render_pixel_pack_abgr(rr, rg, rb, 255u);
     }
 
     float fa = ba / 255.0f;
@@ -92,101 +92,66 @@ uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnu
     uint8_t rg = blendch(bg, sg);
     uint8_t rb = blendch(bb, sb);
     uint8_t new_a = (uint8_t)(ra * 255.0f + 0.5f);
-    return ((uint32_t)new_a << 24) | ((uint32_t)rb << 16) | ((uint32_t)rg << 8) | rr;
+    return render_pixel_pack_abgr(rr, rg, rb, new_a);
 }
 
-static uint32_t* render_composite_target(ImageSurface* surface, const uint32_t* backdrop,
-                                         int width, int height, int* pitch) {
-    if (!surface || !surface->pixels || !backdrop || width <= 0 || height <= 0) return nullptr;
-    *pitch = surface->pitch / 4;
-    return (uint32_t*)surface->pixels;
+void render_composite_apply_region(ImageSurface* surface, const uint32_t* backdrop,
+                                   int x0, int y0, int width, int height,
+                                   RenderCompositeRegionMode mode,
+                                   CssEnum blend_mode, uint8_t opacity,
+                                   const ClipShape* exclude_shape,
+                                   const ClipShape* include_shape) {
+    if (!surface || !surface->pixels || !backdrop || width <= 0 || height <= 0) return;
+    uint32_t* pixels = (uint32_t*)surface->pixels;
+    int pitch = surface->pitch / 4;
+    int opacity_i = (int)opacity;
+    for (int row = 0; row < height; row++) {
+        for (int col = 0; col < width; col++) {
+            if (exclude_shape || include_shape) {
+                float px = (float)(x0 + col) + 0.5f;
+                float py = (float)(y0 + row) + 0.5f;
+                if ((exclude_shape && clip_point_in_shape(
+                        const_cast<ClipShape*>(exclude_shape), px, py)) ||
+                    (include_shape && !clip_point_in_shape(
+                        const_cast<ClipShape*>(include_shape), px, py))) continue;
+            }
+            uint32_t* pixel = &pixels[(y0 + row) * pitch + (x0 + col)];
+            uint32_t source = backdrop[row * width + col];
+            if (mode == RENDER_COMPOSITE_REGION_BLEND) {
+                *pixel = render_composite_blend_pixel(source, *pixel, blend_mode);
+            } else if (mode == RENDER_COMPOSITE_REGION_PREMULTIPLIED) {
+                *pixel = render_pixel_source_over_premultiplied_opaque(source, *pixel);
+            } else if (mode == RENDER_COMPOSITE_REGION_PREMULTIPLIED_FULL) {
+                *pixel = render_pixel_source_over_premultiplied(*pixel, source);
+            } else {
+                *pixel = render_pixel_source_over_straight(
+                    source, *pixel, (uint8_t)opacity_i);
+            }
+        }
+    }
+}
+
+void render_composite_blend_surface(ImageSurface* surface, const uint32_t* backdrop,
+                                    int x0, int y0, int width, int height,
+                                    CssEnum blend_mode) {
+    render_composite_apply_region(surface, backdrop, x0, y0, width, height,
+                                  RENDER_COMPOSITE_REGION_BLEND, blend_mode, 255);
 }
 
 void render_composite_source_over_premul(ImageSurface* surface, const uint32_t* backdrop,
                                          int x0, int y0, int width, int height) {
-    int pitch;
-    uint32_t* pixels = render_composite_target(surface, backdrop, width, height, &pitch);
-    if (!pixels) return;
-    for (int row = 0; row < height; row++) {
-        for (int col = 0; col < width; col++) {
-            uint32_t src = pixels[(y0 + row) * pitch + (x0 + col)];
-            uint32_t dst = backdrop[row * width + col];
-            if (src == 0) {
-                pixels[(y0 + row) * pitch + (x0 + col)] = dst;
-                continue;
-            }
-            uint32_t sa = (src >> 24) & 0xFF;
-            if (sa == 255) continue;
-            uint32_t inv_sa = 255 - sa;
-            uint32_t da = (dst >> 24) & 0xFF;
-            uint32_t ra = sa + (da * inv_sa + 127) / 255;
-            uint32_t rr = (src & 0xFF) + (((dst & 0xFF) * inv_sa + 127) / 255);
-            uint32_t rg = ((src >> 8) & 0xFF) + ((((dst >> 8) & 0xFF) * inv_sa + 127) / 255);
-            uint32_t rb = ((src >> 16) & 0xFF) + ((((dst >> 16) & 0xFF) * inv_sa + 127) / 255);
-            pixels[(y0 + row) * pitch + (x0 + col)] =
-                (LMB_MIN(ra, 255u) << 24) |
-                (LMB_MIN(rb, 255u) << 16) |
-                (LMB_MIN(rg, 255u) << 8) |
-                LMB_MIN(rr, 255u);
-        }
-    }
+    render_composite_apply_region(surface, backdrop, x0, y0, width, height,
+                                  RENDER_COMPOSITE_REGION_PREMULTIPLIED,
+                                  CSS_VALUE_NORMAL, 255);
 }
 
 void render_composite_opacity(ImageSurface* surface, const uint32_t* backdrop,
                               int x0, int y0, int width, int height,
                               float opacity) {
-    if (!surface || !surface->pixels || !backdrop || width <= 0 || height <= 0) {
-        return;
-    }
-    uint32_t* pixels = (uint32_t*)surface->pixels;
-    int pitch = surface->pitch / 4;
     int opacity_i = (int)(opacity * 255.0f + 0.5f);
     if (opacity_i < 0) opacity_i = 0;
     if (opacity_i > 255) opacity_i = 255;
-    for (int row = 0; row < height; row++) {
-        for (int col = 0; col < width; col++) {
-            uint32_t src = pixels[(y0 + row) * pitch + (x0 + col)];
-            uint32_t dst = backdrop[row * width + col];
-            if (src == 0) {
-                pixels[(y0 + row) * pitch + (x0 + col)] = dst;
-                continue;
-            }
-            uint32_t src_a = (src >> 24) & 0xFF;
-            uint32_t sa = (src_a * (uint32_t)opacity_i + 127u) / 255u;
-            if (sa == 0) {
-                pixels[(y0 + row) * pitch + (x0 + col)] = dst;
-                continue;
-            }
-            uint32_t src_r = src & 0xFF;
-            uint32_t src_g = (src >> 8) & 0xFF;
-            uint32_t src_b = (src >> 16) & 0xFF;
-            uint32_t inv_sa = 255 - sa;
-            uint32_t da = (dst >> 24) & 0xFF;
-            uint32_t dr = dst & 0xFF;
-            uint32_t dg = (dst >> 8) & 0xFF;
-            uint32_t db = (dst >> 16) & 0xFF;
-            uint32_t src_rp = (src_r * sa + 127u) / 255u;
-            uint32_t src_gp = (src_g * sa + 127u) / 255u;
-            uint32_t src_bp = (src_b * sa + 127u) / 255u;
-            uint32_t dst_rp = (dr * da + 127u) / 255u;
-            uint32_t dst_gp = (dg * da + 127u) / 255u;
-            uint32_t dst_bp = (db * da + 127u) / 255u;
-            uint32_t ra = sa + (da * inv_sa + 127u) / 255u;
-            if (ra == 0) {
-                pixels[(y0 + row) * pitch + (x0 + col)] = 0;
-                continue;
-            }
-            uint32_t rrp = src_rp + (dst_rp * inv_sa + 127u) / 255u;
-            uint32_t rgp = src_gp + (dst_gp * inv_sa + 127u) / 255u;
-            uint32_t rbp = src_bp + (dst_bp * inv_sa + 127u) / 255u;
-            uint32_t rr = (rrp * 255u + ra / 2u) / ra;
-            uint32_t rg = (rgp * 255u + ra / 2u) / ra;
-            uint32_t rb = (rbp * 255u + ra / 2u) / ra;
-            pixels[(y0 + row) * pitch + (x0 + col)] =
-                (LMB_MIN(ra, 255u) << 24) |
-                (LMB_MIN(rb, 255u) << 16) |
-                (LMB_MIN(rg, 255u) << 8) |
-                LMB_MIN(rr, 255u);
-        }
-    }
+    render_composite_apply_region(surface, backdrop, x0, y0, width, height,
+                                  RENDER_COMPOSITE_REGION_OPACITY,
+                                  CSS_VALUE_NORMAL, (uint8_t)opacity_i);
 }

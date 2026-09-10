@@ -243,7 +243,7 @@ static float editing_controller_text_control_content_extent(ViewBlock* block,
                                                             DomElement* elem,
                                                             bool horizontal) {
     if (!block || !elem || !elem->form) return 0.0f;
-    bool is_textarea = elem->form->control_type == FORM_CONTROL_TEXTAREA;
+    bool is_textarea = form_control_is_textarea(elem->form);
     float border = (block->bound && block->boundary_mut()->border)
         ? block->boundary()->border->width.left : 1.0f;
     float padding = block->bound ? block->boundary()->padding.left :
@@ -272,7 +272,7 @@ static float editing_controller_text_control_max_line_width(UiContext* uicon,
     uint32_t value_len = elem->form->current_value_len;
     if (!value) value = "";
 
-    bool is_textarea = elem->form->control_type == FORM_CONTROL_TEXTAREA;
+    bool is_textarea = form_control_is_textarea(elem->form);
     float border = (block->bound && block->boundary_mut()->border)
         ? block->boundary()->border->width.left : 1.0f;
     float padding = block->bound ? block->boundary()->padding.left :
@@ -377,7 +377,7 @@ static bool editing_controller_text_control_drag_autoscroll(
     }
 
     ViewBlock* block = lam::view_require_block(elem);
-    bool is_textarea = elem->form->control_type == FORM_CONTROL_TEXTAREA;
+    bool is_textarea = form_control_is_textarea(elem->form);
     RdtLogicalPoint origin = view_geometry_local_to_block_document(
         static_cast<View*>(block), {block->x, block->y});
 
@@ -485,8 +485,8 @@ static bool editing_controller_password_reveal_tick(DocState* state,
     if (!focused || !focused->is_element()) return false;
     DomElement* elem = lam::dom_require_element(focused);
     if (!tc_is_text_control(elem) || !elem->form ||
-        !elem->form->input_type ||
-        strcmp(elem->form->input_type, "password") != 0) {
+        !form_input_kind_is(elem->form->input_type,
+            FORM_INPUT_KIND_PASSWORD)) {
         return false;
     }
     // The hold is a frame timer, so it stays native; the window it counts down
@@ -502,8 +502,8 @@ static bool editing_controller_password_reveal_active_for_focus(DocState* state)
     if (!focused || !focused->is_element()) return false;
     DomElement* elem = lam::dom_require_element(focused);
     return tc_is_text_control(elem) && elem->form &&
-        elem->form->input_type &&
-        strcmp(elem->form->input_type, "password") == 0 &&
+        form_input_kind_is(elem->form->input_type,
+            FORM_INPUT_KIND_PASSWORD) &&
         form_control_password_reveal_get(state, focused, nullptr, nullptr);
 }
 
@@ -743,7 +743,7 @@ extern "C" int editing_controller_caret_surface_kind(DocState* state) {
     if (editing_surface_from_target(caret_view, &surface) &&
         editing_surface_is_text_control(&surface)) {
         return surface.owner && surface.owner->form &&
-                surface.owner->form->control_type == FORM_CONTROL_TEXTAREA
+            form_control_is_textarea(surface.owner->form)
             ? 3     // textarea
             : 1;    // single-line text control
     }

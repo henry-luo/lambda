@@ -80,24 +80,23 @@ static void ui_document_set_raster_scale(DomDocument* doc,
                                          float device_scale,
                                          uint8_t depth);
 
-static void ui_view_set_embedded_raster_scale(View* view,
-                                              float device_scale,
-                                              uint8_t depth) {
-    if (!view || depth > MAX_IFRAME_DEPTH) return;
+typedef struct UiRasterScaleWalk {
+    float device_scale;
+    uint8_t depth;
+} UiRasterScaleWalk;
+
+static bool ui_view_set_embedded_raster_scale(View* view, void* context) {
+    UiRasterScaleWalk* walk = (UiRasterScaleWalk*)context;
+    if (!view || !walk || walk->depth > MAX_IFRAME_DEPTH) return true;
     if (view->is_block()) {
         ViewBlock* block = lam::view_require_block(view);
         if (block->embed && block->embedp()->doc) {
             ui_document_set_raster_scale(block->embedp()->doc,
-                                         device_scale,
-                                         (uint8_t)(depth + 1));
+                                         walk->device_scale,
+                                         (uint8_t)(walk->depth + 1));
         }
     }
-    if (!view->is_element()) return;
-    DomElement* element = lam::dom_require_element(view);
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        ui_view_set_embedded_raster_scale(static_cast<View*>(child),
-                                          device_scale, depth);
-    }
+    return true;
 }
 
 static void ui_document_set_raster_scale(DomDocument* doc,
@@ -117,8 +116,9 @@ static void ui_document_set_raster_scale(DomDocument* doc,
         doc_state_mark_dirty(doc->state);
     }
     if (doc->view_tree && doc->view_tree->root) {
-        ui_view_set_embedded_raster_scale(doc->view_tree->root,
-                                          device_scale, depth);
+        UiRasterScaleWalk walk = {device_scale, depth};
+        view_geometry_walk_elements(doc->view_tree->root,
+                                    ui_view_set_embedded_raster_scale, &walk);
     }
 }
 

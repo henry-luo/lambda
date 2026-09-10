@@ -64,9 +64,7 @@ static void render_caret(RenderContext* rdcon, DocState* state) {
 
     if (view->is_element()) {
         DomElement* elem = lam::dom_require_element(lam::view_dom_node(view));
-        if (elem->form_control() &&
-            (elem->form->control_type == FORM_CONTROL_TEXT ||
-             elem->form->control_type == FORM_CONTROL_TEXTAREA)) {
+        if (elem->form_control() && form_control_is_text_editable(elem->form)) {
             return;
         }
     }
@@ -134,10 +132,7 @@ static bool render_text_control_selection(RenderContext* rdcon, DomRange* range,
 
 static bool render_dom_node_is_in_current_tree(DomNode* root, DomNode* node) {
     if (!root || !node) return false;
-    for (DomNode* cur = node; cur; cur = cur->parent) {
-        if (cur == root) return true;
-    }
-    return false;
+    return view_geometry_dom_is_descendant(node, root);
 }
 
 static bool rebind_paint_boundary_to_current_tree(DomNode* root,

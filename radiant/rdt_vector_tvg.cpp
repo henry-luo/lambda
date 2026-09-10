@@ -2137,19 +2137,6 @@ static const char* rdt_picture_elem_attr(Element* element, const char* attr_name
     return str_val ? str_val->chars : nullptr;
 }
 
-static Element* rdt_picture_find_id_recursive(Element* elem, const char* id) {
-    if (!elem || !id) return nullptr;
-    const char* elem_id = rdt_picture_elem_attr(elem, "id");
-    if (elem_id && strcmp(elem_id, id) == 0) return elem;
-    for (int64_t i = 0; i < elem->length; i++) {
-        Item child = elem->items[i];
-        if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
-        Element* found = rdt_picture_find_id_recursive(child.element, id);
-        if (found) return found;
-    }
-    return nullptr;
-}
-
 Element* rdt_picture_get_svg_root(RdtPicture* pic) {
     if (!pic || pic->kind != RdtPicture::KIND_SVG_DOM) return nullptr;
     return pic->svg_root;
@@ -2157,7 +2144,7 @@ Element* rdt_picture_get_svg_root(RdtPicture* pic) {
 
 Element* rdt_picture_find_svg_element_by_id(RdtPicture* pic, const char* id) {
     if (!pic || pic->kind != RdtPicture::KIND_SVG_DOM || !id || !*id) return nullptr;
-    return rdt_picture_find_id_recursive(pic->svg_root, id);
+    return rdt_picture_find_element_id(pic->svg_root, id, rdt_picture_elem_attr);
 }
 
 Pool* rdt_picture_get_pool(RdtPicture* pic) {

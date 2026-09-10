@@ -152,54 +152,35 @@ float layout_used_preferred_aspect_ratio(ViewBlock* block) {
     if (!block) return specified_ratio;
 
     bool uses_content_box_ratio = layout_aspect_ratio_uses_content_box(block);
-    if (block->tag() == MARKUP_NAME_VIDEO && block->embed &&
-        block->embedp()->video && (specified_ratio <= 0.0f || uses_content_box_ratio)) {
-        // CSS Sizing: a loaded video's intrinsic ratio participates in auto sizing
-        // before the 300×150 replaced-element fallback is considered.
-        float video_width = (float)rdt_video_get_width(block->embedp()->video);
-        float video_height = (float)rdt_video_get_height(block->embedp()->video);
-        if (video_width > 0.0f && video_height > 0.0f) {
-            return video_width / video_height;
-        }
+    ReplacedIntrinsicFacts facts = layout_replaced_intrinsic_facts(nullptr, block);
+    // CSS Sizing: a loaded video's intrinsic ratio participates in auto sizing
+    // before the 300×150 replaced-element fallback is considered.
+    if (block->tag() == MARKUP_NAME_VIDEO && facts.has_natural_aspect_ratio &&
+        (specified_ratio <= 0.0f || uses_content_box_ratio)) {
+        return facts.natural_aspect_ratio;
     }
     if (block->tag() == MARKUP_NAME_CANVAS &&
         (layout_css_size_is_automatic(block, true) ||
          layout_css_size_is_automatic(block, false)) &&
-        (specified_ratio <= 0.0f || uses_content_box_ratio)) {
-        float natural_width = 0.0f;
-        float natural_height = 0.0f;
+        (specified_ratio <= 0.0f || uses_content_box_ratio) &&
+        facts.has_natural_aspect_ratio) {
         // An automatic canvas axis uses its bitmap's natural preferred ratio;
         // definite sizing keywords such as stretch retain their own sizing.
-        if (layout_canvas_natural_size(block, &natural_width, &natural_height) &&
-            natural_width > 0.0f && natural_height > 0.0f) {
-            return natural_width / natural_height;
-        }
+        return facts.natural_aspect_ratio;
     }
 
     if (!uses_content_box_ratio) {
         return specified_ratio;
     }
 
-    if (block->tag() == MARKUP_NAME_SVG) {
-        Element* native_svg = block->is_element()
-            ? dom_element_backing(lam::dom_require_element(block)) : nullptr;
-        SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(native_svg);
+    if (block->tag() == MARKUP_NAME_SVG && facts.has_natural_aspect_ratio) {
         // `auto <ratio>` uses an SVG viewBox/natural ratio only when one exists;
         // the synthetic 300x150 fallback must not override the specified ratio.
-        return intrinsic.has_intrinsic_aspect_ratio ? intrinsic.aspect_ratio : specified_ratio;
+        return facts.natural_aspect_ratio;
     }
 
-    if (!block->embed || !block->embedp()->img) return specified_ratio;
-
-    ImageSurface* image = block->embedp()->img;
-    if (image->width <= 0 || image->height <= 0) return specified_ratio;
-    // SVG fallback dimensions (300x150) are not a natural ratio when the
-    // resource has neither explicit dimensions nor a viewBox ratio.
-    if (!image->has_intrinsic_size && !image->has_intrinsic_aspect_ratio) {
-        return specified_ratio;
-    }
     // `auto <ratio>` selects a replaced element's natural ratio once its image is known.
-    return (float)image->width / (float)image->height;
+    return facts.has_natural_aspect_ratio ? facts.natural_aspect_ratio : specified_ratio;
 }
 
 bool layout_aspect_ratio_uses_content_box(ViewBlock* block) {
@@ -1002,22 +983,8 @@ static DomNode* previous_non_whitespace_sibling(DomNode* node) {
 }
 
 static bool element_has_in_flow_intrinsic_content(DomElement* element) {
-    if (!element) return false;
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (child->is_text()) {
-            if (text_node_has_intrinsic_table_content(child)) return true;
-            continue;
-        }
-        if (!child->is_element()) continue;
-        ViewBlock* child_block = lam::view_as_block(child->as_element());
-        if (!child_block) return true;
-        if (layout_block_is_display_none(child_block) ||
-            layout_view_is_abs_or_fixed(child_block)) {
-            continue;
-        }
-        return true;
-    }
-    return false;
+    return layout_element_has_in_flow_content(
+        element, text_node_has_intrinsic_table_content);
 }
 
 struct IntrinsicMulticolChild {
@@ -1500,11 +1467,8 @@ static bool intrinsic_measure_grapheme_cluster(
     *last_codepoint = *first_codepoint;
     while (cursor < cluster_end) {
         uint32_t codepoint = 0;
-        int codepoint_bytes = str_utf8_decode(
-            (const char*)cursor, (size_t)(cluster_end - cursor), &codepoint);
-        if (codepoint_bytes <= 0) return false;
+        if (!layout_utf8_next_codepoint(&cursor, cluster_end, &codepoint)) return false;
         *last_codepoint = codepoint;
-        cursor += codepoint_bytes;
     }
 
     return true;
@@ -2179,20 +2143,7 @@ static bool is_inline_level_element(DomElement* element) {
         }
     }
 
-    // Fall back to HTML default display for common inline elements
-    // These elements are inline by default in HTML
-    const char* tag = element->node_name();
-    static const char* const default_inline_tags[] = {
-        "a", "span", "em", "strong", "b", "i", "u", "s", "small", "big",
-        "sub", "sup", "code", "tt", "kbd", "samp", "var", "cite", "abbr",
-        "acronym", "dfn", "q", "br", "time", "mark", "label", "img", "video",
-        "audio", "canvas", "iframe", "embed", "object", "svg", "meter",
-        "progress", "button", "input", "select", "textarea"
-    };
-    for (size_t i = 0; tag && i < sizeof(default_inline_tags) / sizeof(default_inline_tags[0]); i++) {
-        if (strcmp(tag, default_inline_tags[i]) == 0) return true;
-    }
-    return false;
+    return layout_tag_is_default_inline(element->tag());
 }
 
 static bool intrinsic_element_has_percentage_height(DomElement* element) {
@@ -2672,11 +2623,6 @@ CssEnum get_element_text_transform(DomElement* element) {
     return CSS_VALUE_NONE;
 }
 
-struct IntrinsicSvgSize {
-    float width;
-    float height;
-};
-
 static bool intrinsic_svg_is_ratio_only(DomElement* element, ViewBlock* view) {
     if (!element || element->tag() != MARKUP_NAME_SVG) return false;
     Element* native_svg = dom_element_backing(lam::dom_require_element(element));
@@ -2686,53 +2632,23 @@ static bool intrinsic_svg_is_ratio_only(DomElement* element, ViewBlock* view) {
         (intrinsic.has_intrinsic_aspect_ratio || preferred_ratio > 0.0f);
 }
 
-static IntrinsicSvgSize intrinsic_svg_size(DomElement* element,
-                                           float constrained_width = -1.0f) {
-    IntrinsicSvgSize size = {300.0f, 150.0f};
-    bool has_width = false;
-    bool has_height = false;
-    const char* width_attr = element ? element->get_attribute("width") : nullptr;
-    const char* height_attr = element ? element->get_attribute("height") : nullptr;
-    if (width_attr) {
-        float width = (float)atof(width_attr);
-        if (width > 0.0f) {
-            size.width = width;
-            has_width = true;
+static bool intrinsic_replaced_height_from_shared_facts(
+        LayoutContext* lycon, ViewBlock* view, DomElement* element,
+        float query_width, float* out_height) {
+    if (!element || !out_height) return false;
+    if (element->tag() == MARKUP_NAME_SVG) {
+        if (intrinsic_svg_is_ratio_only(element, view) && query_width <= 0.0f) {
+            *out_height = 0.0f;
+            return true;
         }
+        *out_height = layout_replaced_svg_intrinsic_size(element, query_width).height;
+        return *out_height >= 0.0f;
     }
-    if (height_attr) {
-        float height = (float)atof(height_attr);
-        if (height > 0.0f) {
-            size.height = height;
-            has_height = true;
-        }
+    if (element->tag() == MARKUP_NAME_AUDIO) {
+        return layout_replaced_default_size(element->tag(), nullptr, out_height);
     }
-
-    const char* viewbox = element ? element->get_attribute("viewBox") : nullptr;
-    float vb_x = 0.0f, vb_y = 0.0f, vb_width = 0.0f, vb_height = 0.0f;
-    bool has_viewbox = viewbox &&
-        sscanf(viewbox, "%f %f %f %f", &vb_x, &vb_y, &vb_width, &vb_height) == 4 &&
-        vb_width > 0.0f && vb_height > 0.0f;
-    if (has_viewbox) {
-        if (!has_width && !has_height) {
-            size.width = vb_width;
-            size.height = vb_height;
-        } else if (has_width && !has_height) {
-            size.height = size.width * vb_height / vb_width;
-        } else if (!has_width && has_height) {
-            size.width = size.height * vb_width / vb_height;
-        }
-    }
-
-    // Width and height paths must use the same SVG aspect ratio resolution.
-    // A lone intrinsic height has no natural ratio to scale through the HTML
-    // 300px fallback width; preserve that height for min/max-content queries.
-    bool has_intrinsic_ratio = has_viewbox || (has_width && has_height);
-    if (has_intrinsic_ratio && constrained_width > 0.0f && constrained_width < size.width) {
-        size.height = constrained_width * size.height / size.width;
-        size.width = constrained_width;
-    }
-    return size;
+    return layout_replaced_intrinsic_axis_size(
+        lycon, view, element, false, query_width, out_height);
 }
 
 static float intrinsic_replaced_max_height(LayoutContext* lycon, DomElement* element,
@@ -3635,8 +3551,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     if (aspect_ratio <= 0.0f && element->tag() == MARKUP_NAME_CANVAS) {
         float natural_width = 0.0f;
         float natural_height = 0.0f;
-        if (layout_canvas_natural_size(view_block_for_aspect, &natural_width, &natural_height) &&
-            natural_width > 0.0f && natural_height > 0.0f) {
+        if (layout_canvas_intrinsic_size(nullptr, view_block_for_aspect,
+                                         &natural_width, &natural_height)) {
             aspect_ratio = natural_width / natural_height;
         }
     }
@@ -3845,6 +3761,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool is_replaced_element = layout_element_is_replaced(element);
     if (is_replaced_element) {
         float replaced_width = -1;
+        ReplacedIntrinsicFacts replaced_facts =
+            layout_replaced_intrinsic_facts(lycon, view_block_replaced);
 
         if (replaced_tag == MARKUP_NAME_IMG) {
             ImageSurface* image = layout_ensure_replaced_image_surface(
@@ -3901,68 +3819,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     : 0.0f;
             }
         }
-        else if (replaced_tag == MARKUP_NAME_IFRAME) {
-            replaced_width = 300;
-        }
-        else if (replaced_tag == MARKUP_NAME_VIDEO || replaced_tag == MARKUP_NAME_CANVAS) {
-            // try actual video dimensions first
-            if (replaced_tag == MARKUP_NAME_VIDEO && view_block_replaced->embed && view_block_replaced->embedp()->video) {
-                int vw = rdt_video_get_width(view_block_replaced->embedp()->video);
-                if (vw > 0) {
-                    replaced_width = (float)vw;
-                } else {
-                    replaced_width = 300;
-                }
-            } else if (replaced_tag == MARKUP_NAME_CANVAS) {
-                float natural_width = 0.0f;
-                float natural_height = 0.0f;
-                // Canvas bitmap attributes are its intrinsic contribution, not a CSS 300px fallback.
-                if (layout_canvas_natural_size(view_block_replaced, &natural_width, &natural_height)) {
-                    replaced_width = natural_width;
-                    // A definite max-height constrains canvas's intrinsic inline
-                    // contribution through its natural ratio, like other replaced boxes.
-                    replaced_width = intrinsic_replaced_width_with_max_height(
-                        lycon, element, view_block_replaced, replaced_width,
-                        natural_width, natural_height);
-                } else {
-                    replaced_width = 300.0f;
-                }
-            } else {
-                replaced_width = 300;
-            }
-        }
-        else if (replaced_tag == MARKUP_NAME_AUDIO) {
-            replaced_width = 300;
-        }
-        else if (replaced_tag == MARKUP_NAME_SVG) {
-            const char* width_attr = element->get_attribute("width");
-            bool width_attr_is_percentage = width_attr && strchr(width_attr, '%') != nullptr;
-            bool svg_ratio_only = intrinsic_svg_is_ratio_only(element, view_block_replaced);
-            if (width_attr_is_percentage || width_is_percentage) {
-                // An unresolved percentage width uses the default replaced-object
-                // contribution; the percentage is resolved after the parent size exists.
-                replaced_width = 300.0f;
-            } else if (svg_ratio_only) {
-                replaced_width = 0.0f;
-            } else {
-                replaced_width = intrinsic_svg_size(element).width;
-            }
-            IntrinsicSvgSize svg_intrinsic = intrinsic_svg_size(element);
-            float ratio_limited_width = intrinsic_replaced_width_with_max_height(
-                lycon, element, view_block_replaced, replaced_width,
-                svg_intrinsic.width, svg_intrinsic.height);
-            if (ratio_limited_width < replaced_width) {
-                replaced_width = ratio_limited_width;
-            }
-        }
         else if (replaced_tag == MARKUP_NAME_HR) {
             replaced_width = 0;
-        }
-        else if (replaced_tag == MARKUP_NAME_EMBED ||
-                 (replaced_tag == MARKUP_NAME_OBJECT &&
-                  (element->get_attribute(MARKUP_NAME_DATA) ||
-                   layout_object_uses_default_size(element)))) {
-            replaced_width = 300;
         }
         else if (replaced_tag == MARKUP_NAME_METER) {
             replaced_width = form_control_em_size(
@@ -3971,6 +3829,26 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         else if (replaced_tag == MARKUP_NAME_PROGRESS) {
             replaced_width = form_control_em_size(
                 lycon, view_block_replaced, FormDefaults::PROGRESS_INLINE_SIZE_EM);
+        }
+        else if (replaced_facts.has_natural_width) {
+            replaced_width = replaced_facts.natural_width;
+        }
+        else if (replaced_facts.has_default_size &&
+                 replaced_tag != MARKUP_NAME_SVG) {
+            replaced_width = replaced_facts.width;
+        }
+        else if (replaced_tag == MARKUP_NAME_SVG) {
+            // Ratio-only SVGs defer their width until an axis or containing block
+            // supplies a size; an unresolved percentage keeps the object fallback.
+            const char* width_attr = element->get_attribute("width");
+            bool width_attr_is_percentage = width_attr && strchr(width_attr, '%') != nullptr;
+            if (width_attr_is_percentage || width_is_percentage) {
+                layout_replaced_default_size(replaced_tag, &replaced_width, nullptr);
+            } else if (intrinsic_svg_is_ratio_only(element, view_block_replaced)) {
+                replaced_width = 0.0f;
+            } else {
+                replaced_width = layout_replaced_svg_intrinsic_size(element).width;
+            }
         }
 
         // Form controls (INPUT, SELECT, TEXTAREA) have intrinsic sizes.
@@ -4000,12 +3878,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (replaced_width < 0) {
             if (replaced_tag == MARKUP_NAME_INPUT) {
                 const char* input_type = element->get_attribute("type");
-                if (input_type && (strcmp(input_type, "checkbox") == 0 || strcmp(input_type, "radio") == 0)) {
-                    replaced_width = FormDefaults::CHECK_SIZE;
-                } else if (input_type && strcmp(input_type, "range") == 0) {
-                    replaced_width = FormDefaults::RANGE_WIDTH;
-                } else if (input_type && strcmp(input_type, "image") == 0) {
-                    replaced_width = FormDefaults::IMAGE_INPUT_WIDTH;
+                float native_width = 0.0f;
+                if (form_input_intrinsic_size(input_type, &native_width, nullptr) &&
+                    native_width > 0.0f) {
+                    replaced_width = native_width;
                 } else {
                     // text, password, number, email, url, search, tel, etc.
                     // FormDefaults::TEXT_WIDTH is Chrome's UA border-box width.
@@ -4022,85 +3898,17 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 }
             } else if (replaced_tag == MARKUP_NAME_SELECT) {
-                // SELECT (combo box): measure max option text + arrow overhead.
-                // calc_select_size in layout_form.cpp may never run when SELECT is a
-                // flex/grid item (laid out via measurement path rather than layout_form_control).
-                bool is_listbox = view_block_replaced->form &&
-                    (view_block_replaced->form->multiple || view_block_replaced->form->select_size > 1);
-                if (is_listbox) {
-                    replaced_width = FormDefaults::SELECT_WIDTH;
-                } else {
-                    // For appearance:none, the heavy author CSS padding typically reserves
-                    // room for an author-supplied chevron icon (e.g. via ::after) — it is
-                    // not part of the replaced content. To match Chrome:
-                    //   • min_content = option text min (no CSS padding) — the floor parent
-                    //     shrink-to-fit can collapse to.
-                    //   • max_content = option text max + CSS padding + border (full
-                    //     border-box) — added by the common pad/border code below.
-                    // The asymmetry lets parent fit-content clamp to available width
-                    // (text floor) when text+padding overflows the container.
-                    bool appearance_none = false;
-                    {
-                        CssDeclaration* ap_decl = dom_element_get_specified_value(element, CSS_PROPERTY_APPEARANCE);
-                        if (ap_decl && ap_decl->value && ap_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-                            ap_decl->value->data.keyword == CSS_VALUE_NONE) {
-                            appearance_none = true;
-                        }
-                    }
-                    float max_text_min = 0;  // longest unbreakable word across options
-                    float max_text_max = 0;  // longest no-wrap option text
-                    auto include_text = [&](const char* text, size_t length, float indent) {
-                        if (!text || length == 0) return;
-                        TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, text, length);
-                        float min_width = tw.min_content + indent;
-                        float max_width = tw.max_content + indent;
-                        if (indent > 0.0f) {
-                            if (min_width < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH) min_width = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
-                            if (max_width < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH) max_width = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
-                        }
-                        if (min_width > max_text_min) max_text_min = min_width;
-                        if (max_width > max_text_max) max_text_max = max_width;
-                    };
-                    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-                        DomElement* ce = child->as_element();
-                        if (ce && ce->tag() == MARKUP_NAME_OPTGROUP) {
-                            const char* lbl = ce->get_attribute("label");
-                            include_text(lbl, lbl ? strlen(lbl) : 0, 0.0f);
-                        }
-                    }
-                    for (DomElement* option = dom_select_next_option(element, nullptr); option;
-                         option = dom_select_next_option(element, option)) {
-                        DomElement* parent = option->parent ? option->parent->as_element() : nullptr;
-                        float indent = parent && parent->tag() == MARKUP_NAME_OPTGROUP
-                            ? FormDefaults::OPTGROUP_OPTION_INDENT : 0.0f;
-                        bool has_text = false;
-                        for (DomNode* child = option->first_child; child; child = child->next_sibling) {
-                            DomText* text = child->as_text();
-                            if (text && text->text && text->length > 0) {
-                                include_text(text->text, text->length, indent);
-                                has_text = true;
-                            }
-                        }
-                        if (!has_text && indent > 0.0f) {
-                            // blank optgroup options still reserve the native minimum row width.
-                            if (FormDefaults::OPTGROUP_OPTION_MIN_WIDTH > max_text_min) max_text_min = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
-                            if (FormDefaults::OPTGROUP_OPTION_MIN_WIDTH > max_text_max) max_text_max = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
-                        }
-                    }
-                    // CSS `appearance: none` removes the native arrow region.
-                    replaced_width = layout_select_combo_intrinsic_width(
-                        max_text_max, !appearance_none);
+                SelectIntrinsicMeasure select_size = {};
+                if (layout_measure_select_intrinsic(
+                        lycon, view_block_replaced, &select_size)) {
+                    replaced_width = select_size.width;
                     if (view_block_replaced->form)
                         view_block_replaced->form->intrinsic_width = replaced_width;
-                    if (appearance_none) {
-                        // Establish asymmetric min/max so parent shrink-to-fit can clamp
-                        // to available width when the SELECT's full border-box overflows.
-                        sizes.min_content = max_text_min;  // pad/border NOT added below
-                        sizes.max_content = max_text_max;  // pad/border ADDED below
+                    if (select_size.min_excludes_padding) {
+                        sizes.min_content = select_size.min_width;
+                        sizes.max_content = select_size.max_width;
                         sizes.replaced_min_excludes_pad_border = true;
                         replaced_intrinsic_set = true;
-                        // Guard: skip the unconditional `if (replaced_width >= 0)` block
-                        // that would overwrite the asymmetric values we just set.
                         replaced_width = -1;
                     }
                 }
@@ -4136,7 +3944,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     // SVG fallback: handle SVG elements even when display.inner is not yet resolved
     if (!replaced_intrinsic_set && element->tag() == MARKUP_NAME_SVG) {
-        float svg_width = intrinsic_svg_size(element).width;
+        float svg_width = layout_replaced_svg_intrinsic_size(element).width;
         sizes.min_content = svg_width;
         sizes.max_content = svg_width;
         replaced_intrinsic_set = true;
@@ -5221,30 +5029,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // Get overflow-wrap and word-break from element or ancestors (inherited properties)
                 CssEnum ow = CSS_VALUE_NORMAL;
                 CssEnum wb = CSS_VALUE_NORMAL;
-                {
-                    DomNode* n = static_cast<DomNode*>(element);
-                    while (n) {
-                        if (n->is_element()) {
-                            DomElement* el = lam::dom_require_element(n);
-                            if (el->blk) {
-                                // Capture word-break from nearest block ancestor
-                                if (el->block()->word_break != 0 && wb == CSS_VALUE_NORMAL) {
-                                    wb = el->block()->word_break;
-                                }
-                                // Original overflow-wrap resolution (unchanged)
-                                if (el->block()->overflow_wrap != 0) {
-                                    ow = el->block()->overflow_wrap;
-                                    break;
-                                }
-                                if (el->block()->word_break == CSS_VALUE_BREAK_WORD) {
-                                    ow = CSS_VALUE_ANYWHERE;
-                                    break;
-                                }
-                            }
-                        }
-                        n = n->parent;
-                    }
-                }
+                layout_resolve_inherited_text_wrap(
+                    static_cast<DomNode*>(element), &ow, &wb);
 
                 TextIntrinsicWidths text_widths;
                 float vertical_text_extent = 0.0f;
@@ -6616,53 +6402,26 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             return 0.0f;  // no image loaded, no dimensions specified
         }
         else if (elem_tag == MARKUP_NAME_IFRAME || elem_tag == MARKUP_NAME_VIDEO ||
-                 elem_tag == MARKUP_NAME_CANVAS ||
+                 elem_tag == MARKUP_NAME_CANVAS || elem_tag == MARKUP_NAME_AUDIO ||
+                 elem_tag == MARKUP_NAME_SVG ||
                  (elem_tag == MARKUP_NAME_OBJECT &&
                   layout_object_uses_default_size(element))) {
-            // try actual video dimensions for aspect-correct height
-            if (elem_tag == MARKUP_NAME_VIDEO && view->embed && view->embedp()->video) {
-                int vw = rdt_video_get_width(view->embedp()->video);
-                int vh = rdt_video_get_height(view->embedp()->video);
-                if (vw > 0 && vh > 0) {
-                    float video_height = (float)vh;
-                    // scale proportionally if width was constrained
-                    if (replaced_query_width > 0 && replaced_query_width != (float)vw) {
-                        video_height = replaced_query_width * (float)vh / (float)vw;
-                    }
-                    return video_height;
-                }
+            float replaced_height = 0.0f;
+            if (intrinsic_replaced_height_from_shared_facts(
+                    lycon, view, element, replaced_query_width, &replaced_height)) {
+                return replaced_height;
             }
-            if (elem_tag == MARKUP_NAME_CANVAS) {
-                float natural_width = 0.0f;
-                float natural_height = 0.0f;
-                // Canvas bitmap attributes scale through its natural ratio for intrinsic block sizing.
-                if (layout_canvas_natural_size(view, &natural_width, &natural_height)) {
-                    return replaced_query_width > 0.0f && natural_width > 0.0f
-                        ? replaced_query_width * natural_height / natural_width : natural_height;
-                }
-            }
-            return 150.0f;  // CSS default 300x150
-        }
-        else if (elem_tag == MARKUP_NAME_AUDIO) {
-            return 54.0f;  // audio controls default height
-        }
-        else if (elem_tag == MARKUP_NAME_SVG) {
-            if (intrinsic_svg_is_ratio_only(element, view) && replaced_query_width <= 0.0f) {
-                return 0.0f;
-            }
-            float svg_height = intrinsic_svg_size(element, replaced_query_width).height;
-            return svg_height;
         }
     }
 
     // SVG fallback: handle SVG elements even when display.inner is not yet resolved
     if (element->tag() == MARKUP_NAME_SVG && !has_empty_size_containment &&
         !has_contain_intrinsic_height) {
-        if (intrinsic_svg_is_ratio_only(element, view) && replaced_query_width <= 0.0f) {
-            return 0.0f;
+        float svg_height = 0.0f;
+        if (intrinsic_replaced_height_from_shared_facts(
+                lycon, view, element, replaced_query_width, &svg_height)) {
+            return svg_height;
         }
-        float svg_height = intrinsic_svg_size(element, replaced_query_width).height;
-        return svg_height;
     }
 
     // Form controls (input, select, textarea) — replaced elements with intrinsic height.
@@ -6682,10 +6441,15 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 height = rows * font_size * 1.2f + 2 * FormDefaults::TEXTAREA_PADDING;
             } else if (etag == MARKUP_NAME_INPUT) {
                 const char* type_attr = element->get_attribute("type");
-                if (type_attr && (strcmp(type_attr, "checkbox") == 0 || strcmp(type_attr, "radio") == 0)) {
-                    return FormDefaults::CHECK_SIZE;  // fixed size, no CSS padding/border
+                FormInputKind input_kind = form_input_kind(type_attr);
+                float native_height = 0.0f;
+                if (form_input_intrinsic_size(type_attr, nullptr, &native_height) &&
+                    native_height > 0.0f &&
+                    (input_kind == FORM_INPUT_KIND_CHECKBOX ||
+                     input_kind == FORM_INPUT_KIND_RADIO)) {
+                    return native_height;  // fixed size, no CSS padding/border
                 }
-                if (type_attr && strcmp(type_attr, "range") == 0 && view->form &&
+                if (input_kind == FORM_INPUT_KIND_RANGE && view->form &&
                     view->form->intrinsic_height > 0.0f) {
                     // Range controls use a UA border-box metric; the generic
                     // text-input formula is 0.7px short and distorts grid rows.

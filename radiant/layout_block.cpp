@@ -63,15 +63,6 @@ static const char* stabilize_custom_layout_name(const char* name, char* storage,
     return storage;
 }
 
-static bool view_is_descendant_of(ViewElement* child, ViewElement* ancestor) {
-    ViewElement* walker = child->parent_view();
-    while (walker) {
-        if (walker == ancestor) return true;
-        walker = walker->parent_view();
-    }
-    return false;
-}
-
 static const char* pseudo_css_value_extract_name(const CssValue* value) {
     if (!value) return nullptr;
     if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
@@ -495,12 +486,10 @@ static void apply_canvas_last_remembered_size(LayoutContext* lycon, ViewBlock* b
     if (!use.x && !use.y) return;
     float natural_width = 0.0f;
     float natural_height = 0.0f;
-    if (!layout_canvas_natural_size(block, &natural_width, &natural_height) ||
-        natural_width <= 0.0f || natural_height <= 0.0f) {
+    if (!layout_canvas_intrinsic_size(lycon, block, &natural_width,
+                                      &natural_height)) {
         return;
     }
-    layout_apply_object_view_box_intrinsic_size(
-        lycon, block->as_element(), &natural_width, &natural_height);
     // visibility skipped the box; the normal replaced fallback otherwise stretches
     LayoutAxisPair<float> natural = {natural_width, natural_height};
     for (LayoutAxis axis : layout_axes()) {
@@ -778,13 +767,13 @@ static void layout_block_prepare_canvas_auto_size(
     if (!width_is_automatic && !height_is_automatic) return;
     float natural_width = 0.0f;
     float natural_height = 0.0f;
-    bool has_natural_size = layout_canvas_natural_size(block, &natural_width, &natural_height);
-    if (!has_natural_size ||
-        natural_width <= 0.0f || natural_height <= 0.0f) {
+    bool object_view_box_changes_intrinsic_size = false;
+    bool has_natural_size = layout_canvas_intrinsic_size(
+        lycon, block, &natural_width, &natural_height,
+        &object_view_box_changes_intrinsic_size);
+    if (!has_natural_size) {
         return;
     }
-    bool object_view_box_changes_intrinsic_size = layout_apply_object_view_box_intrinsic_size(
-        lycon, block->as_element(), &natural_width, &natural_height);
     float css_preferred_aspect_ratio = layout_preferred_aspect_ratio(block);
     bool canvas_has_css_preferred_ratio = css_preferred_aspect_ratio > 0.0f;
     if (block->tag() == MARKUP_NAME_CANVAS &&
@@ -1274,8 +1263,10 @@ static void shift_margin_collapse_floats(FloatBox* floats, ViewElement* parent,
                                          ViewElement* child, float delta,
                                          const char* source_loc) {
     for (FloatBox* box = floats; box; box = box->next) {
-        if (box->element && view_is_descendant_of(lam::view_require_element(box->element), parent) &&
-            !view_is_descendant_of(lam::view_require_element(box->element), child)) {
+        if (box->element && view_geometry_is_descendant(
+                lam::view_require_element(box->element), parent, false) &&
+            !view_geometry_is_descendant(
+                lam::view_require_element(box->element), child, false)) {
             box->margin_box_top += delta;
             box->margin_box_bottom += delta;
             box->y += delta;
@@ -1287,23 +1278,21 @@ static inline bool is_root_element_block(ViewBlock* block) {
     return block && block->tag_id == MARKUP_NAME_HTML;
 }
 
+static bool layout_source_block_child_allowed(DomElement* child) {
+    if (!child) return false;
+    CssEnum position = layout_specified_keyword(
+        child, CSS_PROPERTY_POSITION, CSS_VALUE_STATIC);
+    if (position == CSS_VALUE_ABSOLUTE || position == CSS_VALUE_FIXED) return false;
+    DisplayValue display = resolve_display_value(child);
+    return display.outer == CSS_VALUE_BLOCK ||
+           display.outer == CSS_VALUE_LIST_ITEM ||
+           display.outer == CSS_VALUE_TABLE;
+}
+
 static bool layout_source_has_in_flow_block_child(ViewBlock* block) {
-    if (!block || !block->is_element()) return false;
-    DomElement* element = block->as_element();
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (!child->is_element()) continue;
-        DomElement* child_element = child->as_element();
-        CssEnum position = layout_specified_keyword(
-            child_element, CSS_PROPERTY_POSITION, CSS_VALUE_STATIC);
-        if (position == CSS_VALUE_ABSOLUTE || position == CSS_VALUE_FIXED) continue;
-        DisplayValue display = resolve_display_value(child);
-        if (display.outer == CSS_VALUE_BLOCK ||
-            display.outer == CSS_VALUE_LIST_ITEM ||
-            display.outer == CSS_VALUE_TABLE) {
-            return true;
-        }
-    }
-    return false;
+    return block && block->is_element() &&
+        layout_element_has_in_flow_content(block->as_element(), nullptr,
+                                           layout_source_block_child_allowed);
 }
 
 static inline bool is_quirky_margin_tag(NameId tag) {
@@ -1428,8 +1417,8 @@ static void shift_descendant_float_boxes(BlockContext* bfc, ViewBlock* ancestor,
         for (; floating; floating = floating->next) {
             if (!floating->element) continue;
             // float ownership follows the generated view tree; raw DOM ancestry can
-            if (view_is_descendant_of(
-                    lam::view_require_element(floating->element), ancestor_element)) {
+            if (view_geometry_is_descendant(
+                    lam::view_require_element(floating->element), ancestor_element, false)) {
                 floating->margin_box_top += delta;
                 floating->margin_box_bottom += delta;
                 floating->y += delta;
@@ -1699,10 +1688,7 @@ static DomText* find_first_text_node(DomNode* node, bool* suppressed) {
         // must not be created. Check for replaced elements before recursing.
         NameId tag = elem->tag();
         bool is_replaced = (elem->display.inner == RDT_DISPLAY_REPLACED) ||
-            tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_VIDEO || tag == MARKUP_NAME_CANVAS ||
-            tag == MARKUP_NAME_IFRAME || tag == MARKUP_NAME_EMBED || tag == MARKUP_NAME_OBJECT ||
-            tag == MARKUP_NAME_INPUT || tag == MARKUP_NAME_TEXTAREA || tag == MARKUP_NAME_SELECT ||
-            tag == MARKUP_NAME_SVG || tag == MARKUP_NAME_BR || tag == MARKUP_NAME_AUDIO;
+            layout_tag_is_non_caret_container(tag);
         if (is_replaced) {
             if (suppressed) *suppressed = true;
             return nullptr;
@@ -5666,15 +5652,11 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
     if (bfc && (bfc->left_float_count > 0 || bfc->right_float_count > 0)) {
         float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
-        float bfc_y_offset = 0.0f;
-        float bfc_x_offset = 0.0f;
-        ViewElement* walker = parent_block;
         ViewBlock* bfc_elem = bfc->establishing_element;
-        while (walker && walker != bfc_elem) {
-            bfc_y_offset += walker->y;
-            bfc_x_offset += walker->x;
-            walker = walker->parent_view();
-        }
+        RdtLogicalPoint bfc_offset = view_geometry_ancestor_offset(
+            parent_block, static_cast<View*>(bfc_elem));
+        float bfc_y_offset = bfc_offset.y;
+        float bfc_x_offset = bfc_offset.x;
         float query_y = bfc_y_offset + lycon->block.advance_y;
         // CSS 2.1 §9.5: a line inside a negatively offset run-in uses its
         // local inline origin when testing the shared BFC's float intrusion.
@@ -5757,7 +5739,8 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             (canvas_width_is_contained || canvas_height_is_contained)) {
             float natural_width = 0.0f;
             float natural_height = 0.0f;
-            layout_canvas_natural_size(block, &natural_width, &natural_height);
+            layout_canvas_intrinsic_size(lycon, block, &natural_width,
+                                         &natural_height);
             bool width_is_auto = layout_css_size_is_automatic(block, true);
             bool width_is_contained = canvas_width_is_contained;
             bool height_is_contained = canvas_height_is_contained;
@@ -6405,12 +6388,11 @@ LayoutTextRectContentKind layout_text_rect_content_kind(ViewText* text,
     const unsigned char* data = text->text_data();
     if (!data) return LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE;
     const char* cursor = reinterpret_cast<const char*>(data + rect->start_index);
-    size_t remaining = static_cast<size_t>(rect->length);
+    const char* end = cursor + rect->length;
     bool has_non_collapsible_space = false;
-    while (remaining > 0) {
+    while (cursor < end) {
         uint32_t codepoint = 0;
-        int bytes = str_utf8_decode(cursor, remaining, &codepoint);
-        if (bytes <= 0 || static_cast<size_t>(bytes) > remaining) {
+        if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) {
             return LAYOUT_TEXT_RECT_PAINTED_CONTENT;
         }
         utf8proc_category_t category = utf8proc_category(
@@ -6426,8 +6408,6 @@ LayoutTextRectContentKind layout_text_rect_content_kind(ViewText* text,
         if (!is_line_whitespace && !is_non_collapsible_space) {
             return LAYOUT_TEXT_RECT_PAINTED_CONTENT;
         }
-        cursor += bytes;
-        remaining -= static_cast<size_t>(bytes);
     }
     return has_non_collapsible_space
         ? LAYOUT_TEXT_RECT_NON_COLLAPSIBLE_WHITESPACE
@@ -7389,12 +7369,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             float effective_margin = margin_will_collapse_with_parent ? 0 : block_margin_top;
             float y_in_bfc = block->y + effective_margin;
             float x_in_bfc = block->x;
-            ViewElement* walker = block->parent_view();
-            while (walker && walker != parent_bfc->establishing_element) {
-                y_in_bfc += walker->y;
-                x_in_bfc += walker->x;
-                walker = walker->parent_view();
-            }
+            RdtLogicalPoint parent_offset = view_geometry_ancestor_offset(
+                block->parent_view(),
+                static_cast<View*>(parent_bfc->establishing_element));
+            y_in_bfc += parent_offset.y;
+            x_in_bfc += parent_offset.x;
             if (block->parent_view() && block->parent_view()->is_inline()) {
                 // CSS 2.1 §9.2.1.1: the block fragment's line origin is
                 // already present in block->x; do not add it twice through
@@ -7532,12 +7511,15 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         !block->get_attribute(MARKUP_NAME_DATA);
     bool object_uses_default_size = block->is_element() &&
         layout_object_uses_default_size(block->as_element());
+    float default_width = 300.0f;
+    float default_height = 150.0f;
+    layout_replaced_default_size(elmt_name, &default_width, &default_height);
     if (elmt_name == MARKUP_NAME_IFRAME || is_open_popover_object ||
         object_uses_default_size) {
         // Table-internal display resolution can skip BlockProp creation, but an
         // element's intrinsic fallback must persist on the box's used-size slots.
         block->ensure_block(lycon);
-        LayoutAxisPair<float> defaults = {300.0f, 150.0f};
+        LayoutAxisPair<float> defaults = {default_width, default_height};
         LayoutAxisPair<float> parent_sizes = {
             pa_block ? pa_block->content_width : 0.0f,
             pa_block ? pa_block->content_height : 0.0f
@@ -7592,8 +7574,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
     if (elmt_name == MARKUP_NAME_SVG &&
         !(block->blk && block->block()->content_visibility_hidden)) {
-        Element* native_elem = block->as_element() ? dom_element_backing(block->as_element()) : nullptr;
-        SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(native_elem);
+        ReplacedIntrinsicFacts svg_facts =
+            layout_replaced_intrinsic_facts(lycon, block);
         float preferred_aspect_ratio = layout_used_preferred_aspect_ratio(block);
         if (block->is_element()) {
             DomElement* svg_element = block->as_element();
@@ -7627,15 +7609,15 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             pa_block->content_width > 0.0f &&
             pa_block->content_height > 0.0f;
         bool use_parent_slot = parent_has_definite_slot &&
-            !intrinsic.has_intrinsic_width &&
-            !intrinsic.has_intrinsic_height &&
-            !intrinsic.has_intrinsic_aspect_ratio;
+            !svg_facts.has_natural_width &&
+            !svg_facts.has_natural_height &&
+            !svg_facts.has_natural_aspect_ratio;
         // CSS Sizing 3 §5.1: viewBox-only SVGs provide a ratio, not natural
         bool use_parent_ratio_slot = pa_block &&
             pa_block->content_width > 0.0f &&
-            !intrinsic.has_intrinsic_width &&
-            !intrinsic.has_intrinsic_height &&
-            intrinsic.has_intrinsic_aspect_ratio;
+            !svg_facts.has_natural_width &&
+            !svg_facts.has_natural_height &&
+            svg_facts.has_natural_aspect_ratio;
         bool has_width_percent = block->blk && !isnan(block->block()->given_width_percent);
         bool has_height_percent = block->blk && !isnan(block->block()->given_height_percent);
         bool width_is_auto = !block->blk || block->block()->given_width_type == CSS_VALUE_AUTO ||
@@ -7653,7 +7635,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     ? stretch_css_width : ratio_slot_content_width;
             } else {
                 lycon->block.given_width = use_parent_slot ? pa_block->content_width :
-                    (intrinsic.has_intrinsic_width ? intrinsic.width : 300.0f);
+                    (svg_facts.has_natural_width ? svg_facts.natural_width : default_width);
             }
             block->ensure_block(lycon);
             layout_store_given_axis(lycon, block, lycon->block.given_width, true, false);
@@ -7668,7 +7650,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                         block, stretch_css_width, true);
                 }
                 float ratio_content_height = ratio_slot_content_width /
-                    intrinsic.aspect_ratio;
+                    svg_facts.natural_aspect_ratio;
                 lycon->block.given_height = layout_border_size_if_content_box(
                     block, ratio_content_height, false);
             } else if (use_parent_slot) {
@@ -7677,13 +7659,15 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                        !contain_intrinsic_used_axes.width) {
                 lycon->block.given_height = lycon->block.given_width /
                     preferred_aspect_ratio;
-            } else if (intrinsic.has_intrinsic_height) {
-                lycon->block.given_height = intrinsic.height;
-            } else if (intrinsic.aspect_ratio > 0.0f && lycon->block.given_width > 0.0f &&
+            } else if (svg_facts.has_natural_height) {
+                lycon->block.given_height = svg_facts.natural_height;
+            } else if (svg_facts.natural_aspect_ratio > 0.0f &&
+                       lycon->block.given_width > 0.0f &&
                        !contain_intrinsic_used_axes.width) {
-                lycon->block.given_height = lycon->block.given_width / intrinsic.aspect_ratio;
+                lycon->block.given_height = lycon->block.given_width /
+                    svg_facts.natural_aspect_ratio;
             } else {
-                lycon->block.given_height = 150.0f;
+                lycon->block.given_height = default_height;
             }
             block->ensure_block(lycon);
             layout_store_given_axis(lycon, block, lycon->block.given_height, false, false);
@@ -7761,6 +7745,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     bool is_generated_content_image = content_replacement_image.url && content_replacement_image.url[0];
     bool is_object_image = elmt_name == MARKUP_NAME_OBJECT &&
         block->get_attribute(MARKUP_NAME_DATA);
+    const char* image_source = is_generated_content_image
+        ? content_replacement_image.url
+        : (elmt_name == MARKUP_NAME_OBJECT ? block->get_attribute(MARKUP_NAME_DATA)
+                                           : block->get_attribute("src"));
+    bool has_src_attr = image_source && image_source[0] != '\0';
     if (elmt_name == MARKUP_NAME_IMG || is_generated_content_image || is_object_image) {
         // object data is a replaced image resource, so its natural dimensions
         // must enter the same sizing path as an image before fallback sizing.
@@ -7769,11 +7758,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             // Picture source selection happens before replaced sizing; otherwise
             layout_ensure_replaced_image_surface(lycon, block, block->as_element());
         }
-        const char *value = is_generated_content_image ? content_replacement_image.url :
-            (elmt_name == MARKUP_NAME_OBJECT ? block->get_attribute(MARKUP_NAME_DATA) :
-             block->get_attribute("src"));
-        bool has_src_attr = value && value[0] != '\0';
-        if (has_src_attr) {
+        if (is_generated_content_image) {
+            const char *value = content_replacement_image.url;
             size_t value_len = strlen(value);
             StrBuf* src = strbuf_new_cap(value_len);
             strbuf_append_str_n(src, value, value_len);
@@ -7797,12 +7783,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (block->embedp()->img) {
                 block->embed->broken_alt_fallback = false;
             }
+        } else if (block->embed && block->embedp()->img) {
+            block->embed->broken_alt_fallback = false;
         }
         if (block->embed && block->embedp()->img) {
             ImageSurface* img = block->embedp()->img;
-            bool from_image_orientation = layout_image_orientation_uses_from_image(block->as_element());
-            float w = (from_image_orientation || img->encoded_width <= 0) ? img->width : img->encoded_width;
-            float h = (from_image_orientation || img->encoded_height <= 0) ? img->height : img->encoded_height;
+            float w = 0.0f;
+            float h = 0.0f;
+            layout_image_intrinsic_size(block->as_element(), img, &w, &h);
             bool image_has_intrinsic_ratio = img->has_intrinsic_size ||
                 img->has_intrinsic_aspect_ratio;
             bool image_has_ratio_without_natural_size =
@@ -8180,7 +8168,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     bool canvas_height_is_auto = elmt_name == MARKUP_NAME_CANVAS &&
         layout_css_size_is_automatic(block, false);
     bool has_canvas_natural_size = block->display.inner == RDT_DISPLAY_REPLACED &&
-        layout_canvas_natural_size(block, &canvas_natural_width, &canvas_natural_height) &&
+        layout_canvas_intrinsic_size(lycon, block, &canvas_natural_width,
+                                     &canvas_natural_height) &&
         canvas_natural_width > 0.0f && canvas_natural_height > 0.0f;
     if (has_stretch_height_constraint && preferred_aspect_ratio <= 0.0f &&
         has_canvas_natural_size &&
@@ -9639,11 +9628,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // Textarea is a multi-line scrollable control; per CSS 2.1 §10.8.1,
         bool is_select_listbox = block->tag() == MARKUP_NAME_SELECT &&
             (!block->form || block->form->multiple || block->form->select_size > 1);
-        bool is_replaced = (block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
-            block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
-            (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute("data")) ||
-            block->tag() == MARKUP_NAME_TEXTAREA ||
-            is_select_listbox);
+        bool is_replaced = layout_block_is_replaced_baseline(block, true);
         bool form_control_margin_baseline = block->tag() == MARKUP_NAME_BUTTON ||
             (block->tag() == MARKUP_NAME_INPUT && block->form &&
              block->form->control_type == FORM_CONTROL_TEXT);

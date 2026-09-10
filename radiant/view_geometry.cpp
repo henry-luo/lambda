@@ -64,6 +64,90 @@ RdtLogicalPoint view_geometry_node_document_origin(View* view) {
         view, {0.0f, 0.0f}, false, 1.0f, 0.0f);
 }
 
+RdtLogicalPoint view_geometry_ancestor_offset(View* view, View* stop,
+                                               bool blocks_only) {
+    RdtLogicalPoint point = {0.0f, 0.0f};
+    for (View* current = view; current && current != stop;
+         current = current->parent) {
+        if (!blocks_only || current->is_block()) {
+            point.x += current->x;
+            point.y += current->y;
+        }
+    }
+    return point;
+}
+
+bool view_geometry_is_descendant(View* view, View* ancestor,
+                                 bool include_ancestor) {
+    for (View* current = include_ancestor ? view : (view ? view->parent : nullptr);
+         current; current = current->parent) {
+        if (current == ancestor) return true;
+    }
+    return false;
+}
+
+bool view_geometry_walk_elements(View* root, ViewGeometryElementVisitor visitor,
+                                 void* context) {
+    if (!root || !visitor) return true;
+    if (root->is_element() && !visitor(root, context)) return false;
+    if (!root->is_element()) return true;
+    DomElement* element = lam::dom_require_element(root);
+    for (View* child = element->first_child; child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (!view_geometry_walk_elements(child, visitor, context)) return false;
+    }
+    return true;
+}
+
+static bool view_geometry_walk_tree_node(View* view, ViewGeometryTreeVisitor visitor,
+                                         void* context) {
+    if (!view || !visitor(view, true, context)) return false;
+    if (view->is_element()) {
+        DomElement* element = lam::dom_require_element(view);
+        for (View* child = static_cast<View*>(element->first_child); child;
+             child = static_cast<View*>(child->next_sibling)) {
+            if (!view_geometry_walk_tree_node(child, visitor, context)) return false;
+        }
+    }
+    return visitor(view, false, context);
+}
+
+bool view_geometry_walk_tree(View* root, ViewGeometryTreeVisitor visitor,
+                             void* context) {
+    if (!root || !visitor) return true;
+    return view_geometry_walk_tree_node(root, visitor, context);
+}
+
+static bool view_geometry_walk_dom_node(DomNode* node,
+                                        ViewGeometryDomVisitor visitor,
+                                        void* context) {
+    if (!node || !visitor(node, context)) return false;
+    if (!node->is_element()) return true;
+    DomElement* element = lam::dom_require_element(node);
+    for (DomNode* child = element->first_child; child;
+         child = child->next_sibling) {
+        // Guard malformed retained links before the next recursive descent.
+        if ((uintptr_t)child < 4096) return false;
+        if (!view_geometry_walk_dom_node(child, visitor, context)) return false;
+    }
+    return true;
+}
+
+bool view_geometry_walk_dom_tree(DomNode* root, ViewGeometryDomVisitor visitor,
+                                 void* context) {
+    if (!root || !visitor) return true;
+    return view_geometry_walk_dom_node(root, visitor, context);
+}
+
+bool view_geometry_dom_is_descendant(const DomNode* node, const DomNode* ancestor,
+                                     bool include_ancestor) {
+    const DomNode* current = include_ancestor ? node : (node ? node->parent : nullptr);
+    for (; current; current = current->parent) {
+        if (current == ancestor) return true;
+    }
+    return false;
+}
+
 RdtLogicalPoint view_geometry_local_to_block_document(
         View* view, RdtLogicalPoint local) {
     return view_geometry_map_chain(
@@ -76,6 +160,13 @@ RdtLogicalPoint view_geometry_node_viewport_origin(
         view, {0.0f, 0.0f}, false, 1.0f, 0.0f, resolve_scroll, context);
     return view_geometry_map_chain(
         view ? view->parent : nullptr, point, false, 1.0f, -1.0f,
+        resolve_scroll, context);
+}
+
+RdtLogicalPoint view_geometry_block_viewport_origin(
+        View* view, ViewGeometryScrollResolver resolve_scroll, void* context) {
+    return view_geometry_map_chain(
+        view, {0.0f, 0.0f}, true, 1.0f, -1.0f,
         resolve_scroll, context);
 }
 
@@ -132,14 +223,8 @@ RdtLogicalPoint view_geometry_local_to_window(
         ViewGeometryScrollResolver resolve_scroll, void* context) {
     RdtLogicalPoint point = view_geometry_local_to_block_viewport(
         view, local, resolve_scroll, context);
-    bool root_scroll_applied = false;
-    for (View* current = view ? view->parent : nullptr; current;
-         current = current->parent) {
-        if (current == static_cast<View*>(viewport_root)) {
-            root_scroll_applied = true;
-            break;
-        }
-    }
+    bool root_scroll_applied = view_geometry_is_descendant(
+        view ? view->parent : nullptr, static_cast<View*>(viewport_root));
     if (root_scroll_applied) {
         // Undo the in-chain root scroll before the common viewport step. That
         // step reapplies it only when the external document offset omits it.

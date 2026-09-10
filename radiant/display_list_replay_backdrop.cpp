@@ -112,16 +112,8 @@ void dl_replay_backdrop_apply_blend_mode(DisplayReplayBackdropStack* stack,
     int by = region.y;
     int bw = region.w;
     int bh = region.h;
-    uint32_t* px = (uint32_t*)surface->pixels;
-    int pitch = surface->pitch / 4;
-    for (int row = 0; row < bh; row++) {
-        for (int col = 0; col < bw; col++) {
-            uint32_t bd = backdrop[row * bw + col];
-            uint32_t source = px[(by + row) * pitch + (bx + col)];
-            px[(by + row) * pitch + (bx + col)] =
-                render_composite_blend_pixel(bd, source, (CssEnum)blend->blend_mode);
-        }
-    }
+    render_composite_blend_surface(surface, backdrop, bx, by, bw, bh,
+                                   (CssEnum)blend->blend_mode);
     dl_replay_backdrop_release(stack, scratch, backdrop);
 }
 

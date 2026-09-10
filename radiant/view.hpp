@@ -34,6 +34,7 @@ enum PropGroupKind : uint8_t {
     PROP_GROUP_POSITION,
     PROP_GROUP_FLEX_ITEM,
     PROP_GROUP_GRID_ITEM,
+    PROP_GROUP_OUTLINE,
 };
 
 enum CssPropValueKind : uint8_t {
@@ -705,6 +706,27 @@ inline FontStyleDesc font_style_desc_from_prop(const FontProp* fp) {
                : FONT_SLANT_NORMAL;
     sd.platform_fallback_family = fp->platform_fallback_family;
     return sd;
+}
+
+inline FontStyleDesc font_style_desc_system_ui(float size_px) {
+    FontStyleDesc sd = {};
+    sd.family = "Helvetica,Arial,sans-serif";
+    sd.size_px = size_px;
+    sd.weight = FONT_WEIGHT_NORMAL;
+    sd.slant = FONT_SLANT_NORMAL;
+    return sd;
+}
+
+inline FontWeight radiant_font_weight_from_css(CssEnum weight) {
+    if (weight == CSS_VALUE_BOLD) return FONT_WEIGHT_BOLD;
+    if (weight >= 100 && weight <= 900) return (FontWeight)weight;
+    return FONT_WEIGHT_NORMAL;
+}
+
+inline FontSlant radiant_font_slant_from_css(CssEnum style) {
+    if (style == CSS_VALUE_ITALIC) return FONT_SLANT_ITALIC;
+    if (style == CSS_VALUE_OBLIQUE) return FONT_SLANT_OBLIQUE;
+    return FONT_SLANT_NORMAL;
 }
 
 // tier-2: view-pool, rebuilt each relayout
@@ -2177,9 +2199,29 @@ typedef struct ViewGeometryTextHit {
 } ViewGeometryTextHit;
 
 RdtLogicalPoint view_geometry_node_document_origin(View* view);
+// Sum view origins up to (but excluding) an ancestor. Formatting contexts
+// that ignore inline wrappers use blocks_only for the shared coordinate walk.
+RdtLogicalPoint view_geometry_ancestor_offset(View* view, View* stop,
+                                               bool blocks_only = false);
+bool view_geometry_is_descendant(View* view, View* ancestor,
+                                 bool include_ancestor = true);
+typedef bool (*ViewGeometryElementVisitor)(View* view, void* context);
+bool view_geometry_walk_elements(View* root, ViewGeometryElementVisitor visitor,
+                                 void* context);
+typedef bool (*ViewGeometryTreeVisitor)(View* view, bool entering, void* context);
+bool view_geometry_walk_tree(View* root, ViewGeometryTreeVisitor visitor,
+                             void* context);
+typedef bool (*ViewGeometryDomVisitor)(DomNode* node, void* context);
+bool view_geometry_walk_dom_tree(DomNode* root, ViewGeometryDomVisitor visitor,
+                                 void* context);
+bool view_geometry_dom_is_descendant(const DomNode* node, const DomNode* ancestor,
+                                     bool include_ancestor = true);
 RdtLogicalPoint view_geometry_local_to_block_document(
     View* view, RdtLogicalPoint local);
 RdtLogicalPoint view_geometry_node_viewport_origin(
+    View* view, ViewGeometryScrollResolver resolve_scroll = nullptr,
+    void* context = nullptr);
+RdtLogicalPoint view_geometry_block_viewport_origin(
     View* view, ViewGeometryScrollResolver resolve_scroll = nullptr,
     void* context = nullptr);
 RdtLogicalPoint view_geometry_local_to_block_viewport(
@@ -2923,6 +2965,64 @@ enum FormControlType {
     FORM_CONTROL_HIDDEN,        // type="hidden" - no visual
 };
 
+// Input keywords share a coarse FormControlType for rendering, but their
+// mechanical capabilities are not identical (for example, color is not a
+// text-editing surface). Keep this descriptor separate from live form state.
+enum FormInputKind {
+    FORM_INPUT_KIND_TEXT = 0,
+    FORM_INPUT_KIND_PASSWORD,
+    FORM_INPUT_KIND_EMAIL,
+    FORM_INPUT_KIND_URL,
+    FORM_INPUT_KIND_SEARCH,
+    FORM_INPUT_KIND_TEL,
+    FORM_INPUT_KIND_NUMBER,
+    FORM_INPUT_KIND_CHECKBOX,
+    FORM_INPUT_KIND_RADIO,
+    FORM_INPUT_KIND_BUTTON,
+    FORM_INPUT_KIND_SUBMIT,
+    FORM_INPUT_KIND_RESET,
+    FORM_INPUT_KIND_IMAGE,
+    FORM_INPUT_KIND_HIDDEN,
+    FORM_INPUT_KIND_RANGE,
+    FORM_INPUT_KIND_FILE,
+    FORM_INPUT_KIND_DATE,
+    FORM_INPUT_KIND_TIME,
+    FORM_INPUT_KIND_DATETIME_LOCAL,
+    FORM_INPUT_KIND_MONTH,
+    FORM_INPUT_KIND_WEEK,
+    FORM_INPUT_KIND_COLOR,
+};
+
+enum FormInputCapability {
+    FORM_INPUT_CAP_TEXT_CONTROL = 1u << 0,
+    FORM_INPUT_CAP_SINGLE_LINE = 1u << 1,
+    FORM_INPUT_CAP_PASSWORD = 1u << 2,
+    FORM_INPUT_CAP_CHECKABLE = 1u << 3,
+    FORM_INPUT_CAP_BUTTON = 1u << 4,
+    FORM_INPUT_CAP_HIDDEN = 1u << 5,
+    FORM_INPUT_CAP_REPLACED_IMAGE = 1u << 6,
+    FORM_INPUT_CAP_RANGE = 1u << 7,
+    FORM_INPUT_CAP_FIXED_INTRINSIC_SIZE = 1u << 8,
+};
+
+struct FormInputDescriptor {
+    const char* keyword;
+    FormInputKind kind;
+    FormControlType control_type;
+    uint32_t capabilities;
+    float fixed_intrinsic_width;
+    float fixed_intrinsic_height;
+};
+
+// Static input-type metadata is shared by style, layout, event, editing, and
+// rendering callers. The returned descriptor is immutable and process-owned.
+const FormInputDescriptor* form_input_descriptor(const char* type);
+FormInputKind form_input_kind(const char* type);
+FormControlType form_input_control_type(const char* type);
+bool form_input_has_capability(const char* type, uint32_t capability);
+bool form_input_kind_is(const char* type, FormInputKind kind);
+bool form_input_intrinsic_size(const char* type, float* width, float* height);
+
 // Default intrinsic sizes (CSS pixels at 1x pixel ratio)
 // All dimensions are border-box values matching Chrome UA defaults
 namespace FormDefaults {
@@ -3154,6 +3254,15 @@ inline float form_select_dropdown_row_height(const FormControlProp* form) {
         ? form->intrinsic_height : FormDefaults::SELECT_HEIGHT;
 }
 
+inline bool form_control_is_text_editable(const FormControlProp* form) {
+    return form && (form->control_type == FORM_CONTROL_TEXT ||
+                    form->control_type == FORM_CONTROL_TEXTAREA);
+}
+
+inline bool form_control_is_textarea(const FormControlProp* form) {
+    return form && form->control_type == FORM_CONTROL_TEXTAREA;
+}
+
 // Apply the non-zero default field values. Memory pointed to by `f` must be
 // either zeroed (e.g. from pool_calloc / mem_calloc) or freshly-allocated
 // scratch — this function only assigns the non-zero defaults.
@@ -3170,42 +3279,10 @@ void form_control_release_prop(DomElement* elem);
 // Helper functions
 
 /**
- * Determine FormControlType from input type attribute
+ * Determine FormControlType from input type attribute.
  */
 inline FormControlType get_input_control_type(const char* type) {
-    if (!type || !*type) return FORM_CONTROL_TEXT;  // default is text
-
-    // Text-like inputs
-    if (strcmp(type, "text") == 0 ||
-        strcmp(type, "password") == 0 ||
-        strcmp(type, "email") == 0 ||
-        strcmp(type, "url") == 0 ||
-        strcmp(type, "search") == 0 ||
-        strcmp(type, "tel") == 0 ||
-        strcmp(type, "number") == 0) {
-        return FORM_CONTROL_TEXT;
-    }
-
-    // Toggle controls
-    if (strcmp(type, "checkbox") == 0) return FORM_CONTROL_CHECKBOX;
-    if (strcmp(type, "radio") == 0) return FORM_CONTROL_RADIO;
-
-    // Button types
-    if (strcmp(type, "submit") == 0 ||
-        strcmp(type, "reset") == 0 ||
-        strcmp(type, "button") == 0) {
-        return FORM_CONTROL_BUTTON;
-    }
-
-    // Image button - replaced element with image dimensions
-    if (strcmp(type, "image") == 0) return FORM_CONTROL_IMAGE;
-
-    // Special types
-    if (strcmp(type, "hidden") == 0) return FORM_CONTROL_HIDDEN;
-    if (strcmp(type, "range") == 0) return FORM_CONTROL_RANGE;
-
-    // File, date, color etc. - treat as text for now
-    return FORM_CONTROL_TEXT;
+    return form_input_control_type(type);
 }
 
 
@@ -3229,6 +3306,20 @@ typedef enum CssAnimValueType {
     ANIM_VAL_TRANSFORM,     // transform function list
     ANIM_VAL_DISPLAY,       // display's discrete outer/inner box type
 } CssAnimValueType;
+
+typedef struct CssPropertyRuntimeMetadata {
+    CssPropertyCode property;
+    CssAnimValueType animation_type;
+    bool transition_supported;
+    bool font_phase;
+} CssPropertyRuntimeMetadata;
+
+const CssPropertyRuntimeMetadata* css_property_runtime_metadata(CssPropertyCode property);
+size_t css_property_runtime_metadata_count();
+const CssPropertyRuntimeMetadata* css_property_runtime_metadata_at(size_t index);
+// Resolver inheritance keeps the historical author-facing subset while the
+// CSS database continues to expose broader metadata to other consumers.
+bool css_property_runtime_inherited(CssPropertyCode property);
 
 // Forward declaration from view.hpp
 struct TransformFunction;

@@ -214,11 +214,9 @@ static void on_snapshot_ready(GObject* object, GAsyncResult* result, gpointer us
             unsigned char a = src_row[col * 4 + 3];
 
             // un-premultiply alpha
-            if (a != 0 && a != 255) {
-                r = (unsigned char)((r * 255 + a / 2) / a);
-                g = (unsigned char)((g * 255 + a / 2) / a);
-                b = (unsigned char)((b * 255 + a / 2) / a);
-            }
+            r = render_pixel_unpremultiply_channel(r, a);
+            g = render_pixel_unpremultiply_channel(g, a);
+            b = render_pixel_unpremultiply_channel(b, a);
 
             // write RGBA
             dst_row[col * 4 + 0] = r;

@@ -197,16 +197,7 @@ static bool flex_measure_item_uses_vertical_writing_mode(ViewElement* item) {
 // Nested flex content height measurement
 
 static bool flex_measurement_tag_is_inline(NameId tag) {
-    static const NameId inline_tags[] = {
-        MARKUP_NAME_A, MARKUP_NAME_SPAN, MARKUP_NAME_EM, MARKUP_NAME_STRONG,
-        MARKUP_NAME_B, MARKUP_NAME_I, MARKUP_NAME_SMALL, MARKUP_NAME_SUB,
-        MARKUP_NAME_SUP, MARKUP_NAME_ABBR, MARKUP_NAME_CODE, MARKUP_NAME_KBD,
-        MARKUP_NAME_MARK, MARKUP_NAME_Q, MARKUP_NAME_S, MARKUP_NAME_SAMP,
-        MARKUP_NAME_VAR, MARKUP_NAME_TIME, MARKUP_NAME_U, MARKUP_NAME_CITE,
-        MARKUP_NAME_BDI, MARKUP_NAME_BDO, MARKUP_NAME_BR
-    };
-    return layout_tag_in_list(tag, inline_tags,
-                              sizeof(inline_tags) / sizeof(*inline_tags));
+    return layout_tag_is_default_inline(tag);
 }
 
 static bool flex_break_has_block_siblings(ViewElement* item) {
@@ -759,164 +750,19 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
     float min_width = 0, max_width = 0, min_height = 0, max_height = 0;
     // Check if this is a replaced element (img, video, or SVG) - needs special handling
     NameId elmt_name = item->tag();
-    bool is_replaced = (elmt_name == MARKUP_NAME_IMG || elmt_name == MARKUP_NAME_VIDEO ||
-                        elmt_name == MARKUP_NAME_IFRAME || elmt_name == MARKUP_NAME_CANVAS ||
-                        elmt_name == MARKUP_NAME_SVG);
+    bool is_replaced = layout_tag_is_replaced_content(elmt_name) &&
+        elmt_name != MARKUP_NAME_EMBED && elmt_name != MARKUP_NAME_OBJECT &&
+        elmt_name != MARKUP_NAME_AUDIO;
 
-    if (is_replaced && lycon && elmt_name == MARKUP_NAME_SVG) {
-        Element* native_elem = dom_element_backing(lam::dom_require_element(item));
-        SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(native_elem);
-        float intrinsic_width = intrinsic.width;
-        float intrinsic_height = intrinsic.height;
-
-        if (intrinsic.has_intrinsic_width && intrinsic.has_intrinsic_height) {
-            // SVG width/height attributes are natural dimensions.
-        } else if (intrinsic.has_intrinsic_width && intrinsic.has_intrinsic_aspect_ratio) {
-            intrinsic_height = intrinsic_width / intrinsic.aspect_ratio;
-        } else if (intrinsic.has_intrinsic_height && intrinsic.has_intrinsic_aspect_ratio) {
-            intrinsic_width = intrinsic_height * intrinsic.aspect_ratio;
-        } else if (intrinsic.has_intrinsic_aspect_ratio) {
-            bool main_is_horizontal = is_main_axis_horizontal(flex_layout);
-            float available_inline = main_is_horizontal
-                ? flex_layout->main_axis_size : flex_layout->cross_axis_size;
-            bool available_inline_is_definite = main_is_horizontal
-                ? flex_layout->main_axis_available_size_is_definite
-                : flex_layout->has_definite_cross_size;
-            if (available_inline_is_definite && available_inline > 0.0f) {
-                float inline_border_size = layout_stretch_fit_border_box_size(
-                    lam::view_as_block(item), available_inline, main_is_horizontal);
-                float inline_content_size = layout_content_size_from_border_box(
-                    lam::view_as_block(item), inline_border_size, main_is_horizontal);
-                if (main_is_horizontal) {
-                    intrinsic_width = inline_content_size;
-                    intrinsic_height = inline_content_size / intrinsic.aspect_ratio;
-                } else {
-                    intrinsic_height = inline_content_size;
-                    intrinsic_width = inline_content_size * intrinsic.aspect_ratio;
-                }
-            } else {
-                // CSS Sizing 3 §5.1: without a definite available inline size,
-                // a ratio-only replaced box uses the default object width.
-                intrinsic_width = 300.0f;
-                intrinsic_height = intrinsic_width / intrinsic.aspect_ratio;
-            }
+    if (is_replaced && lycon) {
+        IntrinsicSize replaced_size = {};
+        if (layout_measure_replaced_flex_intrinsic(
+                lycon, item, flex_layout, &replaced_size)) {
+            flex_store_intrinsic_sizes(item, replaced_size.min_width,
+                replaced_size.max_width, replaced_size.min_height,
+                replaced_size.max_height);
+            return;
         }
-
-        min_width = max_width = intrinsic_width;
-        min_height = max_height = intrinsic_height;
-        flex_store_intrinsic_sizes(item, min_width, max_width, min_height, max_height);
-        return;
-    }
-
-    if (is_replaced && lycon && elmt_name == MARKUP_NAME_IMG) {
-        // Load image to get intrinsic dimensions
-        const char* src_value = item->get_attribute("src");
-        if (src_value) {
-            if (!item->embed) {
-                item->ensure_embed(lycon);
-            }
-            if (!item->embedp()->img) {
-                item->embed->img = load_image(lycon->ui_context, src_value);
-            }
-            if (item->embedp()->img) {
-                ImageSurface* img = item->embedp()->img;
-                float w = img->width;
-                float h = img->height;
-                // Check for explicit CSS dimensions
-                float explicit_width = layout_axis_has_given_size(item, true) ?
-                    item->block()->given_width : -1;
-                float explicit_height = layout_axis_has_given_size(item, false) ?
-                    item->block()->given_height : -1;
-                float preferred_aspect_ratio = layout_used_preferred_aspect_ratio(
-                    lam::view_as_block(item));
-                float used_aspect_ratio = preferred_aspect_ratio > 0.0f
-                    ? preferred_aspect_ratio : w / h;
-                // Also check max-width as constraint
-                float max_width_constraint = layout_positive_max_axis_or(
-                    lam::view_as_block(item), true, -1.0f);
-
-                if (explicit_width > 0 && explicit_height > 0) {
-                    // Both dimensions specified
-                    min_width = max_width = explicit_width;
-                    min_height = max_height = explicit_height;
-                } else if (explicit_width > 0) {
-                    // A definite CSS axis transfers through the preferred ratio;
-                    // using the natural ratio here inflates flex auto-minimums.
-                    min_width = max_width = explicit_width;
-                    min_height = max_height = explicit_width / used_aspect_ratio;
-                } else if (explicit_height > 0) {
-                    // Keep intrinsic contributions consistent with normal replaced sizing.
-                    min_height = max_height = explicit_height;
-                    min_width = max_width = explicit_height * used_aspect_ratio;
-                } else if (max_width_constraint > 0 && max_width_constraint < w) {
-                    // Max-width constrains the image
-                    min_width = max_width = max_width_constraint;
-                    min_height = max_height = max_width_constraint * h / w;
-                } else {
-                    // Use intrinsic dimensions
-                    min_width = max_width = w;
-                    min_height = max_height = h;
-                }
-            } else {
-                // Failed image data has no natural dimensions; use the same
-                // missing-image indicator size as the normal <img> layout path.
-                min_width = max_width = 16.0f;
-                min_height = max_height = 16.0f;
-            }
-        } else {
-            // HTML width attributes supply a replaced element's intrinsic
-            // contribution even before an image request exists; without this,
-            // Flexbox's auto minimum sees 0 and shrinks the declared box away.
-            const char* width_attr = item->get_attribute("width");
-            CssDeclaration* css_width_decl = item->specified_style
-                ? style_tree_get_declaration(item->specified_style, CSS_PROPERTY_WIDTH)
-                : nullptr;
-            bool has_html_pixel_width = width_attr && !css_width_decl && item->blk &&
-                item->block()->given_width >= 0.0f &&
-                isnan(item->block()->given_width_percent);
-            min_width = max_width = has_html_pixel_width
-                ? min(item->block()->given_width, MAX_LAYOUT_DIMENSION) : 0.0f;
-            min_height = max_height = 0.0f;
-        }
-
-        flex_store_intrinsic_sizes(item, min_width, max_width, min_height, max_height);
-
-        return;
-    }
-
-    if (is_replaced && elmt_name == MARKUP_NAME_CANVAS) {
-        ViewBlock* block = lam::view_as_block(item);
-        float natural_width = 0.0f;
-        float natural_height = 0.0f;
-        if (block && block->blk &&
-            layout_canvas_natural_size(block, &natural_width, &natural_height) &&
-            natural_width > 0.0f && natural_height > 0.0f) {
-            min_width = max_width = natural_width;
-            min_height = max_height = natural_height;
-
-            bool main_is_horizontal = is_main_axis_horizontal(flex_layout);
-            bool cross_is_horizontal = !main_is_horizontal;
-            CssEnum cross_size_type = cross_is_horizontal
-                ? block->block()->given_width_type : block->block()->given_height_type;
-            if (cross_size_type == CSS_VALUE_STRETCH && flex_layout->has_definite_cross_size) {
-                float stretch_border_size = layout_stretch_fit_border_box_size(
-                    block, flex_layout->cross_axis_size, cross_is_horizontal);
-                float stretch_content_size = layout_content_size_from_border_box(
-                    block, stretch_border_size, cross_is_horizontal);
-                float natural_ratio = natural_width / natural_height;
-                // A definite stretch cross size participates in the canvas's
-                // min-content contribution before Flexbox §4.5 combines suggestions.
-                if (cross_is_horizontal) {
-                    min_width = max_width = stretch_content_size;
-                    min_height = max_height = stretch_content_size / natural_ratio;
-                } else {
-                    min_height = max_height = stretch_content_size;
-                    min_width = max_width = stretch_content_size * natural_ratio;
-                }
-            }
-        }
-        flex_store_intrinsic_sizes(item, min_width, max_width, min_height, max_height);
-        return;
     }
     // Note: Form controls are handled in calculate_flex_basis directly since
     // they don't have fi (FlexItemProp) allocated - form properties use a union

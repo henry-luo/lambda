@@ -97,9 +97,73 @@ void render_output_target_init(RenderOutputTarget* target, RenderOutputKind kind
     target->device_scale = 1.0f;
 }
 
-bool render_export_session_begin(RenderExportSession* session, const char* html_file,
-                                 int viewport_width, int viewport_height,
-                                 int fallback_width, int fallback_height, float output_scale) {
+void render_output_target_apply_session(RenderOutputTarget* target,
+                                        const RenderExportSession* session) {
+    if (!target || !session) return;
+    target->viewport_width = session->viewport_width;
+    target->viewport_height = session->viewport_height;
+    target->output_scale = session->output_scale;
+    target->device_scale = session->device_scale;
+}
+
+static void render_png_write_to_strbuf(png_structp png_ptr,
+                                       png_bytep data, png_size_t length) {
+    StrBuf* out = (StrBuf*)png_get_io_ptr(png_ptr);
+    if (!out || !data || length == 0) return;
+    if (!strbuf_ensure_cap(out, out->length + length + 1)) return;
+    memcpy(out->str + out->length, data, length);
+    out->length += length;
+    out->str[out->length] = '\0';
+}
+
+StrBuf* render_encode_surface_png(ImageSurface* surface) {
+    if (!surface || !surface->pixels || surface->width <= 0 || surface->height <= 0) {
+        return nullptr;
+    }
+    StrBuf* png_bytes = strbuf_new_cap((size_t)surface->width * (size_t)surface->height);
+    png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png_ptr) {
+        strbuf_free(png_bytes);
+        return nullptr;
+    }
+    png_infop info_ptr = png_create_info_struct(png_ptr);
+    if (!info_ptr) {
+        png_destroy_write_struct(&png_ptr, NULL);
+        strbuf_free(png_bytes);
+        return nullptr;
+    }
+    if (setjmp(png_jmpbuf(png_ptr))) {
+        png_destroy_write_struct(&png_ptr, &info_ptr);
+        strbuf_free(png_bytes);
+        return nullptr;
+    }
+    png_set_write_fn(png_ptr, png_bytes, render_png_write_to_strbuf, NULL);
+    png_set_IHDR(png_ptr, info_ptr, surface->width, surface->height,
+                 8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
+                 PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    png_write_info(png_ptr, info_ptr);
+    png_bytep* rows = (png_bytep*)mem_alloc(
+        sizeof(png_bytep) * surface->height, MEM_CAT_RENDER);
+    if (!rows) {
+        png_destroy_write_struct(&png_ptr, &info_ptr);
+        strbuf_free(png_bytes);
+        return nullptr;
+    }
+    for (int y = 0; y < surface->height; y++) {
+        rows[y] = (png_bytep)((uint8_t*)surface->pixels + y * surface->pitch);
+    }
+    png_write_image(png_ptr, rows);
+    png_write_end(png_ptr, NULL);
+    mem_free(rows);
+    png_destroy_write_struct(&png_ptr, &info_ptr);
+    return png_bytes;
+}
+
+static bool render_export_session_begin_internal(
+        RenderExportSession* session, const char* html_file,
+        int viewport_width, int viewport_height,
+        int fallback_width, int fallback_height, float output_scale,
+        float device_scale, bool raster_surface) {
     if (!session || !html_file) return false;
     memset(session, 0, sizeof(*session));
 
@@ -108,21 +172,35 @@ bool render_export_session_begin(RenderExportSession* session, const char* html_
     int layout_width = viewport_width > 0 ? viewport_width : fallback_width;
     int layout_height = viewport_height > 0 ? viewport_height : fallback_height;
     session->output_scale = output_scale > 0.0f ? output_scale : 1.0f;
+    session->device_scale = device_scale > 0.0f ? device_scale : 1.0f;
+    session->raster_scale = session->output_scale * session->device_scale;
+    session->viewport_width = viewport_width;
+    session->viewport_height = viewport_height;
+    session->auto_width = auto_width;
+    session->auto_height = auto_height;
 
     session->ui_context = (UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER); // OBJ_HEAP_OK: export session owns the headless UI context shell.
     if (!session->ui_context) {
         log_error("[EXPORT_SESSION] Failed to allocate headless UI context");
         return false;
     }
-    if (ui_context_init(session->ui_context, true, 1.0f) != 0) {
+    if (ui_context_init(session->ui_context, true, session->device_scale) != 0) {
         log_error("[EXPORT_SESSION] Failed to initialize headless UI context");
         mem_free(session->ui_context);
         session->ui_context = nullptr;
         return false;
     }
-    ui_context_create_surface(session->ui_context, layout_width, layout_height);
-    session->ui_context->window_width = layout_width;
-    session->ui_context->window_height = layout_height;
+    int surface_width = raster_surface
+        ? (int)(layout_width * session->raster_scale)
+        : layout_width;
+    int surface_height = raster_surface
+        ? (int)(layout_height * session->raster_scale)
+        : layout_height;
+    ui_context_create_surface(session->ui_context, surface_width, surface_height);
+    session->ui_context->window_width = surface_width;
+    session->ui_context->window_height = surface_height;
+    session->ui_context->viewport_width = layout_width;
+    session->ui_context->viewport_height = layout_height;
 
     session->base_url = get_current_dir();
     if (!session->base_url) {
@@ -168,6 +246,23 @@ bool render_export_session_begin(RenderExportSession* session, const char* html_
     } else {
     }
     return true;
+}
+
+bool render_export_session_begin(RenderExportSession* session, const char* html_file,
+                                 int viewport_width, int viewport_height,
+                                 int fallback_width, int fallback_height, float output_scale) {
+    return render_export_session_begin_internal(session, html_file,
+        viewport_width, viewport_height, fallback_width, fallback_height,
+        output_scale, 1.0f, false);
+}
+
+bool render_export_session_begin_raster(RenderExportSession* session,
+                                        const char* html_file,
+                                        int viewport_width, int viewport_height,
+                                        float output_scale, float device_scale) {
+    return render_export_session_begin_internal(session, html_file,
+        viewport_width, viewport_height, 1200, 800, output_scale,
+        device_scale, true);
 }
 
 void render_export_session_end(RenderExportSession* session) {
