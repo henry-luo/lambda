@@ -1351,7 +1351,12 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             Item owner = interp_read_binding(f, owner_entry);
             Item replacement = ItemError;
             if (sinfo->fn == SYSPROC_PUSH) {
-                replacement = pn_push_cow(owner, (Item){.item = values[0]});
+                // Only a declared binding imposes the append contract; a
+                // representation certificate may also belong to an open alias.
+                Type* contract = owner_entry->declared_type;
+                replacement = lambda_array_contract_canonical(contract)
+                    ? lambda_array_push_checked(owner, (Item){.item = values[0]}, contract, "push")
+                    : pn_push_cow(owner, (Item){.item = values[0]});
             } else if (sinfo->fn == SYSPROC_SPLICE) {
                 replacement = pn_splice_cow(owner, (Item){.item = values[0]},
                     (Item){.item = values[1]});

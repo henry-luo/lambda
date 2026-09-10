@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3: relay keeps its public entry admission, but native calls to add/size reuse the full admitted Vec witness.",
+  "description": "D3.3.3v3: relay keeps its public entry admission; add/size reuse the admitted Vec witness, and cold append enforces the binding contract explicitly.",
   "checks": [
     {
       "in_func": "_relay_#",
@@ -15,7 +15,7 @@
       "expect_seq": [
         {"pattern": "mov\t{{r}}, u8:4({{r}})"},
         {"pattern": "mov\ti64:({{r}}), %p2"},
-        {"pattern": "call\tpn_push_cow"}
+        {"pattern": "call\tlambda_array_push_checked"}
       ]
     }
   ]

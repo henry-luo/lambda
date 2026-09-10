@@ -81,15 +81,30 @@
           "mir_typed",
           "mir_typed_auto_e2e"
         ],
-        "source": "temp/benchmark_v41_fixed_mir.json",
-        "source_started_at": "2026-09-10T11:35:27",
-        "source_finished_at": "2026-09-10T11:38:23",
+        "source": "temp/benchmark_v41_release_repair.json",
+        "source_started_at": "2026-09-10T12:11:17",
+        "source_finished_at": "2026-09-10T12:16:43",
         "source_runs": 3,
         "source_platform": "Darwin arm64",
-        "source_lambda_commit": "086c8685a67044f35eec7ebf4b2504ea794997a9",
-        "merged_at": "2026-09-10T11:44:22",
-        "cells": 8,
-        "note": "Result41 recovery refresh for awfy/havlak and jetstream/navier_stokes; 3 runs on cached release test/benchmark/exe/lambda-v41-086c8685a6 (SHA-256 34e2779603fc695c8439902e05753561bc97a24d892354f753ab2c55fae0bd28) after Test262 40261/40261, 0 regressions."
+        "source_lambda_commit": "57addc5cf4fe31b7989c72888b3580e3ea600511",
+        "merged_at": "2026-09-10T12:17:42",
+        "cells": 16,
+        "note": "Release repair for awfy/havlak, jetstream/navier_stokes, text/three_way_merge, and text/log_pipeline; three runs from verified NDEBUG cache test/benchmark/exe/lambda-v41-57addc5cf4 (SHA-256 d2c8df4bd4fb1fe8c983ccdef752f2943c6970128e0ce1e33bf04434789c4cf8). The prior debug-build refresh was removed."
+      },
+      {
+        "engines": [
+          "c2mir",
+          "c2mir_e2e"
+        ],
+        "source": "temp/benchmark_v41_c2mir_repair.json",
+        "source_started_at": "2026-09-10T12:18:28",
+        "source_finished_at": "2026-09-10T12:18:36",
+        "source_runs": 3,
+        "source_platform": "Darwin arm64",
+        "source_lambda_commit": "57addc5cf4fe31b7989c72888b3580e3ea600511",
+        "merged_at": "2026-09-10T12:18:54",
+        "cells": 4,
+        "note": "C2MIR repair for text/three_way_merge and text/log_pipeline; three runs after both ports were corrected to execute the complete Lambda workloads."
       }
     ]
   },
@@ -7380,7 +7395,7 @@
     },
     "havlak": {
       "category": "macro",
-      "mir": 2492.88,
+      "mir": 65.097,
       "_status": {
         "mir": "ok",
         "mir_auto_e2e": "ok",
@@ -7403,20 +7418,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 11521.307334,
-              "exec_ms": 2484.88,
+              "wall_ms": 753.324791,
+              "exec_ms": 65.097,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 11468.343,
-              "exec_ms": 2492.88,
+              "wall_ms": 153.447708,
+              "exec_ms": 65.355,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 11481.05825,
-              "exec_ms": 2556.98,
+              "wall_ms": 150.329833,
+              "exec_ms": 64.1,
               "status": "ok"
             }
           ]
@@ -7428,20 +7443,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 13261.73975,
-              "exec_ms": 4567.46,
+              "wall_ms": 155.074875,
+              "exec_ms": 127.003,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 13268.65575,
-              "exec_ms": 4557.98,
+              "wall_ms": 154.794959,
+              "exec_ms": 126.894,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 13396.261709,
-              "exec_ms": 4612.3,
+              "wall_ms": 153.760208,
+              "exec_ms": 126.226,
               "status": "ok"
             }
           ]
@@ -7453,20 +7468,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 11237.757084,
-              "exec_ms": 3582.48,
+              "wall_ms": 132.226541,
+              "exec_ms": 59.367,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 11257.8365,
-              "exec_ms": 3598.12,
+              "wall_ms": 131.869291,
+              "exec_ms": 58.038,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 11325.169917,
-              "exec_ms": 3573.53,
+              "wall_ms": 131.204625,
+              "exec_ms": 58.018,
               "status": "ok"
             }
           ]
@@ -7478,20 +7493,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 12912.382292,
-              "exec_ms": 5391.29,
+              "wall_ms": 132.992667,
+              "exec_ms": 108.831,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 12893.185458,
-              "exec_ms": 5399.44,
+              "wall_ms": 134.34175,
+              "exec_ms": 110.212,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 13008.939958,
-              "exec_ms": 5450.77,
+              "wall_ms": 134.218833,
+              "exec_ms": 109.219,
               "status": "ok"
             }
           ]
@@ -7503,19 +7518,19 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 54.427208,
-              "exec_ms": 1.793945,
+              "wall_ms": 53.71475,
+              "exec_ms": 1.817871,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 53.744958,
-              "exec_ms": 1.828125,
+              "wall_ms": 53.360792,
+              "exec_ms": 1.845947,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 54.049208,
+              "wall_ms": 52.376208,
               "exec_ms": 1.883789,
               "status": "ok"
             }
@@ -7528,19 +7543,19 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 54.427208,
-              "exec_ms": 1.793945,
+              "wall_ms": 53.71475,
+              "exec_ms": 1.817871,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 53.744958,
-              "exec_ms": 1.828125,
+              "wall_ms": 53.360792,
+              "exec_ms": 1.845947,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 54.049208,
+              "wall_ms": 52.376208,
               "exec_ms": 1.883789,
               "status": "ok"
             }
@@ -7697,11 +7712,11 @@
           ]
         }
       },
-      "mir_auto_e2e": 13268.65575,
-      "mir_typed": 3582.48,
-      "mir_typed_auto_e2e": 12912.382292,
-      "c2mir": 1.828125,
-      "c2mir_e2e": 54.049208,
+      "mir_auto_e2e": 154.794959,
+      "mir_typed": 58.038,
+      "mir_typed_auto_e2e": 134.218833,
+      "c2mir": 1.845947,
+      "c2mir_e2e": 53.360792,
       "lambdajs": 18392.906291,
       "lambdajs_e2e": 18716.110125,
       "quickjs": 3330.006,
@@ -18311,7 +18326,7 @@
     },
     "three_way_merge": {
       "category": "merge",
-      "mir": 3801.37,
+      "mir": 3832.44,
       "_status": {
         "mir": "ok",
         "mir_auto_e2e": "ok",
@@ -18334,20 +18349,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 3858.469709,
-              "exec_ms": 3831.32,
+              "wall_ms": 3858.508875,
+              "exec_ms": 3832.44,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 3827.842041,
-              "exec_ms": 3801.37,
+              "wall_ms": 3843.394083,
+              "exec_ms": 3817.82,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 3826.300458,
-              "exec_ms": 3800.33,
+              "wall_ms": 3884.269709,
+              "exec_ms": 3858.21,
               "status": "ok"
             }
           ]
@@ -18359,20 +18374,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 3815.040208,
-              "exec_ms": 3789.05,
+              "wall_ms": 3963.307083,
+              "exec_ms": 3937.23,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 4021.128667,
-              "exec_ms": 3994.31,
+              "wall_ms": 3869.441916,
+              "exec_ms": 3843.07,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 3968.036917,
-              "exec_ms": 3940.54,
+              "wall_ms": 3878.478833,
+              "exec_ms": 3852.17,
               "status": "ok"
             }
           ]
@@ -18384,20 +18399,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 31713.570875,
-              "exec_ms": 31685.2,
+              "wall_ms": 31738.685583,
+              "exec_ms": 31711.7,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 31627.207792,
-              "exec_ms": 31599.7,
+              "wall_ms": 31776.585375,
+              "exec_ms": 31732.2,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 31739.454959,
-              "exec_ms": 31695.6,
+              "wall_ms": 31776.171666,
+              "exec_ms": 31748.2,
               "status": "ok"
             }
           ]
@@ -18409,20 +18424,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 31652.832625,
-              "exec_ms": 31624.6,
+              "wall_ms": 31788.628541,
+              "exec_ms": 31744.6,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 31887.503958,
-              "exec_ms": 31843.8,
+              "wall_ms": 31753.75,
+              "exec_ms": 31726.2,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 31833.578167,
-              "exec_ms": 31805.9,
+              "wall_ms": 32174.174667,
+              "exec_ms": 32129.5,
               "status": "ok"
             }
           ]
@@ -18434,20 +18449,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 1541.071875,
-              "exec_ms": 1492.258057,
+              "wall_ms": 2076.075041,
+              "exec_ms": 2028.780029,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 1492.150584,
-              "exec_ms": 1445.352051,
+              "wall_ms": 2135.009291,
+              "exec_ms": 2087.483154,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 1490.508333,
-              "exec_ms": 1444.287109,
+              "wall_ms": 2134.041833,
+              "exec_ms": 2086.461914,
               "status": "ok"
             }
           ]
@@ -18459,20 +18474,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 1541.071875,
-              "exec_ms": 1492.258057,
+              "wall_ms": 2076.075041,
+              "exec_ms": 2028.780029,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 1492.150584,
-              "exec_ms": 1445.352051,
+              "wall_ms": 2135.009291,
+              "exec_ms": 2087.483154,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 1490.508333,
-              "exec_ms": 1444.287109,
+              "wall_ms": 2134.041833,
+              "exec_ms": 2086.461914,
               "status": "ok"
             }
           ]
@@ -18628,11 +18643,11 @@
           ]
         }
       },
-      "mir_auto_e2e": 3968.036917,
-      "mir_typed": 31685.2,
-      "mir_typed_auto_e2e": 31833.578167,
-      "c2mir": 1445.352051,
-      "c2mir_e2e": 1492.150584,
+      "mir_auto_e2e": 3878.478833,
+      "mir_typed": 31732.2,
+      "mir_typed_auto_e2e": 31788.628541,
+      "c2mir": 2086.461914,
+      "c2mir_e2e": 2134.041833,
       "lambdajs": 20217.172875,
       "lambdajs_e2e": 20259.825709,
       "quickjs": 6130.443,
@@ -18642,7 +18657,7 @@
     },
     "log_pipeline": {
       "category": "log-processing",
-      "mir": 6423.29,
+      "mir": 6435.61,
       "_status": {
         "mir": "ok",
         "mir_auto_e2e": "ok",
@@ -18665,20 +18680,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 6485.361709,
-              "exec_ms": 6419.21,
+              "wall_ms": 6505.702958,
+              "exec_ms": 6435.61,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 6489.911875,
-              "exec_ms": 6423.29,
+              "wall_ms": 6530.060167,
+              "exec_ms": 6465.01,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 6510.4965,
-              "exec_ms": 6445.1,
+              "wall_ms": 6484.407291,
+              "exec_ms": 6420.22,
               "status": "ok"
             }
           ]
@@ -18690,20 +18705,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 6492.632583,
-              "exec_ms": 6425.39,
+              "wall_ms": 6447.204917,
+              "exec_ms": 6379.75,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 6530.232208,
-              "exec_ms": 6462.99,
+              "wall_ms": 6470.640416,
+              "exec_ms": 6387.44,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 6510.87925,
-              "exec_ms": 6445.6,
+              "wall_ms": 6538.011334,
+              "exec_ms": 6470.82,
               "status": "ok"
             }
           ]
@@ -18715,20 +18730,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 6812.678458,
-              "exec_ms": 6737.02,
+              "wall_ms": 6807.259584,
+              "exec_ms": 6734.21,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 6819.135792,
-              "exec_ms": 6744.52,
+              "wall_ms": 6841.738625,
+              "exec_ms": 6766.86,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 6941.184791,
-              "exec_ms": 6866.15,
+              "wall_ms": 6794.905417,
+              "exec_ms": 6721.87,
               "status": "ok"
             }
           ]
@@ -18740,20 +18755,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 6806.41625,
-              "exec_ms": 6730.42,
+              "wall_ms": 6805.429667,
+              "exec_ms": 6732.19,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 6880.011292,
-              "exec_ms": 6803.99,
+              "wall_ms": 6882.853041,
+              "exec_ms": 6808.68,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 6921.869583,
-              "exec_ms": 6847.18,
+              "wall_ms": 6806.514208,
+              "exec_ms": 6732.55,
               "status": "ok"
             }
           ]
@@ -18765,20 +18780,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 619.877917,
-              "exec_ms": 571.302979,
+              "wall_ms": 655.354333,
+              "exec_ms": 606.794189,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 606.556667,
-              "exec_ms": 557.964111,
+              "wall_ms": 658.475333,
+              "exec_ms": 609.835938,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 619.757,
-              "exec_ms": 571.637939,
+              "wall_ms": 660.9705,
+              "exec_ms": 612.291016,
               "status": "ok"
             }
           ]
@@ -18790,20 +18805,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 619.877917,
-              "exec_ms": 571.302979,
+              "wall_ms": 655.354333,
+              "exec_ms": 606.794189,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 606.556667,
-              "exec_ms": 557.964111,
+              "wall_ms": 658.475333,
+              "exec_ms": 609.835938,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 619.757,
-              "exec_ms": 571.637939,
+              "wall_ms": 660.9705,
+              "exec_ms": 612.291016,
               "status": "ok"
             }
           ]
@@ -18959,11 +18974,11 @@
           ]
         }
       },
-      "mir_auto_e2e": 6510.87925,
-      "mir_typed": 6744.52,
-      "mir_typed_auto_e2e": 6880.011292,
-      "c2mir": 571.302979,
-      "c2mir_e2e": 619.757,
+      "mir_auto_e2e": 6470.640416,
+      "mir_typed": 6734.21,
+      "mir_typed_auto_e2e": 6806.514208,
+      "c2mir": 609.835938,
+      "c2mir_e2e": 658.475333,
       "lambdajs": 19046.86125,
       "lambdajs_e2e": 19158.056166,
       "quickjs": 9553.793,
@@ -19306,7 +19321,7 @@
     },
     "navier_stokes": {
       "category": "numeric",
-      "mir": 1760.02,
+      "mir": 1553.55,
       "_status": {
         "mir": "ok",
         "mir_auto_e2e": "ok",
@@ -19329,20 +19344,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2384.557916,
-              "exec_ms": 1811.03,
+              "wall_ms": 1639.578542,
+              "exec_ms": 1553.5,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2313.430292,
-              "exec_ms": 1740.96,
+              "wall_ms": 1639.331292,
+              "exec_ms": 1553.55,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2330.788,
-              "exec_ms": 1760.02,
+              "wall_ms": 1651.879166,
+              "exec_ms": 1565.33,
               "status": "ok"
             }
           ]
@@ -19354,20 +19369,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2371.098,
-              "exec_ms": 1953.87,
+              "wall_ms": 1649.340458,
+              "exec_ms": 1617.1,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2375.740709,
-              "exec_ms": 1959.78,
+              "wall_ms": 1633.487459,
+              "exec_ms": 1615.83,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2387.625917,
-              "exec_ms": 1952.2,
+              "wall_ms": 1645.596583,
+              "exec_ms": 1628.26,
               "status": "ok"
             }
           ]
@@ -19379,20 +19394,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2364.742042,
-              "exec_ms": 1793.46,
+              "wall_ms": 1747.549375,
+              "exec_ms": 1661.17,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2378.761042,
-              "exec_ms": 1790.1,
+              "wall_ms": 1691.937625,
+              "exec_ms": 1605.91,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2415.919709,
-              "exec_ms": 1844.61,
+              "wall_ms": 1711.449041,
+              "exec_ms": 1626.31,
               "status": "ok"
             }
           ]
@@ -19404,20 +19419,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 2459.177958,
-              "exec_ms": 2044.07,
+              "wall_ms": 1699.028834,
+              "exec_ms": 1681.86,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 2455.009542,
-              "exec_ms": 2038.31,
+              "wall_ms": 1699.597541,
+              "exec_ms": 1682.03,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 2432.376583,
-              "exec_ms": 2018.97,
+              "wall_ms": 1711.378625,
+              "exec_ms": 1693.95,
               "status": "ok"
             }
           ]
@@ -19429,20 +19444,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 97.61,
-              "exec_ms": 48.39209,
+              "wall_ms": 95.508125,
+              "exec_ms": 47.079102,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 95.420208,
-              "exec_ms": 47.142822,
+              "wall_ms": 94.859209,
+              "exec_ms": 46.906982,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 95.476958,
-              "exec_ms": 46.993896,
+              "wall_ms": 94.863125,
+              "exec_ms": 47.007812,
               "status": "ok"
             }
           ]
@@ -19454,20 +19469,20 @@
           "samples": [
             {
               "run": 1,
-              "wall_ms": 97.61,
-              "exec_ms": 48.39209,
+              "wall_ms": 95.508125,
+              "exec_ms": 47.079102,
               "status": "ok"
             },
             {
               "run": 2,
-              "wall_ms": 95.420208,
-              "exec_ms": 47.142822,
+              "wall_ms": 94.859209,
+              "exec_ms": 46.906982,
               "status": "ok"
             },
             {
               "run": 3,
-              "wall_ms": 95.476958,
-              "exec_ms": 46.993896,
+              "wall_ms": 94.863125,
+              "exec_ms": 47.007812,
               "status": "ok"
             }
           ]
@@ -19623,11 +19638,11 @@
           ]
         }
       },
-      "mir_auto_e2e": 2375.740709,
-      "mir_typed": 1793.46,
-      "mir_typed_auto_e2e": 2455.009542,
-      "c2mir": 47.142822,
-      "c2mir_e2e": 95.476958,
+      "mir_auto_e2e": 1645.596583,
+      "mir_typed": 1626.31,
+      "mir_typed_auto_e2e": 1699.597541,
+      "c2mir": 47.007812,
+      "c2mir_e2e": 94.863125,
       "lambdajs": 349.683,
       "lambdajs_e2e": 524.184542,
       "quickjs": 98.697,

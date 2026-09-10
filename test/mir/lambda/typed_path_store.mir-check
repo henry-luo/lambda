@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Typed runtime-index stores use guarded packed loads and direct integer/array-pointer stores before cold COW descriptor allocation.",
+  "description": "Typed runtime-index stores use guarded packed loads and direct integer/array-pointer stores before cold COW descriptor allocation; typed append enforces its binding contract.",
   "checks": [
     {
       "in_func": "_bump_#",
@@ -16,7 +16,7 @@
     {
       "in_func": "_append_#",
       "expect_seq": [
-        { "pattern": "call\tpn_push" },
+        { "pattern": "call\tlambda_array_push_checked" },
         { "pattern": "mov\t{{r}}, u8:4({{r}})" },
         { "pattern": "mov\ti64:8({{r}}), {{r}}" },
         { "pattern": "call\tarray_plain" },

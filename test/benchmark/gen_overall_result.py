@@ -582,7 +582,12 @@ def write_report(args, data):
     # Columns folded in by merge_engine_results.py were measured in a separate
     # session; saying so is the difference between a comparison and a claim.
     for record in metadata.get("merged_engines", []):
-        merged_labels = ", ".join(ENGINE_LABELS.get(e, e) for e in record.get("engines", []))
+        merged_label_parts = []
+        for engine in record.get("engines", []):
+            label = ENGINE_LABELS.get(engine, engine)
+            if label not in merged_label_parts:
+                merged_label_parts.append(label)
+        merged_labels = ", ".join(merged_label_parts)
         started = (record.get("source_started_at") or "")[:10]
         when = f" on {started}" if started else ""
         runs_text = f", {record['source_runs']} run(s)" if record.get("source_runs") else ""

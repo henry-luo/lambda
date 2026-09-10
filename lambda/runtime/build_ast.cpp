@@ -8234,6 +8234,42 @@ static void direct_type_alias_begin(LambdaDirectAstSink* sink,
     sink->pending_type_alias = alias;
 }
 
+// Closing a recursive union changes a forward field from a map pointer to
+// an Item. Refresh its cached storage descriptor and any affected packed
+// offsets before literals or native readers can consume the contract (D3.4.1).
+static void direct_refresh_recursive_type_layout(Type* type, ArrayList* visited) {
+    type = unwrap_simple_type_type(type);
+    if (!type || is_global_simple_type(type)) return;
+    for (int i = 0; i < visited->length; i++) {
+        if (visited->data[i] == type) return;
+    }
+    arraylist_append(visited, type);
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
+        TypeBinary* binary = (TypeBinary*)type;
+        direct_refresh_recursive_type_layout(binary->left, visited);
+        direct_refresh_recursive_type_layout(binary->right, visited);
+    } else if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
+        direct_refresh_recursive_type_layout(((TypeUnary*)type)->operand, visited);
+    } else if (type->type_id == LMD_TYPE_MAP && type != &TYPE_MAP) {
+        TypeMap* map = (TypeMap*)type;
+        bool changed_width = false;
+        for (ShapeEntry* field = map->shape; field; field = field->next) {
+            direct_refresh_recursive_type_layout(field->type, visited);
+            int old_width = shape_entry_storage_size(field);
+            shape_entry_set_type(field, field->type);
+            changed_width |= old_width != shape_entry_storage_size(field);
+        }
+        if (changed_width) {
+            int64_t offset = 0;
+            for (ShapeEntry* field = map->shape; field; field = field->next) {
+                field->byte_offset = offset;
+                offset += shape_entry_storage_size(field);
+            }
+            map->byte_size = offset;
+        }
+    }
+}
+
 // Recursive fields were built against the pre-registered placeholder map.
 // Publish the completed shape through that same identity so function contracts
 // and self-references cannot split into placeholder and final maps.
@@ -8242,6 +8278,16 @@ static void direct_adopt_pending_alias_map(Transpiler* tp, AstDeclaratorNode* al
     TypeMap* pre_map = (TypeMap*)pre_type->type;
     Type* definition = alias->type;
     Type* actual = unwrap_simple_type_type(definition);
+    if (lambda_type_is_union(actual)) {
+        // Pattern references retain pre_type, so publish the completed union
+        // through that same wrapper rather than leaving an empty map behind.
+        pre_type->type = actual;
+        alias->type = (Type*)pre_type;
+        ArrayList* visited = arraylist_new(8);
+        direct_refresh_recursive_type_layout(actual, visited);
+        arraylist_free(visited);
+        return;
+    }
     if (!actual || actual->type_id != LMD_TYPE_MAP || actual == &TYPE_MAP ||
             actual == (Type*)pre_map || !pre_map ||
             pre_map->type_id != LMD_TYPE_MAP) return;

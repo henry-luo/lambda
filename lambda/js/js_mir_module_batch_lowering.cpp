@@ -3734,11 +3734,17 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt) {
         COMPILER_FACT_FINALIZED, js_mir_finalize, mt};
     CompilerPassSpec prelink_pass = {"prelink", COMPILER_FACT_FINALIZED,
         COMPILER_FACT_PRELINKED, js_mir_prelink, mt};
-    return compiler_pass_manager_add(pass_manager, &analyze_plan_pass) &&
+    bool completed = compiler_pass_manager_add(pass_manager, &analyze_plan_pass) &&
         compiler_pass_manager_add(pass_manager, &lower_pass) &&
         compiler_pass_manager_add(pass_manager, &finalize_pass) &&
         compiler_pass_manager_add(pass_manager, &prelink_pass) &&
         compiler_pass_manager_run(pass_manager, NULL);
+    // an early analysis error leaves the module open, with no function body.
+    // close it before failure cleanup calls MIR_finish on its owned context.
+    if (!completed && !(pass_manager->facts & COMPILER_FACT_ANALYZED)) {
+        MIR_finish_module(mt->ctx);
+    }
+    return completed;
 }
 
 bool js_mir_link_runtime_state(JsMirTranspiler* mt) {

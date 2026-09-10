@@ -858,8 +858,11 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
 
     if (!transpile_js_mir_ast(mt)) {
         log_error("js-new-function: collection/allocation failed");
+        bool syntax_error = tp->has_errors;
         (void)js_mir_compile_unit_fail(ctx, mt, tp, source,
             js_current_runtime(), context, true);
+        // analysis can discover strict-parameter errors after parsing succeeds.
+        if (syntax_error) return js_dynamic_function_throw_syntax_error("Invalid function source");
         return ItemNull;
     }
 

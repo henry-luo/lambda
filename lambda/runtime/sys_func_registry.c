@@ -1975,6 +1975,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_map_set_checked_inplace", FPTR(lambda_map_set_checked_inplace)},
     {"lambda_map_path_set_checked", FPTR(lambda_map_path_set_checked)},
     {"lambda_map_path_set_checked_inplace", FPTR(lambda_map_path_set_checked_inplace)},
+    {"lambda_array_push_checked", FPTR(lambda_array_push_checked)},
     {"lambda_array_set_checked", FPTR(lambda_array_set_checked)},
     {"lambda_array_set_checked_inplace", FPTR(lambda_array_set_checked_inplace)},
     {"lambda_array_set_checked_lane", FPTR(lambda_array_set_checked_lane)},

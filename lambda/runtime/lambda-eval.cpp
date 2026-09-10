@@ -8123,6 +8123,7 @@ typedef struct CowProfileCounters {
     uint64_t vmap_rejections;
     uint64_t mutable_value_calls;
     uint64_t map_admit_calls;
+    uint64_t union_admit_calls;
     uint64_t map_admit_relation_cache_hits;
     uint64_t map_admit_relation_cache_misses;
     uint64_t map_admit_exact_shape_hits;
@@ -8259,6 +8260,8 @@ void cow_profile_dump(void) {
     strbuf_append_uint64(output, g_cow_profile.vmap_rejections);
     strbuf_append_str(output, "\nfn_mutable_value_calls\t");
     strbuf_append_uint64(output, g_cow_profile.mutable_value_calls);
+    strbuf_append_str(output, "\nunion_admit_calls\t");
+    strbuf_append_uint64(output, g_cow_profile.union_admit_calls);
     strbuf_append_str(output, "\nmap_admit_calls\t");
     strbuf_append_uint64(output, g_cow_profile.map_admit_calls);
     strbuf_append_str(output, "\nmap_admit_relation_cache_hits\t");
@@ -8643,6 +8646,13 @@ static Type* runtime_map_path_leaf_contract(Type* root_contract, Item path) {
         }
         LambdaArrayContractInfo array_info = {};
         int64_t array_index = 0;
+        // an open array constrains the carrier, not its descendants. A valid
+        // indexed write below it cannot invalidate the declared outer record;
+        // the COW walker still checks the entire path before the leaf store
+        // (D3.2.4v3, S7.1.3v2).
+        if (current == &TYPE_ARRAY && lambda_item_to_int64_exact(key, &array_index)) {
+            return &TYPE_ANY;
+        }
         if (!lambda_array_contract_info(current, &array_info) ||
                 !lambda_item_to_int64_exact(key, &array_index)) {
             return NULL;
@@ -10149,18 +10159,20 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
     }
 
     LambdaArrayContractInfo contract_info = {};
+    ArrayNumElemType compact_type = ELEM_INT;
+    bool target_has_numeric_lane = lambda_array_num_elem_type_for_contract(
+        element_type, &compact_type);
     LaneStorageDesc target_lane = {};
     bool target_has_native_lane = lambda_type_lane_storage_desc(element_type, &target_lane) &&
         array_native_lane_supported(&target_lane);
-    if (semantic_element && semantic_element->type_id == LMD_TYPE_ANY &&
-            source_type == LMD_TYPE_ARRAY && value.array && !array_has_native_lane(value.array) &&
-            !target_has_native_lane) {
-        // An already boxed carrier needs no replacement merely to cache an
-        // exact boxed contract. This matters at a `var any[]` boundary: the
-        // caller owns the existing header, so returning a detached-but-byte
-        // identical copy would make the callee mutate an unpublished value.
-        // Any element conversion (including an inner T[] reification) falls
-        // through to the transactional copy path below (D3.3.3v3, S9.2.2).
+    if (source_type == LMD_TYPE_ARRAY && value.array && !array_has_native_lane(value.array) &&
+            !target_has_native_lane && !target_has_numeric_lane) {
+        // A boxed target (including a union element) needs no replacement when
+        // every admitted Item is unchanged. Publish the certificate on that
+        // same carrier so later reads do not copy and revalidate its graph.
+        // Element conversions still take the transactional copy path below;
+        // pointer lanes and compact ArrayNum lanes both need their physical
+        // rebuild, including empty numeric arrays (D3.3.3v3, S9.2.2).
         RootFrame roots(2);
         Rooted<Item> rooted_value(roots, value);
         Rooted<Item> rooted_element(roots, ItemNull);
@@ -10177,6 +10189,8 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
             }
         }
         if (!needs_copy) {
+            // Element identity alone does not prove occurrence/rank constraints.
+            if (!lambda_type_matches(rooted_value.get(), expected)) return false;
             ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
             if (!cert) return false;
             lambda_array_install_rep_cert(rooted_value.get(), cert);
@@ -10185,11 +10199,10 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
         }
     }
 
-    ArrayNumElemType compact_type = ELEM_INT;
     if (source_type == LMD_TYPE_ARRAY_NUM &&
             lambda_array_contract_info(expected, &contract_info) &&
             contract_info.rank == 1 &&
-            lambda_array_num_elem_type_for_contract(element_type, &compact_type) &&
+            target_has_numeric_lane &&
             value.array_num && value.array_num->get_elem_type() == compact_type) {
         // An N-D ArrayNum still owns a flat, exact scalar lane. `item_at`
         // exposes leading-axis views for normal indexing, so validating it as
@@ -10247,8 +10260,7 @@ static bool runtime_type_admit_array(Item value, Type* expected, Item* converted
         }
     }
 
-    compact_type = ELEM_INT;
-    if (lambda_array_num_elem_type_for_contract(element_type, &compact_type) &&
+    if (target_has_numeric_lane &&
             (get_type_id(rooted_candidate.get()) != LMD_TYPE_ARRAY_NUM ||
              rooted_candidate.get().array_num->get_elem_type() != compact_type)) {
         ArrayNum* packed = array_num_new(compact_type, length);
@@ -10335,6 +10347,8 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
     if (!converted) return false;
     expected = runtime_boundary_unwrap_type(expected);
     if (!expected) return false;
+    if (lambda_type_is_union(expected) && cow_profile_enabled())
+        g_cow_profile.union_admit_calls++;
 
     // Reuse the resolved, heap-local proof before decomposing a T[] contract.
     // The carrier check remains mandatory even when certificate identity hits.
