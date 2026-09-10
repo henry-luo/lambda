@@ -457,12 +457,22 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
     return doc;
 }
 
+static bool window_clear_layout_dirty_visitor(DomNode* node, void*) {
+    node->layout_dirty = false;
+    return true;
+}
+
 void reflow_html_doc(DomDocument* doc) {
     if (!doc || !doc->root) {
         log_debug("No document to reflow");
         return;
     }
     layout_html_doc(&ui_context, doc, true);
+    // The completed reflow has consumed the dirty geometry snapshot. Leaving
+    // this bit set makes CSSOM fall back to shorthand declarations instead of
+    // the freshly resolved values (notably outline longhands).
+    view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
+                                window_clear_layout_dirty_visitor, nullptr);
     // Skip render here — let the main loop handle it via render().
     // Mark dirty so the main loop knows to repaint.
     if (doc->state) {

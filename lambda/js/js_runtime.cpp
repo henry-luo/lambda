@@ -24159,7 +24159,13 @@ static Item js_array_generic_push(Item object, Item* args, int argc) {
     }
     for (int i = 0; i < argc; i++) {
         Item idx_key = js_array_method_property_key(len + (int64_t)i);
-        JS_ASSIGN_OR_RETURN(set_result, js_set_key_strict_policy(object, idx_key, args[i]));
+        // The public Set adapter cannot retain the numeric-index lane, so it
+        // stores an array index in the companion map while direct readers see
+        // the dense slot. Route through the unified property kernel instead.
+        JsPropertyLane lane = js_property_lane_for_canonical_key(idx_key);
+        Item set_completion = js_set(object, lane, idx_key, args[i], object);
+        JS_ASSIGN_OR_RETURN(set_result, js_assignment_set_result(args[i], idx_key,
+            set_completion, 1, object));
     }
     int64_t new_len = len + (int64_t)argc;
     JS_ASSIGN_OR_RETURN(length_result, js_elements_set_length_throw_status(object, len_key, new_len));

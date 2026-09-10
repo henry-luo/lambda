@@ -6,6 +6,10 @@
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lib/tagged.hpp"
 
+// CSS-only targets do not link StateStore; their matcher keeps default state.
+__attribute__((weak)) void state_configure_selector_matcher(
+        DocState* /*state*/, SelectorMatcher* /*matcher*/) {}
+
 static void apply_rule_to_element(DomElement* element, CssRule* rule,
                                   SelectorMatcher* matcher, Pool* pool,
                                   CssEngine* engine) {
@@ -157,6 +161,8 @@ void radiant_cascade_styles_for_element(DomElement* element) {
     if (!engine || doc->stylesheet_count <= 0) return;
     SelectorMatcher* matcher = selector_matcher_create(pool);
     if (!matcher) return;
+    // CSSOM reads must see the same live form and interaction state as layout.
+    state_configure_selector_matcher((DocState*)doc->state, matcher);
 
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* stylesheet = doc->stylesheets[i];

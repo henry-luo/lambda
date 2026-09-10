@@ -76,6 +76,8 @@ on keydown(evt) {
     if (pos > 0) {
       new_text = slice(new_text, 0, pos - 1) ++ slice(new_text, pos, len(new_text))
     }
+    // this handler changes the reactive model, so it owns the text edit.
+    return 'prevent-default'
   }
   if (evt.key == "Enter") {
     if (new_text != "") {
@@ -83,8 +85,11 @@ on keydown(evt) {
       let new_item = {id: next_id, text: new_text, done: false}
       ~.items = ~.items ++ [new_item]
       new_text = ""
+      // adding the item supersedes implicit form submission.
+      return 'prevent-default'
     }
   }
+  'pass'
 }
 on delete_item(evt) {
   ~.items = for (item in ~.items where item.id != evt.id) item
