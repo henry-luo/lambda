@@ -287,9 +287,11 @@ static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
     js_function_init_native_module_scope(fn);
     fn->type_id = LMD_TYPE_FUNC;
-    fn->param_count = spec->param_count;
-    fn->formal_length = -1;
-    fn->catalog_id = spec->builtin_id;
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (!code) return ItemError;
+    code->param_count = spec->param_count;
+    code->formal_length = -1;
+    code->catalog_id = spec->builtin_id;
     if (spec->builtin_id > JS_BUILTIN_NONE) {
         const JsIntrinsicTargetSpec* target = js_intrinsic_target_find(
             spec->builtin_id);
@@ -479,9 +481,11 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
         JsFunction* tag_getter = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
         js_function_init_native_module_scope(tag_getter);
         tag_getter->type_id = LMD_TYPE_FUNC;
+        JsCallableCode* tag_code = js_fn_code_ensure(tag_getter);
+        if (!tag_code) return;
         tag_getter->name = heap_create_name("get [Symbol.toStringTag]", 24);
-        tag_getter->param_count = 0;
-        tag_getter->formal_length = -1;
+        tag_code->param_count = 0;
+        tag_code->formal_length = -1;
         // The symbol accessor's spelling is observable metadata; its stored
         // body protects callable behavior from later name mutation.
         js_fn_native_ensure(tag_getter)->call = js_intrinsic_typed_array_to_string_tag_body;

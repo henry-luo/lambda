@@ -545,6 +545,34 @@ TEST_F(GCHeapTest, RootVectorGrowsAddressStableAndFollowsHeapReplacement) {
     gc_heap_destroy(gc2);
 }
 
+// Fixed realm records use the same RootVector owner as growable collections;
+// the external span must remain precise while values are published and reset.
+TEST_F(GCHeapTest, RootVectorBindsExternalSpan) {
+    EvalContext runtime{};
+    Heap heap{};
+    heap.gc = gc;
+    heap.generation = 1;
+    runtime.heap = &heap;
+
+    Item slots[2] = {};
+    RootVector v;
+    root_vector_init(&v, (Context*)&runtime, "external-gtest");
+    root_vector_bind_external(&v, (Context*)&runtime, slots, 2,
+        "external-gtest");
+    ASSERT_TRUE(root_vector_ensure_external(&v));
+    void* object = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
+    ASSERT_NE(object, nullptr);
+    slots[0].item = string_item(object);
+    gc_collect_with_root_region(gc, NULL, 0, NULL, 0);
+    EXPECT_EQ(gc->object_count, 1u);
+
+    root_vector_clear_external(&v);
+    gc_collect_with_root_region(gc, NULL, 0, NULL, 0);
+    EXPECT_EQ(gc->object_count, 0u);
+    root_vector_unbind_external(&v);
+    EXPECT_EQ(gc->root_range_count, 0);
+}
+
 // ============================================================================
 // 1. Object Allocation and Tracking
 // ============================================================================

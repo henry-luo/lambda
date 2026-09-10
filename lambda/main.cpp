@@ -58,6 +58,7 @@
 #include "js/js_exec_profile.h"      // profile flush on the batch _exit path
 #include "js/js_runtime_state.hpp"
 #include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
+#include "../lib/time_util.h"
 #ifdef LAMBDA_BASH
 #include "bash/bash_transpiler.hpp"  // Bash transpiler
 #include "bash/bash_runtime.h"       // bash_exit_code()
@@ -442,7 +443,7 @@ static bool js_test262_hot_context_recycle(Runtime* runtime,
     // signal-safe discard path above intentionally skips those operations, but
     // using it for successful tests leaks module roots and retained JS state;
     // the next large library then pays for an ever-growing heap/cache set.
-    js_batch_reset();
+    // runtime_reset_heap owns the realm reset before retiring its heap.
     runtime_reset_heap(runtime);
     // runtime_reset_heap keeps the canonical EvalContext and its JS capsule
     // bound; clearing it here would leave js_active_runtime_state pointing at
@@ -457,6 +458,7 @@ static bool js_test262_hot_context_recycle(Runtime* runtime,
 
 struct JsTest262AstHarness {
     JsScript* script;
+    JsScript* includes_script;
     bool prepare_failed;
 };
 
@@ -478,7 +480,7 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
         const char* filename, bool inline_module_source,
         bool test262_native_harness,
         const JsPreambleState* preamble, bool has_preamble,
-        uint64_t* result_home) {
+        uint64_t* result_home, volatile long* harness_us) {
     if (ast_harness) {
         if (ast_harness->prepare_failed || !ast_harness->script) {
             return js_throw_syntax_error(js_name_item(
@@ -487,8 +489,17 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
         // A retained AST owns immutable source/binding facts only. Rebuild its
         // heap objects in this test realm so test mutations cannot cross the
         // batch boundary.
-        Item harness_result = js_interp_execute_script(runtime, ast_harness->script,
-            result_home);
+        uint64_t harness_start = harness_us ? time_now_us() : 0;
+        uint64_t realm_start = js_realm_init_time_us();
+        Item harness_result = ItemNull;
+        JsScript* scripts[] = {ast_harness->script, ast_harness->includes_script};
+        for (JsScript* script : scripts) {
+            if (!script) continue;
+            harness_result = js_interp_execute_script(runtime, script, result_home);
+            if (item_is_error(harness_result)) break;
+        }
+        if (harness_us) *harness_us = (long)(time_now_us() - harness_start -
+            (js_realm_init_time_us() - realm_start));
         if (item_is_error(harness_result)) return harness_result;
     }
     if (inline_module_source) {
@@ -504,6 +515,26 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
     }
     return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home);
 }
+
+struct JsBatchLifecycleTiming {
+    bool enabled;
+    uint64_t start_us;
+    uint64_t cleanup_start_us;
+    uint64_t realm_us;
+    long harness_us;
+
+    ~JsBatchLifecycleTiming() {
+        if (!enabled) return;
+        uint64_t end_us = time_now_us();
+        // a separate record keeps BATCH_END's result/timeout contract intact
+        // while covering cleanup even when normal recovery ends this worker.
+        printf("\x01" "BATCH_LIFECYCLE %llu %ld %llu %llu\n",
+            (unsigned long long)realm_us, harness_us,
+            (unsigned long long)(end_us - cleanup_start_us),
+            (unsigned long long)(end_us - start_us));
+        fflush(stdout);
+    }
+};
 
 static void js_test262_clear_preamble(
     JsPreambleState* preamble,
@@ -2685,11 +2716,12 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 JsMirPhaseTiming t; js_mir_get_last_phase_timing(&t);
                 printf("JS_TRANSPILE_TIMING file=%s bytes=%zu "
                        "parse_ms=%.3f ast_ms=%.3f early_ms=%.3f imports_ms=%.3f "
-                       "mir_ms=%.3f link_ms=%.3f exec_ms=%.3f cleanup_ms=%.3f total_ms=%.3f\n",
+                       "mir_ms=%.3f link_ms=%.3f exec_ms=%.3f cleanup_ms=%.3f total_ms=%.3f realm_ms=%.3f\n",
                        js_file, js_source_len,
                        t.parse_us / 1000.0, t.ast_us / 1000.0, t.early_us / 1000.0,
                        t.imports_us / 1000.0, t.mir_us / 1000.0, t.link_us / 1000.0,
-                       t.execute_us / 1000.0, t.cleanup_us / 1000.0, t.total_us / 1000.0);
+                       t.execute_us / 1000.0, t.cleanup_us / 1000.0, t.total_us / 1000.0,
+                       t.realm_us / 1000.0);
                 JsMirVolumeCounters vc; js_mir_volume_counters_get(&vc);
                 printf("JS_MIR_VOLUME file=%s functions=%ld mir_insns=%ld\n",
                        js_file, vc.functions_discovered, vc.mir_insns_emitted);
@@ -4281,6 +4313,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
         const char* compiler_timing_env = getenv("LAMBDA_COMPILER_TIMING");
         bool compiler_timing = compiler_timing_env && compiler_timing_env[0] &&
                                strcmp(compiler_timing_env, "0") != 0;
+        const char* lifecycle_env = getenv("LAMBDA_JS_PHASE_TIMING");
+        bool lifecycle_timing = lifecycle_env && lifecycle_env[0] &&
+                                strcmp(lifecycle_env, "0") != 0;
         bool hot_reload = true; // persistent heap between tests (default: on)
         for (int i = 2; i < argc; i++) {
             if (strncmp(argv[i], "--timeout=", 10) == 0) {
@@ -4417,8 +4452,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
             // Handle harness protocol: harness:<length>
             // Compiles harness source once as preamble; function objects persist as module vars.
-            if (strncmp(line, "harness:", 8) == 0) {
-                size_t harness_len = (size_t)atol(line + 8);
+            bool harness_includes = strncmp(line, "harness-includes:", 17) == 0;
+            if (strncmp(line, "harness:", 8) == 0 || harness_includes) {
+                size_t harness_len = (size_t)atol(line + (harness_includes ? 17 : 8));
                 if (harness_len == 0 || harness_len > 10 * 1024 * 1024) continue;
                 char* harness_src = (char*)mem_alloc(harness_len + 1, MEM_CAT_SYSTEM);
                 if (!harness_src) continue;
@@ -4431,6 +4467,21 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 harness_src[total_read] = '\0';
                 int ch = fgetc(stdin);
                 if (ch != '\n' && ch != EOF) ungetc(ch, stdin);
+
+                if (harness_includes) {
+                    // retained includes own a separate Script so their strict
+                    // directive cannot change the base assertion harness.
+                    if (js_ast_interpreter_requested() && ast_harness.script &&
+                            !ast_harness.includes_script) {
+                        ast_harness.includes_script = js_interp_prepare_script(&runtime,
+                            harness_src, total_read, "<harness-includes>");
+                        ast_harness.prepare_failed |= ast_harness.includes_script == NULL;
+                    } else {
+                        ast_harness.prepare_failed = true;
+                    }
+                    mem_free(harness_src);
+                    continue;
+                }
 
                 // A replacement harness starts a new realm. Retire an AST
                 // owner only after that realm has been detached, since old
@@ -4556,6 +4607,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
             struct timeval tv_start, tv_end;
             gettimeofday(&tv_start, NULL);
             long cpu_start_us = js_batch_process_cpu_us();
+            uint64_t lifecycle_start = lifecycle_timing ? time_now_us() : 0;
+            uint64_t realm_start = js_realm_init_time_us();
+            volatile long harness_us = 0;
             js_mir_reset_last_phase_timing();
             JsBatchDocument batch_document;
             js_batch_document_init(&batch_document);
@@ -4659,7 +4713,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                             ast_harness.script || ast_harness.prepare_failed ? &ast_harness : NULL,
                             js_source, js_source_len, script_exec_path, inline_module_source,
                             test262_native_harness,
-                            &preamble, has_preamble, &result_home);
+                            &preamble, has_preamble, &result_home,
+                            lifecycle_timing ? &harness_us : NULL);
                         alarm(0);
                         batch_timeout_active = 0;
                         mir_error_active = 0;
@@ -4688,7 +4743,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                         ast_harness.script || ast_harness.prepare_failed ? &ast_harness : NULL,
                         js_source, js_source_len, script_exec_path, inline_module_source,
                         test262_native_harness,
-                        &preamble, has_preamble, &result_home);
+                        &preamble, has_preamble, &result_home,
+                        lifecycle_timing ? &harness_us : NULL);
                     mir_error_active = 0;
                     if (item_is_error(res)) {
                         batch_error = res;
@@ -4705,7 +4761,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 ast_harness.script || ast_harness.prepare_failed ? &ast_harness : NULL,
                 js_source, js_source_len, script_exec_path, inline_module_source,
                 test262_native_harness,
-                &preamble, has_preamble, &result_home);
+                &preamble, has_preamble, &result_home,
+                lifecycle_timing ? &harness_us : NULL);
             if (item_is_error(res)) {
                 batch_error = res;
                 result = 1;
@@ -4780,6 +4837,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
 #ifndef _WIN32
             batch_in_test = false;
 #endif
+
+            JsBatchLifecycleTiming lifecycle = {lifecycle_timing, lifecycle_start,
+                lifecycle_timing ? time_now_us() : 0,
+                js_realm_init_time_us() - realm_start, harness_us};
 
             // Memory management: each SIGSEGV/SIGBUS crash recovery via longjmp
             // leaks ~55MB (MIR code pages, AST, temporaries that skip cleanup).

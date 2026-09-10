@@ -590,6 +590,7 @@ typedef struct JsTlsSocket {
     TlsContext*    tls_ctx;        // shared context (owned by this if client-created)
     TlsConnection* tls_conn;       // per-connection TLS state
     RuntimeValueSlots values;
+    uint32_t        resource_id;   // owner row in the context resource table
     JsTlsServer*   owner_server;
     bool           connected;
     bool           destroyed;
@@ -711,6 +712,12 @@ static JsTlsSocket* tls_socket_alloc(void) {
 
 static void tls_socket_free(JsTlsSocket* sock) {
     if (!sock) return;
+    if (sock->resource_id != 0) {
+        uint32_t resource_id = sock->resource_id;
+        sock->resource_id = 0;
+        runtime_resource_table_forget_owned(&js_runtime_state.resources,
+            sock, resource_id);
+    }
     runtime_value_slots_destroy(&sock->values);
     root_vector_destroy(&sock->pending_write_callbacks);
     mem_free(sock);
@@ -726,20 +733,15 @@ static uv_stream_t* tls_socket_stream(JsTlsSocket* sock) {
     return tcp ? (uv_stream_t*)tcp : NULL;
 }
 
-typedef struct TlsClientTicketState {
+struct TlsClientTicketState {
     int port;
     int connect_count;
     struct TlsClientTicketState* next;
-} TlsClientTicketState;
+};
 
 // TLS ticket generations are observable per TLS realm, not per process.
-static TlsClientTicketState*& tls_client_ticket_states_ref() {
-    return *(TlsClientTicketState**)&js_runtime_state.tls_native.client_ticket_states;
-}
-#define tls_client_ticket_states (tls_client_ticket_states_ref())
-
 static TlsClientTicketState* tls_client_ticket_state_for_port(int port) {
-    TlsClientTicketState* state = tls_client_ticket_states;
+    TlsClientTicketState* state = js_runtime_state.tls_native.client_ticket_states;
     while (state) {
         if (state->port == port) return state;
         state = state->next;
@@ -747,8 +749,8 @@ static TlsClientTicketState* tls_client_ticket_state_for_port(int port) {
     state = (TlsClientTicketState*)mem_calloc(1, sizeof(TlsClientTicketState), MEM_CAT_JS_RUNTIME);
     if (!state) return NULL;
     state->port = port;
-    state->next = tls_client_ticket_states;
-    tls_client_ticket_states = state;
+    state->next = js_runtime_state.tls_native.client_ticket_states;
+    js_runtime_state.tls_native.client_ticket_states = state;
     return state;
 }
 
@@ -772,15 +774,10 @@ static void tls_client_apply_ticket_model(JsTlsSocket* sock, bool has_session) {
     }
 }
 
-typedef struct JsTlsSecureContextOwner {
+struct JsTlsSecureContextOwner {
     TlsContext* ctx;
     struct JsTlsSecureContextOwner* next;
-} JsTlsSecureContextOwner;
-
-static JsTlsSecureContextOwner*& secure_context_owners_ref() {
-    return *(JsTlsSecureContextOwner**)&js_runtime_state.tls_native.secure_context_owners;
-}
-#define secure_context_owners (secure_context_owners_ref())
+};
 
 static bool tls_track_secure_context(TlsContext* ctx) {
     if (!ctx) return false;
@@ -788,18 +785,14 @@ static bool tls_track_secure_context(TlsContext* ctx) {
         1, sizeof(JsTlsSecureContextOwner), MEM_CAT_JS_RUNTIME);
     if (!owner) return false;
     owner->ctx = ctx;
-    owner->next = secure_context_owners;
-    secure_context_owners = owner;
+    owner->next = js_runtime_state.tls_native.secure_context_owners;
+    js_runtime_state.tls_native.secure_context_owners = owner;
     return true;
 }
 
-#undef tls_client_ticket_states
-#undef secure_context_owners
-
 static void tls_destroy_tracked_secure_contexts_for(JsRuntimeState* runtime_state) {
     if (!runtime_state) return;
-    JsTlsSecureContextOwner* owner = (JsTlsSecureContextOwner*)
-        runtime_state->tls_native.secure_context_owners;
+    JsTlsSecureContextOwner* owner = runtime_state->tls_native.secure_context_owners;
     runtime_state->tls_native.secure_context_owners = NULL;
     while (owner) {
         JsTlsSecureContextOwner* next = owner->next;
@@ -807,8 +800,7 @@ static void tls_destroy_tracked_secure_contexts_for(JsRuntimeState* runtime_stat
         mem_free(owner);
         owner = next;
     }
-    TlsClientTicketState* state = (TlsClientTicketState*)
-        runtime_state->tls_native.client_ticket_states;
+    TlsClientTicketState* state = runtime_state->tls_native.client_ticket_states;
     runtime_state->tls_native.client_ticket_states = NULL;
     while (state) {
         TlsClientTicketState* next = state->next;
@@ -821,16 +813,23 @@ static void tls_destroy_tracked_secure_contexts(void) {
     tls_destroy_tracked_secure_contexts_for(js_active_runtime_state);
 }
 
-#define tls_client_ticket_states (tls_client_ticket_states_ref())
-#define secure_context_owners (secure_context_owners_ref())
-
 static JsTlsSocket* tls_socket_from_object(Item obj) {
     Item handle_item = js_get_key_cstr(obj, "__handle__");
     if (get_type_id(handle_item) != LMD_TYPE_INT) return NULL;
-    return (JsTlsSocket*)(uintptr_t)it2i(handle_item);
+    uint32_t resource_id = (uint32_t)it2i(handle_item);
+    const RuntimeResourceEntry* entry = runtime_resource_table_entry(
+        &js_runtime_state.resources, resource_id);
+    if (!entry || !entry->descriptor ||
+            entry->descriptor->kind != RUNTIME_RESOURCE_TLS_SOCKET) return NULL;
+    return (JsTlsSocket*)entry->close_user;
 }
 
 static JsTlsServer* tls_server_from_object(Item self);
+static void tls_socket_close_transport(JsTlsSocket* sock, bool had_error);
+
+static void tls_socket_resource_close(void* user) {
+    tls_socket_close_transport((JsTlsSocket*)user, false);
+}
 
 static void tls_server_maybe_destroy(JsTlsServer* srv) {
     if (!srv || !srv->closing || !srv->listen_closed || srv->active_connections > 0) return;
@@ -1494,7 +1493,15 @@ static bool tls_socket_flush_pending_plaintext(JsTlsSocket* sock) {
 }
 
 static void tls_socket_close_transport(JsTlsSocket* sock, bool had_error) {
-    if (!sock || !sock->tcp_initialized || sock->destroyed) return;
+    if (!sock) return;
+    if (sock->resource_id != 0) {
+        uint32_t resource_id = sock->resource_id;
+        sock->resource_id = 0;
+        runtime_resource_table_remove_owned(&js_runtime_state.resources,
+            sock, resource_id);
+        return;
+    }
+    if (!sock->tcp_initialized || sock->destroyed) return;
     sock->destroyed = true;
     sock->close_had_error = had_error;
     if (tls_socket_has_write_callbacks(sock)) {
@@ -1938,7 +1945,16 @@ static Item make_tls_socket_object(JsTlsSocket* sock) {
     if (sock->high_water_mark <= 0) sock->high_water_mark = 16 * 1024;
     Item obj = js_new_object_with_class(JS_CLASS_TLS_SOCKET);
     tls_socket_set_value(sock, JS_TLS_SOCKET_VALUE_OBJECT, obj);
-    js_set_key_cstr(obj, "__handle__", (Item){.item = i2it((int64_t)(uintptr_t)sock)});
+    const RuntimeResourceDescriptor* descriptor =
+        runtime_resource_descriptor_from_legacy_name("TLSSocketWrap");
+    sock->resource_id = runtime_resource_table_add_owned(
+        &js_runtime_state.resources, sock, obj, descriptor,
+        tls_socket_resource_close, sock, true);
+    if (sock->resource_id == 0) {
+        log_error("tls: could not register socket resource");
+    }
+    js_set_key_cstr(obj, "__handle__", sock->resource_id != 0
+        ? (Item){.item = i2it((int64_t)sock->resource_id)} : ItemNull);
 #define JS_TLS_SOCKET_EVENT_METHODS(M) \
     M("on", js_tls_socket_on) M("once", js_tls_socket_once) \
     M("resume", js_tls_socket_resume) M("pause", js_tls_socket_pause) \
@@ -3067,9 +3083,6 @@ extern "C" void js_tls_reset(void) {
     *items.ca_system = (Item){0};
     *items.ca_default = (Item){0};
 }
-
-#undef tls_client_ticket_states
-#undef secure_context_owners
 
 extern "C" void js_tls_destroy_context(JsRuntimeState* runtime_state) {
     // Context teardown is a valid lifecycle exit without a prior realm reset.

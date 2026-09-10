@@ -212,7 +212,7 @@ struct JsWebAnimationHost {
 #define js_document_default_view (js_runtime_state.dom.default_view)
 #define js_document_title_value (js_runtime_state.dom.title)
 #define js_document_fonts_value (js_runtime_state.dom.fonts)
-JS_FORWARD_STATIC_EXPRESSION(bool, dom_ensure_roots, (void), (js_active_runtime_state && js_root_range_ensure_registered(&js_runtime_state.dom.roots)))
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.dom.roots)))
 
 #define js_document_design_mode (js_runtime_state.dom.design_mode)
 #define js_document_active_element (js_runtime_state.dom.active_element)

@@ -991,10 +991,13 @@ struct Test262Prepared {
 
 static void add_batch_local_include_preambles(Test262Prepared* prepared) {
     if (!prepared) return;
-    for (const std::string& include : prepared->includes) {
-        if (include != "nativeFunctionMatcher.js") continue;
+    // retain the entire ordered include set when caching AST helpers, so a
+    // helper's captured primordials and dependencies keep their source order.
+    bool cache_ast_includes = prepared->ast_backend && !prepared->is_negative;
+    for (const auto& include : prepared->includes) {
+        if (!cache_ast_includes && include != "nativeFunctionMatcher.js") continue;
         bool already_promoted = false;
-        for (const std::string& existing : prepared->special_preamble_includes) {
+        for (const auto& existing : prepared->special_preamble_includes) {
             if (existing == include) {
                 already_promoted = true;
                 break;
@@ -1015,6 +1018,7 @@ struct JsBatchGroup {
     bool is_slow_test = false;
     bool ast_backend = false;
     bool native_harness = false;
+    bool is_strict = false;
 };
 
 // Assemble combined source on-the-fly from metadata.
@@ -1243,6 +1247,9 @@ static void partition_batch_indices(
             (prepared[idx].is_async ? "async:" : "sync:");
         if (use_native_harness) key = "native-" + key;
         key += special_preamble_key(prepared[idx].special_preamble_includes);
+        if (prepared[idx].ast_backend && !use_native_harness) {
+            key += prepared[idx].is_strict ? ":strict" : ":sloppy";
+        }
         auto it = group_by_key.find(key);
         size_t group_index;
         if (it == group_by_key.end()) {
@@ -1256,6 +1263,7 @@ static void partition_batch_indices(
             group.is_slow_test = prepared[idx].is_slow_test;
             group.ast_backend = prepared[idx].ast_backend;
             group.native_harness = use_native_harness;
+            group.is_strict = prepared[idx].is_strict;
             js_groups.push_back(std::move(group));
         } else {
             group_index = it->second;
@@ -1311,7 +1319,27 @@ struct BatchResult {
     long cleanup_us;
     long phase_total_us;
     long cpu_us;
+    long realm_us = 0;
+    long harness_us = 0;
+    long reset_us = 0;
+    long lifecycle_us = 0;
 };
+
+static BatchResult parse_t262_batch_end(const char* record) {
+    BatchResult result = {};
+    sscanf(record, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld",
+        &result.exit_code, &result.elapsed_us, &result.rss_before, &result.rss_after,
+        &result.parse_us, &result.ast_us, &result.early_us, &result.imports_us,
+        &result.mir_us, &result.link_us, &result.execute_us, &result.cleanup_us,
+        &result.phase_total_us, &result.cpu_us);
+    return result;
+}
+
+static void parse_t262_lifecycle(const char* record, BatchResult* result) {
+    // optional trailing telemetry never changes result classification.
+    if (result) sscanf(record, "%ld %ld %ld %ld", &result->realm_us,
+        &result->harness_us, &result->reset_us, &result->lifecycle_us);
+}
 
 static const size_t T262_DEFAULT_BATCH_CHUNK_SIZE = 100;
 // AST batch cleanup replaces the test realm after every source, so a larger
@@ -1601,13 +1629,14 @@ static void write_phase_timing_log(const std::unordered_map<std::string, BatchRe
     FILE* phase_log = fopen(phase_path, "w");
     if (!phase_log) return;
     fprintf(phase_log,
-            "test_name\texit_code\telapsed_us\tparse_us\tast_us\tearly_us\timports_us\tmir_us\tlink_us\texecute_us\tcleanup_us\tphase_total_us\n");
+            "test_name\texit_code\telapsed_us\tparse_us\tast_us\tearly_us\timports_us\tmir_us\tlink_us\texecute_us\tcleanup_us\tphase_total_us\trealm_us\tharness_us\treset_us\tlifecycle_us\n");
     for (const auto& kv : batch_results) {
         const BatchResult& br = kv.second;
-        fprintf(phase_log, "%s\t%d\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n",
+        fprintf(phase_log, "%s\t%d\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n",
                 kv.first.c_str(), br.exit_code, br.elapsed_us,
                 br.parse_us, br.ast_us, br.early_us, br.imports_us, br.mir_us,
-                br.link_us, br.execute_us, br.cleanup_us, br.phase_total_us);
+                br.link_us, br.execute_us, br.cleanup_us, br.phase_total_us,
+                br.realm_us, br.harness_us, br.reset_us, br.lifecycle_us);
     }
     fclose(phase_log);
     fprintf(stderr, "[test262] Phase timing data: %zu entries → %s\n",
@@ -2489,9 +2518,8 @@ static void prepare_all_tests(
             p.includes = std::move(meta.includes);
             p.features = std::move(meta.features);
             p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
-            add_batch_local_include_preambles(&p);
-
             p.ast_backend = test262_should_use_ast_backend(p);
+            add_batch_local_include_preambles(&p);
             // Native harness eligibility: pre-computed in metadata cache (V2+),
             // or computed inline when no cache is available. Release builds
             // admit this only for AST, whose realm-local helper installation is
@@ -2755,20 +2783,16 @@ static int run_t262_sub_batch(
                     current_output.clear();
                     in_script = true;
                 } else if (strncmp(buf + 1, "BATCH_END ", 10) == 0) {
-                    int status = 0;
-                    long elapsed_us = 0;
-                    size_t rss_before = 0, rss_after = 0;
-                    long parse_us = 0, ast_us = 0, early_us = 0, imports_us = 0, mir_us = 0;
-                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0, cpu_us = 0;
-                    sscanf(buf + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld",
-                           &status, &elapsed_us, &rss_before, &rss_after,
-                           &parse_us, &ast_us, &early_us, &imports_us, &mir_us,
-                           &link_us, &execute_us, &cleanup_us, &phase_total_us, &cpu_us);
-                    results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after,
-                                               parse_us, ast_us, early_us, imports_us, mir_us,
-                                               link_us, execute_us, cleanup_us, phase_total_us, cpu_us};
+                    auto& result = results[current_script];
+                    result = parse_t262_batch_end(buf + 11);
+                    result.output.swap(current_output);
                     last_progress_ms.store(t262_steady_now_ms(), std::memory_order_relaxed);
                     in_script = false;
+                } else if (strncmp(buf + 1, "BATCH_LIFECYCLE ", 16) == 0) {
+                    auto found = results.find(current_script);
+                    if (found != results.end()) {
+                        parse_t262_lifecycle(buf + 17, &found->second);
+                    }
                 } else if (strncmp(buf + 1, "BATCH_EXIT ", 11) == 0 ||
                            strncmp(buf + 1, "BATCH_DIAG ", 11) == 0) {
                     fprintf(stderr, "[test262] Child diagnostic: %s", buf + 1);
@@ -2916,20 +2940,16 @@ static int run_t262_sub_batch(
                     current_output.clear();
                     in_script = true;
                 } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
-                    int status = 0;
-                    long elapsed_us = 0;
-                    size_t rss_before = 0, rss_after = 0;
-                    long parse_us = 0, ast_us = 0, early_us = 0, imports_us = 0, mir_us = 0;
-                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0, cpu_us = 0;
-                    sscanf(buffer + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld",
-                           &status, &elapsed_us, &rss_before, &rss_after,
-                           &parse_us, &ast_us, &early_us, &imports_us, &mir_us,
-                           &link_us, &execute_us, &cleanup_us, &phase_total_us, &cpu_us);
-                    results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after,
-                                               parse_us, ast_us, early_us, imports_us, mir_us,
-                                               link_us, execute_us, cleanup_us, phase_total_us, cpu_us};
+                    auto& result = results[current_script];
+                    result = parse_t262_batch_end(buffer + 11);
+                    result.output.swap(current_output);
                     last_progress_ms.store(t262_steady_now_ms(), std::memory_order_relaxed);
                     in_script = false;
+                } else if (strncmp(buffer + 1, "BATCH_LIFECYCLE ", 16) == 0) {
+                    auto found = results.find(current_script);
+                    if (found != results.end()) {
+                        parse_t262_lifecycle(buffer + 17, &found->second);
+                    }
                 } else if (strncmp(buffer + 1, "BATCH_EXIT ", 11) == 0 ||
                            strncmp(buffer + 1, "BATCH_DIAG ", 11) == 0) {
                     // Diagnostic from child process: log to parent stderr
@@ -2992,10 +3012,24 @@ static bool write_t262_sub_batch_manifest(
         // JS-harness batch: send harness preamble via harness: protocol
         const auto& special_includes = js_groups[batch.group].special_includes;
         preamble_include_set = make_preamble_include_set(special_includes);
-        std::string harness = assemble_harness_source(special_includes);
+        auto harness = batch.ast_backend ? assemble_harness_source()
+            : assemble_harness_source(special_includes);
         fprintf(mf, "harness:%zu\n", harness.size());
         fwrite(harness.data(), 1, harness.size(), mf);
         fputc('\n', mf);
+        if (batch.ast_backend && !special_includes.empty()) {
+            // includes keep the test's strictness in a distinct classic Script;
+            // sta/assert retain their existing non-strict harness semantics.
+            harness.clear();
+            if (js_groups[batch.group].is_strict) harness += "\"use strict\";\n";
+            for (const auto& include : special_includes) {
+                harness += get_harness_file(include);
+                harness += '\n';
+            }
+            fprintf(mf, "harness-includes:%zu\n", harness.size());
+            fwrite(harness.data(), 1, harness.size(), mf);
+            fputc('\n', mf);
+        }
     }
     // else: native-harness batch — no harness preamble (transpiler intercepts calls)
 
@@ -3111,24 +3145,18 @@ static int run_t262_persistent_sub_batches(
                     in_script = true;
                     last_progress_ms.store(t262_steady_now_ms(), std::memory_order_relaxed);
                 } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
-                    int status = 0;
-                    long elapsed_us = 0;
-                    size_t rss_before = 0, rss_after = 0;
-                    long parse_us = 0, ast_us = 0, early_us = 0, imports_us = 0, mir_us = 0;
-                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0;
-                    sscanf(buffer + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld",
-                           &status, &elapsed_us, &rss_before, &rss_after,
-                           &parse_us, &ast_us, &early_us, &imports_us, &mir_us,
-                           &link_us, &execute_us, &cleanup_us, &phase_total_us);
                     if (batch_pos < batch_order.size()) {
-                        size_t batch_index = batch_order[batch_pos];
-                        thread_results[batch_index][current_script] =
-                            {current_output, status, elapsed_us, rss_before, rss_after,
-                             parse_us, ast_us, early_us, imports_us, mir_us,
-                             link_us, execute_us, cleanup_us, phase_total_us};
+                        auto& result = thread_results[batch_order[batch_pos]][current_script];
+                        result = parse_t262_batch_end(buffer + 11);
+                        result.output.swap(current_output);
                     }
                     in_script = false;
                     last_progress_ms.store(t262_steady_now_ms(), std::memory_order_relaxed);
+                } else if (strncmp(buffer + 1, "BATCH_LIFECYCLE ", 16) == 0) {
+                    if (batch_pos < batch_order.size()) {
+                        auto& result = thread_results[batch_order[batch_pos]][current_script];
+                        parse_t262_lifecycle(buffer + 17, &result);
+                    }
                 } else if (strncmp(buffer + 1, "BATCH_MANIFEST_END ", 19) == 0) {
                     if (batch_pos < batch_order.size()) {
                         size_t batch_index = batch_order[batch_pos];
@@ -5090,8 +5118,8 @@ int main(int argc, char** argv) {
                 }
             }
             p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
-            add_batch_local_include_preambles(&p);
             p.ast_backend = test262_should_use_ast_backend(p);
+            add_batch_local_include_preambles(&p);
             p.native_harness = p.is_raw || (test262_native_harness_is_available(p.ast_backend) &&
                 !p.is_async && cached_native_harness);
             if (p.is_module) p.native_harness = false;
@@ -5265,8 +5293,8 @@ int main(int argc, char** argv) {
                 // regressions retry without their special preamble and thousands
                 // of retry results become infrastructure noise instead of signal.
                 p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
-                add_batch_local_include_preambles(&p);
                 p.ast_backend = test262_should_use_ast_backend(p);
+                add_batch_local_include_preambles(&p);
                 p.native_harness = p.is_raw || (test262_native_harness_is_available(p.ast_backend) &&
                     !p.is_async && cm_it != g_metadata_cache.end() &&
                     cm_it->second.native_harness);

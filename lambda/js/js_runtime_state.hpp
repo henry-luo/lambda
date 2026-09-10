@@ -25,6 +25,8 @@ struct AstNode;
 struct DomDocument;
 struct DomElement;
 struct UiContext;
+struct TlsClientTicketState;
+struct JsTlsSecureContextOwner;
 
 // Namespace selection is the JS profile's counterpart to the shared module
 // slab scope.  Keep restoration identical for AST and MIR module entries.
@@ -109,21 +111,12 @@ struct JsRegexpLastMatch {
     int match_end = 0;
 };
 
-// A fixed Item range whose address outlives every heap epoch.  Registration is
-// deliberately owned by the range so clients cannot publish a live Item before
-// the collector knows where that Item resides.
-struct JsRootRange {
-    Item* slots = NULL;
-    int slot_count = 0;
-    uint64_t roots_epoch = 0;
-    const char* name = NULL;
-};
-
 // All context-owned caches expose the same precise root owner; keeping that
 // invariant in one base state prevents realm subsystems from drifting into
-// ad-hoc GC registration fields (D5.3).
+// ad-hoc GC registration fields. RootVector also supports fixed contiguous
+// spans for legacy semantic records, so there is one root carrier (D5.3).
 struct JsRootedState {
-    JsRootRange roots = {};
+    RootVector roots = {};
 };
 
 struct JsNamespaceState : JsRootedState {
@@ -133,6 +126,21 @@ struct JsNamespaceState : JsRootedState {
 // Fixed realm singleton/cache values converge here. Callers reserve the
 // stable slot before an allocation can publish its Item (D5.3.5; JSCU29).
 enum JsRealmSlotId {
+    JS_REALM_SLOT_PROTO_KEY,
+    JS_REALM_SLOT_GENERATOR_FUNCTION_PROTOTYPE,
+    JS_REALM_SLOT_ASYNC_GENERATOR_FUNCTION_PROTOTYPE,
+    JS_REALM_SLOT_ASYNC_FUNCTION_PROTOTYPE,
+    JS_REALM_SLOT_GENERATOR_PROTO_DEPTH2,
+    JS_REALM_SLOT_ASYNC_GENERATOR_PROTO_DEPTH2,
+    JS_REALM_SLOT_ASYNC_ITERATOR_PROTOTYPE,
+    JS_REALM_SLOT_GENERATOR_RETURN_MARKER,
+    JS_REALM_SLOT_GENERATOR_THROW_MARKER,
+    JS_REALM_SLOT_ITERATOR_PROTOTYPE,
+    JS_REALM_SLOT_ARRAY_ITERATOR_PROTOTYPE,
+    JS_REALM_SLOT_STRING_ITERATOR_PROTOTYPE,
+    JS_REALM_SLOT_MAP_ITERATOR_PROTOTYPE,
+    JS_REALM_SLOT_SET_ITERATOR_PROTOTYPE,
+    JS_REALM_SLOT_REGEXP_ITERATOR_PROTOTYPE,
     JS_REALM_SLOT_UTIL_NAMESPACE,
     JS_REALM_SLOT_CHILD_PROCESS_NAMESPACE,
     JS_REALM_SLOT_CRYPTO_NAMESPACE,
@@ -245,8 +253,8 @@ struct JsReadlineState {
 };
 
 struct JsTlsNativeState {
-    void* client_ticket_states = NULL;
-    void* secure_context_owners = NULL;
+    TlsClientTicketState* client_ticket_states = NULL;
+    JsTlsSecureContextOwner* secure_context_owners = NULL;
 };
 
 struct JsStreamState : JsNamespaceState {
@@ -493,10 +501,6 @@ void js_global_environment_release_module_bindings(
 // their Items contiguous gives the realm one precise owner and reset contract
 // without treating catalog-indexed constructor arrays as dynamic registries.
 struct JsRealmIntrinsicSlots : JsRootedState {
-    Item proto_key = {};
-    Item generator_function = {};
-    Item async_generator_function = {};
-    Item async_function = {};
     Item builtin_function_entries[JS_INTRINSIC_BINDING_COUNT] = {};
     Item global_builtin_functions[JS_BUILTIN_GLOBAL_MAX] = {};
     Item constructors[JS_CTOR_MAX] = {};
@@ -517,7 +521,7 @@ struct JsRealmIntrinsicSlots : JsRootedState {
 };
 
 enum : int {
-    JS_REALM_INTRINSIC_SLOT_COUNT = 1 + 3 + JS_INTRINSIC_BINDING_COUNT +
+    JS_REALM_INTRINSIC_SLOT_COUNT = JS_INTRINSIC_BINDING_COUNT +
         JS_BUILTIN_GLOBAL_MAX + JS_CTOR_MAX + 2 + JS_TYPED_ARRAY_CACHE_TYPE_COUNT + 8,
 };
 
@@ -564,20 +568,6 @@ struct JsProcessState : JsRootedState {
     char* ipc_buffer = NULL;
     size_t ipc_length = 0;
     size_t ipc_capacity = 0;
-};
-
-struct JsIteratorState : JsRootedState {
-    Item generator_return_marker = {};
-    Item generator_throw_marker = {};
-    Item iterator_prototype = {};
-    Item array_iterator_prototype = {};
-    Item string_iterator_prototype = {};
-    Item map_iterator_prototype = {};
-    Item set_iterator_prototype = {};
-    Item regexp_string_iterator_prototype = {};
-    Item generator_proto_depth2 = {};
-    Item async_generator_proto_depth2 = {};
-    Item async_iterator_prototype = {};
 };
 
 // One label owns both console.count and console.time state. A label may serve
@@ -801,10 +791,13 @@ struct JsAsyncContextStateRecord : JsSuspendedActivation {
     JsInterpTryContinuation* ast_try_continuations = NULL;
 };
 
-bool js_root_range_ensure_registered(JsRootRange* range);
-void js_root_range_unregister(JsRootRange* range);
+bool js_root_vector_ensure_registered(RootVector* roots);
+void js_root_vector_unregister(RootVector* roots);
 void js_readline_state_destroy(JsReadlineState* state);
+JsReadlineState* js_readline_state_ensure(JsRuntimeState* state);
+JsAsyncLocalStorageState* js_async_local_storage_state_ensure(JsRuntimeState* state);
 void js_test262_agent_state_destroy(JsTest262AgentState* state);
+JsTest262AgentState* js_test262_agent_state_ensure(JsRuntimeState* state);
 void js_item_stack_init(JsItemStack* stack, Context* owner, const char* name);
 void js_item_stack_destroy(JsItemStack* stack);
 bool js_item_stack_push(JsItemStack* stack, Item value);
@@ -990,7 +983,6 @@ struct JsRuntimeState {
     JsRealmIntrinsicSlots* intrinsic_slots = NULL;
     JsTest262AgentState* test262_agent = NULL;
     JsProcessState* process = NULL;
-    JsIteratorState* iterators = NULL;
     JsConsoleState console = {};
     JsRuntimeOperationState operations = {};
     JsWellKnownRefs well_known = {};
@@ -1068,7 +1060,7 @@ struct JsRuntimeState {
     bool eval_initializer_context = false;
 
     // The event-loop queues share their three fixed, context-owned Item homes.
-    JsRootRange event_loop_queue_roots = {};
+    RootVector event_loop_queue_roots = {};
 };
 
 // This derived TLS cache is initialized once after the eval thread acquires

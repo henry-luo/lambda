@@ -111,7 +111,7 @@ JS_FORWARD_STATIC_VOID( js_stream_set_default_method, (Item object, const char* 
 
 static bool stream_ensure_roots(void) {
     return js_active_runtime_state &&
-        js_root_range_ensure_registered(&js_runtime_state.stream.roots);
+        js_root_vector_ensure_registered(&js_runtime_state.stream.roots);
 }
 
 static Item js_stream_make_error_with_code(const char* code, const char* message);

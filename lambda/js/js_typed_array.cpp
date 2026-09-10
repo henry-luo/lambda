@@ -900,12 +900,13 @@ typedef struct JsAtomicsRuntimeState {
 } JsAtomicsRuntimeState;
 
 static JsAtomicsRuntimeState* js_atomics_runtime_state(void) {
-    return js_active_runtime_state ?
+    return js_active_runtime_state && js_runtime_state.test262_agent ?
         (JsAtomicsRuntimeState*)js_runtime_state.test262_agent->atomics_waiter_state : NULL;
 }
 
 extern "C" bool js_atomics_runtime_state_ensure(void) {
     if (!js_active_runtime_state) return false;
+    if (!js_test262_agent_state_ensure(&js_runtime_state)) return false;
     if (!js_runtime_state.test262_agent->atomics_waiter_state) {
         // Atomics namespace creation is cold; waiter lookup and notification
         // below use direct owner-context storage without synchronization.
@@ -1151,7 +1152,8 @@ extern "C" void js_atomics_reset_waiters(void) {
 }
 
 extern "C" void js_atomics_destroy_context(JsRuntimeState* runtime_state) {
-    if (!runtime_state || !runtime_state->test262_agent->atomics_waiter_state) return;
+    if (!runtime_state || !runtime_state->test262_agent ||
+            !runtime_state->test262_agent->atomics_waiter_state) return;
     JsAtomicsRuntimeState* state = (JsAtomicsRuntimeState*)
         runtime_state->test262_agent->atomics_waiter_state;
     js_atomics_waiters_clear(state);

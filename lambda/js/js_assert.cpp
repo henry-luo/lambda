@@ -75,7 +75,7 @@ JS_FORWARD_STATIC_VOID( js_assert_set_native, (Item object, const char* name, Ta
 
 static bool js_assert_ensure_roots(void) {
     return js_active_runtime_state && js_runtime_state.assert &&
-        js_root_range_ensure_registered(&js_runtime_state.assert->roots);
+        js_root_vector_ensure_registered(&js_runtime_state.assert->roots);
 }
 
 static void js_assert_register_instance(Item instance) {

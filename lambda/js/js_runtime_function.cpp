@@ -45,7 +45,8 @@ extern "C" void js_function_root_item_if_needed(void* function, Item* slot) {
 }
 
 static int js_function_metadata_length(JsFunction* fn) {
-    int length = fn->formal_length >= 0 ? fn->formal_length : fn->param_count;
+    int length = js_fn_formal_length(fn) >= 0 ? js_fn_formal_length(fn) :
+        js_fn_param_count(fn);
     if (length < 0) length = -length - 1;
     if (js_fn_bound(fn)->args) {
         length -= js_fn_bound(fn)->argc;
@@ -108,8 +109,8 @@ extern "C" bool js_function_has_own_prototype(Item function) {
         js_fn_native(fn)->construct == js_intrinsic_ctor_proxy_construct_body) {
         return false;
     }
-    if (fn->intrinsic_class == JS_CLASS_SYMBOL ||
-            fn->intrinsic_class == JS_CLASS_BIGINT) {
+    if (js_fn_intrinsic_class(fn) == JS_CLASS_SYMBOL ||
+            js_fn_intrinsic_class(fn) == JS_CLASS_BIGINT) {
         // D6.2.2v2: [[Construct]] and own properties are independent.
         // Symbol and BigInt deliberately reject construction but still own
         // their specification-defined prototype objects.
@@ -146,7 +147,8 @@ static void js_function_register_pool_pointer_roots(JsFunction* fn) {
     // fields. Register raw metadata slots before finalization allocates, or a
     // freshly assigned name/source can be collected through the pool record.
     bool registered = heap_try_register_gc_root((uint64_t*)&fn->name);
-    registered = heap_try_register_gc_root((uint64_t*)&fn->source_text) &&
+    registered = fn->code && heap_try_register_gc_root(
+        (uint64_t*)&fn->code->source_text) &&
         registered;
 
 
@@ -176,8 +178,8 @@ void js_function_finalize_capabilities(JsFunction* fn) {
         fn->construct = js_construct_entry_native;
     } else if (inherited_construct) {
         fn->construct = inherited_construct;
-    } else if (!js_fn_native(fn)->call && (fn->func_ptr ||
-            fn->body_kind == JS_FUNCTION_BODY_AST)) {
+    } else if (!js_fn_native(fn)->call && (js_fn_func_ptr(fn) ||
+            js_fn_body_kind(fn) == JS_FUNCTION_BODY_AST)) {
         fn->construct = js_construct_entry_ordinary;
     }
     js_function_ensure_metadata_properties(fn);
@@ -212,7 +214,7 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     gc_mark_object_ptr(gc, fn->name);
     gc_mark_item(gc, fn->properties_map.item);
     gc_mark_item(gc, fn->home_global.item);
-    gc_mark_object_ptr(gc, fn->source_text);
+    gc_mark_object_ptr(gc, js_fn_source_text(fn));
     // JSCUO8: one container holds every optional record, so the whole payload
     // side of the trace is reached through a single null check.
     const JsFunctionPayload* p = fn->payload;
@@ -265,6 +267,26 @@ static void* js_fn_payload_calloc(const JsFunction* fn, size_t size) {
         return js_input && js_input->pool ? pool_calloc(js_input->pool, size) : NULL;
     }
     return mem_calloc(1, size, MEM_CAT_JS_RUNTIME);
+}
+
+static void* js_fn_code_calloc(const JsFunction* fn) {
+    if (js_function_is_pool_backed(fn)) {
+        return js_input && js_input->pool
+            ? pool_calloc(js_input->pool, sizeof(JsCallableCode)) : NULL;
+    }
+    return mem_calloc(1, sizeof(JsCallableCode), MEM_CAT_JS_RUNTIME);
+}
+
+JsCallableCode* js_fn_code_ensure(JsFunction* fn) {
+    if (!fn) return NULL;
+    if (!fn->code) {
+        fn->code = (JsCallableCode*)js_fn_code_calloc(fn);
+        if (!fn->code) return NULL;
+        fn->code->module_state_id = UINT32_MAX;
+        fn->code->formal_length = -1;
+        fn->code->body_kind = JS_FUNCTION_BODY_CODE;
+    }
+    return fn->code;
 }
 
 // JSCU20: an eval origin is a per-value native payload, so it is allocated
@@ -342,15 +364,20 @@ extern "C" void js_function_gc_destroy(void* data) {
     // only a GC-backed value reaches this hook, and those own malloc'd
     // payloads; a pool-backed value's payload dies with its pool instead
     JsFunctionPayload* p = fn->payload;
-    if (!p) return;
-    if (p->eval_origin) mem_free(p->eval_origin);
-    if (p->bound) mem_free(p->bound);
-    if (p->klass) mem_free(p->klass);
-    if (p->with) mem_free(p->with);
-    if (p->ast) mem_free(p->ast);
-    if (p->native) mem_free(p->native);
-    mem_free(p);
-    fn->payload = NULL;
+    if (p) {
+        if (p->eval_origin) mem_free(p->eval_origin);
+        if (p->bound) mem_free(p->bound);
+        if (p->klass) mem_free(p->klass);
+        if (p->with) mem_free(p->with);
+        if (p->ast) mem_free(p->ast);
+        if (p->native) mem_free(p->native);
+        mem_free(p);
+        fn->payload = NULL;
+    }
+    if (fn->code) {
+        mem_free(fn->code);
+        fn->code = NULL;
+    }
 }
 
 extern "C" int js_function_gc_compact(void* data, gc_heap_t* gc) {
@@ -469,7 +496,7 @@ extern "C" void* js_function_get_ptr(Item fn_item) {
     // Typed native functions deliberately have no MIR pointer; the layout
     // marker prevents them from being reinterpreted as the legacy prefix.
     JsFunction* jsfn = (JsFunction*)fn_item.function;
-    if (jsfn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) return jsfn->func_ptr;
+    if (jsfn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) return js_fn_func_ptr(jsfn);
     // Fall back to Function layout (ptr at offset 16)
     Function* fn = fn_item.function;
     return (void*)fn->ptr;
@@ -482,7 +509,7 @@ extern "C" int js_function_get_arity(Item fn_item) {
     // The layout marker, not a target field, distinguishes JsFunction from the
     // compact legacy Function prefix; typed native targets intentionally leave
     // the MIR-only func_ptr null.
-    if (jsfn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) return jsfn->param_count;
+    if (jsfn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) return js_fn_param_count(jsfn);
     // Otherwise it's Function layout — arity at offset 1
     Function* fn = fn_item.function;
     return fn->arity;
@@ -507,8 +534,11 @@ static void js_function_init_common(JsFunction* fn, int param_count) {
     // D6.2.2v2: every callable wrapper uses the canonical layout marker;
     // legacy arity/target decoding otherwise silently drops compiled args.
     fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
-    fn->param_count = param_count;
-    fn->formal_length = -1;
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (code) {
+        code->param_count = param_count;
+        code->formal_length = -1;
+    }
     fn->prototype = ItemNull;
 }
 
@@ -541,11 +571,13 @@ static Item js_new_function_impl(void* func_ptr, int param_count,
     if (!fn) return ItemError;
     fn_root.set((Item){.function = (Function*)fn});
     js_function_init_common(fn, param_count);
-    fn->func_ptr = func_ptr;
-    fn->runtime_context = runtime;
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (!code) return ItemError;
+    code->func_ptr = func_ptr;
+    code->runtime_context = runtime;
     fn->env = NULL;
     fn->env_size = 0;
-    fn->module_state_id = lambda_active_module_state_id();
+    code->module_state_id = lambda_active_module_state_id();
     fn->home_global = js_get_global_this();
     js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
@@ -566,21 +598,23 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     if (!fn) return ItemError;
     function_root.set((Item){.function = (Function*)fn});
     js_function_init_common(fn, param_count);
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (!code) return ItemError;
     JsAstBody* ast = js_fn_ast_ensure(fn);
     if (!ast) return ItemError;
     ast->function = function;
     ast->script = script;
     ast->env = environment;
-    fn->body_kind = JS_FUNCTION_BODY_AST;
+    code->body_kind = JS_FUNCTION_BODY_AST;
     fn->flags = flags;
-    fn->module_state_id = lambda_active_module_state_id();
+    code->module_state_id = lambda_active_module_state_id();
     fn->home_global = js_get_global_this();
     ast->lexical_this = (flags & JS_FUNC_FLAG_ARROW) ? js_get_this() : ItemNull;
     ast->lexical_new_target = (flags & JS_FUNC_FLAG_ARROW)
         ? js_get_new_target() : ItemNull;
     js_function_root_ast_payload(fn);
     fn->name = function->name;
-    fn->formal_length = (int16_t)param_count;
+    code->formal_length = (int16_t)param_count;
     // AST closures created inside `with` use the same captured object
     // environment stack as compiled and native JS functions.
     js_function_capture_with_env(fn);
@@ -1125,20 +1159,22 @@ static Item js_new_method_function_impl(void* func_ptr, int param_count,
     // The wrapper is fresh and not yet reachable from its owning object while
     // global/with capture helpers may allocate.
     fn_root.set((Item){.function = (Function*)fn});
-    fn->func_ptr = func_ptr;
-    fn->runtime_context = runtime;
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (!code) return ItemError;
+    code->func_ptr = func_ptr;
+    code->runtime_context = runtime;
     if (runtime) {
         // Only compiled method wrappers carry an explicit Context*. Jube
         // trampolines and native interface callbacks use the ordinary ABI;
         // stamping those contextless callbacks shifted every call argument.
         fn->flags |= JS_FUNC_FLAG_MIR_PUBLIC_ABI | JS_FUNC_FLAG_MIR_CONTEXT_ABI;
     }
-    fn->param_count = param_count;
-    fn->formal_length = -1;
+    code->param_count = param_count;
+    code->formal_length = -1;
     fn->env = NULL;
     fn->env_size = 0;
     fn->prototype = ItemNull;
-    fn->module_state_id = lambda_active_module_state_id();
+    code->module_state_id = lambda_active_module_state_id();
     fn->home_global = js_get_global_this();
     js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
@@ -1164,14 +1200,16 @@ static Item js_new_closure_impl(void* func_ptr, int param_count, Item* env,
         AutoDeferGC defer_gc;
         fn = js_alloc_gc_function_object();
         if (!fn) return ItemError;
-        fn->func_ptr = func_ptr;
-        fn->runtime_context = runtime;
-        fn->param_count = param_count;
-        fn->formal_length = -1; // -1 = use param_count for .length
+        JsCallableCode* code = js_fn_code_ensure(fn);
+        if (!code) return ItemError;
+        code->func_ptr = func_ptr;
+        code->runtime_context = runtime;
+        code->param_count = param_count;
+        code->formal_length = -1; // -1 = use param_count for .length
         fn->env = env;
         fn->env_size = env_size;
         fn->prototype = ItemNull;
-        fn->module_state_id = lambda_active_module_state_id();
+        code->module_state_id = lambda_active_module_state_id();
     }
     // A new closure is not owned by its caller until return. Root it across
     // scalar rehoming and dynamic-with capture, both of which may allocate.
@@ -1188,7 +1226,9 @@ JS_FORWARD_ITEM(js_new_closure_mir, (void* func_ptr, int param_count,         It
 extern "C" void js_set_formal_length(Item fn_item, int length) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
-    fn->formal_length = (int16_t)length;
+    JsCallableCode* code = js_fn_code_ensure(fn);
+    if (!code) return;
+    code->formal_length = (int16_t)length;
     js_function_refresh_length_property(fn);
 }
 
@@ -1265,9 +1305,15 @@ extern "C" void js_finalize_function(Item fn_item, const char* name_chars,
     if (source_chars) {
         Item source_item = js_make_string_len(source_chars, (int)source_length);
         fn = (JsFunction*)function_root.get().function;
-        if (get_type_id(source_item) == LMD_TYPE_STRING) fn->source_text = it2s(source_item);
+        if (get_type_id(source_item) == LMD_TYPE_STRING) {
+            JsCallableCode* code = js_fn_code_ensure(fn);
+            if (code) code->source_text = it2s(source_item);
+        }
     }
-    if (formal_length >= 0) fn->formal_length = (int16_t)formal_length;
+    if (formal_length >= 0) {
+        JsCallableCode* code = js_fn_code_ensure(fn);
+        if (code) code->formal_length = (int16_t)formal_length;
+    }
     if (init_flags & JS_FUNC_INIT_GENERATOR) fn->flags |= JS_FUNC_FLAG_GENERATOR;
     if (init_flags & JS_FUNC_INIT_ASYNC_GENERATOR) {
         fn->flags |= JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN;
@@ -1285,10 +1331,12 @@ extern "C" void js_finalize_function(Item fn_item, const char* name_chars,
         // Synthetic field callables are finalized during class evaluation, not
         // while fields run; without this capability direct eval loses the class
         // initializer PrivateEnvironment at its later invocation.
-        fn->eval_initializer_context = true;
+        JsCallableCode* code = js_fn_code_ensure(fn);
+        if (code) code->eval_initializer_context = true;
     }
     if (js_private_field_initializing || js_eval_initializer_context) {
-        fn->eval_initializer_context = true;
+        JsCallableCode* code = js_fn_code_ensure(fn);
+        if (code) code->eval_initializer_context = true;
     }
     js_function_refresh_name_property(fn);
     js_function_refresh_length_property(fn);
@@ -1486,6 +1534,10 @@ extern "C" void js_set_function_source(Item fn_item, Item source_item) {
     if (get_type_id(source_item) != LMD_TYPE_STRING) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     if (fn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) {
-        fn->source_text = it2s(source_item);
+        JsCallableCode* code = js_fn_code_ensure(fn);
+        if (code) {
+            code->source_text = it2s(source_item);
+            js_function_register_pool_pointer_roots(fn);
+        }
     }
 }

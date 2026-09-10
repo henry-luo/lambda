@@ -36,9 +36,20 @@ typedef struct RootVector {
     int64_t high_water;         // diagnostic: maximum count ever published
     uint64_t heap_generation;   // heap incarnation the blocks are registered with
     const char* name;           // diagnostic label
+    // Some semantic records expose a fixed contiguous Item prefix.  Binding
+    // that prefix here lets it use the same precise registration and heap
+    // replacement contract as growable vectors without a second root-range
+    // descriptor type.
+    Item* external_slots;
+    int64_t external_count;
 } RootVector;
 
 void root_vector_init(RootVector* v, Context* owner, const char* name);
+void root_vector_bind_external(RootVector* v, Context* owner, Item* slots,
+                               int64_t count, const char* name);
+bool root_vector_ensure_external(RootVector* v);
+void root_vector_clear_external(RootVector* v);
+void root_vector_unbind_external(RootVector* v);
 bool root_vector_push(RootVector* v, Item value);        // may allocate a block
 void root_vector_pop(RootVector* v);                     // clears the vacated slot
 Item* root_vector_at(RootVector* v, int64_t index);      // stable address; NULL if out of range
